@@ -154,8 +154,8 @@
 │                                                                  (comma-separated). Available    │
 │                                                                  formats: text, flat-json, yaml, │
 │                                                                  csv, html, junitxml, markdown,  │
-│                                                                  sarif, ocsf, cyclonedx, spdx,   │
-│                                                                  github-ghas, gitlab-sast,       │
+│                                                                  sarif, asff, ocsf, cyclonedx,   │
+│                                                                  spdx, github-ghas, gitlab-sast, │
 │                                                                  gitlab-cyclonedx,               │
 │                                                                  unused-suppressions. With the   │
 │                                                                  AWS plugin module               │
@@ -166,7 +166,7 @@
 │                                                                  cloudwatch-logs, s3. Also       │
 │                                                                  accepted, though no reporter    │
 │                                                                  writes them: aggregated, dict,  │
-│                                                                  asff, custom.                   │
+│                                                                  custom.                         │
 │ --inspect                            --no-inspect                Enable inspection of SARIF      │
 │                                                                  fields after running. This adds │
 │                                                                  the inspect phase to the        │

@@ -5617,7 +5617,7 @@ def test_a_default_scan_writes_the_files_and_reports_the_output_files_page_lists
 
     A detect-secrets scan of the sample project writes every top-level entry of the
     Layout tree, and ``reports/`` holds exactly the tree's report files, which are the
-    Reports table's "yes" rows; its "no" rows (spdx and yaml) are not written. Which
+    Reports table's "yes" rows; its "no" rows (asff, spdx and yaml) are not written. Which
     scanners ran changes ``scanners/`` but not ``reports/``. The table is also held to
     the code: it lists every built-in reporter once, with the file its extension
     names, any file its module names beside it, and its ``enabled`` default.
@@ -5637,7 +5637,7 @@ def test_a_default_scan_writes_the_files_and_reports_the_output_files_page_lists
 
     top, listed = _outputs_layout()
     table = _outputs_reports_table()
-    assert len(top) == 8 and len(listed) == 14 and len(table) == 15, (
+    assert len(top) == 8 and len(listed) == 14 and len(table) == 16, (
         "the Layout tree or the Reports table no longer parses",
         top,
         listed,
@@ -21993,7 +21993,7 @@ _OUTPUT_FORMATS_ACCEPTS = (
     "It accepts the name of every reporter ASH ships, including `github-ghas`, "
     "`gitlab-sast`, `gitlab-cyclonedx`, and `unused-suppressions`, and the names of the "
     "AWS reporters, which write a report only when an operator loads their plugin "
-    "module. It also accepts `aggregated`, `dict`, `asff`, and `custom`, which no "
+    "module. It also accepts `aggregated`, `dict`, and `custom`, which no "
     "reporter writes."
 )
 _OUTPUT_FORMATS_NARROW = (
@@ -22050,7 +22050,13 @@ _OUTPUT_FORMATS_NARROW = (
             id="gitlab-cyclonedx",
         ),
         pytest.param("dict", [], None, False, id="dict-no-reporter-writes"),
-        pytest.param("asff", [], None, False, id="asff-no-reporter-writes"),
+        pytest.param(
+            "asff",
+            [],
+            "its reporter is disabled in the configuration",
+            True,
+            id="asff-disabled-by-default",
+        ),
         pytest.param("custom", [], None, False, id="custom-no-reporter-writes"),
         pytest.param(
             "spdx",

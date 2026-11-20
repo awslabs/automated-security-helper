@@ -4,6 +4,7 @@ $ ash report --format aggregated --log-level ERROR
 [stderr]
 Error: Reporter plugin 'aggregated' not found.
 Available reporter formats:
+  - asff
   - csv
   - cyclonedx
   - github-ghas

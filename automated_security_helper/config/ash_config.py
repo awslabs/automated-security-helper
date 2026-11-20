@@ -108,6 +108,9 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.junitxml_rep
 from automated_security_helper.plugin_modules.ash_builtin.reporters.markdown_reporter import (
     MarkdownReporterConfig,
 )
+from automated_security_helper.plugin_modules.ash_builtin.reporters.asff_reporter import (
+    AsffReporterConfig,
+)
 from automated_security_helper.plugin_modules.ash_builtin.reporters.ocsf_reporter import (
     OCSFReporterConfig,
 )
@@ -1024,6 +1027,10 @@ class ReporterConfigSegment(_PluginConfigSegment):
         MarkdownReporterConfig,
         Field(description="Configure the options for the Markdown reporter"),
     ] = MarkdownReporterConfig()
+    asff: Annotated[
+        AsffReporterConfig,
+        Field(description="Configure the options for offline ASFF export"),
+    ] = AsffReporterConfig()
     ocsf: Annotated[
         OCSFReporterConfig,
         Field(description="Configure the options for the OCSF reporter"),

@@ -843,7 +843,7 @@ out["imports"]["packages"] = local_packages
 out["imports"]["preloaded"] = preloaded
 
 sys.path.insert(0, sys.argv[1])
-from tests.snapshot.support.fixture_model import build_fixture_model
+from tests.snapshot.support.fixture_model import FIXTURE_REPO, build_fixture_model
 from automated_security_helper.base.plugin_config import plugin_config_key
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.ash_config import AshConfig
@@ -884,7 +884,19 @@ for cls in sorted(ash_plugin_manager.plugin_modules("reporter"), key=plugin_conf
     with tempfile.TemporaryDirectory() as tmp:
         context = PluginContext(source_dir=Path(tmp) / "src",
                                 output_dir=Path(tmp) / "out", config=AshConfig())
-        record(plugin_config_key(cls), lambda: cls(context=context).report(model))
+        def run_report(cls=cls, context=context):
+            reporter = cls(context=context)
+            if plugin_config_key(cls) == "asff":
+                # The offline export refuses to run without these four options
+                # (it reads no AWS state to fill them in), so it gets what an
+                # `ash report --format asff` is given.
+                options = reporter.config.options
+                options.account_id = "123456789012"
+                options.aws_region = "us-east-1"
+                options.findings_scope = "guarded-run"
+                options.scan_root = FIXTURE_REPO.as_posix()
+            return reporter.report(model)
+        record(plugin_config_key(cls), run_report)
         out[plugin_config_key(cls)]["module"] = cls.__module__
 print(json.dumps(out))
 """

@@ -4,6 +4,7 @@ $ ash report --format s3 --log-level ERROR
 [stderr]
 Error: Reporter plugin 's3' not found.
 Available reporter formats:
+  - asff
   - csv
   - cyclonedx
   - github-ghas

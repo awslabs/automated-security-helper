@@ -395,6 +395,13 @@ reporters:
       top_hotspots_limit: 10
       use_collapsible_details: true
       compact: false
+  asff:
+    enabled: false
+    options:
+      account_id: null
+      aws_region: null
+      findings_scope: null
+      scan_root: null
   ocsf:
     enabled: true
     options: {}

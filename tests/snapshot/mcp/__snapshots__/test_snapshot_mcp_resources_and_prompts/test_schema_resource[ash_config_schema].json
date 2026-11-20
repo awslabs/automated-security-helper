@@ -272,6 +272,115 @@
       "title": "ArchiveConverterConfigOptions",
       "type": "object"
     },
+    "AsffReporterConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
+          "default": false,
+          "title": "Enabled"
+        },
+        "extension": {
+          "default": "asff.json",
+          "title": "Extension",
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "const": "asff",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
+          "default": "asff",
+          "title": "Name"
+        },
+        "options": {
+          "$ref": "#/$defs/AsffReporterOptions"
+        }
+      },
+      "title": "AsffReporterConfig",
+      "type": "object"
+    },
+    "AsffReporterOptions": {
+      "additionalProperties": false,
+      "properties": {
+        "account_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Twelve-digit AWS account ID for the findings.",
+          "title": "Account Id"
+        },
+        "aws_region": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "AWS Region for the findings product ARN.",
+          "title": "Aws Region"
+        },
+        "findings_scope": {
+          "anyOf": [
+            {
+              "maxLength": 1024,
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Stable identifier for the scanned target.",
+          "title": "Findings Scope"
+        },
+        "scan_root": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Absolute original scan root for normalizing finding paths.",
+          "title": "Scan Root"
+        }
+      },
+      "title": "AsffReporterOptions",
+      "type": "object"
+    },
     "AshConfig": {
       "description": "Main configuration model for Automated Security Helper.",
       "properties": {
@@ -657,6 +766,17 @@
         "reporters": {
           "$ref": "#/$defs/ReporterConfigSegment",
           "default": {
+            "asff": {
+              "enabled": false,
+              "extension": "asff.json",
+              "name": "asff",
+              "options": {
+                "account_id": null,
+                "aws_region": null,
+                "findings_scope": null,
+                "scan_root": null
+              }
+            },
             "csv": {
               "enabled": true,
               "extension": "csv",
@@ -3459,7 +3579,7 @@
     "ExportFormat": {
       "anyOf": [
         {
-          "description": "A report format name, as --output-formats and output_formats take it.\n\nEach names the reporter that writes it, except aggregated, dict, asff and\ncustom: no reporter writes those, so asking for one writes nothing for it and\nlogs why.",
+          "description": "A report format name, as --output-formats and output_formats take it.\n\nEach names the reporter that writes it, except aggregated, dict and\ncustom: no reporter writes those, so asking for one writes nothing for it and\nlogs why.",
           "enum": [
             "aggregated",
             "text",
@@ -3494,7 +3614,7 @@
           "type": "string"
         }
       ],
-      "description": "A report format name, as --output-formats and output_formats take it.\n\nEach names the reporter that writes it, except aggregated, dict, asff and\ncustom: no reporter writes those, so asking for one writes nothing for it and\nlogs why.",
+      "description": "A report format name, as --output-formats and output_formats take it.\n\nEach names the reporter that writes it, except aggregated, dict and\ncustom: no reporter writes those, so asking for one writes nothing for it and\nlogs why.",
       "title": "ExportFormat"
     },
     "FlatJSONReporterConfig": {
@@ -5480,6 +5600,21 @@
         ]
       },
       "properties": {
+        "asff": {
+          "$ref": "#/$defs/AsffReporterConfig",
+          "default": {
+            "enabled": false,
+            "extension": "asff.json",
+            "name": "asff",
+            "options": {
+              "account_id": null,
+              "aws_region": null,
+              "findings_scope": null,
+              "scan_root": null
+            }
+          },
+          "description": "Configure the options for offline ASFF export"
+        },
         "csv": {
           "$ref": "#/$defs/CSVReporterConfig",
           "default": {

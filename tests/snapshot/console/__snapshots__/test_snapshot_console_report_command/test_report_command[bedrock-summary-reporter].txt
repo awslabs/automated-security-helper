@@ -4,6 +4,7 @@ $ ash report --format bedrock-summary-reporter --log-level ERROR
 [stderr]
 Error: Reporter plugin 'bedrock-summary-reporter' not found.
 Available reporter formats:
+  - asff
   - csv
   - cyclonedx
   - github-ghas

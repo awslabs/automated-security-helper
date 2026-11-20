@@ -9,7 +9,7 @@
 │                                                                    'markdown'. Values: text,    │
 │                                                                    flat-json, yaml, csv, html,  │
 │                                                                    junitxml, markdown, sarif,   │
-│                                                                    ocsf, cyclonedx, spdx,       │
+│                                                                    asff, ocsf, cyclonedx, spdx, │
 │                                                                    github-ghas, gitlab-sast,    │
 │                                                                    gitlab-cyclonedx,            │
 │                                                                    unused-suppressions. With    │

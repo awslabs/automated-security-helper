@@ -1,6 +1,9 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+from automated_security_helper.plugin_modules.ash_builtin.reporters.asff_reporter import (
+    AsffReporter,
+)
 from automated_security_helper.plugin_modules.ash_builtin.reporters.csv_reporter import (
     CsvReporter,
 )
@@ -51,6 +54,7 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.yaml_reporte
 )
 
 __all__ = [
+    "AsffReporter",
     "CsvReporter",
     "CycloneDXReporter",
     "GHASReporter",

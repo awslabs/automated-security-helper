@@ -18,6 +18,7 @@ This page is generated from the reporter plugins in the ASH source code by `scri
 <!-- doctest: options of=reporters -->
 | Reporter | File extension | Enabled by default | Primary use case | Standard |
 |----------|----------------|--------------------|------------------|----------|
+| [ASFF](#asff) (`asff`) | `.asff.json` | no | Offline export for AWS Security Hub CSPM | [AWS Security Finding Format](https://docs.aws.amazon.com/securityhub/latest/userguide/securityhub-findings-format.html) |
 | [CSV](#csv) (`csv`) | `.csv` | yes | Spreadsheet analysis, filtering | RFC 4180 |
 | [CycloneDX](#cyclonedx) (`cyclonedx`) | `.cdx.json` | yes | Software bill of materials (SBOM) | [CycloneDX 1.6](https://cyclonedx.org/specification/overview/) |
 | [Flat JSON](#flat-json) (`flat-json`) | `.flat.json` | yes | Programmatic consumption, dashboards | ASH-native |
@@ -34,7 +35,7 @@ This page is generated from the reporter plugins in the ASH source code by `scri
 | [Unused suppressions](#unused-suppressions) (`unused-suppressions`) | `.unused-suppressions.json` | yes | Suppression hygiene: rules that matched nothing this scan | ASH-native |
 | [YAML](#yaml) (`yaml`) | `.yaml` | no | Human-readable structured data | -- |
 
-Of the 15 built-in reporters, 13 are enabled by default: `csv`, `cyclonedx`, `flat-json`, `github-ghas`, `gitlab-cyclonedx`, `gitlab-sast`, `html`, `junitxml`, `markdown`, `ocsf`, `sarif`, `text`, and `unused-suppressions`. `spdx` and `yaml` are available but disabled by default.
+Of the 16 built-in reporters, 13 are enabled by default: `csv`, `cyclonedx`, `flat-json`, `github-ghas`, `gitlab-cyclonedx`, `gitlab-sast`, `html`, `junitxml`, `markdown`, `ocsf`, `sarif`, `text`, and `unused-suppressions`. `asff`, `spdx`, and `yaml` are available but disabled by default.
 
 A default written as from `NAME`, else `value` is read from that environment variable when ASH starts; `value` applies when the variable is not set.
 
@@ -49,6 +50,24 @@ These are loaded only when the configuration's `ash_plugin_modules` names their 
 | [`bedrock-summary-reporter`](#bedrock-summary-reporter) | `.bedrock.summary.md` | no | plugin module `ash_aws_plugins` |
 | [`cloudwatch-logs`](#cloudwatch-logs) | `.cwlog.json` | no | plugin module `ash_aws_plugins` |
 | [`s3`](#s3) | `.s3.json` | no | plugin module `ash_aws_plugins` |
+
+## `asff`
+
+- Class: `automated_security_helper.plugin_modules.ash_builtin.reporters.asff_reporter.AsffReporter`
+- Provided by: built in, loaded on every scan
+- Enabled by default: no
+- File extension: `.asff.json`
+- Runs with `--python-only`: yes
+
+Options, under `reporters.asff.options`. An option not listed here refuses the configuration.
+
+<!-- doctest: options of=reporters.asff -->
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| <a id="reporters.asff.options.account_id"></a>`account_id` | string or null | `null` | Twelve-digit AWS account ID for the findings. |
+| <a id="reporters.asff.options.aws_region"></a>`aws_region` | string or null | `null` | AWS Region for the findings product ARN. |
+| <a id="reporters.asff.options.findings_scope"></a>`findings_scope` | string or null, length at most 1,024 | `null` | Stable identifier for the scanned target. |
+| <a id="reporters.asff.options.scan_root"></a>`scan_root` | string or null | `null` | Absolute original scan root for normalizing finding paths. |
 
 ## `csv`
 
