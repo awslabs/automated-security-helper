@@ -44,7 +44,7 @@
             }
           ],
           "default": null,
-          "description": "(Optional) Per-engine blocks, keyed by scanner name (e.g. 'cdk-nag'). Listing engines ENUMERATES the engines the entry covers: a finding from a scanner not listed here does not match this entry, and a listed scanner's finding matches only when that scanner's plugin accepts its block. A listed scanner whose plugin is not installed or enabled suppresses nothing (fail closed). The block's keys belong to the named plugin.",
+          "description": "(Optional) Per-engine blocks, keyed by scanner name (e.g. 'cdk-nag'). Listing engines ENUMERATES the engines the entry covers: a finding from a scanner not listed here does not match this entry, and a listed scanner's finding matches only when that scanner's plugin accepts its block. A listed scanner whose plugin is not installed (its module is never imported) suppresses nothing (fail closed); a plugin that is imported but disabled for the run is still registered. The block's keys belong to the named plugin.",
           "title": "Engines"
         }
       },
