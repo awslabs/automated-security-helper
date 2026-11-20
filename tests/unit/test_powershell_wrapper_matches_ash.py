@@ -58,6 +58,14 @@ HELPERS = REPO_ROOT / "utils" / "ash_helpers.ps1"
 RUN_SCAN_TEST = REPO_ROOT / ".github" / "actions" / "run-scan-test" / "action.yml"
 PWSH = shutil.which("pwsh")
 
+# The root ./ash script was deleted by a533dd6531a (absorbed into the ash CLI), so the
+# tests that run it beside Invoke-ASH have nothing to compare and skip. They run again
+# if the script returns.
+_NEEDS_ASH_SCRIPT = pytest.mark.skipif(
+    not (REPO_ROOT / "ash").is_file(),
+    reason="root ./ash script removed by a533dd6531a (absorbed into the ash CLI)",
+)
+
 RUNNERS = ("finch", "docker", "nerdctl", "podman")
 _GUARD_EXIT = 97
 _GUARD_MESSAGE = "REAL-RUNNER-GUARD"
@@ -301,8 +309,9 @@ def _build_call(result, calls) -> list[str]:
 
 
 def _inner_ash_args(run_call: list[str]) -> list[str]:
-    """What follows the image name and ``ash``."""
-    return run_call[run_call.index("ash") + 1 :]
+    """What follows the image name and ``ashx``, the image's command (the v4
+    canonical name; ``ash`` is the deprecated alias)."""
+    return run_call[run_call.index("ashx") + 1 :]
 
 
 #: What Invoke-ASH gives scan, and ash with no command named (which scans), right
@@ -315,7 +324,7 @@ SANDBOX_OFF = ["--sandbox", "off"]
 
 def _run_env(run_call: list[str]) -> dict[str, str]:
     """The ``-e NAME=value`` pairs before the image name."""
-    before_image = run_call[: run_call.index("ash")]
+    before_image = run_call[: run_call.index("ashx")]
     pairs = [
         before_image[i + 1]
         for i, arg in enumerate(before_image[:-1])
@@ -1483,6 +1492,7 @@ def _both_wrappers_in_both_locales(
     reason="./ash's runs in this module are measured on Linux",
 )
 @pytest.mark.parametrize("name", sorted(_IMAGE_NAMES))
+@_NEEDS_ASH_SCRIPT
 def test_the_wrappers_agree_on_an_image_name(tmp_path, name):
     image, code = _IMAGE_NAMES[name]
     measured = _both_wrappers_in_both_locales(
@@ -1501,6 +1511,7 @@ def test_the_wrappers_agree_on_an_image_name(tmp_path, name):
     reason="./ash's runs in this module are measured on Linux",
 )
 @pytest.mark.parametrize("name", sorted(_BASE_IMAGE_OVERRIDES))
+@_NEEDS_ASH_SCRIPT
 def test_the_wrappers_agree_on_a_base_image_override(tmp_path, name):
     # ./ash reads the override only when it builds without ASH_BASE_OCI_LAYOUT, so
     # its runs build; Invoke-ASH reads it when it starts.
@@ -1694,6 +1705,7 @@ def _shown_value(output: str, before: str, after: str) -> str:
 )
 @pytest.mark.parametrize("where", sorted(_SHOWN_IN))
 @pytest.mark.parametrize("character", sorted(_HIDDEN_CHARACTERS))
+@_NEEDS_ASH_SCRIPT
 def test_the_wrappers_show_a_refused_value_alike(tmp_path, where, character):
     """Both refusals print the same message and the same value, in two notations.
 
@@ -1784,6 +1796,7 @@ _WORKSPACE_AND_SANDBOX = {
     reason="./ash's runs in this module are measured on Linux",
 )
 @pytest.mark.parametrize("case", sorted(_WORKSPACE_AND_SANDBOX))
+@_NEEDS_ASH_SCRIPT
 def test_the_wrappers_refuse_a_sandbox_next_to_a_workspace_alike(tmp_path, case):
     ash_args, invocation = _WORKSPACE_AND_SANDBOX[case]
     (tmp_path / "src").mkdir()
@@ -1827,6 +1840,7 @@ def test_the_wrappers_refuse_a_sandbox_next_to_a_workspace_alike(tmp_path, case)
     not sys.platform.startswith("linux"),
     reason="./ash's runs in this module are measured on Linux",
 )
+@_NEEDS_ASH_SCRIPT
 def test_an_empty_ash_image_name_is_unset_in_both_wrappers(tmp_path):
     """An empty ASH_IMAGE_NAME names no image, so both wrappers use the default.
 
@@ -1876,6 +1890,7 @@ def test_an_empty_ash_image_name_is_unset_in_both_wrappers(tmp_path):
     reason="./ash's runs in this module are measured on Linux",
 )
 @pytest.mark.parametrize("character", sorted(_HIDDEN_CHARACTERS))
+@_NEEDS_ASH_SCRIPT
 def test_the_wrappers_show_ash_config_in_their_warning_alike(tmp_path, character):
     """The ASH_CONFIG warning shows the value as a refusal shows one.
 
@@ -1972,6 +1987,7 @@ _TARGET_AND_MODE_LOOKALIKES = {
     reason="./ash's runs in this module are measured on Linux",
 )
 @pytest.mark.parametrize("case", sorted(_TARGET_AND_MODE_LOOKALIKES))
+@_NEEDS_ASH_SCRIPT
 def test_the_wrappers_agree_on_a_lookalike_target_or_mode(tmp_path, case):
     option, value, code = _TARGET_AND_MODE_LOOKALIKES[case]
     (tmp_path / "src").mkdir()

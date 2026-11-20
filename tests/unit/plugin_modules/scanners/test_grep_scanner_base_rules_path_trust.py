@@ -52,23 +52,11 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scan
     OpengrepScannerConfig,
     OpengrepScannerConfigOptions,
 )
-from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner import (
-    SemgrepScanner,
-    SemgrepScannerConfig,
-    SemgrepScannerConfigOptions,
-)
 
 pytestmark = pytest.mark.unit
 
 
 SCANNERS = [
-    pytest.param(
-        SemgrepScanner,
-        SemgrepScannerConfig,
-        SemgrepScannerConfigOptions,
-        "SEMGREP_RULES_CACHE_DIR",
-        id="semgrep",
-    ),
     pytest.param(
         OpengrepScanner,
         OpengrepScannerConfig,

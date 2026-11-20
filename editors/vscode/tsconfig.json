@@ -1,0 +1,39 @@
+{
+  "//": "The build config. Compiles src/ to out/, which is what package.json's `main` points at and the only directory .vscodeignore lets into the .vsix. tsconfig.test.json extends this for jest, which needs test/ in the program and the jest types.",
+  "compilerOptions": {
+    "alwaysStrict": true,
+    "declaration": false,
+    "esModuleInterop": false,
+    "lib": [
+      "es2022"
+    ],
+    "module": "CommonJS",
+    "moduleResolution": "node",
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitAny": true,
+    "noImplicitReturns": true,
+    "noImplicitThis": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "outDir": "out",
+    "rootDir": "src",
+    "skipLibCheck": true,
+    "sourceMap": false,
+    "strict": true,
+    "strictNullChecks": true,
+    "strictPropertyInitialization": true,
+    "target": "es2022",
+    "types": [
+      "node",
+      "vscode"
+    ]
+  },
+  "exclude": [
+    "node_modules",
+    "out",
+    "test"
+  ],
+  "include": [
+    "src/**/*.ts"
+  ]
+}

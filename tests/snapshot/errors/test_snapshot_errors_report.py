@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""What ``ash report`` prints, and exits with, when it cannot produce a report."""
+"""What ``ashx report`` prints, and exits with, when it cannot produce a report."""
 
 from __future__ import annotations
 

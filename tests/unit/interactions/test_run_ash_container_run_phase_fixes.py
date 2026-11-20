@@ -29,6 +29,7 @@ from typing import List
 
 import pytest
 
+from automated_security_helper.cli.deprecations import CANONICAL_CLI_NAME
 from automated_security_helper.core.cancellation import CancelEvent, cancel_scope
 from automated_security_helper.interactions import run_ash_container as rac
 from automated_security_helper.interactions.run_ash_container import (
@@ -477,7 +478,7 @@ def test_no_build_with_a_custom_containerfile_runs_the_custom_image(commands, tm
 
     assert result.returncode == 0, result.stderr
     run = _run_command(commands)
-    assert run[run.index("ash") - 1] == "automated-security-helper:custom"
+    assert run[run.index(CANONICAL_CLI_NAME) - 1] == "automated-security-helper:custom"
 
 
 def test_no_build_without_a_custom_containerfile_runs_the_stock_image(commands):
@@ -486,7 +487,9 @@ def test_no_build_without_a_custom_containerfile_runs_the_stock_image(commands):
 
     assert result.returncode == 0, result.stderr
     run = _run_command(commands)
-    assert run[run.index("ash") - 1] == "automated-security-helper:non-root"
+    assert (
+        run[run.index(CANONICAL_CLI_NAME) - 1] == "automated-security-helper:non-root"
+    )
 
 
 def test_an_image_named_by_the_environment_is_the_custom_images_base_not_the_run(
@@ -510,7 +513,7 @@ def test_an_image_named_by_the_environment_is_the_custom_images_base_not_the_run
 
     assert result.returncode == 0, result.stderr
     run = _run_command(commands)
-    assert run[run.index("ash") - 1] == "automated-security-helper:custom"
+    assert run[run.index(CANONICAL_CLI_NAME) - 1] == "automated-security-helper:custom"
     assert "registry.example/ash:pinned" not in run
 
 
@@ -524,7 +527,7 @@ def test_an_image_named_by_the_environment_still_runs_without_a_custom_file(
 
     assert result.returncode == 0, result.stderr
     run = _run_command(commands)
-    assert run[run.index("ash") - 1] == "registry.example/ash:pinned"
+    assert run[run.index(CANONICAL_CLI_NAME) - 1] == "registry.example/ash:pinned"
 
 
 # ---------------------------------------------------------------------------

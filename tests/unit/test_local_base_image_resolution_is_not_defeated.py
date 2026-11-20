@@ -54,8 +54,7 @@ What this does NOT assert
 -------------------------
 It does not assert that any runtime honours a local tag -- that is a property of buildah and of
 BuildKit, not of this repository, and asserting it here would be measuring them. It also does
-not stop a *user* from passing these flags. ``./ash`` honours ``DOCKER_EXTRA_ARGS`` and
-``_build_image`` honours ``--custom-build-arg``; a caller who asks for ``--platform`` is
+not stop a *user* from passing these flags. ``_build_image`` honours ``--custom-build-arg``; a caller who asks for ``--platform`` is
 entitled to it and accepts the consequence. What is guarded is only what ASH adds on its own,
 unasked, to every build.
 
@@ -65,21 +64,15 @@ the machine this was written on, and ``test_cfn_nag_windows_toolchain.py`` alrea
 text assertions as this repository's answer to that.
 """
 
-import os
-import shutil
-import stat
-import subprocess
 from pathlib import Path
 from typing import Any, Dict, List
 
 import pytest
 
-from tests.utils.host_ids import with_fixed_ids
 from automated_security_helper.interactions import run_ash_container as rac
 from automated_security_helper.interactions.run_ash_container import _build_image
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-ASH_SCRIPT = REPO_ROOT / "ash"
 PS1 = REPO_ROOT / "utils" / "ash_helpers.ps1"
 
 # Exact argv tokens that must never appear. Kept as whole tokens rather than substrings so that
@@ -156,7 +149,7 @@ def _build_image_kwargs(dockerfile: Path, **overrides: Any) -> Dict[str, Any]:
 
 @pytest.mark.unit
 class TestThePythonEntrypoint:
-    """``_build_image`` -- ``ash build-image`` and ``ash scan --mode container``."""
+    """``_build_image`` -- ``ashx build-image`` and ``ashx scan --mode container``."""
 
     @pytest.fixture
     def dockerfile(self, tmp_path):
@@ -255,10 +248,9 @@ class TestThePythonEntrypoint:
 class TestTheLocalOnlyPullFlag:
     """``--pull=false`` appears on nerdctl and finch with a verified layout, and nowhere else.
 
-    Asserted in ``_build_image`` directly. The same three conditions for ``./ash`` and
-    ``ash_helpers.ps1`` are pinned in
-    ``test_base_oci_layout_reaches_every_build_entrypoint.py``, which runs ``./ash`` under a
-    runner named ``nerdctl`` and reads the PowerShell branch.
+    Asserted in ``_build_image`` directly. The same three conditions for ``ash_helpers.ps1``
+    are pinned in ``test_base_oci_layout_reaches_every_build_entrypoint.py``, which reads the
+    PowerShell branch.
     """
 
     @pytest.fixture
@@ -302,91 +294,6 @@ class TestTheLocalOnlyPullFlag:
         _build_image(**_build_image_kwargs(dockerfile, resolved_oci_runner=runner))
 
         assert _offending_tokens(recorded_commands[0]) == [], recorded_commands[0]
-
-
-_REQUIRES_BASH = [
-    pytest.mark.skipif(
-        os.name == "nt",
-        reason="bash on Windows runners is the WSL stub; ./ash is the POSIX entrypoint",
-    ),
-    pytest.mark.skipif(
-        shutil.which("bash") is None, reason="the entrypoint under test is bash"
-    ),
-    pytest.mark.skipif(
-        not ASH_SCRIPT.is_file(),
-        reason="repository ash entrypoint not present (installed-package layout)",
-    ),
-]
-
-RECORDING_RUNNER = """#!/bin/bash
-if [ "$1" = "build" ]; then
-  printf '%s\\n' "$*" > "$ARGV_LOG"
-  echo 'fake runner: refusing to build, argv recorded' >&2
-  exit 1
-fi
-echo "FAKE-RUNNER-INVOKED-WITH: $*"
-exit 0
-"""
-
-
-@pytest.mark.integration
-class TestTheBashEntrypoint:
-    """``./ash``, which is what the ``bash`` scan legs run."""
-
-    pytestmark = _REQUIRES_BASH
-
-    def test_the_build_argv_has_no_flag_that_defeats_local_resolution(self, tmp_path):
-        runner = tmp_path / "fake-oci-runner"
-        runner.write_text(RECORDING_RUNNER, encoding="utf-8")
-        runner.chmod(runner.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP)
-
-        source_dir = tmp_path / "src"
-        source_dir.mkdir(exist_ok=True)
-        argv_log = tmp_path / "argv"
-
-        # An unprivileged `id`, so the default non-root build reaches the runner when
-        # the suite itself runs as root.
-        env = with_fixed_ids(
-            {
-                **os.environ,
-                "OCI_RUNNER": str(runner),
-                "ARGV_LOG": str(argv_log),
-            },
-            tmp_path / "fixed-id-bin",
-        )
-        env.pop("ASH_BASE_IMAGE_OVERRIDE", None)
-        env.pop("ASH_BASE_OCI_LAYOUT", None)
-        # A developer with this exported would otherwise have their own flags asserted.
-        env.pop("DOCKER_EXTRA_ARGS", None)
-
-        proc = subprocess.run(  # nosec B603 B607 — fixed script path, list args, no shell
-            [
-                "bash",
-                str(ASH_SCRIPT),
-                "--source-dir",
-                str(source_dir),
-                "--output-dir",
-                str(tmp_path / "out"),
-            ],
-            capture_output=True,
-            text=True,
-            cwd=str(REPO_ROOT),
-            env=env,
-            timeout=180,
-            check=False,
-        )
-        assert argv_log.is_file(), (
-            "the fake runner was never asked to build, so there is no argv to assert over -- "
-            f"this test would otherwise pass vacuously.\nstdout:\n{proc.stdout}\n"
-            f"stderr:\n{proc.stderr}"
-        )
-
-        argv = argv_log.read_text(encoding="utf-8").strip().split()
-        offending = _offending_tokens(argv)
-        assert offending == [], (
-            f"./ash added {offending} to the build argv; see this module's docstring for what "
-            f"each one breaks.\nargv was:\n{' '.join(argv)}"
-        )
 
 
 @pytest.mark.unit
@@ -446,7 +353,7 @@ class TestEveryBuildEntrypointIsCovered:
     per job and every entrypoint reachable afterwards has to keep the local store usable.
     """
 
-    def test_this_file_covers_the_same_three_entrypoints_as_the_override_guard(self):
+    def test_this_file_covers_the_same_entrypoints_as_the_override_guard(self):
         override_guard = (
             REPO_ROOT
             / "tests"
@@ -459,7 +366,6 @@ class TestEveryBuildEntrypointIsCovered:
         )
         covered = {
             "TestThePythonEntrypoint",
-            "TestTheBashEntrypoint",
             "TestThePowerShellEntrypoint",
         }
         body = Path(__file__).read_text(encoding="utf-8")

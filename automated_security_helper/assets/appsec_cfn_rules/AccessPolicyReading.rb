@@ -34,6 +34,17 @@ module AccessPolicyReading
 
   module_function
 
+  # True when a resource carries an AccessPolicies property that is a policy document, the
+  # shape of an Elasticsearch or OpenSearch domain's resource policy. AWS::EKS::AccessEntry
+  # also has a property named AccessPolicies, and it is a list of {PolicyArn, AccessScope}
+  # entries: no Statement, nothing a policy parser can read. Handing that list to
+  # PolicyDocumentParser made both rules raise on every template with an access entry, and
+  # under --isolate-custom-rule-exceptions that template then counts as not evaluated.
+  def policy_resource?(resource)
+    policies = resource.accessPolicies
+    !policies.nil? && !policies.is_a?(Array)
+  end
+
   # The policy document of a resource with each branch of every Fn::If in it present, and
   # whether a statement had more combinations of branches than are read.
   #

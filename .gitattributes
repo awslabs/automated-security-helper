@@ -1,1 +1,16 @@
 * text=auto eol=lf
+
+# The Gradle wrapper's Windows launcher, which the rule above would break.
+#
+# `eol=lf` normalizes every checked-out file to LF. cmd.exe tolerates LF inside a batch
+# file for simple lines but mis-parses a multi-line construct written with them, and
+# gradlew.bat has one: the `if ... (` / `) else (` block that locates the JVM. The failure
+# is a batch file that runs and does the wrong thing, on the one platform this repository's
+# CI cannot exercise for the JetBrains plugin.
+#
+# The wrapper jar is binary and must not be touched by any end-of-line conversion. `text=auto`
+# detects that correctly for a well-formed jar, but stating it removes the guess -- and a jar
+# that has been through a CRLF conversion is corrupt in a way that surfaces as
+# "Could not find or load main class org.gradle.wrapper.GradleWrapperMain".
+editors/jetbrains/gradlew.bat text eol=crlf
+editors/jetbrains/gradle/wrapper/gradle-wrapper.jar binary

@@ -812,7 +812,7 @@ _SPEC_ASSIGNMENT = re.compile(
     r"""(?:(?P<q>['"])(?P<quoted>.*?)(?P=q)|(?P<bare>[^\s;]*))"""
 )
 #: The ``ash`` command, as a command word.
-_ASH_COMMAND = re.compile(r"""(?<![\w.$/-])"?(?:[^\s"'`;&|()<>]*/)?ash"?(?![\w.-])""")
+_ASH_COMMAND = re.compile(r"""(?<![\w.$/-])"?(?:[^\s"'`;&|()<>]*/)?ashx?"?(?![\w.-])""")
 
 #: An image repository of ASH: a path component automated-security-helper.
 _ASH_IMAGE_PATH = re.compile(
@@ -1525,7 +1525,7 @@ def _jenkinsfile_provenance(lines: list[str], where: str) -> list[_Insertion]:
 def _runs_ash(script: str) -> bool:
     """Whether a script runs the ``ash`` command (_command_names)."""
     return any(
-        command.words[index].name == "ash"
+        command.words[index].name in ("ash", "ashx")
         for line in _read_script(script)
         for command in line.commands
         for index in _command_names(command.words)
@@ -3231,7 +3231,7 @@ def rewrite_pipeline(
                 )
             if used_built and not built:
                 raise RewriteError(
-                    f"{where}: no job on an image the run builds runs ash, so the "
+                    f"{where}: no job on an image the run builds runs ash or ashx, so the "
                     "block runs no ASH to measure"
                 )
             insertions += built
@@ -3655,8 +3655,8 @@ def _scan_command_problem(command: _Command) -> str | None:
         return f"`{shown}` runs a script nested too deep to read"
     names = _command_names(command.words)
     for index in names:
-        if command.words[index].name == "ash":
-            return f"`{shown}` runs ash other than through uvx"
+        if command.words[index].name in ("ash", "ashx"):
+            return f"`{shown}` runs {command.words[index].name} other than through uvx"
     for index in names:
         tool = command.words[index].name
         if not _TOOL_NAME.fullmatch(tool) or tool == "uvx":

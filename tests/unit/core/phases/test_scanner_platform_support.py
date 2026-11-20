@@ -49,9 +49,6 @@ from automated_security_helper.interactions.run_ash_scan import (
     _COMPLETE_SCANNER_STATUSES,
 )
 from automated_security_helper.models.asharp_model import AshAggregatedResults
-from automated_security_helper.plugin_modules.ash_builtin.scanners import (
-    semgrep_scanner,
-)
 
 pytestmark = pytest.mark.unit
 
@@ -110,24 +107,10 @@ def test_the_base_class_declares_nothing_unsupported():
     assert ScannerPluginBase.unsupported_platform_reason(object()) is None
 
 
-@pytest.mark.parametrize("system", ["Windows", "windows", "WINDOWS"])
-def test_semgrep_declares_windows_unsupported(system, monkeypatch):
-    monkeypatch.setattr(semgrep_scanner.platform, "system", lambda: system)
-    reason = semgrep_scanner.SemgrepScanner.unsupported_platform_reason(object())
-    assert isinstance(reason, str) and reason, reason
-    assert "Windows" in reason
-
-
-@pytest.mark.parametrize("system", ["Linux", "Darwin"])
-def test_semgrep_declares_nothing_on_platforms_it_supports(system, monkeypatch):
-    """The other direction, and it is not symmetric with the test above.
-
-    A reason returned everywhere would make semgrep SKIPPED on Linux too -- which is
-    where it actually finds things, so the scan would go green having measured nothing.
-    That is worse than the bug being fixed.
-    """
-    monkeypatch.setattr(semgrep_scanner.platform, "system", lambda: system)
-    assert semgrep_scanner.SemgrepScanner.unsupported_platform_reason(object()) is None
+# The per-scanner declaration tests lived here while the semgrep scanner
+# shipped (it was the one builtin that publishes no Windows build and said so
+# through this hook). No current builtin declares a platform unsupported, so
+# the fabricated plugin below is what exercises the classification.
 
 
 # ---------------------------------------------------------------------------
@@ -425,7 +408,7 @@ def test_the_gate_and_the_exit_code_agree_on_which_statuses_mean_ran():
     """The second set the two implementations share, held together the same way.
 
     ``test_the_gate_still_fails_when_every_scanner_is_skipped`` above drives
-    ``gate.main()``, so it passed throughout the window in which ``ash scan`` answered 0
+    ``gate.main()``, so it passed throughout the window in which ``ashx scan`` answered 0
     on the same results file: the script asserted the set-level condition and
     ``_compute_exit_code`` had no counterpart. It now has one, and the two sets are
     spelled separately -- the script cannot import ASH, because the bash and PowerShell

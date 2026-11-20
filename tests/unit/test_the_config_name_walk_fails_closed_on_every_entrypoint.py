@@ -39,6 +39,13 @@ FILE_FLAG = rac.CONFIG_FILE_FROM_SCANNED_REPOSITORY_FLAG
 IMAGE = "automated-security-helper:non-root"
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ASH_SCRIPT = REPO_ROOT / "ash"
+#: The bash cells drive the root ./ash script, which a533dd6531a deleted when it was
+#: absorbed into the Python CLI. They skip while it is absent (the python cells above
+#: carry the same walk through rac) and run again if the script returns.
+REQUIRES_ASH_SCRIPT = pytest.mark.skipif(
+    not ASH_SCRIPT.is_file(),
+    reason="root ./ash script removed by a533dd6531a (absorbed into the ash CLI)",
+)
 IS_ROOT = hasattr(os, "geteuid") and os.geteuid() == 0
 
 #: The whole module measures POSIX semantics: ./ash is the POSIX wrapper
@@ -421,6 +428,7 @@ def test_py_the_failing_shapes_fail_closed(which, tmp_path, monkeypatch):
 # -------------------------------------------------------------- fail-closed cells: bash entrypoint
 
 
+@REQUIRES_ASH_SCRIPT
 @pytest.mark.integration
 @pytest.mark.parametrize(
     "which",
@@ -448,6 +456,7 @@ def test_bash_fn_the_failing_shapes_report_undecided(which, tmp_path):
     assert status == 2
 
 
+@REQUIRES_ASH_SCRIPT
 @pytest.mark.integration
 @pytest.mark.parametrize(
     "which",
@@ -582,6 +591,7 @@ def _bash_fn_undecided_at(source: Path, named: Path) -> str:
     return last[-1]
 
 
+@REQUIRES_ASH_SCRIPT
 @pytest.mark.integration
 @pytest.mark.skipif(IS_ROOT, reason="root searches any directory")
 def test_bash_fn_a_directory_that_cannot_be_searched_says_directory(tmp_path):
@@ -611,6 +621,7 @@ def test_py_a_link_to_a_directory_that_cannot_be_searched_is_named_as_that(tmp_p
     assert "link loop" not in text, text
 
 
+@REQUIRES_ASH_SCRIPT
 @pytest.mark.integration
 @pytest.mark.skipif(IS_ROOT, reason="root searches any directory")
 def test_bash_fn_a_link_to_a_directory_that_cannot_be_searched_says_directory(tmp_path):
@@ -625,6 +636,7 @@ def test_bash_fn_a_link_to_a_directory_that_cannot_be_searched_says_directory(tm
     assert said == "status=2 at=directory", said
 
 
+@REQUIRES_ASH_SCRIPT
 @pytest.mark.integration
 def test_bash_fn_a_directory_link_up_to_the_tree_is_collapsed_by_name(tmp_path):
     """A directory link whose last name is ".." lands on the physical parent of
@@ -640,6 +652,7 @@ def test_bash_fn_a_directory_link_up_to_the_tree_is_collapsed_by_name(tmp_path):
     assert status == 0
 
 
+@REQUIRES_ASH_SCRIPT
 @pytest.mark.integration
 @pytest.mark.parametrize(
     "which", ["loop-as-the-final-component", "loop-as-a-directory-component"]
@@ -651,6 +664,7 @@ def test_bash_fn_a_link_loop_says_link(which, tmp_path):
     assert said == "status=2 at=link", said
 
 
+@REQUIRES_ASH_SCRIPT
 @pytest.mark.integration
 @pytest.mark.parametrize(
     "which", ["loop-as-the-final-component", "loop-as-a-directory-component"]
@@ -674,6 +688,7 @@ def test_bash_run_a_link_loop_is_refused_as_a_missing_file_before_any_link_is_fo
     assert observed == (3, 0, True, False, False)
 
 
+@REQUIRES_ASH_SCRIPT
 @pytest.mark.unit
 def test_bash_refuses_each_undecided_place_in_its_own_words():
     """The refusals read from the shipped script: the caller picks by UNDECIDED_AT."""
@@ -686,6 +701,7 @@ def test_bash_refuses_each_undecided_place_in_its_own_words():
     assert "a link loop, or a link that cannot be read" in text
 
 
+@REQUIRES_ASH_SCRIPT
 @pytest.mark.unit
 def test_the_extracted_walk_carries_every_function_it_reaches():
     """The walk runs alone, so a function it starts to call and the harness does not carry fails here by name."""
@@ -721,6 +737,7 @@ def _control_layout(which: str, tmp_path: Path):
     return checkout, checkout["root"] / "ci" / "link.yaml", True
 
 
+@REQUIRES_ASH_SCRIPT
 @pytest.mark.integration
 @pytest.mark.parametrize("which", ["plain-outside-file", "name-is-a-tree-file-link"])
 def test_controls_hold_on_every_entrypoint(which, fake_runner, tmp_path):
@@ -773,6 +790,7 @@ def _steered_layout(layout: str, tmp_path: Path, marker: str = "git-with-head"):
     return source.resolve(), out.resolve(), config
 
 
+@REQUIRES_ASH_SCRIPT
 @pytest.mark.integration
 @pytest.mark.parametrize("marker", ["git-with-head", "bare-dot-git-directory"])
 @pytest.mark.parametrize("layout", NAMES_STEERED_BY_THE_SCANNED_CHECKOUT)

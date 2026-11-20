@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Regression tests: ``ash scan`` refuses unusable input with a message, not a traceback.
+"""Regression tests: ``ashx scan`` refuses unusable input with a message, not a traceback.
 
 * ``--use-existing`` with no existing results raised an uncaught ``ValueError``,
   so the operator got a traceback and whatever exit code the interpreter chose.

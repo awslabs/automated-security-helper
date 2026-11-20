@@ -100,7 +100,7 @@ ASH_CONVERTERS = [MarkdownPythonConverter]
 
 ```bash
 export PYTHONPATH="$PWD/ash-plugins"
-ash plugin list --ash-plugin-modules acme_ash_plugins
+ashx plugin list --ash-plugin-modules acme_ash_plugins
 ```
 
 The converters table has a row for the plugin:
@@ -129,7 +129,7 @@ Run a scan with the module loaded:
 
 <!-- doctest: run expect-exit=2 -->
 ```bash
-ash scan --ash-plugin-modules acme_ash_plugins --scanners detect-secrets --offline
+ashx scan --ash-plugin-modules acme_ash_plugins --scanners detect-secrets --offline
 ```
 
 The scan exits with code 2 for the hardcoded password in `app.py`. List what the converter wrote:

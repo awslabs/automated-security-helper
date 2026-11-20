@@ -34,7 +34,7 @@ def run_finished(**kwargs):
 <!-- doctest: run expect-exit=2 -->
 ```bash
 export PYTHONPATH="$PWD/ash-plugins"
-ash scan --ash-plugin-modules acme_ash_plugins --scanners detect-secrets --offline
+ashx scan --ash-plugin-modules acme_ash_plugins --scanners detect-secrets --offline
 ```
 
 Among the scan's output are the two lines the subscribers print:
@@ -45,7 +45,7 @@ acme: detect-secrets finished, 0 left
 acme: run finished in 0.9 s
 ```
 
-`ash plugin list` does not show event subscribers.
+`ashx plugin list` does not show event subscribers.
 
 ## How subscribing works
 
@@ -99,4 +99,4 @@ Catch exceptions inside your subscriber unless you mean it to stop the scan.
 
 ## Built-in subscribers
 
-ASH subscribes two functions of its own. At `SCAN_COMPLETE` one logs which scanners are still running, as in `Scanner bandit completed. 2 remaining: semgrep, checkov`, and `All scanners completed!` after the last one. At `EXECUTION_START` the other checks the expiration dates in the config ([Expiration](../how-to/suppress-findings.md#expiration)). It logs, in this order, one warning that names every suppression and ignore path that has already expired, one that expires today included; a warning for the ignore paths that expire within the next 30 days; and a warning for the suppressions that do. Under `--ignore-suppressions` it leaves the suppressions out of these warnings and still names the ignore paths.
+ASH subscribes two functions of its own. At `SCAN_COMPLETE` one logs which scanners are still running, as in `Scanner bandit completed. 2 remaining: opengrep, checkov`, and `All scanners completed!` after the last one. At `EXECUTION_START` the other checks the expiration dates in the config ([Expiration](../how-to/suppress-findings.md#expiration)). It logs, in this order, one warning that names every suppression and ignore path that has already expired, one that expires today included; a warning for the ignore paths that expire within the next 30 days; and a warning for the suppressions that do. Under `--ignore-suppressions` it leaves the suppressions out of these warnings and still names the ignore paths.

@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""`ash config lint`: every kind of lint issue, the fixes, and the file left behind.
+"""`ashx config lint`: every kind of lint issue, the fixes, and the file left behind.
 
 The fixtures between them trigger every ``LintCategory``. Which categories exist is
 read from the enum itself, not copied here, so adding a lint rule without a fixture

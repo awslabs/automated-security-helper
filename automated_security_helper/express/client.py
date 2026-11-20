@@ -157,6 +157,7 @@ def delegated_exit_code(
 #: the names through the loop that reads them and documents each one.
 COMPLETION_ENV_NAMES = (
     "_ASH_COMPLETE",
+    "_ASHX_COMPLETE",
     "_ASHV3_COMPLETE",
     "_AUTOMATED_SECURITY_HELPER_COMPLETE",
     "_AGENTIC_SECURITY_HARNESS_COMPLETE",

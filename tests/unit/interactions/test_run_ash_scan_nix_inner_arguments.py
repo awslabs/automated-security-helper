@@ -25,6 +25,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from automated_security_helper.cli.deprecations import CANONICAL_CLI_NAME
 from automated_security_helper.core.enums import (
     AshLogLevel,
     ExecutionPhase,
@@ -116,7 +117,9 @@ def test_a_json_input_flag_on_the_command_line_does_not_reach_the_inner_scan(
     """The document was read into the options already; the shell's standard
     input is empty, so a forwarded ``--cli-json-input -`` made the inner scan
     read an empty document and refuse."""
-    monkeypatch.setattr(sys, "argv", ["ash", "scan", "--cli-json-input", "-"])
+    monkeypatch.setattr(
+        sys, "argv", [CANONICAL_CLI_NAME, "scan", "--cli-json-input", "-"]
+    )
 
     _run(tmp_path)
 

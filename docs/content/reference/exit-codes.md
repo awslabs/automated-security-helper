@@ -1,12 +1,12 @@
 # Exit codes
 
-The exit code of every `ash` command, with the conditions that produce it. For how to change the scan verdict, see [Set the gate](../how-to/set-the-gate.md).
+The exit code of every `ashx` command, with the conditions that produce it. For how to change the scan verdict, see [Set the gate](../how-to/set-the-gate.md).
 
-On every command, a command-line usage error exits 5: an unknown option, subcommand, or argument; a value outside the choices an option takes (such as `--mode` or `--min-severity`) or a number that is not one; a missing required option; or a `--cli-json-input` document that ASH cannot read or use. `ash scan`, `ash build-image`, and `ash` with no subcommand reject an option or argument they do not define. An option given to `ash` before a subcommand is passed to the command named right after `ash`, and is a usage error when that command does not take it: `ash --source-dir . config get` exits 5, because `ash config` has no `--source-dir`, while `ash config get --source-dir .` works. Some names and paths that ASH cannot use are usage errors too, such as a `--scanners` list that names no scanner, a `--source-dir` that does not exist, or an `--output-dir` that ASH cannot create, while `ash report`, and a scan with `--use-existing`, exit 1 when they find no results to use. The tables below list both. Two `ash dependencies install` selections exit 2 instead: a `--tool` name that it has no plugin for, or whose plugin type `--plugin-type` leaves out, and a `--plugin-type` other than `converter`, `scanner`, or `reporter`. Usage errors have a code of their own so that a CI gate does not read a mistyped flag as a scan with findings.
+On every command, a command-line usage error exits 5: an unknown option, subcommand, or argument; a value outside the choices an option takes (such as `--mode` or `--min-severity`) or a number that is not one; a missing required option; or a `--cli-json-input` document that ASH cannot read or use. `ashx scan`, `ashx build-image`, and `ashx` with no subcommand reject an option or argument they do not define. An option given to `ashx` before a subcommand is passed to the command named right after `ashx`, and is a usage error when that command does not take it: `ashx --source-dir . config get` exits 5, because `ashx config` has no `--source-dir`, while `ashx config get --source-dir .` works. Some names and paths that ASH cannot use are usage errors too, such as a `--scanners` list that names no scanner, a `--source-dir` that does not exist, or an `--output-dir` that ASH cannot create, while `ashx report`, and a scan with `--use-existing`, exit 1 when they find no results to use. The tables below list both. Two `ashx dependencies install` selections exit 2 instead: a `--tool` name that it has no plugin for, or whose plugin type `--plugin-type` leaves out, and a `--plugin-type` other than `converter`, `scanner`, or `reporter`. Usage errors have a code of their own so that a CI gate does not read a mistyped flag as a scan with findings.
 
-## `ash scan` {#scan}
+## `ashx scan` {#scan}
 
-`ash` with no subcommand runs a scan and exits the same way.
+`ashx` with no subcommand runs a scan and exits the same way.
 
 | Code | Condition |
 |---|---|
@@ -15,7 +15,7 @@ On every command, a command-line usage error exits 5: an unknown option, subcomm
 | 1 | A rule could not be evaluated, or a scanner tool ASH could not stop (also with `fail_on_incomplete_scanners` off) |
 | 1 | A content database is past its age bound, with `content_db_staleness: fail` (the default). A scanner that passed against that database is recorded ERROR, and one that failed its threshold stays FAILED. This row sets the code for both, also with `fail_on_incomplete_scanners` off. |
 | 1 | A report file a reporter is about to write, such as `reports/ash.sarif`, is a link ([Output files](output-files.md#links)) |
-| 1 | `--use-existing` finds no `ash_aggregated_results.json` in the output directory. The command is well formed, but what it asks to use is not on disk, so this is the code `ash report` gives for missing results and not a usage error |
+| 1 | `--use-existing` finds no `ash_aggregated_results.json` in the output directory. The command is well formed, but what it asks to use is not on disk, so this is the code `ashx report` gives for missing results and not a usage error |
 | 1 | Any other error during the scan |
 | 2 | Actionable findings: an unsuppressed finding at or above its scanner's severity threshold, with `fail_on_findings` on and `--min-severity` met |
 | 3 | The configuration cannot be used: the config file that `--config` or `ASH_CONFIG` names, or that discovery finds, does not exist, is not a regular file, cannot be read, is not UTF-8, or does not parse; it does not validate (an unknown key in a plugin's options makes it invalid, and so does one plugin's section written under two spellings, neither of them the plugin's own name, such as `DetectSecrets` and `DETECT_SECRETS`; an unknown key in a suppression or an ignore-path entry instead warns and leaves the entry applying to nothing, unless `fail_on_unknown_keys: true` is set, the default from ASH v4); an override does not parse or does not validate; a config file an MCP client delivered sets a field the server's policy denies; or two plugins of one type that the scan loads have the same name or names that read as one ([Package a third-party plugin](../plugins/index.md#package-a-third-party-plugin)) |
@@ -46,28 +46,28 @@ In a repository where detect-secrets reports one finding, `SECRET-SECRET-KEYWORD
 
 <!-- doctest: run expect-exit=2 -->
 ```bash
-ash --source-dir . --scanners detect-secrets --offline --no-progress
+ashx --source-dir . --scanners detect-secrets --offline --no-progress
 ```
 
 With `fail_on_findings` off, the same scan exits 0:
 
 <!-- doctest: run expect-exit=0 -->
 ```bash
-ash --source-dir . --scanners detect-secrets --offline --no-progress --no-fail-on-findings
+ashx --source-dir . --scanners detect-secrets --offline --no-progress --no-fail-on-findings
 ```
 
-`--use-existing` with an output directory that holds no results exits 1, the same answer `ash report` gives for missing results. The command is well formed; what it asks to use is not on disk yet, so it is not a usage error:
+`--use-existing` with an output directory that holds no results exits 1, the same answer `ashx report` gives for missing results. The command is well formed; what it asks to use is not on disk yet, so it is not a usage error:
 
 <!-- doctest: run expect-exit=1 -->
 ```bash
-ash --source-dir . --use-existing --output-dir no-scan-here
+ashx --source-dir . --use-existing --output-dir no-scan-here
 ```
 
 A `--source-dir` that does not exist is a usage error, 5:
 
 <!-- doctest: run expect-exit=5 -->
 ```bash
-ash --source-dir no-such-dir --scanners detect-secrets --offline --no-progress
+ashx --source-dir no-such-dir --scanners detect-secrets --offline --no-progress
 ```
 
 <!-- doctest: output -->
@@ -79,7 +79,7 @@ A threshold in lowercase does not validate, so the config is invalid, 3:
 
 <!-- doctest: run expect-exit=3 -->
 ```bash
-ash --source-dir . --scanners detect-secrets --offline --no-progress \
+ashx --source-dir . --scanners detect-secrets --offline --no-progress \
   --config-overrides global_settings.severity_threshold=high
 ```
 
@@ -87,21 +87,21 @@ A `--config` that names no file exits 3 too:
 
 <!-- doctest: run expect-exit=3 -->
 ```bash
-ash --source-dir . --scanners detect-secrets --offline --no-progress --config no-such-config.yaml
+ashx --source-dir . --scanners detect-secrets --offline --no-progress --config no-such-config.yaml
 ```
 
 `--dry-run` without `--workspace` exits 4:
 
 <!-- doctest: run expect-exit=4 -->
 ```bash
-ash --source-dir . --dry-run
+ashx --source-dir . --dry-run
 ```
 
 A mistyped `--min-severity` value is a usage error, 5, and nothing is scanned:
 
 <!-- doctest: run expect-exit=5 -->
 ```bash
-ash --source-dir . --scanners detect-secrets --offline --no-progress --min-severity hihg
+ashx --source-dir . --scanners detect-secrets --offline --no-progress --min-severity hihg
 ```
 
 ### Precedence {#scan-precedence}
@@ -121,23 +121,23 @@ ASH stops at the first of these that applies:
 
 ### Container and Nix mode {#container}
 
-In `--mode container` (and `ash build-image`) and `--mode nix`, ASH reads the results back on the host and computes the code by the rules above, applying `--min-severity` there. `--ignore-suppressions` reaches the scan inside the container and works there as in a local scan.
+In `--mode container` (and `ashx build-image`) and `--mode nix`, ASH reads the results back on the host and computes the code by the rules above, applying `--min-severity` there. `--ignore-suppressions` reaches the scan inside the container and works there as in a local scan.
 
 | Code | Condition |
 |---|---|
 | 0, 1, 2 | The verdict, from the results |
 | 1, or the container runtime's code | Refused before a container started: no container runtime found, a non-numeric UID or GID, an invalid revision, no Dockerfile, or a failed image build |
-| 3 | Refused before a container started: a path ASH would mount is not UTF-8 ([Mounts and network](../how-to/run-in-a-container.md#mounts)); a config file cannot be used, or would be mounted from a place the scanned repository chooses ([The config file](../how-to/run-in-a-container.md#config)); a config file reads a variable a container scan does not pass in; or, through `OCI_RUNNER_WRAPPER`, the variables a config reads cannot be passed in an env file; or the output directory is a symlink, or a symlink below the source directory leads to it (such as a committed `.ash` link, for the default `.ash/ash_output`), as in every mode ([`ash scan`](#scan)). Nothing is created or mounted, also with `--no-run`. `./ash` and `Invoke-ASH` refuse the same output directory with exit 3 |
+| 3 | Refused before a container started: a path ASH would mount is not UTF-8 ([Mounts and network](../how-to/run-in-a-container.md#mounts)); a config file cannot be used, or would be mounted from a place the scanned repository chooses ([The config file](../how-to/run-in-a-container.md#config)); a config file reads a variable a container scan does not pass in; or, through `OCI_RUNNER_WRAPPER`, the variables a config reads cannot be passed in an env file; or the output directory is a symlink, or a symlink below the source directory leads to it (such as a committed `.ash` link, for the default `.ash/ash_output`), as in every mode ([`ashx scan`](#scan)). Nothing is created or mounted, also with `--no-run`. `./ash` and `Invoke-ASH` refuse the same output directory with exit 3 |
 | 1 | The results file is missing or does not parse |
 | 0, or the build's code | `--no-run` |
-| 130 | Interrupted with Ctrl-C. Outside Windows, ASH passes the interrupt to the container runtime or the Nix shell, unless the terminal already delivered it there, waits up to 5 seconds for it to stop, and then kills it; a second Ctrl-C during the wait kills it at once. On Windows, a Ctrl-C typed in the console reaches the container runtime as well, and ASH waits up to 5 seconds for it to stop, as above; without a console, ASH ends the runtime at once. A scan prints the interrupted-scan message above. `ash build-image` prints `ASH build-image interrupted before it finished.`, and, without `--no-run`, adds `: there is no verdict, and the output directory may hold partial results` before the period. |
+| 130 | Interrupted with Ctrl-C. Outside Windows, ASH passes the interrupt to the container runtime or the Nix shell, unless the terminal already delivered it there, waits up to 5 seconds for it to stop, and then kills it; a second Ctrl-C during the wait kills it at once. On Windows, a Ctrl-C typed in the console reaches the container runtime as well, and ASH waits up to 5 seconds for it to stop, as above; without a console, ASH ends the runtime at once. A scan prints the interrupted-scan message above. `ashx build-image` prints `ASH build-image interrupted before it finished.`, and, without `--no-run`, adds `: there is no verdict, and the output directory may hold partial results` before the period. |
 | any other | The container exited with a code other than 0, 1, or 2 (for example 3, 4, 5, 125, 126, 127, or 137); ASH exits with the same code |
 | 1 | Nix mode: `nix` is not installed |
 | 3, 4, or 5 | Nix mode: the Nix shell wrote no results and exited with 3, 4, or 5, which means the ASH inside it refused the run before scanning; ASH exits with the same code. Any other code without results exits 1. |
 
 ### Sharded scans {#shards}
 
-Each shard computes the verdict for its own scanners, so a shard with findings exits 2 and a shard with a MISSING scanner exits 1. The one difference is that a shard that ran no scanner does not fail for that reason. Gate the pipeline on [`ash merge`](#merge), not on the shards.
+Each shard computes the verdict for its own scanners, so a shard with findings exits 2 and a shard with a MISSING scanner exits 1. The one difference is that a shard that ran no scanner does not fail for that reason. Gate the pipeline on [`ashx merge`](#merge), not on the shards.
 
 ### Workspace mode {#workspace}
 
@@ -152,30 +152,30 @@ With `--workspace`, ASH scans each project and combines their verdicts. The firs
 
 A project that is incomplete exits 1 even when it also has findings, as the same project scanned alone does. Workspace mode checks the same unconditional causes as a single scan: a rule a scanner could not evaluate, a scanner tool ASH could not stop, and a stale content database under a `fail` policy each fail the project whatever `fail_on_incomplete_scanners` says. One exception, and only in workspace mode: a stale database of a scanner that the workspace policy alone added (`additional_scanners`) with `policy_scanners_gate` off is listed in the project's `stale_content_databases` and does not fail it, as that scanner's missing tool and findings decide nothing either. The other two unconditional causes have no such exception: a rule that such a scanner could not evaluate, or its tool that ASH could not stop, still fails the project, whichever config asked for the scanner, because a rule that raised says nothing about compliance with it and a tool still running may write into the project's output after the verdict read it.
 
-## `ash merge` {#merge}
+## `ashx merge` {#merge}
 
 | Code | Condition |
 |---|---|
-| 0, 1, 2 | The verdict over all shards, by the same rules as `ash scan`, including incompleteness, stale databases, and `--min-severity` |
+| 0, 1, 2 | The verdict over all shards, by the same rules as `ashx scan`, including incompleteness, stale databases, and `--min-severity` |
 | 1 | Refused: no shard index; results from a scan that was not sharded; a `--results` directory with no `ash_aggregated_results.json` at its top, in `ash_output/`, or in `.ash/ash_output/`, and none or more than one below it; a duplicated or mismatched shard; a results file that does not parse; a shard that completed none of its scanners; a report file it is about to write, such as `reports/ash.sarif`, is a link ([Output files](output-files.md#links)) |
 | 3 | The output directory, a directory on the way to it, or a directory ASH writes in it, such as `reports`, is a link ([Output files](output-files.md#links)) |
 | 3 | The configuration recorded in the shards reads a field that takes a fixed choice, a boolean, or a number from the environment, and neither `--config-overrides` nor the file `--config` names supplies the field ([Read values from the environment](../how-to/configure.md#environment)) |
 | 3 | Two reporters that the merge loads have the same name or names that read as one, as for a scan |
 | 5 | A usage error, including a missing `--results` or `--output-dir`, a `--results` path that does not exist or is neither a file nor a directory, and an invalid `--output-formats` or `--min-severity` value |
-| 5 | An output directory it cannot use, refused as a scan refuses it ([`ash scan`](#scan)): it is not a directory, it cannot be created, entered, or written, or it is not a valid path because it holds a NUL character, which a `--cli-json-input` document can carry. The merge prints the scan's `Output directory` line for it, with the path as given, on standard output, where it prints its log, and creates nothing. An output directory that does not exist is created |
+| 5 | An output directory it cannot use, refused as a scan refuses it ([`ashx scan`](#scan)): it is not a directory, it cannot be created, entered, or written, or it is not a valid path because it holds a NUL character, which a `--cli-json-input` document can carry. The merge prints the scan's `Output directory` line for it, with the path as given, on standard output, where it prints its log, and creates nothing. An output directory that does not exist is created |
 
-A shard whose scanner is ERROR only because its content database is stale counts as having completed that scanner: `ash merge` merges the shard and then exits 1 for the stale database.
+A shard whose scanner is ERROR only because its content database is stale counts as having completed that scanner: `ashx merge` merges the shard and then exits 1 for the stale database.
 
 A `--results` path that does not exist is a usage error:
 
 <!-- doctest: run expect-exit=5 -->
 ```bash
-ash merge --results no-such-shard --output-dir merged
+ashx merge --results no-such-shard --output-dir merged
 ```
 
-## `ash report` {#report}
+## `ashx report` {#report}
 
-`ash report` never fails on findings.
+`ashx report` never fails on findings.
 
 | Code | Condition |
 |---|---|
@@ -189,10 +189,10 @@ ASH checks the config first, then `--format`, then the results:
 
 <!-- doctest: run expect-exit=5 -->
 ```bash
-ash report --output-dir no-scan-here --format bogus
+ashx report --output-dir no-scan-here --format bogus
 ```
 
-## `ash mcp` {#mcp}
+## `ashx mcp` {#mcp}
 
 | Code | Condition |
 |---|---|
@@ -207,64 +207,64 @@ A scan's own errors end that scan as failed, not the server. On Windows a stdio 
 
 <!-- doctest: run expect-exit=5 -->
 ```bash
-ash mcp --transport bogus
+ashx mcp --transport bogus
 ```
 
-## `ash config` {#config}
+## `ashx config` {#config}
 
 | Command | Code | Condition |
 |---|---|---|
-| `ash config init` | 0 | The file was written |
+| `ashx config init` | 0 | The file was written |
 | | 1 | The file exists and `--force` is not given. When neither `--config` nor `ASH_CONFIG` names the file, also when the directory already has another config source, which `--force` does not override. |
-| `ash config get` | 0 | The resolved config was printed (the defaults, when no config file is found) |
+| `ashx config get` | 0 | The resolved config was printed (the defaults, when no config file is found) |
 | | 3 | The named config path does not exist, is a directory, or cannot be read; the config does not parse or does not validate; or an override does not validate |
-| `ash config update` | 0 | The file was updated, no `--set` was given, or `--dry-run` was given with `--set` values it can apply |
+| `ashx config update` | 0 | The file was updated, no `--set` was given, or `--dry-run` was given with `--set` values it can apply |
 | | 1 | No config file is found; the file is TOML, uses `extends` or `patch`, or reads values from the environment; it cannot be written |
 | | 3 | The named config path does not exist, is a directory, or cannot be read; the file is not UTF-8, does not load, or does not validate; a `--set` value does not parse (no `=`, or nothing before it), starts with a top-level key the configuration does not have, or leaves a config a scan would refuse. `update` prints `Not updating <file>: ...` and leaves the file unchanged, also with `--dry-run`, and applies no other `--set` given with it. |
-| `ash config validate` | 0 | A scan accepts the config, apart from the options of plugins loaded from `ash_plugin_modules`, which only a scan checks. Warnings may be printed, for example for a missing `project_name`, which a scan does not need, or for an ignore or suppression path that names an existing directory and matches no file in it ([Check a config](../how-to/configure.md#check)). |
+| `ashx config validate` | 0 | A scan accepts the config, apart from the options of plugins loaded from `ash_plugin_modules`, which only a scan checks. Warnings may be printed, for example for a missing `project_name`, which a scan does not need, or for an ignore or suppression path that names an existing directory and matches no file in it ([Check a config](../how-to/configure.md#check)). |
 | | 1 | No config file is found in the source directory and none is named: `validate` says so, and that a scan of that directory uses the default configuration. Also when an error occurred. |
 | | 3 | The named config path does not exist, is a directory, or cannot be read. A scan refuses the config: it does not parse, it or an override does not validate (one plugin's section written under two spellings included), its `extends` chain does not resolve, or `ash_plugin_modules` names a module a scan refuses. `validate` imports no plugin module, so two plugins whose names read as one pass it. |
 | | 5 | The source directory (`--source-dir` or `ASH_SOURCE_DIR`) does not exist, is not a directory, or cannot be entered, refused with the line a scan prints |
-| `ash config lint` | 0 | A scan accepts the config (warnings and notes are allowed), apart from the options of plugins loaded from `ash_plugin_modules`. Also when a fix prompt was declined, if a scan accepts the file. |
+| `ashx config lint` | 0 | A scan accepts the config (warnings and notes are allowed), apart from the options of plugins loaded from `ash_plugin_modules`. Also when a fix prompt was declined, if a scan accepts the file. |
 | | 1 | No config file is found; `--fix` or `--fix-unused` refused to rewrite the file (a TOML file, `--fix-unused` on a JSON file, or `--fix` with something to fix on a file that reads values from the environment); an error that a scan accepts remains |
 | | 3 | As for `validate`, also after a declined fix prompt. With `--fix`, the code describes the file after the fixes. |
-| `ash config validate-plugin-dependencies` | 0 | The config resolves (`project_name` has a default, so the file does not need to set it) |
+| `ashx config validate-plugin-dependencies` | 0 | The config resolves (`project_name` has a default, so the file does not need to set it) |
 | | 1 | No config file is found |
 | | 3 | The named config path does not exist, is a directory, or cannot be read, or the config does not resolve |
-| `ash config wizard` | 0 | The file was written |
+| `ashx config wizard` | 0 | The file was written |
 | | 1 | The file is TOML, uses `extends` or `patch`, or reads values from the environment; a prompt was aborted |
 | | 3 | The file cannot be loaded |
 
 The named config path is the one `--config`, `ASH_CONFIG`, or the path argument of `get`, `update`, and `validate-plugin-dependencies` gives. An `ASH_CONFIG` that names a file that does not exist exits 3 from `get`, `validate`, `lint`, and `validate-plugin-dependencies` even when `--config` or the path argument names a file that loads, since a scan refuses that pair too. [Configure ASH](../how-to/configure.md#check) explains what `validate`, `lint`, and `get` check.
 
-`ash config init` refuses to add a second config source:
+`ashx config init` refuses to add a second config source:
 
 <!-- doctest: run expect-exit=1 -->
 ```bash
 mkdir -p .ash && printf 'project_name: payments-api\n' > .ash/.ash.yaml
-ash config init
+ashx config init
 ```
 
-A named config path that does not exist or is a directory exits 3 from every `ash config` command that reads a config:
+A named config path that does not exist or is a directory exits 3 from every `ashx config` command that reads a config:
 
 <!-- doctest: run expect-exit=3 -->
 ```bash
-ash config get --config no-such-config.yaml
-```
-
-<!-- doctest: run expect-exit=3 -->
-```bash
-ash config validate --config .ash
+ashx config get --config no-such-config.yaml
 ```
 
 <!-- doctest: run expect-exit=3 -->
 ```bash
-ash config lint --config no-such-config.yaml
+ashx config validate --config .ash
 ```
 
 <!-- doctest: run expect-exit=3 -->
 ```bash
-ash config validate-plugin-dependencies --config no-such-config.yaml
+ashx config lint --config no-such-config.yaml
+```
+
+<!-- doctest: run expect-exit=3 -->
+```bash
+ashx config validate-plugin-dependencies --config no-such-config.yaml
 ```
 
 So does an `ASH_CONFIG` that names one, beside a `--config` file that loads:
@@ -272,15 +272,15 @@ So does an `ASH_CONFIG` that names one, beside a `--config` file that loads:
 <!-- doctest: run expect-exit=3 -->
 ```bash
 printf 'project_name: payments-api\n' > named.yaml
-ASH_CONFIG=no-such-config.yaml ash config lint --config named.yaml
+ASH_CONFIG=no-such-config.yaml ashx config lint --config named.yaml
 ```
 
-`ash config update` refuses a file that is not UTF-8 the same way, and leaves it unchanged:
+`ashx config update` refuses a file that is not UTF-8 the same way, and leaves it unchanged:
 
 <!-- doctest: run expect-exit=3 -->
 ```bash
 printf '\377\376' > not-utf8.yaml
-ash config update --config not-utf8.yaml --set fail_on_findings=false
+ashx config update --config not-utf8.yaml --set fail_on_findings=false
 ```
 
 A config without `project_name` is valid, with a warning:
@@ -288,24 +288,24 @@ A config without `project_name` is valid, with a warning:
 <!-- doctest: run expect-exit=0 -->
 ```bash
 printf 'global_settings:\n  severity_threshold: HIGH\n' > no-name.yaml
-ash config validate --config no-name.yaml
+ashx config validate --config no-name.yaml
 ```
 
 A `--set` without `=` leaves the file unchanged and exits 3:
 
 <!-- doctest: run expect-exit=3 -->
 ```bash
-ash config update --set fail_on_findings
+ashx config update --set fail_on_findings
 ```
 
 So does a `--set` whose top-level key the configuration does not have, such as the misspelled `fail_on_finding`. A top-level key may be written with `-` for `_`, as in a config file, so `--set fail-on-findings=false` sets `fail_on_findings`:
 
 <!-- doctest: run expect-exit=3 -->
 ```bash
-ash config update --set fail_on_finding=false
+ashx config update --set fail_on_finding=false
 ```
 
-A misspelled suppression key no longer makes the config invalid on its own: the entry is kept but suppresses nothing until the key is fixed, and a scan warns, naming the key with a did-you-mean. `ash config validate` accepts the file (exit 0), here with `ruleId` for `rule_id`:
+A misspelled suppression key no longer makes the config invalid on its own: the entry is kept but suppresses nothing until the key is fixed, and a scan warns, naming the key with a did-you-mean. `ashx config validate` accepts the file (exit 0), here with `ruleId` for `rule_id`:
 
 <!-- doctest: run expect-exit=0 -->
 ```bash
@@ -317,10 +317,10 @@ global_settings:
       ruleId: SECRET-SECRET-KEYWORD
       reason: Fixture value, not a real password
 EOF
-ash config validate --config misspelled.yaml
+ashx config validate --config misspelled.yaml
 ```
 
-With `fail_on_unknown_keys: true` the same typo makes the config one a scan refuses, so `ash config validate` names the key and exits 3. ASH v4 makes that the default:
+With `fail_on_unknown_keys: true` the same typo makes the config one a scan refuses, so `ashx config validate` names the key and exits 3. ASH v4 makes that the default:
 
 <!-- doctest: run expect-exit=3 -->
 ```bash
@@ -333,28 +333,28 @@ global_settings:
       ruleId: SECRET-SECRET-KEYWORD
       reason: Fixture value, not a real password
 EOF
-ash config validate --config misspelled-strict.yaml
+ashx config validate --config misspelled-strict.yaml
 ```
 
 ## Other commands {#other}
 
 | Command | Code | Condition |
 |---|---|---|
-| `ash dependencies install` | 0 | Without `--tool`: every tool that a scan with the same configuration on this platform would run is present after the install. With `--tool`: every named plugin's tool is present; the other plugins are not installed and do not count. |
+| `ashx dependencies install` | 0 | Without `--tool`: every tool that a scan with the same configuration on this platform would run is present after the install. With `--tool`: every named plugin's tool is present; the other plugins are not installed and do not count. |
 | | 1 | For a plugin that counts (one such a scan would run, or with `--tool` one it names): an install command failed, the plugin raised an error, or its tool is still absent. Without `--tool`, a plugin the scan skips (disabled in the config, or not available on this platform) does not count. |
 | | 2 | A `--tool` name matches no plugin, or names a plugin of a type that `--plugin-type` leaves out; or a `--plugin-type` is not `converter`, `scanner`, or `reporter`. ASH names the tool or the type, installs nothing, and starts no program. |
 | | 3 | The config cannot be used or is invalid, as for a scan, or an override does not validate; or there is no usable home directory, so nowhere to keep install receipts, whatever `--bin-path` says: `HOME` is empty or relative, or unset with no absolute home in the passwd entry. Nothing is installed. The same code for a `--bin-path` (or `ASH_BIN_PATH`) directory that cannot be made, because a file is in the way or a directory it needs cannot be written to; an existing bin directory is accepted whether or not you can write to it. A `--tool` name that matches no plugin is refused first, with code 2 |
-| `ash plugin list` | 0 | The lists were printed, also when a plugin module is skipped |
+| `ashx plugin list` | 0 | The lists were printed, also when a plugin module is skipped |
 | | 1 | Any other error |
 | | 3 | The config cannot be used or is invalid, as for a scan, or an override does not validate |
-| `ash get-genai-guide` | 0 | The guide was written |
+| `ashx get-genai-guide` | 0 | The guide was written |
 | | 1 | The installation has no readable copy of the guide; with `--from-github`, the download failed; or the output directory does not exist |
-| `ash inspect findings` | 0 | Always, also when there are no results to show |
-| `ash inspect sarif-fields` | 0 | The analysis was written |
+| `ashx inspect findings` | 0 | Always, also when there are no results to show |
+| `ashx inspect sarif-fields` | 0 | The analysis was written |
 | | 1 | No SARIF files were found, or a scanner's field is missing from the aggregated SARIF |
 
 <!-- doctest: run expect-exit=2 -->
 ```bash
 tool=not-a-tool
-ash dependencies install --tool "${tool}"
+ashx dependencies install --tool "${tool}"
 ```

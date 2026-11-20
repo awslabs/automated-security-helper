@@ -1,0 +1,8 @@
+<application>
+  <component name="EditorSettings">
+    <option name="IS_CARET_BLINKING" value="false" />
+    <option name="IS_CARET_INSIDE_TABS" value="false" />
+    <option name="SHOW_STICKY_LINES" value="false" />
+    <option name="SHOW_BREADCRUMBS" value="false" />
+  </component>
+</application>

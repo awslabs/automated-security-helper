@@ -89,7 +89,6 @@ import {
   suppressGuardRule,
   suppressLambdaLogWildcard,
   suppressScanFunctionVpcAccess,
-  suppressSecretRotation,
 } from './ash-nag-suppressions';
 import { AshRuntimeConfig } from './ash-runtime-config';
 
@@ -503,7 +502,6 @@ export class AshCodeCommitGateStack extends Stack {
       ],
     });
 
-    suppressSecretRotation(config.authSecret);
     suppressLambdaLogWildcard(scanRole);
 
     new CfnOutput(this, 'ScanFunctionRoleArn', {

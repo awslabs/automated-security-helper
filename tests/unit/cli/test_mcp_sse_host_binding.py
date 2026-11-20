@@ -14,7 +14,7 @@ call the same SDK autodetect is a property asserted on half the surface.
 The mechanism is identical on both. ``MCPServer.sse_app`` declares
 ``host: str = "127.0.0.1"`` and, when ``transport_security`` is None and host is
 loopback, installs an allowlist of exactly ``127.0.0.1``, ``localhost`` and
-``[::1]``. So ``ash mcp --transport sse --host 0.0.0.0`` bound the wildcard
+``[::1]``. So ``ashx mcp --transport sse --host 0.0.0.0`` bound the wildcard
 address and then answered 421 to every request whose Host header was not
 loopback, and ``--allowed-host`` reached nothing at all.
 

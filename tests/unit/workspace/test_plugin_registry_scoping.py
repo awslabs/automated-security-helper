@@ -18,7 +18,7 @@ declared an external plugin:
 
 Correct is ``web=True, api=False``, and neither ordering produced it. The
 ``api``-first case is the dangerous one: ``web`` reported fewer findings than
-``ash --source-dir web`` would, with nothing in the output saying so -- a silent
+``ashx --source-dir web`` would, with nothing in the output saying so -- a silent
 false negative on a security scanner, which is exactly the axis workspace mode
 exists to protect. It reproduced at ``max_parallel_projects=1``, so concurrency
 only randomised *which* project was wrong.

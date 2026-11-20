@@ -127,7 +127,7 @@ export const ASH_REPOSITORY_URL = 'https://github.com/awslabs/automated-security
  * - `mcp`    — the MCP server entrypoint baked in. Used by AgentCore and Fargate.
  * - `lambda` — the Lambda Runtime Interface Client plus the gate handler.
  * - `cli`    — plain ASH, used as a CodeBuild environment image by the sharded
- *              executor, where `ash scan` is invoked directly.
+ *              executor, where `ashx scan` is invoked directly.
  */
 export type AshImageFlavor = 'mcp' | 'lambda' | 'cli';
 
@@ -554,10 +554,12 @@ export class AshImageBuild extends Construct {
       description:
         'Starts the ASH image build during stack creation; the build answers ' +
         'CloudFormation once the image exists.',
-      environment: { PROJECT_NAME: this.project.projectName, KEY_ARN: props.encryptionKey.keyArn },
-      // Encrypts the two variables at rest with the adopter's key when one was
-      // supplied, and disappears when it was not. See `AshCustomerKey`.
-      environmentEncryption: props.customerKey.key,
+      // No `environment`. The project name and the key ARN arrive as the custom
+      // resource's `ProjectName` and `KeyArn` properties instead (see below).
+      // checkov's CKV_AWS_45 fired on an environment that held only a `Ref` to the
+      // project, on some CI runs and not others, and a function with no environment
+      // gives it nothing to read. With no variables there is nothing for
+      // `environmentEncryption` to encrypt either, so the function takes no key.
       /*
        * ONE, because one is the most CloudFormation will ever ask for.
        *
@@ -653,7 +655,16 @@ export class AshImageBuild extends Construct {
       serviceToken: starter.functionArn,
       resourceType: 'Custom::AshImageBootstrap',
       properties: {
-        // These are read by nobody. They exist so that changing the ASH version
+        // The one property the handler reads: the project to start. Passing it
+        // here rather than in the Lambda's environment keeps the function free of
+        // environment variables. The starter's role may StartBuild on this project
+        // and no other.
+        ProjectName: this.project.projectName,
+        // The key that encrypts the SecureString parameter the response URL is
+        // handed through (see "CLOUDFORMATION'S RESPONSE URL" above); read the same
+        // way, and for the same reason, as ProjectName.
+        KeyArn: props.encryptionKey.keyArn,
+        // The rest are read by nobody. They exist so that changing the ASH version
         // or the offline flag changes the custom resource's properties, which is
         // what makes CloudFormation re-invoke it on a stack update. Without them
         // a version bump would leave the old image in place and the workload
@@ -862,7 +873,7 @@ export class AshImageBuild extends Construct {
     ];
 
     if (flavor === 'cli') {
-      // Nothing to derive: the sharded executor invokes `ash scan` directly, so
+      // Nothing to derive: the sharded executor invokes `ashx scan` directly, so
       // ASH's own image is exactly what it needs.
       return [`docker tag "${base}" "ash-cli:local"`, ...push];
     }
@@ -993,17 +1004,19 @@ const BOOTSTRAP_PARAMETER_PREFIX = 'ash-bootstrap';
 /**
  * Inline handler that starts the build and stays silent on success.
  *
- * Kept small on purpose: `lambda.Code.fromInline` writes into the template's
- * `ZipFile`, which CloudFormation caps at 4096 characters.
+ * Kept small on purpose. `lambda.Code.fromInline` writes this source into the
+ * template's `ZipFile`. That property allows up to 4 MB once zipped
+ * (https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-properties-lambda-function-code.html),
+ * so it is not the constraint. The constraint is the template itself: every
+ * byte here lands in a committed template that must stay under CloudFormation's
+ * 51,200-byte `--template-body` quota
+ * (https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/cloudformation-limits.html).
  */
 const BOOTSTRAP_STARTER_CODE = `import json
-import os
 import urllib.request
 
 import boto3
 
-# The URL reaches the build by parameter name; see ash-image-build.ts.
-PARAMETER = "/${BOOTSTRAP_PARAMETER_PREFIX}/" + os.environ["PROJECT_NAME"]
 IDS = (("STACK_ID", "StackId"), ("REQUEST_ID", "RequestId"), ("LOGICAL_ID", "LogicalResourceId"))
 
 
@@ -1016,20 +1029,26 @@ def send(event, status, reason):
 
 
 def handler(event, context):
+    props = event["ResourceProperties"]
     ssm = boto3.client("ssm")
     if event["RequestType"] == "Delete":  # never block a teardown on a build
+        parameter = "/${BOOTSTRAP_PARAMETER_PREFIX}/" + props["ProjectName"]
         try:
-            ssm.delete_parameter(Name=PARAMETER)
+            ssm.delete_parameter(Name=parameter)
         except Exception as exc:
-            print("could not delete %s: %s" % (PARAMETER, exc))
+            print("could not delete %s: %s" % (parameter, exc))
         return send(event, "SUCCESS", "Nothing to undo")
     try:
-        ssm.put_parameter(Name=PARAMETER, Value=event["ResponseURL"], Type="SecureString",
-                          KeyId=os.environ["KEY_ARN"], Overwrite=True)
+        # The URL reaches the build by parameter name; see ash-image-build.ts. Inside
+        # the try so a missing property answers FAILED instead of leaving the stack
+        # waiting for a response nobody sends.
+        parameter = "/${BOOTSTRAP_PARAMETER_PREFIX}/" + props["ProjectName"]
+        ssm.put_parameter(Name=parameter, Value=event["ResponseURL"], Type="SecureString",
+                          KeyId=props["KeyArn"], Overwrite=True)
         boto3.client("codebuild").start_build(
-            projectName=os.environ["PROJECT_NAME"],
+            projectName=props["ProjectName"],
             environmentVariablesOverride=[
-                {"name": "CFN_RESPONSE_URL", "value": PARAMETER, "type": "PARAMETER_STORE"}
+                {"name": "CFN_RESPONSE_URL", "value": parameter, "type": "PARAMETER_STORE"}
             ] + [{"name": "CFN_" + n, "value": event[k], "type": "PLAINTEXT"} for n, k in IDS])
     except Exception as exc:  # nothing else will answer
         send(event, "FAILED", "Could not start the ASH image build. A scheduled rebuild "

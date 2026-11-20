@@ -1,0 +1,65 @@
+plugin
+  id: io.github.awslabs.ash
+  name: ASH - Automated Security Helper
+  vendor: Amazon Web Services <https://github.com/awslabs/automated-security-helper>
+  since-build: 252
+  until-build: null
+  depends: [com.intellij.modules.platform]
+  description:
+    Runs the <a href="https://github.com/awslabs/automated-security-helper">Automated
+        Security Helper</a> (ASH) command line tool over the open project and shows the findings
+        inline, at the file and line the scanner reported.
+        <br/><br/>
+        This plugin contains no scanners and no copy of ASH. It invokes the <code>ashx</code>
+        command on your PATH, falls back to <code>ash</code> when <code>ashx</code> is not
+        installed, or runs the executable set in <b>Settings | Tools | ASH</b>, and reads the
+        SARIF report ASH writes.
+        <br/><br/>
+        <b>Usage:</b> <i>Tools | Run ASH Security Scan</i>. Findings appear as editor errors and
+        warnings, with severity taken from the SARIF report. A scan ASH reports as incomplete
+        still shows the findings it produced, and says which scanners did not run.
+
+action io.github.awslabs.ash.jetbrains.AshScanAction
+  text: Run ASH Security Scan
+  description: Run the installed ASH CLI over this project and show findings inline
+  in groups: [ToolsMenu]
+  shortcuts: []
+  background task title: Running ASH security scan
+  enabled with a project: true
+  enabled while a scan runs: false
+  enabled with no project: false
+
+localInspection AshFinding
+  displayName: ASH security finding
+  groupName: Security
+  level: WARNING
+  enabledByDefault: true
+  language: null
+  description page:
+    <html>
+    <body>
+    Reports findings from the most recent Automated Security Helper (ASH) scan of this
+    project.
+    <p>
+    Findings are not produced by this inspection. They come from running
+    <i>Tools &rarr; Run ASH Security Scan</i>, which invokes the ASH CLI you
+    have installed and reads the SARIF report it writes. Until a scan has been run, this
+    inspection reports nothing.
+    </p>
+    <p>
+    The severity shown for each finding is the SARIF <code>level</code> from the report:
+    <code>error</code> is shown as an error, <code>warning</code> as a warning and
+    <code>note</code> as a weak warning. Where a result omits its own level, the level is
+    taken from the rule's <code>defaultConfiguration</code>, and the tooltip says so.
+    </p>
+    <!-- tooltip end --><p><small>Inspection ID: AshFinding</small></p></body>
+    </html>
+
+applicationConfigurable io.github.awslabs.ash.settings
+  parentId: tools
+  displayName: ASH
+  instance: io.github.awslabs.ash.jetbrains.AshSettingsConfigurable
+
+notificationGroup ASH
+  displayType: BALLOON
+  toolWindowId: null

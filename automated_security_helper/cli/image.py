@@ -15,6 +15,9 @@ from automated_security_helper.core.cancellation import (
 )
 
 # Import subprocess utilities
+from automated_security_helper.cli.deprecations import (
+    warn_deprecated_option_spellings,
+)
 from automated_security_helper.core.constants import (
     ASH_CONFIG_SOURCES_DESCRIPTION,
     ASH_EXIT_INTERRUPTED,
@@ -72,7 +75,7 @@ def build_ash_image_cli_command(
                 "Use the specified OCI runner instead of docker to run the containerized tools. "
                 "To prefix every OCI command with a wrapper (e.g. sudo), set the "
                 "OCI_RUNNER_WRAPPER environment variable instead of using this option "
-                "(e.g. OCI_RUNNER_WRAPPER=sudo ash ...)."
+                "(e.g. OCI_RUNNER_WRAPPER=sudo ashx ...)."
             ),
             envvar="OCI_RUNNER",
         ),
@@ -97,7 +100,7 @@ def build_ash_image_cli_command(
         str,
         typer.Option(
             "--offline-semgrep-rulesets",
-            help="Specify Semgrep rulesets for use in ASH offline mode",
+            help="Specify rulesets to bake into the opengrep offline cache for ASH offline mode (the flag keeps its historical name; the semgrep scanner is served by the opengrep plugin)",
         ),
     ] = "p/ci",
     container_uid: Annotated[
@@ -119,6 +122,12 @@ def build_ash_image_cli_command(
     ash_revision_to_install: Annotated[
         str | None,
         typer.Option(
+            "--ash-revision-to-install",
+            # Same two compatibility spellings as `scan`. The deleted root bash
+            # script drove an image build, so a caller migrating off it is at
+            # least as likely to land here as on `scan`.
+            "--ash-revision",
+            "-rev",
             help="ASH branch, tag or full commit id to install in the container image for usage during containerized scans",
         ),
     ] = None,
@@ -148,7 +157,11 @@ def build_ash_image_cli_command(
             help="Run scan in offline/airgapped mode. npm-audit does not run offline, because npm, yarn and pnpm audit by asking the registry: a project with a lockfile reports it MISSING, and one without reports it SKIPPED. IMPORTANT: Online access is needed when building ASH to prepare it for usage during a scan! If selecting Offline while performing a build, the ASH container image will be built in offline mode and any typically online-only dependencies like downloadable tool vulnerability databases will be cached in the image itself before publishing for scan usage."
         ),
     ] = False,
-    quiet: Annotated[bool, typer.Option(help="Hide all log output")] = False,
+    quiet: Annotated[
+        bool,
+        # Pair spelled out so attaching -q does not drop --no-quiet.
+        typer.Option("--quiet/--no-quiet", "-q", help="Hide all log output"),
+    ] = False,
     log_level: Annotated[
         AshLogLevel,
         typer.Option(
@@ -171,10 +184,26 @@ def build_ash_image_cli_command(
     debug: Annotated[
         bool, typer.Option("--debug", "-d", help="Enable debug logging")
     ] = False,
-    color: Annotated[bool, typer.Option(help="Enable/disable colorized output")] = True,
+    color: Annotated[
+        bool,
+        # The leading whitespace in "  /-C" is load-bearing. It is how click
+        # disambiguates a short form for the OFF side of a boolean flag. Without
+        # it the decl is taken as a literal option named "/-C" and -C is
+        # rejected with "No such option", silently and at runtime only.
+        #
+        # -C rather than -c because -c is --config on most of these commands.
+        # The deleted root bash script used -c for --no-color, so an old
+        # invocation consumes the next argument as a config path; see
+        # docs/content/docs/cli-reference.md.
+        typer.Option(
+            "--color/--no-color", "  /-C", help="Enable/disable colorized output"
+        ),
+    ] = True,
 ):
     if ctx.resilient_parsing or ctx.invoked_subcommand not in [None, "image"]:
         return
+
+    warn_deprecated_option_spellings()
 
     # Rebind list defaults to fresh empty lists at call time.
     if custom_build_arg is None:

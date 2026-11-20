@@ -1,0 +1,7 @@
+progress:
+  (none)
+
+notification group=ASH type=INFORMATION
+title: ASH scan already running
+body:
+A scan of this project is already running, so another was not started. Its result is shown when it finishes.

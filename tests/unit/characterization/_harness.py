@@ -4344,13 +4344,11 @@ class Harness:
 
     def skip_sleeps(self) -> None:
         """Make ``time.sleep`` return at once, counting each call in ``sleeps``."""
-        original = time.sleep
 
         def sleep(seconds: float) -> None:
             self.sleeps.append(seconds)
 
-        time.sleep = sleep  # type: ignore[assignment]
-        self._restore.append(lambda: setattr(time, "sleep", original))
+        self._patch(time, "sleep", sleep)
 
     def fix_clock(self) -> None:
         """Stop ASH's clock at ``FIXED_INSTANT`` for the rest of the test.

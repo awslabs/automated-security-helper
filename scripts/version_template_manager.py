@@ -348,6 +348,9 @@ class VersionTemplateManager:
         # committed pages carry the current release: a reader of any docs version,
         # the site's main version included, installs a release.
         self.version_placeholder = "{{VERSION}}"
+        # The major of the version being rendered (`4` for 4.x), for a doc that names
+        # the major rather than the whole release.
+        self.major_version_placeholder = "{{MAJOR_VERSION}}"
         # The current release number, on every build: what `ash --version` prints, the
         # release this repository's generated files pin, a release named in a table.
         # Never in an install command, whose ref is written with the version
@@ -404,12 +407,6 @@ class VersionTemplateManager:
             for pattern in form_patterns
             if re.search(pattern, content)
         ]
-
-    def render(self, content: str, version: str) -> str:
-        """A template rendered for a release: both placeholders become the version."""
-        return content.replace(self.version_placeholder, version).replace(
-            self.release_placeholder, version
-        )
 
     def packaged_release(self) -> str:
         """The current release number: `[tool.commitizen] version` in pyproject.toml.
@@ -600,6 +597,19 @@ class VersionTemplateManager:
                 "not rendering the docs with a placeholder version"
             )
         return version
+
+    def render(self, content: str, version: str) -> str:
+        """Substitute the version placeholders in template content.
+
+        {{VERSION}} and {{RELEASE}} both become the version; {{MAJOR_VERSION}}
+        becomes its first component.
+        """
+        major = version.split(".", 1)[0]
+        return (
+            content.replace(self.version_placeholder, version)
+            .replace(self.release_placeholder, version)
+            .replace(self.major_version_placeholder, major)
+        )
 
     def generate_from_template(self, template_path: Path) -> bool:
         """

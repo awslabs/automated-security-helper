@@ -1,0 +1,396 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+name: JetBrains plugin CI
+# Builds the JetBrains plugin under editors/jetbrains/, runs its tests, gates its coverage,
+# runs the Plugin Verifier against later IDE releases (the plugin-verifier job),
+# and checks what the distribution zip contains. The headless-real job runs the plugin against
+# a real ashx built from the same commit and installs, upgrades and uninstalls the built zip
+# in a real IDE.
+#
+# WHY THIS WORKFLOW EXISTS
+#
+# Nothing else under .github/ builds anything with Gradle, and nothing compiles Java. The
+# plugin's correctness therefore rested entirely on a developer's machine until this file, and
+# the parts of it most likely to be wrong are the parts a reviewer cannot see by reading:
+# whether the IDE distribution resolves, whether the tests run, and what ends up inside the
+# zip.
+#
+# WHY IT IS A SEPARATE WORKFLOW AND NOT A JOB IN ash-package.yml
+#
+# That workflow builds ASH's wheel and every native package downstream of it, and each of
+# those jobs starts by downloading the wheel artifact. This plugin has no such dependency: it
+# ships no ASH code and invokes whatever `ashx` (or, failing that, `ash`) is on the user's PATH, so a job here would need
+# neither the wheel nor the build job it comes from. Putting it there would also make an
+# unrelated failure in the wheel gate block the plugin's only signal.
+#
+# ash-typescript-ci.yml is the closer neighbour by shape -- an editor-adjacent package with its
+# own toolchain and its own coverage gate -- and this file follows it rather than ash-package.yml.
+#
+# WHY THERE IS NO paths FILTER
+#
+# ash-typescript-ci.yml has one and explains at length why its own is load-bearing. The same
+# reasoning points the other way here. `merge_group` accepts no paths filter, so a gate filtered
+# on pull_request and unfiltered on merge_group runs in one place and not the other. And a
+# filter would be an assertion about what cannot affect this build; the coverage gate reads
+# `git ls-files` for its census, so a file added anywhere under editors/jetbrains changes the
+# verdict, and the plugin's own settings page quotes the entry-point contract that lives
+# elsewhere in the tree.
+#
+# The cost is stated plainly: this runs on every push and every pull request, and the first
+# run on a cold cache resolves an IDE distribution of roughly a gigabyte from JetBrains' CDN.
+#
+# The push trigger carries no paths filter either. It used to, on the argument that a push run
+# is a branch signal rather than a merge gate. That stopped being true when the five jobs here
+# became required checks: a required check whose workflow a paths filter skipped never reports,
+# so its rule is never satisfied. A paths filter added back on push or pull_request fails
+# tests/unit/test_required_checks_run_on_every_push.py.
+
+# WHY THERE IS A push TRIGGER
+#
+# `workflow_dispatch` alone does not make a new workflow reachable. GitHub resolves a
+# dispatch by filename against the DEFAULT branch, so a workflow that has never run
+# is unknown to the API and `gh workflow run ash-jetbrains-ci.yml --ref
+# v4-capabilities` answers `HTTP 404: workflow not found on the default branch`. That
+# is measured, not inferred: it is what happened on this branch, while
+# ash-vscode-extension.yml -- new in the same merge -- dispatched fine because its
+# push trigger had already run it once and registered it. "**" covers v4-capabilities
+# and v4/**, which is where the e2e legs are required to run.
+on:
+  push:
+    branches:
+      - "**"
+  pull_request:
+    branches:
+      - "**"
+  merge_group:
+    types: [checks_requested]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  # One in-flight run per pull request; pushing again supersedes the previous run. github.ref
+  # is refs/pull/<n>/merge on pull_request and the per-entry gh-readonly-queue branch on
+  # merge_group, so every queue entry lands in its own group and entries never serialize
+  # behind one another. Pushes are keyed by commit, as in ash-e2e.yml: grouped by ref, two
+  # quick pushes to v4-capabilities would put both runs in one group, GitHub would cancel the
+  # older one while it was still pending, and that commit would get no headless-real verdict.
+  group: ${{ github.workflow }}-${{ github.event_name == 'push' && github.sha || github.ref }}
+  # Only pull_request runs may be cancelled. A merge_group run must finish or the queue loses
+  # its verdict.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  plugin:
+    name: "editors: jetbrains (gradle:jdk21)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+
+    # A container, for the same reason the deb and rpm jobs in ash-native-packages.yml use one, and
+    # NOT for its Gradle. The image is used for its toolset: a JDK 21, git, python3 and unzip,
+    # measured present in gradle:jdk21 (Ubuntu 26.04, Gradle 9.7.1). The build itself always
+    # goes through ./gradlew, which pins the Gradle version -- so the image's Gradle drifting
+    # cannot change what this job tests.
+    #
+    # The alternative was ubuntu-latest plus actions/setup-java. That would have introduced the
+    # first use of that action in this repository, which means a new SHA pin to look up and
+    # keep current, to obtain a JDK the container already has.
+    #
+    # Testing inside a container PUBLISHES NOTHING. It pulls a public base image, builds in it,
+    # and throws the container away.
+    #
+    # --init, so the container has a PID 1 that reaps orphans. Actions starts a job container
+    # with `tail -f /dev/null` as PID 1, and tail never calls wait. The cancel and timeout
+    # tests kill a stub shell whose `sleep` child is then reparented to PID 1; without a reaper
+    # it stays a zombie, ProcessHandle.isAlive() reports a zombie as alive, and
+    # StubProcesses.assertAllExited fails five tests on a process that is already dead.
+    # Measured by running these steps in this image the way Actions does: the zombies were
+    # all children of tail. docker-init (tini) is what --init runs, and it reaps them.
+    #
+    # Pinned by digest, like every other job image here (.github/scripts/assert-images-pinned.py
+    # enforces it). The digest is the multi-arch index gradle:jdk21 resolved to on 2026-10-09
+    # (Gradle 9.8.1, JDK 21.0.12); move both together.
+    container:
+      image: gradle:jdk21@sha256:d5c815d1281e3edc7e986ca573b1b309639747fa0d91a2199adadf327cfdf634
+      options: --init
+
+    steps:
+      # Before checkout. actions/checkout needs git in the image; gradle:jdk21 ships it, and
+      # this step states the requirement rather than relying on the image's contents staying
+      # the same. Without git, checkout silently falls back to a REST API tarball, which leaves
+      # no git metadata -- and the coverage gate's census comes from `git ls-files`, so it would
+      # fail with a message about missing source files rather than about a missing repository.
+      # `shell: bash`, because inside a `container:` Actions runs a bare `run:` with
+      # `sh -e {0}`, and gradle:jdk21's /bin/sh is dash. This one happens to work
+      # without it -- that image's dash is new enough to accept `-o pipefail`, which
+      # dash gained in 0.5.12 -- but debian:bookworm's is not, and the same three
+      # lines in the deb job (then in ash-package.yml) died on their first line with
+      # "Illegal option -o pipefail" and failed the whole job. Depending on which
+      # dash a base image happens to ship is not worth the one line it takes to
+      # remove the dependency. Measured: /bin/sh is dash in this image, bash is
+      # present at /usr/bin/bash.
+      - name: Confirm the image has git, and that this is a real clone
+        shell: bash
+        run: |
+          set -euo pipefail
+          git --version
+          python3 -V
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The build must not run as root, and the container does (gradle:jdk21 has no USER, and
+      # actions/checkout and the Docker-side plumbing expect root, so the job is not started
+      # with --user). Root ignores file permissions, so the runner tests for unreadable and
+      # undeletable reports cannot exercise what they test; they check for that and fail
+      # rather than pass vacuously. verify-in-container.sh therefore re-executes as the
+      # checkout's owner via run-unprivileged.sh, and this step makes that owner the image's
+      # unprivileged `gradle` user (uid 1000) rather than root, which is who checkout wrote
+      # the files as. Running as the owner is also what lets git read the checkout: the
+      # coverage gate shells out to `git ls-files`, and git refuses a repository owned by
+      # someone else.
+      - name: Hand the checkout to the image's unprivileged gradle user
+        shell: bash
+        run: chown -R gradle:gradle "$GITHUB_WORKSPACE"
+
+      # No `if:` anywhere in this job, and no Docker-based action in it. A Docker-based action's
+      # image is pulled in the job's PREPARE phase, BEFORE its `if:` is evaluated, so a
+      # conditional container step is an unconditional network dependency -- which has already
+      # cost this repository a CI failure that reported red having run zero tests.
+      - name: Build the plugin, run its tests, and check what it produced
+        run: bash editors/jetbrains/verify-in-container.sh
+
+      # Uploaded on failure only, and never as an input to anything. The IDE resolution and the
+      # test run are the two slow parts of a debugging cycle, and a failure here is otherwise a
+      # console tail with no report behind it.
+      - name: Upload the test and coverage reports when something failed
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: jetbrains-reports-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          path: |
+            editors/jetbrains/build/reports/
+            editors/jetbrains/build/test-results/
+          if-no-files-found: warn
+          retention-days: 7
+
+  # The Plugin Verifier's compatibility run, against the IDE releases recommended() resolves for
+  # the declared since-build with no upper bound -- including releases newer than the 2025.2
+  # build target. Folded in from the standalone workflow the Kotlin runtime was written with.
+  #
+  # WHY IT IS A GATE HERE AND NOT OPTIONAL. Two decisions in this plugin are only defensible
+  # because something tests a later platform. The open until-build lets the plugin load on IDE
+  # releases nobody has tried it on, and the SARIF and status readers use the Gson the platform
+  # bundles rather than a declared dependency, which keeps the distribution free of third-party
+  # jars but is not something the plugin SDK promises to keep shipping. If a newer IDE dropped an
+  # API or a class this plugin uses, this job reports it as a compatibility problem and fails;
+  # nothing in the build job above can, because it compiles and tests against 2025.2 only.
+  #
+  # A separate job because it downloads one full IDE per recommended release on top of the build
+  # target, and the build job's signal should not wait on that. The same container, for the same
+  # reasons the build job gives. No artifact upload and no cache: the verdict and the problem list
+  # are in the job log, and an upload would be a new publish surface for
+  # .github/scripts/assert-publish-surfaces.py to allowlist for no reader.
+  plugin-verifier:
+    name: "editors: jetbrains plugin verifier (gradle:jdk21)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    # Pinned by digest; the same image as the plugin job above.
+    container: gradle:jdk21@sha256:d5c815d1281e3edc7e986ca573b1b309639747fa0d91a2199adadf327cfdf634
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Not as root, for the reason the build job gives; run-unprivileged.sh runs Gradle as the
+      # checkout's owner, and this makes that the image's gradle user.
+      - name: Hand the checkout to the image's unprivileged gradle user
+        run: chown -R gradle:gradle "$GITHUB_WORKSPACE"
+
+      # verifyPlugin fails the task on a compatibility problem by default (failureLevel
+      # COMPATIBILITY_PROBLEMS), so the exit status is the verdict. Deprecated-API usages are
+      # reported in the log without failing, which is what DaemonCodeAnalyzer.restart() needs:
+      # see AshScanService for why the 252 floor cannot use its replacement.
+      - name: Verify the plugin against the recommended IDE releases
+        working-directory: editors/jetbrains
+        run: |
+          set -euo pipefail
+          bash ./run-unprivileged.sh ./gradlew --no-daemon --console=plain verifyPlugin
+
+  # The plugin against a REAL ashx built from this commit, and the built plugin zip installed,
+  # upgraded and uninstalled in a real IDE. Both headless. The plugin job above tests the same
+  # code against a stub CLI that replays captured output; this job is the one whose verdict
+  # moves when the CLI does.
+  #
+  # e2e-real-cli.sh builds the wheel from a `git archive` of HEAD, installs it with --no-cache
+  # into a fresh venv, shows the real-CLI suite failing with no CLI installed (it must fail, not
+  # skip), and then runs AshScanRealCliTest: every case in tests/e2e/fixtures/cases.json through
+  # the plugin's scan entry point, judged by scripts/e2e/assert_outcome.py and by what the user
+  # sees, plus the ashx -> ash fallback and a wrong-count control on real output.
+  #
+  # e2e-ide-cycle.sh installs N fresh with the IDE's own headless installer, installs N-1 (the
+  # plugin at the commit scripts/e2e/n1-ref.sh derives, with a lowered version) and replaces it
+  # with N, uninstalls, and reads what the IDE says it loaded after each step. Its header records
+  # why the upgrade is remove-then-install: the headless installer answers "already installed"
+  # to an upgrade.
+  #
+  # The same image and digest as the jobs above, with --init for the same reason. Nothing is
+  # published and nothing is uploaded: the wheel, the venv and both zips stay under RUNNER_TEMP,
+  # the N-1 zip carries a version that was never released, and the tests log every failure in
+  # full, so an upload would only be a new publish surface.
+  headless-real:
+    name: "editors: jetbrains e2e with a real ashx (gradle:jdk21)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    container:
+      image: gradle:jdk21@sha256:d5c815d1281e3edc7e986ca573b1b309639747fa0d91a2199adadf327cfdf634
+      options: --init
+    defaults:
+      run:
+        shell: bash
+    steps:
+      # Full history and every tag, because N-1 is derived from them rather than named:
+      # E2E_PREV_REF=auto below makes scripts/e2e/n1-ref.sh take the newest release tag, else
+      # the newest ancestor, that differs from HEAD and carries editors/jetbrains. Naming a
+      # development branch here would fail the fetch once that branch is merged and deleted.
+      # tests/unit/test_e2e_n1_fetch.py holds every leg to this.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      # No uv cache: the install has to be fresh, and a saved Actions cache is a publish surface
+      # (.github/scripts/assert-publish-surfaces.py) this job has no reason to open. The same
+      # pin as ash-e2e.yml.
+      - name: Install uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: false
+
+      # Both scripts re-execute as the checkout's owner, for the reason the plugin job gives, so
+      # the checkout and their work directories go to the image's gradle user first.
+      - name: Hand the checkout and the work directories to the image's unprivileged gradle user
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/jb-real-cli" "$RUNNER_TEMP/jb-ide-cycle"
+          chown -R gradle:gradle "$GITHUB_WORKSPACE" "$RUNNER_TEMP/jb-real-cli" "$RUNNER_TEMP/jb-ide-cycle"
+
+      - name: The plugin against a real ashx built from this commit
+        run: bash editors/jetbrains/e2e-real-cli.sh "$RUNNER_TEMP/jb-real-cli"
+
+      # e2e-ide-cycle.sh derives N-1 as the checkout's owner, after the chown above: the runner
+      # checks out as its host user, this container runs as root, and git refuses a repository
+      # root does not own ("detected dubious ownership"). actions/checkout's safe.directory
+      # entry is written to a temporary HOME and is gone once the checkout step ends.
+      - name: Install, upgrade and uninstall the plugin zip in a real IDE
+        env:
+          E2E_PREV_REF: auto
+        run: bash editors/jetbrains/e2e-ide-cycle.sh "$RUNNER_TEMP/jb-ide-cycle"
+
+      # A real scan through the plugin as the IDE's installer unpacked it, not the build's
+      # sandbox copy: the findings case through the fresh install the step above left, after the
+      # same task pointed at its separate N-1 install has failed on the loaded version.
+      # e2e-installed-scan.sh's header has the detail.
+      - name: Scan through the plugin as installed from its zip
+        run: bash editors/jetbrains/e2e-installed-scan.sh "$RUNNER_TEMP/jb-ide-cycle" "$RUNNER_TEMP/jb-real-cli"
+
+  # A changed snapshot needs a reason. Every file under a __snapshots__ directory in
+  # editors/jetbrains (the structural suite's text and the visual suite's PNGs) must be changed
+  # by a commit carrying a 'Snapshot-Update: <reason>' trailer, over the event's own range:
+  # base..head of the pull request or the merge-queue entry, before..after of a push. The script
+  # is the one core ASH's snapshot-trailers job runs, scoped here to this tree with
+  # --golden-root.
+  #
+  # On the runner itself, as the runner's unprivileged user: the check reads git history with
+  # the standard library and builds nothing, so there is no image to pin and no root to drop.
+  # Full history, because the range can reach back past a shallow clone.
+  snapshot-trailers:
+    name: "editors: jetbrains snapshot trailers"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      # --self-test first: a checker that has degenerated into finding nothing exits 0 and
+      # reads as a clean tree. --policy is the second lock on the update flag: the suites
+      # refuse it under CI, and this fails a workflow that passes it at all.
+      - name: Assert every editor snapshot change carries a Snapshot-Update trailer
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/check-snapshot-trailers.py --self-test
+          python3 .github/scripts/check-snapshot-trailers.py --policy
+          python3 .github/scripts/check-snapshot-trailers.py --golden-root editors/jetbrains
+
+  # The visual snapshots: a real IDE on an Xvfb display, driven by Remote-Robot, every scene
+  # compared pixel for pixel with the committed PNGs under
+  # editors/jetbrains/src/uiTest/snapshots/__snapshots__, threshold zero.
+  #
+  # The image is built here from editors/jetbrains/ui-test/Dockerfile: the same digest-pinned
+  # gradle:jdk21 as the jobs above, plus Xvfb at pinned versions from a dated Ubuntu archive
+  # snapshot. It is built, used and discarded in this job and never pushed. It is run with
+  # --init for the reason the plugin job gives, and ui-test-in-container.sh drops from root to
+  # the checkout's owner (the runner's own user here) before anything runs.
+  #
+  # `2` runs the suite twice, each from a fresh IDE configuration, and fails unless both runs
+  # rendered identical pixels, so a scene that is not deterministic fails here rather than as
+  # an intermittent red somewhere else. CI and GITHUB_ACTIONS are passed in so the update flag
+  # is refused inside the container as it is outside.
+  visual-snapshots:
+    name: "editors: jetbrains visual snapshots (IntelliJ IDEA 2025.2.5, Xvfb)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build the pinned visual-test image
+        run: docker build -t "ash-jetbrains-ui:${GITHUB_RUN_ID}" editors/jetbrains/ui-test
+
+      - name: Render every scene twice and compare it with the committed PNGs
+        run: |
+          set -euo pipefail
+          docker run --rm --init -e CI -e GITHUB_ACTIONS \
+            -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" -w "$GITHUB_WORKSPACE" \
+            "ash-jetbrains-ui:${GITHUB_RUN_ID}" \
+            bash editors/jetbrains/ui-test-in-container.sh 2
+
+      # Failure evidence only: for each scene that differs, the rendered PNG and a diff image,
+      # plus the IDE's log and the test report. A reviewer cannot see a pixel difference from
+      # the job log.
+      - name: Upload the rendered scenes and diffs when something failed
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: jetbrains-visual-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          path: |
+            editors/jetbrains/build/ui-snapshots/
+            editors/jetbrains/build/ui-logs/
+            editors/jetbrains/build/reports/tests/uiTest/
+          if-no-files-found: warn
+          retention-days: 7
+

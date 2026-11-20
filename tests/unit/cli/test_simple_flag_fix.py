@@ -18,7 +18,7 @@ def _strip_ansi(text: str) -> str:
 
 @pytest.mark.unit
 def test_simple_flag_in_help():
-    """The --simple flag must appear in `ash scan --help` output.
+    """The --simple flag must appear in `ashx scan --help` output.
 
     Issue #92/#94 reported that --simple was missing from the CLI.
     This test guards against that regression.

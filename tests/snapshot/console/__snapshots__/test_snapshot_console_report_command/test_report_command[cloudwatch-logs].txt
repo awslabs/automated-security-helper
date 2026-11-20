@@ -1,4 +1,4 @@
-$ ash report --format cloudwatch-logs --log-level ERROR
+$ ashx report --format cloudwatch-logs --log-level ERROR
 [exit 5]
 
 [stderr]

@@ -30,7 +30,13 @@ from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactLocation,
     Invocation,
+    PropertyBag,
     SarifReport,
+)
+from automated_security_helper.utils.package_identity import (
+    NpmLockIndex,
+    identity_properties,
+    install_path,
 )
 from automated_security_helper.base.uv_tool_mixin import guarded_values_read
 from automated_security_helper.utils.error_text import text_without_values
@@ -261,6 +267,112 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
             f"--config={config_file}",
             f"--module-dir={module_dir.resolve().as_posix()}",
         ]
+
+    @staticmethod
+    def _package_from_message(message: str | None) -> tuple[str | None, str | None]:
+        """Name and version from trivy's vulnerability or license message.
+
+        A vulnerability message has ``Package: <name>`` and ``Installed
+        Version: <version>`` on their own lines. A license message has
+        ``PkgName: <name>`` and no version, for example::
+
+            Artifact: scripts/e2e/inspector/package-lock.json
+            License MPL-2.0
+            PkgName: lightningcss
+             Classification: reciprocal
+
+        Reading it gives license findings a ``package_name``, so a license
+        approval can name the package it covers rather than the whole file.
+        A message with neither line (a misconfiguration or secret finding) is
+        not about a package.
+        """
+        name = version = None
+        for line in (message or "").splitlines():
+            if line.startswith("Package: "):
+                name = line[len("Package: ") :].strip() or None
+            elif line.startswith("PkgName: "):
+                name = line[len("PkgName: ") :].strip() or None
+            elif line.startswith("Installed Version: "):
+                version = line[len("Installed Version: ") :].strip() or None
+        return name, version
+
+    def _attach_package_identity(
+        self, sarif_report: SarifReport, target: Path
+    ) -> SarifReport:
+        """Give each dependency result one package copy and say which it is.
+
+        trivy groups packages by name and version before matching, so the same
+        version installed at two places in one lockfile becomes ONE result with
+        one location per copy. No suppression can then cover one copy and not
+        the other. For npm lockfiles, each location's line is the line of that
+        copy's ``packages`` key, so such a result is split into one result per
+        location, each with ``package_path``. Results whose locations do not
+        all resolve to a lockfile entry are left whole.
+        """
+        lock_index = NpmLockIndex(target)
+        for run in sarif_report.runs or []:
+            new_results = []
+            for result in run.results or []:
+                message = result.message.root.text if result.message else None
+                name, version = self._package_from_message(message)
+                if name is None:
+                    new_results.append(result)
+                    continue
+
+                resolved = []
+                for location in result.locations or []:
+                    physical = location.physicalLocation
+                    root = physical.root if physical else None
+                    uri = (
+                        root.artifactLocation.uri
+                        if root and root.artifactLocation
+                        else None
+                    )
+                    line = root.region.startLine if root and root.region else None
+                    # Relativized the same way as grype's, so package_path is
+                    # POSIX and scan-root-relative whatever form trivy used.
+                    lock_rel = lock_index.relative(uri) if uri else None
+                    entry = (
+                        lock_index.by_line(lock_rel, line)
+                        if lock_rel and line
+                        else None
+                    )
+                    # The line is trivy's, and the lockfile may have moved since
+                    # the scan: the entry there counts only when it is the
+                    # package the message names. A license message states no
+                    # version, so it is held to the name alone.
+                    if entry is not None and (
+                        entry.name != name
+                        or (version is not None and entry.version != version)
+                    ):
+                        entry = None
+                    resolved.append(
+                        install_path(lock_rel, entry.key)
+                        if lock_rel and entry is not None
+                        else None
+                    )
+
+                if resolved and all(resolved):
+                    for location, path in zip(result.locations or [], resolved):
+                        copy = result.model_copy(deep=True)
+                        copy.locations = [location.model_copy(deep=True)]
+                        self._set_identity(copy, name, version, path)
+                        new_results.append(copy)
+                else:
+                    path = resolved[0] if len(resolved) == 1 else None
+                    self._set_identity(result, name, version, path)
+                    new_results.append(result)
+            run.results = new_results
+        return sarif_report
+
+    @staticmethod
+    def _set_identity(result, name, version, path) -> None:
+        identity = identity_properties(name, version, path)
+        if result.properties is None:
+            result.properties = PropertyBag.model_validate(identity)
+        else:
+            for key, value in identity.items():
+                setattr(result.properties, key, value)
 
     def content_databases_in_use(self) -> list:
         """trivy-db, unless the scan's effective scanners leave out ``vuln``.

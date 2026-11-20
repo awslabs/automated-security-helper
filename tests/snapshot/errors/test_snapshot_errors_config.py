@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""What the ``ash config`` subcommands print, and exit with, for a bad config file.
+"""What the ``ashx config`` subcommands print, and exit with, for a bad config file.
 
 Three kinds of bad file, each given to every subcommand that reads one: a path that
 does not exist, a file that is not YAML, and YAML that does not satisfy the schema.

@@ -1,0 +1,96 @@
+<!--
+  Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+  SPDX-License-Identifier: Apache-2.0
+
+  The plugin descriptor.
+
+  A note on punctuation before anything else, because this file has already broken the build
+  once for it: XML forbids a double hyphen inside a comment, and the IntelliJ Platform Gradle
+  plugin's patchPluginXml task fails the whole build with
+  "org.jdom2.input.JDOMParseException: Error on line 12: The string is not permitted within
+  comments" rather than skipping the comment. The rest of this directory uses a double hyphen
+  the way prose uses a dash. Do not carry that habit into this file.
+  packaging/chocolatey/ash.nuspec carries the same warning for the same reason.
+
+  NO version AND NO idea-version ELEMENT HERE, ON PURPOSE
+
+  Both are written into this file by patchPluginXml, from `version` and
+  `pluginConfiguration.ideaVersion` in build.gradle.kts. Declaring them here as well would
+  mean two sources of truth for a number, and the one in this file would be the stale one,
+  because patchPluginXml replaces what it finds.
+
+  That also keeps this file out of pyproject.toml's [tool.commitizen] version_files, and
+  build.gradle.kts explains at length why the plugin version does not track ASH's at all.
+
+  WHY THERE IS NO depends ON A LANGUAGE PLUGIN
+
+  The inspection is registered without a language attribute, so it runs for every file type.
+  ASH scans a repository and reports findings in whatever it finds: Python, TypeScript,
+  Terraform, CloudFormation YAML, Dockerfiles, Ruby. Restricting the registration to one
+  language would silently drop findings in every other file type. com.intellij.modules.platform
+  is the only dependency, which is what makes this plugin installable in every JetBrains IDE
+  rather than only in IDEA.
+-->
+<idea-plugin>
+    <id>io.github.awslabs.ash</id>
+    <name>ASH - Automated Security Helper</name>
+    <vendor url="https://github.com/awslabs/automated-security-helper">Amazon Web Services</vendor>
+
+    <description><![CDATA[
+    Runs the <a href="https://github.com/awslabs/automated-security-helper">Automated
+    Security Helper</a> (ASH) command line tool over the open project and shows the findings
+    inline, at the file and line the scanner reported.
+    <br/><br/>
+    This plugin contains no scanners and no copy of ASH. It invokes the <code>ashx</code>
+    command on your PATH, falls back to <code>ash</code> when <code>ashx</code> is not
+    installed, or runs the executable set in <b>Settings | Tools | ASH</b>, and reads the
+    SARIF report ASH writes.
+    <br/><br/>
+    <b>Usage:</b> <i>Tools | Run ASH Security Scan</i>. Findings appear as editor errors and
+    warnings, with severity taken from the SARIF report. A scan ASH reports as incomplete
+    still shows the findings it produced, and says which scanners did not run.
+    ]]></description>
+
+    <depends>com.intellij.modules.platform</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <!-- Application level, because the path to a binary is a property of the machine. -->
+        <applicationService serviceImplementation="io.github.awslabs.ash.jetbrains.AshSettings"/>
+
+        <applicationConfigurable
+                parentId="tools"
+                instance="io.github.awslabs.ash.jetbrains.AshSettingsConfigurable"
+                id="io.github.awslabs.ash.settings"
+                displayName="ASH"/>
+
+        <!-- No `language` attribute: the inspection then runs for every file type, which
+             is what ASH scanning a whole repository requires. Naming a language here
+             would silently skip everything not named. -->
+        <localInspection
+                implementationClass="io.github.awslabs.ash.jetbrains.AshFindingInspection"
+                shortName="AshFinding"
+                displayName="ASH security finding"
+                groupName="Security"
+                enabledByDefault="true"
+                level="WARNING"/>
+
+        <notificationGroup
+                id="ASH"
+                displayType="BALLOON"/>
+    </extensions>
+
+    <actions>
+        <action
+                id="io.github.awslabs.ash.jetbrains.AshScanAction"
+                class="io.github.awslabs.ash.jetbrains.AshScanAction"
+                text="Run ASH Security Scan"
+                description="Run the installed ASH CLI over this project and show findings inline">
+            <!-- ToolsMenu only. An AnalyzeMenu entry was tried and removed: that group
+                 is not registered in IntelliJ IDEA Community, and the platform logs
+                 "group with id AnalyzeMenu isn't registered so the action won't be added
+                 to it" at error level on every startup. The action stays reachable from
+                 Tools and from Find Action. -->
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+        </action>
+    </actions>
+</idea-plugin>

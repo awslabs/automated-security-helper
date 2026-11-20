@@ -44,6 +44,7 @@ from tests.utils.trivy_fixture import PINNED_TRIVY, materialize, version_of
 import yaml
 
 from automated_security_helper.base.plugin_context import PluginContext
+from automated_security_helper.cli.deprecations import CANONICAL_CLI_NAME
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.plugin_modules.ash_builtin.scanners.trivy_scanner import (
     TrivyScanner,
@@ -434,8 +435,8 @@ def test_an_operators_opt_out_of_the_database_update_is_honored(
 
 
 def _ash() -> str:
-    ash = shutil.which("ash", path=str(Path(sys.executable).parent))
-    assert ash, f"no ash entry point beside {sys.executable}"
+    ash = shutil.which(CANONICAL_CLI_NAME, path=str(Path(sys.executable).parent))
+    assert ash, f"no {CANONICAL_CLI_NAME} entry point beside {sys.executable}"
     return ash
 
 

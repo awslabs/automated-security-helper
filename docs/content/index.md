@@ -2,7 +2,7 @@
 template: home.html
 title: Overview
 description: "Automated Security Helper, the agentic security harness: security scanning for code, infrastructure, secrets, and dependencies."
-ash_version: "3.8.0"
+ash_version: "4.0.0"
 hide:
   - navigation
   - toc
@@ -25,7 +25,7 @@ Install ASH with Python 3.10+ and pipx:
 
 <!-- doctest: illustrative reason="installs ASH from GitHub over the network" -->
 ```bash
-pipx install git+https://github.com/awslabs/automated-security-helper.git@v3.8.0
+pipx install git+https://github.com/awslabs/automated-security-helper.git@v4.0.0
 ```
 
 From your project directory, choose an execution mode:
@@ -34,41 +34,41 @@ From your project directory, choose an execution mode:
 ```bash
 # Linux/macOS
 curl -LsSf https://astral.sh/uv/install.sh | sh
-alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.8.0"
+alias ashx="uvx git+https://github.com/awslabs/automated-security-helper.git@v4.0.0"
 
 # Windows PowerShell
 irm https://astral.sh/uv/install.ps1 | iex
-function ash { uvx git+https://github.com/awslabs/automated-security-helper.git@v3.8.0 $args }
+function ashx { uvx git+https://github.com/awslabs/automated-security-helper.git@v4.0.0 $args }
 ```
 
 #### Using `pip`
 
 <!-- doctest: illustrative reason="installs ASH from GitHub over the network" -->
 ```bash
-pip install git+https://github.com/awslabs/automated-security-helper.git@v3.8.0
+pip install git+https://github.com/awslabs/automated-security-helper.git@v4.0.0
 ```
 
 #### Clone the Repository
 
 <!-- doctest: illustrative reason="clones the ASH repository and installs it over the network" -->
 ```bash
-git clone https://github.com/awslabs/automated-security-helper.git --branch v3.8.0
+git clone https://github.com/awslabs/automated-security-helper.git --branch v4.0.0
 cd automated-security-helper
 pip install .
 ```
-</details>
 
 ## Basic Usage
 
 <!-- doctest: illustrative reason="container mode needs a container runtime, and every mode runs a scan with all scanner tools" -->
 ```bash
 # Run a scan in local mode (the scanner tools installed on this machine)
-ash --mode local
+ashx --mode local
 
 # Run a scan in container mode (all tools)
-ash --mode container
-ash --mode local
-ash --mode precommit
+ashx --mode container
+
+# Run a scan in precommit mode (fast subset of tools)
+ashx --mode precommit
 ```
 
 | Mode | Requirements |
@@ -81,7 +81,7 @@ ash --mode precommit
 
 ## Scanners
 
-- Code: Bandit, Semgrep, Opengrep
+- Code: Bandit, Opengrep
 - Infrastructure: Checkov, CDK-Nag, CFN-Nag
 - Secrets: detect-secrets
 - Dependencies and software inventory: Grype, npm audit, Syft
@@ -117,7 +117,7 @@ Run [locally](getting-started/local.md), integrate with [CI/CD](getting-started/
 ```yaml
 repos:
   - repo: https://github.com/awslabs/automated-security-helper
-    rev: v3.8.0
+    rev: v4.0.0
     hooks:
       - id: ash
 ```
@@ -170,7 +170,7 @@ ASH leaves its own output out of the scan, whether or not `.gitignore` lists it:
 <details>
 <summary>How do I run ASH in an offline/air-gapped environment?</summary>
 
-Build an offline image with `ash --mode container --offline --offline-semgrep-rulesets p/ci --no-run`, push to your private registry, then use `ash --mode container --offline --no-build` in your air-gapped environment.
+Build an offline image with `ashx --mode container --offline --offline-semgrep-rulesets p/ci --no-run`, push to your private registry, then use `ashx --mode container --offline --no-build` in your air-gapped environment. The `--offline-semgrep-rulesets` flag keeps its historical name but now feeds the opengrep rules cache.
 </details>
 
 <details>

@@ -789,7 +789,7 @@ def test_plugin_list_shows_a_plugins_config_and_error_as_text(in_tmp, monkeypatc
                 "enabled": True,
                 "options": {"additional_formats": [text]},
             }
-        if plugin_name == "semgrep":
+        if plugin_name == "opengrep":
             raise ValueError(f"cannot build: {text}")
         return real(self, plugin_type=plugin_type, plugin_name=plugin_name)
 
@@ -801,7 +801,7 @@ def test_plugin_list_shows_a_plugins_config_and_error_as_text(in_tmp, monkeypatc
 
     assert result.exit_code == 0, result.output
     # Each place the text is shown holds it whole: bandit's config column (the
-    # JSON-quoted value), semgrep's error column, and the warning bandit's config
+    # JSON-quoted value), opengrep's error column, and the warning bandit's config
     # validation logs about the additional_formats value. A count would move with
     # every new line that shows the value.
     assert f'"{text}"' in result.output, result.output

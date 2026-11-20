@@ -203,7 +203,7 @@
     'exit_code': 1,
     'stderr': '',
     'stdout': '''
-      Config file not found. Use 'ash config init' to create one.
+      Config file not found. Use 'ashx config init' to create one.
   
     ''',
   })

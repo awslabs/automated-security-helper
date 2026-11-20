@@ -1945,7 +1945,7 @@ def test_the_scanner_lists_reach_the_scan(pwsh, recording_docker, tmp_path):
 
     assert result.returncode == 0, result.stdout + result.stderr
     args = _recorded(tmp_path)
-    inner = args[args.index("ash") + 1 :]
+    inner = args[args.index("ashx") + 1 :]
     pairs = [
         (inner[i], inner[i + 1])
         for i in range(len(inner) - 1)

@@ -263,55 +263,6 @@ class TestGrypeExecutionSuccessful:
 
 
 # ---------------------------------------------------------------------------
-# Semgrep
-# ---------------------------------------------------------------------------
-
-
-class TestSemgrepExecutionSuccessful:
-    """Semgrep: exit 0/1 = success, exit >=2 = failure."""
-
-    @pytest.mark.parametrize("exit_code,expected", [(0, True), (1, True), (2, False)])
-    def test_execution_successful_reflects_exit_code(
-        self, test_plugin_context, exit_code, expected, tmp_path
-    ):
-        from automated_security_helper.schemas.sarif_schema_model import (
-            ArtifactLocation,
-            Invocation,
-            SarifReport,
-        )
-        from automated_security_helper.utils.get_shortest_name import get_shortest_name
-
-        minimal_sarif = {
-            "version": "2.1.0",
-            "runs": [
-                {
-                    "tool": {"driver": {"name": "Semgrep", "version": "1.0.0"}},
-                    "results": [],
-                }
-            ],
-        }
-        sarif_report = SarifReport.model_validate(minimal_sarif)
-        final_args = ["semgrep", "--config", "auto"]
-        exit_code_val = exit_code
-
-        sarif_report.runs[0].invocations = [
-            Invocation(
-                commandLine=" ".join(final_args),
-                arguments=final_args[1:],
-                startTimeUtc="2024-01-01T00:00:00Z",
-                endTimeUtc="2024-01-01T00:01:00Z",
-                executionSuccessful=(exit_code_val == 0 or exit_code_val == 1),
-                exitCode=exit_code_val,
-                exitCodeDescription="",
-                workingDirectory=ArtifactLocation(
-                    uri=get_shortest_name(input=tmp_path)
-                ),
-            )
-        ]
-        assert _extract_execution_successful(sarif_report) is expected
-
-
-# ---------------------------------------------------------------------------
 # Opengrep
 # ---------------------------------------------------------------------------
 
@@ -524,7 +475,6 @@ class TestSourceCodeUsesCorrectExpression:
         "bandit": "automated_security_helper/plugin_modules/ash_builtin/scanners/bandit_scanner.py",
         "checkov": "automated_security_helper/plugin_modules/ash_builtin/scanners/checkov_scanner.py",
         "grype": "automated_security_helper/plugin_modules/ash_builtin/scanners/grype_scanner.py",
-        "semgrep": "automated_security_helper/plugin_modules/ash_builtin/scanners/semgrep_scanner.py",
         "opengrep": "automated_security_helper/plugin_modules/ash_builtin/scanners/opengrep_scanner.py",
         "cfn_nag": "automated_security_helper/plugin_modules/ash_builtin/scanners/cfn_nag_scanner.py",
         "trivy": "automated_security_helper/plugin_modules/ash_trivy_plugins/trivy_repo_scanner.py",
@@ -535,7 +485,6 @@ class TestSourceCodeUsesCorrectExpression:
         [
             "bandit",
             "checkov",
-            "semgrep",
             "opengrep",
             "cfn_nag",
             "trivy",

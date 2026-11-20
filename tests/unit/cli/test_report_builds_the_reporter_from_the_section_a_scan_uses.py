@@ -83,7 +83,7 @@ REPOSITORY_CONFIG_PATH = ".ash/.ash.yaml"
 REFUSAL_START = "reporter 's3' sends findings off the host and is not enabled"
 #: The refusal as the CLI reference describes the command.
 REFUSAL = (
-    f"{REFUSAL_START}. ash report takes whether it runs, and where it sends, "
+    f"{REFUSAL_START}. ashx report takes whether it runs, and where it sends, "
     "from --config-overrides"
 )
 #: Advice an older wording gave, which `ash report` does not honor: it ignores a

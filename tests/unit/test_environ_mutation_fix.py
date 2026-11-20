@@ -62,32 +62,7 @@ def _find_environ_assignments(source_path: Path) -> list[ast.Assign]:
 
 
 # ---------------------------------------------------------------------------
-# Site 1: semgrep_scanner.py — scan() must not mutate os.environ
-# ---------------------------------------------------------------------------
-@pytest.mark.unit
-def test_semgrep_scanner_source_has_no_os_environ_mutation():
-    """The semgrep scanner module must not contain ``os.environ[k] = v``.
-
-    Any such write leaks into the parent process and races with other
-    scanners running in parallel threads.
-    """
-    path = (
-        _REPO_ROOT
-        / "automated_security_helper"
-        / "plugin_modules"
-        / "ash_builtin"
-        / "scanners"
-        / "semgrep_scanner.py"
-    )
-    mutations = _find_environ_assignments(path)
-    assert mutations == [], (
-        f"semgrep_scanner.py still mutates os.environ at lines: "
-        f"{[m.lineno for m in mutations]}"
-    )
-
-
-# ---------------------------------------------------------------------------
-# Site 2: opengrep_scanner.py — scan() must not mutate os.environ
+# Site: opengrep_scanner.py — scan() must not mutate os.environ
 # ---------------------------------------------------------------------------
 @pytest.mark.unit
 def test_opengrep_scanner_source_has_no_os_environ_mutation():

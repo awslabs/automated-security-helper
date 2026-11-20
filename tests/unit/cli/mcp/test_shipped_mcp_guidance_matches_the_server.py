@@ -362,7 +362,7 @@ ENDINGS: Dict[str, Dict[str, Any]] = {
 }
 
 #: Findings in the results file: two actionable, one suppressed, and one HIGH
-#: finding below its scanner's own threshold (SEMGREP_THRESHOLD), which the
+#: finding below its scanner's own threshold (OPENGREP_THRESHOLD), which the
 #: guide's critical/high examples select by severity and must not list.
 FINDINGS = [
     ("bandit", "B602", "error", "HIGH", "src/app.py", 12, False),
@@ -376,10 +376,10 @@ FINDINGS = [
         False,
     ),
     ("bandit", "B101", "note", "LOW", "tests/test_app.py", 4, True),
-    ("semgrep", "SEMGREP-HIGH", "error", "HIGH", "src/web.py", 9, False),
+    ("opengrep", "OPENGREP-HIGH", "error", "HIGH", "src/web.py", 9, False),
 ]
-#: semgrep's own threshold in the scan's config. The global one is the default.
-SEMGREP_THRESHOLD = "CRITICAL"
+#: opengrep's own threshold in the scan's config. The global one is the default.
+OPENGREP_THRESHOLD = "CRITICAL"
 
 
 @pytest.fixture
@@ -397,9 +397,9 @@ def project(tmp_path, monkeypatch) -> Path:
         {
             "project_name": "project",
             "scanners": {
-                "semgrep": {
+                "opengrep": {
                     "enabled": True,
-                    "options": {"severity_threshold": SEMGREP_THRESHOLD},
+                    "options": {"severity_threshold": OPENGREP_THRESHOLD},
                 }
             },
         }
@@ -433,7 +433,7 @@ def project(tmp_path, monkeypatch) -> Path:
     document["scanner_results"] = {
         "bandit": {"status": "FAILED", "finding_count": 2},
         "detect-secrets": {"status": "FAILED", "finding_count": 1},
-        "semgrep": {"status": "PASSED", "finding_count": 1},
+        "opengrep": {"status": "PASSED", "finding_count": 1},
     }
     (output / "ash_aggregated_results.json").write_text(
         json.dumps(document), encoding="utf-8"
@@ -551,7 +551,7 @@ def test_a_results_example_runs_against_the_real_tool(example, project, capsys):
 
     Pattern 1 gates on actionable critical and high findings, of which the
     results file has two, so it exits 1. Pattern 2 lists them, and neither the
-    suppressed one nor the HIGH one below semgrep's own CRITICAL threshold.
+    suppressed one nor the HIGH one below opengrep's own CRITICAL threshold.
     """
     server = _Server(project)
     exit_code = None
@@ -567,4 +567,4 @@ def test_a_results_example_runs_against_the_real_tool(example, project, capsys):
     if example.heading.startswith("Pattern 2"):
         assert "B602" in output and "SECRET-AWS-ACCESS-KEY" in output, output
         assert "B101" not in output, output
-        assert "SEMGREP-HIGH" not in output, output
+        assert "OPENGREP-HIGH" not in output, output

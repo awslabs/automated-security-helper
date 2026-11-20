@@ -1,4 +1,4 @@
-$ ash report --format flat-json --log-level ERROR
+$ ashx report --format flat-json --log-level ERROR
 [exit 0]
 {
   "metadata": {

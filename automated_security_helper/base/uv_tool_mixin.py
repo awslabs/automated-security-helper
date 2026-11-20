@@ -1786,7 +1786,7 @@ class UVToolMixin:
                 remedy = (
                     "uv cannot fetch what is missing while offline. Install it "
                     f"before going offline, e.g. `uv tool install '{requirement}'`, "
-                    "or rebuild the image with `ash build-image --offline`."
+                    "or rebuild the image with `ashx build-image --offline`."
                 )
             cannot = (
                 "cannot be used"

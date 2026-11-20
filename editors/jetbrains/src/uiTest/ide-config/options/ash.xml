@@ -1,0 +1,5 @@
+<application>
+  <component name="AshSettings">
+    <option name="executablePath" value="/tmp/ash-ui/bin/ashx" />
+  </component>
+</application>

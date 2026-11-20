@@ -12,7 +12,7 @@ scanner took the not-selected path, and the run recorded ten SKIPPED entries.
 
 Measured on this tree before the fix, against a one-file fixture::
 
-    ash scan --scanners detect_secrets      # underscore; the name is detect-secrets
+    ashx scan --scanners detect_secrets      # underscore; the name is detect-secrets
     -> scanner_results: Counter({'SKIPPED': 10})
     -> summary_stats:   passed=0 failed=0 missing=0 skipped=10 error=0
     -> exit code:       0

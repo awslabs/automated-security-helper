@@ -14,6 +14,7 @@ from typer.core import TyperGroup
 from typer._click.exceptions import UsageError
 
 from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
+from automated_security_helper.cli.deprecations import warn_deprecated_command_alias
 from automated_security_helper.cli.json_input import (
     CliJsonInputCommand,
     usage_error_text,
@@ -543,8 +544,8 @@ class AshTyperGroup(TyperGroup):
                 )
                 them = "it" if len(not_taken) == 1 else "them"
                 clauses.append(
-                    f"'ash {name}' does not take {spellings}, given before it (see "
-                    f"'ash {name} --help'). Options given before a subcommand are "
+                    f"'ashx {name}' does not take {spellings}, given before it (see "
+                    f"'ashx {name} --help'). Options given before a subcommand are "
                     f"passed to it only when it takes them: drop {them}, give {them} "
                     f"after a subcommand that takes {them}, or leave out '{name}' to "
                     f"scan with {them}."
@@ -555,9 +556,9 @@ class AshTyperGroup(TyperGroup):
                     (opt for opt in target.opts if opt.startswith("--")), target.opts[0]
                 )
                 clauses.append(
-                    f"'ash {name}' takes {typed} as {own}, which means something "
+                    f"'ashx {name}' takes {typed} as {own}, which means something "
                     f"else than it does before the subcommand: give it after "
-                    f"'{name}', as 'ash {name} {own} ...'."
+                    f"'{name}', as 'ashx {name} {own} ...'."
                 )
             ctx.fail(" ".join(clauses))
         return tokens
@@ -587,13 +588,18 @@ class AshRootTyperGroup(AshTyperGroup):
 
 
 app = typer.Typer(
-    name="ash",
+    name="ashx",
     cls=AshRootTyperGroup,
     help="Automated Security Helper, the agentic security harness · one workflow for your scanners.",
     pretty_exceptions_enable=True,
     pretty_exceptions_short=True,
     # Not on a CI runner: locals can hold secrets (utils/log.py).
     pretty_exceptions_show_locals=show_debug_locals(),
+    # click injects --help and nothing else, so -h has to be asked for. Set on
+    # the app rather than per command: click's Context inherits
+    # help_option_names from its parent, so every subcommand picks it up from
+    # the root group. -h came from the deleted root bash script.
+    context_settings={"help_option_names": ["-h", "--help"]},
 )
 
 # Neither `scan` nor `build-image` sets click's ignore_unknown_options or
@@ -602,6 +608,12 @@ app = typer.Typer(
 # misspelled option or a stray argument would be collected into ctx.args and
 # dropped, and the command would run as though it had not been given.
 app.callback(invoke_without_command=True)(run_ash_scan_cli_command)
+# No allow_extra_args/ignore_unknown_options here. `scan` used to swallow any
+# unrecognized flag and run a full scan regardless, so a typo in CI scanned the
+# wrong thing and exited 0. Nothing read ctx.args on this path, so the swallowed
+# arguments were discarded rather than forwarded -- dropping the pass-through
+# removes a silent failure without removing a feature. `build-image` below is
+# the deliberate exception.
 app.command(
     name="scan",
     cls=CliJsonInputCommand,
@@ -630,7 +642,14 @@ def _mcp_wrapper(
     debug: bool = typer.Option(
         False, "--debug/--no-debug", "-d", help="Enable debug logging"
     ),
-    color: bool = typer.Option(True, help="Enable/disable colorized output"),
+    # "  /-C" with its leading whitespace, matching the other commands: that is
+    # how click attaches a short form to the OFF side of a boolean flag. Written
+    # out here rather than inherited, because this wrapper declares its own
+    # params and delegates to mcp_command by keyword. Flags, default and help
+    # match mcp_command's declaration, which the parity test compares.
+    color: bool = typer.Option(
+        True, "--color/--no-color", "  /-C", help="Enable/disable colorized output"
+    ),
     quiet: bool = typer.Option(False, help="Hide all log output"),
     transport: str = typer.Option(
         "stdio",
@@ -965,6 +984,44 @@ def run_app():
 
     # Run the application
     app()
+
+
+def _run_deprecated_alias(alias):
+    """Announce that ``alias`` is deprecated, then run the app unchanged.
+
+    The notice is one stderr line and nothing else changes: the arguments, the
+    output and the exit code are exactly what ``ashx`` would produce, because
+    ``app()`` raises its ``SystemExit`` straight through this function.
+
+    The warning lives here, in a dedicated entry point per alias, rather than in a
+    Typer callback. A callback would fire for the ``ashx`` name too, and group
+    callbacks can run more than once for a single command line.
+    """
+    reset_logging_config()
+    warn_deprecated_command_alias(alias)
+    app()
+
+
+def run_ash_alias():
+    """Entry point for the deprecated ``ash`` console script.
+
+    ``ash`` was the v3 command. v4 renamed it to ``ashx`` because ``ash`` is also
+    the Almquist shell's name on Alpine, BusyBox and MSYS2, so a bare ``ash`` on
+    PATH often is not ASH. The alias keeps v3 scripts working through v4.
+    """
+    _run_deprecated_alias("ash")
+
+
+def run_ashv3():
+    """Entry point for the deprecated ``ashv3`` console script.
+
+    ``ashv3`` names a version, so it ages badly now that v4 exists -- that is
+    the reason it is deprecated rather than any problem with the alias itself.
+    ``automated-security-helper`` is deliberately NOT deprecated alongside it: it
+    is the escape hatch for environments where a short name resolves to
+    something else.
+    """
+    _run_deprecated_alias("ashv3")
 
 
 def _run_as_main(module: Any) -> None:

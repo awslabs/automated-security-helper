@@ -1,0 +1,8 @@
+
+ Usage: ashx express stop [OPTIONS]
+
+ Stop the express daemon. A scan it is running is sent SIGTERM.
+
+┌─ Options ───────────────────────────────────────────────────────────────────────────────────────┐
+│ --help  -h        Show this message and exit.                                                   │
+└─────────────────────────────────────────────────────────────────────────────────────────────────┘

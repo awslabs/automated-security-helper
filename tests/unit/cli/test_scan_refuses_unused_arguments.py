@@ -325,7 +325,7 @@ class TestOptionsBeforeASubcommand:
         result = _invoke(args)
 
         assert result.exit_code == USAGE_ERROR_EXIT, result.output
-        assert f"'ash report' does not take {typed}," in _plain(result.output)
+        assert f"'ashx report' does not take {typed}," in _plain(result.output)
 
     @pytest.mark.parametrize(
         "args",
@@ -354,7 +354,7 @@ class TestOptionsBeforeASubcommand:
         result = _invoke(["--source-dir", "src", "report", "--help"])
 
         assert result.exit_code == 0, result.output
-        assert "Usage: ash report" in _plain(result.output)
+        assert "Usage: ashx report" in _plain(result.output)
 
     def test_names_every_option_the_subcommand_does_not_take(self, in_tmp):
         result = _invoke(["--offline", "--scanners", "bandit", "report"])

@@ -3,7 +3,7 @@
 
 """The results files every other output is derived from, and the workspace manifest.
 
-``ash_aggregated_results.json`` is what ``ash report``, ``ash merge``, the MCP server
+``ash_aggregated_results.json`` is what ``ashx report``, ``ashx merge``, the MCP server
 and every downstream consumer read back, so its shape is a contract in its own right
 and not only an input to the reporters.
 """

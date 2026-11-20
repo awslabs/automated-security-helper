@@ -1631,7 +1631,7 @@
             }
           ],
           "default": "fail",
-          "description": "What a scan does when a scanner's content database (grype's or trivy's vulnerability database, the offline semgrep/opengrep rulesets) was built longer ago than the bound declared for it in automated_security_helper/utils/content_databases.py. 'fail' (the default) keeps the scanner's findings and exits 1, naming the database, its build time, its age and the bound. 'warn' lets the scan pass and records the same warning in the log and in the reports (summary, SARIF invocation notifications, flat JSON). The CLI flag --allow-stale-content-db sets 'warn' for one scan and takes precedence over this value; --no-allow-stale-content-db sets 'fail'.",
+          "description": "What a scan does when a scanner's content database (grype's or trivy's vulnerability database, the offline opengrep rulesets) was built longer ago than the bound declared for it in automated_security_helper/utils/content_databases.py. 'fail' (the default) keeps the scanner's findings and exits 1, naming the database, its build time, its age and the bound. 'warn' lets the scan pass and records the same warning in the log and in the reports (summary, SARIF invocation notifications, flat JSON). The CLI flag --allow-stale-content-db sets 'warn' for one scan and takes precedence over this value; --no-allow-stale-content-db sets 'fail'.",
           "title": "Content Db Staleness"
         },
         "content_db_staleness_offline_image_default": {
@@ -2274,25 +2274,6 @@
                 "severity_threshold": null,
                 "sha256": {},
                 "version": "v1.33.1"
-              }
-            },
-            "semgrep": {
-              "enabled": true,
-              "name": "semgrep",
-              "options": {
-                "config": "p/ci",
-                "exclude": [
-                  "*-converted.py",
-                  "*_report_result.txt"
-                ],
-                "exclude_rule": [],
-                "install_timeout": 300,
-                "metrics": "auto",
-                "offline": false,
-                "scan_timeout": 1800,
-                "severity": [],
-                "severity_threshold": null,
-                "tool_version": null
               }
             },
             "syft": {
@@ -5943,7 +5924,7 @@
       "description": "One content database held to a different staleness policy, until a fixed date.\n\n``content_db_staleness`` decides for every database at once. This narrows a\nrelaxation to the one database that needs it -- typically one whose upstream\npublisher has stopped publishing for a while -- so every other database is still\nheld to the scan-wide policy. ``expiration`` and ``reason`` are required, the\nsame two fields a time-boxed suppression carries: an exception to a freshness\ngate that has no end date is a permanent one. On and after ``expiration``\n(00:00 UTC) the entry is ignored, with a warning in the log, and the database\nis held to the policy it has without the entry: ``content_db_staleness``, or,\nfor trivy-db in an image built with ``OFFLINE=YES``, that image's ``warn``\ndefault unless ``content_db_staleness_offline_image_default`` is false.",
       "properties": {
         "database": {
-          "description": "The content database's registry name, as listed in automated_security_helper/utils/content_databases.py: grype-db, trivy-db, semgrep-offline-rules or opengrep-offline-rules.",
+          "description": "The content database's registry name, as listed in automated_security_helper/utils/content_databases.py: grype-db, trivy-db or opengrep-offline-rules.",
           "title": "Database",
           "type": "string"
         },
@@ -10438,7 +10419,7 @@
           "type": "integer"
         },
         "honored": {
-          "description": "Whether the scanned repository's .gitignore and .ignore files decided which files were scanned. False when the operator set honor_ignore_files: false or passed --no-honor-ignore-files. In merged results (a workspace scan's, or ash merge's), True only when every merged scan honored them; see honored_scan_count.",
+          "description": "Whether the scanned repository's .gitignore and .ignore files decided which files were scanned. False when the operator set honor_ignore_files: false or passed --no-honor-ignore-files. In merged results (a workspace scan's, or ashx merge's), True only when every merged scan honored them; see honored_scan_count.",
           "title": "Honored",
           "type": "boolean"
         },
@@ -10453,7 +10434,7 @@
             }
           ],
           "default": null,
-          "description": "In merged results (a workspace scan's, or ash merge's) whose scans did not agree, how many of the scan_count merged scans honored the ignore files; honored is then False. Absent for a single scan, and when every merged scan agreed.",
+          "description": "In merged results (a workspace scan's, or ashx merge's) whose scans did not agree, how many of the scan_count merged scans honored the ignore files; honored is then False. Absent for a single scan, and when every merged scan agreed.",
           "title": "Honored Scan Count"
         },
         "output_dir_file_count": {
@@ -19822,7 +19803,7 @@
             }
           ],
           "default": null,
-          "description": "Scanners allowed a network when the scan is online. Null (the default) uses each scanner's declared need: semgrep, opengrep, grype, trivy, npm-audit and snyk-code fetch rules, databases or audit data. A list replaces those defaults. Under --offline no scanner gets a network. Honored only from --config-overrides or a config file outside every git checkout and the scanned directory; set by any other config file, a list can only remove network.",
+          "description": "Scanners allowed a network when the scan is online. Null (the default) uses each scanner's declared need: opengrep, grype, trivy, npm-audit and snyk-code fetch rules, databases or audit data. A list replaces those defaults. Under --offline no scanner gets a network. Honored only from --config-overrides or a config file outside every git checkout and the scanned directory; set by any other config file, a list can only remove network.",
           "title": "Network Scanners"
         },
         "read_path_scanners": {
@@ -20127,29 +20108,6 @@
           },
           "description": "Configure the options for Opengrep"
         },
-        "semgrep": {
-          "$ref": "#/$defs/SemgrepScannerConfig",
-          "default": {
-            "enabled": true,
-            "name": "semgrep",
-            "options": {
-              "config": "p/ci",
-              "exclude": [
-                "*-converted.py",
-                "*_report_result.txt"
-              ],
-              "exclude_rule": [],
-              "install_timeout": 300,
-              "metrics": "auto",
-              "offline": false,
-              "scan_timeout": 1800,
-              "severity": [],
-              "severity_threshold": null,
-              "tool_version": null
-            }
-          },
-          "description": "Configure the options for Semgrep"
-        },
         "syft": {
           "$ref": "#/$defs/SyftScannerConfig",
           "default": {
@@ -20453,7 +20411,7 @@
         },
         "subcommands": {
           "default": [],
-          "description": "Subcommands to include when invoking the scanner, e.g. ['scan'] is needed as the subcommand for 'semgrep' as Semgrep supports multiple subcommands, but we are specifically interested in running a scan.",
+          "description": "Subcommands to include when invoking the scanner, e.g. ['scan'] is needed as the subcommand for 'opengrep' as Opengrep supports multiple subcommands, but we are specifically interested in running a scan.",
           "items": {
             "type": "string"
           },
@@ -21563,207 +21521,6 @@
       "title": "SecuredBy",
       "type": "object"
     },
-    "SemgrepScannerConfig": {
-      "additionalProperties": true,
-      "properties": {
-        "enabled": {
-          "default": true,
-          "title": "Enabled",
-          "type": "boolean"
-        },
-        "name": {
-          "anyOf": [
-            {
-              "const": "semgrep",
-              "type": "string"
-            },
-            {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
-              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
-              "type": "string"
-            }
-          ],
-          "default": "semgrep",
-          "title": "Name"
-        },
-        "options": {
-          "$ref": "#/$defs/SemgrepScannerConfigOptions",
-          "default": {
-            "config": "p/ci",
-            "exclude": [
-              "*-converted.py",
-              "*_report_result.txt"
-            ],
-            "exclude_rule": [],
-            "install_timeout": 300,
-            "metrics": "auto",
-            "offline": false,
-            "scan_timeout": 1800,
-            "severity": [],
-            "severity_threshold": null,
-            "tool_version": null
-          },
-          "description": "Configure Semgrep scanner"
-        }
-      },
-      "title": "SemgrepScannerConfig",
-      "type": "object"
-    },
-    "SemgrepScannerConfigOptions": {
-      "additionalProperties": true,
-      "properties": {
-        "config": {
-          "default": "p/ci",
-          "description": "YAML configuration file, directory of YAML files ending in .yml|.yaml, URL of a configuration file, or Semgrep registry entry name. Defaults to 'p/ci' for consistent results across online and offline modes.",
-          "title": "Config",
-          "type": "string"
-        },
-        "exclude": {
-          "default": [
-            "*-converted.py",
-            "*_report_result.txt"
-          ],
-          "description": "Skip any file or directory whose path matches the pattern.",
-          "items": {
-            "type": "string"
-          },
-          "title": "Exclude",
-          "type": "array"
-        },
-        "exclude_rule": {
-          "default": [],
-          "description": "Skip any rule with the given id.",
-          "items": {
-            "type": "string"
-          },
-          "title": "Exclude Rule",
-          "type": "array"
-        },
-        "install_timeout": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
-              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
-              "type": "string"
-            }
-          ],
-          "default": 300,
-          "description": "Timeout in seconds for tool installation",
-          "title": "Install Timeout"
-        },
-        "metrics": {
-          "anyOf": [
-            {
-              "enum": [
-                "auto",
-                "on",
-                "off"
-              ],
-              "type": "string"
-            },
-            {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
-              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
-              "type": "string"
-            }
-          ],
-          "default": "auto",
-          "description": "Configures how usage metrics are sent to the Semgrep server.",
-          "title": "Metrics"
-        },
-        "offline": {
-          "default": false,
-          "description": "Run in offline mode, using locally cached rules. When true, this scanner runs offline even if ASH does not. ASH's own offline mode (--offline or ASH_OFFLINE) applies whatever this is set to; false follows it.",
-          "title": "Offline",
-          "type": "boolean"
-        },
-        "scan_timeout": {
-          "anyOf": [
-            {
-              "minimum": 1,
-              "type": "integer"
-            },
-            {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
-              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": 1800,
-          "description": "Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes.",
-          "title": "Scan Timeout"
-        },
-        "severity": {
-          "default": [],
-          "description": "Report findings only from rules matching the supplied severity level.",
-          "items": {
-            "anyOf": [
-              {
-                "enum": [
-                  "INFO",
-                  "WARNING",
-                  "ERROR"
-                ],
-                "type": "string"
-              },
-              {
-                "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
-                "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
-                "type": "string"
-              }
-            ]
-          },
-          "title": "Severity",
-          "type": "array"
-        },
-        "severity_threshold": {
-          "anyOf": [
-            {
-              "enum": [
-                "ALL",
-                "LOW",
-                "MEDIUM",
-                "HIGH",
-                "CRITICAL"
-              ],
-              "type": "string"
-            },
-            {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
-              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM.",
-          "title": "Severity Threshold"
-        },
-        "tool_version": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Version constraint for semgrep installation, in pip requirement syntax. Leave unset to use the scanner's own default constraint.",
-          "title": "Tool Version"
-        }
-      },
-      "title": "SemgrepScannerConfigOptions",
-      "type": "object"
-    },
     "Service": {
       "additionalProperties": false,
       "properties": {
@@ -22171,7 +21928,7 @@
       "type": "string"
     },
     "ShardAssignment": {
-      "description": "What one shard was actually asked to run.\n\nRecorded on each shard's results so ``ash merge`` can verify coverage from the\nresult files alone, without being told out of band how many shards to expect.\nTaking the expected count as a merge argument would mean an operator who\nchanged their matrix in one place and not the other gets a silently short\nmerge.\n\n``assigned_scanners`` is the assignment, not the outcome. A scanner listed\nhere that failed or was disabled by config still appears; the scanner's own\nstatus in the results says what became of it. Conflating the two would make a\nlegitimately-disabled scanner look like a coverage gap.\n\n``candidate_scanners`` is what makes coverage verifiable at all. Recording\nonly the assignment lets every shard be internally consistent while the union\nhas a hole: at ``shard_count=2``, executor 0 resolving ``{a,b,c,d}`` and\ntaking ``[a,c]`` alongside executor 1 resolving ``{a,b,c}`` and taking ``[b]``\nagrees on the count, has complete indices, no duplicates and no overlap. Every\ncheck in :func:`verify_shard_coverage` passed and ``d`` was never scanned,\nbecause nothing recorded what the partition was taken *from*.\n\n``selected_scanners`` closes the remaining gap, and it is a third field rather\nthan a narrowing of ``assigned_scanners`` for a reason that is easy to get\nbackwards. The partition is taken over every registered scanner, before the\nselection filters, so ``assigned_scanners`` names scanners the shard never\nintended to run -- ``--scanners bandit`` leaves grype assigned and SKIPPED. That\nbreadth reads like the defect, and narrowing it looks like the fix, but two\nreaders depend on it. ``verify_shard_coverage``'s ``uncovered`` check compares\nthe union of the assignments against the candidate set, so a narrowed assignment\nwould leave every config-disabled and platform-declined scanner uncovered and\nrefuse merges with nothing wrong with them. ``cli.merge._verify_shard_contributions``\nreads it as ownership, and would stop holding a shard to the scanners it was\ngiven. Recording intent alongside the assignment keeps both readers correct and\nmakes the over-claim recoverable: a scanner assigned, not selected here, and not\nselected on any other shard ran nowhere, and before this field there was nothing\nin the provenance that said so.",
+      "description": "What one shard was actually asked to run.\n\nRecorded on each shard's results so ``ashx merge`` can verify coverage from the\nresult files alone, without being told out of band how many shards to expect.\nTaking the expected count as a merge argument would mean an operator who\nchanged their matrix in one place and not the other gets a silently short\nmerge.\n\n``assigned_scanners`` is the assignment, not the outcome. A scanner listed\nhere that failed or was disabled by config still appears; the scanner's own\nstatus in the results says what became of it. Conflating the two would make a\nlegitimately-disabled scanner look like a coverage gap.\n\n``candidate_scanners`` is what makes coverage verifiable at all. Recording\nonly the assignment lets every shard be internally consistent while the union\nhas a hole: at ``shard_count=2``, executor 0 resolving ``{a,b,c,d}`` and\ntaking ``[a,c]`` alongside executor 1 resolving ``{a,b,c}`` and taking ``[b]``\nagrees on the count, has complete indices, no duplicates and no overlap. Every\ncheck in :func:`verify_shard_coverage` passed and ``d`` was never scanned,\nbecause nothing recorded what the partition was taken *from*.\n\n``selected_scanners`` closes the remaining gap, and it is a third field rather\nthan a narrowing of ``assigned_scanners`` for a reason that is easy to get\nbackwards. The partition is taken over every registered scanner, before the\nselection filters, so ``assigned_scanners`` names scanners the shard never\nintended to run -- ``--scanners bandit`` leaves grype assigned and SKIPPED. That\nbreadth reads like the defect, and narrowing it looks like the fix, but two\nreaders depend on it. ``verify_shard_coverage``'s ``uncovered`` check compares\nthe union of the assignments against the candidate set, so a narrowed assignment\nwould leave every config-disabled and platform-declined scanner uncovered and\nrefuse merges with nothing wrong with them. ``cli.merge._verify_shard_contributions``\nreads it as ownership, and would stop holding a shard to the scanners it was\ngiven. Recording intent alongside the assignment keeps both readers correct and\nmakes the over-claim recoverable: a scanner assigned, not selected here, and not\nselected on any other shard ran nowhere, and before this field there was nothing\nin the provenance that said so.",
       "properties": {
         "assigned_scanners": {
           "description": "Scanner names this shard was responsible for running.",
@@ -28050,7 +27807,7 @@
                 "supportedTaxonomies": [],
                 "taxa": [],
                 "translationMetadata": null,
-                "version": "3.8.0"
+                "version": "4.0.0"
               },
               "extensions": [],
               "properties": null

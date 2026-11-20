@@ -64,3 +64,32 @@ def test_a_non_apt_command_is_run_once(monkeypatch):
     assert dependencies._run_install_command(["npm", "install", "-g", "x"]) == 1
     assert len(calls) == 1
     assert sleeps == []
+
+
+def test_a_command_stopped_at_its_timeout_is_not_retried(monkeypatch):
+    """A stalled apt-get (the dpkg lock held) would stall again, an hour each."""
+    calls, sleeps = _script(monkeypatch, [dependencies._TimedOutExitCode(124), 0, 0])
+
+    assert dependencies._run_install_command(APT) == 124
+    assert len(calls) == 1
+    assert sleeps == []
+
+
+def test_run_command_reports_a_timed_out_command_distinctly(monkeypatch):
+    from automated_security_helper.utils import subprocess_utils
+
+    def stopped(*args, **kwargs):
+        return subprocess_utils.TimedOutProcess(
+            args=APT, returncode=-1, stdout="", stderr=""
+        )
+
+    def failed(*args, **kwargs):
+        return subprocess_utils.subprocess.CompletedProcess(APT, 100, "", "")
+
+    monkeypatch.setattr(subprocess_utils, "run_command", stopped)
+    timed_out = dependencies.run_command(APT)
+    monkeypatch.setattr(subprocess_utils, "run_command", failed)
+    plain = dependencies.run_command(APT)
+
+    assert isinstance(timed_out, dependencies._TimedOutExitCode) and timed_out != 0
+    assert plain == 100 and not isinstance(plain, dependencies._TimedOutExitCode)

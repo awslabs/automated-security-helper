@@ -440,13 +440,13 @@ def test_trivy_is_not_given_an_ignored_path_with_a_comma(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# semgrep and opengrep
+# opengrep
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture(params=["semgrep", "opengrep"])
+@pytest.fixture(params=["opengrep"])
 def grep_scanner(request, tmp_path, monkeypatch):
-    """A semgrep or opengrep scanner over the fixture tree.
+    """An opengrep scanner over the fixture tree.
 
     opengrep's patterns mode is no longer a row here: the scanner refuses the
     option at construction (opengrep runs a ``--pattern`` search only with a
@@ -456,13 +456,6 @@ def grep_scanner(request, tmp_path, monkeypatch):
     monkeypatch.delenv("ASH_OFFLINE", raising=False)
     source = _tree(tmp_path)
     context = _context(source, tmp_path)
-    if request.param == "semgrep":
-        from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner import (
-            SemgrepScanner,
-            SemgrepScannerConfig,
-        )
-
-        return source, SemgrepScanner(context=context, config=SemgrepScannerConfig())
     from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scanner import (
         OpengrepScanner,
         OpengrepScannerConfig,
@@ -471,15 +464,8 @@ def grep_scanner(request, tmp_path, monkeypatch):
     return source, OpengrepScanner(context=context, config=OpengrepScannerConfig())
 
 
-@pytest.fixture(params=["semgrep", "opengrep"])
+@pytest.fixture(params=["opengrep"])
 def grep_scanner_class(request):
-    if request.param == "semgrep":
-        from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner import (
-            SemgrepScanner,
-            SemgrepScannerConfig,
-        )
-
-        return SemgrepScanner, SemgrepScannerConfig
     from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scanner import (
         OpengrepScanner,
         OpengrepScannerConfig,

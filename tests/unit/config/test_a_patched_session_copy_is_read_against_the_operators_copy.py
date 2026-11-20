@@ -136,3 +136,44 @@ def test_get_config_marks_the_reference_at_its_moved_entry(bound):
     assert marked, "get_config does not mark the reference at its moved entry"
     shows_the_value = CANARY in json.dumps(shown)
     assert not shows_the_value, "get_config shows the value the reference reads"
+
+
+def test_the_operators_copy_is_read_once_for_the_fill_and_the_trusted_base(
+    bound, monkeypatch
+):
+    """The references come from the trusted base's own read, not a second one.
+
+    Two reads of the operator's file could see two versions of it, and the
+    extra one skipped the run's caches.
+    """
+    from automated_security_helper.config import resolve_config as module
+
+    client, operator = bound
+    standalone_reads: list = []
+    loads: list = []
+    real_document = module.read_config_document
+    real_load = module._load_operator_config
+
+    def counting_document(path, *args, **kwargs):
+        standalone_reads.append(path)
+        return real_document(path, *args, **kwargs)
+
+    def counting_load(path, *args, **kwargs):
+        loads.append(path)
+        return real_load(path, *args, **kwargs)
+
+    monkeypatch.setattr(module, "read_config_document", counting_document)
+    monkeypatch.setattr(module, "_load_operator_config", counting_load)
+    entries = module.resolve_config(
+        client, trusted_config_path=operator
+    ).external_reports_to_include
+    assert entries == ["c.sarif", CANARY, "other.sarif"], "the fill is lost"
+    # Loads of the operator's file by its argument: the client policy's check
+    # of the overrides makes one, resolve_config's own is the other; a third
+    # would be a load the fill added.
+    of_the_operator = [path for path in loads if Path(path) == Path(operator)]
+    assert 1 <= len(of_the_operator) <= 2, (
+        f"the operator's copy was loaded {len(of_the_operator)} times"
+    )
+    reread = [path for path in standalone_reads if Path(path) == Path(operator)]
+    assert not reread, "the operator's copy was read a second time on its own"

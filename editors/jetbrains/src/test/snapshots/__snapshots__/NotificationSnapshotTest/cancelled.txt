@@ -1,0 +1,8 @@
+progress:
+  Looking for the ASH executable
+  Running <BIN>/ashx scan
+
+notification group=ASH type=WARNING
+title: ASH scan cancelled
+body:
+The scan was cancelled and ASH was stopped before it finished. No findings are shown, and this is not a clean result.

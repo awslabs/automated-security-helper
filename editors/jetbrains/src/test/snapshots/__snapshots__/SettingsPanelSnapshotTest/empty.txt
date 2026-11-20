@@ -1,0 +1,8 @@
+displayName: ASH
+modified after reset: false
+JPanel
+  JBLabel text="ASH executable:"
+  JBTextField text="" emptyText="ashx"
+  JLabel text=""
+  JBLabel text="<html>Leave empty to run <code>ashx</code> from PATH, or <code>ash</code> when <code>ashx</code> is not installed. A value here is run as given. On a host where another program answers to <code>ash</code> (MSYS2 ships an <code>ash</code> shell on Windows), use <code>automated-security-helper</code> or a full path.</html>"
+  JPanel

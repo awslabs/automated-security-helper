@@ -3,7 +3,7 @@
 
 """``--cli-json-input`` and ``--generate-cli-skeleton`` (issue #290).
 
-The scan tests drive the real ``ash`` Typer app through ``CliRunner`` with
+The scan tests drive the real ``ashx`` Typer app through ``CliRunner`` with
 ``run_ash_scan`` patched out, so what is asserted is the value the scan command
 would have handed to the scan, after click has parsed, cast and defaulted it.
 That is the only place a precedence bug or a skipped type check is visible.
@@ -36,6 +36,9 @@ from automated_security_helper.core.enums import ExecutionStrategy, RunMode
 pytestmark = pytest.mark.unit
 
 RUN_ASH_SCAN = "automated_security_helper.cli.scan.run_ash_scan"
+# Wide enough that no error panel wraps a path; Rich reads COLUMNS when its output
+# is not a terminal, as under CliRunner.
+WIDE_CONSOLE = {"COLUMNS": "1000"}
 
 
 @pytest.fixture
@@ -319,6 +322,24 @@ class TestScanJsonInputErrors:
         ]
         assert len(error_lines) == 1, result.output
         assert str(missing) in error_lines[0], result.output
+
+    # The error panel is drawn at the console width and wraps a long path at any
+    # character, so at the default width "absent.json" came out as "absent.j" and
+    # "son" whenever the temp directory's length put the break there: a pass or a
+    # failure decided by where pytest's basetemp happened to be. Rendered wide, the
+    # whole path is on one line, so the assertion can name all of it.
+    @pytest.mark.parametrize("pad", range(0, 84, 3))
+    def test_missing_file_is_named_in_full_at_any_path_length(
+        self, runner, tmp_path, pad
+    ):
+        missing = tmp_path / ("d" * (pad + 1)) / "absent.json"
+        with patch(RUN_ASH_SCAN) as mock_run:
+            result = runner.invoke(
+                app, ["scan", "--cli-json-input", str(missing)], env=WIDE_CONSOLE
+            )
+        assert result.exit_code == ASH_EXIT_USAGE_ERROR
+        assert not mock_run.called
+        assert str(missing) in result.output
 
     @pytest.mark.parametrize("shape", ["missing", "a-directory"])
     def test_an_unreadable_document_path_is_named_once(self, runner, tmp_path, shape):

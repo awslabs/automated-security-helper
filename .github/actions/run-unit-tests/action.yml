@@ -136,8 +136,8 @@ runs:
     # copy without it is MISSING. The added packages survive `uv run`'s inexact sync.
     #
     # Windows gets bandit and checkov only. They are the two scanners the external-target
-    # and multi-project gates install on windows-latest, and semgrep publishes no Windows
-    # build (semgrep_scanner.py), so it cannot be in that list.
+    # and multi-project gates install on windows-latest, and opengrep is off by default
+    # on Windows (opengrep_scanner.py), so it is not in that list.
     #
     # The unit tier runs no real scanner. The integration tier gets bandit alone, in the
     # step after this one. The other real-tool integration tests skip when their tool is
@@ -150,7 +150,7 @@ runs:
         if [ "$RUNNER_OS" = Windows ]; then
           uv run ash dependencies install --tool bandit --tool checkov
         else
-          uv run ash dependencies install --tool bandit --tool actionlint --tool cfn-lint --tool cfn-guard --tool gitleaks --tool checkov --tool semgrep --tool zizmor
+          uv run ash dependencies install --tool bandit --tool actionlint --tool cfn-lint --tool cfn-guard --tool gitleaks --tool checkov --tool opengrep --tool zizmor
         fi
         uv pip install 'cfn-lint[sarif]>=1.43.3,<2.0.0'
 

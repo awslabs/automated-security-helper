@@ -11,6 +11,7 @@
  */
 
 import {
+  ASH_CLI,
   DEFAULT_ASH_REF,
   DEFAULT_ASH_REPOSITORY,
   installCommands,
@@ -219,7 +220,7 @@ export function mergeLoopCommands(): string[] {
       `echo "${SHARD_RESULTS_VAR} is empty; refusing to report a verdict for zero shards." >&2; ` +
       'exit 1; fi',
     `set --; for shard_dir in $${SHARD_RESULTS_VAR}; do set -- "$@" --results "$shard_dir"; done; ` +
-      `ash merge "$@" --output-dir ${shellArg(`$${OUTPUT_DIR_VAR}`)} ` +
+      `${ASH_CLI} merge "$@" --output-dir ${shellArg(`$${OUTPUT_DIR_VAR}`)} ` +
       `--min-severity ${shellArg(`$${MIN_SEVERITY_VAR}`)}`,
   ];
 }
@@ -272,7 +273,7 @@ export function generatedBuildspecs(): GeneratedBuildspec[] {
           `Set ${SHARD_RESULTS_VAR} to a space-separated list of shard output`,
           'directories, one per shard.',
           '',
-          'This step is the verdict for the whole scan, so `ash merge` must exit',
+          'This step is the verdict for the whole scan, so `ashx merge` must exit',
           'non-zero when the merged findings breach the configured threshold.',
         ]),
         mergeBuildspec(),

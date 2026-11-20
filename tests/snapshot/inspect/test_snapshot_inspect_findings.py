@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""`ash inspect findings`: the rows it extracts, and the screens the TUI draws.
+"""`ashx inspect findings`: the rows it extracts, and the screens the TUI draws.
 
 ``extract_findings`` is the pure half: SARIF results in, the dicts every table row
 and detail view is built from out. The TUI half runs in-process under Textual's

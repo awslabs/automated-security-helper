@@ -68,6 +68,7 @@ case "${LAYOUT_DIR}" in
 esac
 
 verify_err="$(mktemp)"
+trap 'rm -f "${verify_err}"' EXIT
 if ! manifest="$(python3 "${HELPER}" verify --dir "${LAYOUT_DIR}" --pin "${pin}" \
     --arch "${RUNNER_ARCH}" 2> "${verify_err}")"; then
   discard "verification failed ($(tr '\n' ' ' < "${verify_err}"))"
@@ -88,7 +89,7 @@ same_id() {
 
 case "${runtime}" in
   docker)
-    # For `docker build` on the docker driver -- ./ash and ash_helpers.ps1 -- which prefers a
+    # For `docker build` on the docker driver -- ash_helpers.ps1 -- which prefers a
     # local image and cannot take the oci-layout context. The buildx path gets the context and
     # does not need this, but loading costs seconds and keeps the two docker paths alike.
     if ! python3 "${HELPER}" docker-archive --dir "${LAYOUT_DIR}" --pin "${pin}" \

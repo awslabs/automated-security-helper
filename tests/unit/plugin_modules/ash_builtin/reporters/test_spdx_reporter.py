@@ -4,7 +4,7 @@
 """Tests for SpdxReporter.
 
 The reporter used to dump the whole results model as YAML into ``ash.spdx.json``:
-neither SPDX nor JSON. ``ash report --format spdx`` exited 1 on it, because the
+neither SPDX nor JSON. ``ashx report --format spdx`` exited 1 on it, because the
 CLI prints the spdx format with ``print_json`` and the YAML did not parse. These
 tests pin the replacement: an SPDX 2.3 JSON document built from the scan's
 CycloneDX SBOM.

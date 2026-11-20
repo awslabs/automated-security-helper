@@ -17,7 +17,7 @@ what came back.
 
 Those existing jobs cannot catch the bugs below, for two compounding reasons:
 
-* Their fixture is ``echo 'print("hello")' > /tmp/ash-selftest/test_sample.py`` -- a
+* Their fixture is ``echo 'print("hello")' > "${RUNNER_TEMP}/ash-selftest/test_sample.py"`` -- a
   clean file that yields zero findings even when every scanner works perfectly.
   There is nothing there to notice the absence of.
 * Their only assertion is the step's exit status, and a scanner at ERROR cannot
@@ -107,7 +107,7 @@ Known limitations
   than passing quietly. A gate that silently tests nothing is worse than a red one,
   so this is intentional -- but it does mean a broken tool install reads as a gate
   failure. The message names that cause explicitly, and the workflow runs
-  ``ash dependencies install`` as its own step so an install flake fails there
+  ``ashx dependencies install`` as its own step so an install flake fails there
   instead.
 * ``validation_checkpoints`` errors and discrepancies are reported as diagnostic
   context for a scanner at ERROR. They are not themselves a failure condition.
@@ -191,7 +191,7 @@ TOLERATED_EXIT_CODES = (0, 2)
 #: checkov are available at all". Left unnarrowed, cfn-nag, grype, syft and the
 #: rest report MISSING. ``fail_on_incomplete_scanners`` defaults to True, so an
 #: unnarrowed run would exit 1 for the tools the runner lacks, and under an
-#: operator config that turns the gate off ``ash scan`` exits 0 on a results
+#: operator config that turns the gate off ``ashx scan`` exits 0 on a results
 #: file full of MISSING -- either way the set has to be named. An unnarrowed
 #: run that did exit 0 would land inside
 #: TOLERATED_EXIT_CODES having exercised two scanners while appearing to cover ten,
@@ -849,7 +849,7 @@ def check_expected_rules_present(
     anywhere in this repository, so the citation resolved to nothing; and the gate as a
     whole does fail when one of the scanners it selected is MISSING. It fails in
     ``check_exit_code``: ``GATE_SCANNERS`` narrows the run to bandit and checkov, so a
-    MISSING one of those makes ``ash scan`` exit 1, and 1 is deliberately absent from
+    MISSING one of those makes ``ashx scan`` exit 1, and 1 is deliberately absent from
     ``TOLERATED_EXIT_CODES`` -- see the note there, which rejects adding it because that
     would tolerate exactly the state this gate exists to catch.
 
@@ -1099,7 +1099,7 @@ def check_exit_code(exit_code: int, states: Sequence[ScannerState] = ()) -> List
         return []
     return [
         (
-            f"ash scan exited {exit_code}; expected one of "
+            f"ashx scan exited {exit_code}; expected one of "
             f"{list(TOLERATED_EXIT_CODES)} (0 success, 2 actionable findings). "
             "Exit 1 is a scan error, or a selected scanner that did not run "
             "(fail_on_incomplete_scanners defaults on; check_gate_scanners_ran "

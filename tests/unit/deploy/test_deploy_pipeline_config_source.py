@@ -41,6 +41,7 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 import yaml
 
+from automated_security_helper.cli.deprecations import CANONICAL_CLI_NAME
 from tests.unit.deploy.codepipeline_stub import CodePipelineStub, action_execution
 from tests.unit.deploy.buildspec_extraction import (
     CDK_TEMPLATE_DIR,
@@ -156,11 +157,11 @@ def ash_env(child_env: dict[str, str], tmp_path: pathlib.Path) -> dict[str, str]
             "UV_TOOL_DIR": str(home / ".local" / "share" / "uv" / "tools"),
         }
     )
-    ash = shutil.which("ash", path=env["PATH"])
+    ash = shutil.which(CANONICAL_CLI_NAME, path=env["PATH"])
     assert (
         ash is not None
         and pathlib.Path(ash).parent == pathlib.Path(sys.executable).parent
-    ), f"expected this interpreter's ash first on PATH, found {ash!r}"
+    ), f"expected this interpreter's {CANONICAL_CLI_NAME} first on PATH, found {ash!r}"
     return env
 
 
@@ -234,7 +235,7 @@ def test_control_the_in_tree_config_decides_the_verdict_when_ash_is_given_none(
     def shard(index: int) -> subprocess.CompletedProcess:
         return subprocess.run(
             [
-                "ash",
+                CANONICAL_CLI_NAME,
                 "scan",
                 "--source-dir",
                 str(source),
@@ -269,7 +270,7 @@ def test_control_the_in_tree_config_decides_the_verdict_when_ash_is_given_none(
 
     merge = subprocess.run(
         [
-            "ash",
+            CANONICAL_CLI_NAME,
             "merge",
             "--results",
             str(tmp_path / "shard-0"),

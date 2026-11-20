@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Regression test: `ash report` reads the results file as UTF-8, not as the locale.
+"""Regression test: `ashx report` reads the results file as UTF-8, not as the locale.
 
 Why this file exists
 --------------------
@@ -15,7 +15,7 @@ That message is ``cli/report.py``'s, from the broad ``except`` around the result
 ``open(results_file, "r")`` with no encoding uses the process's locale encoding, which is
 cp1252 on Windows, and 0x9d is unmapped in cp1252. ASH writes this file as UTF-8, and
 findings routinely carry bytes cp1252 cannot decode -- a snippet quoted out of a
-non-ASCII source file, a tool's smart quotes. So on Windows ``ash report`` could not
+non-ASCII source file, a tool's smart quotes. So on Windows ``ashx report`` could not
 render a report for any scan whose results were not pure cp1252.
 
 Why the existing tests in test_report.py did not catch it

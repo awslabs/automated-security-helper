@@ -74,6 +74,7 @@ from tests.utils.helpers import CHILD_TIMEOUT_SECONDS
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ash-tag-on-merge.yml"
 JOB = "tag-and-release"
+VERSION_JOB = "resolve"  # reads the version from the merge commit's checkout
 TEMPLATE = REPO_ROOT / ".github" / "changelog" / "CHANGELOG.md.j2"
 NOTES_V380 = REPO_ROOT / ".github" / "release-notes" / "v3.8.0.md"
 CZ_BIN = Path(sys.executable).parent / ("cz.exe" if os.name == "nt" else "cz")
@@ -154,6 +155,11 @@ def _release_script() -> str:
     return script
 
 
+# The job-level env the release step reads its --target from (ash-tag-on-merge.yml).
+# Shaped like a commit SHA and nothing like a digest, so no entropy detector reads it as one.
+RELEASE_SHA = "a1" * 20
+
+
 class Result:
     def __init__(self, proc: subprocess.CompletedProcess, calls: list[list[str]]):
         self.proc = proc
@@ -224,6 +230,7 @@ def _run(script: str, workdir: Path, version: str, tmp_path: Path) -> Result:
         "GH_TOKEN": "stub-token",
         "GH_CALL_LOG": str(log),
         "RUNNER_TEMP": str(runner_temp),
+        "RELEASE_SHA": RELEASE_SHA,
         "LANG": "C.UTF-8",
         "LC_ALL": "C.UTF-8",
     }
@@ -383,6 +390,23 @@ class TestTheReleaseBody:
         assert result.notes is None, result.describe()
         assert "::warning::" in result.proc.stdout, result.describe()
 
+    def test_the_release_targets_the_pinned_commit_and_attaches_the_staged_set(
+        self, tmp_path: Path
+    ):
+        # The tag goes on the commit the assets were built from, not on whatever
+        # main is by then, and the files are the staged directory, unexpanded here
+        # because the fixture has none (the shell passes an unmatched glob through).
+        work = tmp_path / "work"
+        work.mkdir()
+        (work / "CHANGELOG.md").write_text("", encoding="utf-8")
+
+        result = _run(_release_script(), work, "4.0.0", tmp_path)
+
+        assert result.proc.returncode == 0, result.describe()
+        argv = result.create or []
+        assert argv[argv.index("--target") + 1] == RELEASE_SHA, result.describe()
+        assert argv[-1] == "release-assets/*", result.describe()
+
 
 class TestTheHarnessCanFail:
     pytestmark = _INTEGRATION_SHELL
@@ -498,6 +522,10 @@ def _run_release_step(
         "HOME": str(tmp_path),
         "VERSION": "3.8.0",
         "MERGE_SHA": FAKE_SHA,
+        # The job's env maps this from the `resolve` job's output: the commit it
+        # pinned, which it checked equal to the merge commit. The step targets it
+        # and stops under `set -u` when it is unset.
+        "RELEASE_SHA": FAKE_SHA,
         "GITHUB_REPOSITORY": FAKE_REPO,
         "GH_TOKEN": "stub-token",
         "GH_CALL_LOG": str(log),
@@ -545,9 +573,13 @@ class TestTheReleaseTargetsTheMergeCommit:
         Reading them from the tip of main lets the run for an earlier release pull
         request see a later release's version and create that release at the older
         merge commit.
+
+        The version is read in the `resolve` job, which pins the commit and hands the
+        version and SHA to the jobs that build and publish; `tag-and-release` reads
+        both through `needs`, so the read is checked where it happens.
         """
         doc = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
-        steps = doc["jobs"][JOB]["steps"]
+        steps = doc["jobs"][VERSION_JOB]["steps"]
         checkout = next(
             s for s in steps if str(s.get("uses", "")).startswith("actions/checkout@")
         )

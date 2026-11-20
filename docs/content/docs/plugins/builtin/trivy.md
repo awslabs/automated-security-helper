@@ -4,14 +4,14 @@
 
 ## Enabling it
 
-The `trivy` scanner is a builtin scanner, enabled by default: a default scan runs it. `scanners.trivy.enabled: false` in the ASH config turns it off, and `--scanners` and `--exclude-scanners` select it as they select any scanner. If the tool is not installed, the scanner is reported `MISSING` and the scan exits 1 (the incomplete-scan gate), as for every builtin scanner; `ash dependencies install` and the container image provide it.
+The `trivy` scanner is a builtin scanner, enabled by default: a default scan runs it. `scanners.trivy.enabled: false` in the ASH config turns it off, and `--scanners` and `--exclude-scanners` select it as they select any scanner. If the tool is not installed, the scanner is reported `MISSING` and the scan exits 1 (the incomplete-scan gate), as for every builtin scanner; `ashx dependencies install` and the container image provide it.
 
 trivy is a native binary, so `--python-only` does not run it.
 
 ## Installing trivy
 
 - Container image: included. The image installs the pinned release (currently v0.76.2).
-- Local mode: `ash dependencies install` downloads the pinned release asset from GitHub and checks it against the SHA256 recorded in `automated_security_helper/utils/tool_downloads.py` before installing it. trivy publishes no Windows arm64 asset, so there it has to be installed another way.
+- Local mode: `ashx dependencies install` downloads the pinned release asset from GitHub and checks it against the SHA256 recorded in `automated_security_helper/utils/tool_downloads.py` before installing it. trivy publishes no Windows arm64 asset, so there it has to be installed another way.
 - Nix mode: the flake supplies nixpkgs' `trivy`, and the nix shell keeps its vulnerability database in `TRIVY_CACHE_DIR` (default `~/.cache/ash/trivy`), updating it on every entry; trivy returns at once when the database is current. Nix mode scans offline, so when the shell had no network and nothing is cached, trivy is reported `MISSING` with the reason; see [Offline and air-gapped use](#offline-and-air-gapped-use).
 - A `trivy` already on `PATH` is used as is. ASH is tested against the pinned version.
 
@@ -73,7 +73,7 @@ To use your own:
 
 <!-- doctest: illustrative reason="runs a full scan, which needs every scanner installed" -->
 ```bash
-ash scan --config-overrides 'scanners.trivy.options.ignore_file=/etc/ash/trivyignore'
+ashx scan --config-overrides 'scanners.trivy.options.ignore_file=/etc/ash/trivyignore'
 ```
 
 A configured file that does not exist fails the scan rather than running without it.
@@ -123,7 +123,7 @@ TRIVY_CACHE_DIR=/path/to/cache trivy image --download-db-only
 
 and point the offline scan at the same `TRIVY_CACHE_DIR`.
 
-With `misconfig` added to `scanners`, trivy's Terraform checks do not run offline: trivy downloads the source of every `module` block a `.tf` file names (from the Terraform registry, with the host's `git`, or over HTTPS) whatever offline flags it is given. ASH passes `trivy --misconfig-scanners` with the installed trivy's own default list minus `terraform`, read from `trivy fs --help`, and logs a warning; when that list cannot be read, `misconfig` is left out of the offline scan. checkov still checks Terraform. trivy-repo does the same. In nix mode, export `TRIVY_CACHE_DIR` before running `ash scan --mode nix`; the variable is passed through to the scan. The container image built with `--offline` ships a trivy database (in `/deps/.trivy`, its `TRIVY_CACHE_DIR`), downloaded at build time; the build fails if that download fails or leaves the cache empty. Once that database is older than the 24h bound, scans in that image still pass: the image holds `trivy-db` to `warn` rather than `fail`, so every report records the stale database and its age. Its findings still lack advisories published since the build, so refresh it anyway: rebuild the image, or mount a fresher cache as `TRIVY_CACHE_DIR`. To make the stale database fail the scan instead, set `content_db_staleness_offline_image_default: false` (see [Stale content databases](../../../how-to/set-the-gate.md#content-databases)). This default follows `ASH_OFFLINE_AT_BUILD_TIME=YES`, which the offline image sets; without it, a stale database in a `TRIVY_CACHE_DIR` you provide is held to `content_db_staleness`.
+With `misconfig` added to `scanners`, trivy's Terraform checks do not run offline: trivy downloads the source of every `module` block a `.tf` file names (from the Terraform registry, with the host's `git`, or over HTTPS) whatever offline flags it is given. ASH passes `trivy --misconfig-scanners` with the installed trivy's own default list minus `terraform`, read from `trivy fs --help`, and logs a warning; when that list cannot be read, `misconfig` is left out of the offline scan. checkov still checks Terraform. trivy-repo does the same. In nix mode, export `TRIVY_CACHE_DIR` before running `ashx scan --mode nix`; the variable is passed through to the scan. The container image built with `--offline` ships a trivy database (in `/deps/.trivy`, its `TRIVY_CACHE_DIR`), downloaded at build time; the build fails if that download fails or leaves the cache empty. Once that database is older than the 24h bound, scans in that image still pass: the image holds `trivy-db` to `warn` rather than `fail`, so every report records the stale database and its age. Its findings still lack advisories published since the build, so refresh it anyway: rebuild the image, or mount a fresher cache as `TRIVY_CACHE_DIR`. To make the stale database fail the scan instead, set `content_db_staleness_offline_image_default: false` (see [Stale content databases](../../../how-to/set-the-gate.md#content-databases)). This default follows `ASH_OFFLINE_AT_BUILD_TIME=YES`, which the offline image sets; without it, a stale database in a `TRIVY_CACHE_DIR` you provide is held to `content_db_staleness`.
 
 ## Running it alongside the trivy-repo community plugin
 

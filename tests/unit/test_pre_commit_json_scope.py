@@ -73,7 +73,10 @@ MUST_BE_FORMATTED = (
 EXCLUDED_FAMILIES = {
     r"(.*/)?\.vscode/.*": "editor settings, which allow comments",
     r"deploy/cdk/templates/.*\.template\.json": "cdk synth output, byte-compared",
-    r"deploy/[^/]+/package(-lock)?\.json": "npm manifests",
+    r"(deploy|editors)/[^/]+/package(-lock)?\.json": "npm manifests",
+    r"scripts/e2e/inspector/package(-lock)?\.json": (
+        "npm manifests of the MCP Inspector the MCPB e2e leg installs with npm ci"
+    ),
     r"deploy/cdk/tsconfig\.json": "tsc config with comments",
     r"tests/snapshot/.*/__snapshots__/.*": "snapshot bytes",
     r"ash-agent-plugins/agentic-coding/plugins/.*": "transpiler output, byte-compared",

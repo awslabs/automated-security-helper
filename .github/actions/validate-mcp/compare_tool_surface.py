@@ -20,7 +20,7 @@ only fail for reasons unrelated to the code under test is worse than no step --
 it spends the reader's trust and teaches them to re-run red legs.
 
 This script makes the install load-bearing. It speaks the protocol the way a
-client does: the inspector spawns `ash mcp` over stdio, performs the
+client does: the inspector spawns `ashx mcp` over stdio, performs the
 initialization handshake, calls one list method, and prints the server's reply.
 That reply is compared against `tool_surface.golden.json`.
 
@@ -60,7 +60,7 @@ transport, the JSON-RPC framing, the protocol-version negotiation, and the
 server's serialization of every Pydantic model into JSON Schema. A defect in any
 of those is invisible to the unit test and fatal to a client:
 
-* a console-script entry point that no longer resolves, or an `ash mcp` that
+* a console-script entry point that no longer resolves, or an `ashx mcp` that
   exits non-zero before serving -- the registry is still correct in-process
 * a transport that never completes `initialize`, so `tools/list` never returns
 * a model whose JSON Schema serialization changes shape -- the unit test
@@ -327,7 +327,7 @@ def capture(
     ahead of the target makes the inspector ignore the target entirely, fall back
     to its server catalog, and fail with
     `{"error":{"code":"error","message":"No servers found in config file"}}`.
-    Measured against inspector 2.8.0.
+    Measured on 2.8.0; not re-measured on 2.9.0.
 
     stdio is the right transport here: it is what every desktop MCP client uses
     for a locally installed server, the inspector auto-detects it from a command
@@ -338,10 +338,18 @@ def capture(
     only to `tools/list`, the one method run with `--strict`. Against a stub
     server that answers `tools/list` with a property whose schema is the bare
     boolean `true`, inspector 2.8.0 prints the full `tools/list` reply on stdout,
-    the per-tool error detail on stderr, and exits 6. So a portability error does
+    the per-tool error detail on stderr, and exits 6 (measured on 2.8.0; not
+    re-measured on 2.9.0). So a portability error does
     not cost the golden comparison: both verdicts are reported from one spawn.
     The other three methods run without `--strict`, measured to exit 0 against
-    `ash mcp` with inspector 2.8.0, so anything else from them is a failure.
+    `ashx mcp` with inspector 2.8.0 and again with 2.9.0, so anything else from them
+    is a failure.
+
+    The pin moved to 2.9.0 because 2.8.0 pins @modelcontextprotocol/client 2.0.0,
+    inside the >=2.0.0 <2.2.0 range of GHSA-6qxp-vccf-f47h. On that bump this whole comparison was run
+    under both versions against the same `ashx mcp`: all four methods exited 0, the
+    surface matched the golden, and the output, warnings included, was identical.
+    The exit-6 stub measurement above was not repeated.
     """
     cmd = [inspector, "--cli", ash, "mcp", "--method", surface.method]
     if surface.strict:
@@ -596,8 +604,8 @@ def main() -> int:
     )
     parser.add_argument(
         "--ash",
-        default=os.environ.get("ASH_BIN", "ash"),
-        help="ash executable to serve over stdio (default: ash on PATH)",
+        default=os.environ.get("ASH_BIN", "ashx"),
+        help="ASH executable to serve over stdio (default: ashx on PATH)",
     )
     parser.add_argument(
         "--inspector-arg",
@@ -631,7 +639,7 @@ def main() -> int:
             "optional; install it with the pinned version the action uses."
         )
     if not Path(ash).exists():
-        raise SystemExit(f"FAIL: ash executable not found ({args.ash!r}).")
+        raise SystemExit(f"FAIL: ASH executable not found ({args.ash!r}).")
 
     live: Dict[str, Dict[str, Dict[str, Any]]] = {}
     portability_exit = 0

@@ -15,6 +15,6 @@ To investigate...
     - HTML report of all findings: '.ash/ash_output/reports/ash.html'
     - Markdown summary: '.ash/ash_output/reports/ash.summary.md'
     - Text summary: '.ash/ash_output/reports/ash.summary.txt'
-  2. Use ash report to view a short text summary of the scan in your terminal
-  3. Use ash inspect findings to explore the findings interactively
+  2. Use ashx report to view a short text summary of the scan in your terminal
+  3. Use ashx inspect findings to explore the findings interactively
   4. Review scanner-specific reports and outputs in the '.ash/ash_output/scanners' directory

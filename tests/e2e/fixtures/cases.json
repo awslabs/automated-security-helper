@@ -1,0 +1,45 @@
+{
+  "cases": {
+    "clean": {
+      "args": [],
+      "env": {},
+      "expect_rc": 0,
+      "findings": 0,
+      "scanners": [
+        "detect-secrets"
+      ],
+      "source": "clean"
+    },
+    "findings": {
+      "args": [],
+      "env": {},
+      "expect_rc": 2,
+      "findings": 3,
+      "require_scanner": "detect-secrets",
+      "scanners": [
+        "detect-secrets"
+      ],
+      "source": "findings"
+    },
+    "incomplete": {
+      "args": [
+        "--config-overrides",
+        "scanners.opengrep.enabled=true"
+      ],
+      "env": {
+        "ASH_OFFLINE": "YES",
+        "OPENGREP_RULES_CACHE_DIR": ""
+      },
+      "expect_rc": 1,
+      "findings": 3,
+      "incomplete_scanner": "opengrep",
+      "require_scanner": "detect-secrets",
+      "scanners": [
+        "detect-secrets",
+        "opengrep"
+      ],
+      "source": "findings"
+    }
+  },
+  "comment": "The three e2e scan cases every channel runs. Each case is scanned as: ashx scan --source-dir <a copy of fixtures/SOURCE> --output-dir <scratch> --no-progress --scanners SCANNERS ARGS, with ENV set. scripts/e2e/run_case.py appends ARGS, so every channel that uses it passes them; a channel that builds its own command line must append them too. scripts/e2e/assert_outcome.py --case NAME checks the result. The incomplete trigger, and why its ARGS turn opengrep on, are measured in tests/e2e/README.md."
+}

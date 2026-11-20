@@ -34,6 +34,7 @@ from pathlib import Path
 import botocore.endpoint
 import pytest
 
+from automated_security_helper.cli.deprecations import CANONICAL_CLI_NAME as ASHX
 from tests.utils.env_assertions import (
     NamesOnlyEnvironment,
     environ_names,
@@ -361,7 +362,7 @@ class TestToolInstallingChildrenGetTheirOwnHome:
         self, home_guard_violations, developer_env
     ):
         outcome = self._start(
-            ["ash", "dependencies", "install", "--help"], env=developer_env
+            [ASHX, "dependencies", "install", "--help"], env=developer_env
         )
         assert outcome.startswith("refused"), outcome
         home_guard_violations.clear()
@@ -638,7 +639,7 @@ class TestInstallersAreRefusedADestinationInTheDeveloperHome:
         self, home_guard_violations, developer_home
     ):
         env = {**os.environ, "ASH_BIN_PATH": str(developer_home / ".ash" / "bin")}
-        outcome = self._start(["ash", "dependencies", "install", "--help"], env=env)
+        outcome = self._start([ASHX, "dependencies", "install", "--help"], env=env)
         assert outcome.startswith("refused"), outcome
         assert "ASH_BIN_PATH" in outcome, outcome
         home_guard_violations.clear()
@@ -663,7 +664,7 @@ class TestInstallersAreRefusedADestinationInTheDeveloperHome:
     ):
         """The guard reads --bin-path with the CLI's own parser, so it reads what ash would."""
         destination = str(developer_home / ".ash" / "bin")
-        argv = ["ash", "dependencies", "install"]
+        argv = [ASHX, "dependencies", "install"]
         argv += [*spelling(destination, str(tmp_path / "bin")), "--help"]
         outcome = self._start(argv)
         assert outcome.startswith("refused"), outcome
@@ -1057,7 +1058,7 @@ class TestTheGuardReadsThroughWrappers:
 
     @pytest.mark.unit
     def test_a_shell_command_string_running_ash(self, home_guard_violations, into_home):
-        command = ["ash", "dependencies", "install", "--bin-path", into_home, "--help"]
+        command = [ASHX, "dependencies", "install", "--bin-path", into_home, "--help"]
         outcome = self._start(["sh", "-c", shlex.join(command)])
         self._refused(home_guard_violations, outcome, "--bin-path", into_home)
 
@@ -1067,7 +1068,7 @@ class TestTheGuardReadsThroughWrappers:
         self, home_guard_violations, into_home, option
     ):
         """The option's value is not where the options end: -c still comes after it."""
-        command = ["ash", "dependencies", "install", "--bin-path", into_home, "--help"]
+        command = [ASHX, "dependencies", "install", "--bin-path", into_home, "--help"]
         outcome = self._start(["bash", option, os.devnull, "-c", shlex.join(command)])
         self._refused(home_guard_violations, outcome, "--bin-path", into_home)
 
@@ -1086,7 +1087,7 @@ class TestTheGuardReadsThroughWrappers:
         does, so the command string is still the operand after it. Read without that,
         pipefail was the command string, and the destination inside the real one was
         never seen: the installer started."""
-        command = ["ash", "dependencies", "install", "--bin-path", into_home, "--help"]
+        command = [ASHX, "dependencies", "install", "--bin-path", into_home, "--help"]
         outcome = self._start(["bash", *options, shlex.join(command)])
         self._refused(home_guard_violations, outcome, "--bin-path", into_home)
 
@@ -1203,7 +1204,7 @@ class TestTheGuardReadsThroughWrappers:
 
     @pytest.mark.unit
     def test_a_shell_behind_a_prefix(self, home_guard_violations, into_home):
-        command = ["ash", "dependencies", "install", "--bin-path", into_home, "--help"]
+        command = [ASHX, "dependencies", "install", "--bin-path", into_home, "--help"]
         outcome = self._start(["nice", "sh", "-c", shlex.join(command)])
         self._refused(home_guard_violations, outcome, "--bin-path", into_home)
 
@@ -1261,7 +1262,7 @@ class TestTheGuardReadsThroughWrappers:
     def test_a_shell_option_the_guard_does_not_know(
         self, home_guard_violations, into_home
     ):
-        command = ["ash", "dependencies", "install", "--bin-path", into_home, "--help"]
+        command = [ASHX, "dependencies", "install", "--bin-path", into_home, "--help"]
         outcome = self._start(["bash", "--new-option", "-c", shlex.join(command)])
         self._refused(home_guard_violations, outcome, "cannot read")
 

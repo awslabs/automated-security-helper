@@ -15,7 +15,7 @@
  * `AgentRuntimeArtifact.ContainerConfiguration.ContainerUri`. There is no
  * `Command`, `EntryPoint` or `Args` property. So the MCP invocation CANNOT be
  * supplied by the template — it has to be baked into the image. ASH's own
- * Dockerfile ends with `ENTRYPOINT [] / CMD ["ash"]`, which would run `ash` with
+ * Dockerfile ends with `ENTRYPOINT [] / CMD ["ashx"]`, which would run `ashx` with
  * no arguments and exit.
  * https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-properties-bedrockagentcore-runtime-containerconfiguration.html
  *
@@ -69,7 +69,7 @@ export const ASH_S3_SYNC_PATH = '/tmp/ash-s3-sync.py';
  * WHY THIS EXISTS AT ALL
  * ---------------------
  * The shard and merge actions of the distributed pipeline use the ASH image as
- * their CodeBuild environment image. That is what puts `ash` directly on PATH with
+ * their CodeBuild environment image. That is what puts `ashx` directly on PATH with
  * no Docker-in-Docker and no privileged build, and the trade is the constraint the
  * header of this file describes: the image ships git, curl and boto3, but no AWS
  * CLI. `aws s3 cp --recursive` is not available there. It exits 127.
@@ -375,18 +375,19 @@ ${ASH_S3_SYNC_SCRIPT}PY`;
  * `--stateless-http` and `--allowed-host` exist in no release up to v3.7.1 — the
  * word `stateless` appears nowhere under `automated_security_helper/cli` at
  * v3.7.0 or v3.7.1 — and were added on main after them. Emitting them
- * unconditionally made the shipped default (`AshVersion=v3.7.0`) undeployable:
- * Typer rejects the unknown option, the server never binds, and CloudFormation
- * reports a health-check timeout rather than the flag that caused it.
+ * unconditionally made the then-shipped default (`AshVersion=v3.7.0`)
+ * undeployable: Typer rejects the unknown option, the server never binds, and
+ * CloudFormation reports a health-check timeout rather than the flag that caused
+ * it.
  *
- * So the script asks `ash mcp --help` once and branches on what it finds.
+ * So the script asks `ashx mcp --help` once and branches on what it finds.
  *
  * WHAT WAS TRIED AND REJECTED
  * ---------------------------
- * - Pointing `DEFAULT_ASH_VERSION` at a ref that has the flags: rejected. The
- *   only such ref is a feature branch. A moving branch is not a reproducible
- *   default, and pinning adopters to someone's in-flight work is worse than
- *   pinning them to a release.
+ * - Relying on `DEFAULT_ASH_VERSION` alone: rejected. The default is v4.0.0,
+ *   the first release whose `ashx mcp` has the flags, but `AshVersion` is a
+ *   deploy-time parameter and an adopter can still point it at a v3 tag. The
+ *   probe is what keeps that choice from failing silently.
  * - Emitting the flags conditionally with NO refusal path: rejected outright.
  *   Dropping `--stateless-http` yields a stateful server, which is the exact
  *   failure the flag prevents. A quiet downgrade there produces a container that
@@ -397,48 +398,23 @@ ${ASH_S3_SYNC_SCRIPT}PY`;
  *   the flags' absence — banning the one combination that genuinely works on an
  *   older ASH (stateful, single replica). It would also be a second guard for the
  *   same fault, and the untaken one would never be exercised.
- * - Probing by running `ash mcp --stateless-http --help` and reading the exit
+ * - Probing by running `ashx mcp --stateless-http --help` and reading the exit
  *   code: rejected. Whether Click services the eager `--help` before or after it
  *   rejects an unknown option is version-dependent, so the probe could report
  *   success for a flag that does not exist — the one error direction that must
  *   not happen.
  *
- * `ASH_MCP_STATELESS_FALLBACK`, AND WHY THE SHIPPED DEFAULTS NEEDED IT
- * -------------------------------------------------------------------
- * The refusal above is correct and it made the one-click templates undeployable
- * with their own defaults. `AshVersion` defaulted to `v3.7.0`, whose `ash mcp` has
- * no `--stateless-http`, and `McpStatelessHttp` defaults to `true`, so the
- * entrypoint took the refusal branch and exited 65 before the server ever bound.
- * An adopter who changed nothing got a container that never started and a
- * CloudFormation health-check timeout naming no cause.
- *
- * Both defaults are individually right. `v3.7.0` is the newest release, and
- * pinning adopters to a feature branch is worse; `true` is what AWS documents as
- * the AgentCore default and what is correct behind any multi-replica load
- * balancer. The defect is the COMBINATION, so the fix is a third value that lets a
- * deployment say which way to resolve it.
- *
- * `refuse` is the default when the variable is unset, so nothing an existing
- * deployment does changes. `warn` starts stateful and says so loudly. Only the
- * AgentCore stack set `warn`, and only because that is where stateful was
- * MEASURED to work — a live runtime completed initialize, tools/list and
- * tools/call, with controls proving sessions were genuinely enforced. The residual
- * hazard there is narrower than the old refusal message claimed: not "rejects
- * every session id the platform injects", which was measured false, but a client
- * that follows AgentCore's own guidance to adopt the rotating id it returns, which
- * is refused on its third call. That message has been corrected to say so.
- *
- * This is maintainer decision D6's second option. The first — moving
- * `DEFAULT_ASH_VERSION` to a ref whose `ash mcp` accepts the flag — is the right
- * end state and needs a release cut from `main`, which no change here can make.
- * `cz bump` made that move at 3.8.0, the first release after 3.7.1, and the
- * AgentCore stack no longer sets `warn` (a tripwire test failed at that bump until
- * it was removed, and now fails if it comes back).
- *
- * The Fargate stack deliberately does NOT set it. Its hazard is a load balancer
- * routing consecutive requests to different replicas, which no measurement here
- * excuses, so that target keeps exiting 65 until its `AshVersion` can serve
- * stateless.
+ * WHY THERE IS NO STATELESS FALLBACK
+ * ----------------------------------
+ * Until v4.0.0 the one-click templates defaulted `AshVersion` to v3.7.0, whose
+ * `ash mcp` has no `--stateless-http`, while `McpStatelessHttp` defaulted to
+ * `true`. The refusal above made that pair exit 65, so an
+ * `ASH_MCP_STATELESS_FALLBACK=warn` setting existed to start stateful with a
+ * warning, and only the AgentCore stack set it, because AgentCore is where
+ * stateful was measured to work. It was the interim fix, kept only until a release with the flag became the default. That release is
+ * v4.0.0, so the fallback was deleted rather than kept beside it. An adopter
+ * who pins a v3 tag now gets the refusal, which names the two fixes: a newer
+ * `AshVersion`, or `McpStatelessHttp=false` to run stateful on purpose.
  *
  * THE SHARED SECRET STAYS OFF THE COMMAND LINE WHEN ASH ALLOWS IT. A process's
  * command line is readable by every user in the container, and from the host by
@@ -478,7 +454,15 @@ ${ASH_S3_SYNC_SCRIPT}PY`;
  * declares `mcp>=2.0.0,<3`, so the resolved version moves under us; a fix that
  * depends on library behaviour we do not pin would regress silently.
  *
- * KNOWN LIMITATION: the probe costs one `ash mcp --help` — a Python import of
+ * WHY THE SCRIPT FALLS BACK FROM `ashx` TO `ash`
+ * ---------------------------------------------
+ * `ashx` is the canonical command. `AshVersion` can still name a v3 tag, and a
+ * v3 image ships only `ash`, so the entrypoint and the gate handler run `ashx`
+ * when the image has it and `ash` otherwise. On a v4 image `ash` is a deprecated
+ * alias that warns on every run, which is why it is the fallback and not the
+ * default. Drop the fallback together with the `ash` alias.
+ *
+ * KNOWN LIMITATION: the probe costs one `ashx mcp --help` — a Python import of
  * ASH's CLI — at every container start. That is well inside the five-minute
  * health-check grace period the Fargate target allows.
  *
@@ -538,6 +522,12 @@ ${ASH_S3_SYNC_SCRIPT}PY`;
  * reading the container's entrypoint needs. Please keep that split; re-expanding
  * the shell comments spends template budget that the launch path depends on.
  */
+/** The canonical ASH command, run inside the image. */
+export const ASH_CLI = 'ashx';
+
+/** ASH's deprecated alias; the only name a v3 image provides. */
+export const ASH_CLI_V3 = 'ash';
+
 export const MCP_ENTRYPOINT_SCRIPT = `#!/bin/sh
 # Entrypoint for the ASH MCP server. Generated by the ASH CDK deployment
 # targets; see deploy/cdk/lib/ash-container-scripts.ts.
@@ -559,10 +549,14 @@ if [ -n "\${ASH_MCP_AUTH_HEADER_VALUE_SECRET_ARN:-}" ]; then
   ASH_AUTH_VALUE=$(python3 -c "import os, sys, boto3; sys.stdout.write(boto3.client('secretsmanager').get_secret_value(SecretId=os.environ['ASH_MCP_AUTH_HEADER_VALUE_SECRET_ARN'])['SecretString'])")
 fi
 
+# v3 images have no ${ASH_CLI}, only ${ASH_CLI_V3}.
+ASH_CLI=${ASH_CLI}
+command -v "$ASH_CLI" >/dev/null 2>&1 || ASH_CLI=${ASH_CLI_V3}
+
 # Ask this image's ASH which MCP options it accepts, once; AshVersion decides
 # which ASH is in here. COLUMNS keeps rich from wrapping a flag name.
-if ! ASH_MCP_HELP="$(COLUMNS=200 ash mcp --help 2>&1)"; then
-  echo "ash-mcp-entrypoint: 'ash mcp --help' exited non-zero, so this image cannot serve MCP at all. This is not a missing option; it is a broken ASH install. Its output was:" >&2
+if ! ASH_MCP_HELP="$(COLUMNS=200 "$ASH_CLI" mcp --help 2>&1)"; then
+  echo "ash-mcp-entrypoint: '$ASH_CLI mcp --help' exited non-zero, so this image cannot serve MCP at all. This is not a missing option; it is a broken ASH install. Its output was:" >&2
   printf '%s\\n' "\${ASH_MCP_HELP}" >&2
   exit 69
 fi
@@ -571,7 +565,7 @@ ash_mcp_supports() {
   printf '%s' "\${ASH_MCP_HELP}" | grep -qF -- "$1"
 }
 
-set -- ash mcp --transport streamable-http \\
+set -- "$ASH_CLI" mcp --transport streamable-http \\
   --host "\${ASH_MCP_HOST:-0.0.0.0}" \\
   --port "\${ASH_MCP_PORT:-8000}" \\
   --mount-path "\${ASH_MCP_MOUNT_PATH:-/mcp}"
@@ -582,10 +576,8 @@ if [ "\${ASH_MCP_STATELESS:-true}" = "true" ]; then
     if [ "\${ASH_MCP_TRUST_UPSTREAM_SESSION_ID:-false}" = "true" ] && ash_mcp_supports '--trust-upstream-session-id'; then
       set -- "$@" --trust-upstream-session-id
     fi
-  elif [ "\${ASH_MCP_STATELESS_FALLBACK:-refuse}" = "warn" ]; then
-    echo "ash-mcp-entrypoint: WARNING: stateless was asked for, but the ASH in this image has no --stateless-http option, so this server runs STATEFUL. It honors only the session id it issued at initialize, so a client that adopts the id returned on each response is refused on its third call. Deploy an AshVersion whose 'ash mcp' accepts --stateless-http to remove this." >&2
   else
-    echo "ash-mcp-entrypoint: this deployment asks for a stateless MCP server, but the ASH in this image has no --stateless-http option, so the server would run stateful and honor only the session id it issued at initialize. Deploy an AshVersion whose 'ash mcp' accepts --stateless-http, set McpStatelessHttp=false to run stateful deliberately, or set ASH_MCP_STATELESS_FALLBACK=warn to start stateful with a warning." >&2
+    echo "ash-mcp-entrypoint: this deployment asks for a stateless MCP server, but the ASH in this image has no --stateless-http option, so the server would run stateful and honor only the session id it issued at initialize. Deploy an AshVersion whose 'ashx mcp' accepts --stateless-http, or set McpStatelessHttp=false to run stateful deliberately." >&2
     exit 65
   fi
 elif ash_mcp_supports '--no-stateless-http'; then
@@ -594,7 +586,7 @@ fi
 
 if [ -n "\${ASH_MCP_ALLOWED_HOST:-}" ]; then
   if ! ash_mcp_supports '--allowed-host'; then
-    echo "ash-mcp-entrypoint: a Host allowlist of '\${ASH_MCP_ALLOWED_HOST}' was requested, but the ASH in this image has no --allowed-host option and would accept every Host header. Deploy an AshVersion whose 'ash mcp' accepts --allowed-host." >&2
+    echo "ash-mcp-entrypoint: a Host allowlist of '\${ASH_MCP_ALLOWED_HOST}' was requested, but the ASH in this image has no --allowed-host option and would accept every Host header. Deploy an AshVersion whose 'ashx mcp' accepts --allowed-host." >&2
     exit 65
   fi
   ASH_SAVED_IFS=$IFS
@@ -989,21 +981,27 @@ COMPLETENESS_FLAG = "--fail-on-incomplete-scanners"
 _completeness_flag_found = None
 
 
+def _ash_cli(scan_env):
+    # v3 images have no ${ASH_CLI}, only ${ASH_CLI_V3}.
+    return "${ASH_CLI}" if shutil.which("${ASH_CLI}", path=scan_env.get("PATH")) else "${ASH_CLI_V3}"
+
+
 def _check_completeness_flag(scan_env):
     global _completeness_flag_found
+    cli = _ash_cli(scan_env)
     if _completeness_flag_found is None:
         env = dict(scan_env, COLUMNS="200", NO_COLOR="1")
         env.pop("FORCE_COLOR", None)
-        probe = _run(["ash", "scan", "--help"], env=env)
+        probe = _run([cli, "scan", "--help"], env=env)
         if probe.returncode != 0:
-            raise RuntimeError("'ash scan --help' exited %d, so this image's ASH could not be "
-                               "checked for %s. Refusing to scan." % (probe.returncode, COMPLETENESS_FLAG))
+            raise RuntimeError("'%s scan --help' exited %d, so this image's ASH could not be "
+                               "checked for %s. Refusing to scan." % (cli, probe.returncode, COMPLETENESS_FLAG))
         _completeness_flag_found = COMPLETENESS_FLAG in re.sub(r"\\x1b\\[[0-9;]*m", "", probe.stdout or "")
     if not _completeness_flag_found:
         raise RuntimeError(
             "The ASH in this image has no %s option, so a scan whose scanners never ran "
             "would be reported as passing. Refusing to scan. Deploy an AshVersion whose "
-            "'ash scan' accepts %s." % (COMPLETENESS_FLAG, COMPLETENESS_FLAG))
+            "'%s scan' accepts %s." % (COMPLETENESS_FLAG, cli, COMPLETENESS_FLAG))
 
 
 def _scan_config(workdir):
@@ -1074,7 +1072,7 @@ def handler(event, context):
     if checkout.returncode != 0:
         raise RuntimeError("could not check out %s: %s" % (source_commit, checkout.stderr))
 
-    argv = ["ash", "scan", "--source-dir", source_dir, "--output-dir", output_dir,
+    argv = [_ash_cli(scan_env), "scan", "--source-dir", source_dir, "--output-dir", output_dir,
             "--config", config_path, COMPLETENESS_FLAG,
             "--no-progress", "--simple", "--compact-report"]
     if os.environ.get("ASH_CHANGED_FILES_ONLY", "false") == "true":

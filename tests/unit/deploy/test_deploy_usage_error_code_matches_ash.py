@@ -153,7 +153,7 @@ def test_the_terraform_merge_buildspec():
     arms = [
         int(n)
         for n in re.findall(
-            r"^\s*(\d+)\)\s*echo \"ash merge: usage error", text, re.MULTILINE
+            r"^\s*(\d+)\)\s*echo \"ashx? merge: usage error", text, re.MULTILINE
         )
     ]
     table = [

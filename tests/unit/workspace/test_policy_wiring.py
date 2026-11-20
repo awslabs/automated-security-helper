@@ -34,7 +34,7 @@ The `--compact-report` trap
 `cli/scan.py` appends `reporters.markdown.options.compact=true` to
 `config_overrides` when `--compact-report` is set. So `config_overrides` is
 non-empty for a user who never heard of `--config-overrides`, and
-`ash --workspace X --compact-report` against a project with its own
+`ashx --workspace X --compact-report` against a project with its own
 `.ash/ash.yaml` is the minimal reproduction of the refusal.
 
 What these tests deliberately do NOT pin

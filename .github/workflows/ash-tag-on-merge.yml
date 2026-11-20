@@ -6,45 +6,42 @@ on:
     branches:
       - main
 
-# No workflow-level write grant: each job asks for what it uses. tag-and-release
-# creates the release tag and the GitHub Release, so it holds
-# contents: write. This workflow publishes no docs; the docs workflow deploys on
-# pushes to main and when run by hand. zizmor (excessive-permissions) flagged the old
-# workflow-level `contents: write`, which also reached any job added later without a
-# block of its own.
-permissions: {}
+# Read-only default. Every job below declares what it needs, and a job-level
+# `permissions:` block REPLACES this one rather than adding to it, so this value
+# never applies to them. Only tag-and-release holds write scopes. Keeping this at
+# `read` means a job added here later starts with no write access instead of
+# silently inheriting the write scopes that publishing needs.
+permissions:
+  contents: read
 
 jobs:
-  tag-and-release:
-    name: Create tag and GitHub Release
-    permissions:
-      contents: write
+  # What to release, decided once, before anything is built. The commit is pinned here
+  # and handed to every later job: the assets take most of an hour to build, and main can
+  # move in that time, so "check out main" in two jobs could name two commits.
+  #
+  # The commit is the pull request's merge commit, not main's tip when this job starts.
+  # actions/attest-build-provenance records github.sha as the source commit, and for a
+  # merged pull request github.sha is that merge commit. Checking out `main` would build
+  # from whatever landed after the merge while the attestation names the merge, so a
+  # verifier would be pointed at code the assets were not built from.
+  resolve:
+    name: Decide what to release
     if: >-
       github.event.pull_request.merged == true &&
       startsWith(github.event.pull_request.title, 'chore(release):')
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-    # Release runs do not overlap. The group is not per pull request or per
-    # version: the release step reads the remote's tags before it creates anything,
-    # so two runs for different versions must not interleave that read with each
-    # other's writes. cancel-in-progress stays false because a release run must
-    # finish once started.
-    #
-    # GitHub keeps at most one running and one pending run per group. When a third
-    # release run arrives while one runs and one waits, the waiting run is cancelled
-    # (cancel-in-progress: false does not change that). A cancelled run creates no
-    # release and starts no docs publish, and the only trace is a "cancelled" run in
-    # the Actions list. Re-run it by hand. That is safe: the step skips a release that
-    # already exists and refuses a release tag that sits at another commit.
-    concurrency:
-      group: ash-release-tag
-      cancel-in-progress: false
+    timeout-minutes: 10
+    permissions:
+      contents: read
     outputs:
       version: ${{ steps.version.outputs.version }}
+      sha: ${{ steps.sha.outputs.sha }}
+      skip: ${{ steps.existing.outputs.skip }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           # The release pull request's merge commit, not the branch: with two release
           # pull requests merged close together, a run that read the version from the
           # current tip of main would release the newer version at the older merge.
@@ -76,19 +73,206 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Version: $VERSION"
 
-      - name: Create tag and GitHub Release
+      # Fails here, before an hour of building, rather than after: an empty merge SHA
+      # would have checked out the default branch, and one that is not github.sha would
+      # give the attestation a source commit the assets were not built from.
+      # tests/unit/test_release_assets.py runs this script.
+      #
+      # Two comparisons, no format check: HEAD is always a full 40-hex SHA, so any
+      # MERGE_SHA that is empty or not a commit ID differs from github.sha or from HEAD.
+      # A separate regex on MERGE_SHA would refuse nothing these two let through.
+      - name: Pin the commit being released
+        id: sha
+        env:
+          MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+        run: |
+          set -euo pipefail
+          if [ "$MERGE_SHA" != "$GITHUB_SHA" ]; then
+            echo "::error::merge_commit_sha '${MERGE_SHA}' is not github.sha ${GITHUB_SHA}, which the provenance attestation records as the source commit. Refusing to attest assets built from a commit the attestation does not name."
+            exit 1
+          fi
+          SHA="$(git rev-parse HEAD)"
+          if [ "$SHA" != "$MERGE_SHA" ]; then
+            echo "::error::the checkout is at ${SHA}, not the merge commit '${MERGE_SHA}'"
+            exit 1
+          fi
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "Releasing the merge commit $SHA"
+
+      # Asked before building, because the build, the gates and the attestation are all
+      # pointless work if the release already exists -- and an attestation is not free:
+      # it writes to the repository's attestation store, so attesting artifacts for a
+      # release that is then skipped leaves a signed record of something never published.
+      - name: Decide whether this release already exists
+        id: existing
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.version.outputs.version }}
           MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
         run: |
+          set -euo pipefail
           TAG="v${VERSION}"
-
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "::notice::Release $TAG already exists, skipping"
-            exit 0
+            echo "::notice::Release $TAG already exists, skipping build and publish"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
+  # Every release asset, built, installed where it can be, and gated on the bytes that
+  # will be attached: the wheel, sdist and .mcpb this job used to build itself, plus the
+  # .deb, .rpm, .msix, .nupkg, Flatpak bundle, .vsix, JetBrains plugin zip and winget
+  # manifests. ash-release-assets.yml is the same workflow a push runs as the dry run;
+  # packaging/release-assets.py is the list it holds the staged set to.
+  #
+  # Called rather than downloaded from the merge commit's own CI: a called workflow is
+  # part of THIS run, so its artifacts are covered by this run's OIDC identity when the
+  # job below attests them, which an artifact from another run would not be.
+  assets:
+    name: Release assets
+    needs: resolve
+    if: needs.resolve.outputs.skip == 'false'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ash-release-assets.yml
+    with:
+      ref: ${{ needs.resolve.outputs.sha }}
+      release: true
+    secrets:
+      MSIX_SIGNING_PFX_BASE64: ${{ secrets.MSIX_SIGNING_PFX_BASE64 }}
+      MSIX_SIGNING_PFX_PASSWORD: ${{ secrets.MSIX_SIGNING_PFX_PASSWORD }}
+
+  tag-and-release:
+    name: Create tag and GitHub Release
+    needs: [resolve, assets]
+    # Runs when the release already exists too, with the publishing steps skipped.
+    # `assets` is skipped in that case, which would skip this job without the explicit
+    # condition.
+    if: >-
+      !cancelled() &&
+      needs.resolve.result == 'success' &&
+      (needs.resolve.outputs.skip == 'true' || needs.assets.result == 'success')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Release runs do not overlap. The group is not per pull request or per
+    # version: the release step reads the remote's tags before it creates anything,
+    # so two runs for different versions must not interleave that read with each
+    # other's writes. cancel-in-progress stays false because a release run must
+    # finish once started.
+    #
+    # GitHub keeps at most one running and one pending run per group. When a third
+    # release run arrives while one runs and one waits, the waiting run is cancelled
+    # (cancel-in-progress: false does not change that). A cancelled run creates no
+    # release and starts no docs publish, and the only trace is a "cancelled" run in
+    # the Actions list. Re-run it by hand. That is safe: the step skips a release that
+    # already exists and refuses a release tag that sits at another commit.
+    concurrency:
+      group: ash-release-tag
+      cancel-in-progress: false
+    # `contents: write` creates the tag and the release. The other two exist only for
+    # provenance and are the minimum
+    # `actions/attest-build-provenance` accepts:
+    #
+    #   id-token: write       mints the OIDC token Sigstore binds the attestation
+    #                         to. Without it the action fails at signing rather
+    #                         than silently publishing an unattested asset. It
+    #                         grants no repository access by itself.
+    #   attestations: write   writes the attestation to this repository's
+    #                         attestation store, which is what
+    #                         `gh attestation verify` later reads.
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      VERSION: ${{ needs.resolve.outputs.version }}
+      # The commit resolve pinned: the one the assets were built from and checked out
+      # below, and the one the tag is created on.
+      RELEASE_SHA: ${{ needs.resolve.outputs.sha }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
+          fetch-depth: 0
+
+      # download-artifact treats an empty artifact-ids as "no filter" and downloads
+      # every artifact of the run, each into its own subdirectory. The verify step
+      # would then fail, but on a confusing message, so the ID is held to a number here.
+      - name: Check the release asset artifact ID
+        if: needs.resolve.outputs.skip == 'false'
+        env:
+          ARTIFACT_ID: ${{ needs.assets.outputs.artifact-id }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$ARTIFACT_ID" =~ ^[0-9]+$ ]]; then
+            echo "::error::the assets job's artifact-id output is '${ARTIFACT_ID}', not an artifact ID. Without one, download-artifact would fetch every artifact in the run."
+            exit 1
+          fi
+          echo "release asset artifact: ${ARTIFACT_ID}"
+
+      # By ID, so exactly the one artifact the assemble job uploaded is fetched, and
+      # with one artifact download-artifact extracts it straight into `path` (no
+      # per-artifact subdirectory). An ID also survives "re-run failed jobs", where a
+      # name carrying run_attempt would name an artifact that was never uploaded.
+      - name: Download the gated release assets
+        if: needs.resolve.outputs.skip == 'false'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ needs.assets.outputs.artifact-id }}
+          path: release-assets
+
+      # The bytes about to be attached are the bytes the gates passed: the digests come
+      # from the assemble job's output, computed after its gates, not from a file inside
+      # the artifact, so they cannot travel with the files they describe. The set check
+      # then refuses anything missing or extra, which sha256sum -c alone does not.
+      - name: Verify the assets are the gated set
+        if: needs.resolve.outputs.skip == 'false'
+        env:
+          SUMS: ${{ needs.assets.outputs.sums }}
+          BUILT_VERSION: ${{ needs.assets.outputs.version }}
+        run: |
+          set -euo pipefail
+          if [ "$BUILT_VERSION" != "$VERSION" ]; then
+            echo "::error::the assets were built for ${BUILT_VERSION}, and this release is ${VERSION}"
+            exit 1
+          fi
+          # Blank lines dropped: under --strict, sha256sum fails on one, so a trailing
+          # newline in the output value would refuse a good set. An empty SUMS still
+          # leaves no checksum line, which sha256sum refuses.
+          printf '%s\n' "$SUMS" | awk 'NF' > "$RUNNER_TEMP/SHA256SUMS"
+          (cd release-assets && sha256sum --strict -c "$RUNNER_TEMP/SHA256SUMS")
+          python3 packaging/release-assets.py check release-assets --version "$VERSION"
+
+      # Provenance. Attested BEFORE the release is created, so a signing failure blocks
+      # publication rather than leaving an unattested asset already public and needing a
+      # delete. `release-assets/*` is every file the step above held to the asset list,
+      # so the attested set and the attached set are one glob over one checked directory.
+      # One call, one attestation per subject.
+      - name: Attest build provenance
+        if: needs.resolve.outputs.skip == 'false'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: release-assets/*
+
+      - name: Create tag and GitHub Release
+        if: needs.resolve.outputs.skip == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+        run: |
+          set -euo pipefail
+          TAG="v${VERSION}"
+
+          # The artifacts are passed as positional arguments. Before they were, this
+          # command had no file argument at all, so every ASH release published
+          # release notes and nothing installable. `release-assets/*` is the
+          # directory the verify step held to packaging/release-assets.py.
+          #
+          # --target is RELEASE_SHA, the commit resolve pinned and the assets were
+          # built from, rather than `main`, which may have moved while they were
+          # built. `set -u` stops the step if it is unset.
+          #
           # `gh release create --target` is ignored when the tag already exists, so a
           # tag left at another commit would publish this release there. Read the tag
           # on the remote first: absent, or already at the merge commit, is fine. An
@@ -137,7 +321,7 @@ jobs:
           sys.exit(0 if curated and curated in notes else 1)
           PY
             then
-              echo "::error::${CURATED} exists, but the CHANGELOG.md entry for ${TAG} does not contain it. Refusing to publish ${TAG} without its curated notes. Regenerate the entry with commitizen without bumping the version (the template includes the file) and merge it as a new chore(release): pull request, or keep this merge commit: create the release by hand with gh release create ${TAG} --target ${MERGE_SHA} and the entry plus the curated notes as its body, after which a run of this job finds the release and exits without publishing. A plain re-run of this job reads the same CHANGELOG.md from the same merge commit and fails the same way."
+              echo "::error::${CURATED} exists, but the CHANGELOG.md entry for ${TAG} does not contain it. Refusing to publish ${TAG} without its curated notes. Regenerate the entry with commitizen without bumping the version (the template includes the file) and merge it as a new chore(release): pull request, or keep this merge commit: create the release by hand at ${MERGE_SHA} for ${TAG} with the GitHub CLI's release creation command and the entry plus the curated notes as its body, after which a run of this job finds the release and exits without publishing. A plain re-run of this job reads the same CHANGELOG.md from the same merge commit and fails the same way."
               exit 1
             fi
           fi
@@ -149,14 +333,44 @@ jobs:
             echo "::warning::CHANGELOG.md has no entry for ${TAG}, so the release body is GitHub's generated notes only."
           fi
 
-          # Target the merge commit of the release pull request, not the branch name.
-          # `main` is resolved when the release is created, so a pull request merged
-          # in between would put the tag on a commit that is not the release.
+          # Target the merge commit of the release pull request, not the branch name:
+          # RELEASE_SHA is the commit resolve pinned, which it checked equal to that
+          # merge commit. `main` is resolved when the release is created, so a pull
+          # request merged in between would put the tag on a commit that is not the
+          # release.
+          #
+          # ${A[@]+"${A[@]}"} rather than "${A[@]}": bash before 4.4, which is
+          # macOS's /bin/bash, treats an empty array as unset under `set -u`.
+          # The test runs this step on macOS runners as well as ubuntu.
           gh release create "$TAG" \
             --repo "$GITHUB_REPOSITORY" \
-            --target "$MERGE_SHA" \
+            --target "$RELEASE_SHA" \
             --generate-notes \
-            "${NOTES_ARGS[@]}" \
-            --title "$TAG"
+            ${NOTES_ARGS[@]+"${NOTES_ARGS[@]}"} \
+            --title "$TAG" \
+            release-assets/*
 
-          echo "Created release $TAG"
+          # The count is this step's own evidence of how much it attached. The step
+          # below compares names with what the release actually carries.
+          echo "Created release $TAG with $(find release-assets -maxdepth 1 -type f \
+            | wc -l) attached artifact(s)"
+
+      # The release as GitHub holds it, against the staged set. A release can be
+      # created with an asset missing (an upload that failed after the release
+      # existed), and nothing above would notice. It cannot be un-published from
+      # here, but it fails loudly, by name, while the person who merged is watching.
+      - name: Assert the release carries exactly the staged assets
+        if: needs.resolve.outputs.skip == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="v${VERSION}"
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets \
+            --jq '.assets[].name' | sort > "$RUNNER_TEMP/attached.txt"
+          find release-assets -maxdepth 1 -type f -printf '%f\n' | sort > "$RUNNER_TEMP/staged.txt"
+          if ! diff -u "$RUNNER_TEMP/staged.txt" "$RUNNER_TEMP/attached.txt"; then
+            echo "::error::release ${TAG} does not carry exactly the staged assets (diff above: - staged, + attached)"
+            exit 1
+          fi
+          echo "release ${TAG} carries all $(wc -l < "$RUNNER_TEMP/staged.txt") staged asset(s)"

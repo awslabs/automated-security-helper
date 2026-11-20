@@ -393,7 +393,7 @@ class ConfigLinter:
             )
             return result
 
-        # Run validation checks (same as `ash config validate`)
+        # Run validation checks (same as `ashx config validate`)
         cls._check_validation_issues(
             config_path, config_data, result, source_dir, config_text=config_text
         )
@@ -2121,7 +2121,7 @@ class ConfigLinter:
             message=(
                 f"{subject} is written with the deprecated 'expiration' "
                 "spelling; write 'expires'. The alias is removed in ASH v4; "
-                "`ash config lint --fix` does not rename it"
+                "`ashx config lint --fix` does not rename it"
             ),
             path=path,
             entry_id=entry_id,
@@ -2827,7 +2827,7 @@ class ConfigLinter:
         through silently.
 
         Each issue is :class:`LintSeverity.WARNING` and ``fixable=True``;
-        ``ash config lint --fix`` renames the key in-place.
+        ``ashx config lint --fix`` renames the key in-place.
 
         A message names a section key as ``shown_data`` (the copy of
         ``config_data`` ``lint`` makes) holds it, so one the file read from the
@@ -2958,7 +2958,7 @@ class ConfigLinter:
                                 f"scan merges them key by key, and where both "
                                 f"set a key '{swapped}' wins, so a key only "
                                 f"'{shown_key}' sets still applies. Remove or "
-                                f"merge one of them by hand: `ash config lint "
+                                f"merge one of them by hand: `ashx config lint "
                                 f"--fix` does not rename it"
                             ),
                             fixable=False,
@@ -3235,7 +3235,7 @@ class ConfigLinter:
         collapsed = cls._collapse_reason_whitespace(reason)
         if collapsed == reason:
             # Nothing to do. Reporting success here would make
-            # `ash config lint --fix` claim a fix it did not make.
+            # `ashx config lint --fix` claim a fix it did not make.
             return False
 
         suppression["reason"] = collapsed

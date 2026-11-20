@@ -49,6 +49,9 @@ from automated_security_helper.core.exceptions import (
     WorkspaceDefinitionError,
     WorkspacePathNotUtf8Error,
 )
+from automated_security_helper.cli.deprecations import (
+    warn_deprecated_option_spellings,
+)
 from automated_security_helper.cli.params import from_environment as _from_environment
 
 # This module is imported on EVERY `ash` invocation (`ash --version` included):
@@ -820,7 +823,7 @@ def _validate_shard_options(
             "--shard-index/--shard-count cannot be combined with --workspace. "
             "Both spread one scan over more compute, but along different axes, and "
             "only sharding is recombinable: it partitions the scanners and stamps "
-            "the partition onto the results so 'ash merge' can prove the shards "
+            "the partition onto the results so 'ashx merge' can prove the shards "
             "reconstruct exactly one whole scan. Workspace mode's unified results "
             "file is assembled from the per-project payloads and carries none of "
             "each project's scan metadata, so a sharded workspace run would write "
@@ -1150,7 +1153,7 @@ def run_ash_scan_cli_command(
         typer.Option(
             "--offline-semgrep-rulesets",
             rich_help_panel="Execution",
-            help="Specify Semgrep rulesets for use in ASH offline mode",
+            help="Specify rulesets to bake into the opengrep offline cache for ASH offline mode (the flag keeps its historical name; the semgrep scanner is served by the opengrep plugin)",
         ),
     ] = "p/ci",
     strategy: Annotated[
@@ -1221,6 +1224,11 @@ def run_ash_scan_cli_command(
         bool,
         typer.Option(
             "--version",
+            # -V, not -v. The deleted root bash script used -v for --version,
+            # but -v is already --verbose here and has been for all of v3, so
+            # taking it back would silently turn a verbose run into a version
+            # print for anyone who has it in CI. Version gets its own letter.
+            "-V",
             help="Prints version number",
         ),
     ] = False,
@@ -1263,7 +1271,15 @@ def run_ash_scan_cli_command(
     ] = True,
     quiet: Annotated[
         bool,
-        typer.Option(rich_help_panel="Output and logging", help="Hide all log output"),
+        # The pair is spelled out because attaching -q means naming the flag
+        # explicitly, and naming only "--quiet" would drop the --no-quiet that
+        # typer derives from the parameter name.
+        typer.Option(
+            "--quiet/--no-quiet",
+            "-q",
+            rich_help_panel="Output and logging",
+            help="Hide all log output",
+        ),
     ] = False,
     log_level: Annotated[
         AshLogLevel,
@@ -1305,8 +1321,20 @@ def run_ash_scan_cli_command(
     ] = False,
     color: Annotated[
         bool,
+        # The leading whitespace in "  /-C" is load-bearing. It is how click
+        # disambiguates a short form for the OFF side of a boolean flag. Without
+        # it the decl is taken as a literal option named "/-C" and -C is
+        # rejected with "No such option", silently and at runtime only.
+        #
+        # -C rather than -c because -c is --config on most of these commands.
+        # The deleted root bash script used -c for --no-color, so an old
+        # invocation consumes the next argument as a config path; see
+        # docs/content/docs/cli-reference.md.
         typer.Option(
-            rich_help_panel="Output and logging", help="Enable/disable colorized output"
+            "--color/--no-color",
+            "  /-C",
+            rich_help_panel="Output and logging",
+            help="Enable/disable colorized output",
         ),
     ] = True,
     fail_on_findings: Annotated[
@@ -1347,7 +1375,7 @@ def run_ash_scan_cli_command(
             rich_help_panel="Exit policy",
             help=(
                 "Let the scan pass when a scanner's content database (grype's or "
-                "trivy's vulnerability database, the offline semgrep/opengrep "
+                "trivy's vulnerability database, the offline opengrep "
                 "rulesets) is older than its declared bound -- for grype, "
                 f"{go_duration(get_content_database('grype-db').max_age)} after the "
                 "database was built. Without it such a scan exits 1, except for "
@@ -1461,7 +1489,7 @@ def run_ash_scan_cli_command(
         typer.Option(
             "--shard-index",
             rich_help_panel="CI and sharding",
-            help="Zero-based index of this shard when one scan is split across several executors. Requires --shard-count. A 3-way split uses indices 0, 1 and 2. Each shard runs a disjoint subset of the scanners and records which ones in its results; recombine them with 'ash merge'.",
+            help="Zero-based index of this shard when one scan is split across several executors. Requires --shard-count. A 3-way split uses indices 0, 1 and 2. Each shard runs a disjoint subset of the scanners and records which ones in its results; recombine them with 'ashx merge'.",
             envvar="ASH_SHARD_INDEX",
         ),
     ] = None,
@@ -1610,6 +1638,15 @@ def run_ash_scan_cli_command(
     ash_revision_to_install: Annotated[
         str | None,
         typer.Option(
+            "--ash-revision-to-install",
+            # Both compatibility spellings come from the deleted root bash
+            # script. -rev is a single-dash multi-character option, which is
+            # unusual: click's short-option matcher would otherwise split it
+            # into -r -e -v, and -r exists here. Declaring it explicitly makes
+            # click match the whole token first, verified in
+            # tests/unit/cli/test_cli_flag_surface.py.
+            "--ash-revision",
+            "-rev",
             rich_help_panel="Container",
             help="ASH branch, tag or full commit id to install in the container image for usage during containerized scans",
         ),
@@ -1642,6 +1679,11 @@ def run_ash_scan_cli_command(
     # (like 'scan') will handle the actual execution with the correct arguments
     if ctx.resilient_parsing or ctx.invoked_subcommand is not None:
         return
+
+    # Below the guard above, not in an option callback. This function is both the
+    # root callback and the `scan` command, so `ashx scan ...` parses its
+    # parameters twice; an option callback would warn twice for one invocation.
+    warn_deprecated_option_spellings()
 
     if version:
         echo(f"awslabs/automated-security-helper v{get_ash_version()}")

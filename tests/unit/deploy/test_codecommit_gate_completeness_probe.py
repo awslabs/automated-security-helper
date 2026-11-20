@@ -86,7 +86,7 @@ class _Ash:
 
     def __call__(self, argv, cwd=None, env=None):
         argv = list(argv)
-        if argv == ["ash", "scan", "--help"]:
+        if argv == ["ashx", "scan", "--help"]:
             self.probes.append(dict(env or {}))
             return SimpleNamespace(
                 returncode=self.help_exit, stdout=self.help_text, stderr=""

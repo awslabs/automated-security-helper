@@ -22,7 +22,7 @@ while this test checks another. The test used to recover the same facts by parsi
 rendered page with regular expressions.
 
 Each scan must exit with the code the journey states, and print its ``Exiting due to
-N actionable findings`` line where it states a count. ``ash report`` in step 6 must
+N actionable findings`` line where it states a count. ``ashx report`` in step 6 must
 exit 0 and name the rule the page suppresses next.
 
 bandit has to be where a docs session finds tools (docs_runner.session_path): the

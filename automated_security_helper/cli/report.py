@@ -101,7 +101,7 @@ from automated_security_helper.utils.terminal_text import (
 # Every entry must be a real reporter's config name, because this is matched
 # against --format. The list used to carry names no reporter has
 # (security-hub, security-lake, opensearch) and to miss JSON reporters, and spdx
-# sat here while that reporter emitted YAML, so `ash report --format spdx` died
+# sat here while that reporter emitted YAML, so `ashx report --format spdx` died
 # in print_json. tests/unit/cli/test_report_format_output.py checks every name
 # against the registered reporters.
 #
@@ -724,7 +724,21 @@ def report_command(
     debug: Annotated[
         bool, typer.Option("--debug", "-d", help="Enable debug logging")
     ] = False,
-    color: Annotated[bool, typer.Option(help="Enable/disable colorized output")] = True,
+    color: Annotated[
+        bool,
+        # The leading whitespace in "  /-C" is load-bearing. It is how click
+        # disambiguates a short form for the OFF side of a boolean flag. Without
+        # it the decl is taken as a literal option named "/-C" and -C is
+        # rejected with "No such option", silently and at runtime only.
+        #
+        # -C rather than -c because -c is --config on most of these commands.
+        # The deleted root bash script used -c for --no-color, so an old
+        # invocation consumes the next argument as a config path; see
+        # docs/content/docs/cli-reference.md.
+        typer.Option(
+            "--color/--no-color", "  /-C", help="Enable/disable colorized output"
+        ),
+    ] = True,
 ):
     """Generate a report from ASH scan results using the specified reporter plugin."""
     if config_overrides is None:
@@ -1127,7 +1141,7 @@ def report_command(
     # locale encoding, which on Windows is cp1252. ASH writes this file as UTF-8, and
     # findings routinely carry bytes cp1252 cannot decode -- a snippet from a
     # non-ASCII source file, a tool's smart quotes. Measured on
-    # `scan (python-local, windows-latest)`: `ash report --format text` died with
+    # `scan (python-local, windows-latest)`: `ashx report --format text` died with
     # "'charmap' codec can't decode byte 0x9d", so on Windows this command could not
     # render a report for any scan whose results were not pure cp1252.
     try:
@@ -1188,7 +1202,7 @@ def report_command(
         name = plugin_config_key(reporter_class)
         _print_error(
             "[red]Error: reporter '{}' sends findings off the host and is not "
-            "enabled. ash report takes whether it runs, and where it sends, from "
+            "enabled. ashx report takes whether it runs, and where it sends, from "
             "--config-overrides: pass --config-overrides reporters.{}.enabled=true "
             "and its destination options.[/red]",
             name,
@@ -1269,7 +1283,7 @@ def report_command(
         if report_content is None:
             # `report` is annotated `-> str | None`, and a reporter returns None
             # when it could not build its artefact at all. Without this guard the
-            # branches below hand None to print()/print_json(), so `ash report`
+            # branches below hand None to print()/print_json(), so `ashx report`
             # writes the literal "None" to stdout and exits 0 -- a caller
             # redirecting stdout to a file gets a four-byte report and a success
             # status. Exit non-zero instead: the reporter already logged why.

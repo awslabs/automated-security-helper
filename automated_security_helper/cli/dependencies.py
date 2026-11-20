@@ -86,6 +86,7 @@ from automated_security_helper.utils.log import (
 # the next tag; see escape_markup.
 from automated_security_helper.utils.log import escape_markup as escape
 from automated_security_helper.utils.process_env import set_environ, snapshot_environ
+from automated_security_helper.utils.scanner_names import canonical_scanner_name
 from automated_security_helper.utils.python_child import (
     empty_directory,
     python_child,
@@ -264,8 +265,11 @@ def _resolve_tool_aliases(tools: List[str]) -> dict[str, str]:
 
     A deprecated alias, in any case or with blanks around it, maps to its
     replacement and prints one warning to stderr per alias, however many times it
-    was passed. Every other name maps to itself, so an unknown name is still
-    refused by the caller exactly as before.
+    was passed. A retired scanner name resolves through ``canonical_scanner_name``
+    -- the same case- and punctuation-insensitive lookup every other entry point
+    applies, so ``--tool Semgrep`` installs opengrep's tool too. Every other name
+    maps to itself, so an unknown name is still refused by the caller exactly as
+    before.
     """
     resolved: dict[str, str] = {}
     aliases_by_key = _deprecated_aliases_by_key()
@@ -277,6 +281,9 @@ def _resolve_tool_aliases(tools: List[str]) -> dict[str, str]:
             continue
         key = _selection_key(tool)
         replacement = aliases_by_key.get(key)
+        if replacement is None:
+            canonical = canonical_scanner_name(tool.strip())
+            replacement = canonical if canonical != tool.strip() else None
         if replacement is None:
             resolved[tool] = tool.strip()
             continue
@@ -804,6 +811,14 @@ def _shown_command(args: Iterable[Any], values: Iterable[str]) -> str:
     return text_without_values(shown, value_tuple(values))
 
 
+class _TimedOutExitCode(int):
+    """The exit code of a command stopped at INSTALL_COMMAND_TIMEOUT_SECONDS.
+
+    An ``int`` with the code's own value, so every caller reads it as before;
+    the type alone says the command timed out rather than failed.
+    """
+
+
 def run_command(args: List[str], shell: bool = False):
     """Run a command and return the exit code.
 
@@ -919,7 +934,12 @@ def run_command(args: List[str], shell: bool = False):
             # whatever its code says, and may have no code: the answer is a
             # non-zero number either way.
             code = result.returncode
-            return code if isinstance(code, int) and code != 0 else 1
+            code = code if isinstance(code, int) and code != 0 else 1
+            # A command stopped at its timeout is told apart from one that
+            # exited non-zero: _run_install_command does not retry it.
+            if getattr(result, "timed_out", False) is True:
+                return _TimedOutExitCode(code)
+            return code
         return result.returncode
     except Exception as e:
         print(
@@ -950,6 +970,10 @@ def _run_install_command(cmd: List[str], shell: bool = False) -> int:
     code = run_command(cmd)
     for attempt, delay in enumerate(_APT_RETRY_DELAYS_SECONDS, start=2):
         if code == 0:
+            break
+        if isinstance(code, _TimedOutExitCode):
+            # Stopped after an hour, not failed fast: a stalled apt-get (the
+            # dpkg lock held) would stall again, three hours in all.
             break
         print(
             f"apt-get install failed with exit code {code}; retrying in "
@@ -1052,7 +1076,21 @@ def install_dependencies(
     debug: Annotated[
         bool, typer.Option("--debug", "-d", help="Enable debug logging")
     ] = False,
-    color: Annotated[bool, typer.Option(help="Enable/disable colorized output")] = True,
+    color: Annotated[
+        bool,
+        # The leading whitespace in "  /-C" is load-bearing. It is how click
+        # disambiguates a short form for the OFF side of a boolean flag. Without
+        # it the decl is taken as a literal option named "/-C" and -C is
+        # rejected with "No such option", silently and at runtime only.
+        #
+        # -C rather than -c because -c is --config on most of these commands.
+        # The deleted root bash script used -c for --no-color, so an old
+        # invocation consumes the next argument as a config path; see
+        # docs/content/docs/cli-reference.md.
+        typer.Option(
+            "--color/--no-color", "  /-C", help="Enable/disable colorized output"
+        ),
+    ] = True,
 ) -> int:
     """Install dependencies for ASH plugins.
 
@@ -1223,7 +1261,7 @@ def install_dependencies(
     work_dir = output_dir.joinpath(ASH_WORK_DIR_NAME)
     # config_path is what makes --config/ASH_CONFIG mean anything here. Omitting it
     # made the option accept a path and then quietly ignore it, so
-    # `ash dependencies install --config .ash/.ash_community_plugins.yaml` resolved
+    # `ashx dependencies install --config .ash/.ash_community_plugins.yaml` resolved
     # the default config instead and installed dependencies for the wrong set of
     # plugins.
     try:
@@ -1243,7 +1281,7 @@ def install_dependencies(
     # `--config` previously resolved the config's *values* and stopped there. The
     # scanners a config adds through `ash_plugin_modules` were never imported, so
     # their plugin classes never registered, so
-    # `ash dependencies install --config .ash/.ash_community_plugins.yaml` installed
+    # `ashx dependencies install --config .ash/.ash_community_plugins.yaml` installed
     # dependencies for the built-in set and reported success -- and trivy, snyk and
     # ferret had to be installed by hand in CI before the scan.
     #
@@ -1328,7 +1366,7 @@ def install_dependencies(
                 # The plugin's own section of the resolved config, looked up the way
                 # the scan path looks it up (ExecutionEngine.get_scanner). Without
                 # it every plugin was built from its defaults, so a
-                # `--config-overrides scanners.semgrep.options.tool_version===X`
+                # `--config-overrides scanners.bandit.options.tool_version===X`
                 # reached resolved_config and stopped there: the scanner installed
                 # its default range, and the image carried whatever release PyPI
                 # had that day instead of the version its license entry records.

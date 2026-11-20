@@ -333,6 +333,30 @@ ALLOWED: Dict[str, str] = {
     "tests/utils/selection.py::get_tests_by_keyword::test-run#1@run": _SELECTION_TOOL,
     "tests/utils/selection.py::get_slow_tests::test-run#1@run": _SELECTION_TOOL,
     "tests/utils/selection.py::run_selected_tests::test-run#1@run": _SELECTION_TOOL,
+    "tests/unit/test_release_assets.py::test_the_self_test_passes::script#1@run": (
+        "runs packaging/release-assets.py, which imports the standard library only"
+    ),
+    "tests/unit/test_release_assets.py"
+    "::test_the_check_command_fails_on_a_missing_asset::script#1@run": (
+        "runs packaging/release-assets.py, which imports the standard library only"
+    ),
+    "tests/unit/test_release_assets.py"
+    "::test_the_check_command_fails_on_a_missing_asset::script#2@run": (
+        "runs packaging/release-assets.py, which imports the standard library only"
+    ),
+    "tests/unit/test_iac_equivalence_gate.py::run_checker::unread-script#1@run": (
+        "runs the copied deploy/tests/iac-equivalence.py, which imports the "
+        "standard library only"
+    ),
+    "tests/unit/test_assert_pytest_required_nodes.py::run_pytest::test-run#1@run+cwd": (
+        "a pytest over one generated module in a temporary directory with an ini of "
+        "its own; the module imports pytest only, and nothing of ASH is collected"
+    ),
+    "tests/unit/test_assert_pytest_required_nodes.py"
+    "::test_a_run_without_rp_is_rejected::test-run#1@run+cwd": (
+        "a pytest over the generated suite in a temporary directory with an ini of "
+        "its own; the suite imports pytest only, and nothing of ASH is collected"
+    ),
     "tests/unit/config/test_client_scanner_exclusions_pattern_bounds.py"
     "::test_a_pass_starts_one_process_on_the_spawn_path"
     "::fresh-interpreter#1@get_context": (

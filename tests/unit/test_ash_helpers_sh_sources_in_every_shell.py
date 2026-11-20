@@ -96,7 +96,10 @@ def checkout(tmp_path: Path) -> Path:
     root = tmp_path / "ash checkout"
     (root / "utils").mkdir(parents=True)
     shutil.copy2(HELPERS, root / "utils" / "ash_helpers.sh")
-    stub = root / "ash"
+    (root / "pyproject.toml").write_text("[project]\nname = 'x'\n", encoding="utf-8")
+    stub_dir = tmp_path / "stub-bin"
+    stub_dir.mkdir()
+    stub = stub_dir / "ashx"
     stub.write_text(STUB_ASH, encoding="utf-8")
     stub.chmod(0o755)
     return root
@@ -133,6 +136,7 @@ def _source(
     home.mkdir(exist_ok=True)
     env["HOME"] = str(home)
     env["ZDOTDIR"] = str(home)
+    env["PATH"] = os.pathsep.join([str(tmp_path / "stub-bin"), env.get("PATH", "")])
     env["ASH_STUB_LOG"] = str(log)
     env["HELPERS"] = str(checkout / "utils" / "ash_helpers.sh")
     env.update(extra_env or {})
@@ -167,7 +171,16 @@ def _assert_working(result, calls, checkout: Path) -> None:
     detail = f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     assert _reported(result, "rc") == "0", detail
     assert Path(_reported(result, "root")).resolve() == checkout.resolve(), detail
-    assert calls == ["--first", "two words", "--", "--second", "--"], detail
+    container = ["--mode", "container"]
+    assert calls == [
+        *container,
+        "--first",
+        "two words",
+        "--",
+        *container,
+        "--second",
+        "--",
+    ], detail
     assert _reported(result, "after") == "ok", detail
 
 
@@ -183,8 +196,9 @@ def test_the_files_own_location_wins_over_a_stale_ash_root_dir(
 ):
     stale = tmp_path / "some other checkout"
     stale.mkdir()
-    (stale / "ash").write_text("#!/bin/sh\nexit 99\n", encoding="utf-8")
-    (stale / "ash").chmod(0o755)
+    (stale / "pyproject.toml").write_text(
+        "[project]\nname = 'stale'\n", encoding="utf-8"
+    )
     result, calls = _source(
         shell, checkout, tmp_path, extra_env={"ASH_ROOT_DIR": str(stale)}
     )
@@ -218,15 +232,13 @@ def test_sourcing_twice_still_works(shell, checkout, tmp_path):
 def test_a_relative_path_resolves_even_with_cdpath_set(shell, checkout, tmp_path):
     # With CDPATH set, `cd` into a relative path that does not start with ./ looks it
     # up through CDPATH first. The first entry here is a decoy holding the same
-    # relative path, with an ash that fails, so a helper that does not clear CDPATH
-    # adopts the decoy and invoke_ash runs the wrong ash.
+    # relative path, with its own pyproject.toml, so a helper that does not clear
+    # CDPATH adopts the decoy as ASH_ROOT_DIR.
     decoy = tmp_path / "cdpath decoy"
     (decoy / checkout.name / "utils").mkdir(parents=True)
-    decoy_ash = decoy / checkout.name / "ash"
-    decoy_ash.write_text(
-        '#!/bin/sh\necho ran-the-decoy >> "$ASH_STUB_LOG"\nexit 99\n', encoding="utf-8"
+    (decoy / checkout.name / "pyproject.toml").write_text(
+        "[project]\nname = 'decoy'\n", encoding="utf-8"
     )
-    decoy_ash.chmod(0o755)
     result, calls = _source(
         shell,
         checkout,
@@ -420,7 +432,7 @@ def test_a_copy_outside_the_checkout_without_a_preset_is_refused(
     )
     detail = f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     assert _reported(result, "rc") == REFUSAL_EXIT, detail
-    assert "has no ash entrypoint" in result.stderr, detail
+    assert "is not an ASH checkout" in result.stderr, detail
     assert "Set ASH_ROOT_DIR" in result.stderr, detail
     assert calls == [], detail
 
@@ -435,10 +447,9 @@ def test_the_developers_shell_startup_files_are_not_read(
     canary_log = tmp_path / "canary.log"
     decoy = tmp_path / "decoy checkout"
     decoy.mkdir()
-    (decoy / "ash").write_text(
-        f"#!/bin/sh\necho ran-decoy-ash >> '{canary_log}'\nexit 99\n", encoding="utf-8"
+    (decoy / "pyproject.toml").write_text(
+        "[project]\nname = 'decoy'\n", encoding="utf-8"
     )
-    (decoy / "ash").chmod(0o755)
     startup = (
         f"echo read-startup-file >> '{canary_log}'\nexport ASH_ROOT_DIR='{decoy}'\n"
     )
@@ -487,9 +498,9 @@ _HELPER_SITES = {
         "bash",
         True,
         None,
-        "the directory above this file, has no ash entrypoint",
+        "the directory above this file, is not an ASH checkout",
     ),
-    "ash-root-dir-without-ash": ("bash", True, "empty", "which has no ash entrypoint"),
+    "ash-root-dir-without-ash": ("bash", True, "empty", "which is not an ASH checkout"),
 }
 
 
@@ -527,5 +538,5 @@ def test_an_ash_root_dir_without_an_ash_entrypoint_is_refused(checkout, tmp_path
         return
     detail = f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     assert _reported(result, "rc") == REFUSAL_EXIT, detail
-    assert "has no ash entrypoint" in result.stderr, detail
+    assert "is not an ASH checkout" in result.stderr, detail
     assert calls == [], detail

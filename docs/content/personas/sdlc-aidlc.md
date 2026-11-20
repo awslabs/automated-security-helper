@@ -21,7 +21,7 @@ flowchart LR
 
 | Moment | What runs | Guide |
 |---|---|---|
-| Write code | A terminal scan scoped to fast scanners, `ash inspect findings` to work through results, or a scan the editor's agent runs over MCP | [Scan on your machine](../getting-started/local.md), [Connect an AI agent](../getting-started/agents.md) |
+| Write code | A terminal scan scoped to fast scanners, `ashx inspect findings` to work through results, or a scan the editor's agent runs over MCP | [Scan on your machine](../getting-started/local.md), [Connect an AI agent](../getting-started/agents.md) |
 | Commit | The `ash` pre-commit hook: precommit mode's five fast scanners, seconds per commit after the first run | [Run ASH with pre-commit](../how-to/pre-commit.md) |
 | Push | The same hook on `stages: [pre-push]`, or `ash-full-scan` for the container image's full scanner set | [When the hook runs](../how-to/pre-commit.md#stages), [The ash-full-scan hook](../how-to/pre-commit.md#full-scan) |
 | Pull request | The complete scan on a clean runner, gating on the exit code; the summary as a comment, findings as code scanning annotations, `--changed-files-only` so the gate counts the change's own findings | [Add ASH to CI](../getting-started/ci.md), [Gate on the files a change touches](../how-to/scale-large-repos.md#changed-files) |
@@ -51,7 +51,7 @@ results itself. The checkpoints map over directly:
 | Triage a backlog | MCP-driven triage | `explain_finding` for context, `suggest_suppression` for a drafted, expiring exception a human approves ([MCP tools](../reference/mcp-tools.md)) |
 
 Two practices from the persona pages matter more here. Give the agent ASH's
-own instructions (`ash get-genai-guide`, or an
+own instructions (`ashx get-genai-guide`, or an
 [agent plugin](../how-to/agent-plugins.md) that packages the server and the
 guidance), so scanning is part of its definition of done rather than a step it
 can skip. And treat generated or fetched code as

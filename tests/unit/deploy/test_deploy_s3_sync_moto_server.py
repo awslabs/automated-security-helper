@@ -1072,7 +1072,7 @@ class TestCommittedBuildspecCommands:
         shard command above writes, under the same prefix layout, for the builds
         CodePipeline reports for this execution. It lands them in
         `./shard-results/shard-N`, which is exactly where the merge's own
-        completeness check and `ash merge --results` look.
+        completeness check and `ashx merge --results` look.
         """
         details = []
         for shard in range(4):

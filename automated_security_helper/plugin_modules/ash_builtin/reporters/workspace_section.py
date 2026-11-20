@@ -24,7 +24,7 @@ workspace are independently configured -- a project with a HIGH threshold and a
 project with a LOW one would be judged the same way. The section would then
 disagree with the exit code for the same run, and an operator would have two
 verdicts and no rule for which is authoritative. The whole invariant workspace
-mode holds is that a project's verdict is what ``ash --source-dir P`` would
+mode holds is that a project's verdict is what ``ashx --source-dir P`` would
 produce; re-deriving it here would break that in the most visible artefact.
 
 The finding *counts* per project are also taken from the payload for the same

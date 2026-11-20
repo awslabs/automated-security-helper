@@ -234,7 +234,7 @@ class TestOnlyTheOperatorChoosesThePluginModules:
         assert _flat(f"Ignoring ash_plugin_modules entries '{MARKER_PACKAGE}'") in (
             warning
         ), result["output"]
-        assert _flat("ash merge's --config-overrides or --config") in warning
+        assert _flat("ashx merge's --config-overrides or --config") in warning
 
     def test_a_module_the_operators_config_names_is_imported(self, tmp_path):
         """The shards record no module; the operator's --config names one."""

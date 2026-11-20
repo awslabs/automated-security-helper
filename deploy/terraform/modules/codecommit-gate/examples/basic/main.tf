@@ -15,7 +15,7 @@ module "ash_image" {
   source = "../../../ash-image-pipeline"
 
   name_prefix         = "ash-pr-gate"
-  ash_version         = "v3.8.0"
+  ash_version         = "v4.0.0"
   target_architecture = "x86_64"
   rebuild_schedule    = "rate(1 day)"
 
@@ -44,7 +44,7 @@ module "ash_pr_gate" {
   # Must match the base image architecture.
   lambda_architecture = "x86_64"
 
-  # Handed to `ash scan --min-severity`. ASH computes the verdict from its own
+  # Handed to `ashx scan --min-severity`. ASH computes the verdict from its own
   # severity ladder; the handler reports it rather than recomputing it.
   #
   # This is a floor on what counts as actionable, so "low" is the STRICTEST

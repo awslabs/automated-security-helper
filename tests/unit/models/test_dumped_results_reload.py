@@ -9,7 +9,7 @@ Why this file exists
 ``merged.model_dump_json(indent=2)`` -- no ``by_alias``. ``cli/merge.py:357``
 reads results files back with ``AshAggregatedResults.model_validate_json``. So
 dump-then-load is a real path through the product, not a test-only shape, and
-running ``ash merge`` over a directory that already holds merged output takes it.
+running ``ashx merge`` over a directory that already holds merged output takes it.
 
 That path breaks whenever ``AshAggregatedResults.__pydantic_custom_init__`` is
 ``True``. With the flag set, pydantic-core stops validating the input mapping in

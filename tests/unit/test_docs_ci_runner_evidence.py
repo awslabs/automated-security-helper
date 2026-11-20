@@ -45,6 +45,9 @@ CI_RUNNERS = REPO_ROOT / "tests" / "integration" / "docs" / "ci_runners"
 PACKAGE = "_ash_ci_runners"
 HEAD = "0123456789abcdef0123456789abcdef01234567"
 REPOSITORY = "awslabs/automated-security-helper"
+#: The job id of the scan job in the reusable workflow; a GitHub Actions job name, not
+#: the command the job runs.
+ASH_JOB = "ash"
 POSIX_ONLY = pytest.mark.skipif(
     sys.platform == "win32", reason="the runners run on Linux; the stubs are bash"
 )
@@ -463,7 +466,7 @@ def test_a_reusable_calls_report_job_follows_the_callers_inputs():
         "      collect-sarif-report: false\n",
     )
     assert sorted(plan(load(off), _called_workflows())) == ["ash"]
-    assert sorted(plan(load(QUIET), _called_workflows())) == ["ash", "report"]
+    assert sorted(plan(load(QUIET), _called_workflows())) == [ASH_JOB, "report"]
     entry = plan(load(QUIET), _called_workflows())["report"]
     assert entry.inputs["fail-on-findings"] is False
     assert entry.inputs["artifact-name"] == "ash_output", "the declared default"

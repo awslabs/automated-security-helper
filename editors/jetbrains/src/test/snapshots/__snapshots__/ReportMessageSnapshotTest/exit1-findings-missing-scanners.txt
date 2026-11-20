@@ -1,0 +1,7 @@
+type=WARNING
+title: ASH scan incomplete
+body:
+ASH reported this scan INCOMPLETE (exit 1): it did not cover everything it was asked to. Showing the 1 finding(s) it did produce: 1 warning. Findings from the parts that did not run are absent.<br>
+<br>
+1 of 3 scanner(s) did not complete: grype (MISSING). Findings from those scanners are absent, so this is not a complete answer.<br>
+awslabs/automated-security-helper v4.0.0, exit code 1. Report: /project/.ash/ash_output/reports/ash.sarif

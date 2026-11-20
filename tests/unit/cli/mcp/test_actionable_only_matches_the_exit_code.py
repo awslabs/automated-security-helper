@@ -41,9 +41,9 @@ from automated_security_helper.cli.mcp_server import get_scan_results
 pytestmark = pytest.mark.unit
 
 #: The config the scans below were judged by: HIGH globally, bandit at its own
-#: CRITICAL, semgrep at its own LOW. detect-secrets sets none, so HIGH applies.
+#: CRITICAL, opengrep at its own LOW. detect-secrets sets none, so HIGH applies.
 GLOBAL = "HIGH"
-SCANNER_THRESHOLDS = {"bandit": "CRITICAL", "semgrep": "LOW"}
+SCANNER_THRESHOLDS = {"bandit": "CRITICAL", "opengrep": "LOW"}
 
 
 def _finding(
@@ -91,8 +91,8 @@ CASES: Dict[str, tuple] = {
     # A scanner's own threshold decides its findings, either way.
     "AT-BANDIT": (_finding("AT-BANDIT", "bandit", "CRITICAL"), True),
     "BELOW-BANDIT": (_finding("BELOW-BANDIT", "bandit", "HIGH"), False),
-    "AT-SEMGREP": (_finding("AT-SEMGREP", "semgrep", "LOW"), True),
-    "BELOW-SEMGREP": (_finding("BELOW-SEMGREP", "semgrep", "INFO"), False),
+    "AT-OPENGREP": (_finding("AT-OPENGREP", "opengrep", "LOW"), True),
+    "BELOW-OPENGREP": (_finding("BELOW-OPENGREP", "opengrep", "INFO"), False),
     # No issue_severity: the SARIF level decides. error is CRITICAL, warning MEDIUM.
     "LEVEL-ERROR": (_finding("LEVEL-ERROR", "detect-secrets", None, "error"), True),
     "LEVEL-WARNING": (
@@ -133,7 +133,7 @@ def _model(findings: List[Dict[str, Any]]):
     )
     # Every scanner that ran has an entry, as in a real scan, so the completeness
     # gate passes and the exit code is decided by the findings.
-    for name in ("bandit", "semgrep", "detect-secrets"):
+    for name in ("bandit", "opengrep", "detect-secrets"):
         model.scanner_results[name] = ScannerTargetStatusInfo(
             status=ScannerStatus.PASSED,
             excluded=False,
@@ -210,8 +210,10 @@ class TestTheThresholdIsTheOneTheScanWasJudgedBy:
         assert await _listed_from(root, "AT-BANDIT", "BELOW-BANDIT") == ["AT-BANDIT"]
 
     async def test_a_scanners_own_looser_threshold_decides_its_findings(self, root):
-        """semgrep's LOW finding is below the global HIGH and at semgrep's LOW."""
-        assert await _listed_from(root, "AT-SEMGREP", "BELOW-SEMGREP") == ["AT-SEMGREP"]
+        """opengrep's LOW finding is below the global HIGH and at opengrep's LOW."""
+        assert await _listed_from(root, "AT-OPENGREP", "BELOW-OPENGREP") == [
+            "AT-OPENGREP"
+        ]
 
     async def test_the_level_decides_a_finding_that_names_no_severity(self, root):
         assert await _listed_from(root, "LEVEL-ERROR", "LEVEL-WARNING") == [

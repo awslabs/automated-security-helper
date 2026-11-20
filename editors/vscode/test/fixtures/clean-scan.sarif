@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "AWS Labs - Automated Security Helper",
+          "organization": "Amazon Web Services",
+          "fullName": "awslabs/automated-security-helper",
+          "version": "3.7.0",
+          "downloadUri": "https://github.com/awslabs/automated-security-helper",
+          "informationUri": "https://awslabs.github.io/automated-security-helper"
+        },
+        "extensions": [
+          {
+            "name": "detect-secrets",
+            "organization": "Yelp",
+            "fullName": "yelp/detect-secrets",
+            "version": "3.7.0",
+            "downloadUri": "https://github.com/Yelp/detect-secrets",
+            "informationUri": "https://github.com/Yelp/detect-secrets",
+            "rules": [],
+            "properties": {
+              "tags": [
+                "detect-secrets"
+              ],
+              "scanner_details": {
+                "tool_name": "detect-secrets",
+                "tool_version": "3.7.0",
+                "tool_invocation": {
+                  "start_time": "2026-09-17T20:05:38.008694+00:00",
+                  "end_time": "2026-09-17T20:05:38.023647+00:00"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "invocations": [
+        {
+          "commandLine": "ash-detect-secrets-scanner",
+          "arguments": [
+            "--target",
+            "/workspace",
+            "--scanner"
+          ],
+          "startTimeUtc": "2026-09-17T20:05:38.008694Z",
+          "endTimeUtc": "2026-09-17T20:05:38.023647Z",
+          "exitCode": 0,
+          "exitCodeDescription": "",
+          "executionSuccessful": true,
+          "workingDirectory": {
+            "uri": "/workspace"
+          },
+          "properties": {
+            "tool": {
+              "driver": {
+                "name": "detect-secrets",
+                "organization": "Yelp",
+                "fullName": "yelp/detect-secrets",
+                "version": "3.7.0",
+                "downloadUri": "https://github.com/Yelp/detect-secrets",
+                "informationUri": "https://github.com/Yelp/detect-secrets",
+                "rules": [],
+                "properties": {
+                  "tags": [
+                    "detect-secrets"
+                  ],
+                  "scanner_details": {
+                    "tool_name": "detect-secrets",
+                    "tool_version": "3.7.0",
+                    "tool_invocation": {
+                      "start_time": "2026-09-17T20:05:38.008694+00:00",
+                      "end_time": "2026-09-17T20:05:38.023647+00:00"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ],
+      "results": [],
+      "properties": {}
+    }
+  ]
+}

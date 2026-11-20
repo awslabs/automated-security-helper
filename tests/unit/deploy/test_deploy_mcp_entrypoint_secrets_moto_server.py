@@ -42,7 +42,7 @@ WHAT IS NOT COVERED HERE, AND WHY
 The entrypoint's refuse-to-start guard -- `McpAuthHeaderName` set but no secret
 resolved, which exits 64 rather than serving unauthenticated -- is shell logic, not
 an AWS call. Reaching it means running the entrypoint to completion, and the
-entrypoint ends in `exec ash mcp ...`, so a test would need a stand-in `ash` on
+entrypoint ends in `exec ashx mcp ...`, so a test would need a stand-in `ashx` on
 PATH. That is worth having and it is not a moto question; it belongs with whoever
 owns ash-container-scripts.ts. Recorded here so the gap is visible rather than
 implied.
@@ -111,8 +111,8 @@ def entrypoint_script(stack: str) -> str:
         f"{ENTRYPOINT_DESTINATION} <<'{ENTRYPOINT_HEREDOC_DELIMITER}'",
     )
     body = heredoc_body(command, delimiter=ENTRYPOINT_HEREDOC_DELIMITER)
-    assert "ash mcp" in body, (
-        f"{stack}: the extracted heredoc body does not invoke `ash mcp`, so the "
+    assert "ashx mcp" in body, (
+        f"{stack}: the extracted heredoc body does not invoke `ashx mcp`, so the "
         f"extraction matched a different heredoc than the MCP entrypoint"
     )
     return body
@@ -139,7 +139,7 @@ def run_secret_read(
     """Run `stack`'s committed assignment, then write what it captured.
 
     The `printf` is this test's, not the deployment's -- the entrypoint keeps the
-    value in a shell variable and passes it to `ash` as an argument, so observing
+    value in a shell variable and passes it to `ashx` as an argument, so observing
     it needs one added line. `printf '%s'` rather than `echo`, which would append a
     newline and make byte-exactness unmeasurable.
     """

@@ -107,7 +107,7 @@ def test_a_block_whose_install_cannot_succeed_fails_without_a_verdict(
 def test_the_outer_ash_is_first_on_path_and_never_ran(ci_runner_session):
     env.require_github_hosted(os.environ)
     session = ci_runner_session
-    assert shutil.which("ash") == str(session.poisoned_ash), (
+    assert shutil.which(env.DOCUMENTED_COMMAND) == str(session.poisoned_ash), (
         "the poisoned ash must be the one this process's PATH finds"
     )
     problem = env.poisoned_ash_problem(session.sentinel)

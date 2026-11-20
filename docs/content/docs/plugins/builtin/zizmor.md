@@ -12,7 +12,7 @@ reported by each, under its own rule id.
 
 ## Enabling it
 
-zizmor is a builtin scanner, enabled by default: a default scan runs it. `scanners.zizmor.enabled: false` in the ASH config turns it off, and `--scanners` and `--exclude-scanners` select it as they select any scanner. If no zizmor satisfying `tool_version` is found, ASH installs one with `uv tool install` (online only). If that fails, the scanner is reported `MISSING` and the scan exits 1 (the incomplete-scan gate), as for every builtin scanner; `ash dependencies install` and the container image provide it.
+zizmor is a builtin scanner, enabled by default: a default scan runs it. `scanners.zizmor.enabled: false` in the ASH config turns it off, and `--scanners` and `--exclude-scanners` select it as they select any scanner. If no zizmor satisfying `tool_version` is found, ASH installs one with `uv tool install` (online only). If that fails, the scanner is reported `MISSING` and the scan exits 1 (the incomplete-scan gate), as for every builtin scanner; `ashx dependencies install` and the container image provide it.
 
 ## What gets scanned
 
@@ -119,7 +119,7 @@ configure zizmor at all: its whole section, `/scanners/zizmor/**`, is denied to 
 client whatever a profile's `denied_paths` says, as for every scanner that can send
 data off the host. ASH never
 reads, copies or logs the token and never puts it on zizmor's command line.
-ASH's own offline mode (`ASH_OFFLINE=true` or `ash scan --offline`) overrides
+ASH's own offline mode (`ASH_OFFLINE=true` or `ashx scan --offline`) overrides
 `online_audits`. Under `--sandbox`, zizmor never gets the token: the sandbox
 passes no `GH_TOKEN`, `GITHUB_TOKEN` or `ZIZMOR_GITHUB_TOKEN`, so online audits
 cannot authenticate. It gets a network only when the operator lists `zizmor` in
@@ -178,7 +178,7 @@ no packages, and a workflow has no functions or classes.
 
 ## Installation
 
-`ash dependencies install` installs zizmor with `uv tool install`, the newest
+`ashx dependencies install` installs zizmor with `uv tool install`, the newest
 release within `tool_version`, and the ASH container image ships zizmor 1.32.0. ASH also uses any `zizmor` already on `PATH` whose
 `zizmor --version` satisfies `tool_version`, which covers the nix flake (nixpkgs
 supplies zizmor), Homebrew, and `cargo install`. Offline, ASH does not try to

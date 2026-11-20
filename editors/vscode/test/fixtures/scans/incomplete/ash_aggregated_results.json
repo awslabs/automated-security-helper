@@ -1,0 +1,1337 @@
+{
+  "additional_reports": {
+    "bandit": {
+      "None": {
+        "excluded": true,
+        "raw_results": null,
+        "scanner_name": "bandit",
+        "status": "SKIPPED"
+      }
+    },
+    "cdk-nag": {
+      "None": {
+        "excluded": true,
+        "raw_results": null,
+        "scanner_name": "cdk-nag",
+        "status": "SKIPPED"
+      }
+    },
+    "cfn-nag": {
+      "None": {
+        "excluded": true,
+        "raw_results": null,
+        "scanner_name": "cfn-nag",
+        "status": "SKIPPED"
+      }
+    },
+    "checkov": {
+      "None": {
+        "excluded": true,
+        "raw_results": null,
+        "scanner_name": "checkov",
+        "status": "SKIPPED"
+      }
+    },
+    "detect-secrets": {
+      "source": {
+        "dependencies_satisfied": true,
+        "duration": 0.014052,
+        "end_time": "2026-10-05T12:59:36.997294Z",
+        "exit_code": 0,
+        "finding_count": 3,
+        "scanner_name": "detect-secrets",
+        "severity_counts": {
+          "critical": 3
+        },
+        "start_time": "2026-10-05T12:59:36.983242Z",
+        "status": "PASSED",
+        "target": "__ASH_SOURCE_DIR__",
+        "target_type": "source",
+        "targets_failed": 0
+      }
+    },
+    "grype": {
+      "None": {
+        "excluded": true,
+        "raw_results": null,
+        "scanner_name": "grype",
+        "status": "SKIPPED"
+      }
+    },
+    "npm-audit": {
+      "None": {
+        "excluded": true,
+        "raw_results": null,
+        "scanner_name": "npm-audit",
+        "status": "SKIPPED"
+      }
+    },
+    "opengrep": {
+      "None": {
+        "excluded": true,
+        "raw_results": null,
+        "scanner_name": "opengrep",
+        "status": "SKIPPED"
+      }
+    },
+    "semgrep": {
+      "source": {
+        "dependencies_satisfied": true,
+        "duration": 0.517671,
+        "end_time": "2026-10-05T12:59:37.500989Z",
+        "exit_code": 1,
+        "raw_results": {
+          "errors": [
+            "Failed to execute semgrep scanner on source: SemgrepScanner scan failed: [Errno 2] No such file or directory: '__ASH_OUTPUT_DIR__/scanners/semgrep/source/results_sarif.sarif' (exit code 1: an accepted exit code for this scanner). Stderr: Traceback (most recent call last):\n  File \"/opt/ash-fixture/home/.local/share/uv/tools/semgrep/bin/pysemgrep\", line 10, in <module>\n    sys.exit(main())\n  File \"/opt/ash-fixture/home/.local/share/uv/tools/semgrep/lib64/python3.9/site-packages/semgrep/console_scripts/pysemgrep.py\", line 64, in main\n    sys.exit(semgrep.main.main())\n  File \"/opt/ash-fixture/home/.local/share/uv/tools/semgrep/lib64/python3.9/site-packages/semgrep/main.py\", line 141, in main\n    from semgrep.cli import cli\n  File \"/opt/ash-fixture/home/.local/share/uv/tools/semgrep/lib64/python3.9/site-packages/semgrep/cli.py\", line 22, in <module>\n    from semgrep.commands.ci import ci\n  File \"/opt/ash-fixture/home/.local/share/uv/tools/semgrep/lib64/python3.9/site-packages/semgrep/commands/ci.py\", line 34, in <module>\n    import semgrep.app.auth as auth\n  File \"/opt/ash-fixture/home/.local/share/uv/tools/semgrep/lib64/python3.9/site-packages/semgrep/app/auth.py\", line 19, in <module>\n    from semgrep import tracing\n  File \"/opt/ash-fixture/home/.local/share/uv/tools/semgrep/lib64/python3.9/site-packages/semgrep/tracing.py\", line 36, in <module>\n    from opentelemetry.instrumentation.requests import RequestsInstrumentor\n  File \"/opt/ash-fixture/home/.local/share/uv/tools/semgrep/lib64/python3.9/site-packages/opentelemetry/instrumentation/requests/__init__.py\", line 84, in <module>\n    from opentelemetry.instrumentation.instrumentor import BaseInstrumentor\n  File \"/opt/ash-fixture/home/.local/share/uv/tools/semgrep/lib64/python3.9/site ...[truncated]"
+          ],
+          "exception": "SemgrepScanner scan failed: [Errno 2] No such file or directory: '__ASH_OUTPUT_DIR__/scanners/semgrep/source/results_sarif.sarif' (exit code 1: an accepted exit code for this scanner). Stderr: Traceback (most recent call last):\n  File \"/opt/ash-fixture/home/.local/share/uv/tools/semgrep/bin/pysemgrep\", line 10, in <module>\n    sys.exit(main())\n  File \"/opt/ash-fixture/home/.local/share/uv/tools/semgrep/lib64/python3.9/site-packages/semgrep/console_scripts/pysemgrep.py\", line 64, in main\n    sys.exit(semgrep.main.main())\n  File \"/opt/ash-fixture/home/.local/share/uv/tools/semgrep/lib64/python3.9/site-packages/semgrep/main.py\", line 141, in main\n    from semgrep.cli import cli\n  File \"/opt/ash-fixture/home/.local/share/uv/tools/semgrep/lib64/python3.9/site-packages/semgrep/cli.py\", line 22, in <module>\n    from semgrep.commands.ci import ci\n  File \"/opt/ash-fixture/home/.local/share/uv/tools/semgrep/lib64/python3.9/site-packages/semgrep/commands/ci.py\", line 34, in <module>\n    import semgrep.app.auth as auth\n  File \"/opt/ash-fixture/home/.local/share/uv/tools/semgrep/lib64/python3.9/site-packages/semgrep/app/auth.py\", line 19, in <module>\n    from semgrep import tracing\n  File \"/opt/ash-fixture/home/.local/share/uv/tools/semgrep/lib64/python3.9/site-packages/semgrep/tracing.py\", line 36, in <module>\n    from opentelemetry.instrumentation.requests import RequestsInstrumentor\n  File \"/opt/ash-fixture/home/.local/share/uv/tools/semgrep/lib64/python3.9/site-packages/opentelemetry/instrumentation/requests/__init__.py\", line 84, in <module>\n    from opentelemetry.instrumentation.instrumentor import BaseInstrumentor\n  File \"/opt/ash-fixture/home/.local/share/uv/tools/semgrep/lib64/python3.9/site ...[truncated]",
+          "output": [],
+          "stack_trace": "Traceback (most recent call last):\n  File \"/opt/ash-fixture/ash/automated_security_helper/base/scanner_plugin.py\", line 694, in scan\n    raw = self._read_results_file(results_file)\n  File \"/opt/ash-fixture/ash/automated_security_helper/base/scanner_plugin.py\", line 527, in _read_results_file\n    with open(results_file, mode=\"r\", encoding=\"utf-8\") as fh:\n         ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nFileNotFoundError: [Errno 2] No such file or directory: '__ASH_OUTPUT_DIR__/scanners/semgrep/source/results_sarif.sarif'\n\nDuring handling of the above exception, another exception occurred:\n\nTraceback (most recent call last):\n  File \"/opt/ash-fixture/ash/automated_security_helper/core/phases/scanner_executor.py\", line 259, in _execute_scanner\n    raw_results = scanner_plugin.scan(\n        target=scan_target,\n    ...<2 lines>...\n        global_ignore_paths=self._global_ignore_paths,\n    )\n  File \"/opt/ash-fixture/ash/automated_security_helper/base/scanner_plugin.py\", line 725, in scan\n    raise ScannerError(self._describe_scan_failure(e, results_file))\nautomated_security_helper.core.exceptions.ScannerError: SemgrepScanner scan failed: [Errno 2] No such file or directory: '__ASH_OUTPUT_DIR__/scanners/semgrep/source/results_sarif.sarif' (exit code 1: an accepted exit code for this scanner). Stderr: Traceback (most recent call last):\n  File \"/opt/ash-fixture/home/.local/share/uv/tools/semgrep/bin/pysemgrep\", line 10, in <module>\n    sys.exit(main())\n  File \"/opt/ash-fixture/home/.local/share/uv/tools/semgrep/lib64/python3.9/site-packages/semgrep/console_scripts/pysemgrep.py\", line 64, in main\n    sys.exit(semgrep.main.main())\n  File \"/opt/ash-fixture/home/.local/share/uv/tools/semgrep/lib64/python3.9/site-packages/semgrep/main.py\", line 141, in main\n    from semgrep.cli import cli\n  File \"/opt/ash-fixture/home/.local/share/uv/tools/semgrep/lib64/python3.9/site-packages/semgrep/cli.py\", line 22, in <module>\n    from semgrep.commands.ci import ci\n  File \"/opt/ash-fixture/home/.local/share/uv/tools/semgrep/lib64/python3.9/site-packages/semgrep/commands/ci.py\", line 34, in <module>\n    import semgrep.app.auth as auth\n  File \"/opt/ash-fixture/home/.local/share/uv/tools/semgrep/lib64/python3.9/site-packages/semgrep/app/auth.py\", line 19, in <module>\n    from semgrep import tracing\n  File \"/opt/ash-fixture/home/.local/share/uv/tools/semgrep/lib64/python3.9/site-packages/semgrep/tracing.py\", line 36, in <module>\n    from opentelemetry.instrumentation.requests import RequestsInstrumentor\n  File \"/opt/ash-fixture/home/.local/share/uv/tools/semgrep/lib64/python3.9/site-packages/opentelemetry/instrumentation/requests/__init__.py\", line 84, in <module>\n    from opentelemetry.instrumentation.instrumentor import BaseInstrumentor\n  File \"/opt/ash-fixture/home/.local/share/uv/tools/semgrep/lib64/python3.9/site ...[truncated]\n",
+          "status": "failed"
+        },
+        "scanner_name": "semgrep",
+        "start_time": "2026-10-05T12:59:36.983318Z",
+        "status": "ERROR",
+        "target": "__ASH_SOURCE_DIR__",
+        "target_type": "source",
+        "targets_failed": 0
+      }
+    },
+    "syft": {
+      "None": {
+        "excluded": true,
+        "raw_results": null,
+        "scanner_name": "syft",
+        "status": "SKIPPED"
+      }
+    }
+  },
+  "ash_config": {
+    "ash_plugin_modules": [],
+    "build": null,
+    "content_db_staleness": "fail",
+    "converters": {
+      "archive": {
+        "enabled": true,
+        "name": "archive",
+        "options": {}
+      },
+      "jupyter": {
+        "enabled": true,
+        "name": "jupyter",
+        "options": {
+          "install_timeout": 300,
+          "tool_version": ">=7.16.0,<8.0.0"
+        }
+      }
+    },
+    "external_reports_to_include": [],
+    "fail_on_findings": true,
+    "fail_on_incomplete_scanners": true,
+    "global_settings": {
+      "ignore_paths": [],
+      "mcp": {
+        "runtime_overrides": {
+          "allowed_paths": [],
+          "denied_paths": [
+            "/fail_on_findings",
+            "/fail_on_incomplete_scanners",
+            "/content_db_staleness",
+            "/global_settings/ignore_paths",
+            "/global_settings/suppressions",
+            "/reporters/bedrock-summary-reporter/options/aws_*",
+            "/reporters/cloudwatch-logs/**"
+          ],
+          "denied_value_patterns": {},
+          "enabled": false
+        }
+      },
+      "severity_threshold": "MEDIUM",
+      "suppressions": []
+    },
+    "mcp-resource-management": {
+      "enable_health_checks": true,
+      "enable_resource_logging": true,
+      "health_check_interval_seconds": 60,
+      "log_resource_operations": false,
+      "max_concurrent_scans": 3,
+      "max_concurrent_tasks": 20,
+      "max_directory_size_mb": 1000,
+      "max_message_size_bytes": 10485760,
+      "max_path_length": 4096,
+      "memory_critical_threshold_mb": 2048,
+      "memory_warning_threshold_mb": 1024,
+      "operation_timeout_seconds": 180,
+      "scan_timeout_seconds": 1800,
+      "shutdown_timeout_seconds": 30,
+      "task_count_warning_threshold": 15,
+      "thread_pool_max_workers": 4
+    },
+    "project_name": "ash-scan",
+    "reporters": {
+      "csv": {
+        "enabled": true,
+        "extension": "csv",
+        "name": "csv",
+        "options": {}
+      },
+      "cyclonedx": {
+        "enabled": true,
+        "extension": "cdx.json",
+        "name": "cyclonedx",
+        "options": {}
+      },
+      "flat-json": {
+        "enabled": true,
+        "extension": "flat.json",
+        "name": "flat-json",
+        "options": {
+          "include_metadata": true,
+          "include_scanner_metrics": true,
+          "include_summary_metrics": true
+        }
+      },
+      "github-ghas": {
+        "enabled": true,
+        "extension": "ghas.sarif",
+        "name": "github-ghas",
+        "options": {
+          "exclude_suppressed": true
+        }
+      },
+      "gitlab-cyclonedx": {
+        "enabled": true,
+        "extension": "gl-dependency-scanning-report.cdx.json",
+        "name": "gitlab-cyclonedx",
+        "options": {
+          "category": "production",
+          "input_file_path_override": null,
+          "language_override": null,
+          "package_manager_override": null
+        }
+      },
+      "gitlab-sast": {
+        "enabled": true,
+        "extension": "gl-sast-report.json",
+        "name": "gitlab-sast",
+        "options": {
+          "exclude_suppressed": false
+        }
+      },
+      "html": {
+        "enabled": true,
+        "extension": "html",
+        "name": "html",
+        "options": {}
+      },
+      "junitxml": {
+        "enabled": true,
+        "extension": "junit.xml",
+        "name": "junitxml",
+        "options": {
+          "respect_severity_threshold": true
+        }
+      },
+      "markdown": {
+        "enabled": true,
+        "extension": "summary.md",
+        "name": "markdown",
+        "options": {
+          "compact": false,
+          "include_detailed_findings": true,
+          "include_findings_table": false,
+          "include_summary": true,
+          "max_detailed_findings": 20,
+          "top_hotspots_limit": 10,
+          "use_collapsible_details": true
+        }
+      },
+      "ocsf": {
+        "enabled": true,
+        "extension": "ocsf.json",
+        "name": "ocsf",
+        "options": {}
+      },
+      "sarif": {
+        "enabled": true,
+        "extension": "sarif",
+        "name": "sarif",
+        "options": {}
+      },
+      "spdx": {
+        "enabled": false,
+        "extension": "spdx.json",
+        "name": "spdx",
+        "options": {}
+      },
+      "text": {
+        "enabled": true,
+        "extension": "summary.txt",
+        "name": "text",
+        "options": {
+          "include_detailed_findings": false,
+          "include_findings_table": false,
+          "include_summary": true,
+          "max_detailed_findings": 20,
+          "top_hotspots_limit": 20
+        }
+      },
+      "unused-suppressions": {
+        "enabled": true,
+        "extension": "unused-suppressions.json",
+        "name": "unused-suppressions",
+        "options": {
+          "output_format": "both"
+        }
+      },
+      "yaml": {
+        "enabled": false,
+        "extension": "yaml",
+        "name": "yaml",
+        "options": {}
+      }
+    },
+    "scanners": {
+      "bandit": {
+        "enabled": true,
+        "name": "bandit",
+        "options": {
+          "additional_formats": [],
+          "confidence_level": "all",
+          "config_file": null,
+          "excluded_paths": [],
+          "ignore_nosec": false,
+          "install_timeout": 300,
+          "scan_timeout": 1800,
+          "severity_threshold": null,
+          "tool_version": ">=1.7.0,<2.0.0"
+        }
+      },
+      "cdk-nag": {
+        "enabled": true,
+        "name": "cdk-nag",
+        "options": {
+          "include_compliant_checks": false,
+          "nag_packs": {
+            "AwsSolutionsChecks": true,
+            "HIPAASecurityChecks": false,
+            "NIST80053R4Checks": false,
+            "NIST80053R5Checks": false,
+            "PCIDSS321Checks": false
+          },
+          "scan_timeout": 1800,
+          "severity_threshold": null
+        }
+      },
+      "cfn-nag": {
+        "enabled": true,
+        "name": "cfn-nag",
+        "options": {
+          "scan_timeout": 1800,
+          "severity_threshold": null
+        }
+      },
+      "checkov": {
+        "enabled": true,
+        "name": "checkov",
+        "options": {
+          "additional_formats": [
+            "cyclonedx_json"
+          ],
+          "config_file": null,
+          "frameworks": [
+            "all"
+          ],
+          "install_timeout": 300,
+          "offline": false,
+          "scan_timeout": 1800,
+          "severity_threshold": null,
+          "skip_frameworks": [],
+          "skip_path": [],
+          "tool_version": null
+        }
+      },
+      "detect-secrets": {
+        "enabled": true,
+        "name": "detect-secrets",
+        "options": {
+          "baseline_file": null,
+          "scan_settings": {
+            "filters_used": [],
+            "generated_at": null,
+            "plugins_used": [],
+            "results": {},
+            "version": null
+          },
+          "scan_timeout": 1800,
+          "severity_threshold": null,
+          "skip_generated_lockfiles": true
+        }
+      },
+      "grype": {
+        "enabled": true,
+        "name": "grype",
+        "options": {
+          "config_file": null,
+          "offline": false,
+          "scan_timeout": 1800,
+          "severity_threshold": null
+        }
+      },
+      "npm-audit": {
+        "enabled": true,
+        "name": "npm-audit",
+        "options": {
+          "offline": false,
+          "scan_timeout": 1800,
+          "severity_threshold": null
+        }
+      },
+      "opengrep": {
+        "enabled": true,
+        "name": "opengrep",
+        "options": {
+          "config": "p/ci",
+          "exclude": [
+            "*-converted.py",
+            "*_report_result.txt"
+          ],
+          "exclude_rule": [],
+          "metrics": "auto",
+          "offline": false,
+          "patterns": [],
+          "scan_timeout": 1800,
+          "severity": [],
+          "severity_threshold": null,
+          "version": "v1.15.1"
+        }
+      },
+      "semgrep": {
+        "enabled": true,
+        "name": "semgrep",
+        "options": {
+          "config": "p/ci",
+          "exclude": [
+            "*-converted.py",
+            "*_report_result.txt"
+          ],
+          "exclude_rule": [],
+          "install_timeout": 300,
+          "metrics": "auto",
+          "offline": false,
+          "scan_timeout": 1800,
+          "severity": [],
+          "severity_threshold": null,
+          "tool_version": null
+        }
+      },
+      "syft": {
+        "enabled": true,
+        "name": "syft",
+        "options": {
+          "additional_outputs": [
+            "syft-table"
+          ],
+          "config_file": null,
+          "exclude": [],
+          "offline": false,
+          "scan_timeout": 1800,
+          "severity_threshold": null
+        }
+      }
+    },
+    "workspace": {
+      "max_parallel_projects": null,
+      "project_timeout": null
+    }
+  },
+  "converter_results": {
+    "archive": {
+      "candidate_inputs": null,
+      "converted_paths": [],
+      "dependencies_satisfied": true,
+      "excluded": false,
+      "failure": null
+    },
+    "jupyter": {
+      "candidate_inputs": null,
+      "converted_paths": [],
+      "dependencies_satisfied": true,
+      "excluded": false,
+      "failure": null
+    }
+  },
+  "cyclonedx": {
+    "$schema": null,
+    "annotations": null,
+    "bomFormat": "CycloneDX",
+    "components": null,
+    "compositions": null,
+    "declarations": null,
+    "definitions": null,
+    "dependencies": null,
+    "externalReferences": null,
+    "formulation": null,
+    "metadata": null,
+    "properties": null,
+    "serialNumber": null,
+    "services": null,
+    "signature": null,
+    "specVersion": "1.6",
+    "version": 1,
+    "vulnerabilities": null
+  },
+  "description": "Aggregated security scan results",
+  "metadata": {
+    "description": "Automated Security Helper Aggregated Report Post-processor",
+    "execution_discrepancy_report": {
+      "has_discrepancies": false,
+      "missing_count": 1,
+      "missing_scanners": [
+        "semgrep"
+      ],
+      "total_discrepancies": 1,
+      "unexpected_count": 0,
+      "unexpected_scanners": []
+    },
+    "expected_scanners": [
+      "bandit",
+      "cdk-nag",
+      "cfn-nag",
+      "checkov",
+      "detect-secrets",
+      "grype",
+      "npm-audit",
+      "opengrep",
+      "semgrep",
+      "syft"
+    ],
+    "generated_at": "2026-10-05T12:59:10+00:00",
+    "plugin_load_errors": {},
+    "project_name": "ASH",
+    "report_id": "ASH-20261005",
+    "result_completeness_report": {
+      "has_adjustments": true,
+      "missing_scanners": [
+        "semgrep"
+      ],
+      "unexpected_scanners": []
+    },
+    "shard": null,
+    "summary_stats": {
+      "actionable": 3,
+      "duration": 27.053286,
+      "end": "2026-10-05T12:59:37+00:00",
+      "error": 1,
+      "failed": 1,
+      "missing": 0,
+      "passed": 0,
+      "severity_counts": {
+        "critical": 3,
+        "high": 0,
+        "info": 0,
+        "low": 0,
+        "medium": 0,
+        "suppressed": 0
+      },
+      "skipped": 8,
+      "start": "2026-10-05T12:59:10+00:00",
+      "total": 3
+    },
+    "tool_version": "3.7.0",
+    "validation_summary": {
+      "execution_completion_validation": {
+        "completed_count": 1,
+        "completion_rate": 0.5,
+        "expected_count": 2,
+        "has_issues": false,
+        "missing_count": 1,
+        "timestamp": "2026-10-05T12:59:37.510729",
+        "unexpected_count": 0
+      },
+      "result_completeness_validation": {
+        "completeness_rate": 0.9,
+        "expected_count": 10,
+        "final_count": 9,
+        "has_issues": true,
+        "missing_count": 1,
+        "timestamp": "2026-10-05T12:59:37.512984",
+        "unexpected_count": 0
+      },
+      "scanner_tasks_validation": {
+        "actual_count": 2,
+        "expected_count": 2,
+        "has_issues": false,
+        "missing_count": 0,
+        "successfully_retried": 0,
+        "timestamp": "2026-10-05T12:59:36.977920"
+      }
+    }
+  },
+  "name": "ASH Scan 2026-10-05T12:59:10.526545",
+  "sarif": {
+    "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+    "inlineExternalProperties": [],
+    "properties": {
+      "tags": []
+    },
+    "runs": [
+      {
+        "addresses": [],
+        "artifacts": null,
+        "automationDetails": null,
+        "baselineGuid": null,
+        "columnKind": null,
+        "conversion": null,
+        "defaultEncoding": null,
+        "defaultSourceLanguage": null,
+        "externalPropertyFileReferences": null,
+        "graphs": [],
+        "invocations": [
+          {
+            "account": null,
+            "arguments": [
+              "--target",
+              "__ASH_SOURCE_DIR__",
+              "--scanner"
+            ],
+            "commandLine": "ash-detect-secrets-scanner",
+            "endTimeUtc": "2026-10-05T12:59:36.997294Z",
+            "environmentVariables": null,
+            "executableLocation": null,
+            "executionSuccessful": true,
+            "exitCode": 0,
+            "exitCodeDescription": "",
+            "exitSignalName": null,
+            "exitSignalNumber": null,
+            "machine": null,
+            "notificationConfigurationOverrides": [],
+            "processId": null,
+            "processStartFailureMessage": null,
+            "properties": {
+              "tags": [],
+              "tool": {
+                "driver": {
+                  "associatedComponent": null,
+                  "contents": [
+                    "localizedData",
+                    "nonLocalizedData"
+                  ],
+                  "dottedQuadFileVersion": null,
+                  "downloadUri": "https://github.com/Yelp/detect-secrets",
+                  "fullDescription": null,
+                  "fullName": "yelp/detect-secrets",
+                  "globalMessageStrings": null,
+                  "guid": null,
+                  "informationUri": "https://github.com/Yelp/detect-secrets",
+                  "isComprehensive": false,
+                  "language": "en-US",
+                  "localizedDataSemanticVersion": null,
+                  "locations": [],
+                  "minimumRequiredLocalizedDataSemanticVersion": null,
+                  "name": "detect-secrets",
+                  "notifications": [],
+                  "organization": "Yelp",
+                  "product": null,
+                  "productSuite": null,
+                  "properties": {
+                    "scanner_details": {
+                      "tool_invocation": {
+                        "end_time": "2026-10-05T12:59:36.997294+00:00",
+                        "start_time": "2026-10-05T12:59:36.983242+00:00"
+                      },
+                      "tool_name": "detect-secrets",
+                      "tool_version": "3.7.0"
+                    },
+                    "tags": [
+                      "detect-secrets"
+                    ]
+                  },
+                  "releaseDateUtc": null,
+                  "rules": [],
+                  "semanticVersion": null,
+                  "shortDescription": null,
+                  "supportedTaxonomies": [],
+                  "taxa": [],
+                  "translationMetadata": null,
+                  "version": "3.7.0"
+                },
+                "extensions": [],
+                "properties": null
+              }
+            },
+            "responseFiles": null,
+            "ruleConfigurationOverrides": [],
+            "startTimeUtc": "2026-10-05T12:59:36.983242Z",
+            "stderr": null,
+            "stdin": null,
+            "stdout": null,
+            "stdoutStderr": null,
+            "toolConfigurationNotifications": [],
+            "toolExecutionNotifications": [],
+            "workingDirectory": {
+              "description": null,
+              "index": -1,
+              "properties": null,
+              "uri": "__ASH_SOURCE_DIR__",
+              "uriBaseId": null
+            }
+          }
+        ],
+        "language": "en-US",
+        "logicalLocations": [],
+        "newlineSequences": [
+          "\r\n",
+          "\n"
+        ],
+        "originalUriBaseIds": null,
+        "policies": [],
+        "properties": {
+          "tags": []
+        },
+        "redactionTokens": [],
+        "results": [
+          {
+            "analysisTarget": null,
+            "attachments": [],
+            "baselineState": null,
+            "codeFlows": [],
+            "correlationGuid": null,
+            "fingerprints": null,
+            "fixes": [],
+            "graphTraversals": [],
+            "graphs": [],
+            "guid": null,
+            "hostedViewerUri": null,
+            "kind": "fail",
+            "level": "error",
+            "locations": [
+              {
+                "annotations": [],
+                "id": 1,
+                "logicalLocations": [],
+                "message": null,
+                "physicalLocation": {
+                  "address": null,
+                  "artifactLocation": {
+                    "description": null,
+                    "index": -1,
+                    "properties": null,
+                    "uri": "planted_secret.py",
+                    "uriBaseId": null
+                  },
+                  "contextRegion": null,
+                  "properties": null,
+                  "region": {
+                    "byteLength": null,
+                    "byteOffset": -1,
+                    "charLength": null,
+                    "charOffset": -1,
+                    "endColumn": null,
+                    "endLine": 25,
+                    "message": null,
+                    "properties": null,
+                    "snippet": {
+                      "binary": null,
+                      "properties": null,
+                      "rendered": null,
+                      "text": "Secret of type Base64 High Entropy String detected"
+                    },
+                    "sourceLanguage": null,
+                    "startColumn": null,
+                    "startLine": 25
+                  }
+                },
+                "properties": null,
+                "relationships": []
+              }
+            ],
+            "message": {
+              "arguments": [],
+              "id": null,
+              "markdown": null,
+              "properties": null,
+              "text": "Secret of type 'Base64 High Entropy String' detected in file '__ASH_SOURCE_DIR__/planted_secret.py' at line 25"
+            },
+            "occurrenceCount": null,
+            "partialFingerprints": null,
+            "properties": {
+              "scanner_details": {
+                "tool_invocation": {
+                  "end_time": "2026-10-05T12:59:36.997294+00:00",
+                  "start_time": "2026-10-05T12:59:36.983242+00:00"
+                },
+                "tool_name": "detect-secrets",
+                "tool_version": "3.7.0"
+              },
+              "scanner_name": "detect-secrets",
+              "scanner_version": "3.7.0",
+              "tags": [
+                "detect-secrets",
+                "secret",
+                "security",
+                "tool_name::detect-secrets",
+                "tool_type::ScannerToolType.SECRETS"
+              ]
+            },
+            "provenance": null,
+            "rank": -1.0,
+            "relatedLocations": [],
+            "rule": null,
+            "ruleId": "SECRET-BASE64-HIGH-ENTROPY-STRING",
+            "ruleIndex": -1,
+            "stacks": [],
+            "suppressions": null,
+            "taxa": [],
+            "webRequest": null,
+            "webResponse": null,
+            "workItemUris": null
+          },
+          {
+            "analysisTarget": null,
+            "attachments": [],
+            "baselineState": null,
+            "codeFlows": [],
+            "correlationGuid": null,
+            "fingerprints": null,
+            "fixes": [],
+            "graphTraversals": [],
+            "graphs": [],
+            "guid": null,
+            "hostedViewerUri": null,
+            "kind": "fail",
+            "level": "error",
+            "locations": [
+              {
+                "annotations": [],
+                "id": 1,
+                "logicalLocations": [],
+                "message": null,
+                "physicalLocation": {
+                  "address": null,
+                  "artifactLocation": {
+                    "description": null,
+                    "index": -1,
+                    "properties": null,
+                    "uri": "planted_secret.py",
+                    "uriBaseId": null
+                  },
+                  "contextRegion": null,
+                  "properties": null,
+                  "region": {
+                    "byteLength": null,
+                    "byteOffset": -1,
+                    "charLength": null,
+                    "charOffset": -1,
+                    "endColumn": null,
+                    "endLine": 25,
+                    "message": null,
+                    "properties": null,
+                    "snippet": {
+                      "binary": null,
+                      "properties": null,
+                      "rendered": null,
+                      "text": "Secret of type AWS Access Key detected"
+                    },
+                    "sourceLanguage": null,
+                    "startColumn": null,
+                    "startLine": 25
+                  }
+                },
+                "properties": null,
+                "relationships": []
+              }
+            ],
+            "message": {
+              "arguments": [],
+              "id": null,
+              "markdown": null,
+              "properties": null,
+              "text": "Secret of type 'AWS Access Key' detected in file '__ASH_SOURCE_DIR__/planted_secret.py' at line 25"
+            },
+            "occurrenceCount": null,
+            "partialFingerprints": null,
+            "properties": {
+              "scanner_details": {
+                "tool_invocation": {
+                  "end_time": "2026-10-05T12:59:36.997294+00:00",
+                  "start_time": "2026-10-05T12:59:36.983242+00:00"
+                },
+                "tool_name": "detect-secrets",
+                "tool_version": "3.7.0"
+              },
+              "scanner_name": "detect-secrets",
+              "scanner_version": "3.7.0",
+              "tags": [
+                "detect-secrets",
+                "secret",
+                "security",
+                "tool_name::detect-secrets",
+                "tool_type::ScannerToolType.SECRETS"
+              ]
+            },
+            "provenance": null,
+            "rank": -1.0,
+            "relatedLocations": [],
+            "rule": null,
+            "ruleId": "SECRET-AWS-ACCESS-KEY",
+            "ruleIndex": -1,
+            "stacks": [],
+            "suppressions": null,
+            "taxa": [],
+            "webRequest": null,
+            "webResponse": null,
+            "workItemUris": null
+          },
+          {
+            "analysisTarget": null,
+            "attachments": [],
+            "baselineState": null,
+            "codeFlows": [],
+            "correlationGuid": null,
+            "fingerprints": null,
+            "fixes": [],
+            "graphTraversals": [],
+            "graphs": [],
+            "guid": null,
+            "hostedViewerUri": null,
+            "kind": "fail",
+            "level": "error",
+            "locations": [
+              {
+                "annotations": [],
+                "id": 1,
+                "logicalLocations": [],
+                "message": null,
+                "physicalLocation": {
+                  "address": null,
+                  "artifactLocation": {
+                    "description": null,
+                    "index": -1,
+                    "properties": null,
+                    "uri": "planted_secret.py",
+                    "uriBaseId": null
+                  },
+                  "contextRegion": null,
+                  "properties": null,
+                  "region": {
+                    "byteLength": null,
+                    "byteOffset": -1,
+                    "charLength": null,
+                    "charOffset": -1,
+                    "endColumn": null,
+                    "endLine": 25,
+                    "message": null,
+                    "properties": null,
+                    "snippet": {
+                      "binary": null,
+                      "properties": null,
+                      "rendered": null,
+                      "text": "Secret of type Secret Keyword detected"
+                    },
+                    "sourceLanguage": null,
+                    "startColumn": null,
+                    "startLine": 25
+                  }
+                },
+                "properties": null,
+                "relationships": []
+              }
+            ],
+            "message": {
+              "arguments": [],
+              "id": null,
+              "markdown": null,
+              "properties": null,
+              "text": "Secret of type 'Secret Keyword' detected in file '__ASH_SOURCE_DIR__/planted_secret.py' at line 25"
+            },
+            "occurrenceCount": null,
+            "partialFingerprints": null,
+            "properties": {
+              "scanner_details": {
+                "tool_invocation": {
+                  "end_time": "2026-10-05T12:59:36.997294+00:00",
+                  "start_time": "2026-10-05T12:59:36.983242+00:00"
+                },
+                "tool_name": "detect-secrets",
+                "tool_version": "3.7.0"
+              },
+              "scanner_name": "detect-secrets",
+              "scanner_version": "3.7.0",
+              "tags": [
+                "detect-secrets",
+                "secret",
+                "security",
+                "tool_name::detect-secrets",
+                "tool_type::ScannerToolType.SECRETS"
+              ]
+            },
+            "provenance": null,
+            "rank": -1.0,
+            "relatedLocations": [],
+            "rule": null,
+            "ruleId": "SECRET-SECRET-KEYWORD",
+            "ruleIndex": -1,
+            "stacks": [],
+            "suppressions": null,
+            "taxa": [],
+            "webRequest": null,
+            "webResponse": null,
+            "workItemUris": null
+          }
+        ],
+        "runAggregates": [],
+        "specialLocations": null,
+        "taxonomies": [],
+        "threadFlowLocations": [],
+        "tool": {
+          "driver": {
+            "associatedComponent": null,
+            "contents": [
+              "localizedData",
+              "nonLocalizedData"
+            ],
+            "dottedQuadFileVersion": null,
+            "downloadUri": "https://github.com/awslabs/automated-security-helper",
+            "fullDescription": null,
+            "fullName": "awslabs/automated-security-helper",
+            "globalMessageStrings": null,
+            "guid": null,
+            "informationUri": "https://awslabs.github.io/automated-security-helper",
+            "isComprehensive": false,
+            "language": "en-US",
+            "localizedDataSemanticVersion": null,
+            "locations": [],
+            "minimumRequiredLocalizedDataSemanticVersion": null,
+            "name": "AWS Labs - Automated Security Helper",
+            "notifications": [],
+            "organization": "Amazon Web Services",
+            "product": null,
+            "productSuite": null,
+            "properties": null,
+            "releaseDateUtc": null,
+            "rules": [],
+            "semanticVersion": null,
+            "shortDescription": null,
+            "supportedTaxonomies": [],
+            "taxa": [],
+            "translationMetadata": null,
+            "version": "3.7.0"
+          },
+          "extensions": [
+            {
+              "associatedComponent": null,
+              "contents": [
+                "localizedData",
+                "nonLocalizedData"
+              ],
+              "dottedQuadFileVersion": null,
+              "downloadUri": "https://github.com/Yelp/detect-secrets",
+              "fullDescription": null,
+              "fullName": "yelp/detect-secrets",
+              "globalMessageStrings": null,
+              "guid": null,
+              "informationUri": "https://github.com/Yelp/detect-secrets",
+              "isComprehensive": false,
+              "language": "en-US",
+              "localizedDataSemanticVersion": null,
+              "locations": [],
+              "minimumRequiredLocalizedDataSemanticVersion": null,
+              "name": "detect-secrets",
+              "notifications": [],
+              "organization": "Yelp",
+              "product": null,
+              "productSuite": null,
+              "properties": {
+                "scanner_details": {
+                  "tool_invocation": {
+                    "end_time": "2026-10-05T12:59:36.997294+00:00",
+                    "start_time": "2026-10-05T12:59:36.983242+00:00"
+                  },
+                  "tool_name": "detect-secrets",
+                  "tool_version": "3.7.0"
+                },
+                "tags": [
+                  "detect-secrets"
+                ]
+              },
+              "releaseDateUtc": null,
+              "rules": [],
+              "semanticVersion": null,
+              "shortDescription": null,
+              "supportedTaxonomies": [],
+              "taxa": [],
+              "translationMetadata": null,
+              "version": "3.7.0"
+            }
+          ],
+          "properties": null
+        },
+        "translations": [],
+        "versionControlProvenance": [],
+        "webRequests": [],
+        "webResponses": []
+      }
+    ],
+    "version": "2.1.0"
+  },
+  "scanner_results": {
+    "bandit": {
+      "actionable_finding_count": 0,
+      "dependencies_satisfied": true,
+      "duration": 0.0,
+      "excluded": false,
+      "exit_code": 0,
+      "finding_count": 0,
+      "severity_counts": {
+        "critical": 0,
+        "high": 0,
+        "info": 0,
+        "low": 0,
+        "medium": 0,
+        "suppressed": 0
+      },
+      "status": "SKIPPED",
+      "suppressed_finding_count": 0
+    },
+    "cdk-nag": {
+      "actionable_finding_count": 0,
+      "dependencies_satisfied": true,
+      "duration": 0.0,
+      "excluded": false,
+      "exit_code": 0,
+      "finding_count": 0,
+      "severity_counts": {
+        "critical": 0,
+        "high": 0,
+        "info": 0,
+        "low": 0,
+        "medium": 0,
+        "suppressed": 0
+      },
+      "status": "SKIPPED",
+      "suppressed_finding_count": 0
+    },
+    "cfn-nag": {
+      "actionable_finding_count": 0,
+      "dependencies_satisfied": true,
+      "duration": 0.0,
+      "excluded": false,
+      "exit_code": 0,
+      "finding_count": 0,
+      "severity_counts": {
+        "critical": 0,
+        "high": 0,
+        "info": 0,
+        "low": 0,
+        "medium": 0,
+        "suppressed": 0
+      },
+      "status": "SKIPPED",
+      "suppressed_finding_count": 0
+    },
+    "checkov": {
+      "actionable_finding_count": 0,
+      "dependencies_satisfied": true,
+      "duration": 0.0,
+      "excluded": false,
+      "exit_code": 0,
+      "finding_count": 0,
+      "severity_counts": {
+        "critical": 0,
+        "high": 0,
+        "info": 0,
+        "low": 0,
+        "medium": 0,
+        "suppressed": 0
+      },
+      "status": "SKIPPED",
+      "suppressed_finding_count": 0
+    },
+    "detect-secrets": {
+      "actionable_finding_count": 3,
+      "dependencies_satisfied": true,
+      "duration": 0.014052,
+      "excluded": false,
+      "exit_code": 0,
+      "finding_count": 3,
+      "severity_counts": {
+        "critical": 3,
+        "high": 0,
+        "info": 0,
+        "low": 0,
+        "medium": 0,
+        "suppressed": 0
+      },
+      "status": "FAILED",
+      "suppressed_finding_count": 0
+    },
+    "grype": {
+      "actionable_finding_count": 0,
+      "dependencies_satisfied": true,
+      "duration": 0.0,
+      "excluded": false,
+      "exit_code": 0,
+      "finding_count": 0,
+      "severity_counts": {
+        "critical": 0,
+        "high": 0,
+        "info": 0,
+        "low": 0,
+        "medium": 0,
+        "suppressed": 0
+      },
+      "status": "SKIPPED",
+      "suppressed_finding_count": 0
+    },
+    "npm-audit": {
+      "actionable_finding_count": 0,
+      "dependencies_satisfied": true,
+      "duration": 0.0,
+      "excluded": false,
+      "exit_code": 0,
+      "finding_count": 0,
+      "severity_counts": {
+        "critical": 0,
+        "high": 0,
+        "info": 0,
+        "low": 0,
+        "medium": 0,
+        "suppressed": 0
+      },
+      "status": "SKIPPED",
+      "suppressed_finding_count": 0
+    },
+    "opengrep": {
+      "actionable_finding_count": 0,
+      "dependencies_satisfied": true,
+      "duration": 0.0,
+      "excluded": false,
+      "exit_code": 0,
+      "finding_count": 0,
+      "severity_counts": {
+        "critical": 0,
+        "high": 0,
+        "info": 0,
+        "low": 0,
+        "medium": 0,
+        "suppressed": 0
+      },
+      "status": "SKIPPED",
+      "suppressed_finding_count": 0
+    },
+    "semgrep": {
+      "actionable_finding_count": 0,
+      "dependencies_satisfied": true,
+      "duration": 0.517671,
+      "excluded": false,
+      "exit_code": 0,
+      "finding_count": 0,
+      "severity_counts": {
+        "critical": 0,
+        "high": 0,
+        "info": 0,
+        "low": 0,
+        "medium": 0,
+        "suppressed": 0
+      },
+      "status": "ERROR",
+      "suppressed_finding_count": 0
+    },
+    "syft": {
+      "actionable_finding_count": 0,
+      "dependencies_satisfied": true,
+      "duration": 0.0,
+      "excluded": false,
+      "exit_code": 0,
+      "finding_count": 0,
+      "severity_counts": {
+        "critical": 0,
+        "high": 0,
+        "info": 0,
+        "low": 0,
+        "medium": 0,
+        "suppressed": 0
+      },
+      "status": "SKIPPED",
+      "suppressed_finding_count": 0
+    }
+  },
+  "used_suppressions": [],
+  "validation_checkpoints": [
+    {
+      "actual_scanners": [
+        "detect-secrets",
+        "semgrep"
+      ],
+      "checkpoint_name": "task_queue_validation",
+      "discrepancies": [],
+      "errors": [],
+      "expected_scanners": [
+        "detect-secrets",
+        "semgrep"
+      ],
+      "metadata": {
+        "expected_count": 2,
+        "queue_items": 2,
+        "queued_count": 2
+      },
+      "timestamp": "2026-10-05T12:59:36.977920"
+    },
+    {
+      "actual_scanners": [
+        "detect-secrets"
+      ],
+      "checkpoint_name": "execution_completion",
+      "discrepancies": [],
+      "errors": [],
+      "expected_scanners": [
+        "detect-secrets",
+        "semgrep"
+      ],
+      "metadata": {
+        "completed_count": 1,
+        "completion_rate": 0.5,
+        "expected_count": 2
+      },
+      "timestamp": "2026-10-05T12:59:37.510729"
+    },
+    {
+      "actual_scanners": [
+        "bandit",
+        "cdk-nag",
+        "cfn-nag",
+        "checkov",
+        "detect-secrets",
+        "grype",
+        "npm-audit",
+        "opengrep",
+        "syft"
+      ],
+      "checkpoint_name": "result_completeness",
+      "discrepancies": [
+        "Scanner 'semgrep' was missing from results: Scanner was queued for execution but did not complete - execution failed"
+      ],
+      "errors": [],
+      "expected_scanners": [
+        "bandit",
+        "cdk-nag",
+        "cfn-nag",
+        "checkov",
+        "detect-secrets",
+        "grype",
+        "npm-audit",
+        "opengrep",
+        "semgrep",
+        "syft"
+      ],
+      "metadata": {
+        "completeness_rate": 0.9,
+        "executed_count": 9,
+        "expected_count": 10
+      },
+      "timestamp": "2026-10-05T12:59:37.512984"
+    }
+  ],
+  "workspace": null
+}

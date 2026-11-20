@@ -37,10 +37,6 @@ pytestmark = pytest.mark.unit
 #: is reached, and the probe is never seen. Nothing is created at this path.
 UV_PATH = fake_tool_path("/opt/uv/bin/uv")
 
-#: Where the mocked uv lives. ASH refuses to spawn a program whose path is not
-#: anchored (a drive letter is needed on Windows), so /opt/uv/bin/uv gets one there.
-UV_PATH = os.path.abspath("/opt/uv/bin/uv")
-
 
 @pytest.fixture(autouse=True)
 def _unresolved_names_reach_the_mocked_spawn(monkeypatch):
@@ -2834,7 +2830,7 @@ class TestGetUvToolCommand:
     def test_probe_honors_offline_mode(self, reset_module_caches, monkeypatch, offline):
         """Under ASH_OFFLINE the probe must not resolve the tool from PyPI.
 
-        Online, it downloaded bandit and checkov during `ash scan --mode nix` and
+        Online, it downloaded bandit and checkov during `ashx scan --mode nix` and
         could be killed mid-download by its 5s timeout, leaving uv's cache with
         an index entry and no wheel.
         """
@@ -3317,8 +3313,19 @@ class TestAMemoizedFailureIsRecoverable:
     provenance defect. So validate_cached_tool forces a re-probe.
     """
 
-    def test_a_timeout_is_memoized_and_served_to_later_callers(self, runner):
-        """Documents the caching that makes the refresh below necessary."""
+    def test_a_failure_is_memoized_and_served_to_later_callers(self, runner):
+        """Documents the caching that makes the refresh below necessary. A
+        timeout is the exception: see the next test."""
+        runner._uv_available_cache = True
+        with patch(
+            "automated_security_helper.utils.subprocess_utils._run_plain",
+            return_value=MagicMock(returncode=1, stdout=""),
+        ) as mock_run:
+            assert runner.get_tool_version("bandit") is None
+            assert runner.get_tool_version("bandit") is None
+            assert mock_run.call_count == 1
+
+    def test_a_timeout_is_not_remembered(self, runner):
         runner._uv_available_cache = True
         with patch(
             "automated_security_helper.utils.subprocess_utils._run_plain",
@@ -3326,7 +3333,10 @@ class TestAMemoizedFailureIsRecoverable:
         ) as mock_run:
             assert runner.get_tool_version("bandit") is None
             assert runner.get_tool_version("bandit") is None
-            assert mock_run.call_count == 1
+            assert mock_run.call_count == 1, "the retry window answers the second"
+            uv_tool_runner._uv_version_probe_windows.clear()
+            assert runner.get_tool_version("bandit") is None
+            assert mock_run.call_count == 2
 
     def test_validate_cached_tool_re_probes_past_a_memoized_failure(self, runner):
         runner._uv_available_cache = True
@@ -4128,7 +4138,7 @@ class TestBuiltinPluginEnvironmentReadsAreAudited:
         files = sorted(root.rglob("*.py"))
         # Denominator control: an empty or relocated tree must fail, not
         # pass vacuously.
-        assert any(file.name == "semgrep_scanner.py" for file in files), files
+        assert any(file.name == "bandit_scanner.py" for file in files), files
         found: Counter = Counter()
         for file in files:
             tree = ast.parse(file.read_text(encoding="utf-8"))

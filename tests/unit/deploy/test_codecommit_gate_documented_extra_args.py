@@ -87,7 +87,7 @@ def test_the_example_gate_reaches_ash_scan(monkeypatch, tmp_path):
 
     def run(argv, cwd=None, env=None):
         argv = list(argv)
-        if argv == ["ash", "scan", "--help"]:
+        if argv == ["ashx", "scan", "--help"]:
             # The gate's probe of the image's options, answered as an ASH that has
             # --fail-on-incomplete-scanners; it is not a scan, so it is not recorded.
             return SimpleNamespace(
@@ -109,11 +109,11 @@ def test_the_example_gate_reaches_ash_scan(monkeypatch, tmp_path):
             f"which the gate refuses, so every pull request reports an error:\n{exc}"
         )
 
-    assert captured and captured[0][:2] == ["ash", "scan"], captured
+    assert captured and captured[0][:2] == ["ashx", "scan"], captured
     scan = typer.main.get_command(app).commands["scan"]
     context = scan.make_context("scan", captured[0][2:], resilient_parsing=False)
     assert not context.args, (
-        f"`ash scan` collected unknown options from the example's argv: {context.args}"
+        f"`ashx scan` collected unknown options from the example's argv: {context.args}"
     )
 
 

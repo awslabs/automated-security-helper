@@ -987,7 +987,7 @@ def test_lint_hint_with_a_deleted_working_directory_keeps_the_source_dir(
 
     hint = lint_hint(config, source)
 
-    assert hint.startswith("Run: ash config lint --config "), hint
+    assert hint.startswith("Run: ashx config lint --config "), hint
     assert hint.endswith(f" --source-dir {source.as_posix()}"), hint
 
 

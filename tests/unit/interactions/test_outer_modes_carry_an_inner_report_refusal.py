@@ -47,6 +47,7 @@ from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
     ReporterPluginConfigBase,
 )
+from automated_security_helper.cli.deprecations import CANONICAL_CLI_NAME
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.core.enums import RunMode
 from automated_security_helper.core.phases.report_phase import ReportPhase
@@ -953,7 +954,7 @@ PLUGIN = textwrap.dedent(
 # Drops `nix ... develop <ref> --command` and runs the rest, which is `ash ...`.
 FAKE_NIX = '#!/bin/sh\nwhile [ "$#" -gt 0 ] && [ "$1" != "--command" ]; do shift; done\nshift\nexec "$@"\n'
 
-ASH = Path(sys.executable).with_name("ash")
+ASH = Path(sys.executable).with_name(CANONICAL_CLI_NAME)
 
 
 @pytest.mark.skipif(

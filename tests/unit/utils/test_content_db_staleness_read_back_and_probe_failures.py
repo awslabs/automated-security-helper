@@ -119,16 +119,16 @@ class _Scanner:
 
 
 def test_a_scan_that_read_no_database_is_graded_against_none_when_the_probe_fails():
-    scanner = _Scanner("semgrep", [], RuntimeError("no context"))
-    records = staleness.assess_scanner(scanner, _sarif("semgrep"), STALENESS_FAIL)
+    scanner = _Scanner("opengrep", [], RuntimeError("no context"))
+    records = staleness.assess_scanner(scanner, _sarif("opengrep"), STALENESS_FAIL)
     assert records == []
 
 
 def test_a_probe_failure_grades_only_the_databases_the_scan_read_as_unmeasured():
-    entry = _entry("semgrep-offline-rules")
-    scanner = _Scanner("semgrep", [entry], RuntimeError("no context"))
+    entry = _entry("opengrep-offline-rules")
+    scanner = _Scanner("opengrep", [entry], RuntimeError("no context"))
     records = staleness.assess_scanner(
-        scanner, _sarif("semgrep"), STALENESS_FAIL, now=_NOW
+        scanner, _sarif("opengrep"), STALENESS_FAIL, now=_NOW
     )
     assert [record.name for record in records] == [entry.name]
     (record,) = records
@@ -148,16 +148,16 @@ def test_a_probe_failure_runs_no_measurer(monkeypatch):
         )
 
     monkeypatch.setattr(staleness, "measure", _no_probe)
-    entry = _entry("semgrep-offline-rules")
-    scanner = _Scanner("semgrep", [entry], RuntimeError("no context"))
+    entry = _entry("opengrep-offline-rules")
+    scanner = _Scanner("opengrep", [entry], RuntimeError("no context"))
     records = staleness.assess_scanner(
-        scanner, _sarif("semgrep"), STALENESS_FAIL, now=_NOW
+        scanner, _sarif("opengrep"), STALENESS_FAIL, now=_NOW
     )
     (record,) = records
     assert record.built is None
     assert record.absent is False
     assert record.measured_by == entry.age_source
-    assert record.scanner == "semgrep"
+    assert record.scanner == "opengrep"
     assert record.stale is True
 
 

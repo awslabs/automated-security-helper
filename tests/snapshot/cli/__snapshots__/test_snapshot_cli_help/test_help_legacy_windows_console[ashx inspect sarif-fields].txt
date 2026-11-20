@@ -1,0 +1,18 @@
+
+ Usage: ashx inspect sarif-fields [OPTIONS]
+
+ The `inspect sarif-fields` command analyzes SARIF reports to understand field usage across
+ different scanners and ensure fields are preserved during aggregation.
+
+ This command:
+ 1. Extracts field paths from the original SARIF reports
+ 2. Identifies which scanners populate which fields and their data types
+ 3. Compares fields between original scanner reports and the aggregated report
+ 4. Generates a comprehensive HTML report showing field presence and mapping information
+ 5. Outputs field data in both JSON and CSV formats for further analysis
+
+┌─ Options ───────────────────────────────────────────────────────────────────────────────────────┐
+│ --sarif-dir           <str>  Directory containing SARIF files to analyze                        │
+│ --output-dir          <str>  Directory to write output files                                    │
+│ --help        -h             Show this message and exit.                                        │
+└─────────────────────────────────────────────────────────────────────────────────────────────────┘

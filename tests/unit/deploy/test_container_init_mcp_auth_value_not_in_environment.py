@@ -377,12 +377,12 @@ with open(os.environ["STAND_IN_RECORD"], "w", encoding="utf-8") as out:
 
 @pytest.mark.integration
 class TestTheHandOverToAshMcp:
-    """What ash-mcp-serve passes ``ash mcp``, with a stand-in ``ash`` on PATH."""
+    """What ash-mcp-serve passes ``ash mcp``, with a stand-in ``ashx`` on PATH."""
 
     def _run(self, child_env, tmp_path, has_fd: bool):
         bin_dir = tmp_path / "bin"
         bin_dir.mkdir()
-        ash = bin_dir / "ash"
+        ash = bin_dir / "ashx"
         ash.write_text(STAND_IN_ASH.format(python=sys.executable), encoding="utf-8")
         ash.chmod(0o755)
         record = tmp_path / "record.json"

@@ -392,13 +392,46 @@ def iter_repo_files(
             yield here / name
 
 
+#: The ``.github`` directories that hold this repository's workflows and composite
+#: actions, relative to the repository root. Listed rather than discovered with a
+#: ``**`` glob from the root: that walk descends into tests/pytest-temp, where other
+#: xdist workers create and delete directories, and raised FileNotFoundError on a
+#: windows-latest py3.11 leg (test_checkout_persist_credentials). The completeness
+#: test in tests/unit/test_github_yaml_files.py compares this list with
+#: ``git ls-files`` so a new one cannot be missed.
+GITHUB_YAML_ROOTS = (
+    ".github",
+    "ash-agent-plugins/.github",
+    "docs/content/tutorials/CI/GitHubActions/.github",
+)
+
+
+def github_yaml_files(repo_root: Path) -> list[Path]:
+    """Every workflow and composite-action YAML under ``GITHUB_YAML_ROOTS``.
+
+    Each glob is one or two fixed levels deep inside a ``.github`` directory, so
+    nothing outside those directories is listed, let alone descended into.
+    """
+    found: set[Path] = set()
+    for rel in GITHUB_YAML_ROOTS:
+        root = repo_root / rel
+        for pattern in (
+            "workflows/*.yml",
+            "workflows/*.yaml",
+            "actions/*/action.yml",
+            "actions/*/action.yaml",
+        ):
+            found.update(path for path in root.glob(pattern) if path.is_file())
+    return sorted(found)
+
+
 def ash_tool_not_found_reason(tool: str, windows: Optional[bool] = None) -> str:
     """The skip reason for a test that needs a tool ASH installs, and found none.
 
     ``find_executable`` looks on PATH, then in ASH's bin directory (ASH_BIN_PATH, or
     ~/.ash/bin) and /usr/local/bin. tests/conftest.py gives every run and every test
     a home of its own, so during a run ~/.ash/bin is an empty directory there, and a
-    tool ``ash dependencies install`` put in the developer's ~/.ash/bin is not found
+    tool ``ashx dependencies install`` put in the developer's ~/.ash/bin is not found
     unless that directory is on PATH. The reason says so, because "not installed" sends
     whoever reads it to install a tool they already have. It names PATH rather than
     ASH_BIN_PATH because tests that install to the default directory install into
@@ -416,7 +449,7 @@ def ash_tool_not_found_reason(tool: str, windows: Optional[bool] = None) -> str:
         advice = 'PATH="$HOME/.ash/bin:$PATH"'
     return (
         f"{tool} is not on PATH or in ASH's bin directory, which tests keep in a home "
-        "of their own; to run this test against a copy `ash dependencies install` put "
+        "of their own; to run this test against a copy `ashx dependencies install` put "
         f"in ~/.ash/bin, run with {advice}"
     )
 

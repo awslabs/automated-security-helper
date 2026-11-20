@@ -195,12 +195,16 @@ repos:
         # snapshots out of the parameter order a user sees and failed every one, and
         # some .json snapshots are not JSON at all (the s3 reporter writes a URL).
         #
-        # The deploy/ npm manifests are excluded for the same reason: npm owns them.
+        # The npm manifests under deploy/ and editors/ are excluded for the same
+        # reason: npm owns them.
         # This hook sorts keys (it is not passed --no-sort-keys), so on any commit
         # touching package.json or package-lock.json it rewrote the whole file into
         # an order `npm install` immediately undoes -- several thousand lines per
         # lockfile, which is why lockfile commits used to be made with this hook
-        # skipped.
+        # skipped. editors/vscode is the third npm tree and needs the same
+        # exclusion: without it the hook rewrites 3,261 lines of its lockfile.
+        # scripts/e2e/inspector is the fourth: the MCP Inspector the MCPB e2e leg
+        # installs with `npm ci`.
         #
         # ash-agent-plugins/agentic-coding/plugins/ is the transpiler's output, and
         # `agentic-plugins check` (ash-agent-plugins-drift.yml) rebuilds it and
@@ -225,7 +229,8 @@ repos:
           (?x)^(
             .*\.vscode/.*
             |deploy/cdk/templates/.*\.template\.json
-            |deploy/[^/]+/package(-lock)?\.json
+            |(deploy|editors)/[^/]+/package(-lock)?\.json
+            |scripts/e2e/inspector/package(-lock)?\.json
             |deploy/cdk/tsconfig\.json
             |tests/snapshot/.*/__snapshots__/.*
             |ash-agent-plugins/agentic-coding/plugins/.*
@@ -369,7 +374,7 @@ repos:
       - id: ash
         name: (manual) ASH dev manual scan
         description: Runs various code scanners from Python directly
-        entry: uv run --frozen ash --mode=precommit
+        entry: uv run --frozen ashx --mode=precommit
         pass_filenames: false
         verbose: true
         language: system

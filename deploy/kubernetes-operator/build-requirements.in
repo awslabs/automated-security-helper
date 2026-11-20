@@ -1,0 +1,4 @@
+# The operator's [build-system] requirement, locked so the image builds the operator
+# wheel with --no-build-isolation from hashed inputs only. Regenerate the
+# .txt with relock.sh.
+hatchling

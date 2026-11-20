@@ -14,6 +14,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
+import { ASH_CLI } from '../lib/ash-container-scripts';
 import { AshDistributedPipelineStack } from '../lib/ash-distributed-pipeline-stack';
 import { CfnResolver, synth } from './support/cfn';
 import { AshRecord, fakeAshScript, python3, readLines } from './support/gate-harness';
@@ -44,7 +45,8 @@ function runMerge(baseConfig?: string): AshRecord[] {
     fs.mkdirSync(bin);
     fs.mkdirSync(py, { recursive: true });
     const record = path.join(dir, 'ash.jsonl');
-    fs.writeFileSync(path.join(bin, 'ash'), fakeAshScript(python3(), record, 0), { mode: 0o755 });
+    // Named for the command the buildspec runs (ASH_CLI, `ashx`), not the alias.
+    fs.writeFileSync(path.join(bin, ASH_CLI), fakeAshScript(python3(), record, 0), { mode: 0o755 });
     fs.writeFileSync(
       path.join(py, '__init__.py'),
       [

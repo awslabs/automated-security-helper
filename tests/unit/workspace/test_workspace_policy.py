@@ -508,28 +508,28 @@ def test_a_scanner_the_project_already_declares_is_not_policy_origin():
 
 def test_a_scanner_only_the_policy_names_is_policy_origin():
     resolved = policy_for_project(
-        _policy(additional_scanners=["semgrep"]),
+        _policy(additional_scanners=["opengrep"]),
         project_prefix="api",
         project_threshold="MEDIUM",
         project_scanners=("bandit",),
     )
-    assert resolved.policy_scanners == ("semgrep",)
+    assert resolved.policy_scanners == ("opengrep",)
 
 
 def test_policy_origin_scanners_do_not_gate_by_default():
     resolved = policy_for_project(
-        _policy(additional_scanners=["semgrep"]),
+        _policy(additional_scanners=["opengrep"]),
         project_prefix="api",
         project_threshold="MEDIUM",
         project_scanners=(),
     )
-    assert resolved.policy_scanners == ("semgrep",)
+    assert resolved.policy_scanners == ("opengrep",)
     assert resolved.policy_scanners_gate is False
 
 
 def test_policy_origin_scanners_gate_when_the_operator_opts_in():
     resolved = policy_for_project(
-        _policy(additional_scanners=["semgrep"], policy_scanners_gate=True),
+        _policy(additional_scanners=["opengrep"], policy_scanners_gate=True),
         project_prefix="api",
         project_threshold="MEDIUM",
         project_scanners=(),
@@ -559,9 +559,43 @@ def test_the_scanner_comparison_ignores_case_and_separator_style():
 
 def test_the_policy_file_names_are_disjoint_from_the_project_config_names():
     """Structural guarantee that discovery can never pick up a project config."""
-    from automated_security_helper.core.constants import ASH_CONFIG_FILE_NAMES
+    from automated_security_helper.core.constants import (
+        ASH_CONFIG_FILE_NAMES,
+        ASH_PYPROJECT_FILE_NAME,
+        ASH_RC_FILE_NAMES,
+    )
 
-    assert not set(WORKSPACE_POLICY_FILE_NAMES) & set(ASH_CONFIG_FILE_NAMES)
+    project_names = {
+        *ASH_CONFIG_FILE_NAMES,
+        *ASH_RC_FILE_NAMES,
+        ASH_PYPROJECT_FILE_NAME,
+    }
+    assert not set(WORKSPACE_POLICY_FILE_NAMES) & project_names
+
+
+@pytest.mark.parametrize(
+    "name, content",
+    [
+        (".ashrc.yaml", "global_settings:\n  severity_threshold: HIGH\n"),
+        ("ashrc.json", '{"global_settings": {"severity_threshold": "HIGH"}}\n'),
+        ("pyproject.toml", '[tool.ash.global_settings]\nseverity_threshold = "HIGH"\n'),
+    ],
+)
+def test_pointing_the_policy_at_an_ashrc_or_pyproject_is_refused_by_name(
+    tmp_path, name, content
+):
+    """The root project's config may now be an ashrc file or [tool.ash].
+
+    With no project list, as on the CLI, only the name catches it, so the name
+    check has to cover every project config source, not just the older names.
+    """
+    project_config = _write(tmp_path / name, content)
+    with pytest.raises(WorkspaceDefinitionError) as excinfo:
+        resolve_workspace_policy(tmp_path, explicit=project_config)
+
+    message = str(excinfo.value)
+    assert name in message
+    assert "ash-workspace" in message
 
 
 def test_a_policy_file_beside_the_workspace_file_is_discovered(tmp_path):

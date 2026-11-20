@@ -106,7 +106,7 @@ def nix_shell(monkeypatch) -> FakeNixShell:
 
 @pytest.fixture
 def scan(run_cli, monkeypatch):
-    """Run ``ash <args>`` with ``sys.argv`` set as a real ``ash`` process would have it.
+    """Run ``ashx <args>`` with ``sys.argv`` set as a real ``ashx`` process would have it.
 
     The scan entry point builds the inner command from the call's own options, not
     from this process's argv; ``sys.argv`` is still set as ``ash`` would have it so
@@ -114,7 +114,7 @@ def scan(run_cli, monkeypatch):
     """
 
     def _scan(args):
-        monkeypatch.setattr(sys, "argv", ["ash", *args])
+        monkeypatch.setattr(sys, "argv", ["ashx", *args])
         return run_cli(args)
 
     return _scan

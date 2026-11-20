@@ -21,6 +21,7 @@ import sys
 
 import pytest
 
+from automated_security_helper.cli.deprecations import CANONICAL_CLI_NAME
 from automated_security_helper.interactions import run_ash_nix as nix
 
 pytestmark = pytest.mark.unit
@@ -65,7 +66,7 @@ def test_a_forwarded_command_line_keeps_the_hosts_variables(shell, monkeypatch):
     """Control: with no argv the caller's own command line is forwarded, and it was
     read against this environment already."""
     monkeypatch.setenv("ASH_SCANNERS", "grype")
-    monkeypatch.setattr(sys, "argv", ["ash", "scan", "--mode", "nix"])
+    monkeypatch.setattr(sys, "argv", [CANONICAL_CLI_NAME, "scan", "--mode", "nix"])
 
     nix.run_ash_nix()
 
