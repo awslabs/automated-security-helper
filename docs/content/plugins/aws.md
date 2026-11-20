@@ -330,7 +330,7 @@ carry those paths as recorded, which are specific to the scanning machine.
 
 <!-- doctest: illustrative reason="requires saved ASH scan results" -->
 ```bash
-ash report --format asff --output-dir ash_output \
+ashx report --format asff --output-dir ash_output \
   --config-overrides reporters.asff.options.account_id=123456789012 \
   --config-overrides reporters.asff.options.aws_region=us-east-1 \
   --config-overrides reporters.asff.options.findings_scope=my-repository \
