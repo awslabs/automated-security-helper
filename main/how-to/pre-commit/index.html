@@ -3865,7 +3865,9 @@ bandit and checkov about 240 MB under <code>~/.local/share/uv</code>.</p>
 the scan: without the flag, each commit scans the whole tree, however small the change.
 With <code>--staged</code>, which the hook passes, the scan covers the staged files and the time
 grows with the commit instead. checkov is the slowest scanner. Warm-run times, measured
-on x86_64 Linux with 8 or more vCPUs, Python 3.12, and warm caches:</p>
+on x86_64 Linux with 8 or more vCPUs, Python 3.12, and warm caches. The 10-file column is
+the median of three runs on one machine; the ~900-file column comes from an earlier
+measurement on a different machine, so compare rows within a column rather than across:</p>
 <table>
 <thead>
 <tr>
@@ -3877,12 +3879,12 @@ on x86_64 Linux with 8 or more vCPUs, Python 3.12, and warm caches:</p>
 <tbody>
 <tr>
 <td><code>--mode precommit</code> on the whole repository (no <code>--staged</code>)</td>
-<td>~6.7 s</td>
+<td>~6.6 s</td>
 <td>~18 s</td>
 </tr>
 <tr>
 <td><code>--mode precommit --staged</code>, one <code>.py</code> file staged</td>
-<td>~4.4 s</td>
+<td>~2.8 s</td>
 <td>~5.7 s</td>
 </tr>
 <tr>
@@ -3892,7 +3894,7 @@ on x86_64 Linux with 8 or more vCPUs, Python 3.12, and warm caches:</p>
 </tr>
 <tr>
 <td><code>--staged</code> with the express daemon warm (<code>--express</code>)</td>
-<td>~3.0 s</td>
+<td>~1.4 s</td>
 <td>not measured</td>
 </tr>
 </tbody>
