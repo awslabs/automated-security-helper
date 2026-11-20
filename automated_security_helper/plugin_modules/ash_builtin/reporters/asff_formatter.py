@@ -1,0 +1,477 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""Builds ASFF findings from ASH results, for the offline export and Security Hub.
+
+Shared by the built-in ``asff`` reporter, which writes the findings to a file, and
+the ``aws-security-hub`` reporter in ``ash_aws_plugins``, which imports them. It sits
+here, in the built-in package, so the built-in reporter never imports the opt-in AWS
+package (that import registers the AWS reporters as a side effect). Nothing here
+touches the network or needs AWS credentials, which is also why the partition of a
+region is read from botocore's bundled data file rather than through a botocore
+session.
+"""
+
+import functools
+import hashlib
+import json
+import re
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Callable, TYPE_CHECKING
+
+from automated_security_helper.models.flat_vulnerability import FlatVulnerability
+from automated_security_helper.utils.finding_identity import (
+    identity_keys,
+    relative_path,
+    relative_to_scan_root,
+)
+from automated_security_helper.utils.sarif_utils import _resolve_result_severity
+
+if TYPE_CHECKING:
+    from automated_security_helper.models.asharp_model import AshAggregatedResults
+    from automated_security_helper.schemas.sarif_schema_model import Result
+
+
+# Limits the findings are built on. Each is quoted from the AWS documentation page
+# named beside it; none is from memory.
+#
+# https://docs.aws.amazon.com/securityhub/1.0/APIReference/API_AwsSecurityFinding.html
+#   Id, GeneratorId: "Maximum length of 512". Title: "Maximum length of 256".
+#   Description: "Maximum length of 1024". ProductFields: "Can contain up to 50
+#   key-value pairs. For each key-value pair, the key can contain up to 128
+#   characters, and the value can contain up to 2048 characters."
+#   SchemaVersion: "The value is 2018-10-08."
+MAX_GENERATOR_ID_LENGTH = 512
+MAX_TITLE_LENGTH = 256
+MAX_DESCRIPTION_LENGTH = 1024
+MAX_PRODUCT_FIELD_VALUE_LENGTH = 2048
+ASFF_SCHEMA_VERSION = "2018-10-08"
+
+# https://docs.aws.amazon.com/securityhub/1.0/APIReference/API_Severity.html
+#   Original: "Maximum length of 64". Label valid values: INFORMATIONAL | LOW |
+#   MEDIUM | HIGH | CRITICAL.
+_ASFF_SEVERITY_LABELS = {
+    "critical": "CRITICAL",
+    "high": "HIGH",
+    "medium": "MEDIUM",
+    "low": "LOW",
+    "info": "INFORMATIONAL",
+}
+
+# https://docs.aws.amazon.com/securityhub/1.0/APIReference/API_Resource.html
+#   Type: "If the resource does not match any of the provided types, then set Type
+#   to Other." Id has no documented length limit; this reporter bounds it at the
+#   ProductFields value length so the finding size stays bounded.
+_RESOURCE_TYPE = "Other"
+MAX_RESOURCE_ID_LENGTH = 2048
+
+# https://docs.aws.amazon.com/securityhub/latest/userguide/asff-required-attributes.html
+#   Types: "One or more finding types in the format of namespace/category/classifier".
+_TYPE_VULNERABILITY = "Software and Configuration Checks/Vulnerabilities"
+_TYPE_CVE = "Software and Configuration Checks/Vulnerabilities/CVE"
+_CVE_PATTERN = re.compile(r"\bCVE-\d{4}-\d{4,}\b", re.IGNORECASE)
+
+# Set on every finding so the Security Hub console and filters name ASH instead of
+# the "Personal" / "Default" a custom integration otherwise shows. The ASFF page
+# for CompanyName and ProductName: "You cannot update this attribute with
+# BatchImportFindings or BatchUpdateFindings. The exception to this is a custom
+# integration."
+PRODUCT_NAME = "Automated Security Helper"
+COMPANY_NAME = "AWS Labs"
+
+# An ISO 8601 timestamp, split so it can be rewritten into the forms
+# datetime.fromisoformat accepts on Python 3.10: no "Z", and a fraction of exactly
+# 3 or 6 digits. Security Hub returns "2026-01-15T12:00:00.000Z".
+_ISO_TIMESTAMP = re.compile(
+    r"^(?P<head>\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2})"
+    r"(?:\.(?P<fraction>\d+))?"
+    r"(?P<zone>[Zz]|[+-]\d{2}:?\d{2})?$"
+)
+
+# A fenced code block in a finding message. FlatVulnerability reads one as the
+# finding's code snippet, and snippets are not sent. An unterminated fence runs to
+# the end of the message.
+_FENCED_BLOCK = re.compile(r"```.*?(?:```|\Z)", re.DOTALL)
+
+
+class AsffFormatError(RuntimeError):
+    """The results cannot be turned into ASFF findings.
+
+    The Security Hub reporter passes its own ``SecurityHubImportError`` to the
+    formatter instead, so its callers keep catching that.
+    """
+
+
+class AsffFormatter:
+    """ASFF findings for one set of results.
+
+    ``offline`` is the export that runs where the scan's checkout may be gone: paths
+    are compared with ``source_dir`` as spelled, never resolved on this host (see
+    ``utils/finding_identity.py``), and the region's partition comes from
+    ``partition_of``, by default botocore's bundled endpoint data. The Security Hub
+    reporter passes its own partition lookup.
+
+    ``reporter`` and ``error_type`` name the caller in a refusal, and ``nothing``
+    says what did not happen ("nothing was sent", "nothing was written").
+    """
+
+    def __init__(
+        self,
+        target: str,
+        scope: str | None,
+        source_dir: str | Path | None,
+        *,
+        offline: bool = False,
+        partition_of: Callable[[str], str] | None = None,
+        reporter: str = "asff",
+        nothing: str = "nothing was written",
+        error_type: type[Exception] = AsffFormatError,
+    ) -> None:
+        self.target = target
+        self.scope = scope
+        self.source_dir = source_dir
+        self.offline = offline
+        self.partition_of = partition_of
+        self.reporter = reporter
+        self.nothing = nothing
+        self.error_type = error_type
+
+    def build_asff_findings(
+        self, model: "AshAggregatedResults", *, account_id: str, region: str
+    ) -> list[dict[str, Any]]:
+        product_arn = _product_arn(
+            region, account_id, partition=(self.partition_of or _offline_partition)
+        )
+        timestamp = _asff_timestamp(
+            model.metadata.generated_at,
+            reporter=self.reporter,
+            nothing=self.nothing,
+            error_type=self.error_type,
+        )
+        target = self.target
+        model_project = _model_project(model)
+        scope = self.scope
+        source_dir = self.source_dir
+
+        prepared: list[dict[str, Any]] = []
+        for run in (model.sarif.runs if model.sarif else None) or []:
+            tool_name = "unknown"
+            if run.tool and run.tool.driver and run.tool.driver.name:
+                tool_name = run.tool.driver.name
+            for result in run.results or []:
+                prepared.append(
+                    self._prepare(
+                        result,
+                        tool_name=tool_name,
+                        target=target,
+                        model_project=model_project,
+                        source_dir=source_dir,
+                    )
+                )
+
+        keys = identity_keys(
+            [entry["identity"] for entry in prepared], default_project=model_project
+        )
+        return [
+            self._to_asff(
+                entry,
+                key=key,
+                target=target,
+                scope=scope,
+                account_id=account_id,
+                product_arn=product_arn,
+                timestamp=timestamp,
+            )
+            for entry, key in zip(prepared, keys)
+        ]
+
+    def _prepare(
+        self,
+        result: "Result",
+        *,
+        tool_name: str,
+        target: str,
+        model_project: str | None,
+        source_dir: str | Path | None,
+    ) -> dict[str, Any]:
+        flat = FlatVulnerability.from_sarif_result(result, tool_name, "UNKNOWN")
+        identity = flat.identity
+        if identity is None:
+            raise self.error_type(
+                f"{self.reporter}: the {tool_name} result "
+                f"{flat.rule_id or 'unknown'} has no finding identity, so no "
+                f"finding Id can be derived for it; {self.nothing}"
+            )
+        project = flat.workspace_project or model_project
+        return {
+            "flat": flat,
+            "result": result,
+            "scanner": flat.scanner or tool_name,
+            "rule_id": flat.rule_id or "unknown",
+            "file_path": relative_path(
+                flat.file_path, source_dir, resolve_root=not self.offline
+            ),
+            "project": project,
+            "target_key": _target_key(target, project),
+            "identity": relative_to_scan_root(
+                identity, source_dir, resolve_root=not self.offline
+            ),
+            "message": _without_code_blocks(flat.description or ""),
+        }
+
+    @staticmethod
+    def _to_asff(
+        entry: dict[str, Any],
+        *,
+        key: dict[str, Any],
+        target: str,
+        scope: str | None,
+        account_id: str,
+        product_arn: str,
+        timestamp: str,
+    ) -> dict[str, Any]:
+        flat = entry["flat"]
+        ash_severity = _resolve_result_severity(entry["result"])
+        label = _ASFF_SEVERITY_LABELS.get(ash_severity, "INFORMATIONAL")
+        original = ash_severity.upper()
+
+        scanner = entry["scanner"]
+        rule_id = entry["rule_id"]
+        file_path = entry["file_path"]
+        project = entry["project"]
+        target_key = entry["target_key"]
+
+        message = entry["message"]
+        first_line = next(
+            (line.strip() for line in message.splitlines() if line.strip()), ""
+        )
+        location = file_path or target_key
+        if file_path and flat.line_start is not None:
+            location = f"{file_path}:{flat.line_start}"
+        title = f"{rule_id}: {first_line}" if first_line else rule_id
+        description = (
+            message if first_line else f"{scanner} reported {rule_id} at {location}"
+        )
+
+        types = [_TYPE_CVE if _CVE_PATTERN.search(rule_id) else _TYPE_VULNERABILITY]
+        severity = {"Label": label, "Original": original}
+        resource_id = f"{target_key}/{file_path}" if file_path else target_key
+
+        product_fields = {
+            "ash/target": target_key,
+            "ash/scope": scope,
+            "ash/scanner": scanner,
+            "ash/ruleId": rule_id,
+            "ash/severity": original,
+            "ash/suppressed": "true" if flat.is_suppressed else "false",
+            "ash/file": file_path,
+            "ash/startLine": _str_or_none(flat.line_start),
+            "ash/endLine": _str_or_none(flat.line_end),
+            "ash/workspaceProject": project,
+            "ash/suppressionJustification": (
+                flat.suppression_justification if flat.is_suppressed else None
+            ),
+            "ash/packageName": flat.package_name,
+            "ash/packageVersion": flat.package_version,
+        }
+
+        return {
+            "SchemaVersion": ASFF_SCHEMA_VERSION,
+            "Id": _finding_id(target, key),
+            "ProductArn": product_arn,
+            "GeneratorId": _truncate(
+                f"ash/{scanner}/{rule_id}", MAX_GENERATOR_ID_LENGTH
+            ),
+            "AwsAccountId": account_id,
+            "Types": types,
+            "CreatedAt": timestamp,
+            "UpdatedAt": timestamp,
+            "Severity": dict(severity),
+            "Title": _truncate(title, MAX_TITLE_LENGTH),
+            "Description": _truncate(description, MAX_DESCRIPTION_LENGTH),
+            "Resources": [
+                {
+                    "Type": _RESOURCE_TYPE,
+                    "Id": _truncate(resource_id, MAX_RESOURCE_ID_LENGTH),
+                }
+            ],
+            "FindingProviderFields": {"Severity": dict(severity), "Types": list(types)},
+            "ProductFields": {
+                key: _truncate(value, MAX_PRODUCT_FIELD_VALUE_LENGTH)
+                for key, value in product_fields.items()
+                if isinstance(value, str) and value.strip()
+            },
+            "ProductName": PRODUCT_NAME,
+            "CompanyName": COMPANY_NAME,
+            "RecordState": "ARCHIVED" if flat.is_suppressed else "ACTIVE",
+        }
+
+
+def _target_key(target: str, project: str | None) -> str:
+    """The scan target, with a workspace project's key when it adds anything."""
+    return target if not project or project == target else f"{target}/{project}"
+
+
+def _model_project(model: "AshAggregatedResults") -> str | None:
+    project = getattr(model.metadata, "workspace_project", None)
+    return project if isinstance(project, str) and project.strip() else None
+
+
+def _without_code_blocks(message: str) -> str:
+    """``message`` with every fenced code block removed."""
+    stripped = _FENCED_BLOCK.sub("", message)
+    return re.sub(r"\n{3,}", "\n\n", stripped).strip()
+
+
+def _parse_timestamp(value: Any) -> datetime | None:
+    """An ISO 8601 timestamp as an aware datetime, on every supported Python.
+
+    Python 3.10's ``datetime.fromisoformat`` accepts neither a trailing ``Z`` nor
+    a fraction of other than 3 or 6 digits, and GetFindings returns
+    ``2026-01-15T12:00:00.000Z``. Both are rewritten first: ``Z`` to ``+00:00``,
+    and the fraction padded or cut to 6 digits.
+    """
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = value.strip()
+    match = _ISO_TIMESTAMP.match(text)
+    if match:
+        text = match["head"]
+        if match["fraction"]:
+            text += "." + (match["fraction"] + "000000")[:6]
+        zone = match["zone"]
+        if zone in ("Z", "z"):
+            zone = "+00:00"
+        elif zone and ":" not in zone:
+            zone = f"{zone[:3]}:{zone[3:]}"
+        text += zone or ""
+    try:
+        moment = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    return moment if moment.tzinfo else moment.replace(tzinfo=timezone.utc)
+
+
+def _unique_by_id(
+    findings: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], int]:
+    """Drop findings whose Id an earlier one has; return (kept, dropped count).
+
+    Security Hub's guidance for custom products: "If the custom product sends
+    multiple findings with the same finding ID, Security Hub CSPM only processes
+    the first finding."
+    (https://docs.aws.amazon.com/securityhub/latest/userguide/securityhub-custom-providers.html)
+    Doing the same here keeps the counts in the receipt honest.
+    """
+    seen: set[str] = set()
+    kept: list[dict[str, Any]] = []
+    for finding in findings:
+        if finding["Id"] in seen:
+            continue
+        seen.add(finding["Id"])
+        kept.append(finding)
+    return kept, len(findings) - len(kept)
+
+
+def _finding_id(target: str, key: dict[str, Any]) -> str:
+    """``ash/<sha256>`` of the scan target and the identity key; 68 characters.
+
+    Identity contract v2: ``"ash/" + sha256(json.dumps([target, key],
+    sort_keys=True))``, the hash the Security Hub reporter takes over the key
+    ``utils/finding_identity.py`` defines.
+    """
+    canonical = json.dumps([target, key], sort_keys=True)
+    return "ash/" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _scan_scope(model: "AshAggregatedResults") -> str | None:
+    source = getattr(model.metadata, "scan_source", None)
+    if not isinstance(source, str) or not source.strip():
+        return None
+    converted = any(
+        "converted" in report
+        for report in (getattr(model, "additional_reports", None) or {}).values()
+        if isinstance(report, dict)
+    )
+    return f"source={source};converted={'yes' if converted else 'no'}"
+
+
+@functools.lru_cache(maxsize=None)
+def _offline_partition(region: str) -> str:
+    """The AWS partition for ``region``, read from botocore's bundled endpoint data.
+
+    The same answer as ``_partition`` in ``ash_aws_plugins/security_hub_reporter.py``
+    (botocore's ``get_partition_for_region``: the first partition that lists the
+    region or whose ``regionRegex`` matches it, else ``aws``), without importing
+    botocore, so this module reaches no network library.
+    """
+    from importlib.resources import files
+
+    data = json.loads(
+        files("botocore").joinpath("data/endpoints.json").read_text(encoding="utf-8")
+    )
+    for partition in data["partitions"]:
+        if region in partition["regions"]:
+            return partition["partition"]
+        pattern = partition.get("regionRegex")
+        if pattern and re.compile(pattern).match(region):
+            return partition["partition"]
+    return "aws"
+
+
+def _product_arn(
+    region: str, account_id: str, *, partition: Callable[[str], str]
+) -> str:
+    """The account's default product ARN, for findings it imports itself.
+
+    https://docs.aws.amazon.com/securityhub/latest/userguide/securityhub-custom-providers.html:
+    "This product ARN has the following format:
+    arn:aws:securityhub:<region>:<account-id>:product/<account-id>/default".
+    """
+    return (
+        f"arn:{partition(region)}:securityhub:{region}:{account_id}:"
+        f"product/{account_id}/default"
+    )
+
+
+def _asff_timestamp(
+    value: str | None,
+    *,
+    reporter: str = "asff",
+    nothing: str = "nothing was written",
+    error_type: type[Exception] = AsffFormatError,
+) -> str:
+    """``value`` as ``YYYY-MM-DDTHH:MM:SS.mmmZ``, a form the API reference lists.
+
+    https://docs.aws.amazon.com/securityhub/1.0/APIReference/Welcome.html#timestamps
+    """
+    moment = _parse_timestamp(value) if value else None
+    if moment is None:
+        # Refused rather than replaced with the current time: now is later than
+        # any stored UpdatedAt, so an import stamped with it would overrule the
+        # findings of every newer scan and archive what they reported.
+        # ReportMetadata always sets generated_at, so this is reached only for
+        # a hand-edited or foreign results file.
+        raise error_type(
+            f"{reporter}: the results' generated_at {value!r} is not an "
+            "ISO 8601 timestamp, so the scan time that orders this import "
+            f"against the findings already in Security Hub is unknown; {nothing}. "
+            "Set metadata.generated_at in the results file to the "
+            "time of the scan."
+        )
+    return (
+        moment.astimezone(timezone.utc)
+        .isoformat(timespec="milliseconds")
+        .replace("+00:00", "Z")
+    )
+
+
+def _str_or_none(value: int | None) -> str | None:
+    return None if value is None else str(value)
+
+
+def _truncate(value: str, limit: int) -> str:
+    if len(value) <= limit:
+        return value
+    return value[: limit - 3] + "..."
