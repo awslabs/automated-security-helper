@@ -327,5 +327,5 @@ def test_install_runs_after_the_mode_check_and_before_the_scan():
 def test_install_step_receives_no_secrets_and_no_new_action():
     install = step(INSTALL)
     assert "uses" not in install
-    assert "USE_BETTERLEAKS" in install["env"]
+    assert install["env"]["USE_BETTERLEAKS"]
     assert "secrets." not in yaml.safe_dump(install)
