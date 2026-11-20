@@ -121,7 +121,7 @@ class MinSeverity(str, Enum):
 class ExportFormat(str, Enum):
     """A report format name, as --output-formats and output_formats take it.
 
-    Each names the reporter that writes it, except aggregated, dict, asff and
+    Each names the reporter that writes it, except aggregated, dict and
     custom: no reporter writes those, so asking for one writes nothing for it and
     logs why.
     """
@@ -130,7 +130,7 @@ class ExportFormat(str, Enum):
     # needs a member with that exact value. Without one the reporter cannot be
     # named, and any list of formats switches it off.
     #
-    # aggregated, dict, asff and custom name no reporter. They stay accepted
+    # aggregated, dict and custom name no reporter. They stay accepted
     # rather than refused because they have been valid values of this public enum
     # and of --output-formats since v3; ReportPhase's FORMAT_NO_REPORTER message
     # tells an operator who asks for one that nothing will be written.
@@ -168,7 +168,7 @@ class ExportFormat(str, Enum):
 #: The formats no reporter writes (see ExportFormat): ``ash report --format``
 #: refuses each, and a scan asked for one writes nothing for it and says why.
 FORMATS_NO_REPORTER_WRITES = frozenset(
-    {ExportFormat.AGGREGATED, ExportFormat.DICT, ExportFormat.ASFF, ExportFormat.CUSTOM}
+    {ExportFormat.AGGREGATED, ExportFormat.DICT, ExportFormat.CUSTOM}
 )
 
 #: The formats of the AWS plugin module's reporters, which a run has only when

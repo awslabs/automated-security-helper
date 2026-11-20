@@ -265,6 +265,11 @@ on:
         required: false
         default: true
         type: boolean
+      use-betterleaks:
+        description: "Replace Gitleaks with Betterleaks in local mode. Requires an ASH version with Betterleaks support."
+        required: false
+        default: false
+        type: boolean
       install-gitleaks:
         description: "Whether to install the gitleaks scanner (about 8.2 MB). Set false when the scan does not need it, for example in ash-mode: container or with scanners.gitleaks.enabled: false."
         required: false
@@ -871,7 +876,7 @@ jobs:
       # so the diff would be the base branch's own changes.
       - name: Resolve the base for changed-files-only
         id: base-ref
-        if: inputs.changed-files-only
+        if: inputs.changed-files-only || inputs.use-betterleaks
         shell: bash
         env:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -880,6 +885,8 @@ jobs:
           CONFIGURED_BASE_REF: ${{ steps.inputs.outputs.base_ref }}
           # pull_request synchronize payloads carry `before` too; push only.
           PUSH_BEFORE: ${{ github.event_name == 'push' && github.event.before || '' }}
+          CHECK_CHANGED_FILES_ONLY: ${{ inputs.changed-files-only && 'true' || '' }}
+          USE_BETTERLEAKS: ${{ inputs.use-betterleaks && 'true' || '' }}
           ASH_MODE: ${{ steps.inputs.outputs.ash_mode }}
           ASH_ARGS: ${{ steps.inputs.outputs.ash_args }}
         run: |
@@ -932,6 +939,13 @@ jobs:
                 ;;
             esac
           done
+          if [ -n "${USE_BETTERLEAKS}" ] && [ "${mode}" != "local" ]; then
+            echo "::error::use-betterleaks requires effective ASH mode local."
+            exit 1
+          fi
+          if [ -z "${CHECK_CHANGED_FILES_ONLY}" ]; then
+            exit 0
+          fi
           if [ "${mode}" = "container" ]; then
             echo "::error::changed-files-only: ASH does not support --changed-files-only in container mode and would report the findings in every file. Use ash-mode local (the default) with no --mode container in ash-args, or turn changed-files-only off."
             exit 1
@@ -1753,22 +1767,36 @@ jobs:
       # cfn-guard's rules land next to the bin path, in
       # ${RUNNER_TEMP}/share/cfn-guard-rules; the Run ASH step points
       # ASH_CFN_GUARD_RULES_DIR there.
+      #
+      # use-betterleaks adds Betterleaks to the same list, and drops Gitleaks from it
+      # whatever install-gitleaks says. Betterleaks is a plugin, so its install call
+      # also loads the plugin module (the Run ASH step loads it for the scan). Unlike
+      # the other tools, a Betterleaks the installed ASH does not know fails the step
+      # even with ASH_DEPENDENCIES_UNKNOWN_TOOLS=skip: the caller asked for it, and a
+      # scan without it would pass with no secret scanner.
       - name: Install actionlint, cfn-guard, gitleaks and trivy
-        if: inputs.install-actionlint || inputs.install-cfn-guard || inputs.install-gitleaks || inputs.install-trivy
+        if: inputs.install-actionlint || inputs.install-cfn-guard || inputs.install-gitleaks || inputs.install-trivy || inputs.use-betterleaks
         env:
           ASH_TOOL_BIN: ${{ runner.temp }}/ash-tools
           INSTALL_ACTIONLINT: ${{ inputs.install-actionlint && 'actionlint' || '' }}
           INSTALL_CFN_GUARD: ${{ inputs.install-cfn-guard && 'cfn-guard' || '' }}
           INSTALL_GITLEAKS: ${{ inputs.install-gitleaks && 'gitleaks' || '' }}
           INSTALL_TRIVY: ${{ inputs.install-trivy && 'trivy' || '' }}
+          USE_BETTERLEAKS: ${{ inputs.use-betterleaks && 'true' || '' }}
         run: |
           set -euo pipefail
           # Every value a workflow command below prints goes through one_line.
           . "${RUNNER_TEMP}/ash-one-line.sh"
+          betterleaks=""
+          if [ -n "${USE_BETTERLEAKS}" ]; then
+            betterleaks=betterleaks
+            INSTALL_GITLEAKS=""
+          fi
           tools=()
-          for tool in "${INSTALL_ACTIONLINT}" "${INSTALL_CFN_GUARD}" "${INSTALL_GITLEAKS}" "${INSTALL_TRIVY}"; do
+          for tool in "${INSTALL_ACTIONLINT}" "${INSTALL_CFN_GUARD}" "${INSTALL_GITLEAKS}" "${INSTALL_TRIVY}" "${betterleaks}"; do
             if [ -n "${tool}" ]; then tools+=("${tool}"); fi
           done
+          betterleaks_module='ash_plugin_modules+=[automated_security_helper.plugin_modules.ash_betterleaks_plugins]'
           install_tools() {
             (mkdir -p "${RUNNER_TEMP}/ash-install-cwd" && cd "${RUNNER_TEMP}/ash-install-cwd" && env -u ASH_CONFIG \
               uvx --from "${ASH_UVX_SOURCE}" ash dependencies install \
@@ -1778,14 +1806,22 @@ jobs:
           if [ "${ASH_DEPENDENCIES_UNKNOWN_TOOLS:-}" != "skip" ]; then
             args=()
             for tool in "${tools[@]}"; do args+=(--tool "${tool}"); done
+            if [ -n "${betterleaks}" ]; then args+=(--config-overrides "${betterleaks_module}"); fi
             install_tools "${args[@]}"
           else
             output="${RUNNER_TEMP}/ash-install-tool.log"
             for tool in "${tools[@]}"; do
+              args=(--tool "${tool}")
+              skip_unknown_tools=skip
+              if [ "${tool}" = "betterleaks" ]; then
+                args+=(--config-overrides "${betterleaks_module}")
+                skip_unknown_tools=""
+              fi
               status=0
-              install_tools --tool "${tool}" > "${output}" 2>&1 || status=$?
+              ASH_DEPENDENCIES_UNKNOWN_TOOLS="${skip_unknown_tools}" \
+                install_tools "${args[@]}" > "${output}" 2>&1 || status=$?
               cat "${output}"
-              if [ "${status}" -eq 2 ] && grep -q -F 'Unknown tool(s)' "${output}"; then
+              if [ "${status}" -eq 2 ] && [ "${tool}" != "betterleaks" ] && grep -q -F 'Unknown tool(s)' "${output}"; then
                 echo "::notice::$(one_line "${tool}") is not a tool the installed ASH knows, so it is not installed and its scanner does not run (ASH_DEPENDENCIES_UNKNOWN_TOOLS=skip)."
               elif [ "${status}" -ne 0 ]; then
                 exit "${status}"
@@ -2087,6 +2123,7 @@ jobs:
           # every part of ASH that reads ASH_CONFIG sees the same file.
           ASH_CONFIG: ${{ steps.config-ref-files.outputs.path || steps.inputs.outputs.config }}
           ASH_MODE: ${{ steps.inputs.outputs.ash_mode }}
+          USE_BETTERLEAKS: ${{ inputs.use-betterleaks && 'true' || '' }}
           ASH_ARGS: ${{ steps.inputs.outputs.ash_args }}
           ASH_OUTPUT_DIR: ${{ steps.inputs.outputs.output_dir }}
           # Bare `inputs.fail-on-findings`, not `== 'true'`. GitHub casts
@@ -2213,8 +2250,14 @@ jobs:
                 ;;
             esac
           done
+          betterleaks_args=()
+          if [ -n "${USE_BETTERLEAKS:-}" ]; then
+            betterleaks_args+=(--config-overrides 'ash_plugin_modules+=[automated_security_helper.plugin_modules.ash_betterleaks_plugins]')
+            betterleaks_args+=(--config-overrides 'scanners.betterleaks.enabled=true')
+            betterleaks_args+=(--config-overrides 'scanners.gitleaks.enabled=false')
+          fi
           uvx --reinstall --from "${ASH_UVX_SOURCE}" ash \
-            --source-dir . --output-dir "${ASH_OUTPUT_DIR}" --no-progress "${FAIL_ON_FINDINGS_PARAM}" --build-target ci --mode "${ASH_MODE}" ${ASH_CONFIG:+--config "${ASH_CONFIG}"} ${VERBOSE:+"${VERBOSE}"} ${CHANGED_FILES_ONLY:+"${CHANGED_FILES_ONLY}" --base-ref "${BASE_REF}"} "${ASH_ARGS_LIST[@]}"
+            --source-dir . --output-dir "${ASH_OUTPUT_DIR}" --no-progress "${FAIL_ON_FINDINGS_PARAM}" --build-target ci --mode "${ASH_MODE}" ${ASH_CONFIG:+--config "${ASH_CONFIG}"} ${VERBOSE:+"${VERBOSE}"} ${CHANGED_FILES_ONLY:+"${CHANGED_FILES_ONLY}" --base-ref "${BASE_REF}"} "${ASH_ARGS_LIST[@]}" ${betterleaks_args[@]+"${betterleaks_args[@]}"}
 
       # Default branch only, after the scan, so what is saved is the database grype
       # actually scanned with. The save is refused unless that database is at most

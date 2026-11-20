@@ -821,6 +821,17 @@
       }),
       'project_name': 'snapshot-project',
       'reporters': dict({
+        'asff': dict({
+          'enabled': False,
+          'extension': 'asff.json',
+          'name': 'asff',
+          'options': dict({
+            'account_id': None,
+            'aws_region': None,
+            'findings_scope': None,
+            'scan_root': None,
+          }),
+        }),
         'csv': dict({
           'enabled': True,
           'extension': 'csv',
@@ -1421,6 +1432,17 @@
       }),
       'project_name': 'ash-scan',
       'reporters': dict({
+        'asff': dict({
+          'enabled': False,
+          'extension': 'asff.json',
+          'name': 'asff',
+          'options': dict({
+            'account_id': None,
+            'aws_region': None,
+            'findings_scope': None,
+            'scan_root': None,
+          }),
+        }),
         'csv': dict({
           'enabled': True,
           'extension': 'csv',

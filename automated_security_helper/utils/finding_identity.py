@@ -148,7 +148,10 @@ def _is_absolute(text: str) -> bool:
 
 
 def relative_path(
-    file_path: Optional[str], source_dir: Optional[str | Path] = None
+    file_path: Optional[str],
+    source_dir: Optional[str | Path] = None,
+    *,
+    resolve_root: bool = True,
 ) -> Optional[str]:
     """*file_path* as an identity key writes it.
 
@@ -162,13 +165,23 @@ def relative_path(
     An absolute path inside *source_dir* is made relative to it; any other
     absolute path stays absolute. A relative path is taken as relative to the
     scan root already.
+
+    *resolve_root* also tries ``Path(source_dir).resolve()`` as the root, after
+    *source_dir* as spelled. The resolved arm exists for paths a scan recorded
+    under a symbolic-link-resolved root, which a caller on the scanning host
+    still holds as the unresolved spelling. Passing False compares only the
+    spelling given, as the offline export does (it must not resolve paths on a
+    host that is not the scanning one), and changes the identity of a path that
+    only the resolved arm matched: it stays absolute, and so does its Id.
     """
     if not file_path:
         return None
     text = posixpath.normpath(sanitized_uri_text(str(file_path)))
     if not _is_absolute(text) or source_dir is None:
         return text
-    for root in (source_dir, Path(source_dir).resolve()):
+    for root in (
+        (source_dir, Path(source_dir).resolve()) if resolve_root else (source_dir,)
+    ):
         spelled = posixpath.normpath(root_text(root))
         if text == spelled:
             return "."
@@ -265,7 +278,10 @@ def finding_identity(
 
 
 def relative_to_scan_root(
-    identity: FindingIdentity, source_dir: Optional[str | Path]
+    identity: FindingIdentity,
+    source_dir: Optional[str | Path],
+    *,
+    resolve_root: bool = True,
 ) -> FindingIdentity:
     """*identity* with its file made relative to *source_dir* by :func:`relative_path`.
 
@@ -274,10 +290,17 @@ def relative_to_scan_root(
     one result and keys its path as the result wrote it. Only an absolute path
     changes, so a converted file's key, which is relative to the converted root,
     is left as it is.
+
+    *resolve_root* is passed to :func:`relative_path`: True also matches a path
+    recorded under the symbolic-link-resolved form of *source_dir*, False only
+    the spelling given, which changes the identity (the file in its key) of a
+    path that only the resolved form matched.
     """
     if source_dir is None:
         return identity
-    file = relative_path(identity.base.get("file"), source_dir)
+    file = relative_path(
+        identity.base.get("file"), source_dir, resolve_root=resolve_root
+    )
     if file == identity.base.get("file"):
         return identity
     return replace(identity, base={**identity.base, "file": file})

@@ -148,15 +148,10 @@ PLUGIN_MODULE_FORMATS: Dict[ExportFormat, str] = {
 #: the config: enabling each one produces ``ash.yaml`` and ``ash.spdx.json``, which
 #: is also what rules out a third bug in those two reporters. That experiment is
 #: kept as :func:`test_disabled_reporters_emit_once_enabled`.
-#:
-#: The other four name no reporter at all. ``aggregated`` and ``dict`` are
-#: internal result shapes rather than report formats, ``asff`` is the payload the
-#: Security Hub reporter publishes but that reporter is named
-#: ``aws-security-hub``, and ``custom`` is a placeholder for third-party plugins.
 UNPRODUCIBLE: Dict[ExportFormat, str] = {
     ExportFormat.AGGREGATED: FORMAT_NO_REPORTER,
     ExportFormat.DICT: FORMAT_NO_REPORTER,
-    ExportFormat.ASFF: FORMAT_NO_REPORTER,
+    ExportFormat.ASFF: FORMAT_REPORTER_DISABLED,
     ExportFormat.CUSTOM: FORMAT_NO_REPORTER,
     ExportFormat.YAML: FORMAT_REPORTER_DISABLED,
     ExportFormat.SPDX: FORMAT_REPORTER_DISABLED,
@@ -579,10 +574,10 @@ def test_unproducible_format_warns_on_the_operators_log(tmp_path, caplog):
     calling the helper.
     """
     with caplog.at_level(logging.ERROR):
-        written = _run_report_phase(tmp_path, ["asff"])
+        written = _run_report_phase(tmp_path, ["custom"])
 
     assert written == []
-    assert "asff" in caplog.text
+    assert "custom" in caplog.text
     assert "no reporter produces it" in caplog.text
 
 
@@ -623,16 +618,17 @@ def test_the_diagnostic_survives_quiet(export_format, tmp_path, caplog):
 def test_mixed_request_writes_what_it_can_and_reports_the_rest(tmp_path, caplog):
     """One unproducible format must not cost the operator their other reports.
 
-    Logging rather than raising is a deliberate choice: erroring out on ``asff``
-    here would discard the markdown report the same command asked for, and for
-    ``ashx scan`` the findings verdict along with it. ERROR is the log level, not an
-    exit code -- the exit code stays a verdict about the code under scan.
+    Logging rather than raising is a deliberate choice: erroring out on the
+    unproducible format here would discard the markdown report the same command
+    asked for, and for ``ashx scan`` the findings verdict along with it. ERROR is
+    the log level, not an exit code -- the exit code stays a verdict about the
+    code under scan.
     """
     with caplog.at_level(logging.ERROR):
-        written = _run_report_phase(tmp_path, ["markdown", "asff"])
+        written = _run_report_phase(tmp_path, ["markdown", "custom"])
 
     assert written == ["ash.summary.md"]
-    assert "asff" in caplog.text
+    assert "custom" in caplog.text
 
 
 # --------------------------------------------------------------------------- #

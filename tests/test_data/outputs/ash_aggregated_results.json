@@ -230,10 +230,10 @@
     "reporters": {
       "asff": {
         "enabled": false,
-        "extension": "asff",
+        "extension": "asff.json",
         "name": "asff",
         "options": {
-          "aws_account_id": "123456789012",
+          "account_id": "123456789012",
           "aws_region": "us-east-1"
         }
       },

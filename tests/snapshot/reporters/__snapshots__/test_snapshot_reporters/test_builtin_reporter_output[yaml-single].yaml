@@ -327,6 +327,15 @@ ash_config:
     only_scanners: []
   project_name: snapshot-fixture
   reporters:
+    asff:
+      enabled: false
+      extension: asff.json
+      name: asff
+      options:
+        account_id: null
+        aws_region: null
+        findings_scope: null
+        scan_root: null
     csv:
       enabled: true
       extension: csv

@@ -4,6 +4,7 @@ $ ashx report --format custom --log-level ERROR
 [stderr]
 Error: Reporter plugin 'custom' not found.
 Available reporter formats:
+  - asff
   - csv
   - cyclonedx
   - github-ghas

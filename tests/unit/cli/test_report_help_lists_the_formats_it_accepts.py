@@ -4,7 +4,7 @@
 """``ash report --help`` lists the formats ``ash report --format`` accepts.
 
 A format listed plainly is accepted with the default configuration.
-``aggregated``, ``dict``, ``asff`` and ``custom``, which no reporter writes and
+``aggregated``, ``dict`` and ``custom``, which no reporter writes and
 which ``--format`` refuses with exit 5, are not listed. The AWS plugin module's
 reporters are listed apart: each is accepted once the configuration's
 ``ash_plugin_modules`` loads that module, and refused with exit 5 otherwise.

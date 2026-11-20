@@ -73,14 +73,6 @@ FORMAT_REPORTER_DEPENDENCIES = "reporter-dependencies-unsatisfied"
 #: anything -- the reporter is enabled and its dependencies are fine.
 FORMAT_REPORTER_NOT_PYTHON = "reporter-non-python-excluded"
 
-#: No reporter in this run produces this format. ``ExportFormat`` carries members
-#: that name no reporter -- ``aggregated`` and ``dict`` are internal result shapes
-#: rather than report formats, ``asff`` is the Security Hub reporter's payload but
-#: that reporter is named ``aws-security-hub``, and ``custom`` is a placeholder --
-#: and members naming the AWS reporters, which exist only when
-#: ``ash_plugin_modules`` loads their module. ``--output-formats`` and the config's
-#: ``output_formats`` accept all of them, and only this check tells the operator
-#: that asking for one produces nothing.
 FORMAT_NO_REPORTER = "no-reporter"
 
 #: A reporter for this format exists but could not be created, so there is no

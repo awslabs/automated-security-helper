@@ -12,7 +12,7 @@ rather than with the plugin manager mocked, because the mocked tests in
   ``ashx report --format junitxml`` on a scan with any finding exited 1 with
   ``'dict' object has no attribute 'options'``.
 * The list of formats printed with ``print_json`` named reporters that do not
-  exist (asff, security-hub, security-lake, opensearch), missed JSON reporters
+  exist (security-hub, security-lake, opensearch), missed JSON reporters
   that do, and the Markdown list spelled ``bedrock-summary`` where the reporter
   is ``bedrock-summary-reporter``.
 """
@@ -146,7 +146,19 @@ def test_every_routed_format_is_a_real_reporter(name):
 )
 def test_json_formats_print_parseable_json(tmp_path, name):
     _write_results(tmp_path)
-    result = _report(tmp_path, name)
+    options = (
+        (
+            "--config-overrides",
+            "reporters.asff.options.account_id=123456789012",
+            "--config-overrides",
+            "reporters.asff.options.aws_region=us-east-1",
+            "--config-overrides",
+            "reporters.asff.options.findings_scope=example",
+        )
+        if name == "asff"
+        else ()
+    )
+    result = _report(tmp_path, name, *options)
     assert result.exit_code == 0, result.output
     json.loads(_stdout(result))
 

@@ -63,6 +63,11 @@ GENERATOR = "scripts/generate_reporter_docs.py"
 # Editorial metadata per reporter name: the title, what a reader would use the
 # format for, and the standard it follows. See "What stays hand-written" above.
 REPORTER_DOCS: dict[str, dict] = {
+    "asff": {
+        "title": "ASFF",
+        "use_case": "Offline export for AWS Security Hub CSPM",
+        "standard": "[AWS Security Finding Format](https://docs.aws.amazon.com/securityhub/latest/userguide/securityhub-findings-format.html)",
+    },
     "csv": {
         "title": "CSV",
         "use_case": "Spreadsheet analysis, filtering",

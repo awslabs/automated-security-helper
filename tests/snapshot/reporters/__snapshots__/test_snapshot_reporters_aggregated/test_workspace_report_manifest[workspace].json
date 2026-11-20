@@ -6,6 +6,15 @@
     "web"
   ],
   "reporters": {
+    "asff": {
+      "behaviour": "per-project",
+      "considered": false,
+      "covers_projects": false,
+      "workspace_artifact": null,
+      "per_project_artifacts": [],
+      "missing_per_project_artifacts": [],
+      "skipped": "disabled"
+    },
     "csv": {
       "behaviour": "merged",
       "considered": true,

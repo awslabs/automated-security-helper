@@ -74,7 +74,7 @@ def test_the_checkout_fetches_history_when_the_input_is_on():
 @pytest.mark.unit
 def test_a_step_resolves_the_base_and_the_scan_uses_it():
     resolve = _step(step_id="base-ref")
-    assert resolve["if"] == "inputs.changed-files-only"
+    assert resolve["if"] == "inputs.changed-files-only || inputs.use-betterleaks"
     env = resolve["env"]
     assert env["PR_BASE_SHA"] == "${{ github.event.pull_request.base.sha }}"
     assert env["MERGE_GROUP_BASE_SHA"] == "${{ github.event.merge_group.base_sha }}"
@@ -196,6 +196,8 @@ def _run_step(cwd: Path, tmp_path: Path, bin_first: Path | None = None, **env: s
             "MERGE_GROUP_BASE_SHA": "",
             "CONFIGURED_BASE_REF": "origin/main",
             "PUSH_BEFORE": "",
+            "CHECK_CHANGED_FILES_ONLY": "true",
+            "USE_BETTERLEAKS": "",
             "ASH_MODE": "local",
             "ASH_ARGS": "",
             **env,

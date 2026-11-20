@@ -29,7 +29,7 @@ Known limitations
   typo detection to after the scan has started.
 * The AWS reporter names are accepted on the command line whether or not
   ``ash_plugin_modules`` loads the AWS module. When it does not, the report phase
-  logs that no reporter in the run has that name, as it does for ``asff``.
+  logs that no reporter in the run has that name.
 """
 
 import ast
@@ -189,7 +189,7 @@ def test_the_accepted_name_selects_its_reporter(reporter_class):
     stand_in = SimpleNamespace(config=config)
 
     assert reporter_matches_requested_formats(stand_in, [ExportFormat(config.name)])
-    assert not reporter_matches_requested_formats(stand_in, [ExportFormat.ASFF])
+    assert not reporter_matches_requested_formats(stand_in, [ExportFormat.CUSTOM])
 
 
 @pytest.mark.parametrize("name", SHIPPED_REPORTER_NAMES)

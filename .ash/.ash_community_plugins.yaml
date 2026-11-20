@@ -72,17 +72,23 @@ global_settings:
         hold words, not a credential.
     - rule_id: API_KEY_OR_SECRET
       path: Dockerfile
+      line_start: 812
+      line_end: 814
       reason: >-
         False positive. The adduser command in the non-root-user block passes the
         --disabled-password flag, which the netrc_password detector in ferret-scan 2.6.1
-        reads as a password token. No secret is present. Per file, because the line
-        moves whenever the Dockerfile is edited.
+        reads as a password token. No secret is present. Pinned to the lines around the
+        command; tests/unit/test_ci_ferret_dockerfile_pins.py fails if the command
+        moves out of this range.
     - rule_id: API_KEY_OR_SECRET
       path: automated_security_helper/assets/Dockerfile
+      line_start: 812
+      line_end: 814
       reason: >-
         False positive. This is the build-context copy of the Dockerfile entry above, with
         the same adduser --disabled-password flag that ferret-scan 2.6.1 reads as a
-        password token. No secret is present.
+        password token. No secret is present. The copy is byte-identical, so it takes the
+        same range.
     - rule_id: SSN
       path: docs/content/reference/converters.md
       reason: >-

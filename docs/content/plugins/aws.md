@@ -316,6 +316,37 @@ runs once per project.
 IAM: `securityhub:BatchImportFindings`, `securityhub:DescribeHub` for the pre-flight check,
 and `securityhub:GetFindings` when `archive_resolved_findings` is on.
 
+### Export ASFF without AWS credentials {#asff}
+
+Use the built-in `asff` reporter to review findings or pass them to a separate import job.
+It reads saved results and writes JSON to stdout. It does not look up credentials or call AWS.
+Use the account, Region and `findings_scope` you would use for a live import. The scope and
+finding identity produce the same IDs as `aws-security-hub` when the finding paths the
+results recorded sit under the scan root as the root is spelled. The export compares the
+spelling it is given and never resolves a path on the export host, so a scan whose root was
+recorded through a symbolic link needs the resolved spelling as `scan_root`. A `scan_root`
+that is a prefix of none of the absolute finding paths logs a warning, and the IDs then
+carry those paths as recorded, which are specific to the scanning machine.
+
+<!-- doctest: illustrative reason="requires saved ASH scan results" -->
+```bash
+ash report --format asff --output-dir ash_output \
+  --config-overrides reporters.asff.options.account_id=123456789012 \
+  --config-overrides reporters.asff.options.aws_region=us-east-1 \
+  --config-overrides reporters.asff.options.findings_scope=my-repository \
+  > findings.asff.json
+```
+
+For workspace results, point `--output-dir` at one project's result directory. If findings
+have absolute paths and the saved results do not record the absolute scan root, pass
+`--config-overrides reporters.asff.options.scan_root=/original/scan/root`. The original
+path need not exist on the export host.
+
+The JSON has a `Findings` array. If you import it yourself, skip an empty array and split a
+larger array into [requests of at most 100 findings](https://docs.aws.amazon.com/securityhub/1.0/APIReference/API_BatchImportFindings.html).
+Suppressed findings have `RecordState: ARCHIVED`, as with `aws-security-hub`. The export
+never checks for findings that disappeared from the previous scan.
+
 ## Rendering a reporter from saved results {#ash-report}
 
 `ashx report --format s3`, or the name of any of the other three, runs that reporter

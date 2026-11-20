@@ -55,6 +55,7 @@ Output format configuration
 │ github-ghas         │        yes        │
 │ junitxml            │        yes        │
 │ markdown            │        yes        │
+│ asff                │        no         │
 │ ocsf                │        yes        │
 │ sarif               │        yes        │
 │ spdx                │        no         │
@@ -71,6 +72,7 @@ Output format configuration
   Enable github-ghas? [Y/n]:
   Enable junitxml? [Y/n]:
   Enable markdown? [Y/n]:
+  Enable asff? [y/N]:
   Enable ocsf? [Y/n]:
   Enable sarif? [Y/n]:
   Enable spdx? [y/N]:

@@ -47,13 +47,15 @@ The option works like this:
 - It accepts the name of every reporter ASH ships, including `github-ghas`,
   `gitlab-sast`, `gitlab-cyclonedx`, and `unused-suppressions`, and the names of the AWS
   reporters, which write a report only when an operator loads their plugin module. It also
-  accepts `aggregated`, `dict`, `asff`, and `custom`, which no reporter writes. Reporters
+  accepts `aggregated`, `dict`, and `custom`, which no reporter writes. Reporters
   left out of the list do not run. A reporter from your own plugin module cannot be
   named; it runs only when no list is given.
 - An unknown name stops the scan with a usage error before scanning, and exits 5.
-- The list narrows the enabled reporters and does not turn on a disabled one. `yaml` and
-  `spdx` are disabled by default. Naming one writes nothing until you enable its
-  reporter; ASH logs an error in `ash.log` that names the setting.
+- The list narrows the enabled reporters and does not turn on a disabled one. `yaml`
+  and `spdx` are disabled by default. Naming one writes nothing until you enable its
+  reporter; ASH logs an error in `ash.log` that names the setting. The `asff` reporter
+  is also off by default. To export ASFF from a saved scan, see [Export ASFF without
+  AWS credentials](../plugins/aws.md#asff).
 
 To make the same choice for every scan, list the names under `output_formats` in your
 ASH config file. It also takes one name, or names separated by commas, as

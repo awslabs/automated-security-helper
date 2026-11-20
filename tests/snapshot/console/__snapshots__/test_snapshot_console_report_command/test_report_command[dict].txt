@@ -4,6 +4,7 @@ $ ashx report --format dict --log-level ERROR
 [stderr]
 Error: Reporter plugin 'dict' not found.
 Available reporter formats:
+  - asff
   - csv
   - cyclonedx
   - github-ghas

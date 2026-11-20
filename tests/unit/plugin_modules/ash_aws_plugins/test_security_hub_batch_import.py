@@ -47,8 +47,10 @@ import botocore.session
 import pytest
 from botocore.validate import ParamValidator
 from pydantic import ValidationError
+from typer.testing import CliRunner
 
 from automated_security_helper.base.plugin_context import PluginContext
+from automated_security_helper.cli.main import app
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.core.enums import ScannerStatus
 from automated_security_helper.models.asharp_model import (
@@ -185,6 +187,53 @@ def test_one_finding_is_imported_in_one_request(tmp_path):
     assert document["product_arn"] == PRODUCT_ARN
     # The document records exactly what was sent.
     assert document["findings"] == capture.findings
+
+
+@pytest.mark.unit
+def test_offline_export_matches_the_live_import(tmp_path, monkeypatch):
+    reporter = _reporter(tmp_path)
+    source = tmp_path / "checkout"
+    saved = tmp_path / "saved"
+    model = _model(
+        [
+            _result(
+                uri=(source / "app.py").as_uri(),
+                message="Example finding\n```python\nprivate-snippet-marker\n```",
+                suppressed=True,
+            )
+        ]
+    )
+    model.save_model(saved)
+    securityhub, stub = _stubbed_client("securityhub")
+    capture = _Capture(securityhub)
+    stub.add_response("batch_import_findings", _ok(1))
+    _report_with(reporter, model, {"securityhub": securityhub})
+    stub.assert_no_pending_responses()
+
+    monkeypatch.chdir(tmp_path)
+    exported = CliRunner().invoke(
+        app,
+        [
+            "report",
+            "--format",
+            "asff",
+            "--output-dir",
+            str(saved),
+            "--config-overrides",
+            f"reporters.asff.options.account_id={ACCOUNT}",
+            "--config-overrides",
+            f"reporters.asff.options.aws_region={REGION}",
+            "--config-overrides",
+            "reporters.asff.options.findings_scope=fixture-project",
+            "--config-overrides",
+            f"reporters.asff.options.scan_root={source.as_posix()}",
+        ],
+    )
+
+    assert exported.exit_code == 0, exported.output
+    assert json.loads(exported.stdout) == capture.requests[0]
+    assert capture.findings[0]["RecordState"] == "ARCHIVED"
+    assert "private-snippet-marker" not in exported.stdout
 
 
 @pytest.mark.unit
@@ -5149,14 +5198,16 @@ def test_a_request_botocore_refuses_is_not_reported_as_unreachable(
     tmp_path, monkeypatch
 ):
     """ParamValidationError is raised before anything is sent; it is ASH's defect."""
-    original = SecurityHubReporter._to_asff
+    original = securityhub_module.AsffFormatter._to_asff
 
-    def malformed(self, *args, **kwargs):
-        finding = original(self, *args, **kwargs)
+    def malformed(*args, **kwargs):
+        finding = original(*args, **kwargs)
         finding["Title"] = 5
         return finding
 
-    monkeypatch.setattr(SecurityHubReporter, "_to_asff", malformed)
+    monkeypatch.setattr(
+        securityhub_module.AsffFormatter, "_to_asff", staticmethod(malformed)
+    )
     securityhub, stub = _stubbed_client("securityhub")
     # Queued so the Stubber is not what refuses the call: botocore's parameter
     # validation runs first and raises before this response could be returned.

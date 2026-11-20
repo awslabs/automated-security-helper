@@ -99,8 +99,8 @@ from automated_security_helper.utils.terminal_text import (
 # Reporters whose output is a JSON document, printed with rich's print_json.
 #
 # Every entry must be a real reporter's config name, because this is matched
-# against --format. The list used to carry names no reporter has (asff,
-# security-hub, security-lake, opensearch) and to miss JSON reporters, and spdx
+# against --format. The list used to carry names no reporter has
+# (security-hub, security-lake, opensearch) and to miss JSON reporters, and spdx
 # sat here while that reporter emitted YAML, so `ashx report --format spdx` died
 # in print_json. tests/unit/cli/test_report_format_output.py checks every name
 # against the registered reporters.
@@ -110,6 +110,7 @@ from automated_security_helper.utils.terminal_text import (
 # CI command forms broken.
 JSON_STDOUT_FORMATS = frozenset(
     {
+        "asff",
         "aws-security-hub",
         "cloudwatch-logs",
         "cyclonedx",

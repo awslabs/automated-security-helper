@@ -4,6 +4,7 @@ $ ashx report --format cloudwatch-logs --log-level ERROR
 [stderr]
 Error: Reporter plugin 'cloudwatch-logs' not found.
 Available reporter formats:
+  - asff
   - csv
   - cyclonedx
   - github-ghas
