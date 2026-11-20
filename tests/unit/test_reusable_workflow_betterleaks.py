@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -16,7 +17,22 @@ pytestmark = pytest.mark.integration
 WORKFLOW = (
     Path(__file__).resolve().parents[2] / ".github/workflows/run-ash-security-scan.yml"
 )
+INSTALL = "Install actionlint, cfn-guard, gitleaks and trivy"
 MODULE = "ash_plugin_modules+=[automated_security_helper.plugin_modules.ash_betterleaks_plugins]"
+
+
+# The steps run here are bash steps of an ubuntu-latest job, with a /bin/sh stub for uvx.
+needs_bash = pytest.mark.skipif(
+    os.name == "nt" or shutil.which("bash") is None,
+    reason="the steps under test are bash steps that run on ubuntu-latest",
+)
+
+NO_INSTALLS = {
+    "INSTALL_ACTIONLINT": "",
+    "INSTALL_CFN_GUARD": "",
+    "INSTALL_GITLEAKS": "",
+    "INSTALL_TRIVY": "",
+}
 
 
 def workflow():
@@ -35,7 +51,9 @@ def run_step(tmp_path, name, env):
     bin_dir.mkdir(exist_ok=True)
     uvx = bin_dir / "uvx"
     uvx.write_text(
-        '#!/bin/sh\nprintf "%s\\n" "$@" > "$ARGV_FILE"\nexit "${UVX_STATUS:-0}"\n'
+        '#!/bin/sh\nprintf "%s\\n" "$@" > "$ARGV_FILE"\n'
+        '[ -z "${UVX_OUTPUT:-}" ] || printf "%s\\n" "$UVX_OUTPUT"\n'
+        'exit "${UVX_STATUS:-0}"\n'
     )
     uvx.chmod(0o755)
     argv = tmp_path / "argv"
@@ -61,54 +79,47 @@ def run_step(tmp_path, name, env):
 def test_input_and_install_selection():
     inp = workflow()[True]["workflow_call"]["inputs"]["use-betterleaks"]
     assert inp["type"] == "boolean" and inp["default"] is False
-    install = step("Install actionlint, cfn-guard, gitleaks and trivy")
-    only_gitleaks = {
+    install = step(INSTALL)
+    nothing_else = {
         "inputs.install-actionlint": False,
         "inputs.install-cfn-guard": False,
-        "inputs.install-gitleaks": True,
+        "inputs.install-gitleaks": False,
         "inputs.install-trivy": False,
-        "inputs.use-betterleaks": True,
     }
-    assert not evaluate(install["if"], only_gitleaks, "success")
-    expr = install["env"]["INSTALL_GITLEAKS"][3:-3]
-    assert (
-        evaluate(
-            expr,
-            {"inputs.install-gitleaks": True, "inputs.use-betterleaks": True},
-            "success",
-        )
-        is False
+    assert evaluate(
+        install["if"], {**nothing_else, "inputs.use-betterleaks": True}, "success"
     )
-    assert (
-        evaluate(
-            expr,
-            {"inputs.install-gitleaks": True, "inputs.use-betterleaks": False},
-            "success",
-        )
-        is True
+    assert not evaluate(
+        install["if"], {**nothing_else, "inputs.use-betterleaks": False}, "success"
+    )
+    expr = _expr(install["env"]["USE_BETTERLEAKS"])
+    assert evaluate(expr, {"inputs.use-betterleaks": True}, "success")
+    assert not evaluate(expr, {"inputs.use-betterleaks": False}, "success")
+    # The gitleaks entry is unchanged: use-betterleaks drops it in the script.
+    assert install["env"]["INSTALL_GITLEAKS"] == (
+        "${{ inputs.install-gitleaks && 'gitleaks' || '' }}"
     )
 
 
-@pytest.mark.parametrize("status", [0, 2])
-def test_installer_propagates_failure_even_with_skip(tmp_path, status):
-    result, argv = run_step(
+def _install(tmp_path, env):
+    return run_step(
         tmp_path,
-        "Install Betterleaks",
+        INSTALL,
         {
+            **NO_INSTALLS,
+            "USE_BETTERLEAKS": "true",
             "ASH_TOOL_BIN": str(tmp_path / "runner/ash-tools"),
-            "ASH_DEPENDENCIES_UNKNOWN_TOOLS": "skip",
-            "UVX_STATUS": str(status),
+            **env,
         },
     )
-    assert result.returncode == status
-    assert argv == [
-        "--from",
-        "ash-source",
-        "ash",
-        "dependencies",
-        "install",
-        "--tool",
-        "betterleaks",
+
+
+def _betterleaks_call(tmp_path, *tools):
+    args = ["--from", "ash-source", "ash", "dependencies", "install"]
+    for tool in tools:
+        args += ["--tool", tool]
+    return [
+        *args,
         "--config-overrides",
         MODULE,
         "--bin-path",
@@ -116,6 +127,58 @@ def test_installer_propagates_failure_even_with_skip(tmp_path, status):
     ]
 
 
+@needs_bash
+@pytest.mark.parametrize("status", [0, 2])
+def test_installer_propagates_failure_even_with_skip(tmp_path, status):
+    result, argv = _install(
+        tmp_path,
+        {"ASH_DEPENDENCIES_UNKNOWN_TOOLS": "skip", "UVX_STATUS": str(status)},
+    )
+    assert result.returncode == status
+    assert argv == _betterleaks_call(tmp_path, "betterleaks")
+
+
+@needs_bash
+def test_an_unknown_betterleaks_fails_even_with_skip(tmp_path):
+    result, _ = _install(
+        tmp_path,
+        {
+            "ASH_DEPENDENCIES_UNKNOWN_TOOLS": "skip",
+            "UVX_STATUS": "2",
+            "UVX_OUTPUT": "Unknown tool(s): betterleaks",
+        },
+    )
+    assert result.returncode == 2
+    assert "is not a tool the installed ASH knows" not in result.stdout
+
+
+@needs_bash
+def test_other_unknown_tools_are_still_skipped_with_skip(tmp_path):
+    result, _ = _install(
+        tmp_path,
+        {
+            "USE_BETTERLEAKS": "",
+            "INSTALL_TRIVY": "trivy",
+            "ASH_DEPENDENCIES_UNKNOWN_TOOLS": "skip",
+            "UVX_STATUS": "2",
+            "UVX_OUTPUT": "Unknown tool(s): trivy",
+        },
+    )
+    assert result.returncode == 0
+    assert "trivy is not a tool the installed ASH knows" in result.stdout
+
+
+@needs_bash
+def test_betterleaks_replaces_gitleaks_in_one_install_call(tmp_path):
+    result, argv = _install(
+        tmp_path, {"INSTALL_GITLEAKS": "gitleaks", "INSTALL_TRIVY": "trivy"}
+    )
+    assert result.returncode == 0, result.stderr
+    assert argv == _betterleaks_call(tmp_path, "trivy", "betterleaks")
+    assert "gitleaks" not in argv
+
+
+@needs_bash
 @pytest.mark.parametrize(
     "args, mode, refused",
     [
@@ -143,6 +206,7 @@ def test_effective_mode(tmp_path, args, mode, refused):
         assert "use-betterleaks requires effective ASH mode local" in result.stdout
 
 
+@needs_bash
 def test_scan_appends_overrides(tmp_path):
     from automated_security_helper.config.default_config import get_default_config
     from automated_security_helper.config.resolve_config import apply_config_overrides
@@ -204,20 +268,16 @@ def _expr(value):
 
 
 def test_betterleaks_is_off_unless_the_input_is_set():
-    # Opt-in: with the input off (also its default, asserted above) the install
-    # step does not run, and the two steps that read the input see it falsy.
-    install = step("Install Betterleaks")
-    assert install["if"] == "inputs.use-betterleaks"
-    assert not evaluate(install["if"], {"inputs.use-betterleaks": False}, "success")
-    assert evaluate(install["if"], {"inputs.use-betterleaks": True}, "success")
-    for name in ("Resolve the base for changed-files-only", "Run ASH"):
+    # Opt-in: with the input off (also its default, asserted above) the three steps
+    # that read it see it falsy, and the install step adds no tool for it.
+    for name in (INSTALL, "Resolve the base for changed-files-only", "Run ASH"):
         expr = _expr(step(name)["env"]["USE_BETTERLEAKS"])
         assert not evaluate(expr, {"inputs.use-betterleaks": False}, "success")
         assert evaluate(expr, {"inputs.use-betterleaks": True}, "success")
 
 
 def test_install_gitleaks_still_installs_gitleaks_by_default():
-    install = step("Install actionlint, cfn-guard, gitleaks and trivy")
+    install = step(INSTALL)
     context = {
         "inputs.install-actionlint": False,
         "inputs.install-cfn-guard": False,
@@ -233,6 +293,7 @@ def test_install_gitleaks_still_installs_gitleaks_by_default():
     assert not evaluate(install["if"], context, "success")
 
 
+@needs_bash
 def test_scan_adds_nothing_when_the_input_is_off(tmp_path):
     env = {
         "ASH_ARGS": "--config-overrides scanners.gitleaks.enabled=true",
@@ -253,12 +314,13 @@ def test_scan_adds_nothing_when_the_input_is_off(tmp_path):
 def test_install_runs_after_the_mode_check_and_before_the_scan():
     names = [s.get("name") for s in workflow()["jobs"]["ash"]["steps"]]
     resolve = names.index("Resolve the base for changed-files-only")
-    install = names.index("Install Betterleaks")
+    install = names.index(INSTALL)
     assert resolve < install < names.index("Run ASH")
+    assert "Install Betterleaks" not in names
 
 
 def test_install_step_receives_no_secrets_and_no_new_action():
-    install = step("Install Betterleaks")
+    install = step(INSTALL)
     assert "uses" not in install
-    assert set(install["env"]) == {"ASH_TOOL_BIN"}
+    assert "USE_BETTERLEAKS" in install["env"]
     assert "secrets." not in yaml.safe_dump(install)

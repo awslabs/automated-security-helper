@@ -1656,22 +1656,6 @@ jobs:
           else result=miss; fi
           echo "cache ${CACHE_NAME}: ${result}" | tee -a "$GITHUB_STEP_SUMMARY"
 
-      - name: Install Betterleaks
-        if: inputs.use-betterleaks
-        shell: bash
-        env:
-          ASH_TOOL_BIN: ${{ runner.temp }}/ash-tools
-        run: |
-          set -euo pipefail
-          . "${RUNNER_TEMP}/ash-one-line.sh"
-          mkdir -p "${RUNNER_TEMP}/ash-install-cwd"
-          with_commands_stopped env -C "${RUNNER_TEMP}/ash-install-cwd" -u ASH_CONFIG -u ASH_DEPENDENCIES_UNKNOWN_TOOLS \
-            uvx --from "${ASH_UVX_SOURCE}" ash dependencies install \
-              --tool betterleaks \
-              --config-overrides 'ash_plugin_modules+=[automated_security_helper.plugin_modules.ash_betterleaks_plugins]' \
-              --bin-path "${ASH_TOOL_BIN}"
-          echo "${ASH_TOOL_BIN}" >> "$GITHUB_PATH"
-
       # `ash dependencies install`, not `curl https://get.anchore.io/... | sudo sh`.
       #
       # The piped form pinned nothing and gave the endpoint root on the runner at
@@ -1779,22 +1763,36 @@ jobs:
       # cfn-guard's rules land next to the bin path, in
       # ${RUNNER_TEMP}/share/cfn-guard-rules; the Run ASH step points
       # ASH_CFN_GUARD_RULES_DIR there.
+      #
+      # use-betterleaks adds Betterleaks to the same list, and drops Gitleaks from it
+      # whatever install-gitleaks says. Betterleaks is a plugin, so its install call
+      # also loads the plugin module (the Run ASH step loads it for the scan). Unlike
+      # the other tools, a Betterleaks the installed ASH does not know fails the step
+      # even with ASH_DEPENDENCIES_UNKNOWN_TOOLS=skip: the caller asked for it, and a
+      # scan without it would pass with no secret scanner.
       - name: Install actionlint, cfn-guard, gitleaks and trivy
-        if: inputs.install-actionlint || inputs.install-cfn-guard || (inputs.install-gitleaks && !inputs.use-betterleaks) || inputs.install-trivy
+        if: inputs.install-actionlint || inputs.install-cfn-guard || inputs.install-gitleaks || inputs.install-trivy || inputs.use-betterleaks
         env:
           ASH_TOOL_BIN: ${{ runner.temp }}/ash-tools
           INSTALL_ACTIONLINT: ${{ inputs.install-actionlint && 'actionlint' || '' }}
           INSTALL_CFN_GUARD: ${{ inputs.install-cfn-guard && 'cfn-guard' || '' }}
-          INSTALL_GITLEAKS: ${{ inputs.install-gitleaks && !inputs.use-betterleaks && 'gitleaks' || '' }}
+          INSTALL_GITLEAKS: ${{ inputs.install-gitleaks && 'gitleaks' || '' }}
           INSTALL_TRIVY: ${{ inputs.install-trivy && 'trivy' || '' }}
+          USE_BETTERLEAKS: ${{ inputs.use-betterleaks && 'true' || '' }}
         run: |
           set -euo pipefail
           # Every value a workflow command below prints goes through one_line.
           . "${RUNNER_TEMP}/ash-one-line.sh"
+          betterleaks=""
+          if [ -n "${USE_BETTERLEAKS}" ]; then
+            betterleaks=betterleaks
+            INSTALL_GITLEAKS=""
+          fi
           tools=()
-          for tool in "${INSTALL_ACTIONLINT}" "${INSTALL_CFN_GUARD}" "${INSTALL_GITLEAKS}" "${INSTALL_TRIVY}"; do
+          for tool in "${INSTALL_ACTIONLINT}" "${INSTALL_CFN_GUARD}" "${INSTALL_GITLEAKS}" "${INSTALL_TRIVY}" "${betterleaks}"; do
             if [ -n "${tool}" ]; then tools+=("${tool}"); fi
           done
+          betterleaks_module='ash_plugin_modules+=[automated_security_helper.plugin_modules.ash_betterleaks_plugins]'
           install_tools() {
             (mkdir -p "${RUNNER_TEMP}/ash-install-cwd" && cd "${RUNNER_TEMP}/ash-install-cwd" && env -u ASH_CONFIG \
               uvx --from "${ASH_UVX_SOURCE}" ash dependencies install \
@@ -1804,14 +1802,17 @@ jobs:
           if [ "${ASH_DEPENDENCIES_UNKNOWN_TOOLS:-}" != "skip" ]; then
             args=()
             for tool in "${tools[@]}"; do args+=(--tool "${tool}"); done
+            if [ -n "${betterleaks}" ]; then args+=(--config-overrides "${betterleaks_module}"); fi
             install_tools "${args[@]}"
           else
             output="${RUNNER_TEMP}/ash-install-tool.log"
             for tool in "${tools[@]}"; do
+              args=(--tool "${tool}")
+              if [ "${tool}" = "betterleaks" ]; then args+=(--config-overrides "${betterleaks_module}"); fi
               status=0
-              install_tools --tool "${tool}" > "${output}" 2>&1 || status=$?
+              install_tools "${args[@]}" > "${output}" 2>&1 || status=$?
               cat "${output}"
-              if [ "${status}" -eq 2 ] && grep -q -F 'Unknown tool(s)' "${output}"; then
+              if [ "${status}" -eq 2 ] && [ "${tool}" != "betterleaks" ] && grep -q -F 'Unknown tool(s)' "${output}"; then
                 echo "::notice::$(one_line "${tool}") is not a tool the installed ASH knows, so it is not installed and its scanner does not run (ASH_DEPENDENCIES_UNKNOWN_TOOLS=skip)."
               elif [ "${status}" -ne 0 ]; then
                 exit "${status}"

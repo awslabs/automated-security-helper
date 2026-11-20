@@ -80,7 +80,7 @@ including any `--mode` in `ash-args`. Installation fails if the selected ASH ver
 does not support Betterleaks. The workflow installs ASH's pinned Betterleaks binary,
 enables its scanner and disables Gitleaks, regardless of `install-gitleaks`.
 
-<!-- doctest: illustrative reason="input fragment for the calling workflow job" -->
+<!-- doctest: config kind=other reason="one entry to add to the with: block of the call in Call the reusable workflows, not a workflow on its own" -->
 ```yaml
 with:
   use-betterleaks: true
