@@ -2942,6 +2942,17 @@ SOFTWARE.
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#asff" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Export ASFF without AWS credentials
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -3504,6 +3515,17 @@ SOFTWARE.
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#asff" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Export ASFF without AWS credentials
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -3979,6 +4001,31 @@ imported and archived, plus the findings as they were sent. In a workspace scan 
 runs once per project.</p>
 <p>IAM: <code>securityhub:BatchImportFindings</code>, <code>securityhub:DescribeHub</code> for the pre-flight check,
 and <code>securityhub:GetFindings</code> when <code>archive_resolved_findings</code> is on.</p>
+<h3 id="asff">Export ASFF without AWS credentials<a class="headerlink" href="#asff" title="Permanent link">&para;</a></h3>
+<p>Use the built-in <code>asff</code> reporter to review findings or pass them to a separate import job.
+It reads saved results and writes JSON to stdout. It does not look up credentials or call AWS.
+Use the account, Region and <code>findings_scope</code> you would use for a live import. The scope and
+finding identity produce the same IDs as <code>aws-security-hub</code> when the finding paths the
+results recorded sit under the scan root as the root is spelled. The export compares the
+spelling it is given and never resolves a path on the export host, so a scan whose root was
+recorded through a symbolic link needs the resolved spelling as <code>scan_root</code>. A <code>scan_root</code>
+that is a prefix of none of the absolute finding paths logs a warning, and the IDs then
+carry those paths as recorded, which are specific to the scanning machine.</p>
+<!-- doctest: illustrative reason="requires saved ASH scan results" -->
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>ash<span class="w"> </span>report<span class="w"> </span>--format<span class="w"> </span>asff<span class="w"> </span>--output-dir<span class="w"> </span>ash_output<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span>--config-overrides<span class="w"> </span>reporters.asff.options.account_id<span class="o">=</span><span class="m">123456789012</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">  </span>--config-overrides<span class="w"> </span>reporters.asff.options.aws_region<span class="o">=</span>us-east-1<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">  </span>--config-overrides<span class="w"> </span>reporters.asff.options.findings_scope<span class="o">=</span>my-repository<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="w">  </span>&gt;<span class="w"> </span>findings.asff.json
+</span></code></pre></div>
+<p>For workspace results, point <code>--output-dir</code> at one project's result directory. If findings
+have absolute paths and the saved results do not record the absolute scan root, pass
+<code>--config-overrides reporters.asff.options.scan_root=/original/scan/root</code>. The original
+path need not exist on the export host.</p>
+<p>The JSON has a <code>Findings</code> array. If you import it yourself, skip an empty array and split a
+larger array into <a href="https://docs.aws.amazon.com/securityhub/1.0/APIReference/API_BatchImportFindings.html">requests of at most 100 findings</a>.
+Suppressed findings have <code>RecordState: ARCHIVED</code>, as with <code>aws-security-hub</code>. The export
+never checks for findings that disappeared from the previous scan.</p>
 <h2 id="ash-report">Rendering a reporter from saved results<a class="headerlink" href="#ash-report" title="Permanent link">&para;</a></h2>
 <p><code>ash report --format s3</code>, or the name of any of the other three, runs that reporter
 against the results of a previous scan, which sends the data again. Stored results do not
@@ -3986,18 +4033,18 @@ record which tree was scanned, so a config file <code>ash report</code> reads co
 repository's own, even one outside every git checkout. So <code>ash report</code> takes whether the
 reporter runs, and its destination options, from <code>--config-overrides</code> only:</p>
 <!-- doctest: illustrative reason="sends the stored findings to an S3 bucket" -->
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>ash<span class="w"> </span>report<span class="w"> </span>--format<span class="w"> </span>s3<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span>--config-overrides<span class="w"> </span><span class="s1">&#39;ash_plugin_modules+=[automated_security_helper.plugin_modules.ash_aws_plugins]&#39;</span><span class="w"> </span><span class="se">\</span>
-</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">  </span>--config-overrides<span class="w"> </span>reporters.s3.enabled<span class="o">=</span><span class="nb">true</span><span class="w"> </span><span class="se">\</span>
-</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">  </span>--config-overrides<span class="w"> </span>reporters.s3.options.bucket_name<span class="o">=</span>my-bucket
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>ash<span class="w"> </span>report<span class="w"> </span>--format<span class="w"> </span>s3<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span>--config-overrides<span class="w"> </span><span class="s1">&#39;ash_plugin_modules+=[automated_security_helper.plugin_modules.ash_aws_plugins]&#39;</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">  </span>--config-overrides<span class="w"> </span>reporters.s3.enabled<span class="o">=</span><span class="nb">true</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">  </span>--config-overrides<span class="w"> </span>reporters.s3.options.bucket_name<span class="o">=</span>my-bucket
 </span></code></pre></div>
 <p>The config file that <code>--config</code> or <code>ASH_CONFIG</code> names still applies its other settings.
 Its <code>enabled</code> and destination options for these reporters are ignored with a warning, and
 a reporter that <code>--config-overrides</code> does not turn on is refused with exit code 1. With the
 same settings in a file, <code>ash report --format s3 --config /etc/ash/ash.yaml</code> sends nothing
 and prints:</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>WARNING  Ignoring reporters.s3.options.aws_region, reporters.s3.options.bucket_name, reporters.s3.enabled from /etc/ash/ash.yaml: ash report cannot tell that config from the scanned repository&#39;s own, since stored results do not record which tree was scanned, and these options choose whether findings are sent, where they are sent or written, and which credentials send them. To send findings off the host from ash report, pass each of these settings with --config-overrides instead.
-</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>Error: reporter &#39;s3&#39; sends findings off the host and is not enabled. ash report takes whether it runs, and where it sends, from --config-overrides: pass --config-overrides reporters.s3.enabled=true and its destination options.
+<div class="language-text highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>WARNING  Ignoring reporters.s3.options.aws_region, reporters.s3.options.bucket_name, reporters.s3.enabled from /etc/ash/ash.yaml: ash report cannot tell that config from the scanned repository&#39;s own, since stored results do not record which tree was scanned, and these options choose whether findings are sent, where they are sent or written, and which credentials send them. To send findings off the host from ash report, pass each of these settings with --config-overrides instead.
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>Error: reporter &#39;s3&#39; sends findings off the host and is not enabled. ash report takes whether it runs, and where it sends, from --config-overrides: pass --config-overrides reporters.s3.enabled=true and its destination options.
 </span></code></pre></div>
 <p><code>ash merge</code> holds its <code>--config</code> file to the same rule, since the shards do not record the
 tree either: the merged findings go off the host only with the reporter's <code>enabled</code> and
@@ -4012,8 +4059,8 @@ a package that only the shards' scan loaded is not loaded. It runs them only whe
 <p><code>ash report</code> runs the reporter's pre-flight check first, as a scan does. When the check
 refuses, for a missing setting or for credentials it cannot find, the reporter sends
 nothing, and <code>ash report</code> logs the reason and exits 1. For S3 with no region set:</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>ERROR    Reporter &#39;s3&#39; is enabled but does not run: no aws_region is set. Set it with --config-overrides reporters.s3.options.aws_region=&lt;value&gt;, or set AWS_REGION or AWS_DEFAULT_REGION in the environment, which is read only when no config sets aws_region.
-</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>Error: reporter &#39;s3&#39; cannot run: its dependency check refused. See the log above for the reason.
+<div class="language-text highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>ERROR    Reporter &#39;s3&#39; is enabled but does not run: no aws_region is set. Set it with --config-overrides reporters.s3.options.aws_region=&lt;value&gt;, or set AWS_REGION or AWS_DEFAULT_REGION in the environment, which is read only when no config sets aws_region.
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>Error: reporter &#39;s3&#39; cannot run: its dependency check refused. See the log above for the reason.
 </span></code></pre></div>
 <p><code>ash report</code> has no <code>--ash-plugin-modules</code> option and does
 not read <code>ASH_PLUGIN_MODULES</code>, and without <code>--config</code> it reads the config file of the
@@ -4024,26 +4071,26 @@ your config file (<code>--config</code>) or with
 <p>A policy for the configuration above (S3 and CloudWatch Logs only), with your account,
 bucket, and log group:</p>
 <!-- doctest: config kind=other reason="IAM policy document, not an ASH config" -->
-<div class="language-json highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="p">{</span>
-</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="w">  </span><span class="nt">&quot;Version&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;2012-10-17&quot;</span><span class="p">,</span>
-</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="w">  </span><span class="nt">&quot;Statement&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
-</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="w">    </span><span class="p">{</span>
-</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="w">      </span><span class="nt">&quot;Effect&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Allow&quot;</span><span class="p">,</span>
-</span><span id="__span-7-6"><a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="w">      </span><span class="nt">&quot;Action&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;s3:PutObject&quot;</span><span class="p">,</span>
-</span><span id="__span-7-7"><a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="w">      </span><span class="nt">&quot;Resource&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;arn:aws:s3:::example-security-scan-results/ash-reports/*&quot;</span>
-</span><span id="__span-7-8"><a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="w">    </span><span class="p">},</span>
-</span><span id="__span-7-9"><a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a><span class="w">    </span><span class="p">{</span>
-</span><span id="__span-7-10"><a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a><span class="w">      </span><span class="nt">&quot;Effect&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Allow&quot;</span><span class="p">,</span>
-</span><span id="__span-7-11"><a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a><span class="w">      </span><span class="nt">&quot;Action&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;s3:ListBucket&quot;</span><span class="p">,</span>
-</span><span id="__span-7-12"><a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a><span class="w">      </span><span class="nt">&quot;Resource&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;arn:aws:s3:::example-security-scan-results&quot;</span>
-</span><span id="__span-7-13"><a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a><span class="w">    </span><span class="p">},</span>
-</span><span id="__span-7-14"><a id="__codelineno-7-14" name="__codelineno-7-14" href="#__codelineno-7-14"></a><span class="w">    </span><span class="p">{</span>
-</span><span id="__span-7-15"><a id="__codelineno-7-15" name="__codelineno-7-15" href="#__codelineno-7-15"></a><span class="w">      </span><span class="nt">&quot;Effect&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Allow&quot;</span><span class="p">,</span>
-</span><span id="__span-7-16"><a id="__codelineno-7-16" name="__codelineno-7-16" href="#__codelineno-7-16"></a><span class="w">      </span><span class="nt">&quot;Action&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;logs:CreateLogStream&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;logs:PutLogEvents&quot;</span><span class="p">],</span>
-</span><span id="__span-7-17"><a id="__codelineno-7-17" name="__codelineno-7-17" href="#__codelineno-7-17"></a><span class="w">      </span><span class="nt">&quot;Resource&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;arn:aws:logs:us-west-2:111122223333:log-group:/security/ash:*&quot;</span>
-</span><span id="__span-7-18"><a id="__codelineno-7-18" name="__codelineno-7-18" href="#__codelineno-7-18"></a><span class="w">    </span><span class="p">}</span>
-</span><span id="__span-7-19"><a id="__codelineno-7-19" name="__codelineno-7-19" href="#__codelineno-7-19"></a><span class="w">  </span><span class="p">]</span>
-</span><span id="__span-7-20"><a id="__codelineno-7-20" name="__codelineno-7-20" href="#__codelineno-7-20"></a><span class="p">}</span>
+<div class="language-json highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="p">{</span>
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="w">  </span><span class="nt">&quot;Version&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;2012-10-17&quot;</span><span class="p">,</span>
+</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">  </span><span class="nt">&quot;Statement&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+</span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="w">    </span><span class="p">{</span>
+</span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="w">      </span><span class="nt">&quot;Effect&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Allow&quot;</span><span class="p">,</span>
+</span><span id="__span-8-6"><a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="w">      </span><span class="nt">&quot;Action&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;s3:PutObject&quot;</span><span class="p">,</span>
+</span><span id="__span-8-7"><a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="w">      </span><span class="nt">&quot;Resource&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;arn:aws:s3:::example-security-scan-results/ash-reports/*&quot;</span>
+</span><span id="__span-8-8"><a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="w">    </span><span class="p">},</span>
+</span><span id="__span-8-9"><a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a><span class="w">    </span><span class="p">{</span>
+</span><span id="__span-8-10"><a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a><span class="w">      </span><span class="nt">&quot;Effect&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Allow&quot;</span><span class="p">,</span>
+</span><span id="__span-8-11"><a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a><span class="w">      </span><span class="nt">&quot;Action&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;s3:ListBucket&quot;</span><span class="p">,</span>
+</span><span id="__span-8-12"><a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a><span class="w">      </span><span class="nt">&quot;Resource&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;arn:aws:s3:::example-security-scan-results&quot;</span>
+</span><span id="__span-8-13"><a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a><span class="w">    </span><span class="p">},</span>
+</span><span id="__span-8-14"><a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a><span class="w">    </span><span class="p">{</span>
+</span><span id="__span-8-15"><a id="__codelineno-8-15" name="__codelineno-8-15" href="#__codelineno-8-15"></a><span class="w">      </span><span class="nt">&quot;Effect&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Allow&quot;</span><span class="p">,</span>
+</span><span id="__span-8-16"><a id="__codelineno-8-16" name="__codelineno-8-16" href="#__codelineno-8-16"></a><span class="w">      </span><span class="nt">&quot;Action&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;logs:CreateLogStream&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;logs:PutLogEvents&quot;</span><span class="p">],</span>
+</span><span id="__span-8-17"><a id="__codelineno-8-17" name="__codelineno-8-17" href="#__codelineno-8-17"></a><span class="w">      </span><span class="nt">&quot;Resource&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;arn:aws:logs:us-west-2:111122223333:log-group:/security/ash:*&quot;</span>
+</span><span id="__span-8-18"><a id="__codelineno-8-18" name="__codelineno-8-18" href="#__codelineno-8-18"></a><span class="w">    </span><span class="p">}</span>
+</span><span id="__span-8-19"><a id="__codelineno-8-19" name="__codelineno-8-19" href="#__codelineno-8-19"></a><span class="w">  </span><span class="p">]</span>
+</span><span id="__span-8-20"><a id="__codelineno-8-20" name="__codelineno-8-20" href="#__codelineno-8-20"></a><span class="p">}</span>
 </span></code></pre></div>
 <p>Each reporter's full option list is in the <a href="../../reference/reporters/#s3">reporters reference</a>.</p>
 

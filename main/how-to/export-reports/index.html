@@ -3616,13 +3616,15 @@ files you asked for:</p>
 <li>It accepts the name of every reporter ASH ships, including <code>github-ghas</code>,
   <code>gitlab-sast</code>, <code>gitlab-cyclonedx</code>, and <code>unused-suppressions</code>, and the names of the AWS
   reporters, which write a report only when an operator loads their plugin module. It also
-  accepts <code>aggregated</code>, <code>dict</code>, <code>asff</code>, and <code>custom</code>, which no reporter writes. Reporters
+  accepts <code>aggregated</code>, <code>dict</code>, and <code>custom</code>, which no reporter writes. Reporters
   left out of the list do not run. A reporter from your own plugin module cannot be
   named; it runs only when no list is given.</li>
 <li>An unknown name stops the scan with a usage error before scanning, and exits 5.</li>
-<li>The list narrows the enabled reporters and does not turn on a disabled one. <code>yaml</code> and
-  <code>spdx</code> are disabled by default. Naming one writes nothing until you enable its
-  reporter; ASH logs an error in <code>ash.log</code> that names the setting.</li>
+<li>The list narrows the enabled reporters and does not turn on a disabled one. <code>yaml</code>
+  and <code>spdx</code> are disabled by default. Naming one writes nothing until you enable its
+  reporter; ASH logs an error in <code>ash.log</code> that names the setting. The <code>asff</code> reporter
+  is also off by default. To export ASFF from a saved scan, see <a href="../../plugins/aws/#asff">Export ASFF without
+  AWS credentials</a>.</li>
 </ul>
 <p>To make the same choice for every scan, list the names under <code>output_formats</code> in your
 ASH config file. It also takes one name, or names separated by commas, as

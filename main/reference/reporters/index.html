@@ -2121,6 +2121,17 @@ SOFTWARE.
 </li>
       
         <li class="md-nav__item">
+  <a href="#asff" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        asff
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#csv" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3575,6 +3586,17 @@ SOFTWARE.
 </li>
       
         <li class="md-nav__item">
+  <a href="#asff" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        asff
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#csv" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3880,6 +3902,13 @@ SOFTWARE.
 </thead>
 <tbody>
 <tr>
+<td><a href="#asff">ASFF</a> (<code>asff</code>)</td>
+<td><code>.asff.json</code></td>
+<td>no</td>
+<td>Offline export for AWS Security Hub CSPM</td>
+<td><a href="https://docs.aws.amazon.com/securityhub/latest/userguide/securityhub-findings-format.html">AWS Security Finding Format</a></td>
+</tr>
+<tr>
 <td><a href="#csv">CSV</a> (<code>csv</code>)</td>
 <td><code>.csv</code></td>
 <td>yes</td>
@@ -3986,7 +4015,7 @@ SOFTWARE.
 </tr>
 </tbody>
 </table>
-<p>Of the 15 built-in reporters, 13 are enabled by default: <code>csv</code>, <code>cyclonedx</code>, <code>flat-json</code>, <code>github-ghas</code>, <code>gitlab-cyclonedx</code>, <code>gitlab-sast</code>, <code>html</code>, <code>junitxml</code>, <code>markdown</code>, <code>ocsf</code>, <code>sarif</code>, <code>text</code>, and <code>unused-suppressions</code>. <code>spdx</code> and <code>yaml</code> are available but disabled by default.</p>
+<p>Of the 16 built-in reporters, 13 are enabled by default: <code>csv</code>, <code>cyclonedx</code>, <code>flat-json</code>, <code>github-ghas</code>, <code>gitlab-cyclonedx</code>, <code>gitlab-sast</code>, <code>html</code>, <code>junitxml</code>, <code>markdown</code>, <code>ocsf</code>, <code>sarif</code>, <code>text</code>, and <code>unused-suppressions</code>. <code>asff</code>, <code>spdx</code>, and <code>yaml</code> are available but disabled by default.</p>
 <p>A default written as from <code>NAME</code>, else <code>value</code> is read from that environment variable when ASH starts; <code>value</code> applies when the variable is not set.</p>
 <h2 id="reporters-in-plugin-modules">Reporters in plugin modules<a class="headerlink" href="#reporters-in-plugin-modules" title="Permanent link">&para;</a></h2>
 <p>These are loaded only when the configuration's <code>ash_plugin_modules</code> names their module.</p>
@@ -4024,6 +4053,52 @@ SOFTWARE.
 <td><code>.s3.json</code></td>
 <td>no</td>
 <td>plugin module <code>ash_aws_plugins</code></td>
+</tr>
+</tbody>
+</table>
+<h2 id="asff"><code>asff</code><a class="headerlink" href="#asff" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Class: <code>automated_security_helper.plugin_modules.ash_builtin.reporters.asff_reporter.AsffReporter</code></li>
+<li>Provided by: built in, loaded on every scan</li>
+<li>Enabled by default: no</li>
+<li>File extension: <code>.asff.json</code></li>
+<li>Runs with <code>--python-only</code>: yes</li>
+</ul>
+<p>Options, under <code>reporters.asff.options</code>. An option not listed here refuses the configuration.</p>
+<!-- doctest: options of=reporters.asff -->
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a id="reporters.asff.options.account_id"></a><code>account_id</code></td>
+<td>string or null</td>
+<td><code>null</code></td>
+<td>Twelve-digit AWS account ID for the findings.</td>
+</tr>
+<tr>
+<td><a id="reporters.asff.options.aws_region"></a><code>aws_region</code></td>
+<td>string or null</td>
+<td><code>null</code></td>
+<td>AWS Region for the findings product ARN.</td>
+</tr>
+<tr>
+<td><a id="reporters.asff.options.findings_scope"></a><code>findings_scope</code></td>
+<td>string or null, length at most 1,024</td>
+<td><code>null</code></td>
+<td>Stable identifier for the scanned target.</td>
+</tr>
+<tr>
+<td><a id="reporters.asff.options.scan_root"></a><code>scan_root</code></td>
+<td>string or null</td>
+<td><code>null</code></td>
+<td>Absolute original scan root for normalizing finding paths.</td>
 </tr>
 </tbody>
 </table>
