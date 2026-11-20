@@ -335,6 +335,13 @@ jobs:
       # a real gate once ty reaches a stable release; until then the value is the
       # signal in the log, not a verdict.
       #
+      # THE ONE REMAINING continue-on-error IN THIS WORKFLOW. The version is pinned
+      # exactly, so an upstream release cannot move the result; the reason it stays is
+      # that `ty check automated_security_helper/` exits 1 today (1304 diagnostics at
+      # ty 0.0.84) and `lint` is in required-checks' `needs`, so dropping the flag turns
+      # the required lint check red on every PR until those diagnostics are fixed in
+      # the source. The way to remove it is to clear the diagnostics, then delete it.
+      #
       # The step name says informational so nobody reads this job's green tick as ty
       # having passed -- it exits 1 today. It runs through the project environment,
       # not standalone, so ty resolves first- and third-party imports the way mypy
@@ -1360,10 +1367,13 @@ jobs:
   # tiers above. Windows asserts the clean unix-only refusal inside the required e2e
   # tier instead (the one express e2e test that carries no ASH_E2E_EXPRESS gate).
   #
-  # Advisory on purpose: continue-on-error, and named in _UNGATED in
+  # Not a required check on purpose: named in _UNGATED in
   # assert-required-checks-census.py, so it is in no required-checks list and a red
-  # here is read by a person rather than by the merge gate. It runs pytest directly
-  # instead of through run-unit-tests: that action publishes a `PyTest - ...` check
+  # here is read by a person rather than by the merge gate. It does not carry
+  # continue-on-error, so a red leg turns the run red and stays visible instead of
+  # reading green; promoting it into the required lists is a separate decision. It
+  # runs pytest directly instead of through run-unit-tests: that action publishes a
+  # `PyTest - ...` check
   # run per leg and admits only the three tier markers, and this job is neither a
   # tier nor a check anything requires.
   e2e-express:
@@ -1372,7 +1382,6 @@ jobs:
     # above the integration tier), and a restore tolerates a miss.
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
-    continue-on-error: true
     permissions:
       contents: read
     strategy:
@@ -2726,11 +2735,12 @@ jobs:
   # 1. Per-method verdicts. Five methods in one job would ordinarily stop at the
   #    first failure, so a pip break would hide whether pipx also broke -- and a
   #    red `bundle` leg that names one method out of five is worse to debug than
-  #    five red legs. Each method therefore carries `continue-on-error: true` and
-  #    an `id`, and the `bundle: verdict` step below reads every recorded outcome,
-  #    prints all five, and fails naming each one that did not match what it was
-  #    supposed to report. That step is the leg's verdict; the per-method steps
-  #    deliberately do not decide it.
+  #    five red legs. Each method therefore carries `if: ${{ !cancelled() && ... }}`
+  #    and an `id`, so every method attempts even after an earlier one failed, and
+  #    the `bundle: verdict` step below reads every recorded outcome, prints all
+  #    five, and fails naming each one that did not match what it was supposed to
+  #    report. A failed method step also fails the job on its own; the verdict step
+  #    is what names all of them at once.
   #
   # 2. Which install each method's `ash` actually is. Five methods in one job share
   #    a PATH, and pip and pipx both put an `ash` on it. The step order below is
@@ -2918,41 +2928,37 @@ jobs:
 
       # --- bundle: five install methods, five recorded verdicts, one runner ------
       #
-      # `continue-on-error: true` on each is what keeps the later methods running
-      # after an earlier one breaks. It makes the step's *conclusion* success while
-      # leaving its *outcome* failure, so `success()` still holds for the steps that
-      # follow and none of them gets skipped. The outcome is the part that matters
-      # and `bundle: verdict` is the only step that acts on it.
+      # `!cancelled()` in each step's `if` is what keeps the later methods running
+      # after an earlier one breaks: without it the default `success()` skips every
+      # step after the first failure. A failed step keeps its *outcome* and
+      # *conclusion* as failure, so the job fails even if the verdict step were
+      # lost, and `bundle: verdict` reads every outcome and names all of them.
       #
       # pipx is deliberately first: see the ordering note above the job.
       - name: pipx
         id: pipx
-        if: matrix.method == 'bundle'
-        continue-on-error: true
+        if: ${{ !cancelled() && matrix.method == 'bundle' }}
         uses: ./.github/actions/validate-install
         with:
           method: pipx
 
       - name: pip
         id: pip
-        if: matrix.method == 'bundle'
-        continue-on-error: true
+        if: ${{ !cancelled() && matrix.method == 'bundle' }}
         uses: ./.github/actions/validate-install
         with:
           method: pip
 
       - name: mcp
         id: mcp
-        if: matrix.method == 'bundle'
-        continue-on-error: true
+        if: ${{ !cancelled() && matrix.method == 'bundle' }}
         uses: ./.github/actions/validate-mcp
 
       - name: pre-commit
         # The id has no hyphen on purpose. `steps.pre-commit.outcome` parses as a
         # subtraction in a GitHub expression, not as a step lookup.
         id: precommit
-        if: matrix.method == 'bundle'
-        continue-on-error: true
+        if: ${{ !cancelled() && matrix.method == 'bundle' }}
         uses: ./.github/actions/validate-install
         with:
           method: pre-commit
@@ -2970,8 +2976,7 @@ jobs:
         # 3.12 only, because uvx brings its own interpreter and the other four cells
         # would repeat this run verbatim. This is the same coverage the 20 deleted
         # `method: uvx` excludes bought: five uvx runs, one per OS.
-        if: matrix.method == 'bundle' && matrix.python-version == '3.12'
-        continue-on-error: true
+        if: ${{ !cancelled() && matrix.method == 'bundle' && matrix.python-version == '3.12' }}
         uses: ./.github/actions/validate-install
         with:
           method: uvx
@@ -2983,7 +2988,7 @@ jobs:
       # running. Only uvx is allowed to be skipped, only off 3.12, and the
       # expression below says so rather than the shell inferring it.
       - name: "bundle: verdict"
-        if: matrix.method == 'bundle'
+        if: ${{ !cancelled() && matrix.method == 'bundle' }}
         shell: bash
         env:
           # method, outcome, required outcome -- one method per line.

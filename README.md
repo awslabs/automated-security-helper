@@ -309,6 +309,11 @@ for new capabilities.
 | [actionlint](https://github.com/rhysd/actionlint) | GitHub Actions workflows | `ash dependencies install` (pinned release binary) |
 | [zizmor](https://github.com/zizmorcore/zizmor) | GitHub Actions workflows and composite actions | Managed through uv tool isolation |
 
+Six more scanners ship as community plugin modules (Betterleaks, Ferret Scan,
+GuardDog, hadolint, Snyk Code, and Trivy repository scanning). A scan runs one only
+when `ash_plugin_modules` or `--ash-plugin-modules` names its module; see the
+[community plugins](docs/content/docs/plugins/community/index.md).
+
 Enabled scanners depend on your execution mode and configuration. Check the
 [scanner catalog](docs/content/reference/scanners.md) for capabilities
 and the [language guide](docs/content/reference/coverage.md) for coverage.
