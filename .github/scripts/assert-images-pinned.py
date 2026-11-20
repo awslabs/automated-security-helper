@@ -36,6 +36,13 @@ Images named inside `run:` scripts (`docker run fedora:41 ...`) and in documenta
 not parsed. A digest is checked for form, not for existence; resolving one needs the
 registry.
 
+EXEMPTIONS
+
+EXEMPT_PATH_PREFIXES lists path prefixes whose unpinned references are not reported,
+each with a required reason. Today that is the hadolint scanner's test fixtures, whose
+positive cases are unpinned on purpose. Exempted files still count in the census totals;
+an exemption that suppresses nothing, or has no reason, is itself reported.
+
 NO VACUOUS PASSES
 
 Zero workflow files, zero Dockerfiles, or zero image references in total each fail: they
@@ -289,10 +296,38 @@ def _is_workflow(path: str) -> bool:
 
 KIND_SUFFIXES = (".py", ".sh", ".yml", ".yaml", ".mjs", ".js", ".ts", ".ps1")
 
+# Path prefixes whose unpinned image references are not reported, each with the reason
+# it is exempt. The reason is required (a blank one is itself reported). An exempted
+# file is still counted in the census totals, and an exemption under which nothing was
+# left to suppress is reported, so a carve-out cannot outlive the files it covers.
+EXEMPT_PATH_PREFIXES: Dict[str, str] = {
+    "tests/test_data/scanners/hadolint/": (
+        "scanner test fixtures: hadolint is run against these Dockerfiles and the "
+        "positive ones are unpinned on purpose, because an unpinned FROM is what the "
+        "scanner is tested to flag"
+    ),
+}
 
-def scan(root: Path, files: Iterable[str]) -> Tuple[List[Problem], Dict[str, int]]:
+
+def _exemption(rel: str, exempt: Dict[str, str]) -> Optional[str]:
+    for prefix in exempt:
+        if rel.startswith(prefix):
+            return prefix
+    return None
+
+
+def scan(
+    root: Path,
+    files: Iterable[str],
+    exempt: Optional[Dict[str, str]] = None,
+) -> Tuple[List[Problem], Dict[str, int]]:
+    exempt = EXEMPT_PATH_PREFIXES if exempt is None else exempt
     problems: List[Problem] = []
     totals = {"workflows": 0, "dockerfiles": 0, "references": 0, "kind": 0}
+    suppressed: Dict[str, int] = dict.fromkeys(exempt, 0)
+    for prefix, reason in exempt.items():
+        if not reason.strip():
+            problems.append((prefix, "image-pinning exemption has no reason"))
     for rel in sorted(files):
         path = root / rel
         if not path.is_file():
@@ -303,14 +338,28 @@ def scan(root: Path, files: Iterable[str]) -> Tuple[List[Problem], Dict[str, int
             text = path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             continue
+        found: List[Problem] = []
         if _is_workflow(rel):
             totals["workflows"] += 1
-            totals["references"] += check_workflow(Path(rel), text, problems)
+            totals["references"] += check_workflow(Path(rel), text, found)
         if _is_dockerfile(rel):
             totals["dockerfiles"] += 1
-            totals["references"] += check_dockerfile(Path(rel), text, problems)
+            totals["references"] += check_dockerfile(Path(rel), text, found)
         if rel.endswith(KIND_SUFFIXES):
-            totals["kind"] += check_kind(Path(rel), text, problems)
+            totals["kind"] += check_kind(Path(rel), text, found)
+        prefix = _exemption(rel, exempt)
+        if prefix is not None and exempt[prefix].strip():
+            suppressed[prefix] += len(found)
+            continue
+        problems.extend(found)
+    for prefix, count in suppressed.items():
+        if count == 0 and exempt[prefix].strip():
+            problems.append(
+                (
+                    prefix,
+                    "image-pinning exemption matched no unpinned reference; remove it",
+                )
+            )
     return problems, totals
 
 
@@ -436,6 +485,49 @@ SELF_TEST_BAD = {
 }
 
 
+EXEMPTION_CHECKS = 4
+
+
+def _self_test_exemptions(root: Path) -> int:
+    """Plants the exemption cases; returns how many of EXEMPTION_CHECKS failed."""
+    failures = 0
+    exempt = {"fixtures/": "scanner test inputs, unpinned on purpose"}
+    exempted = "fixtures/Dockerfile"
+    plain = "other/Dockerfile"
+    for rel in (exempted, plain):
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (root / rel).write_text("FROM python:3.12-slim\n", encoding="utf-8")
+    problems, totals = scan(root, [exempted], exempt)
+    if problems or totals["dockerfiles"] != 1 or totals["references"] != 1:
+        print(
+            f"  FAIL: an exempted path was reported or left out of the census: {problems} {totals}"
+        )
+        failures += 1
+    else:
+        print("  ok: an exempted unpinned path is not reported and still counts")
+    problems, _ = scan(root, [exempted, plain], exempt)
+    if [location for location, _ in problems] == [f"{plain}:1"]:
+        print("  ok: a non-exempted unpinned image still fails beside an exempted one")
+    else:
+        print(f"  FAIL: expected exactly {plain}:1 to be reported: {problems}")
+        failures += 1
+    problems, _ = scan(root, [plain], exempt)
+    if any("matched no unpinned reference" in message for _, message in problems):
+        print("  ok: an exemption that suppresses nothing is reported")
+    else:
+        print(f"  FAIL: a stale exemption was not reported: {problems}")
+        failures += 1
+    problems, _ = scan(root, [exempted], {"fixtures/": " "})
+    if any("has no reason" in message for _, message in problems) and any(
+        location == f"{exempted}:1" for location, _ in problems
+    ):
+        print("  ok: an exemption with no reason is reported and exempts nothing")
+    else:
+        print(f"  FAIL: a reasonless exemption was accepted: {problems}")
+        failures += 1
+    return failures
+
+
 def self_test() -> int:
     failures = 0
     with tempfile.TemporaryDirectory(prefix="assert-images-pinned-") as tmp:
@@ -443,7 +535,7 @@ def self_test() -> int:
         for rel, text in SELF_TEST_FILES.items():
             (root / rel).parent.mkdir(parents=True, exist_ok=True)
             (root / rel).write_text(text, encoding="utf-8")
-        problems, totals = scan(root, SELF_TEST_FILES)
+        problems, totals = scan(root, SELF_TEST_FILES, exempt={})
         if problems:
             print(f"  FAIL: accepted forms were reported: {problems}")
             failures += 1
@@ -452,7 +544,7 @@ def self_test() -> int:
         for rel, (text, needle) in SELF_TEST_BAD.items():
             (root / rel).parent.mkdir(parents=True, exist_ok=True)
             (root / rel).write_text(text, encoding="utf-8")
-            problems, _ = scan(root, [rel])
+            problems, _ = scan(root, [rel], exempt={})
             if any(
                 needle in f"{location}: {message}" for location, message in problems
             ):
@@ -468,7 +560,8 @@ def self_test() -> int:
             failures += 1
         else:
             print("  ok: an empty census fails")
-    total = len(SELF_TEST_BAD) + 2
+        failures += _self_test_exemptions(root)
+    total = len(SELF_TEST_BAD) + 2 + EXEMPTION_CHECKS
     if failures:
         print(f"self-test FAILED: {failures} of {total} checks")
         return 1
