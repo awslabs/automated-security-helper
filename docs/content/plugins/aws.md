@@ -321,7 +321,12 @@ and `securityhub:GetFindings` when `archive_resolved_findings` is on.
 Use the built-in `asff` reporter to review findings or pass them to a separate import job.
 It reads saved results and writes JSON to stdout. It does not look up credentials or call AWS.
 Use the account, Region and `findings_scope` you would use for a live import. The scope and
-finding identity produce the same IDs as `aws-security-hub`.
+finding identity produce the same IDs as `aws-security-hub` when the finding paths the
+results recorded sit under the scan root as the root is spelled. The export compares the
+spelling it is given and never resolves a path on the export host, so a scan whose root was
+recorded through a symbolic link needs the resolved spelling as `scan_root`. A `scan_root`
+that is a prefix of none of the absolute finding paths logs a warning, and the IDs then
+carry those paths as recorded, which are specific to the scanning machine.
 
 <!-- doctest: illustrative reason="requires saved ASH scan results" -->
 ```bash

@@ -174,3 +174,202 @@ def test_corrupt_metadata_is_rejected(tmp_path):
     data["metadata"] = "corrupt"
     path.write_text(json.dumps(data))
     assert _asff(tmp_path).exit_code != 0
+
+
+@pytest.fixture
+def ash_warnings():
+    """The warnings ASH logs while a test runs (ASH's logger does not propagate)."""
+    import logging
+
+    from automated_security_helper.utils.log import ASH_LOGGER
+
+    records = []
+
+    class _Collect(logging.Handler):
+        def emit(self, record):
+            if record.levelno >= logging.WARNING:
+                records.append(record.getMessage())
+
+    handler = _Collect(level=logging.DEBUG)
+    previous = ASH_LOGGER.level
+    ASH_LOGGER.addHandler(handler)
+    ASH_LOGGER.setLevel(logging.DEBUG)
+    try:
+        yield records
+    finally:
+        ASH_LOGGER.removeHandler(handler)
+        ASH_LOGGER.setLevel(previous)
+
+
+def _model_with_the_finding_at(path):
+    from automated_security_helper.schemas.sarif_schema_model import (
+        ArtifactLocation,
+        Location,
+        PhysicalLocation,
+        PhysicalLocation2,
+    )
+
+    model = _model_with_one_low_finding()
+    model.sarif.runs[0].results[0].locations = [
+        Location(
+            physicalLocation=PhysicalLocation(
+                root=PhysicalLocation2(
+                    artifactLocation=ArtifactLocation(uri=path.as_uri())
+                )
+            )
+        )
+    ]
+    return model
+
+
+def _export(tmp_path, model, root):
+    from automated_security_helper.base.plugin_context import PluginContext
+    from automated_security_helper.plugin_modules.ash_builtin.reporters.asff_reporter import (
+        AsffReporter,
+        AsffReporterConfig,
+        AsffReporterOptions,
+    )
+
+    options = AsffReporterOptions(
+        account_id="123456789012",
+        aws_region="us-east-1",
+        findings_scope="example",
+        scan_root=root,
+    )
+    reporter = AsffReporter(
+        context=PluginContext(source_dir=tmp_path, output_dir=tmp_path / "out"),
+        config=AsffReporterConfig(options=options),
+    )
+    return json.loads(reporter.report(model))["Findings"]
+
+
+def test_a_scan_root_that_is_a_prefix_of_no_finding_path_warns(tmp_path, ash_warnings):
+    recorded = tmp_path / "recorded"
+    model = _model_with_the_finding_at(recorded / "file.py")
+
+    [finding] = _export(tmp_path, model, (tmp_path / "elsewhere").as_posix())
+
+    assert len(ash_warnings) == 1, ash_warnings
+    assert "is not a prefix of any of the 1 absolute finding paths" in ash_warnings[0]
+    assert "specific to the machine that scanned" in ash_warnings[0]
+    # The export still runs, with the paths as the results recorded them.
+    assert finding["ProductFields"]["ash/file"].endswith("recorded/file.py")
+
+
+def test_a_scan_root_over_the_finding_paths_does_not_warn(tmp_path, ash_warnings):
+    recorded = tmp_path / "recorded"
+    model = _model_with_the_finding_at(recorded / "file.py")
+
+    [finding] = _export(tmp_path, model, recorded.as_posix())
+
+    assert ash_warnings == []
+    assert finding["ProductFields"]["ash/file"] == "file.py"
+
+
+def test_a_scan_root_with_no_absolute_finding_path_does_not_warn(
+    tmp_path, ash_warnings
+):
+    # The finding records no path at all, so the root has nothing to match.
+    _export(
+        tmp_path, _model_with_one_low_finding(), (tmp_path / "elsewhere").as_posix()
+    )
+
+    assert ash_warnings == []
+
+
+def test_the_earlier_account_option_spelling_is_accepted():
+    """``aws_account_id`` is what the reporter's options were called before."""
+    from automated_security_helper.config.ash_config import AshConfig
+
+    config = AshConfig.model_validate(
+        {"reporters": {"asff": {"options": {"aws_account_id": "123456789012"}}}}
+    )
+
+    assert config.reporters.asff.options.account_id == "123456789012"
+    assert config.reporters.asff.options.model_dump()["account_id"] == "123456789012"
+
+
+def test_account_id_wins_over_the_earlier_spelling_when_both_are_set():
+    from automated_security_helper.plugin_modules.ash_builtin.reporters.asff_reporter import (
+        AsffReporterOptions,
+    )
+
+    both = AsffReporterOptions.model_validate(
+        {"account_id": "111111111111", "aws_account_id": "222222222222"}
+    )
+    null_and_earlier = AsffReporterOptions.model_validate(
+        {"account_id": None, "aws_account_id": "222222222222"}
+    )
+
+    assert both.account_id == "111111111111"
+    assert null_and_earlier.account_id == "222222222222"
+
+
+def test_the_earlier_account_option_spelling_is_accepted_as_an_override(tmp_path):
+    _write_results(tmp_path)
+    result = _report(
+        tmp_path,
+        "asff",
+        "--config-overrides",
+        "reporters.asff.options.aws_account_id=123456789012",
+        "--config-overrides",
+        "reporters.asff.options.aws_region=us-east-1",
+        "--config-overrides",
+        "reporters.asff.options.findings_scope=example",
+    )
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)["Findings"][0]["AwsAccountId"] == "123456789012"
+
+
+def test_results_that_stored_the_earlier_asff_options_still_load(
+    tmp_path, ash_warnings
+):
+    """An aggregated-results file from before the rename keeps its stored config.
+
+    The stored config is read with unknown keys tolerated (utils/unknown_keys.py),
+    so the file loads; the earlier ``aws_account_id`` is a spelling of the option
+    now, so it also lands in ``account_id`` and is not reported as unknown.
+    """
+    from automated_security_helper.models.asharp_model import AshAggregatedResults
+
+    _write_results(tmp_path)
+    path = tmp_path / "ash_aggregated_results.json"
+    data = json.loads(path.read_text())
+    data["ash_config"]["reporters"]["asff"] = {
+        "enabled": False,
+        "extension": "asff",
+        "name": "asff",
+        "options": {"aws_account_id": "123456789012", "aws_region": "us-east-1"},
+    }
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+    loaded = AshAggregatedResults.load_model(path)
+
+    assert loaded is not None
+    options = loaded.ash_config.reporters.asff.options
+    assert options.account_id == "123456789012"
+    assert options.aws_region == "us-east-1"
+    assert not [w for w in ash_warnings if "unknown key" in w], ash_warnings
+
+
+def test_results_that_stored_an_asff_option_this_version_lacks_still_load(
+    tmp_path, ash_warnings
+):
+    """The stored-config tolerance itself: a key the model does not declare is kept
+    and reported, and the results load."""
+    from automated_security_helper.models.asharp_model import AshAggregatedResults
+
+    _write_results(tmp_path)
+    path = tmp_path / "ash_aggregated_results.json"
+    data = json.loads(path.read_text())
+    data["ash_config"]["reporters"]["asff"]["options"] = {
+        "account_id": "123456789012",
+        "retired_option": "x",
+    }
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+    loaded = AshAggregatedResults.load_model(path)
+
+    assert loaded is not None
+    assert loaded.ash_config.reporters.asff.options.account_id == "123456789012"
+    assert [w for w in ash_warnings if "unknown key" in w], ash_warnings

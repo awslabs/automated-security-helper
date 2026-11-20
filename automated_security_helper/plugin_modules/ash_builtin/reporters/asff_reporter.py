@@ -6,7 +6,7 @@ import re
 from pathlib import PureWindowsPath
 from typing import TYPE_CHECKING, Any, Literal
 
-from pydantic import Field, field_validator
+from pydantic import AliasChoices, Field, field_validator, model_validator
 
 from automated_security_helper.base.options import ReporterOptionsBase
 from automated_security_helper.base.reporter_plugin import (
@@ -14,16 +14,27 @@ from automated_security_helper.base.reporter_plugin import (
     ReporterPluginConfigBase,
 )
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
+from automated_security_helper.plugin_modules.ash_builtin.reporters.asff_formatter import (
+    AsffFormatter,
+    _scan_scope,
+    _unique_by_id,
+)
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 from automated_security_helper.utils.finding_identity import relative_path
+from automated_security_helper.utils.log import ASH_LOGGER
 
 if TYPE_CHECKING:
     from automated_security_helper.models.asharp_model import AshAggregatedResults
 
 
 class AsffReporterOptions(ReporterOptionsBase):
+    # ``aws_account_id`` is the spelling an earlier ASFF reporter's options used
+    # (and that results files written then still carry); ``account_id`` is
+    # canonical and what the Security Hub reporter calls the same option.
     account_id: str | None = Field(
-        default=None, description="Twelve-digit AWS account ID for the findings."
+        default=None,
+        validation_alias=AliasChoices("account_id", "aws_account_id"),
+        description="Twelve-digit AWS account ID for the findings.",
     )
     aws_region: str | None = Field(
         default=None, description="AWS Region for the findings product ARN."
@@ -37,6 +48,22 @@ class AsffReporterOptions(ReporterOptionsBase):
         default=None,
         description="Absolute original scan root for normalizing finding paths.",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _earlier_account_spelling(cls, data: Any) -> Any:
+        """Read ``aws_account_id`` as ``account_id``, which wins when it is set.
+
+        Not left to the alias alone: a section built from the defaults carries
+        ``account_id: null``, and an override of ``aws_account_id`` is merged next
+        to it. The alias takes the first choice present, which would be the null.
+        """
+        if isinstance(data, dict) and "aws_account_id" in data:
+            data = dict(data)
+            earlier = data.pop("aws_account_id")
+            if data.get("account_id") is None:
+                data["account_id"] = earlier
+        return data
 
     @field_validator("account_id", mode="before")
     @classmethod
@@ -74,12 +101,6 @@ class AsffReporter(ReporterPluginBase[AsffReporterConfig]):
         return super().model_post_init(context)
 
     def report(self, model: "AshAggregatedResults") -> str:
-        from automated_security_helper.plugin_modules.ash_aws_plugins.security_hub_reporter import (
-            AsffFormatter,
-            _scan_scope,
-            _unique_by_id,
-        )
-
         config = self.config
         if not isinstance(config, AsffReporterConfig):
             raise ValueError("Invalid reporters.asff configuration")
@@ -106,14 +127,34 @@ class AsffReporter(ReporterPluginBase[AsffReporterConfig]):
         results = model.sarif.get_all_results() if model.sarif else []
         if not results:
             return json.dumps({"Findings": []})
+        paths = [
+            relative_path(
+                FlatVulnerability.from_sarif_result(
+                    result, "unknown", "UNKNOWN"
+                ).file_path
+            )
+            for result in results
+        ]
+        absolute = [path for path in paths if _absolute(path)]
         if root is None:
-            for result in results:
-                flat = FlatVulnerability.from_sarif_result(result, "unknown", "UNKNOWN")
-                path = relative_path(flat.file_path)
-                if _absolute(path):
-                    raise ValueError(
-                        "asff requires an absolute reporters.asff.options.scan_root for absolute finding paths"
-                    )
+            if absolute:
+                raise ValueError(
+                    "asff requires an absolute reporters.asff.options.scan_root for absolute finding paths"
+                )
+        elif absolute and all(
+            _absolute(relative_path(path, root, resolve_root=False))
+            for path in absolute
+        ):
+            ASH_LOGGER.warning(
+                f"asff: the scan root {root!r} is not a prefix of any of the "
+                f"{len(absolute)} absolute finding paths, so the exported finding "
+                "Ids and resource Ids carry those paths as recorded, which are "
+                "specific to the machine that scanned. They will not equal the Ids "
+                "an import from the scan's own checkout gives. Set "
+                "reporters.asff.options.scan_root to the scan root as the results "
+                "recorded it; a root recorded through a symbolic link needs the "
+                "resolved spelling."
+            )
         scope = _scan_scope(model)
         formatter = AsffFormatter(
             options.findings_scope.strip(), scope, root, offline=True
