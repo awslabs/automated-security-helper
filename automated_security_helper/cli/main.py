@@ -212,7 +212,10 @@ _LAZY_SUBCOMMANDS: dict[str, tuple[str, str]] = {
     "report": ("automated_security_helper.cli.report", "report_command"),
     "merge": ("automated_security_helper.cli.merge", "merge_command"),
     "config": ("automated_security_helper.cli.config", "config_app"),
-    "dependencies": ("automated_security_helper.cli.dependencies", "dependencies_app"),
+    "dependencies": (
+        "automated_security_helper.cli.dependencies",
+        "dependencies_cli_app",
+    ),
     "inspect": ("automated_security_helper.cli.inspect", "inspect_app"),
     "plugin": ("automated_security_helper.cli.plugin", "plugin_app"),
     "express": ("automated_security_helper.cli.express", "express_app"),
