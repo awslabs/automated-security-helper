@@ -48,6 +48,9 @@
 
 ### Features
 
+- `ash dependencies check --offline` checks the local Grype and Trivy vulnerability
+  database metadata against the configured age policy without running either tool.
+
 - **`ash --mode precommit --staged` scans the staged files instead of the whole repository.**
   The list comes from `git diff --cached` (no deletions; a rename is scanned at its new
   path): bandit and checkov are handed the staged files as targets, the scanners that pick
