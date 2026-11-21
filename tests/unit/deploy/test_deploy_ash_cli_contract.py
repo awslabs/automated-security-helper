@@ -264,6 +264,7 @@ _COMMANDS = frozenset(
         "build-image",
         "config",
         "dependencies",
+        "diff",
         "express",
         "get-genai-guide",
         "inspect",

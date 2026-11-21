@@ -62,6 +62,7 @@ NON_SCAN_SUBCOMMANDS = frozenset(
     {
         "build-image",
         "report",
+        "diff",
         "merge",
         "mcp",
         "get-genai-guide",
