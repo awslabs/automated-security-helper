@@ -108,6 +108,32 @@ report alone to standard output:
 ash report --format gitlab-sast > gl-sast-report.json
 ```
 
+## Compare two saved scans {#compare-scans}
+
+Use [`ash diff`](../reference/cli.md#diff) with the earlier results first. It reads both
+files without running a scan or changing any reports.
+
+<!-- doctest: illustrative reason="requires two saved ASH scan results files" -->
+```bash
+ash diff baseline/ash_aggregated_results.json current/ash_aggregated_results.json
+ash diff baseline/ash_aggregated_results.json current/ash_aggregated_results.json --format json
+```
+
+The JSON groups are `new`, `absent_after`, `severity_changed`, `suppression_changed`,
+and `warnings`. `absent_after` means the second report did not record the finding, not
+that it was fixed. Compare full scans of the same project with the same scanner and
+rule configuration. For a workspace, compare results from the same individual
+project; do not mix them with a standalone scan. For a sharded scan, run `ash merge`
+first. Results narrowed by `--changed-files-only` are refused. Incomplete scanner
+coverage, different recorded ignore-file exclusions, or inputs marked unscanned
+produce warnings.
+
+ASH matches by finding ID and refuses reports with duplicate IDs. A finding that
+moves to a different line can appear as both new and absent if the scanner did not
+provide a stable fingerprint. The command
+exits 0 after a successful comparison even if findings changed, and 1 when it cannot
+read or compare the results. It is not a CI findings gate.
+
 ## GitHub code scanning {#github}
 
 Upload `ash.ghas.sarif`. It is SARIF 2.1.0 in which every rule a scanner declares gets a

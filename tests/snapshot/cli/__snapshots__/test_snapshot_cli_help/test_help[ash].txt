@@ -593,6 +593,7 @@
 │ build-image      Builds the ASH container image, then scans the current directory with it unless │
 │                  --no-run is given.                                                              │
 │ report           Generate a report from ASH scan results using the specified reporter plugin.    │
+│ diff             Compare the findings in two saved ASH scans without running a scan.             │
 │ merge            Merges the results of a sharded scan into one unified report.                   │
 │ mcp              Start the ASH MCP server (Model Context Protocol)                               │
 │ get-genai-guide  Write the ASH GenAI Integration Guide for AI assistants and LLMs to a file.     │
