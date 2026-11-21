@@ -34,6 +34,11 @@ module AccessPolicyReading
 
   module_function
 
+  def policy_resource?(resource)
+    policies = resource.accessPolicies
+    !policies.nil? && !policies.is_a?(Array)
+  end
+
   # The policy document of a resource with each branch of every Fn::If in it present, and
   # whether a statement had more combinations of branches than are read.
   #

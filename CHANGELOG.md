@@ -94,6 +94,11 @@
   licenses, ITINs, card track data) can surface new findings in previously clean
   scans. The recommended version stays 2.5.3 until the full fixture-matrix pass runs.
 
+### Fixes
+
+- cfn-nag evaluates templates containing `AWS::EKS::AccessEntry` without passing
+  EKS access policy associations to the OpenSearch and Elasticsearch policy rules.
+
 ## v3.8.0 (2026-11-12)
 
 ### Breaking behavior changes in a minor release

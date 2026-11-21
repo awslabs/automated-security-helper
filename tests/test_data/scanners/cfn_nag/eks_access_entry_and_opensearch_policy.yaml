@@ -1,0 +1,25 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: EKS access entries and OpenSearch domain policies use different AccessPolicies shapes.
+Resources:
+  EksAccessEntry:
+    Type: AWS::EKS::AccessEntry
+    Properties:
+      ClusterName: ash-fixture
+      PrincipalArn: arn:aws:iam::111122223333:role/ash-fixture
+      AccessPolicies:
+        - PolicyArn: arn:aws:eks::aws:cluster-access-policy/AmazonEKSViewPolicy
+          AccessScope:
+            Type: namespace
+            Namespaces: [ash-fixture]
+  OpenSearchDomain:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-open-domain
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: "*"
+            Action: "es:*"
+            Resource: "*"
