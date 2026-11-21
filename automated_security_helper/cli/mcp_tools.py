@@ -4822,32 +4822,24 @@ def mcp_diff_scan_results(
             ),
         }
 
-    before_vulns = before_results.to_flat_vulnerabilities()
-    after_vulns = after_results.to_flat_vulnerabilities()
+    from automated_security_helper.utils.finding_diff import compare_findings
 
-    before_by_id: Dict[str, Any] = {v.id: v for v in before_vulns}
-    after_by_id: Dict[str, Any] = {v.id: v for v in after_vulns}
-
-    before_ids = set(before_by_id)
-    after_ids = set(after_by_id)
-
-    new = [after_by_id[i].model_dump() for i in sorted(after_ids - before_ids)]
-    resolved = [before_by_id[i].model_dump() for i in sorted(before_ids - after_ids)]
-
-    severity_changed = []
-    for vid in sorted(before_ids & after_ids):
-        b_sev = (before_by_id[vid].severity or "").upper()
-        a_sev = (after_by_id[vid].severity or "").upper()
-        if b_sev != a_sev:
-            severity_changed.append(
-                {
-                    "id": vid,
-                    "before_severity": b_sev or None,
-                    "after_severity": a_sev or None,
-                }
-            )
-
-    return {"new": new, "resolved": resolved, "severity_changed": severity_changed}
+    diff = compare_findings(
+        before_results.to_flat_vulnerabilities(),
+        after_results.to_flat_vulnerabilities(),
+    )
+    return {
+        "new": [finding.model_dump() for finding in diff.new],
+        "resolved": [finding.model_dump() for finding in diff.absent_after],
+        "severity_changed": [
+            {
+                "id": current.id,
+                "before_severity": previous.severity.upper() or None,
+                "after_severity": current.severity.upper() or None,
+            }
+            for previous, current in diff.severity_changed
+        ],
+    }
 
 
 # ---------------------------------------------------------------------------
