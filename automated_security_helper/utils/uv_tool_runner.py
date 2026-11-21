@@ -2916,6 +2916,7 @@ class UVToolRunner:
         *,
         offline: Optional[bool] = None,
         package: Optional[str] = None,
+        from_metadata: bool = False,
     ) -> Dict[str, Any]:
         """Get comprehensive installation information for a tool.
 
@@ -2923,13 +2924,21 @@ class UVToolRunner:
         ``get_tool_version``: the caller's own offline mode reaches the version
         probe (a scanner offline by its options probed online here), and the
         package the spec was built around is checked before the probe.
+        ``from_metadata`` has the meaning it has for ``get_tool_version``: the
+        scanner's opt-in (``UVToolMixin._tool_version_from_metadata``), so the
+        dependency check reads a tool's version from its installed metadata
+        instead of starting the tool, as the scan's own version read does.
         """
         is_uv_installed = (
             self.is_tool_installed(tool_name) if self.is_uv_available() else False
         )
         uv_version = (
             self.get_tool_version(
-                tool_name, package_name, offline=offline, package=package
+                tool_name,
+                package_name,
+                offline=offline,
+                package=package,
+                from_metadata=from_metadata,
             )
             if is_uv_installed
             else None

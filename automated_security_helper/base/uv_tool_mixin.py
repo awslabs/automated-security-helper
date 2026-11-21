@@ -2725,6 +2725,7 @@ class UVToolMixin:
                 self._checked_uv_from_spec(),
                 offline=self._is_offline_mode(),
                 package=self._uv_package(),
+                **self._uv_metadata_kwargs(),
             )
             info["tool_name"] = self.command
 
