@@ -96,14 +96,20 @@ def match_findings(
         exact_indices.append((i, j))
         matched_before.add(i)
         matched_after.add(j)
+
+    def loose_key(finding):
+        key = fallback_key(finding)
+        return None if key is None else key[:2]
+
+    partner = {j: i for i, j in exact_indices}
     whole_before = defaultdict(list)
     whole_after = defaultdict(list)
     for index, finding in enumerate(before):
-        key = fallback_key(finding)
+        key = loose_key(finding)
         if key is not None:
             whole_before[key].append(index)
     for index, finding in enumerate(after):
-        key = fallback_key(finding)
+        key = loose_key(finding)
         if key is not None:
             whole_after[key].append(index)
     ambiguous = {
@@ -112,16 +118,16 @@ def match_findings(
         if len({before[i].is_suppressed for i in whole_before[key]}) > 1
         and not (
             len(whole_before[key]) == len(whole_after[key])
-            and all(j in matched_after for j in whole_after[key])
+            and all(
+                j in partner and loose_key(before[partner[j]]) == key
+                for j in whole_after[key]
+            )
         )
     }
     if ambiguous:
         kept = []
         for i, j in exact_indices:
-            if (
-                fallback_key(before[i]) in ambiguous
-                or fallback_key(after[j]) in ambiguous
-            ):
+            if loose_key(before[i]) in ambiguous or loose_key(after[j]) in ambiguous:
                 matched_before.discard(i)
                 matched_after.discard(j)
             else:
@@ -138,7 +144,9 @@ def match_findings(
         if index not in matched_after and key is not None:
             groups_after[key].append(index)
     moved = []
-    for key in sorted(groups_before.keys() & groups_after.keys() - ambiguous):
+    for key in sorted(groups_before.keys() & groups_after.keys()):
+        if key[:2] in ambiguous:
+            continue
         old, new = groups_before[key], groups_after[key]
         if len(new) > len(old) or len({before[i].is_suppressed for i in old}) > 1:
             continue
