@@ -144,6 +144,10 @@ def _result_payload(
     return {
         "new": [_finding_row(finding) for finding in diff.new],
         "absent_after": [_finding_row(finding) for finding in diff.absent_after],
+        "moved": [
+            {"before": _finding_row(before), "after": _finding_row(after)}
+            for before, after in diff.moved
+        ],
         "severity_changed": [
             {**_finding_row(after), "before_severity": before.severity.upper()}
             for before, after in diff.severity_changed
@@ -160,6 +164,7 @@ def _print_text(payload: dict[str, Any]) -> None:
     groups = {
         "new": "New",
         "absent_after": "Absent after",
+        "moved": "Moved",
         "severity_changed": "Severity changed",
         "suppression_changed": "Suppression changed",
     }
@@ -174,6 +179,8 @@ def _print_text(payload: dict[str, Any]) -> None:
     table = Table("Change", "Scanner / rule", "Location", "Severity", "Suppressed")
     for key, label in groups.items():
         for row in payload[key]:
+            if key == "moved":
+                row = row["after"]
             location = row["file_path"] or "-"
             if row["line_start"] is not None:
                 location += f":{row['line_start']}"

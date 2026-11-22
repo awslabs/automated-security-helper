@@ -71,6 +71,7 @@ def test_diff_distinguishes_new_absent_and_changed_findings(tmp_path):
     assert set(payload) == {
         "new",
         "absent_after",
+        "moved",
         "severity_changed",
         "suppression_changed",
         "warnings",
@@ -123,8 +124,8 @@ def test_diff_uses_the_existing_identity_when_a_line_moves(tmp_path, fingerprint
     )
     assert response.exit_code == 0, response.output
     payload = json.loads(response.stdout)
-    expected = int(fingerprint is None)
-    assert len(payload["new"]) == len(payload["absent_after"]) == expected
+    assert payload["new"] == payload["absent_after"] == []
+    assert len(payload["moved"]) == int(fingerprint is None)
 
 
 def test_diff_warns_about_an_incomplete_scan_and_different_coverage(tmp_path):
@@ -319,3 +320,15 @@ def test_diff_reports_input_errors_without_echoing_file_contents(tmp_path, conte
     assert "current.json" in response.stderr
     assert "private payload" not in response.stderr
     assert "not JSON" not in response.stderr
+
+
+def test_moved_findings_are_listed_in_text_and_json(tmp_path):
+    before = results(finding("B101", line=4))
+    after = results(finding("B101", line=14))
+    payload = json.loads(diff(tmp_path, before, after).stdout)
+    assert payload["new"] == [] and payload["absent_after"] == []
+    assert payload["moved"][0]["before"]["line_start"] == 4
+    assert payload["moved"][0]["after"]["line_start"] == 14
+    response = diff(tmp_path, before, after, json_output=False)
+    assert "Moved: 1" in response.stdout
+    assert "src/app.py:14" in response.stdout

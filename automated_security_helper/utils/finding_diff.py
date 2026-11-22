@@ -3,40 +3,148 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
+
+from automated_security_helper.utils.finding_identity import canonical
 
 if TYPE_CHECKING:
     from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 
 
 @dataclass(frozen=True)
+class FindingMatch:
+    exact: list[tuple[FlatVulnerability, FlatVulnerability]]
+    moved: list[tuple[FlatVulnerability, FlatVulnerability]]
+    new: list[FlatVulnerability]
+    absent: list[FlatVulnerability]
+
+
+@dataclass(frozen=True)
 class FindingDiff:
     new: list[FlatVulnerability]
     absent_after: list[FlatVulnerability]
+    moved: list[tuple[FlatVulnerability, FlatVulnerability]]
     severity_changed: list[tuple[FlatVulnerability, FlatVulnerability]]
     suppression_changed: list[tuple[FlatVulnerability, FlatVulnerability]]
+
+
+def fallback_key(finding: FlatVulnerability) -> tuple | None:
+    if finding._identity is None or finding.source_report is not None:
+        return None
+    if any(
+        kind in (finding._assigned_identity_key or {})
+        for kind in ("fingerprints", "partialFingerprints")
+    ):
+        return None
+    base = dict(finding._identity.base)
+    if finding._assigned_identity_key is not None:
+        base["project"] = finding._assigned_identity_key.get(
+            "project", base.get("project")
+        )
+    return (
+        canonical(base),
+        finding._identity_message or "",
+        (finding.severity or "").upper(),
+    )
+
+
+def _order(finding: FlatVulnerability) -> tuple:
+    return (
+        finding.line_start if finding.line_start is not None else -1,
+        finding.line_end if finding.line_end is not None else -1,
+        finding.id,
+    )
+
+
+def match_findings(
+    before: Iterable[FlatVulnerability], after: Iterable[FlatVulnerability]
+) -> FindingMatch:
+    before = list(before)
+    after = list(after)
+    before_ids = defaultdict(list)
+    after_ids = defaultdict(list)
+    for index, finding in enumerate(before):
+        before_ids[finding.id].append(index)
+    for index, finding in enumerate(after):
+        after_ids[finding.id].append(index)
+    matched_before = set()
+    matched_after = set()
+    exact = []
+    for finding_id in sorted(before_ids.keys() & after_ids.keys()):
+        if len(before_ids[finding_id]) != 1 or len(after_ids[finding_id]) != 1:
+            continue
+        i, j = before_ids[finding_id][0], after_ids[finding_id][0]
+        previous, current = before[i], after[j]
+        if previous._identity is not None and current._identity is not None:
+            fingerprinted = all(
+                any(
+                    kind in (finding._assigned_identity_key or {})
+                    for kind in ("fingerprints", "partialFingerprints")
+                )
+                for finding in (previous, current)
+            )
+            if (
+                not fingerprinted
+                and previous._identity_message != current._identity_message
+            ):
+                continue
+        exact.append((previous, current))
+        matched_before.add(i)
+        matched_after.add(j)
+    groups_before = defaultdict(list)
+    groups_after = defaultdict(list)
+    for index, finding in enumerate(before):
+        key = fallback_key(finding)
+        if index not in matched_before and key is not None:
+            groups_before[key].append(index)
+    for index, finding in enumerate(after):
+        key = fallback_key(finding)
+        if index not in matched_after and key is not None:
+            groups_after[key].append(index)
+    moved = []
+    for key in sorted(groups_before.keys() & groups_after.keys()):
+        old, new = groups_before[key], groups_after[key]
+        if len(new) > len(old) or len({before[i].is_suppressed for i in old}) > 1:
+            continue
+        for i, j in zip(
+            sorted(old, key=lambda n: _order(before[n])),
+            sorted(new, key=lambda n: _order(after[n])),
+        ):
+            moved.append((before[i], after[j]))
+            matched_before.add(i)
+            matched_after.add(j)
+    return FindingMatch(
+        exact,
+        moved,
+        sorted(
+            (f for i, f in enumerate(after) if i not in matched_after),
+            key=lambda f: (f.id, _order(f)),
+        ),
+        sorted(
+            (f for i, f in enumerate(before) if i not in matched_before),
+            key=lambda f: (f.id, _order(f)),
+        ),
+    )
 
 
 def compare_findings(
     before: Iterable[FlatVulnerability], after: Iterable[FlatVulnerability]
 ) -> FindingDiff:
-    before_by_id = {finding.id: finding for finding in before}
-    after_by_id = {finding.id: finding for finding in after}
-    severity_changed = []
-    suppression_changed = []
-    for finding_id in sorted(before_by_id.keys() & after_by_id.keys()):
-        previous, current = before_by_id[finding_id], after_by_id[finding_id]
-        if (previous.severity or "").upper() != (current.severity or "").upper():
-            severity_changed.append((previous, current))
-        if previous.is_suppressed != current.is_suppressed:
-            suppression_changed.append((previous, current))
+    match = match_findings(before, after)
+    pairs = match.exact + match.moved
     return FindingDiff(
-        new=[after_by_id[key] for key in sorted(after_by_id.keys() - before_by_id)],
-        absent_after=[
-            before_by_id[key] for key in sorted(before_by_id.keys() - after_by_id)
+        new=match.new,
+        absent_after=match.absent,
+        moved=match.moved,
+        severity_changed=[
+            (a, b)
+            for a, b in pairs
+            if (a.severity or "").upper() != (b.severity or "").upper()
         ],
-        severity_changed=severity_changed,
-        suppression_changed=suppression_changed,
+        suppression_changed=[
+            (a, b) for a, b in pairs if a.is_suppressed != b.is_suppressed
+        ],
     )
