@@ -7818,7 +7818,8 @@ def _gating_actionable_count(
                     severity, threshold_for(metric.scanner_name)
                 ):
                     non_sarif_actionable += count
-                    if _SEVERITY_RANK[severity.lower()] >= min_sev_rank:
+                    rank = _SEVERITY_RANK.get(severity.lower(), _SEVERITY_RANK["low"])
+                    if rank >= min_sev_rank:
                         non_sarif_qualifying = True
     # Set when the count below is taken from the written report: whether that
     # report holds a counted result at or above --min-severity. None when the

@@ -451,3 +451,39 @@ def test_scanner_without_complete_baseline_keeps_its_findings(status):
     )
     assert outcome.matched == 0
     assert len(current.sarif.runs[0].results) == 1
+
+
+@pytest.mark.parametrize("with_sarif", [False, True])
+def test_baseline_gate_counts_a_native_info_result_under_all(tmp_path, with_sarif):
+    import json
+
+    from automated_security_helper.config.default_config import get_default_config
+    from automated_security_helper.interactions.run_ash_scan import (
+        ScanOptions,
+        _gating_actionable_count,
+    )
+    from automated_security_helper.utils.inner_run_outcome import record_reports_written
+
+    current = results(finding(10, severity="HIGH"))
+    current.ash_config = get_default_config()
+    current.ash_config.global_settings.severity_threshold = "ALL"
+    current.additional_reports = {
+        "plugin": {
+            "source": {
+                "scanner_name": "plugin",
+                "status": "PASSED",
+                "raw_results": {"findings": [{"rule": "P"}]},
+                "severity_counts": {"info": 1},
+            }
+        }
+    }
+    opts = ScanOptions(source_dir=tmp_path, output_dir=tmp_path / "out")
+    apply_baseline(current, baseline(finding(10, severity="HIGH")))
+    if with_sarif:
+        report = tmp_path / "out" / "reports" / "ash.sarif"
+        report.parent.mkdir(parents=True)
+        report.write_text(
+            json.dumps(current.sarif.model_dump(by_alias=True, exclude_none=True))
+        )
+        record_reports_written(current, [("ash.sarif", "sarif")])
+    assert _gating_actionable_count(current, opts, with_sarif) == 1
