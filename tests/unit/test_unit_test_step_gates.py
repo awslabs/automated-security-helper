@@ -124,12 +124,13 @@ def _pytest_run(marker: str, **env: str) -> tuple[list[str], str]:
 
     ``uv`` is a function that prints COVERAGE_CORE and then each of its arguments on a
     line of its own, so the script's array is expanded by bash itself; ``run pytest``
-    come first and are dropped. ``env`` is the rest of the step's environment; with none
-    given the leg is unsharded, as the step's ``ASH_TEST_SHARD`` is empty for a
-    whole-tier run.
+    come first and are dropped. COVERAGE_CORE is read with ``printenv``, a child process,
+    so only an exported value counts, as for the real ``uv``. ``env`` is the rest of the
+    step's environment; with none given the leg is unsharded, as the step's
+    ``ASH_TEST_SHARD`` is empty for a whole-tier run.
     """
     script = str(_step("Run PyTest")["run"])
-    stub = 'uv() { printf "%s\\n" "COVERAGE_CORE=${COVERAGE_CORE:-}" "$@"; }\n'
+    stub = 'uv() { printf "%s\\n" "COVERAGE_CORE=$(printenv COVERAGE_CORE || true)" "$@"; }\n'
     done = _bash(stub + script, MARKER=marker, **env)
     assert done.returncode == 0, done.stdout + done.stderr
     core, *argv = done.stdout.splitlines()
@@ -426,12 +427,17 @@ class TestTheThresholdBelongsToTheUnitCoverageJob:
 
     def test_the_unit_run_keeps_its_coverage_data_for_the_upload(self):
         step = _step("Keep the unit run's coverage data")
-        condition = str(step["if"])
-        assert "success()" in condition and "failure()" in condition
-        assert "inputs.marker == 'unit'" in condition
-        assert f"inputs.python-version == '{GATED_PYTHON}'" in condition
+        condition = " ".join(str(step["if"]).split())
+        assert condition == (
+            "(success() || failure()) && inputs.marker == 'unit' && "
+            f"inputs.python-version == '{GATED_PYTHON}'"
+        ), condition
         assert "cp .coverage test-results/coverage.data" in str(step["run"])
         assert "coverage.data" in COMBINE_SCRIPT.read_text(encoding="utf-8")
+
+    def test_the_pytest_step_reads_the_legs_python_from_the_input(self):
+        binding = _step("Run PyTest")["env"].get("PYTHON_VERSION")
+        assert binding == "${{ inputs.python-version }}", binding
 
     def test_the_action_names_only_the_python_the_gate_reads(self):
         text = RUN_UNIT_TESTS.read_text(encoding="utf-8")

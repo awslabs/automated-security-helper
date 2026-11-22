@@ -177,16 +177,10 @@ runs:
     # and --run-slow are given, so that a contributor's plain `pytest` stays cheap; this
     # step passes both for those two tiers and for no other.
     #
-    # Coverage is measured only on the unit legs of Python 3.12, the version whose data the
-    # unit-coverage job in ash-unified-ci.yml downloads; other unit legs pass --no-cov. No
-    # threshold here: `--cov-report=` prints and writes no report, and the data stays in
-    # pytest-cov's default .coverage. The 80% gate is the unit-coverage job's, applied once
-    # per OS family (.github/scripts/combine-unit-coverage.py). coverage.py defaults to its
-    # sys.monitoring core only on 3.14 (coverage/env.py, SYSMON_DEFAULT), so the 3.12 legs
-    # set COVERAGE_CORE=sysmon. The coverage options are passed here
-    # rather than through pytest.ini's addopts, where they would gate every run and fail a
-    # contributor's run of one directory on total coverage with every test passing.
-    # tests/unit/test_unit_test_step_gates.py pins this command's shape.
+    # Only the Python 3.12 unit legs measure coverage: the unit-coverage job downloads only
+    # their data. coverage.py picks its sys.monitoring core by default only on 3.14+
+    # (https://coverage.readthedocs.io/en/7.14.0/config.html#run-core), so they set
+    # COVERAGE_CORE=sysmon. tests/unit/test_unit_test_step_gates.py pins this command's shape.
     #
     # ASH_TEST_SHARD makes tests/conftest.py's pytest_ignore_collect hook (tests/utils/
     # sharding.py) ignore the test modules another shard owns. An empty value is the whole
