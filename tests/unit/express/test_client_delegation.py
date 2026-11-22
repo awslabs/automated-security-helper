@@ -729,3 +729,74 @@ class TestScrubbedDaemonEnvironment:
             "PYTHONPATH": os_module.path.abspath("/work/plugins"),
             "VIRTUAL_ENV": "/some/venv",
         }
+
+
+@pytest.mark.parametrize(
+    "argv,environ",
+    [
+        (["scan", "--baseline", "/baseline"], {}),
+        (["scan"], {"ASH_BASELINE": "/baseline"}),
+        (["scan", "--cli-json-input", "/document"], {}),
+        (["scan", "--cli-json-input=/document"], {}),
+    ],
+)
+def test_baseline_scan_gives_the_cold_verdict_via_flag_env_and_json_input(
+    monkeypatch, argv, environ
+):
+    monkeypatch.setattr(runtime, "express_supported", lambda: True)
+    monkeypatch.setattr(runtime, "socket_path", lambda: "/fake")
+    monkeypatch.setattr(
+        client, "_connect", lambda *_: pytest.fail("baseline input must run cold")
+    )
+    assert client.delegated_exit_code(argv, environ=environ) is None
+
+
+@pytest.mark.parametrize("spelling", ["separate", "equals", "file-uri"])
+def test_json_input_without_baseline_can_use_express(tmp_path, monkeypatch, spelling):
+    document = tmp_path / "args.json"
+    document.write_text('{"quiet": true}', encoding="utf-8")
+    monkeypatch.setattr(runtime, "express_supported", lambda: True)
+    monkeypatch.setattr(runtime, "socket_path", lambda: "/fake")
+    calls = []
+    monkeypatch.setattr(client, "_connect", lambda path: calls.append(path))
+    value = document.as_uri() if spelling == "file-uri" else str(document)
+    args = (
+        ["--cli-json-input=" + value]
+        if spelling == "equals"
+        else ["--cli-json-input", value]
+    )
+    assert client.delegated_exit_code(["scan", *args], environ={}) is None
+    assert calls == ["/fake"]
+
+
+@pytest.mark.parametrize(
+    "contents", ['{"baseline": "file"}', '{"x": 1, "x": 2}', '{"x": NaN}', "[]", "x"]
+)
+def test_unsafe_json_input_runs_cold(tmp_path, monkeypatch, contents):
+    document = tmp_path / "args.json"
+    document.write_text(contents, encoding="utf-8")
+    monkeypatch.setattr(
+        client, "_connect", lambda *_: pytest.fail("unsafe input must run cold")
+    )
+    assert (
+        client.delegated_exit_code(
+            ["scan", "--cli-json-input", str(document)], environ={}
+        )
+        is None
+    )
+
+
+def test_json_flag_spelling_for_baseline_runs_cold(tmp_path, monkeypatch):
+    document = tmp_path / "args.json"
+    document.write_text('{"--baseline": "file"}', encoding="utf-8")
+    monkeypatch.setattr(runtime, "express_supported", lambda: True)
+    monkeypatch.setattr(runtime, "socket_path", lambda: "/fake")
+    monkeypatch.setattr(
+        client, "_connect", lambda *_: pytest.fail("baseline must run cold")
+    )
+    assert (
+        client.delegated_exit_code(
+            ["scan", "--cli-json-input", str(document)], environ={}
+        )
+        is None
+    )

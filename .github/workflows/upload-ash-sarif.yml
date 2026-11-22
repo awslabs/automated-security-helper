@@ -144,7 +144,30 @@ jobs:
           name: ${{ inputs.artifact-name }}
           path: ${{ runner.temp }}/ash_output
 
+      - name: Check for baseline results
+        id: baseline_check
+        if: success() || failure()
+        shell: bash
+        env:
+          RESULTS_PATH: ${{ runner.temp }}/ash_output/ash_aggregated_results.json
+        run: |
+          python3 -I - <<'PYTHON'
+          import json
+          import os
+          try:
+              with open(os.environ["RESULTS_PATH"], encoding="utf-8") as source:
+                  data = json.load(source)
+              baseline = "baseline" in data.get("metadata", {})
+          except (OSError, ValueError, TypeError, AttributeError):
+              baseline = False
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"baseline={str(baseline).lower()}\n")
+          if baseline:
+              print("::notice::SARIF upload skipped because the scan results were filtered by a baseline.")
+          PYTHON
+
       - name: Upload ASH SARIF file
+        if: steps.baseline_check.outputs.baseline != 'true'
         uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           sarif_file: ${{ runner.temp }}/ash_output/reports/ash.ghas.sarif

@@ -627,6 +627,78 @@ its file on both events.
 Code scanning already shows a pull request only the alerts on lines it changed, so for the
 SARIF upload alone you do not need this option.
 
+## Gate on new findings {#baseline}
+
+A full scan of the default branch can be saved as a baseline for later local or
+precommit scans. `ash scan --baseline PATH` removes matched SARIF findings from
+the shared results used by reports, the summary, and the exit code. Additional
+(non-SARIF) report findings are not filtered. It also matches findings that only moved
+lines. The saved results record a SHA-256 digest and match counts, not the path.
+
+Keep the baseline outside the checkout and output directory. It must be a regular
+file with exactly one hard link. **Pin it to an artifact from a trusted
+default-branch run, never to a file or artifact supplied
+by the change under review.** A baseline cannot itself be filtered, sharded, or a
+workspace aggregate. ASH refuses different project names and different recorded
+relative scan directories. Coverage differences are warnings; findings from a
+scanner absent from the baseline stay new.
+
+For example, after installing ASH and checking out the change, use a repository
+variable `BASELINE_RUN_ID` set by a trusted process to the run ID of a full
+default-branch scan. That run must upload its `ash_aggregated_results.json` as
+an artifact named `ash-baseline`. The token must have `actions:read` on the
+repository; make it available only to trusted jobs.
+
+<!-- doctest: config kind=github-actions extends=.github/workflows/ash.yml runner=none reason="requires a pinned artifact from a trusted default-branch run" -->
+```yaml
+- name: Download trusted baseline
+  uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+  with:
+    name: ash-baseline
+    run-id: ${{ vars.BASELINE_RUN_ID }}
+    github-token: ${{ secrets.BASELINE_READ_TOKEN }}
+    path: ${{ runner.temp }}/ash-baseline
+- name: Run ASH
+  env:
+    BASELINE_DIR: ${{ runner.temp }}/ash-baseline
+  run: |
+    token="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
+    if [ "${#token}" -ne 32 ]; then
+      echo "::error::no random token could be read for stop-commands, so the command did not run"
+      exit 1
+    fi
+    printf '::stop-commands::%s\n' "${token}"
+    status=0
+    ash scan --mode local --no-progress \
+      --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db \
+      --baseline "$BASELINE_DIR/ash_aggregated_results.json" 2>&1 || status=$?
+    printf '\n::%s::\n' "${token}"
+    exit "${status}"
+```
+
+`ASH_BASELINE` supplies the same option. A `--cli-json-input` document overrides
+`ASH_BASELINE`, even when it omits `baseline`. In CI, pass `--baseline` as a flag
+or use a trusted JSON document that sets it. `--baseline` is not supported with
+container or Nix mode, workspace or sharded scans, or explicit `--express`.
+Use the host CLI rather than the legacy container wrappers: by default they do not
+forward `ASH_BASELINE` from the host.
+`--baseline` cannot be combined with `--use-existing`. Security Hub does not archive absent findings from a
+baseline-filtered run. Do not upload filtered SARIF as a complete code-scanning
+analysis: [GitHub replaces earlier results for the same tool and category](https://docs.github.com/en/code-security/code-scanning/integrating-with-code-scanning/uploading-a-sarif-file-to-github).
+
+Matching never pairs an ambiguous growing group: all its current findings stay
+new. A finding with a usable fingerprint matches only by its exact ID; if the
+scanner's fingerprint includes the line number, moving it can still appear new.
+A third-party scanner is treated as a secret scanner only when its findings carry
+the `SECRETS` tag or its plugin declares the secrets type. Otherwise its location-only
+findings can be matched across line moves.
+A finding that rose in severity or is no longer suppressed stays in the scan. For findings
+without usable fingerprints, if one old finding is fixed and another appears
+with the same scanner, rule, file, package, message and severity, the new finding
+can be treated as the old one. A surviving finding that shared an identity key
+with a removed finding can get a different ID in the filtered flat reports. Use a
+trusted, regularly refreshed full baseline and review its coverage.
+
 ## Run in Nix mode {#nix}
 
 !!! note "Write the Nix job yourself"

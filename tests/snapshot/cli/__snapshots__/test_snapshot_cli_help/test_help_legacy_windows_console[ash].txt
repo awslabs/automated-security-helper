@@ -515,6 +515,14 @@
 │                                    scanner cost, so counts above about four buy little: wall    │
 │                                    clock is bounded by the slowest single scanner.              │
 │                                    [env var: ASH_SHARD_COUNT]                                   │
+│ --baseline                  PATH   Leave out findings already present in this saved             │
+│                                    ash_aggregated_results.json from a full scan (for example    │
+│                                    the default branch's), so the reports, the summary and the   │
+│                                    exit code count only new findings. Matching tolerates        │
+│                                    findings that only moved lines. The file must be outside the │
+│                                    scanned checkout and the output directory. Supported with    │
+│                                    --mode local and precommit only (exit 5 otherwise).          │
+│                                    [env var: ASH_BASELINE]                                      │
 └─────────────────────────────────────────────────────────────────────────────────────────────────┘
 ┌─ Workspace ─────────────────────────────────────────────────────────────────────────────────────┐
 │ --workspace                     <str>  Path to a '.code-workspace' file whose folders are       │

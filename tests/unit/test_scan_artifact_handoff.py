@@ -274,3 +274,45 @@ def test_this_repositorys_caller_passes_the_scan_jobs_artifact_id():
 def test_the_usage_comment_shows_the_artifact_id_handoff():
     header = UPLOAD_WORKFLOW.read_text(encoding="utf-8").split("\npermissions:")[0]
     assert "artifact-id: ${{ needs.ash.outputs.artifact-id }}" in header
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("workflow", [SCAN_WORKFLOW, UPLOAD_WORKFLOW])
+@pytest.mark.parametrize("baseline", [False, True])
+def test_baseline_sarif_is_not_uploaded(tmp_path, workflow, baseline):
+    import json
+
+    document = _load(workflow)
+    steps = [step for job in document["jobs"].values() for step in job.get("steps", [])]
+    check = next(
+        step for step in steps if step.get("name") == "Check for baseline results"
+    )
+    upload = next(
+        step
+        for step in steps
+        if str(step.get("uses", "")).startswith("github/codeql-action/upload-sarif@")
+    )
+    result_file = tmp_path / "ash_aggregated_results.json"
+    result_file.write_text(
+        json.dumps({"metadata": {"baseline": {"sha256": "abc"}} if baseline else {}})
+    )
+    output = tmp_path / "output"
+    output.touch()
+    subprocess.run(
+        ["bash", "-e", "-c", check["run"]],
+        check=True,
+        env={
+            **os.environ,
+            "RESULTS_PATH": str(result_file),
+            "GITHUB_OUTPUT": str(output),
+        },
+        capture_output=True,
+        text=True,
+    )
+    assert f"baseline={'true' if baseline else 'false'}" in output.read_text()
+    expected = (
+        "needs.ash.outputs.baseline != 'true'"
+        if workflow == SCAN_WORKFLOW
+        else "steps.baseline_check.outputs.baseline != 'true'"
+    )
+    assert expected in upload["if"]

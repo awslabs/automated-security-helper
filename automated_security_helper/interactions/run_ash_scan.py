@@ -318,6 +318,8 @@ class ScanOptions(BaseModel):
     fail_on_incomplete_scanners: Optional[bool] = None
     ignore_suppressions: bool = False
     min_severity: str = "low"
+    baseline: Optional[str] = None
+    baseline_data: Optional[Any] = Field(default=None, exclude=True)
     changed_files_only: bool = False
     base_ref: str = "origin/main"
     # --mode precommit only: scan the staged files (git diff --cached) instead
@@ -6418,6 +6420,27 @@ def _run_local_mode(
     opts: ScanOptions, logger
 ) -> tuple[AshAggregatedResults, Optional[bool]]:
     from automated_security_helper.core.orchestrator import ASHScanOrchestrator
+    from automated_security_helper.utils.scan_baseline import (
+        BaselineRefused,
+        check_baseline_scope,
+        read_baseline,
+    )
+
+    def refuse_baseline(exc: BaselineRefused) -> NoReturn:
+        message = f"Error reading --baseline {opts.baseline}: {exc.reason}"
+        echo(shown_on_one_line(message), err=True)
+        raise ScanRefusedExit(ASH_EXIT_USAGE_ERROR, message) from None
+
+    if opts.baseline:
+        try:
+            if opts.baseline_data is None:
+                opts.baseline_data = read_baseline(
+                    Path(opts.baseline),
+                    source_dir=opts.source_dir,
+                    output_dir=opts.output_dir,
+                )
+        except BaselineRefused as exc:
+            refuse_baseline(exc)
 
     # Before this run starts any process, so none of them inherits it. See
     # utils/inner_run_outcome.py.
@@ -6503,6 +6526,23 @@ def _run_local_mode(
 
         final_show_progress = _live_progress_enabled(opts)
 
+        def validate_baseline_scope(orchestrator):
+            model = orchestrator.execution_engine._asharp_model
+            scan_source = recorded_scan_source(
+                opts.source_dir, git_repository_root, snapshot_environ()
+            )
+            for warning in check_baseline_scope(
+                opts.baseline_data,
+                project_name=model.metadata.project_name,
+                scan_source=scan_source,
+            ):
+                logger.warning(warning)
+            if staged_files == []:
+                echo(
+                    "--staged: nothing is staged inside the scanned directory, so there is nothing to scan. Exiting clean."
+                )
+                sys.exit(0)
+
         orchestrator = ASHScanOrchestrator.create(
             source_dir=opts.source_dir,
             output_dir=opts.output_dir,
@@ -6548,7 +6588,15 @@ def _run_local_mode(
             shard_count=opts.shard_count,
             severity_threshold_restriction=opts.severity_threshold_restriction,
             keep_previous_results=opts.keep_previous_results,
+            **(
+                {"before_output": validate_baseline_scope}
+                if opts.baseline_data is not None
+                else {}
+            ),
         )
+        if opts.baseline_data is not None:
+            orchestrator.restrict_to_baseline(opts.baseline_data)
+
         # A discovered file was announced by the resolution that loaded it; a named
         # one is announced here, from that same resolution's record, so neither is
         # named unless it actually loaded.
@@ -6694,6 +6742,8 @@ def _run_local_mode(
         # The shared printer escapes the text, which names fields and a path.
         _print_invalid_config(e)
         sys.exit(3)
+    except BaselineRefused as e:
+        refuse_baseline(e)
     except ASHConfigValidationError as e:
         _printed_config_refusal(3, e)
     except ScannerSelectionError as e:
@@ -7751,6 +7801,25 @@ def _gating_actionable_count(
     # report and the --min-severity filter over the model: one resolver call per
     # scanner, and one actionability rule (_result_fails_its_scanner_threshold).
     threshold_for = _scanner_threshold_lookup(results)
+    non_sarif_actionable = 0
+    non_sarif_qualifying = False
+    if getattr(getattr(results, "metadata", None), "baseline", None) is not None:
+        from automated_security_helper.utils.severity_ladder import (
+            severity_fails_threshold,
+        )
+
+        for metric in scanner_metrics:
+            counts = ScannerStatisticsCalculator.dict_result_counts(
+                results, metric.scanner_name
+            )
+            for severity in ("CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"):
+                count = getattr(counts, severity.lower())
+                if count and severity_fails_threshold(
+                    severity, threshold_for(metric.scanner_name)
+                ):
+                    non_sarif_actionable += count
+                    if _SEVERITY_RANK[severity.lower()] >= min_sev_rank:
+                        non_sarif_qualifying = True
     # Set when the count below is taken from the written report: whether that
     # report holds a counted result at or above --min-severity. None when the
     # count comes from the model's own results, which are then judged instead.
@@ -7803,8 +7872,8 @@ def _gating_actionable_count(
                         >= min_sev_rank
                     ):
                         file_has_qualifying = True
-            actionable_findings = sarif_active
-            counted_in_file = file_has_qualifying
+            actionable_findings = sarif_active + non_sarif_actionable
+            counted_in_file = file_has_qualifying or non_sarif_qualifying
         except Exception:  # nosec B110
             pass  # Fall through to the unified-metrics count
 
@@ -7815,7 +7884,7 @@ def _gating_actionable_count(
             # so a counted one at or above the minimum is a qualifying one.
             has_qualifying = counted_in_file
         else:
-            has_qualifying = False
+            has_qualifying = non_sarif_qualifying
             try:
                 sarif = getattr(results, "sarif", None)
                 if sarif is None or not getattr(sarif, "runs", None):
@@ -8075,6 +8144,8 @@ def run_ash_scan(
     remote_client: bool = False,
     severity_threshold_restriction: Optional[str] = None,
     keep_previous_results: bool = False,
+    baseline: str | None = None,
+    baseline_data: Any = None,
 ):
     """Run an ASH scan against source_dir, outputting results to output_dir.
 
@@ -8134,6 +8205,8 @@ def run_ash_scan(
         fail_on_incomplete_scanners=fail_on_incomplete_scanners,
         ignore_suppressions=ignore_suppressions,
         min_severity=min_severity,
+        baseline=baseline,
+        baseline_data=baseline_data,
         changed_files_only=changed_files_only,
         base_ref=base_ref,
         staged=staged,
@@ -8167,6 +8240,23 @@ def run_ash_scan(
         severity_threshold_restriction=severity_threshold_restriction,
         keep_previous_results=keep_previous_results,
     )
+
+    if opts.baseline and opts.existing_results:
+        message = "--baseline needs a fresh scan; it cannot be applied to saved results with --use-existing"
+        echo(message, err=True)
+        raise ScanRefusedExit(ASH_EXIT_USAGE_ERROR, message) from None
+
+    if opts.baseline and (
+        opts.mode not in (RunMode.local, RunMode.precommit)
+        or opts.workspace_plan is not None
+        or opts.shard_index is not None
+        or opts.shard_count is not None
+        or (
+            opts.phases
+            and not ({ExecutionPhase.SCAN, ExecutionPhase.REPORT} & set(opts.phases))
+        )
+    ):
+        raise ValueError("baseline is not supported with this scan scope")
 
     # Only the local orchestrator resolves with these. Container and nix mode run
     # a separate ASH that is handed the config path alone, and workspace mode
@@ -8346,6 +8436,22 @@ def _run_with_options(
     reads: "OperatorConfigReads | None" = None,
 ):
     """The rest of ``run_ash_scan``, from the logger on, with its root registered."""
+    if opts.baseline and opts.baseline_data is None:
+        from automated_security_helper.utils.scan_baseline import (
+            BaselineRefused,
+            read_baseline,
+        )
+
+        try:
+            opts.baseline_data = read_baseline(
+                Path(opts.baseline),
+                source_dir=opts.source_dir,
+                output_dir=opts.output_dir,
+            )
+        except BaselineRefused as exc:
+            message = f"Error reading --baseline {opts.baseline}: {exc.reason}"
+            echo(shown_on_one_line(message), err=True)
+            raise ScanRefusedExit(ASH_EXIT_USAGE_ERROR, message) from None
     logger = _setup_logger(opts)
     _ignore_output_dir_in_git(opts)
 

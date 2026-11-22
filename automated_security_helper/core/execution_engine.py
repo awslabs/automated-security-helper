@@ -228,6 +228,7 @@ class ScanExecutionEngine:
         self._shard_index = shard_index
         self._shard_count = shard_count
         self._changed_files = changed_files
+        self._baseline = None
         self._selection_origin: SelectionOrigin = selection_origin
 
         # Get debug and verbose flags from environment or config
@@ -887,6 +888,23 @@ class ScanExecutionEngine:
         """
         self._changed_files = changed_files
 
+    def restrict_to_baseline(self, baseline) -> None:
+        self._baseline = baseline
+
+    def _drop_findings_in_baseline(self) -> None:
+        if getattr(self, "_baseline", None) is None or self._results is None:
+            return
+        from automated_security_helper.utils.scan_baseline import apply_baseline
+
+        outcome = apply_baseline(self._results, self._baseline)
+        for warning in outcome.warnings:
+            ASH_LOGGER.warning(warning)
+        ASH_LOGGER.info(
+            f"Left out {outcome.matched} finding(s) already in the baseline "
+            f"({outcome.matched_without_lines} matched without line numbers)."
+        )
+        self._asharp_model = self._results
+
     def _drop_findings_outside_changed_files(self) -> None:
         """Narrow the results to the --changed-files-only set, if one was given.
 
@@ -971,6 +989,7 @@ class ScanExecutionEngine:
                 )
 
         # The --changed-files-only set, after the pass has seen every finding.
+        self._drop_findings_in_baseline()
         self._drop_findings_outside_changed_files()
 
         # Refresh metrics after the final suppression pass so the exit code

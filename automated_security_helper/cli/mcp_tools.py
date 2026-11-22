@@ -4824,6 +4824,11 @@ def mcp_diff_scan_results(
 
     for results in (before_results, after_results):
         metadata = results.metadata
+        if "baseline" in (metadata.model_extra or {}):
+            return {
+                "success": False,
+                "error": "cannot compare results filtered by --baseline",
+            }
         if getattr(metadata, "changed_files_only", None) is True:
             return {
                 "success": False,
@@ -4836,12 +4841,16 @@ def mcp_diff_scan_results(
             }
 
     from automated_security_helper.utils.finding_diff import compare_findings
+    from automated_security_helper.utils.scan_results_file import (
+        ScanResultsRefused,
+        unique_findings,
+    )
 
-    before_findings = before_results.to_flat_vulnerabilities()
-    after_findings = after_results.to_flat_vulnerabilities()
-    for findings in (before_findings, after_findings):
-        if len({finding.id for finding in findings}) != len(findings):
-            return {"success": False, "error": "scan contains duplicate finding IDs"}
+    try:
+        before_findings = unique_findings(before_results)
+        after_findings = unique_findings(after_results)
+    except ScanResultsRefused as exc:
+        return {"success": False, "error": raw_controls_on_one_line(exc.reason)}
     diff = compare_findings(before_findings, after_findings)
     return {
         "new": [finding.model_dump() for finding in diff.new],
