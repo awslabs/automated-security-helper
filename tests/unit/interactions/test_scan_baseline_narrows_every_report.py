@@ -10,6 +10,23 @@ from automated_security_helper.utils.scan_baseline import ScanBaseline, apply_ba
 pytestmark = pytest.mark.unit
 
 
+class _Logger:
+    def __getattr__(self, name):
+        return lambda *args, **kwargs: None
+
+
+def report_exit_code(**options):
+    from automated_security_helper.interactions.run_ash_scan import (
+        ScanOptions,
+        _compute_exit_code,
+        _run_local_mode,
+    )
+
+    opts = ScanOptions(**options)
+    result, config_fail = _run_local_mode(opts, _Logger())
+    return _compute_exit_code(result, opts, config_fail)
+
+
 def finding(line, message="old", severity="LOW", fingerprint=None):
     row = {
         "ruleId": "R1",
@@ -168,7 +185,6 @@ def test_baseline_does_not_remove_additional_reports():
 def test_new_finding_fails_the_scan(tmp_path, monkeypatch, with_sarif):
     from automated_security_helper.config.default_config import get_default_config
     from automated_security_helper.core.enums import ExecutionPhase, ExportFormat
-    from automated_security_helper.interactions.run_ash_scan import run_ash_scan
 
     monkeypatch.setenv("AWS_EC2_METADATA_DISABLED", "true")
     source = tmp_path / "source"
@@ -195,21 +211,20 @@ def test_new_finding_fails_the_scan(tmp_path, monkeypatch, with_sarif):
     ]
     if with_sarif:
         formats.append(ExportFormat.SARIF)
-    with pytest.raises(SystemExit) as error:
-        run_ash_scan(
-            source_dir=source,
-            output_dir=tmp_path / "out",
-            existing_results=str(saved),
-            baseline=str(baseline_path),
-            phases=[ExecutionPhase.REPORT],
-            output_formats=formats,
-            config_overrides=["reporters.yaml.enabled=true"],
-            show_summary=False,
-            progress=False,
-            quiet=True,
-            fail_on_incomplete_scanners=False,
-        )
-    assert error.value.code == 2
+    code = report_exit_code(
+        source_dir=source,
+        output_dir=tmp_path / "out",
+        existing_results=str(saved),
+        baseline=str(baseline_path),
+        phases=[ExecutionPhase.REPORT],
+        output_formats=formats,
+        config_overrides=["reporters.yaml.enabled=true"],
+        show_summary=False,
+        progress=False,
+        quiet=True,
+        fail_on_incomplete_scanners=False,
+    )
+    assert code == 2
     final = AshAggregatedResults.model_validate_json(
         (tmp_path / "out" / "ash_aggregated_results.json").read_text()
     )
@@ -297,7 +312,6 @@ def test_finding_suppressed_in_both_scans_is_left_out():
 def test_previously_suppressed_finding_fails_scan(tmp_path, monkeypatch):
     from automated_security_helper.config.default_config import get_default_config
     from automated_security_helper.core.enums import ExecutionPhase, ExportFormat
-    from automated_security_helper.interactions.run_ash_scan import run_ash_scan
 
     monkeypatch.setenv("AWS_EC2_METADATA_DISABLED", "true")
     source = tmp_path / "source"
@@ -312,20 +326,19 @@ def test_previously_suppressed_finding_fails_scan(tmp_path, monkeypatch):
     baseline_path.write_text(old.model_dump_json(by_alias=True))
     saved = tmp_path / "saved.json"
     saved.write_text(current.model_dump_json(by_alias=True))
-    with pytest.raises(SystemExit) as error:
-        run_ash_scan(
-            source_dir=source,
-            output_dir=tmp_path / "out",
-            existing_results=str(saved),
-            baseline=str(baseline_path),
-            phases=[ExecutionPhase.REPORT],
-            output_formats=[ExportFormat.SARIF],
-            show_summary=False,
-            progress=False,
-            quiet=True,
-            fail_on_incomplete_scanners=False,
-        )
-    assert error.value.code == 2
+    code = report_exit_code(
+        source_dir=source,
+        output_dir=tmp_path / "out",
+        existing_results=str(saved),
+        baseline=str(baseline_path),
+        phases=[ExecutionPhase.REPORT],
+        output_formats=[ExportFormat.SARIF],
+        show_summary=False,
+        progress=False,
+        quiet=True,
+        fail_on_incomplete_scanners=False,
+    )
+    assert code == 2
 
 
 def test_fresh_results_match_the_masked_saved_baseline():
