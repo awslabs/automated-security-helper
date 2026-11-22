@@ -1,5 +1,5 @@
 name: "Run Unit Tests"
-description: "Run pytest with coverage and publish results"
+description: "Run pytest, with coverage on the Python 3.12 unit legs, and publish results"
 
 inputs:
   os:
@@ -177,11 +177,13 @@ runs:
     # and --run-slow are given, so that a contributor's plain `pytest` stays cheap; this
     # step passes both for those two tiers and for no other.
     #
-    # Coverage is measured for the unit tier only, with no threshold here: `--cov-report=`
-    # prints and writes no report, and the data stays in pytest-cov's default .coverage.
-    # The 80% gate belongs to the unit-coverage job in ash-unified-ci.yml, which applies it
-    # once per OS family to the unit tier's data
-    # (.github/scripts/combine-unit-coverage.py). The coverage options are passed here
+    # Coverage is measured only on the unit legs of Python 3.12, the version whose data the
+    # unit-coverage job in ash-unified-ci.yml downloads; other unit legs pass --no-cov. No
+    # threshold here: `--cov-report=` prints and writes no report, and the data stays in
+    # pytest-cov's default .coverage. The 80% gate is the unit-coverage job's, applied once
+    # per OS family (.github/scripts/combine-unit-coverage.py). coverage.py defaults to its
+    # sys.monitoring core only on 3.14 (coverage/env.py, SYSMON_DEFAULT), so the 3.12 legs
+    # set COVERAGE_CORE=sysmon. The coverage options are passed here
     # rather than through pytest.ini's addopts, where they would gate every run and fail a
     # contributor's run of one directory on total coverage with every test passing.
     # tests/unit/test_unit_test_step_gates.py pins this command's shape.
@@ -238,6 +240,7 @@ runs:
         # now fails the leg, under the same floor as the other tiers.
         ASH_TEST_TIER_FLOOR: "1"
         MARKER: ${{ inputs.marker }}
+        PYTHON_VERSION: ${{ inputs.python-version }}
       run: |
         args=(-m "$MARKER" --junit-xml=test-results/pytest.junit.xml)
         # Only a sharded leg is told to warn on unused snapshots. syrupy reports unused
@@ -255,8 +258,11 @@ runs:
         if [ -n "${ASH_TEST_SHARD:-}" ]; then
           args+=(--snapshot-warn-unused)
         fi
-        if [ "$MARKER" = "unit" ]; then
+        if [ "$MARKER" = "unit" ] && [ "$PYTHON_VERSION" = "3.12" ]; then
           args+=(--cov=automated_security_helper --cov-config=.coveragerc --cov-report=)
+          export COVERAGE_CORE=sysmon
+        elif [ "$MARKER" = "unit" ]; then
+          args+=(--no-cov)
         else
           args+=(--run-integration --run-slow --no-cov)
         fi
@@ -286,11 +292,11 @@ runs:
         uv run pytest "${args[@]}"
 
     # The run's coverage data, where the artifact upload below carries it to the
-    # unit-coverage job. Only the unit tier measures coverage. It runs after a failed test
-    # run too, since that run's data is still the run's. The name has no leading dot on
-    # purpose: upload-artifact leaves out hidden files unless told otherwise.
+    # unit-coverage job. Only the Python 3.12 unit legs measure coverage. It runs after a
+    # failed test run too, since that run's data is still the run's. The name has no
+    # leading dot on purpose: upload-artifact leaves out hidden files unless told otherwise.
     - name: Keep the unit run's coverage data
-      if: (success() || failure()) && inputs.marker == 'unit'
+      if: (success() || failure()) && inputs.marker == 'unit' && inputs.python-version == '3.12'
       shell: bash
       run: |
         mkdir -p test-results
