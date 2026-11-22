@@ -267,3 +267,27 @@ def test_an_unchanged_mixed_suppression_group_stays_paired():
     after[1].is_suppressed = True
     match = match_findings(before, after)
     assert match.new == [] and len(match.exact) == 2
+
+
+def test_a_rerated_finding_does_not_vouch_for_a_changed_mixed_group():
+    from automated_security_helper.utils.finding_diff import match_findings
+
+    before = findings(
+        (10, "m", "LOW", None), (20, "m", "LOW", None), (30, "m", "MEDIUM", None)
+    )
+    after = findings((10, "m", "LOW", None), (30, "m", "LOW", None))
+    before[1].is_suppressed = True
+    match = match_findings(before, after)
+    assert match.exact == [] and match.moved == []
+    assert set(map(id, match.new)) == set(map(id, after))
+
+
+def test_a_rerated_suppressed_finding_keeps_an_unchanged_group_paired():
+    from automated_security_helper.utils.finding_diff import match_findings
+
+    before = findings((10, "m", "LOW", None), (20, "m", "LOW", None))
+    after = findings((10, "m", "LOW", None), (20, "m", "INFO", None))
+    before[1].is_suppressed = True
+    after[1].is_suppressed = True
+    match = match_findings(before, after)
+    assert match.new == [] and len(match.exact) == 2
