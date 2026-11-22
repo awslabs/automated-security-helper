@@ -8242,6 +8242,9 @@ def run_ash_scan(
         keep_previous_results=keep_previous_results,
     )
 
+    if opts.baseline_data is not None and not opts.baseline:
+        raise ValueError("baseline_data is accepted only together with baseline")
+
     if opts.baseline and opts.existing_results:
         message = "--baseline needs a fresh scan; it cannot be applied to saved results with --use-existing"
         echo(message, err=True)

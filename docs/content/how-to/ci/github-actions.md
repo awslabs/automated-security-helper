@@ -676,8 +676,8 @@ repository; make it available only to trusted jobs.
     exit "${status}"
 ```
 
-`ASH_BASELINE` supplies the same option. A `--cli-json-input` document overrides
-`ASH_BASELINE`, even when it omits `baseline`. In CI, pass `--baseline` as a flag
+`ASH_BASELINE` supplies the same option. A `--cli-json-input` document that sets
+`baseline` overrides `ASH_BASELINE`. In CI, pass `--baseline` as a flag
 or use a trusted JSON document that sets it. `--baseline` is not supported with
 container or Nix mode, workspace or sharded scans, or explicit `--express`.
 Use the host CLI rather than the legacy container wrappers: by default they do not

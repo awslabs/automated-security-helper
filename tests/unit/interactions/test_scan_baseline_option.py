@@ -327,15 +327,22 @@ def test_library_refuses_output_baseline_before_output_cleanup(tmp_path):
     assert baseline.read_text() == "do not delete"
 
 
-def test_library_refuses_baseline_with_saved_results(tmp_path):
+def test_library_refuses_baseline_with_saved_results(tmp_path, monkeypatch, capsys):
     from automated_security_helper.interactions.run_ash_scan import run_ash_scan
+    from automated_security_helper.models.asharp_model import AshAggregatedResults
+    from automated_security_helper.utils import scan_baseline
 
+    def unread(*args, **kwargs):
+        pytest.fail("baseline read")
+
+    monkeypatch.setattr(scan_baseline, "read_baseline", unread)
     source = tmp_path / "source"
     source.mkdir()
     saved = tmp_path / "saved.json"
-    saved.write_text("sentinel")
+    saved.write_text(AshAggregatedResults().model_dump_json(by_alias=True))
+    before = saved.read_text()
     baseline = tmp_path / "baseline.json"
-    baseline.write_text("{}")
+    baseline.write_text(AshAggregatedResults().model_dump_json(by_alias=True))
     with pytest.raises(SystemExit) as error:
         run_ash_scan(
             source_dir=source,
@@ -346,7 +353,28 @@ def test_library_refuses_baseline_with_saved_results(tmp_path):
             progress=False,
         )
     assert error.value.code == 5
-    assert saved.read_text() == "sentinel"
+    assert "needs a fresh scan" in capsys.readouterr().err
+    assert saved.read_text() == before
+
+
+def test_library_refuses_baseline_data_without_a_baseline_path(tmp_path):
+    from automated_security_helper.interactions.run_ash_scan import run_ash_scan
+    from automated_security_helper.models.asharp_model import AshAggregatedResults
+    from automated_security_helper.utils.scan_baseline import read_baseline
+
+    source = tmp_path / "source"
+    source.mkdir()
+    path = tmp_path / "baseline.json"
+    path.write_text(AshAggregatedResults().model_dump_json(by_alias=True))
+    data = read_baseline(path, source_dir=source, output_dir=tmp_path / "output")
+    with pytest.raises(ValueError, match="baseline_data"):
+        run_ash_scan(
+            source_dir=source,
+            output_dir=tmp_path / "output",
+            baseline_data=data,
+            show_summary=False,
+            progress=False,
+        )
 
 
 def test_explicit_express_with_baseline_is_refused(tmp_path):
