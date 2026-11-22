@@ -147,27 +147,30 @@ jobs:
       - name: Check for baseline results
         id: baseline_check
         if: success() || failure()
-        shell: bash
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
         env:
           RESULTS_PATH: ${{ runner.temp }}/ash_output/ash_aggregated_results.json
-        run: |
-          python3 -I - <<'PYTHON'
-          import json
-          import os
-          try:
-              with open(os.environ["RESULTS_PATH"], encoding="utf-8") as source:
-                  data = json.load(source)
-              baseline = "baseline" in data.get("metadata", {})
-          except (OSError, ValueError, TypeError, AttributeError):
-              baseline = False
-          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
-              output.write(f"baseline={str(baseline).lower()}\n")
-          if baseline:
-              print("::notice::SARIF upload skipped because the scan results were filtered by a baseline.")
-          PYTHON
+        with:
+          script: |
+            const fs = require("fs");
+            let baseline = "unknown";
+            try {
+              const metadata = JSON.parse(fs.readFileSync(process.env.RESULTS_PATH, "utf8")).metadata;
+              if (metadata && typeof metadata === "object" && !Array.isArray(metadata)) {
+                baseline = Object.prototype.hasOwnProperty.call(metadata, "baseline") ? "true" : "false";
+              }
+            } catch (error) {
+              baseline = "unknown";
+            }
+            core.setOutput("baseline", baseline);
+            if (baseline === "true") {
+              core.notice("SARIF upload skipped because the scan results were filtered by a baseline.");
+            } else if (baseline === "unknown") {
+              core.notice("SARIF upload skipped because the scan results could not be read to rule out a baseline.");
+            }
 
       - name: Upload ASH SARIF file
-        if: steps.baseline_check.outputs.baseline != 'true'
+        if: steps.baseline_check.outputs.baseline == 'false'
         uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           sarif_file: ${{ runner.temp }}/ash_output/reports/ash.ghas.sarif

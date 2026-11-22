@@ -2349,7 +2349,7 @@ jobs:
       # earlier upload instead of failing on the name collision.
       - name: Check for baseline results
         id: baseline_check
-        if: success() || failure()
+        if: (success() || failure()) && steps.inputs.outcome == 'success'
         shell: bash
         env:
           RESULTS_PATH: ${{ steps.inputs.outputs.output_dir }}/ash_aggregated_results.json
@@ -2360,13 +2360,18 @@ jobs:
           try:
               with open(os.environ["RESULTS_PATH"], encoding="utf-8") as source:
                   data = json.load(source)
-              baseline = "baseline" in data.get("metadata", {})
-          except (OSError, ValueError, TypeError, AttributeError):
-              baseline = False
+              metadata = data["metadata"]
+              if not isinstance(metadata, dict):
+                  raise TypeError("metadata")
+              baseline = "true" if "baseline" in metadata else "false"
+          except (OSError, ValueError, TypeError, KeyError):
+              baseline = "unknown"
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
-              output.write(f"baseline={str(baseline).lower()}\n")
-          if baseline:
+              output.write(f"baseline={baseline}\n")
+          if baseline == "true":
               print("::notice::SARIF upload skipped because the scan results were filtered by a baseline.")
+          elif baseline == "unknown":
+              print("::notice::SARIF upload skipped because the scan results could not be read to rule out a baseline.")
           PYTHON
 
       - name: Collect ASH output artifact
@@ -2584,7 +2589,7 @@ jobs:
         if: >-
           inputs.collect-sarif-report
           && github.event_name == 'pull_request'
-          && needs.ash.outputs.baseline != 'true'
+          && needs.ash.outputs.baseline == 'false'
           && (success() || failure())
         with:
           sarif_file: ${{ needs.ash.outputs.output-dir }}/reports/ash.ghas.sarif

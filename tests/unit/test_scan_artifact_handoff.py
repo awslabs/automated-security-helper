@@ -276,14 +276,21 @@ def test_the_usage_comment_shows_the_artifact_id_handoff():
     assert "artifact-id: ${{ needs.ash.outputs.artifact-id }}" in header
 
 
-@pytest.mark.unit
-@pytest.mark.parametrize("workflow", [SCAN_WORKFLOW, UPLOAD_WORKFLOW])
-@pytest.mark.parametrize("baseline", [False, True])
-def test_baseline_sarif_is_not_uploaded(tmp_path, workflow, baseline):
-    import json
+BASELINE_CASES = {
+    "full": ('{"metadata": {}}', "false"),
+    "filtered": ('{"metadata": {"baseline": {"sha256": "abc"}}}', "true"),
+    "malformed": ("{", "unknown"),
+    "metadata_not_object": ('{"metadata": []}', "unknown"),
+    "missing": (None, "unknown"),
+}
 
-    document = _load(workflow)
-    steps = [step for job in document["jobs"].values() for step in job.get("steps", [])]
+
+def _baseline_steps(workflow: Path) -> tuple[dict, dict]:
+    steps = [
+        step
+        for job in _load(workflow)["jobs"].values()
+        for step in job.get("steps", [])
+    ]
     check = next(
         step for step in steps if step.get("name") == "Check for baseline results"
     )
@@ -292,10 +299,21 @@ def test_baseline_sarif_is_not_uploaded(tmp_path, workflow, baseline):
         for step in steps
         if str(step.get("uses", "")).startswith("github/codeql-action/upload-sarif@")
     )
-    result_file = tmp_path / "ash_aggregated_results.json"
-    result_file.write_text(
-        json.dumps({"metadata": {"baseline": {"sha256": "abc"}} if baseline else {}})
-    )
+    return check, upload
+
+
+def _results_file(tmp_path: Path, content: str | None) -> Path:
+    path = tmp_path / "ash_aggregated_results.json"
+    if content is not None:
+        path.write_text(content, encoding="utf-8")
+    return path
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("case", sorted(BASELINE_CASES))
+def test_the_scan_workflow_uploads_only_verified_full_results(tmp_path, case):
+    content, expected = BASELINE_CASES[case]
+    check, upload = _baseline_steps(SCAN_WORKFLOW)
     output = tmp_path / "output"
     output.touch()
     subprocess.run(
@@ -303,16 +321,25 @@ def test_baseline_sarif_is_not_uploaded(tmp_path, workflow, baseline):
         check=True,
         env={
             **os.environ,
-            "RESULTS_PATH": str(result_file),
+            "RESULTS_PATH": str(_results_file(tmp_path, content)),
             "GITHUB_OUTPUT": str(output),
         },
         capture_output=True,
         text=True,
     )
-    assert f"baseline={'true' if baseline else 'false'}" in output.read_text()
-    expected = (
-        "needs.ash.outputs.baseline != 'true'"
-        if workflow == SCAN_WORKFLOW
-        else "steps.baseline_check.outputs.baseline != 'true'"
-    )
-    assert expected in upload["if"]
+    assert f"baseline={expected}" in output.read_text()
+    assert "needs.ash.outputs.baseline == 'false'" in upload["if"]
+    assert "steps.inputs.outcome == 'success'" in check["if"]
+
+
+@pytest.mark.unit
+def test_the_upload_workflow_uploads_only_verified_full_results():
+    check, upload = _baseline_steps(UPLOAD_WORKFLOW)
+    assert str(check["uses"]).startswith("actions/github-script@")
+    assert "run" not in check
+    script = check["with"]["script"]
+    assert 'let baseline = "unknown";' in script
+    assert script.count('baseline = "unknown";') == 2
+    assert '"baseline") ? "true" : "false"' in script
+    assert 'typeof metadata === "object" && !Array.isArray(metadata)' in script
+    assert upload["if"] == "steps.baseline_check.outputs.baseline == 'false'"
