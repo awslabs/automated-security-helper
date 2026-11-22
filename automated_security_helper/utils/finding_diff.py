@@ -73,6 +73,7 @@ def match_findings(
     matched_before = set()
     matched_after = set()
     exact = []
+    exact_indices = []
     for finding_id in sorted(before_ids.keys() & after_ids.keys()):
         if len(before_ids[finding_id]) != 1 or len(after_ids[finding_id]) != 1:
             continue
@@ -92,8 +93,40 @@ def match_findings(
             ):
                 continue
         exact.append((previous, current))
+        exact_indices.append((i, j))
         matched_before.add(i)
         matched_after.add(j)
+    whole_before = defaultdict(list)
+    whole_after = defaultdict(list)
+    for index, finding in enumerate(before):
+        key = fallback_key(finding)
+        if key is not None:
+            whole_before[key].append(index)
+    for index, finding in enumerate(after):
+        key = fallback_key(finding)
+        if key is not None:
+            whole_after[key].append(index)
+    ambiguous = {
+        key
+        for key in whole_before.keys() & whole_after.keys()
+        if len({before[i].is_suppressed for i in whole_before[key]}) > 1
+        and not (
+            len(whole_before[key]) == len(whole_after[key])
+            and all(j in matched_after for j in whole_after[key])
+        )
+    }
+    if ambiguous:
+        kept = []
+        for i, j in exact_indices:
+            if (
+                fallback_key(before[i]) in ambiguous
+                or fallback_key(after[j]) in ambiguous
+            ):
+                matched_before.discard(i)
+                matched_after.discard(j)
+            else:
+                kept.append((before[i], after[j]))
+        exact = kept
     groups_before = defaultdict(list)
     groups_after = defaultdict(list)
     for index, finding in enumerate(before):
@@ -105,7 +138,7 @@ def match_findings(
         if index not in matched_after and key is not None:
             groups_after[key].append(index)
     moved = []
-    for key in sorted(groups_before.keys() & groups_after.keys()):
+    for key in sorted(groups_before.keys() & groups_after.keys() - ambiguous):
         old, new = groups_before[key], groups_after[key]
         if len(new) > len(old) or len({before[i].is_suppressed for i in old}) > 1:
             continue

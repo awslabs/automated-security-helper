@@ -244,3 +244,26 @@ def test_unresolved_message_ids_keep_different_arguments_apart():
     before, after = flat("first"), flat("second")
     diff = compare_findings(before, after)
     assert diff.new == after and diff.absent_after == before
+
+
+def test_a_suppression_swap_with_one_line_collision_stays_new():
+    from automated_security_helper.utils.finding_diff import match_findings
+
+    before = findings((10, "m", "LOW", None), (20, "m", "LOW", None))
+    after = findings((20, "m", "LOW", None), (30, "m", "LOW", None))
+    before[1].is_suppressed = True
+    after[0].is_suppressed = True
+    match = match_findings(before, after)
+    assert match.exact == [] and match.moved == []
+    assert after[1] in match.new
+
+
+def test_an_unchanged_mixed_suppression_group_stays_paired():
+    from automated_security_helper.utils.finding_diff import match_findings
+
+    before = findings((10, "m", "LOW", None), (20, "m", "LOW", None))
+    after = findings((10, "m", "LOW", None), (20, "m", "LOW", None))
+    before[1].is_suppressed = True
+    after[1].is_suppressed = True
+    match = match_findings(before, after)
+    assert match.new == [] and len(match.exact) == 2
