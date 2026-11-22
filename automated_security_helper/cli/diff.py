@@ -4,20 +4,23 @@
 import json
 from enum import Enum
 from pathlib import Path
-from stat import S_ISREG
 from typing import Annotated, Any, NoReturn
 
 import typer
 from rich.table import Table
 
-from automated_security_helper.config.config_validator import describe_results_error
-from automated_security_helper.core.enums import ScannerStatus
-from automated_security_helper.interactions.run_ash_scan import scan_incompleteness
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 from automated_security_helper.utils.command_safe_stream import json_commands_broken
 from automated_security_helper.utils.console import ash_console, echo
 from automated_security_helper.utils.finding_diff import compare_findings
+from automated_security_helper.utils.scan_results_file import (
+    ScanResultsRefused,
+    coverage_warnings as _coverage_warnings,
+    parse_full_scan_results,
+    read_regular_file,
+    unique_findings,
+)
 from automated_security_helper.utils.terminal_text import (
     raw_controls_on_one_line,
     shown_on_one_line,
@@ -37,81 +40,9 @@ def _refuse(reason: str, path: Path | None = None) -> NoReturn:
 
 def _load_results(path: Path) -> AshAggregatedResults:
     try:
-        if not S_ISREG(path.stat().st_mode):
-            _refuse("expected a regular scan results file", path)
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except OSError as exc:
-        _refuse(exc.strerror or type(exc).__name__, path)
-    except json.JSONDecodeError as exc:
-        _refuse(f"invalid JSON at line {exc.lineno}, column {exc.colno}", path)
-    except UnicodeDecodeError as exc:
-        _refuse(describe_results_error(exc), path)
-    except (ValueError, RecursionError):
-        _refuse("invalid path or JSON data", path)
-
-    if not isinstance(data, dict):
-        _refuse("expected scan results with metadata and SARIF runs", path)
-    metadata, sarif = data.get("metadata"), data.get("sarif")
-    if (
-        not isinstance(metadata, dict)
-        or not isinstance(sarif, dict)
-        or not isinstance(sarif.get("runs"), list)
-    ):
-        _refuse("expected scan results with metadata and SARIF runs", path)
-
-    try:
-        result = AshAggregatedResults.model_validate(data)
-    except ValueError as exc:
-        _refuse(describe_results_error(exc), path)
-
-    if result.workspace is not None:
-        _refuse("use the per-project results instead of a workspace aggregate", path)
-    if result.metadata.shard is not None:
-        _refuse("use ash merge before comparing sharded results", path)
-    changed_files_only = metadata.get("changed_files_only")
-    if changed_files_only is True:
-        _refuse("cannot compare results filtered by --changed-files-only", path)
-    if changed_files_only is not None and changed_files_only is not False:
-        _refuse("invalid changed-files-only marker", path)
-    project = metadata.get("workspace_project")
-    if project is not None and (not isinstance(project, str) or not project.strip()):
-        _refuse("invalid workspace project marker", path)
-    return result
-
-
-def _evaluated_scanners(results: AshAggregatedResults) -> set[str]:
-    return {
-        name
-        for name, row in results.scanner_results.items()
-        if not row.excluded
-        and row.status in {ScannerStatus.PASSED, ScannerStatus.FAILED}
-    }
-
-
-def _coverage_warnings(
-    baseline: AshAggregatedResults, current: AshAggregatedResults
-) -> list[str]:
-    warnings = []
-    if set(baseline.metadata.expected_scanners) != set(
-        current.metadata.expected_scanners
-    ) or _evaluated_scanners(baseline) != _evaluated_scanners(current):
-        warnings.append("Scanner coverage differs between scans.")
-    if (
-        baseline.metadata.ignore_file_exclusions
-        != current.metadata.ignore_file_exclusions
-    ):
-        warnings.append("Recorded ignore-file exclusions differ between scans.")
-    for label, result in (("Baseline", baseline), ("Current", current)):
-        missing = set(result.metadata.expected_scanners) - result.scanner_results.keys()
-        if missing or scan_incompleteness(result, gate=True):
-            warnings.append(f"{label} scan has incomplete scanner coverage.")
-        elif not result.metadata.expected_scanners or not result.scanner_results:
-            warnings.append(
-                f"{label} scan does not record enough scanner coverage to establish comparability."
-            )
-        if result.metadata.inputs_not_scanned:
-            warnings.append(f"{label} scan records inputs that were not scanned.")
-    return warnings
+        return parse_full_scan_results(read_regular_file(path))
+    except ScanResultsRefused as exc:
+        _refuse(exc.reason, path)
 
 
 def _finding_row(finding: FlatVulnerability) -> dict[str, Any]:
@@ -129,10 +60,10 @@ def _finding_row(finding: FlatVulnerability) -> dict[str, Any]:
 def _unique_findings(
     results: AshAggregatedResults, label: str
 ) -> list[FlatVulnerability]:
-    findings = results.to_flat_vulnerabilities()
-    if len({finding.id for finding in findings}) != len(findings):
-        _refuse(f"{label} scan contains duplicate finding IDs")
-    return findings
+    try:
+        return unique_findings(results)
+    except ScanResultsRefused as exc:
+        _refuse(f"{label} {exc.reason}")
 
 
 def _result_payload(
