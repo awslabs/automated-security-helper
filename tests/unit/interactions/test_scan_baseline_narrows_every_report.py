@@ -487,3 +487,19 @@ def test_baseline_gate_counts_a_native_info_result_under_all(tmp_path, with_sari
         )
         record_reports_written(current, [("ash.sarif", "sarif")])
     assert _gating_actionable_count(current, opts, with_sarif) == 1
+
+
+@pytest.mark.parametrize("old_threshold,kept", [("HIGH", 1), ("LOW", 0)])
+def test_a_finding_a_stricter_threshold_made_actionable_is_kept(old_threshold, kept):
+    from automated_security_helper.config.default_config import get_default_config
+
+    old = results(finding(10, severity="LOW"))
+    old.ash_config = get_default_config()
+    old.ash_config.global_settings.severity_threshold = old_threshold
+    current = results(finding(10, severity="LOW"))
+    current.ash_config = get_default_config()
+    current.ash_config.global_settings.severity_threshold = "LOW"
+    apply_baseline(
+        current, ScanBaseline("abc", old, tuple(old.to_flat_vulnerabilities()))
+    )
+    assert len(current.sarif.runs[0].results) == kept

@@ -100,7 +100,19 @@ def apply_baseline(
         coverage_warnings,
     )
     from automated_security_helper.utils.secret_masking import mask_secrets_in_results
-    from automated_security_helper.utils.severity_ladder import _SEVERITY_RANK
+    from automated_security_helper.core.scanner_statistics_calculator import (
+        ScannerStatisticsCalculator,
+    )
+    from automated_security_helper.utils.severity_ladder import (
+        _SEVERITY_RANK,
+        severity_fails_threshold,
+    )
+
+    def actionable(finding, model):
+        threshold = ScannerStatisticsCalculator.get_scanner_threshold_info(
+            model, finding.scanner
+        )[0]
+        return severity_fails_threshold(finding.severity or "", threshold)
 
     if "baseline" in (results.metadata.model_extra or {}):
         raise BaselineRefused("existing results were filtered by --baseline")
@@ -142,6 +154,8 @@ def apply_baseline(
             old_rank = _SEVERITY_RANK.get((old.severity or "").upper())
             new_rank = _SEVERITY_RANK.get((new.severity or "").upper())
             if old.is_suppressed and not new.is_suppressed:
+                continue
+            if actionable(new, results) and not actionable(old, baseline.results):
                 continue
             if old_rank is None or new_rank is None or new_rank > old_rank:
                 continue
