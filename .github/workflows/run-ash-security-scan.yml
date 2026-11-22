@@ -2358,8 +2358,10 @@ jobs:
           import json
           import os
           try:
+              def reject(constant):
+                  raise ValueError(constant)
               with open(os.environ["RESULTS_PATH"], encoding="utf-8") as source:
-                  data = json.load(source)
+                  data = json.load(source, parse_constant=reject)
               metadata = data["metadata"]
               if not isinstance(metadata, dict):
                   raise TypeError("metadata")

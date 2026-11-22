@@ -155,7 +155,8 @@ jobs:
             const fs = require("fs");
             let baseline = "unknown";
             try {
-              const metadata = JSON.parse(fs.readFileSync(process.env.RESULTS_PATH, "utf8")).metadata;
+              const text = new TextDecoder("utf-8", { fatal: true }).decode(fs.readFileSync(process.env.RESULTS_PATH));
+              const metadata = JSON.parse(text).metadata;
               if (metadata && typeof metadata === "object" && !Array.isArray(metadata)) {
                 baseline = Object.prototype.hasOwnProperty.call(metadata, "baseline") ? "true" : "false";
               }

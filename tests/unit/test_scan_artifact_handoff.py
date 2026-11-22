@@ -282,6 +282,8 @@ BASELINE_CASES = {
     "malformed": ("{", "unknown"),
     "metadata_not_object": ('{"metadata": []}', "unknown"),
     "missing": (None, "unknown"),
+    "non_json_constant": ('{"metadata": {}, "score": NaN}', "unknown"),
+    "invalid_utf8": (b'{"metadata": {}, "x": "\xff"}', "unknown"),
 }
 
 
@@ -302,9 +304,11 @@ def _baseline_steps(workflow: Path) -> tuple[dict, dict]:
     return check, upload
 
 
-def _results_file(tmp_path: Path, content: str | None) -> Path:
+def _results_file(tmp_path: Path, content: str | bytes | None) -> Path:
     path = tmp_path / "ash_aggregated_results.json"
-    if content is not None:
+    if isinstance(content, bytes):
+        path.write_bytes(content)
+    elif content is not None:
         path.write_text(content, encoding="utf-8")
     return path
 
@@ -342,4 +346,5 @@ def test_the_upload_workflow_uploads_only_verified_full_results():
     assert script.count('baseline = "unknown";') == 2
     assert '"baseline") ? "true" : "false"' in script
     assert 'typeof metadata === "object" && !Array.isArray(metadata)' in script
+    assert 'new TextDecoder("utf-8", { fatal: true })' in script
     assert upload["if"] == "steps.baseline_check.outputs.baseline == 'false'"
