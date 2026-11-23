@@ -21,7 +21,7 @@ in order.
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from automated_security_helper.utils.error_text import error_text
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -114,7 +114,9 @@ def _descriptor(component: Any, rule: Any, rule_id: str) -> RuleDescriptor:
     )
 
 
-def _descriptor_for(result: Any, tool: Any) -> Optional[RuleDescriptor]:
+def _declared_rule(result: Any, tool: Any) -> Optional[Tuple[Any, Any, str]]:
+    """The component that declares the result's rule, the rule, and its id; None
+    where the result names no rule or no candidate component declares it."""
     rule_id = result_rule_id(result)
     if not rule_id:
         return None
@@ -126,8 +128,28 @@ def _descriptor_for(result: Any, tool: Any) -> Optional[RuleDescriptor]:
     for component in _candidate_components(result, tool):
         rule = _rule_in(component, rule_id, hint)
         if rule is not None:
-            return _descriptor(component, rule, rule_id)
+            return component, rule, rule_id
     return None
+
+
+def _descriptor_for(result: Any, tool: Any) -> Optional[RuleDescriptor]:
+    declared = _declared_rule(result, tool)
+    if declared is None:
+        return None
+    component, rule, rule_id = declared
+    return _descriptor(component, rule, rule_id)
+
+
+def rule_of_result(result: Any, tool: Any) -> Optional[Any]:
+    """The rule *result* names among *tool*'s components, or None.
+
+    *tool* is the ``tool`` of the run the result sits in. The lookup is scoped as
+    the module docstring describes, so a rule id two scanners share (grype and
+    trivy on a CVE) is read from the result's own scanner. What the rule
+    declares beyond its message strings is read from here: its tags, its help.
+    """
+    declared = _declared_rule(result, tool)
+    return None if declared is None else declared[1]
 
 
 def rule_descriptors_by_result(sarif: Any) -> List[Optional[RuleDescriptor]]:
