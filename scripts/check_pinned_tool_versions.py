@@ -140,6 +140,18 @@ Known limitations
   outside the Dockerfile, run with packages from a build argument or a mounted file,
   installs packages this check never reads.
 
+Held pins
+---------
+A pin that cannot move yet (a tool another pinned tool caps) is declared in
+``HELD_PINS`` in ``tool_downloads.py``, next to the pin: the newest upstream version
+the hold was written against (``acknowledged``), why, and what ends it (``until``).
+An outdated pin whose upstream latest equals ``acknowledged`` is reported as
+``acknowledged`` and does not fail ``--fail-on-outdated``. A newer release makes the
+row ``outdated`` again, so a hold never absorbs a release nobody has looked at, and
+every held row is listed with its reason in each report. A hold for a tool nothing
+pins, or one with no reason or release condition, is refused (exit 2); a hold on a
+pin that is no longer outdated is named in the notes.
+
 Usage::
 
     python scripts/check_pinned_tool_versions.py
@@ -287,9 +299,13 @@ class Result:
 
     pin: Pin
     latest: str | None
-    status: str  # "current" | "outdated" | "ahead" | "held" | "error"
+    # "current" | "outdated" | "acknowledged" | "ahead" | "held" | "error".
+    # "acknowledged" is an outdated pin whose upstream latest is exactly the version
+    # its HELD_PINS entry was written against; it does not fail --fail-on-outdated.
+    status: str
     detail: str = ""
     note: str = ""
+    held: Any = None  # the HELD_PINS entry behind an "acknowledged" result
 
 
 # ---------------------------------------------------------------------------
@@ -497,7 +513,33 @@ def enumerate_pins(pins: Any, dockerfile: Path = DOCKERFILE) -> list[Pin]:
             )
         )
 
+    held = held_pins(pins)
+    known = {p.tool for p in result}
+    for tool, entry in held.items():
+        if tool not in known:
+            raise PinEnumerationError(
+                f"HELD_PINS holds {tool!r}, which is not a pinned tool; a hold for a "
+                "tool nothing pins excuses nothing. Remove it or fix the name."
+            )
+        try:
+            parse_version(entry.acknowledged)
+        except ValueError as exc:
+            raise PinEnumerationError(
+                f"HELD_PINS[{tool!r}].acknowledged is not a version: {exc}"
+            ) from exc
+        for field in ("reason", "until"):
+            if not str(getattr(entry, field, "")).strip():
+                raise PinEnumerationError(
+                    f"HELD_PINS[{tool!r}].{field} is empty; a hold has to say why "
+                    "the pin is held and what ends the hold."
+                )
+
     return sorted(result, key=lambda p: p.tool)
+
+
+def held_pins(pins: Any) -> dict[str, Any]:
+    """The module's ``HELD_PINS`` (tool name -> ``HeldPin``), empty if it has none."""
+    return dict(getattr(pins, "HELD_PINS", {}))
 
 
 # ---------------------------------------------------------------------------
@@ -904,14 +946,22 @@ def check(
     pins: Iterable[Pin],
     fetchers: Fetchers | None = None,
     ruby: tuple[int, int] | None = None,
+    held: dict[str, Any] | None = None,
 ) -> list[Result]:
     """Look up each pin's latest release and classify it.
 
     A gem is compared with the newest release the image's Ruby can run
     (``newest_installable``). ``ruby`` is that Ruby as (major, minor); when None it
     is read from the Dockerfile's apt pin the first time a gem needs it.
+
+    ``held`` maps a tool to its ``HELD_PINS`` entry. An outdated pin whose latest
+    release equals the entry's ``acknowledged`` version is ``acknowledged``, which
+    does not fail the run. A latest release newer than ``acknowledged`` stays
+    ``outdated`` and says so in its note; an entry for a pin that is not outdated
+    is named in the note as no longer needed.
     """
     fetchers = fetchers or DEFAULT_FETCHERS
+    held = held or {}
     results = []
     for pin in pins:
         note = ""
@@ -934,7 +984,25 @@ def check(
         except Exception as exc:  # reported per pin, and it fails the run
             results.append(Result(pin, None, "error", f"{type(exc).__name__}: {exc}"))
             continue
-        results.append(Result(pin, latest, status, note=note))
+        entry = held.get(pin.tool)
+        hold = None
+        if entry is not None:
+            if status != "outdated":
+                extra = (
+                    f"HELD_PINS holds {pin.tool} below {entry.acknowledged}, but the "
+                    f"pin is {status} against {latest}; remove the hold"
+                )
+                note = f"{note}; {extra}" if note else extra
+            elif compare(entry.acknowledged, latest) == "current":
+                status, hold = "acknowledged", entry
+            else:
+                extra = (
+                    f"HELD_PINS holds {pin.tool} below {entry.acknowledged}, but "
+                    f"upstream's latest is {latest}, not {entry.acknowledged}; the "
+                    "hold covers only the acknowledged release"
+                )
+                note = f"{note}; {extra}" if note else extra
+        results.append(Result(pin, latest, status, note=note, held=hold))
     return results
 
 
@@ -2718,6 +2786,21 @@ def render_report(pins: Any, results: list[Result], markdown: bool = False) -> s
         note = f"{r.pin.tool}: {r.note}"
         out.append(f"{bullet}{_escape_markdown(note) if markdown else note}")
 
+    # A held row is always listed with its reason: a hold that is not visible in the
+    # weekly summary would be a pin nobody is reminded about.
+    acknowledged = [r for r in results if r.status == "acknowledged"]
+    if acknowledged:
+        out.append(
+            f"\n{heading}Held pins (acknowledged; not failing "
+            "--fail-on-outdated while upstream's latest is the acknowledged version)"
+        )
+        for r in acknowledged:
+            line = (
+                f"{r.pin.tool}: {r.pin.version} held below {r.held.acknowledged}. "
+                f"Reason: {r.held.reason} Until: {r.held.until}"
+            )
+            out.append(f"{bullet}{_escape_markdown(line) if markdown else line}")
+
     for r in outdated:
         out.append(
             f"\n{heading}{r.pin.tool}: {r.pin.version} -> {r.latest}"
@@ -2741,7 +2824,12 @@ def render_report(pins: Any, results: list[Result], markdown: bool = False) -> s
         # A held row (a bundled library, whose version another pin sets) carries a note
         # that says why it is not compared. That is no release the image cannot use.
         caveats = any(r.note for r in results if r.status != "held")
-        if caveats or any(r.status == "ahead" for r in results):
+        if acknowledged:
+            out.append(
+                "\nNo unacknowledged pin is behind its upstream; the held pins above "
+                "are deliberately behind and are listed so they stay visible."
+            )
+        elif caveats or any(r.status == "ahead" for r in results):
             # Nothing is behind, but a pin newer than upstream's latest, or a newer
             # release the image cannot use, is not "at its upstream's latest release".
             out.append(
@@ -2802,7 +2890,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         return EXIT_ERROR
 
-    results = check(pin_list, ruby=ruby)
+    results = check(pin_list, ruby=ruby, held=held_pins(pins))
     apt_results = check_apt(apt_pins, indexes, APT_INDEX_FETCHER)
     # The two reports are rendered apart: a fault in one must not take the other with
     # it. The lookups are done, so what can be written is written, and a report that

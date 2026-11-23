@@ -155,9 +155,34 @@ Run the tool only by returning its command from `_execute_scan`. A process you s
 | `model_post_init` | ASH constructs the scanner with no config when the ASH config has no section for it, and the base class refuses an empty config, so set the default before calling `super()`. |
 | `command` and `tool_type` | `command` is the program the default dependency check looks for; `tool_type` labels the findings (SAST, SCA, SECRETS, IAC, and others). |
 | `self.results_dir` | A directory for this scanner's files, `.ash/ash_output/scanners/<name>/`. Write the tool's output under it, one subdirectory per `target_type`. |
-| `self._ash_output_dirs_inside(target)` | ASH writes its output under the source directory by default. ASH leaves its own files there out of the scan set and drops the results a scanner reports in them, but a tool that walks the whole directory still reads ASH's earlier reports and converted files, so pass each of these paths to the tool's exclude option. They are ASH's output directories inside `target`, relative to it: this run's output directory and an earlier run's `.ash/ash_output`, less those that hold files git tracks, which ASH scans. The list is empty for the converted target. |
-| `ruff check --isolated` | ruff, like many tools, reads its configuration from files in the repository it checks, which would let the repository turn off the rules you selected, so pass the tool's option for ignoring those files. If your plugin takes an option that names a file the tool reads as configuration, use `operator_path` from `automated_security_helper.utils.config_trust`, the check ASH's own scanners use, which accepts the value only when the operator set it and the file is outside the scanned tree. |
+| `self._ash_output_dirs_inside(target)` | ASH writes its output under the source directory by default. ASH leaves its own files there out of the scan set and drops the results a scanner reports in them, but a tool that walks the whole directory still reads ASH's earlier reports and converted files, so pass each of these paths to the tool's exclude option. They are ASH's output directories inside `target`, relative to it: this run's output directory and an earlier run's `.ash/ash_output`, less those that hold files git tracks, which ASH scans. The list is empty for the converted target. If the tool has no exclude option, call `self._drop_results_under_output_dir(sarif_report, target)` instead ([below](#inherit-the-base-class-mechanisms-do-not-copy-them)). |
+| `ruff check --isolated` | ruff, like many tools, reads its configuration from files in the repository it checks, which would let the repository turn off the rules you selected, so pass the tool's option for ignoring those files. If your plugin takes an option that names a file the tool reads as configuration, use `operator_path` from `automated_security_helper.utils.config_trust`, the check ASH's own scanners use, which accepts the value only when the operator set it and the file is outside the scanned tree. For any other option that widens what a scan reads, trusts, or sends, use `self._operator_gated(...)` ([below](#inherit-the-base-class-mechanisms-do-not-copy-them)). |
 | The module-level list | Optional. The decorator registers the class, and `ash plugin list` shows every registered plugin, listed or not. |
+
+## Inherit the base class mechanisms, do not copy them
+
+Three mechanisms that the first secrets scanners each carried as a private copy now live in `ScannerPluginBase`. Subclass it and use them. A copy keeps the behavior it had on the day it was made, while the base class's version is fixed for every scanner at once, so write none of the three yourself.
+
+### Drop the results under ASH's output directory
+
+A scanner that hands a whole directory to a tool with no exclude option makes the tool read ASH's own files, so its report can hold findings in them. After the SARIF is read, for example in `_post_process_sarif`, call `self._drop_results_under_output_dir(sarif_report, target)`. It removes the results located under ASH's output directories inside `target`, this run's and an earlier run's `.ash/ash_output`, and keeps a result in a file the repository committed there. It removes nothing when the output directory is outside `target`, which is the case for the converted target.
+
+### Gate an option that only the operator may set
+
+An option that widens what a scan reads, trusts, or sends must not take effect when it comes from a file inside the scanned tree or from an MCP client. Do not compare provenance and log the refusal yourself. Call `self._operator_gated(key, wanted, default, refusal)`, where `key` is the option's dotted path, `scanners.<name>.options.<option>`, and `wanted` is the value the scanner is about to use. It returns `wanted` when the operator set the option. Otherwise it returns `default` and logs `refusal` as a warning once for that option on that scanner instance. Return early before the call when the option is off, since there is then nothing to refuse. Use `operator_path` from the table above for an option that names a file.
+
+### Keep the tool's stderr out of the failure text
+
+By default the failure text and `self.errors` carry the tool's stderr, which is what an author debugging a plugin wants. A tool's stderr can also hold text from the scanned tree or an answer from a provider, as when a secrets scanner quotes a line of an ignore file, and the failure text reaches `ash.log`, the console, and every results file. A scanner whose stderr can hold such text sets two class variables:
+
+```python
+from typing import ClassVar, Optional
+
+quote_tool_stderr: ClassVar[bool] = False
+unquoted_failure_tool_name: ClassVar[Optional[str]] = "acme-scan"
+```
+
+With `quote_tool_stderr` False, ASH drops the `stderr` key from the tool's response before it records errors, and the failure text names the scanner's `.stderr.log` file next to the results file and does not quote it. The exit code is still recorded, and the log file keeps the whole stream. `unquoted_failure_tool_name` is the tool's name in that text. Left as `None`, it reads the name in the plugin config, and then "its tool".
 
 ## Declare what the scanner needs under the sandbox
 

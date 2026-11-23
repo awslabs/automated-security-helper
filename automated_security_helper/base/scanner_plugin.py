@@ -60,6 +60,7 @@ from typing import (
     TYPE_CHECKING,
     Annotated,
     Any,
+    Callable,
     ClassVar,
     Dict,
     Generic,
@@ -486,6 +487,20 @@ class ScannerPluginBase(PluginBase, Generic[T]):
     #: Leave it False when the check is the base class's PATH lookup: asking it
     #: again could only agree, or report a tool present that nothing can start.
     resolves_tool_off_path: ClassVar[bool] = False
+    #: Whether the failure text and ``self.errors`` may carry the tool's stderr.
+    #: Leave it True unless the stream can hold text from the scanned tree or an
+    #: answer from a provider (a secrets scanner quoting an ignore file, a tool
+    #: that echoes what it found). When False, ``_process_command_response`` drops
+    #: the ``stderr`` key before the base class folds the response, and
+    #: ``_describe_scan_failure`` names the stderr log and does not quote it. The
+    #: stream stays in the log file either way.
+    quote_tool_stderr: ClassVar[bool] = True
+    #: The tool's name in the unquoted failure text (``quote_tool_stderr`` False).
+    #: None reads the plugin config's name, then "its tool".
+    unquoted_failure_tool_name: ClassVar[Optional[str]] = None
+    #: Option keys ``_operator_gated`` has already warned about, so each refusal is
+    #: logged once per scanner instance.
+    _operator_refusals_logged: Set[str] = PrivateAttr(default_factory=set)
     #: The same reason for the target scan() just looked at, when it differs from the
     #: class's: cfn-nag and cdk-nag set it when they passed over a candidate they could
     #: not parse, and reset it at the top of each scan(). Read before the class value.
@@ -2020,6 +2035,166 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             return []
         return output_dirs_inside(dirs, target)
 
+    def _committed_file_test(self) -> Callable[["Path"], bool]:
+        """A test, of a path, for a file the repository committed under ASH's output.
+
+        The output directory is a path inside the scanned tree, and a repository
+        can commit files to it. Those files are the tree's own, so a finding in
+        one is about the tree and not a copy of something ASH wrote. They are the
+        files ``scan_output_dirs.committed_output_files`` reads: the files of the
+        scan set that are under ASH's output directories, which in a git checkout
+        are the ones git tracks. The executor's drop and the suppression step read
+        the same set, and keep the results located in those files.
+
+        The set is read when the test is first asked, so a run with nothing under
+        the output directory reads nothing, and a path is compared resolved, as
+        the set is. Outside a checkout, and where git cannot say what is tracked,
+        the set is empty: every file under the output directory is then ASH's.
+
+        A path that cannot be resolved, such as a symlink loop or a name holding a
+        null byte, which an entry in a tree's ignore file can spell, is not
+        committed. The file stays treated as ASH's own.
+        """
+        from automated_security_helper.utils.scan_output_dirs import (
+            committed_output_files,
+        )
+
+        committed: Optional[Set[Path]] = None
+
+        def is_committed(path: Path) -> bool:
+            nonlocal committed
+            if committed is None:
+                committed = committed_output_files(self.context)
+            try:
+                return path.resolve() in committed
+            except (OSError, RuntimeError, ValueError):
+                return False
+
+        return is_committed
+
+    def _output_dirs_inside_target(self, target: "Path") -> List["Path"]:
+        """ASH's output directories inside ``target``, relative to it.
+
+        This run's output directory when it sits inside the target
+        (``_output_dir_inside``), whole, and the directories
+        ``_ash_output_dirs_inside`` names: the default ``.ash/ash_output`` an
+        earlier run left in the tree, and for a directory holding committed
+        files ASH's own directories in it. The first keeps the drop of every
+        uncommitted file under this run's output, the files at its root
+        included, which the second lists only in part. Empty for the converted
+        target, which lives under the output directory.
+        """
+        found: List[Path] = []
+        own = self._output_dir_inside(target)
+        if own is not None:
+            found.append(own)
+        for relative in self._ash_output_dirs_inside(target):
+            if relative not in found:
+                found.append(relative)
+        return found
+
+    def _drop_results_under_output_dir(
+        self, sarif_report: SarifReport, target: "Path"
+    ) -> None:
+        """Remove the results located under ASH's output directory inside ``target``.
+
+        For a scanner that hands a whole directory to a tool with no exclude
+        option, so the tool reads ASH's own files, the converted copies the
+        converted target's run reports among them. Nothing is removed when the
+        output directory is not inside ``target`` (``_output_dir_inside``): when
+        it is outside, and for the converted target, which lives under it. A
+        location is joined to the target and normalized lexically, without
+        resolving symlinks, as ``_output_dir_inside`` compares the two
+        directories.
+
+        A result in a file the repository committed under the output directory is
+        kept (``_committed_file_test``): only what ASH wrote there is dropped.
+
+        Every ASH output directory inside the target counts
+        (``_output_dirs_inside_target``): this run's, and the default
+        ``.ash/ash_output`` an earlier run left in the tree, as every other
+        directory-walking scanner skips both.
+
+        A URI's backslashes are read as separators only where the platform
+        writes them (Windows, where the tool joins paths with ``\\``). On POSIX
+        a backslash is a character of a file's name, and reading it as a
+        separator let a file named like ``out\\x`` read as a path under the
+        output directory, and its findings were dropped.
+        """
+        if self.context is None:
+            return
+        outputs_inside = self._output_dirs_inside_target(target)
+        if not outputs_inside:
+            return
+        target_abs = Path(target).absolute()
+        output_roots = [Path(os.path.normpath(target_abs / o)) for o in outputs_inside]
+        committed = self._committed_file_test()
+
+        def under_output_dir(result: Any) -> bool:
+            for location in result.locations or []:
+                physical = location.physicalLocation
+                artifact = physical.root.artifactLocation if physical else None
+                uri = artifact.uri if artifact else None
+                if not uri:
+                    continue
+                if os.sep == "\\":
+                    uri = uri.replace("\\", "/")
+                path = Path(os.path.normpath(target_abs / uri))
+                if any(path.is_relative_to(root) for root in output_roots) and (
+                    not committed(path)
+                ):
+                    return True
+            return False
+
+        dropped = 0
+        for run in sarif_report.runs or []:
+            if not run.results:
+                continue
+            kept = [result for result in run.results if not under_output_dir(result)]
+            dropped += len(run.results) - len(kept)
+            run.results = kept
+        if dropped:
+            self._plugin_log(
+                f"Dropped {dropped} finding(s) under ASH's output directory: copies "
+                "of the files ASH converted, which the converted target's run "
+                "reports, or files ASH wrote.",
+                level=logging.DEBUG,
+            )
+
+    def _operator_gated(self, key: str, wanted: Any, default: Any, refusal: str) -> Any:
+        """``wanted`` when the operator set it, else ``default`` with a warning once.
+
+        For an option that widens what a scan reads, trusts or sends, and so must
+        not come from a file inside the scanned tree or from an MCP client. ``key``
+        is the option's dotted path, ``scanners.<name>.options.<option>``, and
+        ``wanted`` the value the scanner is about to use, which
+        ``config_trust.set_by_operator`` compares against what the operator's
+        trusted config resolves ``key`` to. A scanner returns early, before this,
+        when the option is off: there is nothing to refuse.
+
+        ``refusal`` is the warning's text, shown the first time ``key`` is refused
+        by this instance and not again; the scanner keeps the words that name its
+        tool and its fallback. The safe ``default`` is returned either way a
+        refusal reads.
+        """
+        from automated_security_helper.utils.config_trust import set_by_operator
+
+        config = self.context.config if self.context is not None else None
+        if set_by_operator(config, key, wanted):
+            return wanted
+        if key not in self._operator_refusals_logged:
+            self._operator_refusals_logged.add(key)
+            self._plugin_log(refusal, level=logging.WARNING)
+        return default
+
+    def _process_command_response(self, response: Dict[str, Any]) -> None:
+        """Fold the response, without its stderr when ``quote_tool_stderr`` is False."""
+        if not self.quote_tool_stderr:
+            response = {
+                key: value for key, value in response.items() if key != "stderr"
+            }
+        super()._process_command_response(response)
+
     def _subprocess_cwd(self, results_dir: Path) -> Path | None:
         """The working directory for the tool's scan subprocess.
 
@@ -2473,6 +2648,46 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         # the environment renames.
         return next(iter(sections.values()))
 
+    def _describe_scan_failure_unquoted(
+        self,
+        exc: Exception,
+        results_file: Optional["Path"],
+        tool_started: bool,
+    ) -> str:
+        """The failure and where the tool's log is, without quoting the log.
+
+        The message for a scanner with ``quote_tool_stderr`` False: the tool's
+        stderr can hold text from the scanned tree or a provider's answer, and
+        this message reaches ``ash.log``, the console and every results file. A
+        failure before the tool started gives no exit code, and so does a tool
+        ASH could not stop: it may still be running, and the code the timeout
+        recorded is not one the tool returned.
+        """
+        tool = (
+            self.unquoted_failure_tool_name
+            or getattr(getattr(self, "config", None), "name", None)
+            or "its tool"
+        )
+        detail = f"{self.__class__.__name__} scan failed: {exc}"
+        if not tool_started or results_file is None:
+            return f"{detail} ({tool} was not started)"
+        log_path = Path(results_file).parent / f"{self.__class__.__name__}.stderr.log"
+        if self.scan_could_not_stop is not None:
+            return (
+                f"{detail} (no exit code: ASH could not stop {tool}). "
+                f"{tool}' log is not quoted here; see {log_path.as_posix()}"
+            )
+        verdict = (
+            "an accepted exit code for this scanner"
+            if self._exit_code_accepted()
+            else "not an accepted exit code; success_exit_codes="
+            f"{sorted(self.success_exit_codes)}"
+        )
+        return (
+            f"{detail} (exit code {self.exit_code}: {verdict}). {tool}' log is "
+            f"not quoted here; see {log_path.as_posix()}"
+        )
+
     def _describe_scan_failure(
         self,
         exc: Exception,
@@ -2530,6 +2745,8 @@ class ScannerPluginBase(PluginBase, Generic[T]):
           arguments. There is no exit code or stderr to describe, so the message
           is the failure and that the tool was not started.
         """
+        if not self.quote_tool_stderr:
+            return self._describe_scan_failure_unquoted(exc, results_file, tool_started)
         detail = f"{self.__class__.__name__} scan failed: {error_text(exc)}"
         # A result ``_refuse_rejected_exit_code`` rejected is not read: the
         # decision is the error's type, so it holds however the refusal text

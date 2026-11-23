@@ -24,6 +24,9 @@ pinned ASH with uv instead
 The same page covers the part that ages: grype and trivy read vulnerability
 databases with age bounds, and ASH fails a scan whose database is stale, so
 image rebuilds go on a schedule rather than waiting for the first failed scan.
+`ash dependencies check --offline` reads the age of the cached databases against
+those bounds without running a scan
+([Check cached database ages](../how-to/run-offline.md#check-caches)).
 
 ## Reports your systems read
 
@@ -78,8 +81,10 @@ Across repositories, the aggregation is yours: each scan's
 stable places to build from, and `ash.flat.json` is the one-record-per-finding
 file for quick scripts.
 
-For trend questions, compare results files directly: `diff_scan_results`
-returns the resolved, new, and severity-changed findings between two scans
+For trend questions, compare results files directly: `ash diff` lists the new,
+absent, moved, severity-changed, and suppression-changed findings between two scans
+([Compare two saved scans](../how-to/export-reports.md#compare-scans)), and over MCP
+`diff_scan_results` returns the resolved, new, and severity-changed findings
 ([MCP tools reference](../reference/mcp-tools.md#diff_scan_results)). Keep the
 results file of each scan of record (it is one JSON file per scan) and the
 fleet's history is a directory listing.

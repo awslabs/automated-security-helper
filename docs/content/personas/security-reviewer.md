@@ -112,6 +112,8 @@ Two options sharpen what a pull request is judged on:
   code scanning diffs pull requests against
   ([Add ASH to CI](../getting-started/ci.md)).
 
-For comparing two scans directly, `diff_scan_results` over the
-[MCP server](../reference/mcp-tools.md#diff_scan_results) returns the resolved,
-new, and severity-changed findings between two results files.
+For comparing two scans directly, run
+[`ash diff`](../how-to/export-reports.md#compare-scans) on the two results files.
+Over the [MCP server](../reference/mcp-tools.md#diff_scan_results),
+`diff_scan_results` returns the resolved, new, and severity-changed findings between
+the same two files.

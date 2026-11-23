@@ -74,6 +74,7 @@ Showing 6 of 6 actionable findings, highest severity first.
 - Scanner: grype
 - Rule ID: CVE-2018-18074-requests
 - Location: requirements.txt:1
+- CVE: CVE-2018-18074
 
 A critical vulnerability in requests 2.19.1 (fixed in 2.20.0) was found at requirements.txt
 
@@ -150,6 +151,7 @@ Ensure the S3 bucket has access logging enabled
 - Scanner: grype
 - Rule ID: CVE-2023-32681-requests
 - Location: requirements.txt:1
+- CVE: CVE-2023-32681
 
 A medium vulnerability in requests 2.19.1 (fixed in 2.31.0) was found at requirements.txt
 

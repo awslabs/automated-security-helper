@@ -101,6 +101,7 @@ PROBE_SUBJECT_MODULES = frozenset(
         "base/test_install_command_dispatch_is_exhaustive.py",
         "base/test_scanner_spawn_failure.py",
         "base/test_the_install_debug_line_hides_an_env_read_pin.py",
+        "base/test_the_runner_version_kwargs_are_one_bundle.py",
         "cli/mcp/test_list_scanners.py",
         "config/test_tool_version_is_a_version_specifier.py",
         "core/phases/test_scanner_threads_keep_the_tree_scope.py",
