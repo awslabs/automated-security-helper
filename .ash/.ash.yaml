@@ -429,7 +429,7 @@ global_settings:
     - rule_id: generic-api-key
       path: tests/unit/plugins/test_the_registry_and_decorators_name_a_masked_module_by_its_mask.py
       reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
-    # === Time-boxed: braces GHSA-vfj7-8cjw-p6xm, no patched version (expires 2026-11-27) ===
+    # === Time-boxed: braces GHSA-vfj7-8cjw-p6xm, no patched version (expires 2026-12-27) ===
     # braces <= 3.0.3 is affected and no fixed release exists, so neither an upgrade
     # nor an npm `overrides` pin can remove it. deploy/cdk-constructs reaches it only
     # through build tooling: micromatch, pulled in by fast-glob and
@@ -449,13 +449,13 @@ global_settings:
       package_name: "braces"
       package_version: "3.0.3"
       package_path: "deploy/cdk-constructs/node_modules/braces"
-      expires: "2026-11-27"
+      expires: "2026-12-27"
       reason: >-
         GHSA-vfj7-8cjw-p6xm: braces 3.0.3 in deploy/cdk-constructs/package-lock.json. No patched
         version exists. Reachable only through dev/build tooling (micromatch via
         fast-glob and jsii-rosetta) and not shipped in the wheel or container image. Revisit when a fix
         ships; see the block comment above; expiry renewed 2026-11-04, still no patched version.
-    # === Time-boxed: deepmerge GHSA-gcqx-w48m-w2h4, no patched version (expires 2026-11-27) ===
+    # === Time-boxed: deepmerge GHSA-gcqx-w48m-w2h4, no patched version (expires 2026-12-27) ===
     # deepmerge 4.2.0 through 4.3.1 is affected (mergeObject() prototype poisoning of
     # the returned object) and no fixed release exists: the advisory, published
     # 2026-09-18 and updated 2026-10-27, lists no patched version, and the only fix npm
@@ -471,7 +471,7 @@ global_settings:
       package_name: "deepmerge"
       package_version: "4.3.1"
       package_path: "deploy/cdk/node_modules/deepmerge"
-      expires: "2026-11-27"
+      expires: "2026-12-27"
       reason: >-
         GHSA-gcqx-w48m-w2h4: deepmerge 4.3.1 in deploy/cdk/package-lock.json. No patched
         version exists (advisory published 2026-09-18, updated 2026-10-27). Dev dependency
@@ -483,14 +483,14 @@ global_settings:
       package_name: "deepmerge"
       package_version: "4.3.1"
       package_path: "deploy/cdk-constructs/node_modules/deepmerge"
-      expires: "2026-11-27"
+      expires: "2026-12-27"
       reason: >-
         GHSA-gcqx-w48m-w2h4: deepmerge 4.3.1 in deploy/cdk-constructs/package-lock.json. No
         patched version exists (advisory published 2026-09-18, updated 2026-10-27). Dev
         dependency only, reached through jest-config, not shipped in the wheel or the
         container image. npm's only fix is a jest 25.1.0 major downgrade, refused. Revisit
         when a fix ships; see the block comment above.
-    # === Time-boxed: minimatch GHSA-g3hv-75wg-m249 bundled inside aws-cdk-lib (expires 2026-11-27) ===
+    # === Time-boxed: minimatch GHSA-g3hv-75wg-m249 bundled inside aws-cdk-lib (expires 2026-12-27) ===
     # minimatch below 11.0.1 is affected (globparts amplification denial of service).
     # The copies our lockfiles resolve are overridden to 11.x in deploy/cdk and
     # deploy/cdk-constructs, so the only affected copy left is the one BUNDLED inside
@@ -508,7 +508,7 @@ global_settings:
       package_name: "minimatch"
       package_version: "10.2.5"
       package_path: "deploy/cdk/node_modules/aws-cdk-lib/node_modules/minimatch"
-      expires: "2026-11-27"
+      expires: "2026-12-27"
       reason: >-
         GHSA-g3hv-75wg-m249: minimatch 10.2.5 bundled inside aws-cdk-lib 2.273.0 in
         deploy/cdk/package-lock.json. npm overrides cannot replace a bundled dependency and
@@ -520,7 +520,7 @@ global_settings:
       package_name: "minimatch"
       package_version: "10.2.5"
       package_path: "deploy/cdk-constructs/node_modules/aws-cdk-lib/node_modules/minimatch"
-      expires: "2026-11-27"
+      expires: "2026-12-27"
       reason: >-
         GHSA-g3hv-75wg-m249: minimatch 10.2.5 bundled inside aws-cdk-lib 2.273.0 in
         deploy/cdk-constructs/package-lock.json. npm overrides cannot replace a bundled
@@ -532,7 +532,7 @@ global_settings:
       path: "deploy/cdk/package-lock.json"
       package_name: "minimatch"
       package_version: "10.2.5"
-      expires: "2026-11-27"
+      expires: "2026-12-27"
       reason: >-
         GHSA-g3hv-75wg-m249 (grype spelling): minimatch 10.2.5 bundled inside aws-cdk-lib
         2.273.0 in deploy/cdk/package-lock.json. The lockfile's own minimatch is overridden
@@ -543,7 +543,7 @@ global_settings:
       path: "deploy/cdk/package-lock.json"
       package_name: "minimatch"
       package_version: "10.2.5"
-      expires: "2026-11-27"
+      expires: "2026-12-27"
       reason: >-
         CVE-2026-118764 (GHSA-g3hv-75wg-m249, trivy spelling): minimatch 10.2.5 bundled
         inside aws-cdk-lib 2.273.0 in deploy/cdk/package-lock.json. The lockfile's own
@@ -551,7 +551,7 @@ global_settings:
         aws-cdk-lib release bundles 11.0.1 yet. Deploy tooling only, not shipped in the
         wheel or the container image. Revisit when aws-cdk-lib rebundles; see the block
         comment above.
-    # === Time-boxed: picomatch GHSA-fc5q-39xc-vjpf, no patched version (expires 2026-11-27) ===
+    # === Time-boxed: picomatch GHSA-fc5q-39xc-vjpf, no patched version (expires 2026-12-27) ===
     # picomatch up to and including 4.0.7 is affected (ReDoS through single-branch
     # repeated extglobs) and 4.0.7 is the newest release on the registry (read
     # 2026-11-17), so no upgrade or npm `overrides` pin can remove it;
@@ -568,7 +568,7 @@ global_settings:
       package_name: "picomatch"
       package_version: "2.3.2"
       package_path: "deploy/cdk/node_modules/picomatch"
-      expires: "2026-11-27"
+      expires: "2026-12-27"
       reason: >-
         GHSA-fc5q-39xc-vjpf: picomatch 2.3.2 in deploy/cdk/package-lock.json, hoisted for
         anymatch. No patched version exists (newest release is 4.0.7, inside the affected
@@ -579,7 +579,7 @@ global_settings:
       package_name: "picomatch"
       package_version: "4.0.7"
       package_path: "deploy/cdk/node_modules/@parcel/watcher/node_modules/picomatch"
-      expires: "2026-11-27"
+      expires: "2026-12-27"
       reason: >-
         GHSA-fc5q-39xc-vjpf: picomatch 4.0.7 under @parcel/watcher in
         deploy/cdk/package-lock.json. No patched version exists. Dev dependency of the
@@ -590,7 +590,7 @@ global_settings:
       package_name: "picomatch"
       package_version: "4.0.7"
       package_path: "deploy/cdk/node_modules/jest-haste-map/node_modules/picomatch"
-      expires: "2026-11-27"
+      expires: "2026-12-27"
       reason: >-
         GHSA-fc5q-39xc-vjpf: picomatch 4.0.7 under jest-haste-map in
         deploy/cdk/package-lock.json. No patched version exists. Dev dependency of the
@@ -601,7 +601,7 @@ global_settings:
       package_name: "picomatch"
       package_version: "4.0.7"
       package_path: "deploy/cdk/node_modules/jest-message-util/node_modules/picomatch"
-      expires: "2026-11-27"
+      expires: "2026-12-27"
       reason: >-
         GHSA-fc5q-39xc-vjpf: picomatch 4.0.7 under jest-message-util in
         deploy/cdk/package-lock.json. No patched version exists. Dev dependency of the
@@ -612,7 +612,7 @@ global_settings:
       package_name: "picomatch"
       package_version: "4.0.7"
       package_path: "deploy/cdk/node_modules/jest-util/node_modules/picomatch"
-      expires: "2026-11-27"
+      expires: "2026-12-27"
       reason: >-
         GHSA-fc5q-39xc-vjpf: picomatch 4.0.7 under jest-util in
         deploy/cdk/package-lock.json. No patched version exists. Dev dependency of the
@@ -623,7 +623,7 @@ global_settings:
       package_name: "picomatch"
       package_version: "4.0.7"
       package_path: "deploy/cdk-constructs/node_modules/picomatch"
-      expires: "2026-11-27"
+      expires: "2026-12-27"
       reason: >-
         GHSA-fc5q-39xc-vjpf: picomatch 4.0.7 in deploy/cdk-constructs/package-lock.json,
         hoisted for fdir and the jest 30 tree. No patched version exists. Dev dependency of
@@ -634,7 +634,7 @@ global_settings:
       package_name: "picomatch"
       package_version: "2.3.2"
       package_path: "deploy/cdk-constructs/node_modules/anymatch/node_modules/picomatch"
-      expires: "2026-11-27"
+      expires: "2026-12-27"
       reason: >-
         GHSA-fc5q-39xc-vjpf: picomatch 2.3.2 under anymatch in
         deploy/cdk-constructs/package-lock.json. No patched version exists. Dev dependency
@@ -645,13 +645,13 @@ global_settings:
       package_name: "picomatch"
       package_version: "2.3.2"
       package_path: "deploy/cdk-constructs/node_modules/micromatch/node_modules/picomatch"
-      expires: "2026-11-27"
+      expires: "2026-12-27"
       reason: >-
         GHSA-fc5q-39xc-vjpf: picomatch 2.3.2 under micromatch in
         deploy/cdk-constructs/package-lock.json. No patched version exists. Dev dependency
         of the constructs package's build tooling only, not shipped in the wheel or the
         container image. Revisit when a fix ships; see the block comment above.
-    # === Time-boxed: filelock GHSA-v4x8-3wr5-3wq8 on Python 3.10 (expires 2026-11-27) ===
+    # === Time-boxed: filelock GHSA-v4x8-3wr5-3wq8 on Python 3.10 (expires 2026-12-27) ===
     # uv.lock holds two filelock entries. The one for Python 3.11 and later is at 4.2.1,
     # which is outside the affected range (up to 4.2.0). The one for Python 3.10 stays at
     # 4.0.3 because no release above 4.2.0 supports Python 3.10 and requires-python is
@@ -665,12 +665,12 @@ global_settings:
       path: "uv.lock"
       package_name: "filelock"
       package_version: "4.0.3"
-      expires: "2026-11-27"
+      expires: "2026-12-27"
       reason: >-
         GHSA-v4x8-3wr5-3wq8: filelock 4.0.3 in uv.lock, the Python 3.10 entry. Dev group only;
         no filelock release above 4.2.0 supports Python 3.10. The Python 3.11 and later entry
         is at 4.2.1. Revisit when requires-python rises or a supporting release ships.
-    # === Time-boxed: dnspython CVE-2026-114605 / GHSA-45c3-73f7-pv4m on Python 3.10 (expires 2026-11-27) ===
+    # === Time-boxed: dnspython CVE-2026-114605 / GHSA-45c3-73f7-pv4m on Python 3.10 (expires 2026-12-27) ===
     # uv.lock holds two dnspython entries. The one for Python 3.11 and later is at 2.9.0,
     # the first fixed release. The one for Python 3.10 stays at 2.8.0 because 2.9.0
     # requires Python 3.11 and requires-python is >=3.10. dnspython comes in through
@@ -683,7 +683,7 @@ global_settings:
       path: "uv.lock"
       package_name: "dnspython"
       package_version: "2.8.0"
-      expires: "2026-11-27"
+      expires: "2026-12-27"
       reason: >-
         CVE-2026-114605 (GHSA-45c3-73f7-pv4m): dnspython 2.8.0 in uv.lock, the Python 3.10
         entry. The fixed release 2.9.0 requires Python 3.11; the Python 3.11 and later entry
@@ -692,12 +692,12 @@ global_settings:
       path: "uv.lock"
       package_name: "dnspython"
       package_version: "2.8.0"
-      expires: "2026-11-27"
+      expires: "2026-12-27"
       reason: >-
         GHSA-45c3-73f7-pv4m (CVE-2026-114605): dnspython 2.8.0 in uv.lock, the Python 3.10
         entry. The fixed release 2.9.0 requires Python 3.11; the Python 3.11 and later entry
         is at 2.9.0. Revisit when requires-python rises or a supporting release ships.
-    # === Time-boxed: dnspython CVE-2026-128089 / GHSA-vvf4-9x63-8xvv on Python 3.10 (expires 2026-11-27) ===
+    # === Time-boxed: dnspython CVE-2026-128089 / GHSA-vvf4-9x63-8xvv on Python 3.10 (expires 2026-12-27) ===
     # Same Python 3.10 entry as above. The fixed release 2.9.2 requires Python 3.11, so
     # the 3.10 entry stays at 2.8.0 and the 3.11 and later entry moves to 2.9.2.
     # One entry per id spelling, as for CVE-2026-114605.
@@ -705,7 +705,7 @@ global_settings:
       path: "uv.lock"
       package_name: "dnspython"
       package_version: "2.8.0"
-      expires: "2026-11-27"
+      expires: "2026-12-27"
       reason: >-
         CVE-2026-128089 (GHSA-vvf4-9x63-8xvv): dnspython 2.8.0 in uv.lock, the Python 3.10
         entry. The fixed release 2.9.2 requires Python 3.11; the Python 3.11 and later entry
@@ -714,12 +714,42 @@ global_settings:
       path: "uv.lock"
       package_name: "dnspython"
       package_version: "2.8.0"
-      expires: "2026-11-27"
+      expires: "2026-12-27"
       reason: >-
         GHSA-vvf4-9x63-8xvv (CVE-2026-128089): dnspython 2.8.0 in uv.lock, the Python 3.10
         entry. The fixed release 2.9.2 requires Python 3.11; the Python 3.11 and later entry
         is at 2.9.2. Revisit when requires-python rises or a supporting release ships.
-    # === Time-boxed: filelock, thirteen advisories with no patched version on Python 3.10 (expires 2026-11-27) ===
+    # === Time-boxed: wcmatch GHSA-53pm-wgxf-c6qf on Python 3.10 (expires 2026-12-27) ===
+    # uv.lock holds two wcmatch entries. The one for Python 3.11 and later is at 12.0.1,
+    # which is outside the affected range (11.1 and earlier). The one for Python 3.10
+    # stays at 11.1 because the first fixed release, 11.2, requires Python 3.11 and
+    # requires-python is >=3.10. wcmatch comes in through igittigitt. The version is
+    # pinned in the entry, so the 12.0.1 entry is never covered and a different 3.10
+    # version reports again. grype reports the GHSA id with the package name appended and
+    # trivy reports the CVE alias, which fnmatch cannot bridge, so there is one entry per
+    # spelling. Revisit when requires-python rises or a wcmatch release supporting
+    # Python 3.10 ships.
+    - rule_id: "GHSA-53pm-wgxf-c6qf*"
+      path: "uv.lock"
+      package_name: "wcmatch"
+      package_version: "11.1"
+      expires: "2026-12-27"
+      reason: >-
+        GHSA-53pm-wgxf-c6qf: wcmatch 11.1 in uv.lock, the Python 3.10 entry only. The first
+        fixed release, 11.2, requires Python 3.11; the Python 3.11 and later entry is upgraded
+        to 12.0.1 in this same change. Revisit when requires-python rises or a supporting
+        release ships.
+    - rule_id: "CVE-2026-132276*"
+      path: "uv.lock"
+      package_name: "wcmatch"
+      package_version: "11.1"
+      expires: "2026-12-27"
+      reason: >-
+        CVE-2026-132276 is the CVE alias spelling of GHSA-53pm-wgxf-c6qf, as reported by trivy:
+        wcmatch 11.1 in uv.lock, the Python 3.10 entry only. The first fixed release, 11.2,
+        requires Python 3.11; the Python 3.11 and later entry is upgraded to 12.0.1 in this
+        same change. Revisit when requires-python rises or a supporting release ships.
+    # === Time-boxed: filelock, thirteen advisories with no patched version on Python 3.10 (expires 2026-12-27) ===
     # filelock is affected through 4.2.0 and fixed in 4.2.1, but 4.1.1 and later
     # require Python 3.11 and this project supports 3.10, so uv.lock carries a
     # filelock 4.0.x entry for Python 3.10 that no upgrade can patch. The 3.11 and
@@ -742,7 +772,7 @@ global_settings:
       path: "uv.lock"
       package_name: "filelock"
       package_version: "4.0.*"
-      expires: "2026-11-27"
+      expires: "2026-12-27"
       reason: >-
         GHSA-v4x8-3wr5-3wq8: filelock 4.0.12 in uv.lock, the Python 3.10 resolution.
         No patched release supports Python 3.10 (the fix is 4.2.1, which requires
@@ -754,7 +784,7 @@ global_settings:
       path: "uv.lock"
       package_name: "filelock"
       package_version: "4.0.*"
-      expires: "2026-11-27"
+      expires: "2026-12-27"
       reason: >-
         GHSA-fj95-fr6c-h845 (Medium): filelock 4.0.12 in uv.lock, the Python 3.10
         resolution. Affected through 4.2.0, fixed in 4.2.1, which requires Python
@@ -767,7 +797,7 @@ global_settings:
       path: "uv.lock"
       package_name: "filelock"
       package_version: "4.0.*"
-      expires: "2026-11-27"
+      expires: "2026-12-27"
       reason: >-
         GHSA-69hj-f68j-2879 (Medium): filelock 4.0.12 in uv.lock, the Python 3.10
         resolution. Affected through 4.2.0, fixed in 4.2.1, which requires Python
@@ -780,7 +810,7 @@ global_settings:
       path: "uv.lock"
       package_name: "filelock"
       package_version: "4.0.*"
-      expires: "2026-11-27"
+      expires: "2026-12-27"
       reason: >-
         GHSA-cwqr-hh33-gh44 (Medium): filelock 4.0.12 in uv.lock, the Python 3.10
         resolution. Affected through 4.2.0, fixed in 4.2.1, which requires Python
@@ -793,7 +823,7 @@ global_settings:
       path: "uv.lock"
       package_name: "filelock"
       package_version: "4.0.*"
-      expires: "2026-11-27"
+      expires: "2026-12-27"
       reason: >-
         GHSA-9c4x-gm8v-wgc4 (Medium): filelock 4.0.12 in uv.lock, the Python 3.10
         resolution. Affected through 4.2.0, fixed in 4.2.1, which requires Python
@@ -806,7 +836,7 @@ global_settings:
       path: "uv.lock"
       package_name: "filelock"
       package_version: "4.0.*"
-      expires: "2026-11-27"
+      expires: "2026-12-27"
       reason: >-
         GHSA-rfpc-qcw5-3pc4 (Medium): filelock 4.0.12 in uv.lock, the Python 3.10
         resolution. Affected through 4.2.0, fixed in 4.2.1, which requires Python
@@ -819,7 +849,7 @@ global_settings:
       path: "uv.lock"
       package_name: "filelock"
       package_version: "4.0.*"
-      expires: "2026-11-27"
+      expires: "2026-12-27"
       reason: >-
         GHSA-fq56-3cx3-fjxp (Medium): filelock 4.0.12 in uv.lock, the Python 3.10
         resolution. Affected through 4.2.0, fixed in 4.2.1, which requires Python
@@ -832,7 +862,7 @@ global_settings:
       path: "uv.lock"
       package_name: "filelock"
       package_version: "4.0.*"
-      expires: "2026-11-27"
+      expires: "2026-12-27"
       reason: >-
         GHSA-6627-m3xw-93mp (Medium): filelock 4.0.12 in uv.lock, the Python 3.10
         resolution. Affected through 4.2.0, fixed in 4.2.1, which requires Python
@@ -845,7 +875,7 @@ global_settings:
       path: "uv.lock"
       package_name: "filelock"
       package_version: "4.0.*"
-      expires: "2026-11-27"
+      expires: "2026-12-27"
       reason: >-
         GHSA-8mx5-7m5m-r77g (Medium): filelock 4.0.12 in uv.lock, the Python 3.10
         resolution. Affected through 4.2.0, fixed in 4.2.1, which requires Python
@@ -858,7 +888,7 @@ global_settings:
       path: "uv.lock"
       package_name: "filelock"
       package_version: "4.0.*"
-      expires: "2026-11-27"
+      expires: "2026-12-27"
       reason: >-
         GHSA-m462-7rxw-wvpg (Medium): filelock 4.0.12 in uv.lock, the Python 3.10
         resolution. Affected through 4.2.0, fixed in 4.2.1, which requires Python
@@ -871,7 +901,7 @@ global_settings:
       path: "uv.lock"
       package_name: "filelock"
       package_version: "4.0.*"
-      expires: "2026-11-27"
+      expires: "2026-12-27"
       reason: >-
         GHSA-9j6q-wvj5-jgjg (Low): filelock 4.0.12 in uv.lock, the Python 3.10
         resolution. Affected through 4.2.0, fixed in 4.2.1, which requires Python
@@ -884,7 +914,7 @@ global_settings:
       path: "uv.lock"
       package_name: "filelock"
       package_version: "4.0.*"
-      expires: "2026-11-27"
+      expires: "2026-12-27"
       reason: >-
         GHSA-567q-5qvw-pf92 (Low): filelock 4.0.12 in uv.lock, the Python 3.10
         resolution. Affected through 4.2.0, fixed in 4.2.1, which requires Python
@@ -897,7 +927,7 @@ global_settings:
       path: "uv.lock"
       package_name: "filelock"
       package_version: "4.0.*"
-      expires: "2026-11-27"
+      expires: "2026-12-27"
       reason: >-
         GHSA-9vhv-jxww-xfm5 (Low): filelock 4.0.12 in uv.lock, the Python 3.10
         resolution. Affected through 4.2.0, fixed in 4.2.1, which requires Python
