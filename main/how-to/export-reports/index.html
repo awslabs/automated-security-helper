@@ -1074,6 +1074,17 @@ SOFTWARE.
 </li>
       
         <li class="md-nav__item">
+  <a href="#compare-scans" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Compare two saved scans
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#github" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3410,6 +3421,17 @@ SOFTWARE.
 </li>
       
         <li class="md-nav__item">
+  <a href="#compare-scans" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Compare two saved scans
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#github" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3663,6 +3685,30 @@ the AWS reporters, which run only when <code>--config-overrides</code> turns the
 report alone to standard output:</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>ash<span class="w"> </span>report<span class="w"> </span>--format<span class="w"> </span>gitlab-sast<span class="w"> </span>&gt;<span class="w"> </span>gl-sast-report.json
 </span></code></pre></div>
+<h2 id="compare-scans">Compare two saved scans<a class="headerlink" href="#compare-scans" title="Permanent link">&para;</a></h2>
+<p>Use <a href="../../reference/cli/#diff"><code>ash diff</code></a> with the earlier results first. It reads both
+files without running a scan or changing any reports.</p>
+<!-- doctest: illustrative reason="requires two saved ASH scan results files" -->
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>ash<span class="w"> </span>diff<span class="w"> </span>baseline/ash_aggregated_results.json<span class="w"> </span>current/ash_aggregated_results.json
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>ash<span class="w"> </span>diff<span class="w"> </span>baseline/ash_aggregated_results.json<span class="w"> </span>current/ash_aggregated_results.json<span class="w"> </span>--format<span class="w"> </span>json
+</span></code></pre></div>
+<p>The JSON groups are <code>new</code>, <code>absent_after</code>, <code>moved</code>, <code>severity_changed</code>,
+<code>suppression_changed</code>, and <code>warnings</code>. <code>moved</code> holds the findings ASH paired across the
+two reports although their IDs differ because the finding changed line, as <code>before</code> and
+<code>after</code> entries. <code>absent_after</code> means
+the second report did not record the finding, not that it was fixed; the MCP tool
+<code>diff_scan_results</code> returns the same findings under the name <code>resolved</code>. Compare full scans of the same project with the same scanner and
+rule configuration. For a workspace, compare results from the same individual
+project; do not mix them with a standalone scan. For a sharded scan, run <code>ash merge</code>
+first. Results narrowed by <code>--changed-files-only</code> are refused. Incomplete scanner
+coverage, different recorded ignore-file exclusions, or inputs marked unscanned
+produce warnings.</p>
+<p>ASH matches by finding ID and refuses reports with duplicate IDs. A finding that
+moves to a different line, with no stable fingerprint from the scanner, is listed under
+<code>moved</code> when ASH can pair it unambiguously, and as both new and absent when it cannot.
+The command
+exits 0 after a successful comparison even if findings changed, and 1 when it cannot
+read or compare the results. It is not a CI findings gate.</p>
 <h2 id="github">GitHub code scanning<a class="headerlink" href="#github" title="Permanent link">&para;</a></h2>
 <p>Upload <code>ash.ghas.sarif</code>. It is SARIF 2.1.0 in which every rule a scanner declares gets a
 <code>security-severity</code>, the scanner's own or one from its most severe finding (see
@@ -3674,12 +3720,12 @@ and GitHub shows those by their SARIF level. The file leaves out suppressed find
 job needs <code>security-events: write</code>, and the upload step has to run when the scan step
 fails, because a scan with findings exits 2:</p>
 <!-- doctest: config kind=github-actions runner=none reason="one step of the workflow on how-to/ci/github-actions.md, which runs it" -->
-<div class="language-yaml highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Upload SARIF to code scanning</span>
-</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="w">  </span><span class="nt">if</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${{ !cancelled() }}</span>
-</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">  </span><span class="nt">uses</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370</span><span class="w"> </span><span class="c1"># v4.39.1</span>
-</span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="w">  </span><span class="nt">with</span><span class="p">:</span>
-</span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="w">    </span><span class="nt">sarif_file</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">.ash/ash_output/reports/ash.ghas.sarif</span>
-</span><span id="__span-8-6"><a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="w">    </span><span class="nt">category</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ash</span>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Upload SARIF to code scanning</span>
+</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="w">  </span><span class="nt">if</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${{ !cancelled() }}</span>
+</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="w">  </span><span class="nt">uses</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370</span><span class="w"> </span><span class="c1"># v4.39.1</span>
+</span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="w">  </span><span class="nt">with</span><span class="p">:</span>
+</span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="w">    </span><span class="nt">sarif_file</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">.ash/ash_output/reports/ash.ghas.sarif</span>
+</span><span id="__span-9-6"><a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="w">    </span><span class="nt">category</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ash</span>
 </span></code></pre></div>
 <p><a href="../ci/github-actions/">Run ASH in GitHub Actions</a> has the complete workflow, including
 the reusable workflows ASH ships.</p>
@@ -3727,7 +3773,7 @@ file is still a valid CycloneDX document. Its <code>components</code> list is em
 inventory's completeness is not known, rather than that the project has no
 dependencies:</p>
 <!-- doctest: config kind=other reason="a CycloneDX document, not ASH configuration" -->
-<div class="language-json highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="p">{</span><span class="nt">&quot;bomFormat&quot;</span><span class="p">:</span><span class="s2">&quot;CycloneDX&quot;</span><span class="p">,</span><span class="nt">&quot;specVersion&quot;</span><span class="p">:</span><span class="s2">&quot;1.6&quot;</span><span class="p">,</span><span class="nt">&quot;version&quot;</span><span class="p">:</span><span class="mi">1</span><span class="p">,</span><span class="nt">&quot;components&quot;</span><span class="p">:[],</span><span class="nt">&quot;compositions&quot;</span><span class="p">:[{</span><span class="nt">&quot;aggregate&quot;</span><span class="p">:</span><span class="s2">&quot;unknown&quot;</span><span class="p">}]}</span>
+<div class="language-json highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="p">{</span><span class="nt">&quot;bomFormat&quot;</span><span class="p">:</span><span class="s2">&quot;CycloneDX&quot;</span><span class="p">,</span><span class="nt">&quot;specVersion&quot;</span><span class="p">:</span><span class="s2">&quot;1.6&quot;</span><span class="p">,</span><span class="nt">&quot;version&quot;</span><span class="p">:</span><span class="mi">1</span><span class="p">,</span><span class="nt">&quot;components&quot;</span><span class="p">:[],</span><span class="nt">&quot;compositions&quot;</span><span class="p">:[{</span><span class="nt">&quot;aggregate&quot;</span><span class="p">:</span><span class="s2">&quot;unknown&quot;</span><span class="p">}]}</span>
 </span></code></pre></div>
 <p><code>ash.gl-dependency-scanning-report.cdx.json</code> then has an empty component list in
 GitLab's format. <code>ash.spdx.json</code> converts the same SBOM to SPDX 2.3 and is written only

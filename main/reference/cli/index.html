@@ -2153,6 +2153,17 @@ SOFTWARE.
 </li>
       
         <li class="md-nav__item">
+  <a href="#ash-diff" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ash diff
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#ash-express" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3826,6 +3837,17 @@ SOFTWARE.
 </li>
       
         <li class="md-nav__item">
+  <a href="#ash-diff" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ash diff
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#ash-express" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4144,6 +4166,10 @@ SOFTWARE.
 <td>Install dependencies for ASH plugins.</td>
 </tr>
 <tr>
+<td><a href="#diff"><code>ash diff</code></a></td>
+<td>Compare the findings in two saved ASH scans without running a scan.</td>
+</tr>
+<tr>
 <td><a href="#express"><code>ash express</code></a></td>
 <td>Manage the express daemon: a resident warm ASH process that removes startup cost from every scan. Unix only; scans fall back to ordinary cold runs wherever the daemon is unavailable.</td>
 </tr>
@@ -4235,7 +4261,7 @@ SOFTWARE.
 </tr>
 </tbody>
 </table>
-<p>Subcommands: <a href="#build-image"><code>ash build-image</code></a>, <a href="#config"><code>ash config</code></a>, <a href="#dependencies"><code>ash dependencies</code></a>, <a href="#express"><code>ash express</code></a>, <a href="#get-genai-guide"><code>ash get-genai-guide</code></a>, <a href="#inspect"><code>ash inspect</code></a>, <a href="#mcp"><code>ash mcp</code></a>, <a href="#merge"><code>ash merge</code></a>, <a href="#plugin"><code>ash plugin</code></a>, <a href="#report"><code>ash report</code></a>, <a href="#scan"><code>ash scan</code></a>.</p>
+<p>Subcommands: <a href="#build-image"><code>ash build-image</code></a>, <a href="#config"><code>ash config</code></a>, <a href="#dependencies"><code>ash dependencies</code></a>, <a href="#diff"><code>ash diff</code></a>, <a href="#express"><code>ash express</code></a>, <a href="#get-genai-guide"><code>ash get-genai-guide</code></a>, <a href="#inspect"><code>ash inspect</code></a>, <a href="#mcp"><code>ash mcp</code></a>, <a href="#merge"><code>ash merge</code></a>, <a href="#plugin"><code>ash plugin</code></a>, <a href="#report"><code>ash report</code></a>, <a href="#scan"><code>ash scan</code></a>.</p>
 <h2 id="ash-build-image"><a id="build-image"></a><code>ash build-image</code><a class="headerlink" href="#ash-build-image" title="Permanent link">&para;</a></h2>
 <p>Builds the ASH container image, then scans the current directory with it unless --no-run is given.</p>
 <p>It takes only the options below. To scan with scan options, run <code>ash scan --mode container</code>, which builds the image the same way and accepts every scan option.</p>
@@ -5138,15 +5164,82 @@ By default, it installs dependencies for all plugin types (converter, scanner, r
 </tr>
 </tbody>
 </table>
+<h2 id="ash-diff"><a id="diff"></a><code>ash diff</code><a class="headerlink" href="#ash-diff" title="Permanent link">&para;</a></h2>
+<p>Compare the findings in two saved ASH scans without running a scan.</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>ash diff [OPTIONS] {before} {after}
+</span></code></pre></div>
+<!-- doctest: options of=cli.diff -->
+<table>
+<thead>
+<tr>
+<th>Argument</th>
+<th>Type</th>
+<th>Default</th>
+<th>Environment variable</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a id="diff--arg-before"></a><code>before</code></td>
+<td>path</td>
+<td>required</td>
+<td></td>
+<td>Baseline ASH scan results JSON file.</td>
+</tr>
+<tr>
+<td><a id="diff--arg-after"></a><code>after</code></td>
+<td>path</td>
+<td>required</td>
+<td></td>
+<td>Current ASH scan results JSON file.</td>
+</tr>
+</tbody>
+</table>
+<!-- doctest: options of=cli.diff -->
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Type</th>
+<th>Default</th>
+<th>Environment variable</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a id="diff--format"></a><code>--format</code></td>
+<td>one of <code>text</code>, <code>json</code></td>
+<td><code>text</code></td>
+<td></td>
+<td>Output format (text or json).</td>
+</tr>
+<tr>
+<td><a id="diff--cli-json-input"></a><code>--cli-json-input</code></td>
+<td>text</td>
+<td>not set</td>
+<td></td>
+<td>Read parameter values from a JSON object: a path, a file:// URI, or '-' for stdin. Keys are parameter names (output_dir) or long flag spellings (--output-dir). Flags given on the command line override the file; the file overrides environment variables. Run with --generate-cli-skeleton for a template.</td>
+</tr>
+<tr>
+<td><a id="diff--generate-cli-skeleton"></a><code>--generate-cli-skeleton</code></td>
+<td>flag</td>
+<td>off</td>
+<td></td>
+<td>Print a JSON template for --cli-json-input, listing every parameter of this command with its default, or null where it is required or an environment variable backs it, and exit.</td>
+</tr>
+</tbody>
+</table>
 <h2 id="ash-express"><a id="express"></a><code>ash express</code><a class="headerlink" href="#ash-express" title="Permanent link">&para;</a></h2>
 <p>Manage the express daemon: a resident warm ASH process that removes startup cost from every scan. Unix only; scans fall back to ordinary cold runs wherever the daemon is unavailable.</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>ash express [OPTIONS] COMMAND [ARGS]...
+<div class="language-text highlight"><pre><span></span><code><span id="__span-16-1"><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a>ash express [OPTIONS] COMMAND [ARGS]...
 </span></code></pre></div>
 <p>This command takes no options.</p>
 <p>Subcommands: <a href="#express-start"><code>ash express start</code></a>, <a href="#express-status"><code>ash express status</code></a>, <a href="#express-stop"><code>ash express stop</code></a>.</p>
 <h3 id="ash-express-start"><a id="express-start"></a><code>ash express start</code><a class="headerlink" href="#ash-express-start" title="Permanent link">&para;</a></h3>
 <p>Start the express daemon for this user and ASH version (idempotent).</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-16-1"><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a>ash express start [OPTIONS]
+<div class="language-text highlight"><pre><span></span><code><span id="__span-17-1"><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a>ash express start [OPTIONS]
 </span></code></pre></div>
 <!-- doctest: options of=cli.express.start -->
 <table>
@@ -5178,7 +5271,7 @@ By default, it installs dependencies for all plugin types (converter, scanner, r
 </table>
 <h3 id="ash-express-status"><a id="express-status"></a><code>ash express status</code><a class="headerlink" href="#ash-express-status" title="Permanent link">&para;</a></h3>
 <p>Report whether the express daemon is running, and what it has served.</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-17-1"><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a>ash express status [OPTIONS]
+<div class="language-text highlight"><pre><span></span><code><span id="__span-18-1"><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a>ash express status [OPTIONS]
 </span></code></pre></div>
 <!-- doctest: options of=cli.express.status -->
 <table>
@@ -5203,7 +5296,7 @@ By default, it installs dependencies for all plugin types (converter, scanner, r
 </table>
 <h3 id="ash-express-stop"><a id="express-stop"></a><code>ash express stop</code><a class="headerlink" href="#ash-express-stop" title="Permanent link">&para;</a></h3>
 <p>Stop the express daemon. A scan it is running is sent SIGTERM.</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-18-1"><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a>ash express stop [OPTIONS]
+<div class="language-text highlight"><pre><span></span><code><span id="__span-19-1"><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a>ash express stop [OPTIONS]
 </span></code></pre></div>
 <p>This command takes no options.</p>
 <h2 id="ash-get-genai-guide"><a id="get-genai-guide"></a><code>ash get-genai-guide</code><a class="headerlink" href="#ash-get-genai-guide" title="Permanent link">&para;</a></h2>
@@ -5217,7 +5310,7 @@ interact with ASH scan results, including:</p>
 <li>Configuration file schema</li>
 <li>Common pitfalls and solutions</li>
 </ul>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-19-1"><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a>ash get-genai-guide [OPTIONS]
+<div class="language-text highlight"><pre><span></span><code><span id="__span-20-1"><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a>ash get-genai-guide [OPTIONS]
 </span></code></pre></div>
 <!-- doctest: options of=cli.get-genai-guide -->
 <table>
@@ -5256,7 +5349,7 @@ interact with ASH scan results, including:</p>
 </table>
 <h2 id="ash-inspect"><a id="inspect"></a><code>ash inspect</code><a class="headerlink" href="#ash-inspect" title="Permanent link">&para;</a></h2>
 <p>Inspect and analyze ASH outputs and reports</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-20-1"><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a>ash inspect [OPTIONS] COMMAND [ARGS]...
+<div class="language-text highlight"><pre><span></span><code><span id="__span-21-1"><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a>ash inspect [OPTIONS] COMMAND [ARGS]...
 </span></code></pre></div>
 <p>This command takes no options.</p>
 <p>Subcommands: <a href="#inspect-findings"><code>ash inspect findings</code></a>, <a href="#inspect-sarif-fields"><code>ash inspect sarif-fields</code></a>.</p>
@@ -5268,7 +5361,7 @@ For a finding with none, its lines are read from its file only when the results
 file sits in &lt;root&gt;/.ash/ash_output, and only from a regular file inside &lt;root&gt;
 (a hard link inside the tree counts as a file in it, as it does for the scanners);
 otherwise the detail view says "(source not shown)".</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-21-1"><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a>ash inspect findings [OPTIONS]
+<div class="language-text highlight"><pre><span></span><code><span id="__span-22-1"><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a>ash inspect findings [OPTIONS]
 </span></code></pre></div>
 <!-- doctest: options of=cli.inspect.findings -->
 <table>
@@ -5316,7 +5409,7 @@ across different scanners and ensure fields are preserved during aggregation.</p
 <li>Generates a comprehensive HTML report showing field presence and mapping information</li>
 <li>Outputs field data in both JSON and CSV formats for further analysis</li>
 </ol>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-22-1"><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a>ash inspect sarif-fields [OPTIONS]
+<div class="language-text highlight"><pre><span></span><code><span id="__span-23-1"><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a>ash inspect sarif-fields [OPTIONS]
 </span></code></pre></div>
 <!-- doctest: options of=cli.inspect.sarif-fields -->
 <table>
@@ -5348,7 +5441,7 @@ across different scanners and ensure fields are preserved during aggregation.</p
 </table>
 <h2 id="ash-mcp"><a id="mcp"></a><code>ash mcp</code><a class="headerlink" href="#ash-mcp" title="Permanent link">&para;</a></h2>
 <p>Start the ASH MCP server (Model Context Protocol)</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-23-1"><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a>ash mcp [OPTIONS]
+<div class="language-text highlight"><pre><span></span><code><span id="__span-24-1"><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a>ash mcp [OPTIONS]
 </span></code></pre></div>
 <!-- doctest: options of=cli.mcp -->
 <table>
@@ -5500,7 +5593,7 @@ across different scanners and ensure fields are preserved during aggregation.</p
 <h2 id="ash-merge"><a id="merge"></a><code>ash merge</code><a class="headerlink" href="#ash-merge" title="Permanent link">&para;</a></h2>
 <p>Merges the results of a sharded scan into one unified report.</p>
 <p>Pass one --results per shard. The command refuses to merge a set of shards that does not reconstruct exactly one whole scan, and its exit code is the verdict for the union — a shard that owned no failing scanner exits 0, so CI must gate on this command rather than on per-shard success.</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-24-1"><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a>ash merge [OPTIONS]
+<div class="language-text highlight"><pre><span></span><code><span id="__span-25-1"><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a>ash merge [OPTIONS]
 </span></code></pre></div>
 <!-- doctest: options of=cli.merge -->
 <table>
@@ -5623,13 +5716,13 @@ across different scanners and ensure fields are preserved during aggregation.</p
 </table>
 <h2 id="ash-plugin"><a id="plugin"></a><code>ash plugin</code><a class="headerlink" href="#ash-plugin" title="Permanent link">&para;</a></h2>
 <p>Manage ASH plugins</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-25-1"><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a>ash plugin [OPTIONS] COMMAND [ARGS]...
+<div class="language-text highlight"><pre><span></span><code><span id="__span-26-1"><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a>ash plugin [OPTIONS] COMMAND [ARGS]...
 </span></code></pre></div>
 <p>This command takes no options.</p>
 <p>Subcommands: <a href="#plugin-list"><code>ash plugin list</code></a>.</p>
 <h3 id="ash-plugin-list"><a id="plugin-list"></a><code>ash plugin list</code><a class="headerlink" href="#ash-plugin-list" title="Permanent link">&para;</a></h3>
 <p>The <code>plugin list</code> command lists what a scan with this configuration loads, on or off.</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-26-1"><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a>ash plugin list [OPTIONS]
+<div class="language-text highlight"><pre><span></span><code><span id="__span-27-1"><a id="__codelineno-27-1" name="__codelineno-27-1" href="#__codelineno-27-1"></a>ash plugin list [OPTIONS]
 </span></code></pre></div>
 <!-- doctest: options of=cli.plugin.list -->
 <table>
@@ -5703,7 +5796,7 @@ across different scanners and ensure fields are preserved during aggregation.</p
 </table>
 <h2 id="ash-report"><a id="report"></a><code>ash report</code><a class="headerlink" href="#ash-report" title="Permanent link">&para;</a></h2>
 <p>Generate a report from ASH scan results using the specified reporter plugin.</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-27-1"><a id="__codelineno-27-1" name="__codelineno-27-1" href="#__codelineno-27-1"></a>ash report [OPTIONS]
+<div class="language-text highlight"><pre><span></span><code><span id="__span-28-1"><a id="__codelineno-28-1" name="__codelineno-28-1" href="#__codelineno-28-1"></a>ash report [OPTIONS]
 </span></code></pre></div>
 <!-- doctest: options of=cli.report -->
 <table>
@@ -5794,7 +5887,7 @@ across different scanners and ensure fields are preserved during aggregation.</p
 <p>Start with: ash --mode container --source-dir .</p>
 <p>Review the result with: ash inspect findings</p>
 <p>Options are grouped by workflow below. Running ash without a subcommand starts a scan.</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-28-1"><a id="__codelineno-28-1" name="__codelineno-28-1" href="#__codelineno-28-1"></a>ash scan [OPTIONS]
+<div class="language-text highlight"><pre><span></span><code><span id="__span-29-1"><a id="__codelineno-29-1" name="__codelineno-29-1" href="#__codelineno-29-1"></a>ash scan [OPTIONS]
 </span></code></pre></div>
 <!-- doctest: options of=cli.scan -->
 <table>

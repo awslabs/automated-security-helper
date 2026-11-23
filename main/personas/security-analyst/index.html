@@ -3583,8 +3583,10 @@ else is a <a href="../../plugins/write-a-reporter/">reporter plugin</a> away.</p
 <code>ash_aggregated_results.json</code> and <code>ash.ocsf.json</code> are machine-readable and
 stable places to build from, and <code>ash.flat.json</code> is the one-record-per-finding
 file for quick scripts.</p>
-<p>For trend questions, compare results files directly: <code>diff_scan_results</code>
-returns the resolved, new, and severity-changed findings between two scans
+<p>For trend questions, compare results files directly: <code>ash diff</code> lists the new,
+absent, moved, severity-changed, and suppression-changed findings between two scans
+(<a href="../../how-to/export-reports/#compare-scans">Compare two saved scans</a>), and over MCP
+<code>diff_scan_results</code> returns the resolved, new, and severity-changed findings
 (<a href="../../reference/mcp-tools/#diff_scan_results">MCP tools reference</a>). Keep the
 results file of each scan of record (it is one JSON file per scan) and the
 fleet's history is a directory listing.</p>
