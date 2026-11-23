@@ -106,12 +106,10 @@ variable pointing at a closed port).
 from __future__ import annotations
 
 import logging
-import os
 from pathlib import Path
 from typing import (
     Annotated,
     Any,
-    Callable,
     ClassVar,
     Dict,
     List,
@@ -143,11 +141,9 @@ from automated_security_helper.schemas.sarif_schema_model import (
     PropertyBag,
     SarifReport,
 )
-from automated_security_helper.utils.config_trust import set_by_operator
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
-from automated_security_helper.utils.scan_output_dirs import committed_output_files
 from automated_security_helper.utils.subprocess_utils import find_executable
 
 #: The values ``trufflehog --results`` takes that ASH offers. ``filtered_unverified``
@@ -263,11 +259,13 @@ class TruffleHogScanner(ScannerPluginBase[TruffleHogScannerConfig]):
     # The strict default; see "Sandbox" in the module docstring.
     sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements()
 
-    # Whether each tree-set option refusal, and the offline note, was already logged.
-    _verify_refusal_logged: bool = PrivateAttr(default=False)
+    #: TruffleHog's stderr can hold a provider's answer about a credential, so the
+    #: failure text and ``self.errors`` do not quote it; the log file keeps it.
+    quote_tool_stderr: ClassVar[bool] = False
+
+    # Whether the offline note was already logged. The tree-set option refusals are
+    # logged once by the base class's ``_operator_gated``.
     _verify_offline_logged: bool = PrivateAttr(default=False)
-    _results_refusal_logged: bool = PrivateAttr(default=False)
-    _ignores_refusal_logged: bool = PrivateAttr(default=False)
 
     def model_post_init(self, context: Any) -> None:
         if self.config is None:
@@ -311,19 +309,17 @@ class TruffleHogScanner(ScannerPluginBase[TruffleHogScannerConfig]):
         """Whether TruffleHog may send what it finds to be verified."""
         if not self._options().verify:
             return False
-        config = self.context.config if self.context is not None else None
         # Verification sends each credential found off the host, so only the
         # operator can turn it on.
-        if not set_by_operator(config, "scanners.trufflehog.options.verify", True):
-            if not self._verify_refusal_logged:
-                self._verify_refusal_logged = True
-                self._plugin_log(
-                    "scanners.trufflehog.options.verify is true in a config inside "
-                    "a git checkout or the scanned directory, or from an MCP "
-                    "client, so it is ignored: TruffleHog runs with "
-                    f"--no-verification and sends nothing. {KEEP_A_SETTING}",
-                    level=logging.WARNING,
-                )
+        if not self._operator_gated(
+            "scanners.trufflehog.options.verify",
+            True,
+            False,
+            "scanners.trufflehog.options.verify is true in a config inside "
+            "a git checkout or the scanned directory, or from an MCP "
+            "client, so it is ignored: TruffleHog runs with "
+            f"--no-verification and sends nothing. {KEEP_A_SETTING}",
+        ):
             return False
         # ASH's own offline mode, or this scanner's options.offline (read by the
         # base class as every scanner's is): either keeps TruffleHog offline.
@@ -348,40 +344,30 @@ class TruffleHogScanner(ScannerPluginBase[TruffleHogScannerConfig]):
         wanted = self._options().results
         if wanted == DEFAULT_RESULTS:
             return wanted
-        config = self.context.config if self.context is not None else None
-        if set_by_operator(config, "scanners.trufflehog.options.results", wanted):
-            return wanted
-        if not self._results_refusal_logged:
-            self._results_refusal_logged = True
-            self._plugin_log(
-                f"scanners.trufflehog.options.results is {wanted!r} in a config "
-                "inside a git checkout or the scanned directory, or from an MCP "
-                f"client, so it is ignored: TruffleHog reports {DEFAULT_RESULTS}. "
-                f"{KEEP_A_SETTING}",
-                level=logging.WARNING,
-            )
-        return DEFAULT_RESULTS
+        return self._operator_gated(
+            "scanners.trufflehog.options.results",
+            wanted,
+            DEFAULT_RESULTS,
+            f"scanners.trufflehog.options.results is {wanted!r} in a config "
+            "inside a git checkout or the scanned directory, or from an MCP "
+            f"client, so it is ignored: TruffleHog reports {DEFAULT_RESULTS}. "
+            f"{KEEP_A_SETTING}",
+        )
 
     def _honor_inline_ignores(self) -> bool:
         """Whether TruffleHog may apply ``trufflehog:ignore`` comments in the tree."""
         if not self._options().honor_inline_ignores:
             return False
-        config = self.context.config if self.context is not None else None
-        if set_by_operator(
-            config, "scanners.trufflehog.options.honor_inline_ignores", True
-        ):
-            return True
-        if not self._ignores_refusal_logged:
-            self._ignores_refusal_logged = True
-            self._plugin_log(
-                "scanners.trufflehog.options.honor_inline_ignores is true in a "
-                "config inside a git checkout or the scanned directory, or from an "
-                "MCP client, so it is ignored: TruffleHog runs with "
-                "--no-ignore-tag and ignore comments do not apply; suppress "
-                f"findings with ASH suppressions. {KEEP_A_SETTING}",
-                level=logging.WARNING,
-            )
-        return False
+        return self._operator_gated(
+            "scanners.trufflehog.options.honor_inline_ignores",
+            True,
+            False,
+            "scanners.trufflehog.options.honor_inline_ignores is true in a "
+            "config inside a git checkout or the scanned directory, or from an "
+            "MCP client, so it is ignored: TruffleHog runs with "
+            "--no-ignore-tag and ignore comments do not apply; suppress "
+            f"findings with ASH suppressions. {KEEP_A_SETTING}",
+        )
 
     def _scan_path(self, target: Path) -> str:
         """The path TruffleHog is given: ``.`` for the source, absolute otherwise.
@@ -459,17 +445,6 @@ class TruffleHogScanner(ScannerPluginBase[TruffleHogScannerConfig]):
         )
         return final_args, results_file, None
 
-    def _process_command_response(self, response: Dict[str, Any]) -> None:
-        """Count the exit code, and keep TruffleHog's stderr out of ``self.errors``.
-
-        With verification on, the log can hold what a provider answered about a
-        credential, and the scanner executor copies ``errors`` into the scan's
-        results. The stream stays in the log file.
-        """
-        super()._process_command_response(
-            {key: value for key, value in response.items() if key != "stderr"}
-        )
-
     def _run_subprocess(  # type: ignore[override]
         self,
         command: List[str],
@@ -536,89 +511,8 @@ class TruffleHogScanner(ScannerPluginBase[TruffleHogScannerConfig]):
     # The report
     # ------------------------------------------------------------------
 
-    def _committed_file_test(self) -> Callable[[Path], bool]:
-        """A test, of a path, for a file the repository committed under ASH's output.
-
-        The files ``scan_output_dirs.committed_output_files`` reads, as the executor's
-        drop and the suppression step read them. Read when the test is first asked.
-        Where git cannot say what is tracked the set is empty, and every file under the
-        output directory is treated as ASH's.
-        """
-        committed: Optional[Set[Path]] = None
-
-        def is_committed(path: Path) -> bool:
-            nonlocal committed
-            if committed is None:
-                committed = committed_output_files(self.context)
-            try:
-                return path.resolve() in committed
-            except (OSError, RuntimeError, ValueError):
-                return False
-
-        return is_committed
-
-    def _output_dirs_inside_target(self, target: Path) -> List[Path]:
-        """ASH's output directories inside ``target``, relative to it."""
-        found: List[Path] = []
-        own = self._output_dir_inside(target)
-        if own is not None:
-            found.append(own)
-        for relative in self._ash_output_dirs_inside(target):
-            if relative not in found:
-                found.append(relative)
-        return found
-
-    def _drop_results_under_output_dir(
-        self, sarif_report: SarifReport, target: Path
-    ) -> None:
-        """Remove the results located under ASH's output directory inside ``target``.
-
-        When the output directory is inside the source target (the default
-        ``.ash/ash_output``) TruffleHog reads ASH's own files, including the
-        converted copies the converted target's run reports. A result in a file the
-        repository committed there is kept. Nothing is removed when the output
-        directory is not inside ``target``. A URI is joined to the target and
-        normalized lexically, and its backslashes are separators only on Windows.
-        """
-        if self.context is None:
-            return
-        outputs_inside = self._output_dirs_inside_target(target)
-        if not outputs_inside:
-            return
-        target_abs = Path(target).absolute()
-        output_roots = [Path(os.path.normpath(target_abs / o)) for o in outputs_inside]
-        committed = self._committed_file_test()
-
-        def under_output_dir(result: Any) -> bool:
-            for location in result.locations or []:
-                physical = location.physicalLocation
-                artifact = physical.root.artifactLocation if physical else None
-                uri = artifact.uri if artifact else None
-                if not uri:
-                    continue
-                if os.sep == "\\":
-                    uri = uri.replace("\\", "/")
-                path = Path(os.path.normpath(target_abs / uri))
-                if any(path.is_relative_to(root) for root in output_roots) and (
-                    not committed(path)
-                ):
-                    return True
-            return False
-
-        dropped = 0
-        for run in sarif_report.runs or []:
-            if not run.results:
-                continue
-            kept = [result for result in run.results if not under_output_dir(result)]
-            dropped += len(run.results) - len(kept)
-            run.results = kept
-        if dropped:
-            self._plugin_log(
-                f"Dropped {dropped} finding(s) under ASH's output directory: copies "
-                "of the files ASH converted, which the converted target's run "
-                "reports, or files ASH wrote.",
-                level=logging.DEBUG,
-            )
+    # The drop of results under ASH's output directory is the base class's
+    # ``_drop_results_under_output_dir``, called from ``_post_process_sarif``.
 
     @staticmethod
     def _where(result: Any) -> Optional[Tuple[str, int]]:

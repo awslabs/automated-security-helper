@@ -438,6 +438,26 @@ class TestInlineIgnores:
         assert len(warnings) == 1
         assert "honor_inline_ignores" in warnings[0]
 
+    def test_a_refusal_is_logged_once_per_option_through_the_base_class(
+        self, tree, tmp_path, on_path, monkeypatch
+    ):
+        scanner = _scanner(
+            tree,
+            tmp_path,
+            operator=False,
+            verify=True,
+            honor_inline_ignores=True,
+        )
+        warnings = _warnings(scanner, monkeypatch)
+        for _ in range(3):
+            assert scanner._honor_inline_ignores() is False
+            assert scanner._verify() is False
+        assert len(warnings) == 2
+        assert scanner._operator_refusals_logged == {
+            "scanners.trufflehog.options.verify",
+            "scanners.trufflehog.options.honor_inline_ignores",
+        }
+
 
 class TestReport:
     def test_the_positive_capture_is_rated_and_located(
