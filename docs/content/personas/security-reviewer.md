@@ -102,14 +102,19 @@ GitLab, `ash.gl-sast-report.json` feeds the merge request security widget
 visible in `ash.sarif`, `ash.csv`, and `ash.flat.json` with their reasons, so
 the exception ledger is part of the record you review.
 
-Two options sharpen what a pull request is judged on:
+Three options sharpen what a pull request is judged on:
 
 - `--changed-files-only` drops findings in files the change did not touch, so
   the gate counts the pull request's own debt and not the backlog. Suppressed
   findings and the full reports still record everything
   ([Gate on the files a change touches](../how-to/scale-large-repos.md#changed-files)).
-- A scan of `main` after each merge keeps the baseline current, which is what
-  code scanning diffs pull requests against
+- `--baseline` drops the findings a saved full scan of `main` already holds,
+  so the gate fails only on a finding the baseline did not have. A finding
+  whose severity rose, or whose suppression ended, stays in the scan
+  ([Gate only on new findings](../how-to/set-the-gate.md#baseline)).
+- A scan of `main` after each merge keeps the analysis code scanning holds
+  current, which is what code scanning diffs pull requests against. That
+  comparison is separate from `--baseline`
   ([Add ASH to CI](../getting-started/ci.md)).
 
 For comparing two scans directly, `diff_scan_results` over the

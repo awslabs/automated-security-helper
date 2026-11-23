@@ -697,7 +697,17 @@ without usable fingerprints, if one old finding is fixed and another appears
 with the same scanner, rule, file, package, message and severity, the new finding
 can be treated as the old one. A surviving finding that shared an identity key
 with a removed finding can get a different ID in the filtered flat reports. Use a
-trusted, regularly refreshed full baseline and review its coverage.
+trusted, regularly refreshed full baseline and review its coverage. [Set the gate](../set-the-gate.md#baseline)
+states the same tradeoff for every CI system.
+
+The reusable workflows apply the rule about filtered SARIF for you. Both
+`run-ash-security-scan.yml`, in its pull request upload, and `upload-ash-sarif.yml` read
+`ash_aggregated_results.json` before the upload step. When its `metadata` records a baseline
+(`--baseline` in `ash-args`), they skip the SARIF upload and print the notice
+`SARIF upload skipped because the scan results were filtered by a baseline.`
+When the file cannot be read to rule a baseline out, they skip the upload and print
+`SARIF upload skipped because the scan results could not be read to rule out a baseline.`
+Nothing is uploaded, so code scanning keeps its earlier analysis.
 
 ## Run in Nix mode {#nix}
 
