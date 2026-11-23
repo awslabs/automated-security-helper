@@ -345,4 +345,4 @@ For security concerns, follow [Security issue notifications](CONTRIBUTING.md#sec
 Licensed under [Apache 2.0](LICENSE). Bundled fonts and icons retain their
 respective licenses alongside their assets.
 
-Build with <3 at Amazon Web Services
+Built with <3 at Amazon Web Services
