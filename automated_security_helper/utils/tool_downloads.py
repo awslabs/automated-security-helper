@@ -1433,6 +1433,44 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
 }
 
 
+@dataclass(frozen=True)
+class HeldPin:
+    """A pin that is deliberately kept below its upstream's newest release.
+
+    ``scripts/check_pinned_tool_versions.py --fail-on-outdated`` treats the tool's
+    outdated row as acknowledged, and passes, only while upstream's latest release is
+    exactly ``acknowledged``. A newer release makes the row fail again, so a hold
+    never absorbs a release nobody has looked at. The report lists every held row
+    with its ``reason`` and ``until``.
+
+    ``acknowledged`` is the newest upstream version the hold was written against,
+    spelled as upstream spells it (the checker compares versions as numbers, so a
+    leading ``v`` does not matter). ``reason`` says why the pin cannot move to it.
+    ``until`` names the condition that ends the hold, so a reader knows what to watch
+    for. Delete the entry when the pin is bumped past ``acknowledged``.
+    """
+
+    acknowledged: str
+    reason: str
+    until: str
+
+
+# Pins held on purpose below upstream's latest release, by tool name (a key of
+# TOOL_VERSIONS, RULES_BUNDLES, THIRD_PARTY_LICENSES, or a gem pin). Declared here,
+# with the pins, so the decision to hold a tool is reviewed in the same diff as its
+# pin and not in a CI argument. See HeldPin for what a hold does and does not excuse.
+HELD_PINS: dict[str, HeldPin] = {
+    "pygit2": HeldPin(
+        acknowledged="1.21.0",
+        reason=(
+            "GuardDog 3.2.0 requires pygit2>=1.11,<1.19, so the image cannot install "
+            "pygit2 1.21.0 while it ships that GuardDog."
+        ),
+        until="GuardDog releases a version that admits pygit2>=1.19.",
+    ),
+}
+
+
 def get_third_party_license(tool: str) -> ThirdPartyLicense:
     """The license entry for ``tool``.
 
