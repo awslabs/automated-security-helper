@@ -3587,6 +3587,11 @@ clones are often shallow, so fetch the base branch's history first; the
 <a href="../ci/github-actions/#changed-files">Run ASH in GitHub Actions</a> and
 <a href="../ci/gitlab-ci/#scan-only-what-a-merge-request-changes">Run ASH in GitLab CI</a> show how.</p>
 <p>The option is not available over MCP.</p>
+<p><code>--baseline</code> is the other way to narrow the verdict. <code>--changed-files-only</code> drops the
+findings in files the change did not touch, and <code>--baseline</code> drops the findings a saved
+full scan already holds, in any file. A scan can use both, and the findings that remain are
+the new ones in the changed files. <a href="../set-the-gate/#baseline">Gate only on new findings</a>
+explains the baseline and its tradeoff.</p>
 <h2 id="sharding">Split a scan across runners<a class="headerlink" href="#sharding" title="Permanent link">&para;</a></h2>
 <p><code>--shard-index</code> and <code>--shard-count</code> (or <code>ASH_SHARD_INDEX</code> and <code>ASH_SHARD_COUNT</code>) give each
 runner a share of the scanners. Every runner scans the whole tree with its share; <code>ash merge</code>

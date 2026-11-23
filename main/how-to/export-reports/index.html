@@ -3729,6 +3729,10 @@ fails, because a scan with findings exits 2:</p>
 </span></code></pre></div>
 <p><a href="../ci/github-actions/">Run ASH in GitHub Actions</a> has the complete workflow, including
 the reusable workflows ASH ships.</p>
+<p>Do not upload the SARIF of a scan run with <code>--baseline</code>: it holds only the findings the
+baseline lacks, and GitHub replaces earlier results for the same tool and category with
+whatever an upload carries. The reusable workflows skip that upload and print a notice
+(<a href="../ci/github-actions/#baseline">Gate on new findings</a>).</p>
 <h2 id="gitlab">GitLab<a class="headerlink" href="#gitlab" title="Permanent link">&para;</a></h2>
 <p>GitLab reads three of the files, each under its own <code>artifacts:reports</code> keyword:</p>
 <table>

@@ -3687,6 +3687,10 @@ one. The scan sets its <code>artifact-id</code> output once it has uploaded its 
 when it fails on findings too, so the <code>if:</code> uploads after such a scan and skips the upload
 after a scan that stopped before ASH wrote its reports. Without <code>!cancelled()</code> in it,
 GitHub skips the job whenever the scan job fails.</p>
+<p>The job also skips the upload, with a notice in its log, when the downloaded results record
+a baseline (a scan run with <code>--baseline</code> in <code>ash-args</code>) or cannot be read to rule one out.
+Filtered findings would replace the complete analysis code scanning holds;
+<a href="../../how-to/ci/github-actions/#baseline">Gate on new findings</a> covers <code>--baseline</code>.</p>
 <p>Push the change, then merge the pull request. The merge starts the workflow on <code>main</code>, and
 when that run finishes, the repository's <strong>Security and quality</strong> tab lists ASH's findings
 under <strong>Code scanning</strong>, with the tool name <code>ASH - Automated Security Helper</code>. That analysis

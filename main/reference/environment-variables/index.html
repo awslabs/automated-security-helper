@@ -3488,7 +3488,7 @@ SOFTWARE.
 
 <h1 id="environment-variables">Environment variables<a class="headerlink" href="#environment-variables" title="Permanent link">&para;</a></h1>
 <p>This page is generated from the code that reads each variable by <code>scripts/generate_env_var_reference.py</code>. Edits made to this file by hand are overwritten the next time it is generated.</p>
-<p>ASH reads 172 environment variables: 62 of its own (<code>ASH_</code> prefix) and 110 set by other tools or the platform. The tables list every place each one is read. A variable that sets a CLI option links to that option; the option on the command line takes precedence over the variable.</p>
+<p>ASH reads 173 environment variables: 63 of its own (<code>ASH_</code> prefix) and 110 set by other tools or the platform. The tables list every place each one is read. A variable that sets a CLI option links to that option; the option on the command line takes precedence over the variable.</p>
 <p>Columns:</p>
 <ul>
 <li>Default: the value the code uses when the variable is unset, as written in the code, at each read that supplies one. Where none does, or the only one is an empty string, it is the default of the CLI option the variable sets, or of the configuration key it is the default of. Blank means none of these supplies one (the code checks whether the variable is set, or treats unset as empty).</li>
@@ -3528,6 +3528,13 @@ SOFTWARE.
 <td></td>
 <td><code>automated_security_helper/utils/subprocess_utils.py</code> (<code>in_tree_tools_allowed</code>)</td>
 <td>The environment variable that lets ASH start a tool from inside the scanned tree. Read from the process environment only, which belongs to the operator. (<code>automated_security_helper/utils/subprocess_utils.py</code>)</td>
+</tr>
+<tr>
+<td><code>ASH_BASELINE</code></td>
+<td>not set</td>
+<td></td>
+<td><code>automated_security_helper/cli/scan.py</code> (<code>run_ash_scan_cli_command</code>)<br><code>automated_security_helper/express/client.py</code> (<code>_delegated_exit_code</code>)</td>
+<td>Sets <a href="../cli/#scan--baseline"><code>ash scan --baseline</code></a>. Leave out findings already present in this saved ash_aggregated_results.json from a full scan (for example the default branch's), so the reports, the summary and the exit code count only new findings. Matching tolerates findings that only moved lines. The file must be outside the scanned checkout and the output directory. Supported with --mode local and precommit only (exit 5 otherwise).</td>
 </tr>
 <tr>
 <td><code>ASH_BASE_IMAGE_OVERRIDE</code></td>
@@ -4732,25 +4739,26 @@ SOFTWARE.
 <p>A value in a configuration file that begins with <code>${NAME}</code> or <code>${NAME:default}</code> has the reference replaced by that environment variable. Only names that start with <code>ASH_</code> and these names are substituted: <code>AWS_DEFAULT_REGION</code>, <code>AWS_PROFILE</code>, <code>AWS_REGION</code>. Any other reference is left as written, with a warning. The prefix and the list are defined in <code>automated_security_helper/core/constants.py</code>.</p>
 <h2 id="lookups-that-could-not-be-resolved">Lookups that could not be resolved<a class="headerlink" href="#lookups-that-could-not-be-resolved" title="Permanent link">&para;</a></h2>
 <p>These reads take the variable name from a value the generator cannot resolve without running ASH: a name read from a configuration file, built at run time, or passed in from somewhere it cannot follow. A variable read only through one of these sites is not in the tables above.</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>automated_security_helper/config/ash_config.py (env_reference_value) [environ.get] resolved = os.environ.get(reference.var_name, None)
-</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>automated_security_helper/config/config_sources.py (_empty_key_reference_names.walk) [environ.get] if resolved is None and os.environ.get(name) is not None:
-</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>automated_security_helper/config/config_validator.py (_reference_variable_is_set) [environ.get] value = os.environ.get(reference.group(1))
-</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>automated_security_helper/config/environment_record.py (_value_read) [environ.get] value = os.environ.get(name)
-</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>automated_security_helper/core/constants.py (warn_if_home_unusable) [environ.get] value = os.environ.get(variable)
-</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>automated_security_helper/core/constants.py (xdg_directory) [environ.get] value = os.environ.get(variable, &quot;&quot;)
-</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>automated_security_helper/express/runtime.py (apply_request_env) [environ.pop] environ.pop(name, None)
-</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>automated_security_helper/interactions/run_ash_container.py (_carried_values_by_band) [environ.get] value = environ.get(name, &quot;&quot;)
-</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>automated_security_helper/interactions/run_ash_container.py (_carried_values_by_band) [environ.get] value = environ.get(name.upper(), &quot;&quot;)
-</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>automated_security_helper/interactions/run_ash_container.py (_runner_marker_args) [environ.get] value = environ.get(name)
-</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>automated_security_helper/interactions/run_ash_container.py (_write_env_file) [environ.get] if any(char in environ.get(name, &quot;&quot;) for char in &quot;\n\r\0&quot;):
-</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>automated_security_helper/interactions/run_ash_container.py (_write_env_file) [presence check] if name in environ:
-</span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>automated_security_helper/interactions/run_ash_container.py (_write_env_file) [subscript] handle.write(f&quot;{name}={environ[name]}\n&quot;)
-</span><span id="__span-0-14"><a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>automated_security_helper/plugin_modules/ash_builtin/scanners/grype_scanner.py (_declared_grype_db_bound) [presence check] if name not in environ and config_key_for_env.get(name) not in user_config_keys
-</span><span id="__span-0-15"><a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>automated_security_helper/utils/process_env.py (apply_environ_overrides) [environ.get] previous = {key: os.environ.get(key) for key in overrides}
-</span><span id="__span-0-16"><a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>automated_security_helper/utils/process_env.py (apply_environ_overrides) [environ.pop] os.environ.pop(key, None)
-</span><span id="__span-0-17"><a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>automated_security_helper/utils/process_env.py (restore_environ) [environ.pop] os.environ.pop(key, None)
-</span><span id="__span-0-18"><a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>automated_security_helper/utils/sandbox/policy.py (_env_named_read_paths) [environ.get] value = os.environ.get(name, &quot;&quot;)
-</span><span id="__span-0-19"><a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a>automated_security_helper/utils/sandbox/policy.py (_uv_environment) [environ.get] if path is None or os.environ.get(name):
+<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>automated_security_helper/cli/scan.py (run_ash_scan_cli_command) [environ.get] if os.environ.get(CHILD_ENV):
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>automated_security_helper/config/ash_config.py (env_reference_value) [environ.get] resolved = os.environ.get(reference.var_name, None)
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>automated_security_helper/config/config_sources.py (_empty_key_reference_names.walk) [environ.get] if resolved is None and os.environ.get(name) is not None:
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>automated_security_helper/config/config_validator.py (_reference_variable_is_set) [environ.get] value = os.environ.get(reference.group(1))
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>automated_security_helper/config/environment_record.py (_value_read) [environ.get] value = os.environ.get(name)
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>automated_security_helper/core/constants.py (warn_if_home_unusable) [environ.get] value = os.environ.get(variable)
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>automated_security_helper/core/constants.py (xdg_directory) [environ.get] value = os.environ.get(variable, &quot;&quot;)
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>automated_security_helper/express/runtime.py (apply_request_env) [environ.pop] environ.pop(name, None)
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>automated_security_helper/interactions/run_ash_container.py (_carried_values_by_band) [environ.get] value = environ.get(name, &quot;&quot;)
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>automated_security_helper/interactions/run_ash_container.py (_carried_values_by_band) [environ.get] value = environ.get(name.upper(), &quot;&quot;)
+</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>automated_security_helper/interactions/run_ash_container.py (_runner_marker_args) [environ.get] value = environ.get(name)
+</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>automated_security_helper/interactions/run_ash_container.py (_write_env_file) [environ.get] if any(char in environ.get(name, &quot;&quot;) for char in &quot;\n\r\0&quot;):
+</span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>automated_security_helper/interactions/run_ash_container.py (_write_env_file) [presence check] if name in environ:
+</span><span id="__span-0-14"><a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>automated_security_helper/interactions/run_ash_container.py (_write_env_file) [subscript] handle.write(f&quot;{name}={environ[name]}\n&quot;)
+</span><span id="__span-0-15"><a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>automated_security_helper/plugin_modules/ash_builtin/scanners/grype_scanner.py (_declared_grype_db_bound) [presence check] if name not in environ and config_key_for_env.get(name) not in user_config_keys
+</span><span id="__span-0-16"><a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>automated_security_helper/utils/process_env.py (apply_environ_overrides) [environ.get] previous = {key: os.environ.get(key) for key in overrides}
+</span><span id="__span-0-17"><a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>automated_security_helper/utils/process_env.py (apply_environ_overrides) [environ.pop] os.environ.pop(key, None)
+</span><span id="__span-0-18"><a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>automated_security_helper/utils/process_env.py (restore_environ) [environ.pop] os.environ.pop(key, None)
+</span><span id="__span-0-19"><a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a>automated_security_helper/utils/sandbox/policy.py (_env_named_read_paths) [environ.get] value = os.environ.get(name, &quot;&quot;)
+</span><span id="__span-0-20"><a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a>automated_security_helper/utils/sandbox/policy.py (_uv_environment) [environ.get] if path is None or os.environ.get(name):
 </span></code></pre></div>
 
 

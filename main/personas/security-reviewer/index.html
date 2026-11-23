@@ -3565,14 +3565,19 @@ GitLab, <code>ash.gl-sast-report.json</code> feeds the merge request security wi
 (<a href="../../how-to/export-reports/#gitlab">GitLab</a>). Suppressed findings stay
 visible in <code>ash.sarif</code>, <code>ash.csv</code>, and <code>ash.flat.json</code> with their reasons, so
 the exception ledger is part of the record you review.</p>
-<p>Two options sharpen what a pull request is judged on:</p>
+<p>Three options sharpen what a pull request is judged on:</p>
 <ul>
 <li><code>--changed-files-only</code> drops findings in files the change did not touch, so
   the gate counts the pull request's own debt and not the backlog. Suppressed
   findings and the full reports still record everything
   (<a href="../../how-to/scale-large-repos/#changed-files">Gate on the files a change touches</a>).</li>
-<li>A scan of <code>main</code> after each merge keeps the baseline current, which is what
-  code scanning diffs pull requests against
+<li><code>--baseline</code> drops the findings a saved full scan of <code>main</code> already holds,
+  so the gate fails only on a finding the baseline did not have. A finding
+  whose severity rose, or whose suppression ended, stays in the scan
+  (<a href="../../how-to/set-the-gate/#baseline">Gate only on new findings</a>).</li>
+<li>A scan of <code>main</code> after each merge keeps the analysis code scanning holds
+  current, which is what code scanning diffs pull requests against. That
+  comparison is separate from <code>--baseline</code>
   (<a href="../../getting-started/ci/">Add ASH to CI</a>).</li>
 </ul>
 <p>For comparing two scans directly, run

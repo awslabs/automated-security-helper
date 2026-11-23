@@ -3503,8 +3503,8 @@ it belongs.</p>
 </tr>
 <tr>
 <td>Merge</td>
-<td>A scan of the default branch after each merge, which keeps the baseline that code scanning compares later pull requests against</td>
-<td><a href="../../getting-started/ci/">Add ASH to CI</a></td>
+<td>A scan of the default branch after each merge, which keeps the analysis that code scanning compares later pull requests against, and whose saved <code>ash_aggregated_results.json</code> can serve as the <code>--baseline</code> of later local and precommit scans</td>
+<td><a href="../../getting-started/ci/">Add ASH to CI</a>, <a href="../../how-to/set-the-gate/#baseline">Gate only on new findings</a></td>
 </tr>
 <tr>
 <td>Release</td>
