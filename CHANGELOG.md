@@ -46,6 +46,15 @@
 
 ## Unreleased
 
+### Maintenance
+
+- Removed the ASH v2 in-container scanner scripts `utils/common.sh`,
+  `utils/git-docker-execute.sh`, `utils/grype-docker-execute.sh`,
+  `utils/js-docker-execute.sh`, and `utils/yaml-docker-execute.sh`. ASH v3 has not run
+  them: their scanners live in `automated_security_helper/plugin_modules/ash_builtin/`.
+  No supported invocation changes; `./ash`, `utils/ash_helpers.sh` (`invoke-ash`) and
+  `utils/ash_helpers.ps1` (`Invoke-ASH`) are unchanged.
+
 ### Features
 
 - **`default_scanners` sets the default scanners in a trusted config.** `only`

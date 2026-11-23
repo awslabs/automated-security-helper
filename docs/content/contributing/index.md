@@ -123,7 +123,7 @@ option is in the [CLI reference](../reference/cli.md).
 | `.ash/` | The ASH configuration that CI uses to scan this repository |
 | `Formula/` | The Homebrew formula |
 | `nix/` | Nix packages for the scanners nixpkgs does not carry; `flake.nix` at the root defines the development shell |
-| `utils/` | `ash_helpers.sh`, which you source from a shell profile to get an `invoke-ash` command that runs this checkout's `./ash` from any directory; `ash_helpers.ps1`, which defines `Invoke-ASH`, the container wrapper for PowerShell; and older per-scanner scripts that ASH does not run |
+| `utils/` | `ash_helpers.sh`, which you source from a shell profile to get an `invoke-ash` command that runs this checkout's `./ash` from any directory; `ash_helpers.ps1`, which defines `Invoke-ASH`, the container wrapper for PowerShell |
 
 ## Open a pull request
 
