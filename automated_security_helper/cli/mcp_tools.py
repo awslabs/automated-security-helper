@@ -373,6 +373,12 @@ SUPPRESSION_NOT_SPECIFIC = "suppression_not_specific"
 #: not a YYYY-MM-DD date (``models.core.EXPIRATION_RULE``).
 INVALID_EXPIRATION = "invalid_expiration"
 
+#: ``error_type`` of a diff_scan_results refused because the two results files
+#: cannot be compared (``finding_diff.ComparabilityRefusal``): a sharded or
+#: ``--changed-files-only`` scan, different projects, a workspace mixed with a
+#: standalone scan, or duplicate finding IDs.
+RESULTS_NOT_COMPARABLE = "results_not_comparable"
+
 
 def output_directory_refusal(
     directory_path: Union[str, Path], operation: str
@@ -4778,7 +4784,8 @@ def mcp_diff_scan_results(
           - resolved: List[dict] — findings present in before but not in after.
           - severity_changed: List[dict] — findings in both with a different severity,
             each entry has {id, before_severity, after_severity}.
-        On error, returns {"success": False, "error": <message>}.
+        On error, returns {"success": False, "error": <message>}. Results files
+        that cannot be compared also carry "error_type": "results_not_comparable".
     """
     from automated_security_helper.models.asharp_model import AshAggregatedResults
 
@@ -4833,7 +4840,11 @@ def mcp_diff_scan_results(
             before_results, after_results
         )
     except ComparabilityRefusal as exc:
-        return {"success": False, "error": str(exc)}
+        return {
+            "success": False,
+            "error": str(exc),
+            "error_type": RESULTS_NOT_COMPARABLE,
+        }
     diff = compare_findings(before_findings, after_findings)
     return {
         "new": [finding.model_dump() for finding in diff.new],

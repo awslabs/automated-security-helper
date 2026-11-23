@@ -81,8 +81,10 @@ Across repositories, the aggregation is yours: each scan's
 stable places to build from, and `ash.flat.json` is the one-record-per-finding
 file for quick scripts.
 
-For trend questions, compare results files directly: `diff_scan_results`
-returns the resolved, new, and severity-changed findings between two scans
+For trend questions, compare results files directly: `ash diff` lists the new,
+absent, moved, severity-changed, and suppression-changed findings between two scans
+([Compare two saved scans](../how-to/export-reports.md#compare-scans)), and over MCP
+`diff_scan_results` returns the resolved, new, and severity-changed findings
 ([MCP tools reference](../reference/mcp-tools.md#diff_scan_results)). Keep the
 results file of each scan of record (it is one JSON file per scan) and the
 fleet's history is a directory listing.
