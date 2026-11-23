@@ -344,11 +344,11 @@ def test_previously_suppressed_finding_fails_scan(tmp_path, monkeypatch):
 def test_fresh_results_match_the_masked_saved_baseline():
     from automated_security_helper.utils.secret_masking import mask_secrets_in_results
 
-    secret = "Zx9Qw7" + "Lm2Pk4Rt8v"
-    exposed = finding(3, f"Possible hardcoded password: '{secret}'", "HIGH")
+    value = "Zx9Qw7" + "Lm2Pk4Rt8v"
+    exposed = finding(3, f"Possible hardcoded password: '{value}'", "HIGH")
     exposed["ruleId"] = "custom-secret"
     exposed["properties"]["tags"] = ["secrets"]
-    referenced = finding(5, f"connect() called with token '{secret}'", "HIGH")
+    referenced = finding(5, f"connect() called with token '{value}'", "HIGH")
     referenced["ruleId"] = "R2"
     referenced["locations"][0]["physicalLocation"]["artifactLocation"]["uri"] = (
         "other.py"

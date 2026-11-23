@@ -313,15 +313,18 @@ def _results_file(tmp_path: Path, content: str | bytes | None) -> Path:
     return path
 
 
-@pytest.mark.unit
+@pytest.mark.integration
+@posix_only
 @pytest.mark.parametrize("case", sorted(BASELINE_CASES))
 def test_the_scan_workflow_uploads_only_verified_full_results(tmp_path, case):
     content, expected = BASELINE_CASES[case]
     check, upload = _baseline_steps(SCAN_WORKFLOW)
     output = tmp_path / "output"
     output.touch()
-    subprocess.run(
-        ["bash", "-e", "-c", check["run"]],
+    bash = shutil.which("bash")
+    assert bash, "bash is required to run the step"
+    subprocess.run(  # nosec B603 - the workflow's own step, fixed argv, no shell
+        [bash, "-e", "-c", check["run"]],
         check=True,
         env={
             **os.environ,

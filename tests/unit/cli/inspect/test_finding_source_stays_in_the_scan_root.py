@@ -449,9 +449,9 @@ def test_baseline_filtered_results_do_not_show_secrets_from_live_source(
     output = root / ".ash" / "ash_output"
     output.mkdir(parents=True)
     (root / "src").mkdir()
-    secret = "SECRET_VALUE_FOR_BASELINE_TEST"
+    live_text = "ONLY_IN_THE_LIVE_SOURCE_FILE"
     (root / "src" / "app.py").write_text(
-        f"secret = '{secret}'\nx = 1\n", encoding="utf-8"
+        f"value = '{live_text}'\nx = 1\n", encoding="utf-8"
     )
     data = _results("src/app.py", 2)
     data.setdefault("metadata", {})["baseline"] = {
@@ -472,5 +472,5 @@ def test_baseline_filtered_results_do_not_show_secrets_from_live_source(
     tui.findings_command(
         output_dir=root, report_file=RESULTS, config=root / ".ash.yaml"
     )
-    assert shown and secret not in shown[0]
+    assert shown and live_text not in shown[0]
     assert not shown[0]
