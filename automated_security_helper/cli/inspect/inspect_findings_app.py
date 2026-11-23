@@ -2312,11 +2312,7 @@ def findings_command(
             findings,
             config_path=config_path,
             mask_source=source_snippet_masker(model),
-            scan_root=(
-                None
-                if getattr(model.metadata, "baseline", None) is not None
-                else scan_root
-            ),
+            scan_root=(None if model.baseline_filtered else scan_root),
         )
         app.run()
     except typer.Exit:

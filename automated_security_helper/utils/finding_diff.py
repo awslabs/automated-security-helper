@@ -34,10 +34,7 @@ class FindingDiff:
 def fallback_key(finding: FlatVulnerability) -> tuple[Any, ...] | None:
     if finding._identity is None or finding.source_report is not None:
         return None
-    if any(
-        kind in (finding._assigned_identity_key or {})
-        for kind in ("fingerprints", "partialFingerprints")
-    ):
+    if finding.has_fingerprint_identity:
         return None
     base = dict(finding._identity.base)
     if finding._assigned_identity_key is not None:
@@ -62,6 +59,15 @@ def _order(finding: FlatVulnerability) -> tuple[Any, ...]:
 def match_findings(
     before: Iterable[FlatVulnerability], after: Iterable[FlatVulnerability]
 ) -> FindingMatch:
+    """Pair findings from ``before`` with findings from ``after``.
+
+    ``moved`` pairs differ only in their lines. This matcher is for display as
+    well as gating, and the two deliberately differ on secrets: ``ash diff``
+    reports a moved secret as moved, while ``apply_baseline`` refuses to drop
+    one. The refusal is not applied here. A gating consumer must apply
+    ``FlatVulnerability.requires_exact_identity_match`` and
+    ``has_fingerprint_identity`` to each pair, as ``apply_baseline`` does.
+    """
     before = list(before)
     after = list(after)
     before_ids = defaultdict(list)
@@ -81,11 +87,7 @@ def match_findings(
         previous, current = before[i], after[j]
         if previous._identity is not None and current._identity is not None:
             fingerprinted = all(
-                any(
-                    kind in (finding._assigned_identity_key or {})
-                    for kind in ("fingerprints", "partialFingerprints")
-                )
-                for finding in (previous, current)
+                finding.has_fingerprint_identity for finding in (previous, current)
             )
             if (
                 not fingerprinted

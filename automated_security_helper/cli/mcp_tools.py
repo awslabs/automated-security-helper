@@ -4824,7 +4824,7 @@ def mcp_diff_scan_results(
 
     for results in (before_results, after_results):
         metadata = results.metadata
-        if "baseline" in (metadata.model_extra or {}):
+        if results.baseline_filtered:
             return {
                 "success": False,
                 "error": "cannot compare results filtered by --baseline",

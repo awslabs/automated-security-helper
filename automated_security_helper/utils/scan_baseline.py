@@ -114,7 +114,7 @@ def apply_baseline(
         )[0]
         return severity_fails_threshold(finding.severity or "", threshold)
 
-    if "baseline" in (results.metadata.model_extra or {}):
+    if results.baseline_filtered:
         raise BaselineRefused("existing results were filtered by --baseline")
     mask_secrets_in_results(results)
     results._invalidate_flat_cache()
@@ -142,13 +142,9 @@ def apply_baseline(
     moved = set()
     for pairs, without_lines in ((match.exact, False), (match.moved, True)):
         for old, new in pairs:
-            if old._secret_detection or new._secret_detection:
-                if without_lines or not all(
-                    any(
-                        kind in (finding._assigned_identity_key or {})
-                        for kind in ("fingerprints", "partialFingerprints")
-                    )
-                    for finding in (old, new)
+            if old.requires_exact_identity_match or new.requires_exact_identity_match:
+                if without_lines or not (
+                    old.has_fingerprint_identity and new.has_fingerprint_identity
                 ):
                     continue
             old_rank = _SEVERITY_RANK.get((old.severity or "").upper())
