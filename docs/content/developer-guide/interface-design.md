@@ -148,4 +148,4 @@ Rendered output is also covered by `tests/snapshot/`. Follow the snapshot review
 - [AWS trademark guidelines](https://aws.amazon.com/trademark-guidelines/)
 - [Writing review reference](https://en.wikipedia.org/wiki/Wikipedia:Signs_of_AI_writing)
 
-Text identity: ASH. Footer: `Build with <3 at Amazon Web Services`.
+Text identity: ASH. Footer: `Built with <3 at Amazon Web Services`.

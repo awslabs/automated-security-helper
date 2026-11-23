@@ -38,7 +38,7 @@ from automated_security_helper.utils.terminal_text import (
     shown_not_obeyed,
     shown_on_one_line,
 )
-from automated_security_helper.utils.ui_theme import FOOTER_CREDIT
+from automated_security_helper.utils.ui_theme import FOOTER_CREDIT_SMALL_BLOCKQUOTE
 
 
 #: What GitHub acts on without Markdown syntax: an ``@name`` (or ``@org/team``)
@@ -722,5 +722,5 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
                     ),
                 ]
             )
-        parts.extend(["", FOOTER_CREDIT])
+        parts.extend(["", FOOTER_CREDIT_SMALL_BLOCKQUOTE])
         return "\n".join(parts)

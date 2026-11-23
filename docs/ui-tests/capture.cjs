@@ -156,7 +156,7 @@ async function startServer() {
 <style>/* ${fontLicense} */
 @font-face{font-family:"Open Sans";font-style:normal;font-weight:300 800;font-display:swap;src:url("data:font/woff2;base64,${font.toString("base64")}") format("woff2")}
 *{box-sizing:border-box}body{margin:0;background:#0f141a;color:#dedee3;font:16px/1.5 "Open Sans",Helvetica,Arial,sans-serif}main{max-width:1500px;padding:32px 24px;margin:auto}h1{font-size:24px;font-weight:700}h2{font-size:20px;margin-top:32px}p{color:#b4b4bb}a{color:#42b4ff}section{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:24px}section a{display:block;background:#161d26;border:1px solid #424650;border-radius:16px;overflow:hidden;text-decoration:none}img{display:block;width:100%;height:280px;object-fit:cover;object-position:top}span{display:block;padding:12px 16px}video{display:block;width:100%;max-width:1200px;border:1px solid #424650;border-radius:16px}:focus-visible{outline:2px solid #42b4ff;outline-offset:4px}footer{margin-top:32px;padding-top:16px;border-top:1px solid #424650;font-size:12px;color:#b4b4bb}</style>
-<main><h1>ASH interface gallery</h1><p><a href="index.html">Reports and terminal previews</a></p><section>${cards}</section>${motion}<footer>Build with &lt;3 at Amazon Web Services</footer></main></html>`);
+<main><h1>ASH interface gallery</h1><p><a href="index.html">Reports and terminal previews</a></p><section>${cards}</section>${motion}<footer>Built with &lt;3 at Amazon Web Services</footer></main></html>`);
   console.log(`Review gallery: ${path.join(output, "gallery.html")}`);
 })().catch(error => {
   console.error(error);
