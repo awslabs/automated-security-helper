@@ -2376,7 +2376,9 @@ def test_the_ci_runner_markers_that_are_set_go_into_the_container_by_name(tmp_pa
     assert "GITHUB_ACTIONS" in words, words
     assert "TEAMCITY_VERSION" in words, words
     assert "TF_BUILD" not in words, words
-    assert not [w for w in words if w.startswith(("GITHUB_ACTIONS=", "TEAMCITY_"))]
+    assert not [
+        w for w in words if w.startswith(("GITHUB_ACTIONS=", "TEAMCITY_VERSION="))
+    ]
 
 
 @pytest.mark.integration
