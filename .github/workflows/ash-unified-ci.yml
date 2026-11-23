@@ -209,6 +209,12 @@ jobs:
           fi
       - name: Verify documentation freshness
         run: uv run python scripts/verify_docs_freshness.py
+      - name: Verify the wrapper tables match the ash CLI
+        # The subcommand and option tables inside ./ash and utils/ash_helpers.ps1 are
+        # generated from the CLI. A change to the CLI that adds a subcommand or an option
+        # fails here until `uv run python scripts/generate_wrapper_tables.py` is run and
+        # its output committed.
+        run: uv run python scripts/generate_wrapper_tables.py --check
 
       # Attached to `lint` rather than given its own job, deliberately. A new job
       # here has to be added to required-checks' `needs` AND have
