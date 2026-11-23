@@ -59,28 +59,48 @@ INSTALLED_HERE = [
 ]
 
 
-# Scanners whose own shipped default constraint is an exact pin.
-SHIPPED_EXACT_DEFAULTS = {
-    tool: default
-    for tool, default in {"guarddog": GUARDDOG_DEFAULT_VERSION_CONSTRAINT}.items()
-    if default.startswith("==")
+# The one scanner whose install argv carries an exact pin WITHOUT the Dockerfile's
+# overrides, and why (root cause, read at the bytes):
+#   1. guarddog_scanner.py:173-177 declares GUARDDOG_DEFAULT_VERSION_CONSTRAINT =
+#      "==3.2.0", exact on purpose: the JSON the parser reads is not a versioned
+#      format and 3.x reshaped it between minor releases.
+#   2. guarddog_scanner.py:879-882 `_get_tool_version_constraint` returns that
+#      constant whenever `options.tool_version` is unset, which is the unpinned run
+#      these tests drive.
+#   3. The install command takes that constraint from the scanner, so the recorded
+#      `uv tool install` argv ends in `guarddog==3.2.0`.
+#   4. tool_downloads.py:1187-1199 records the same version (v3.2.0) in the license
+#      entry, so the pin and the license gate agree.
+# The expected pin is derived from that license entry, not from the constant under
+# test, and the constant must equal it. The exempt set is this literal, so a second
+# exemption needs an edit here, and the negative control below pins that.
+EXACT_PIN_EXEMPT_TOOLS = frozenset({"guarddog"})
+EXPECTED_EXACT_PINS = {
+    tool: "==" + THIRD_PARTY_LICENSES[tool].version.lstrip("v")
+    for tool in EXACT_PIN_EXEMPT_TOOLS
 }
+SHIPPED_EXACT_DEFAULTS = {"guarddog": GUARDDOG_DEFAULT_VERSION_CONSTRAINT}
 
 
 def _exact_pins_without_a_shipped_default(argvs):
     """The `uv tool install` argvs that carry an exact pin the license entries do not allow.
 
-    An exact `==` is allowed only for a scanner that ships an exact default constraint.
+    An exact `==` is allowed only for the exempt tools, and only at the value their
+    license entry records.
     """
-    # Only a tool whose shipped default constraint is itself an exact pin is exempt,
-    # and only while that default equals its license entry's version.
+    assert set(SHIPPED_EXACT_DEFAULTS) == EXACT_PIN_EXEMPT_TOOLS, (
+        f"exact-pin exemptions {sorted(SHIPPED_EXACT_DEFAULTS)} differ from "
+        f"{sorted(EXACT_PIN_EXEMPT_TOOLS)}"
+    )
     allowed = {}
-    for tool, default in SHIPPED_EXACT_DEFAULTS.items():
-        entry = THIRD_PARTY_LICENSES[tool]
-        assert default == "==" + entry.version.lstrip("v"), (
-            f"{tool} ships {default!r} but its license entry records {entry.version}"
+    for tool in EXACT_PIN_EXEMPT_TOOLS:
+        default = SHIPPED_EXACT_DEFAULTS[tool]
+        expected = EXPECTED_EXACT_PINS[tool]
+        assert default == expected, (
+            f"{tool} ships {default!r} but its license entry records "
+            f"{THIRD_PARTY_LICENSES[tool].version} ({expected!r})"
         )
-        allowed[entry.distribution] = default
+        allowed[THIRD_PARTY_LICENSES[tool].distribution] = expected
     offenders = []
     for argv in argvs:
         for arg in argv:
@@ -88,8 +108,8 @@ def _exact_pins_without_a_shipped_default(argvs):
             if "==" not in bare:
                 continue
             distribution = bare.split("==", 1)[0]
-            if allowed.get(distribution) is None or not bare.endswith(
-                allowed[distribution]
+            if allowed.get(distribution) is None or bare != (
+                distribution + allowed[distribution]
             ):
                 offenders.append(argv)
                 break
@@ -326,6 +346,13 @@ class TestTheOverridesReachTheInstallCommand:
         # A tool with a shipped default pinned to some OTHER version.
         drifted = ["uv", "tool", "install", f"{entry.distribution}==0.0.1"]
         assert _exact_pins_without_a_shipped_default([drifted]) == [drifted]
+        # The exemption is exactly one tool, at exactly the license entry's value.
+        assert EXACT_PIN_EXEMPT_TOOLS == {"guarddog"}
+        assert EXPECTED_EXACT_PINS == {"guarddog": "==" + entry.version.lstrip("v")}
+        # A longer version that merely ends in the exempt one is not the exempt pin.
+        bare_version = entry.version.lstrip("v")
+        suffix = ["uv", "tool", "install", f"{entry.distribution}==1{bare_version}"]
+        assert _exact_pins_without_a_shipped_default([suffix]) == [suffix]
 
     def test_a_single_override_pins_only_its_tool(self, recorded_install):
         specs = recorded_install(
