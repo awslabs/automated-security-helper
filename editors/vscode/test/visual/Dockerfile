@@ -17,6 +17,10 @@ FROM node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472
 # either one moves glyph edges. check-valid-until=no because a snapshot's Release file
 # is past its Valid-Until date by design; apt still verifies its signature.
 ARG DEBIAN_SNAPSHOT=20261001T000000Z
+# DL3008 (pin versions in apt-get install): the pin here is the snapshot instant above,
+# which fixes every package's version for every build, and a per-package version would
+# repeat it and break on the next snapshot move.
+# hadolint ignore=DL3008
 RUN rm -f /etc/apt/sources.list.d/debian.sources \
  && printf '%s\n' \
       "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/${DEBIAN_SNAPSHOT} bookworm main" \
@@ -31,6 +35,10 @@ RUN rm -f /etc/apt/sources.list.d/debian.sources \
 
 # One font family and nothing else, so fontconfig has no fallback to choose between.
 # The check fails the build if a package above brought in a second family.
+# DL4006 (set -o pipefail before a RUN with a pipe): the pipe is `fc-list | sort -u` inside
+# a command substitution that `test` compares to the expected list, so a failed fc-list
+# yields an empty list that is not equal to it and the build stops.
+# hadolint ignore=DL4006
 RUN test "$(fc-list : family | sort -u)" = "$(printf 'DejaVu Sans\nDejaVu Sans Mono\nDejaVu Serif')" \
  || { echo "unexpected font families:"; fc-list : family | sort -u; exit 1; }
 
@@ -40,6 +48,10 @@ RUN test "$(fc-list : family | sort -u)" = "$(printf 'DejaVu Sans\nDejaVu Sans M
 ARG VSCODE_VERSION=1.141.0
 ARG VSCODE_COMMIT=2a59476c9bfcb90b3ddc372c36762471b7dfad1c
 ARG VSCODE_SHA256=d77d588f0454cbaaa71e723497de4160d15b95fba4988abe177b1432e6bd570a
+# DL4006 (set -o pipefail before a RUN with a pipe): the pipe is `echo | sha256sum -c -`,
+# whose verdict is sha256sum's own exit status, the last command in it; the left side is a
+# literal echo that cannot fail in a way pipefail would catch.
+# hadolint ignore=DL4006
 RUN curl -fsSL --retry 5 -o /tmp/vscode.tar.gz \
       "https://update.code.visualstudio.com/${VSCODE_VERSION}/linux-x64/stable" \
  && echo "${VSCODE_SHA256}  /tmp/vscode.tar.gz" | sha256sum -c - \

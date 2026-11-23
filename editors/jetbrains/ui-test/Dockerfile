@@ -27,6 +27,10 @@ FROM gradle:jdk21@sha256:d5c815d1281e3edc7e986ca573b1b309639747fa0d91a2199adadf3
 # The archive snapshot the X packages come from; move it together with the versions below.
 ARG UBUNTU_SNAPSHOT=20261001T000000Z
 
+# DL3008 (pin versions in apt-get install): every package below carries an exact version.
+# The only word without a version is the value after --snapshot, which hadolint takes for
+# a package name because it does not know that option takes an argument.
+# hadolint ignore=DL3008
 RUN apt-get -o Acquire::Retries=3 update --snapshot "${UBUNTU_SNAPSHOT}" \
  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends --snapshot "${UBUNTU_SNAPSHOT}" \
       xvfb=2:21.1.22-1ubuntu1.2 \

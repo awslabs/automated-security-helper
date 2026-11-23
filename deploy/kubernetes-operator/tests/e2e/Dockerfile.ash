@@ -63,6 +63,10 @@ COPY --from=build /wheels /wheels
 # The ASH wheel goes in with --no-deps --no-index, so it can add nothing the hashed
 # files did not, and `pip check` proves those files are its whole dependency closure
 # and bandit's.
+# DL4006 (set -o pipefail before a RUN with a pipe): the one pipe is `find | wc -l` inside
+# a command substitution, and `test` compares the count to 1, so a find that fails
+# produces a count that is not 1 and the step stops; a pipefail SHELL would add nothing.
+# hadolint ignore=DL4006
 RUN pip install --no-cache-dir --require-hashes \
         -r /locks/ash-runtime.txt -r /locks/scanner-requirements.txt \
     && test "$(find /wheels -name 'automated_security_helper-*.whl' | wc -l)" -eq 1 \

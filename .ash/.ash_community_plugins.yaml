@@ -30,6 +30,70 @@ global_settings:
         secret, generated per run with secrets.choice, into the test's temporary
         fixture tree so trivy's secret scanner has something to find. Nothing reads
         a real credentials file.
+    # === GuardDog false positives from the v4 branch's new code (line-pinned) ===
+    # Each is pinned to the one line GuardDog reports, read on the line before being
+    # listed, so a real finding elsewhere in the file is still reported. The reasons
+    # describe the pattern rather than quote it, so this file does not flag itself.
+    - rule_id: "threat-filesystem-read"
+      path: "automated_security_helper/cli/dependencies.py"
+      line_start: 831
+      line_end: 831
+      reason: >-
+        False positive. The line is part of a docstring that names the settings files a
+        package manager would read from the current directory (an npm settings file, a
+        gem Gemfile). It describes why commands start in an empty directory; nothing opens
+        one of those files.
+    - rule_id: "threat-filesystem-read"
+      path: "packaging/assert-package-payload.py"
+      line_start: 1104
+      line_end: 1104
+      reason: >-
+        False positive. The line is a probe member whose link target is a system password
+        database path, built so the payload checker must refuse a link that leaves the
+        artifact. The checker's tests read no such file; the path is data handed to the
+        function under test.
+    - rule_id: "threat-filesystem-read"
+      path: "packaging/assert-package-payload.py"
+      line_start: 1489
+      line_end: 1489
+      reason: >-
+        False positive. The line is a test-case member name that climbs out of the payload
+        root toward a system password database path, to check the payload checker refuses
+        it. The path is data handed to the function under test; nothing opens it.
+    - rule_id: "threat-filesystem-read"
+      path: "packaging/assert-package-payload.py"
+      line_start: 1507
+      line_end: 1507
+      reason: >-
+        False positive. The line is a test-case description for a wrapper replaced by a
+        symlink to a system password database path, to check the payload checker refuses
+        it. It is a label string; nothing opens that path.
+    - rule_id: "threat-filesystem-destruction"
+      path: "deploy/kubernetes-operator/tests/test_contract.py"
+      line_start: 94
+      line_end: 94
+      reason: >-
+        False positive. The line lists strings that look like shell commands, such as a
+        recursive delete after a semicolon, as arguments the contract's path guard must
+        refuse. They are test inputs; nothing on the shard path runs them as a shell.
+    - rule_id: "threat-network-exfiltration"
+      path: "deploy/kubernetes-operator/tests/test_auth.py"
+      line_start: 50
+      line_end: 50
+      reason: >-
+        False positive. The line asserts the server URL built from a made-up IPv4 host that
+        the test passes in its environment mapping. The test makes no connection.
+    # === The operator e2e's planted SNS topic: trivy-repo (line-pinned) ===
+    # The same two lines the cdk-nag, cfn-nag and checkov entries in .ash/.ash.yaml cover.
+    - rule_id: "AWS-0095"
+      path: "deploy/kubernetes-operator/tests/e2e/fixtures/dirty/template.yaml"
+      line_start: 7
+      line_end: 8
+      reason: >-
+        The fixture's one resource is an SNS topic with no KmsMasterKeyId, planted so the
+        operator e2e has in-scope work for the CloudFormation scanners. It is copied into
+        the e2e cluster as scan input only; nothing is deployed from it. Pinned to the
+        resource's two lines so a second resource added to the file still reports.
     # === Product code and documents: pinned or scoped to the file ===
     - rule_id: B104
       path: automated_security_helper/cli/mcp/__init__.py

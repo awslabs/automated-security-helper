@@ -4290,6 +4290,63 @@ global_settings:
         would require EKS, STS and S3 endpoints or a NAT gateway for a function that
         runs once per stack operation. The template Rule refuses a half-supplied VPC
         config.
+    # === the operator e2e's planted SNS topic: the other scanners that read it ===
+    #
+    # tests/e2e/fixtures/dirty/template.yaml holds one SNS topic with no KmsMasterKeyId
+    # and no publisher TLS policy, on purpose (see the CKV_AWS_26 entry above for why
+    # the fixture exists). checkov was the only scanner its entry covered. cdk-nag
+    # (five rules), cfn-nag (one) and, in the community config, trivy-repo read the
+    # same two lines. Each entry is pinned to the resource's two lines, as the checkov
+    # one is, so a second resource added to the file still reports.
+    - rule_id: AwsSolutions-SNS3
+      path: deploy/kubernetes-operator/tests/e2e/fixtures/dirty/template.yaml
+      line_start: 7
+      line_end: 8
+      reason: >-
+        The fixture's one resource is an SNS topic with no publisher TLS policy, planted so
+        the operator e2e has in-scope work for the CloudFormation scanners. It is copied
+        into the e2e cluster as scan input only; nothing is deployed from it.
+    - rule_id: HIPAA.Security-SNSEncryptedKMS
+      path: deploy/kubernetes-operator/tests/e2e/fixtures/dirty/template.yaml
+      line_start: 7
+      line_end: 8
+      reason: >-
+        The fixture's one resource is an SNS topic with no KmsMasterKeyId, planted so the
+        operator e2e has in-scope work for the CloudFormation scanners. It is copied into
+        the e2e cluster as scan input only; nothing is deployed from it.
+    - rule_id: NIST.800.53.R4-SNSEncryptedKMS
+      path: deploy/kubernetes-operator/tests/e2e/fixtures/dirty/template.yaml
+      line_start: 7
+      line_end: 8
+      reason: >-
+        The fixture's one resource is an SNS topic with no KmsMasterKeyId, planted so the
+        operator e2e has in-scope work for the CloudFormation scanners. It is copied into
+        the e2e cluster as scan input only; nothing is deployed from it.
+    - rule_id: NIST.800.53.R5-SNSEncryptedKMS
+      path: deploy/kubernetes-operator/tests/e2e/fixtures/dirty/template.yaml
+      line_start: 7
+      line_end: 8
+      reason: >-
+        The fixture's one resource is an SNS topic with no KmsMasterKeyId, planted so the
+        operator e2e has in-scope work for the CloudFormation scanners. It is copied into
+        the e2e cluster as scan input only; nothing is deployed from it.
+    - rule_id: PCI.DSS.321-SNSEncryptedKMS
+      path: deploy/kubernetes-operator/tests/e2e/fixtures/dirty/template.yaml
+      line_start: 7
+      line_end: 8
+      reason: >-
+        The fixture's one resource is an SNS topic with no KmsMasterKeyId, planted so the
+        operator e2e has in-scope work for the CloudFormation scanners. It is copied into
+        the e2e cluster as scan input only; nothing is deployed from it.
+    - rule_id: CFN_NAG_W47
+      path: deploy/kubernetes-operator/tests/e2e/fixtures/dirty/template.yaml
+      line_start: 7
+      line_end: 8
+      reason: >-
+        The fixture's one resource is an SNS topic with no KmsMasterKeyId, planted so the
+        operator e2e has in-scope work for the CloudFormation scanners (the partial-scan
+        case would otherwise read SKIPPED instead of MISSING). It is copied into the e2e
+        cluster as scan input only; nothing is deployed from it.
   ignore_paths:
     - path: "**/.venv/**"
       reason: Virtual environment, not committed, only 3p content

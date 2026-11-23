@@ -51,6 +51,10 @@ COPY --from=build /wheels /wheels
 # proves the Python landed; the operator reads the entrypoint scripts off disk to build
 # each run's ConfigMap, so a packaging change that dropped them would produce a
 # controller that starts cleanly and then creates Jobs with no command to run.
+# DL4006 (set -o pipefail before a RUN with a pipe): the one pipe is `find | wc -l` inside
+# a command substitution, and `test` compares the count to 1, so a find that fails
+# produces a count that is not 1 and the step stops; a pipefail SHELL would add nothing.
+# hadolint ignore=DL4006
 RUN pip install --no-cache-dir --require-hashes -r requirements.txt \
     && test "$(find /wheels -name 'ash_kubernetes_operator-*.whl' | wc -l)" -eq 1 \
     && pip install --no-cache-dir --no-deps --no-index /wheels/ash_kubernetes_operator-*.whl \
