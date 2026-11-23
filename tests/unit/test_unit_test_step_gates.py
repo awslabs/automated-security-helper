@@ -21,7 +21,8 @@ This file holds both sides:
   ``uv`` replaced by a function that prints its arguments, so the argument list pinned
   is the one the shell builds and not a substring of the YAML.
 * The 80% threshold is not the step's. It is passed by the ``unit-coverage`` job in
-  ``ash-unified-ci.yml`` to ``combine-unit-coverage.py``, and in no config file, since
+  ``ash-unified-ci.yml`` to ``combine-unit-coverage.py``, once, over the data of every
+  unit leg, and in no config file, since
   in ``addopts`` it failed every run of one directory or one test on total coverage.
   The unit run's own pytest arguments are run here against a planted test and the gate
   is run on the data it leaves, so the threshold is shown to fail a run below it rather
@@ -74,23 +75,10 @@ CI_COVERAGE_THRESHOLD = 80
 TIERS = ("unit", "integration", "e2e")
 
 
-def _gated_python() -> str:
-    job = yaml.safe_load(UNIFIED_CI.read_text(encoding="utf-8"))["jobs"][
-        "unit-coverage"
-    ]
-    patterns = [
-        str(s["with"]["pattern"])
-        for s in job["steps"]
-        if "actions/download-artifact" in str(s.get("uses", ""))
-    ]
-    assert len(patterns) == 1, job["steps"]
-    found = re.search(r"-py(3\.\d+)-unit-shard", patterns[0])
-    assert found, patterns[0]
-    return found.group(1)
-
-
-#: The Python whose unit legs the unit-coverage job downloads and gates.
-GATED_PYTHON = _gated_python()
+#: Every Python of the unit matrix measures coverage; these two get the sys.monitoring core
+#: (it exists from 3.12 and coverage.py makes it the default only from 3.14).
+SYSMON_PYTHONS = ("3.12", "3.13")
+UNIT_PYTHONS = ("3.10", "3.11", "3.12", "3.13", "3.14")
 
 _REQUIRES_BASH = pytest.mark.skipif(
     os.name == "nt" or shutil.which("bash") is None,
@@ -428,10 +416,9 @@ class TestTheThresholdBelongsToTheUnitCoverageJob:
     def test_the_unit_run_keeps_its_coverage_data_for_the_upload(self):
         step = _step("Keep the unit run's coverage data")
         condition = " ".join(str(step["if"]).split())
-        assert condition == (
-            "(success() || failure()) && inputs.marker == 'unit' && "
-            f"inputs.python-version == '{GATED_PYTHON}'"
-        ), condition
+        assert condition == ("(success() || failure()) && inputs.marker == 'unit'"), (
+            "every unit leg keeps its data, whatever its Python version"
+        )
         assert "cp .coverage test-results/coverage.data" in str(step["run"])
         assert "coverage.data" in COMBINE_SCRIPT.read_text(encoding="utf-8")
 
@@ -439,20 +426,40 @@ class TestTheThresholdBelongsToTheUnitCoverageJob:
         binding = _step("Run PyTest")["env"].get("PYTHON_VERSION")
         assert binding == "${{ inputs.python-version }}", binding
 
-    def test_the_action_names_only_the_python_the_gate_reads(self):
+    def test_the_action_selects_no_unit_leg_by_python_for_coverage(self):
+        """Coverage is on for every unit leg; only the tracer core depends on the Python."""
         text = RUN_UNIT_TESTS.read_text(encoding="utf-8")
-        named = set(re.findall(r"python-version == '(3\.\d+)'", text))
-        named |= set(re.findall(r'PYTHON_VERSION}?"? = "(3\.\d+)"', text))
-        assert named == {GATED_PYTHON}, named
+        assert "inputs.python-version == '3.12' && runner.arch" in text, (
+            "the one-shard summary table keeps its own 3.12 selection"
+        )
+        step = _step("Keep the unit run's coverage data")
+        assert "python-version" not in str(step["if"])
+        run = str(_step("Run PyTest")["run"])
+        assert '"$PYTHON_VERSION" = "3.12"' not in run
 
-    def test_coveragerc_keeps_sysmon_usable_on_the_gated_python(self):
+    def test_coveragerc_keeps_sysmon_usable_on_the_python_that_uses_it(self):
         parser = configparser.ConfigParser()
         assert parser.read(COVERAGERC, encoding="utf-8"), f"could not read {COVERAGERC}"
         for option in ("branch", "concurrency", "dynamic_context"):
             assert not parser.has_option("run", option), (
                 f".coveragerc sets [run] {option}, so coverage on Python "
-                f"{GATED_PYTHON} falls back from COVERAGE_CORE=sysmon to the slower tracer"
+                f"{SYSMON_PYTHONS} falls back from COVERAGE_CORE=sysmon to the slower tracer"
             )
+
+    def test_coveragerc_folds_every_operating_systems_source_path_into_the_checkout(
+        self,
+    ):
+        """What lets `coverage combine` read the Linux, macOS and Windows legs as one."""
+        parser = configparser.ConfigParser()
+        assert parser.read(COVERAGERC, encoding="utf-8"), f"could not read {COVERAGERC}"
+        aliases = [
+            line.strip()
+            for line in parser.get("paths", "source").splitlines()
+            if line.strip()
+        ]
+        assert aliases[0] == "automated_security_helper/", aliases
+        assert "*/automated_security_helper/" in aliases, aliases
+        assert "*\\automated_security_helper\\" in aliases, aliases
 
 
 @pytest.mark.integration
@@ -503,27 +510,21 @@ class TestTheStepBuildsTheRightArgumentsForEachTier:
         ]
         assert not positional, argv
 
-    def test_the_gated_unit_leg_measures_the_package_with_sysmon(self):
-        argv, core = _pytest_run("unit", PYTHON_VERSION=GATED_PYTHON)
+    @pytest.mark.parametrize("python", UNIT_PYTHONS)
+    def test_every_unit_leg_measures_the_package_and_gates_nothing(self, python):
+        argv, core = _pytest_run("unit", PYTHON_VERSION=python)
         assert "--cov=automated_security_helper" in argv, argv
         assert "--cov-config=.coveragerc" in argv, argv
         assert "--cov-report=" in argv, "a report here would print what the gate reads"
         assert not [a for a in argv if a.startswith("--cov-fail-under")], argv
         assert "--no-cov" not in argv, argv
         assert "--run-integration" not in argv and "--run-slow" not in argv, argv
-        assert core == "sysmon", core
-
-    @pytest.mark.parametrize("python", ["3.10", "3.11", "3.13", "3.14", ""])
-    def test_other_unit_legs_measure_no_coverage(self, python):
-        argv, core = _pytest_run("unit", PYTHON_VERSION=python)
-        assert "--no-cov" in argv, argv
-        assert not [a for a in argv if a.startswith("--cov") and a != "--no-cov"], argv
-        assert "--run-integration" not in argv and "--run-slow" not in argv, argv
-        assert core == "", core
+        assert core == ("sysmon" if python in SYSMON_PYTHONS else ""), (python, core)
 
     @pytest.mark.parametrize("marker", ["integration", "e2e"])
-    def test_the_other_tiers_never_get_sysmon(self, marker):
-        assert _pytest_run(marker, PYTHON_VERSION=GATED_PYTHON)[1] == ""
+    @pytest.mark.parametrize("python", UNIT_PYTHONS)
+    def test_the_other_tiers_never_get_sysmon(self, marker, python):
+        assert _pytest_run(marker, PYTHON_VERSION=python)[1] == ""
 
     @pytest.mark.parametrize("marker", ["integration", "e2e"])
     def test_the_other_tiers_run_the_gated_tests_and_measure_no_coverage(self, marker):
@@ -624,7 +625,7 @@ class TestTheGateFailsAUnitRunBelowTheThreshold:
                 sys.executable,
                 "-m",
                 "pytest",
-                *_pytest_argv("unit", PYTHON_VERSION=GATED_PYTHON),
+                *_pytest_argv("unit", PYTHON_VERSION="3.12"),
                 str(planted),
                 "-c",
                 str(tmp_path / "pytest.ini"),

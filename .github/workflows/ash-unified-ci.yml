@@ -30,17 +30,17 @@ on:
   #
   # WHAT THIS COSTS, AND WHAT WAS REJECTED
   #
-  # Sized off a count rather than a guess: this workflow expands to 458 jobs on a push
-  # to main, 456 on a merge-queue run, where warm-image-layers does not run, and 202 on a
+  # Sized off a count rather than a guess: this workflow expands to 455 jobs on a push
+  # to main, 453 on a merge-queue run, where warm-image-layers does not run, and 201 on a
   # pull request, where the matrices run the pull-request cover (the note on ensure-cache),
   # and ash-iac-drift.yml to 6, so a queued merge that also pushes to main is
-  # ~926 runner jobs instead of ~462. The duplicate result on a queued merge is the
+  # ~920 runner jobs instead of ~459. The duplicate result on a queued merge is the
   # price of covering the bypassed one, and it was accepted deliberately. With
   # install-validation's five cheap install methods each as its own leg -- 4 methods x
   # 25 cells + uvx x 5 OS = 105 legs in place of the 25 bundled cells (uvx ran on 3.12
-  # only), 80 more legs on each of the two runs -- it would be ~1086 against ~542, so
+  # only), 80 more legs on each of the two runs -- it would be ~1080 against ~539, so
   # running them as one leg per combination cuts a large share of what this deliberate
-  # duplication costs. Most of the 458 is the
+  # duplication costs. Most of the 455 is the
   # unit-test and integration-test families, which are 360 legs since the suite was split
   # by tier and the slow pools took eight shards: the unit tier is 180 legs (2 Linux
   # images x 5 Python versions x 6 shards, plus 2 macOS images and 1 Windows image x 5 x
@@ -56,7 +56,7 @@ on:
   # longest pull-request leg near the ~10.5-minute floor the longest scan leg sets. Each
   # integration shard
   # repeats the checkout and dependency install, so the job
-  # count rises faster than the test time does. The 458-job push figure is
+  # count rises faster than the test time does. The 455-job push figure is
   # derived from a census rather than being one -- see the note on the required-checks job for
   # which link in that chain was actually measured, and
   # tests/unit/test_unified_ci_job_counts.py, which recounts both figures from the
@@ -452,8 +452,9 @@ jobs:
         # On a pull_request event the `exclude` entries below evaluate to the saturated
         # runner images and drop them from this job; on every other event (push to main,
         # merge_group, workflow_dispatch) each entry evaluates to '' and matches no
-        # combination, so the full matrix above runs unchanged. The same overlay sits on the nine tier jobs,
-        # on unit-coverage and on install-validation, each naming this note. The static axes
+        # combination, so the full matrix above runs unchanged. The same overlay sits on the nine tier jobs
+        # and on install-validation, each naming this note, and unit-coverage carries it as the
+        # two lists in its combine step's env, which name the sets the tier ran. The static axes
         # stay the truth the tests read; tests/unit/test_unified_ci_job_counts.py expands
         # the overlay for both events and holds the comments to both figures.
         #
@@ -477,24 +478,25 @@ jobs:
         # macOS job asks for, and on the first pull-request run of the cover (2026-10-29) the
         # seven jobs still queued after 66 minutes were all macos-latest legs, while macOS 14
         # had read a median queue of 1982 s against macos-latest's 5022 s in run 40939758029.
-        # The cost is one gate: unit-coverage's axis names macos-latest and no pinned image,
-        # so a pull request runs no macOS coverage gate; the merge_group entry and the push
-        # to main run it. GitHub retires pinned images, and when macos-15 goes the five
-        # `exclude` entries below that name macos-latest (the three macOS tier jobs,
-        # unit-coverage and install-validation) flip back to it, one value each;
+        # The coverage gate takes whichever images the unit tier ran: the job's two env
+        # lists name macos-15 and not macos-latest on a pull request, so the gate there reads
+        # the macOS data of macos-15, and the merge_group entry and the push to main read
+        # both. GitHub retires pinned images, and when macos-15 goes the four
+        # `exclude` entries below that name macos-latest (the three macOS tier jobs
+        # and install-validation) and the unit-coverage env lists flip back to it, one value each;
         # tests/unit/test_unified_ci_job_counts.py pins which image the cover keeps, so the
         # flip is one list there too.
         #
         # What a pull request stops running, and where it still runs: the ubuntu-latest (x86_64)
         # legs of the unit, integration and e2e tiers and of the install bundle, the macos-latest
-        # legs, and Python 3.11 and 3.13 everywhere (3.12 stays because unit-coverage gates it
-        # and the pre-commit hooks run on it). All of it runs on the merge_group entry that
+        # legs, and Python 3.11 and 3.13 everywhere (3.12 stays because the pre-commit hooks
+        # run on it). All of it runs on the merge_group entry that
         # gates main and on the push to main, so nothing merges without the full matrix; a
         # pull request shows one Linux (arm64), one macOS and one Windows leg per tier on the
         # lowest, the gated and the highest Python. It runs no x86_64 Linux leg of any tier,
         # no Linux or macOS pre-commit hook run (the bundle's hook step keys on ubuntu-latest
-        # and macos-latest) and no x86_64 Linux or macOS unit-coverage gate; those are the
-        # merge-queue entry's and the push's. The container-runtime legs (docker, podman, finch, nerdctl)
+        # and macos-latest) and no x86_64 Linux or macos-latest coverage data in the combined
+        # unit-coverage figure; those are the merge-queue entry's and the push's. The container-runtime legs (docker, podman, finch, nerdctl)
         # and the sandbox legs are x86_64-only or runtime-specific and are not thinned.
         #
         # If GitHub ever stopped evaluating expressions inside `exclude`, the literal string
@@ -772,8 +774,8 @@ jobs:
   # rejects a matrix of more than 256 jobs; the largest matrix here is 80 legs, and
   # test_unified_ci_job_counts.py fails before the workflow does.
   #
-  # The 80% total-coverage gate is the `unit-coverage` job's, once per OS family on the
-  # unit tier's data. The base gated the coverage of the whole suite; this gates the unit
+  # The 80% total-coverage gate is the `unit-coverage` job's, once, on the combined data of
+  # every unit leg. The base gated the coverage of the whole suite; this gates the unit
   # tier alone, and the integration and e2e tiers measure no coverage. The 95% core target
   # and a coverage configuration per tier are separate follow-up work, not part of this
   # split.
@@ -946,8 +948,8 @@ jobs:
     # unit-test-linux). The Linux and macOS pools were left unsharded at first and took
     # the shard axis later, on the 37.9 and 45 minute legs of run 43285884861.
     #
-    # Coverage is unaffected: the unit-coverage job downloads the Python 3.12 unit
-    # artifacts of an OS family by a `unit-shard*` pattern and refuses a set with a shard
+    # Coverage is unaffected: the unit-coverage job downloads the unit artifacts of every
+    # OS and Python version by a `unit-shard*` pattern and refuses a set with a shard
     # missing, so this pool's eight artifacts are combined whole.
     timeout-minutes: 90
     permissions:
@@ -987,37 +989,37 @@ jobs:
           marker: unit
           shard: ${{ matrix.shard }}
 
-  # Applies the 80% total-coverage gate to the unit tier's coverage, once per OS family.
+  # Applies the 80% total-coverage gate once, to the coverage of every unit leg combined.
   #
-  # Each leg combines the unit artifacts of one runner type on Python 3.12 (the
-  # `shard<i>of<n>` artifacts of its pool -- six on Linux, eight on macOS and Windows --
-  # or one `shard1of1` artifact, the complete set
-  # of one an unsharded run uploads; the combine script
-  # checks that the set is complete and refuses a partial one) and fails below 80%. The gate applies to the UNIT tier only: the
+  # Every leg of the unit tier -- every OS image, every Python version, every shard --
+  # measures coverage and uploads its data with its test results. This job downloads all of
+  # them (the `shard<i>of<n>` artifacts of each pool -- six on Linux, eight on macOS and
+  # Windows -- or one `shard1of1` artifact, the complete set of one an unsharded run
+  # uploads), combines them into one data file, and fails below 80% on that one figure. The
+  # combine script checks that every expected OS and Python set is there and whole and
+  # refuses a partial one: the expected sets are the unit tier's matrix for the event (see
+  # the two lists in the job's env). The gate applies to the UNIT tier only: the
   # base gated the coverage of the whole suite, and the integration and e2e tiers measure
   # no coverage. The 95% core target and a coverage configuration per tier are follow-up
-  # work, not part of this change. The gate is kept for each OS family at one Python
-  # version, which is where the platform specific code paths differ. The other Python
-  # versions' unit coverage is measured and uploaded by their legs and gated nowhere.
+  # work, not part of this change.
   #
   # WHY A COMBINE JOB. With the unit tier unsharded, each leg could apply
-  # `--cov-fail-under` itself and this job could be dropped (four small jobs, one
-  # artifact round trip and the `--marker` plumbing). It stays for two reasons, and the
-  # first one has already paid off twice: the threshold lives in one place that does not
-  # care whether the tier is sharded, so cutting the unit tier into four shards changed
-  # no gate, and unsharding it again changed none either (this combine is the only place
-  # the number can be read). And the run-unit-tests action gates nothing, whatever tier
-  # it runs, which keeps "tests failed" and "coverage fell" two separate signals: this
-  # job runs under `!cancelled()` and reports the coverage even when a test failed. The
-  # cost is the extra jobs and the table the action renders on its ubuntu-latest,
-  # Python 3.12 leg (the same data; this job's table is the gate's).
+  # `--cov-fail-under` itself and this job could be dropped. No leg of a sharded tier can
+  # meet the threshold alone, and the figure that matters is the union of what every OS
+  # and Python version ran, so the threshold lives in one place that does not care whether
+  # the tier is sharded (this combine is the only place the number can be read). And the
+  # run-unit-tests action gates nothing, whatever tier it runs, which keeps "tests failed"
+  # and "coverage fell" two separate signals: this job runs under `!cancelled()` and
+  # reports the coverage even when a test failed. The cost is this job and the table the
+  # action renders on its ubuntu-latest, Python 3.12 leg (one shard's data; this job's
+  # table is the gate's).
   #
-  # Each leg runs on the same kind of runner as the runs it combines. Coverage data
-  # records absolute source paths, and a runner of one image has one workspace path
+  # Coverage data records absolute source paths of the runner that wrote it
   # (/home/runner/work/... on Linux, /Users/runner/work/... on macOS, D:\a\... on Windows),
-  # so the combine finds every source file where the shard recorded it and no path
-  # remapping is needed. Combining across operating systems would need it, and is not done.
-  # A path that did not match would fail `coverage report` with "No source for code".
+  # so the job runs on one Linux image and the `[paths]` section of .coveragerc folds all
+  # three layouts into the checkout's own automated_security_helper/ during the combine.
+  # Without it one file would be counted once per operating system. A path that matched no
+  # alias would fail `coverage report` with "No source for code", not pass.
   #
   # `!cancelled()` and not the default `success()`: when a shard fails on a test, its
   # coverage data is still uploaded, and this job should still say whether the combination
@@ -1025,27 +1027,17 @@ jobs:
   # to gate. tests/unit/test_required_checks_census.py requires every gated job with
   # `needs` to carry one of the two.
   unit-coverage:
-    name: "unit-coverage (${{ matrix.os }})"
+    name: unit-coverage
     needs: [unit-test-linux, unit-test-macos, unit-test-windows]
     if: ${{ !cancelled() }}
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
+    # The arm64 image, not ubuntu-latest: the pull-request cover (the note on ensure-cache)
+    # keeps pull requests off the saturated hosted label, and this job only runs coverage.py.
+    runs-on: ubuntu-24.04-arm
+    # About 180 artifacts to download on a push (60 Linux, 80 macOS, 40 Windows shards) and
+    # a third of that on a pull request, then a combine of that many sqlite files.
+    timeout-minutes: 25
     permissions:
       contents: read
-    strategy:
-      fail-fast: false
-      # run all four coverage jobs at once, one per OS family
-      max-parallel: 4
-      matrix:
-        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, windows-latest]
-        # The pull-request cover (the note on ensure-cache): the unit tier runs no
-        # ubuntu-latest and no macos-latest leg on a pull request (its macOS legs run on
-        # macos-15, which this axis does not name), so there is no x86_64 Linux and no
-        # macOS coverage data to combine there; both legs drop out on a pull_request event
-        # only, and the merge_group entry and the push to main run all four.
-        exclude:
-          - os: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || '' }}
-          - os: ${{ github.event_name == 'pull_request' && 'macos-latest' || '' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -1058,24 +1050,30 @@ jobs:
       - name: Install dependencies
         shell: bash
         run: uv sync
-      # The architecture label sits between the OS and the Python version in the artifact
-      # name and is derived by the runner, so the pattern leaves it as a wildcard; the
-      # script rebuilds the exact name from RUNNER_ARCH and checks the shards against it.
-      - name: Download this OS's Python 3.12 unit results
+      # Every unit artifact of every OS, architecture and Python version; the integration
+      # and e2e tiers' names carry another tier segment and do not match. More than one
+      # artifact matches, so each lands in a directory named after it.
+      - name: Download the unit results of every leg
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          pattern: test-results-${{ matrix.os }}-*-py3.12-unit-shard*
+          pattern: test-results-*-py*-unit-shard*
           path: shard-results
+      # The sets the unit tier runs on this event, which the combine requires whole: the
+      # static axes of the three unit-test jobs, less the pull-request cover (the note on
+      # ensure-cache), which drops ubuntu-latest and macos-latest and Python 3.11 and
+      # 3.13 on a pull_request event only. tests/unit/test_unified_ci_job_counts.py holds
+      # both lists to the unit-test jobs' own matrices for every event.
       - name: Combine the unit tier's coverage and apply the threshold
         shell: bash
         env:
-          MATRIX_OS: ${{ matrix.os }}
+          UNIT_OS: ${{ github.event_name == 'pull_request' && 'ubuntu-24.04-arm macos-15 windows-latest' || 'ubuntu-latest ubuntu-24.04-arm macos-latest macos-15 windows-latest' }}
+          UNIT_PYTHON: ${{ github.event_name == 'pull_request' && '3.10 3.12 3.14' || '3.10 3.11 3.12 3.13 3.14' }}
         run: |
           uv run python .github/scripts/combine-unit-coverage.py --self-test
           uv run python .github/scripts/combine-unit-coverage.py \
             --results-dir shard-results \
-            --os "${MATRIX_OS}" \
-            --python-version 3.12 \
+            --os "${UNIT_OS}" \
+            --python-version "${UNIT_PYTHON}" \
             --marker unit \
             --fail-under 80 \
             --summary "$GITHUB_STEP_SUMMARY"
@@ -3078,8 +3076,8 @@ jobs:
   # One check name that can actually be required
   # ---------------------------------------------------------------------------
   #
-  # Most jobs above name themselves from their matrix, so this workflow contributes 337 check
-  # runs to a pull request (821 to a merge-queue run, which runs the full matrices) and few of
+  # Most jobs above name themselves from their matrix, so this workflow contributes 336 check
+  # runs to a pull request (818 to a merge-queue run, which runs the full matrices) and few of
   # their names are stable. A ruleset's
   # required_status_checks list holds literal context strings with no wildcard, so requiring
   # `unit-test` and the integration and e2e families means enumerating all 365 of their names -- and then any matrix edit either orphans
@@ -3089,16 +3087,16 @@ jobs:
   # moves with the trigger set, as the 186 below explains.
   #
   # Those two numbers count different populations, which is how the previous pair of them went
-  # stale unnoticed. The 186 was measured on pull request 599, the 821 is derived
+  # stale unnoticed. The 186 was measured on pull request 599, the 818 is derived
   # below, and both are re-derivable:
   #
   #   gh api repos/<owner>/<repo>/actions/runs/<run>/jobs --paginate --jq '.jobs[].name'
   #   gh api repos/<owner>/<repo>/commits/<sha>/check-runs --paginate --jq '.check_runs[].name'
   #
-  # 337 is this workflow's own contribution to a pull request: the 202 jobs that run there,
+  # 336 is this workflow's own contribution to a pull request: the 201 jobs that run there,
   # plus the 135 `PyTest - ...` check runs that mikepenz/action-junit-report publishes from
   # inside the unit, integration and e2e legs -- one per leg. A merge-queue run, which runs
-  # the full matrices, is 821: the 456 jobs that run there plus 365 check runs.
+  # the full matrices, is 818: the 453 jobs that run there plus 365 check runs.
   # warm-image-layers runs only on a push to main and is in neither; whether GitHub still
   # lists it as skipped on a pull request was not checked. The check runs are not jobs and
   # land in a separate check suite, so a job census alone undercounts what this file puts on
@@ -3155,15 +3153,18 @@ jobs:
   # scan caps moved so a pull request starts everything in one wave: 457 on a push, 455
   # on a merge-queue run, and 202 on a pull request. Then ensure-cache gained the
   # ubuntu-24.04 image the finch legs run on (+1): 458 on a push, 456 on a merge-queue
-  # run, and 202 on a pull request, which does not run that leg.
+  # run, and 202 on a pull request, which does not run that leg. Then the unit-coverage job
+  # stopped being one leg per OS family (4 on a push, 2 on a pull request) and became one
+  # job that combines the coverage of every unit leg (-3, -1): 455 on a push, 453 on a
+  # merge-queue run, and 201 on a pull request.
   # tests/unit/test_unified_ci_job_counts.py recounts the list below from the matrices, so
   # these figures can drift from GitHub's census but not from this file. The 365 `PyTest - ...`
   # runs are derived from the leg count of the unit, integration and e2e jobs by the
   # one-per-leg rule #602 measured at 20 legs, not counted again, and the collapse does not
   # touch them.
   #
-  # Where 458 comes from, per job, on a push to main: lint 1, ensure-cache 6, actionlint 1,
-  # snapshot-trailers 1, unit-test 180, unit-coverage 4,
+  # Where 455 comes from, per job, on a push to main: lint 1, ensure-cache 6, actionlint 1,
+  # snapshot-trailers 1, unit-test 180, unit-coverage 1,
   # integration-test-linux 60, integration-test-macos 80, integration-test-windows 40,
   # e2e-test-linux 2, e2e-test-macos 2, e2e-test-windows 1, e2e-express 2, warm-image-layers 2,
   # scan-validation 24, non-root-image-permissions 1, external-target-scan 2, sandbox 2,
@@ -3171,9 +3172,9 @@ jobs:
   # integration-test 4, docs-examples 1, build-docs 1, converter-integration 2, install-validation 32, homebrew-macos 1,
   # required-checks 1.
   #
-  # Where 202 comes from, per job, on a pull request (the pull-request cover, the note on
+  # Where 201 comes from, per job, on a pull request (the pull-request cover, the note on
   # ensure-cache): lint 1, ensure-cache 2, actionlint 1, snapshot-trailers 1, unit-test 66,
-  # unit-coverage 2, integration-test-linux 18, integration-test-macos 24,
+  # unit-coverage 1, integration-test-linux 18, integration-test-macos 24,
   # integration-test-windows 24, e2e-test-linux 1, e2e-test-macos 1, e2e-test-windows 1,
   # e2e-express 2,
   # scan-validation 24, non-root-image-permissions 1, external-target-scan 2, sandbox 2,
@@ -3226,7 +3227,7 @@ jobs:
   # job for integration-test, 80 fewer for the install-validation collapse, one more for
   # snapshot-trailers and one more for homebrew-macos, so a comparable CI-plumbing commit would
   # see 139 rather than 186. That 139 predates the tier split and the jobs added after
-  # it; the 821 above is the current merge-queue figure and 337 the pull-request one. That
+  # it; the 818 above is the current merge-queue figure and 336 the pull-request one. That
   # is arithmetic on a measured baseline,
   # not a count anyone has taken, and it is why the 186 keeps its own commit's name.
   #
