@@ -17,6 +17,7 @@ from rich.highlighter import JSONHighlighter
 from rich.markdown import Markdown
 
 from automated_security_helper.base.plugin_config import plugin_config_key
+from automated_security_helper.cli.params import ColorOption
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.base.reporter_plugin import (
     off_host_reporter_refused,
@@ -724,21 +725,7 @@ def report_command(
     debug: Annotated[
         bool, typer.Option("--debug", "-d", help="Enable debug logging")
     ] = False,
-    color: Annotated[
-        bool,
-        # The leading whitespace in "  /-C" is load-bearing. It is how click
-        # disambiguates a short form for the OFF side of a boolean flag. Without
-        # it the decl is taken as a literal option named "/-C" and -C is
-        # rejected with "No such option", silently and at runtime only.
-        #
-        # -C rather than -c because -c is --config on most of these commands.
-        # The deleted root bash script used -c for --no-color, so an old
-        # invocation consumes the next argument as a config path; see
-        # docs/content/docs/cli-reference.md.
-        typer.Option(
-            "--color/--no-color", "  /-C", help="Enable/disable colorized output"
-        ),
-    ] = True,
+    color: ColorOption = True,
 ):
     """Generate a report from ASH scan results using the specified reporter plugin."""
     if config_overrides is None:

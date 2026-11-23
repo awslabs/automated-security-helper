@@ -39,7 +39,7 @@ from automated_security_helper.base.scanner_plugin import (
     plugin_explains_its_own_refusal,
     plugin_missing_dependency_reason,
 )
-from automated_security_helper.cli.params import from_environment
+from automated_security_helper.cli.params import ColorOption, from_environment
 from automated_security_helper.config.named_config import (
     refuse_a_named_config_that_does_not_exist,
 )
@@ -1076,21 +1076,7 @@ def install_dependencies(
     debug: Annotated[
         bool, typer.Option("--debug", "-d", help="Enable debug logging")
     ] = False,
-    color: Annotated[
-        bool,
-        # The leading whitespace in "  /-C" is load-bearing. It is how click
-        # disambiguates a short form for the OFF side of a boolean flag. Without
-        # it the decl is taken as a literal option named "/-C" and -C is
-        # rejected with "No such option", silently and at runtime only.
-        #
-        # -C rather than -c because -c is --config on most of these commands.
-        # The deleted root bash script used -c for --no-color, so an old
-        # invocation consumes the next argument as a config path; see
-        # docs/content/docs/cli-reference.md.
-        typer.Option(
-            "--color/--no-color", "  /-C", help="Enable/disable colorized output"
-        ),
-    ] = True,
+    color: ColorOption = True,
 ) -> int:
     """Install dependencies for ASH plugins.
 

@@ -15,6 +15,7 @@ from typer._click.exceptions import UsageError
 
 from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
 from automated_security_helper.cli.deprecations import warn_deprecated_command_alias
+from automated_security_helper.cli.params import color_option
 from automated_security_helper.cli.json_input import (
     CliJsonInputCommand,
     usage_error_text,
@@ -642,14 +643,11 @@ def _mcp_wrapper(
     debug: bool = typer.Option(
         False, "--debug/--no-debug", "-d", help="Enable debug logging"
     ),
-    # "  /-C" with its leading whitespace, matching the other commands: that is
-    # how click attaches a short form to the OFF side of a boolean flag. Written
-    # out here rather than inherited, because this wrapper declares its own
-    # params and delegates to mcp_command by keyword. Flags, default and help
-    # match mcp_command's declaration, which the parity test compares.
-    color: bool = typer.Option(
-        True, "--color/--no-color", "  /-C", help="Enable/disable colorized output"
-    ),
+    # The same shared option definition the other commands use (cli.params), as a
+    # default-style declaration because this wrapper declares its own params and
+    # delegates to mcp_command by keyword. Flags, default and help match
+    # mcp_command's declaration, which the parity test compares.
+    color: bool = color_option(True),
     quiet: bool = typer.Option(False, help="Hide all log output"),
     transport: str = typer.Option(
         "stdio",

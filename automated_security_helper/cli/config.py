@@ -44,6 +44,7 @@ from rich.syntax import Syntax
 from rich.table import Table
 
 from automated_security_helper.cli.json_input import PathRefused
+from automated_security_helper.cli.params import ColorOption
 
 from automated_security_helper.config.ash_config import (
     AshConfig,
@@ -1157,21 +1158,7 @@ def init(
     debug: Annotated[
         bool, typer.Option("--debug", "-d", help="Enable debug logging")
     ] = False,
-    color: Annotated[
-        bool,
-        # The leading whitespace in "  /-C" is load-bearing. It is how click
-        # disambiguates a short form for the OFF side of a boolean flag. Without
-        # it the decl is taken as a literal option named "/-C" and -C is
-        # rejected with "No such option", silently and at runtime only.
-        #
-        # -C rather than -c because -c is --config on most of these commands.
-        # The deleted root bash script used -c for --no-color, so an old
-        # invocation consumes the next argument as a config path; see
-        # docs/content/docs/cli-reference.md.
-        typer.Option(
-            "--color/--no-color", "  /-C", help="Enable/disable colorized output"
-        ),
-    ] = True,
+    color: ColorOption = True,
     force: Annotated[
         bool,
         typer.Option(
@@ -1292,21 +1279,7 @@ def get(
     debug: Annotated[
         bool, typer.Option("--debug/--no-debug", "-d", help="Enable debug logging")
     ] = False,
-    color: Annotated[
-        bool,
-        # The leading whitespace in "  /-C" is load-bearing. It is how click
-        # disambiguates a short form for the OFF side of a boolean flag. Without
-        # it the decl is taken as a literal option named "/-C" and -C is
-        # rejected with "No such option", silently and at runtime only.
-        #
-        # -C rather than -c because -c is --config on most of these commands.
-        # The deleted root bash script used -c for --no-color, so an old
-        # invocation consumes the next argument as a config path; see
-        # docs/content/docs/cli-reference.md.
-        typer.Option(
-            "--color/--no-color", "  /-C", help="Enable/disable colorized output"
-        ),
-    ] = True,
+    color: ColorOption = True,
 ):
     """Print the resolved configuration: the file's settings over the defaults.
 
@@ -1524,21 +1497,7 @@ def update(
     debug: Annotated[
         bool, typer.Option("--debug/--no-debug", "-d", help="Enable debug logging")
     ] = False,
-    color: Annotated[
-        bool,
-        # The leading whitespace in "  /-C" is load-bearing. It is how click
-        # disambiguates a short form for the OFF side of a boolean flag. Without
-        # it the decl is taken as a literal option named "/-C" and -C is
-        # rejected with "No such option", silently and at runtime only.
-        #
-        # -C rather than -c because -c is --config on most of these commands.
-        # The deleted root bash script used -c for --no-color, so an old
-        # invocation consumes the next argument as a config path; see
-        # docs/content/docs/cli-reference.md.
-        typer.Option(
-            "--color/--no-color", "  /-C", help="Enable/disable colorized output"
-        ),
-    ] = True,
+    color: ColorOption = True,
     dry_run: Annotated[
         bool, typer.Option(help="Show changes without writing to file")
     ] = False,
@@ -1827,21 +1786,7 @@ def validate_plugin_dependencies(
     debug: Annotated[
         bool, typer.Option("--debug/--no-debug", "-d", help="Enable debug logging")
     ] = False,
-    color: Annotated[
-        bool,
-        # The leading whitespace in "  /-C" is load-bearing. It is how click
-        # disambiguates a short form for the OFF side of a boolean flag. Without
-        # it the decl is taken as a literal option named "/-C" and -C is
-        # rejected with "No such option", silently and at runtime only.
-        #
-        # -C rather than -c because -c is --config on most of these commands.
-        # The deleted root bash script used -c for --no-color, so an old
-        # invocation consumes the next argument as a config path; see
-        # docs/content/docs/cli-reference.md.
-        typer.Option(
-            "--color/--no-color", "  /-C", help="Enable/disable colorized output"
-        ),
-    ] = True,
+    color: ColorOption = True,
 ):
     """Check that the configuration resolves and names a project.
 
@@ -1979,21 +1924,7 @@ def lint(
     debug: Annotated[
         bool, typer.Option("--debug", "-d", help="Enable debug logging")
     ] = False,
-    color: Annotated[
-        bool,
-        # The leading whitespace in "  /-C" is load-bearing. It is how click
-        # disambiguates a short form for the OFF side of a boolean flag. Without
-        # it the decl is taken as a literal option named "/-C" and -C is
-        # rejected with "No such option", silently and at runtime only.
-        #
-        # -C rather than -c because -c is --config on most of these commands.
-        # The deleted root bash script used -c for --no-color, so an old
-        # invocation consumes the next argument as a config path; see
-        # docs/content/docs/cli-reference.md.
-        typer.Option(
-            "--color/--no-color", "  /-C", help="Enable/disable colorized output"
-        ),
-    ] = True,
+    color: ColorOption = True,
 ):
     """Lint an ASH configuration file for issues and optionally auto-fix them.
 
@@ -2645,21 +2576,7 @@ def wizard(
     debug: Annotated[
         bool, typer.Option("--debug", "-d", help="Enable debug logging")
     ] = False,
-    color: Annotated[
-        bool,
-        # The leading whitespace in "  /-C" is load-bearing. It is how click
-        # disambiguates a short form for the OFF side of a boolean flag. Without
-        # it the decl is taken as a literal option named "/-C" and -C is
-        # rejected with "No such option", silently and at runtime only.
-        #
-        # -C rather than -c because -c is --config on most of these commands.
-        # The deleted root bash script used -c for --no-color, so an old
-        # invocation consumes the next argument as a config path; see
-        # docs/content/docs/cli-reference.md.
-        typer.Option(
-            "--color/--no-color", "  /-C", help="Enable/disable colorized output"
-        ),
-    ] = True,
+    color: ColorOption = True,
 ):
     """Interactive configuration wizard.
 
@@ -3007,14 +2924,7 @@ def validate(
     debug: Annotated[
         bool, typer.Option("--debug", "-d", help="Enable debug logging")
     ] = False,
-    color: Annotated[
-        bool,
-        # "  /-C" needs its leading whitespace, and -C rather than -c because -c is
-        # --config here; see the same declaration on the sibling commands.
-        typer.Option(
-            "--color/--no-color", "  /-C", help="Enable/disable colorized output"
-        ),
-    ] = True,
+    color: ColorOption = True,
 ):
     """Validate an ASH configuration file the way a scan loads it.
 

@@ -23,7 +23,7 @@ from automated_security_helper.core.constants import (
     ASH_EXIT_INTERRUPTED,
     ASH_EXIT_TERMINATED,
 )
-from automated_security_helper.cli.params import from_environment
+from automated_security_helper.cli.params import ColorOption, from_environment
 from automated_security_helper.core.enums import AshLogLevel, BuildTarget, RunMode
 from automated_security_helper.interactions.run_ash_container import (
     OciValueRefused,
@@ -187,21 +187,7 @@ def build_ash_image_cli_command(
     debug: Annotated[
         bool, typer.Option("--debug", "-d", help="Enable debug logging")
     ] = False,
-    color: Annotated[
-        bool,
-        # The leading whitespace in "  /-C" is load-bearing. It is how click
-        # disambiguates a short form for the OFF side of a boolean flag. Without
-        # it the decl is taken as a literal option named "/-C" and -C is
-        # rejected with "No such option", silently and at runtime only.
-        #
-        # -C rather than -c because -c is --config on most of these commands.
-        # The deleted root bash script used -c for --no-color, so an old
-        # invocation consumes the next argument as a config path; see
-        # docs/content/docs/cli-reference.md.
-        typer.Option(
-            "--color/--no-color", "  /-C", help="Enable/disable colorized output"
-        ),
-    ] = True,
+    color: ColorOption = True,
 ):
     if ctx.resilient_parsing or ctx.invoked_subcommand not in [None, "image"]:
         return

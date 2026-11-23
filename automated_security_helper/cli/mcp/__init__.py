@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Annotated, Callable, Dict, List, Optional
 import typer
 
+from automated_security_helper.cli.params import ColorOption
 from automated_security_helper.cli.mcp.http_sessions import (
     DEFAULT_SESSION_WORKSPACE_TTL_SECONDS,
     MODE_SSE,
@@ -1370,21 +1371,7 @@ def mcp_command(
         bool,
         typer.Option("--debug/--no-debug", "-d", help="Enable debug logging"),
     ] = False,
-    color: Annotated[
-        bool,
-        # The leading whitespace in "  /-C" is load-bearing. It is how click
-        # disambiguates a short form for the OFF side of a boolean flag. Without
-        # it the decl is taken as a literal option named "/-C" and -C is
-        # rejected with "No such option", silently and at runtime only.
-        #
-        # -C rather than -c because -c is --config on most of these commands.
-        # The deleted root bash script used -c for --no-color, so an old
-        # invocation consumes the next argument as a config path; see
-        # docs/content/docs/cli-reference.md.
-        typer.Option(
-            "--color/--no-color", "  /-C", help="Enable/disable colorized output"
-        ),
-    ] = True,
+    color: ColorOption = True,
     # Off by default, as on `ashx mcp` (the wrapper in cli/main.py). On by default,
     # -v and -d would fail the --quiet check below unless --no-quiet was also
     # given.

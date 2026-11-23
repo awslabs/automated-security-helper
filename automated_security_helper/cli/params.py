@@ -3,7 +3,41 @@
 
 """Reading where a command's parameter values came from, shared by the commands."""
 
+from typing import Annotated, Any
+
 import typer
+
+
+#: The ``--color/--no-color`` option every command shares, declared once.
+#:
+#: The leading whitespace in ``"  /-C"`` is load-bearing. It is how click
+#: disambiguates a short form for the OFF side of a boolean flag. Without it the
+#: decl is taken as a literal option named ``/-C`` and ``-C`` is rejected with
+#: "No such option", silently and at runtime only.
+#:
+#: ``-C`` rather than ``-c`` because ``-c`` is ``--config`` on most of these
+#: commands. The deleted root bash script used ``-c`` for ``--no-color``, so an old
+#: invocation consumes the next argument as a config path; see
+#: docs/content/docs/cli-reference.md.
+#:
+def color_option(default: Any = ..., **extra: Any) -> Any:
+    """The shared ``--color/--no-color`` option, with *extra* typer arguments.
+
+    ``scan`` passes ``rich_help_panel``; the ``mcp`` wrapper, which declares its
+    default in the option, passes ``True``; every other command takes
+    :data:`ColorOption`.
+    """
+    return typer.Option(
+        default,
+        "--color/--no-color",
+        "  /-C",
+        help="Enable/disable colorized output",
+        **extra,
+    )
+
+
+#: Use as ``color: ColorOption = True``.
+ColorOption = Annotated[bool, color_option()]
 
 
 def from_environment(ctx: typer.Context, param: str) -> bool:
