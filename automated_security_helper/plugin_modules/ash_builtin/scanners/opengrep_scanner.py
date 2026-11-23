@@ -12,6 +12,7 @@ lives in :mod:`_grep_scanner_base`. This module only customises:
 from __future__ import annotations
 
 import logging
+import os
 import platform
 import sys
 from pathlib import Path
@@ -312,6 +313,9 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
     _metrics_decision_pending: bool = PrivateAttr(default=False)
     # The answer, once asked, so the arguments rebuilt with it do not ask again.
     _metrics_flag: bool | None = PrivateAttr(default=None)
+    # The directory this scan was pointed at, set by _resolve_scan_arguments for
+    # extra_subprocess_env.
+    _scan_target_path: Path | None = PrivateAttr(default=None)
 
     @model_validator(mode="after")
     def setup_custom_install_commands(self) -> "OpengrepScanner":
@@ -432,7 +436,30 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
                 self._process_config_options()
                 if self.dependency_unavailable_reason:
                     raise ScannerError(self.dependency_unavailable_reason)
+        self._scan_target_path = target
         return super()._resolve_scan_arguments(target, results_file)
+
+    def extra_subprocess_env(self) -> dict | None:
+        """Git's ``safe.directory`` for the one directory this scan reads.
+
+        opengrep 2.0.0 lists files with ``git ls-files`` itself and exits 2 when git
+        refuses the directory ("Could not get files from git ls-files"), which it
+        does for a mount another user owns (the container scans). 1.33.1 tolerated
+        that. The entry reaches only this child, through ``GIT_CONFIG_*``, and names
+        the real path of the scanned directory, never ``*``; ASH's own git calls
+        and every other process keep the ownership check.
+        """
+        target = self._scan_target_path
+        if target is None:
+            return None
+        # Entries the caller already set keep their places; this one goes after them.
+        existing = snapshot_environ().get("GIT_CONFIG_COUNT", "0")
+        index = int(existing) if existing.isdigit() else 0
+        return {
+            "GIT_CONFIG_COUNT": str(index + 1),
+            f"GIT_CONFIG_KEY_{index}": "safe.directory",
+            f"GIT_CONFIG_VALUE_{index}": os.path.realpath(target),
+        }
 
     # ---------------------------------------------------------------
     # Dependency resolution
