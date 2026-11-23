@@ -108,7 +108,7 @@ def apply_baseline(
         severity_fails_threshold,
     )
 
-    def actionable(finding, model):
+    def actionable(finding: FlatVulnerability, model: AshAggregatedResults) -> bool:
         threshold = ScannerStatisticsCalculator.get_scanner_threshold_info(
             model, finding.scanner
         )[0]
@@ -173,10 +173,14 @@ def apply_baseline(
             for result_index, result in enumerate(run.results or [])
             if (run_index, result_index) not in selected
         ]
-    results.metadata.baseline = {
-        "sha256": baseline.sha256,
-        "matched": len(selected),
-        "matched_without_lines": len(moved),
-    }
+    setattr(
+        results.metadata,
+        "baseline",
+        {
+            "sha256": baseline.sha256,
+            "matched": len(selected),
+            "matched_without_lines": len(moved),
+        },
+    )
     results._invalidate_flat_cache()
     return BaselineOutcome(len(selected), len(moved), warnings)

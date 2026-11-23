@@ -7,7 +7,17 @@ from datetime import datetime as _DatetimeType
 from pathlib import Path
 import platform
 import time
-from typing import Any, Collection, List, Literal, Mapping, Optional, Set, Tuple
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Collection,
+    List,
+    Literal,
+    Mapping,
+    Optional,
+    Set,
+    Tuple,
+)
 
 
 from automated_security_helper.base.plugin_config import (
@@ -70,6 +80,9 @@ from automated_security_helper.utils.error_text import (
     error_text,
 )
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
+
+if TYPE_CHECKING:
+    from automated_security_helper.utils.scan_baseline import ScanBaseline
 
 
 #: Passed for a scanner's configured section when the caller has not read it,
@@ -228,7 +241,7 @@ class ScanExecutionEngine:
         self._shard_index = shard_index
         self._shard_count = shard_count
         self._changed_files = changed_files
-        self._baseline = None
+        self._baseline: Optional["ScanBaseline"] = None
         self._selection_origin: SelectionOrigin = selection_origin
 
         # Get debug and verbose flags from environment or config
@@ -888,15 +901,16 @@ class ScanExecutionEngine:
         """
         self._changed_files = changed_files
 
-    def restrict_to_baseline(self, baseline) -> None:
+    def restrict_to_baseline(self, baseline: Optional["ScanBaseline"]) -> None:
         self._baseline = baseline
 
     def _drop_findings_in_baseline(self) -> None:
-        if getattr(self, "_baseline", None) is None or self._results is None:
+        baseline = getattr(self, "_baseline", None)
+        if baseline is None or self._results is None:
             return
         from automated_security_helper.utils.scan_baseline import apply_baseline
 
-        outcome = apply_baseline(self._results, self._baseline)
+        outcome = apply_baseline(self._results, baseline)
         for warning in outcome.warnings:
             ASH_LOGGER.warning(warning)
         ASH_LOGGER.info(

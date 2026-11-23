@@ -5,6 +5,7 @@ from stat import S_ISREG
 from automated_security_helper.config.config_validator import describe_results_error
 from automated_security_helper.core.enums import ScannerStatus
 from automated_security_helper.models.asharp_model import AshAggregatedResults
+from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 
 
 class ScanResultsRefused(Exception):
@@ -69,14 +70,14 @@ def parse_full_scan_results(data: bytes) -> AshAggregatedResults:
     return result
 
 
-def unique_findings(results):
+def unique_findings(results: AshAggregatedResults) -> list[FlatVulnerability]:
     findings = results.to_flat_vulnerabilities()
     if len({finding.id for finding in findings}) != len(findings):
         raise ScanResultsRefused("scan contains duplicate finding IDs")
     return findings
 
 
-def _evaluated_scanners(results):
+def _evaluated_scanners(results: AshAggregatedResults) -> set[str]:
     return {
         name
         for name, row in results.scanner_results.items()
@@ -85,7 +86,9 @@ def _evaluated_scanners(results):
     }
 
 
-def coverage_warnings(baseline, current):
+def coverage_warnings(
+    baseline: AshAggregatedResults, current: AshAggregatedResults
+) -> list[str]:
     from automated_security_helper.interactions.run_ash_scan import scan_incompleteness
 
     warnings = []

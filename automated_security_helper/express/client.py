@@ -42,7 +42,7 @@ import socket
 import sys
 import time
 from types import FrameType
-from typing import Any, Mapping, Optional, Union
+from typing import Any, Mapping, NoReturn, Optional, Union
 
 #: A socket path as this module passes it around: runtime.socket_path gives a
 #: pathlib.Path, the tests hand in strings.
@@ -191,11 +191,11 @@ def _json_input_needs_cold(argv: list[str]) -> bool:
     from urllib.request import url2pathname
 
     sources = []
-    for index, token in enumerate(argv):
-        if token == "--cli-json-input":
+    for index, arg in enumerate(argv):
+        if arg == "--cli-json-input":
             sources.append(argv[index + 1] if index + 1 < len(argv) else "-")
-        elif token.startswith("--cli-json-input="):
-            sources.append(token.split("=", 1)[1])
+        elif arg.startswith("--cli-json-input="):
+            sources.append(arg.split("=", 1)[1])
     if not sources:
         return False
     if len(sources) != 1 or sources[0] == "-":
@@ -206,17 +206,17 @@ def _json_input_needs_cold(argv: list[str]) -> bool:
         if path[:10].lower() == "localhost/":
             path = path[9:]
         if path.startswith("/"):
-            path = url2pathname(path.translate(str.maketrans({"?": "%3F", "#": "%23"})))
+            path = url2pathname(path.replace("?", "%3F").replace("#", "%23"))
 
-    def unique(pairs):
-        result = {}
+    def unique(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
         for key, value in pairs:
             if key in result:
                 raise ValueError("duplicate key")
             result[key] = value
         return result
 
-    def invalid_constant(value):
+    def invalid_constant(value: str) -> NoReturn:
         raise ValueError(value)
 
     try:
@@ -257,9 +257,7 @@ def _delegated_exit_code(argv: list[str], environ: Mapping[str, str]) -> Optiona
     if (
         environ.get("ASH_BASELINE")
         or _json_input_needs_cold(argv)
-        or any(
-            token == "--baseline" or token.startswith("--baseline=") for token in argv
-        )
+        or any(arg == "--baseline" or arg.startswith("--baseline=") for arg in argv)
     ):
         return None
     if not runtime.express_supported():

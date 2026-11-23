@@ -2077,7 +2077,9 @@ def run_ash_scan_cli_command(
 
         try:
             baseline_data = read_baseline(
-                Path(baseline), source_dir=Path(source_dir), output_dir=Path(output_dir)
+                Path(baseline),
+                source_dir=Path(source_dir),
+                output_dir=Path(str(output_dir)),
             )
         except BaselineRefused as exc:
             _fail_usage(
