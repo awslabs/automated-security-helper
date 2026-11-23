@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 from stat import S_ISREG
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable, Dict
 
 from automated_security_helper.utils.content_databases import (
     STALENESS_FAIL,
@@ -26,11 +26,6 @@ from automated_security_helper.utils.process_env import snapshot_environ
 
 if TYPE_CHECKING:
     from automated_security_helper.config.ash_config import AshConfig
-
-
-class OfflineCacheTool(str, Enum):
-    GRYPE = "grype"
-    TRIVY = "trivy"
 
 
 class CacheState(str, Enum):
@@ -139,20 +134,48 @@ def _trivy_built(path: Path) -> datetime:
     return _timestamp(record.get("UpdatedAt"))
 
 
+@dataclass(frozen=True)
+class OfflineChecker:
+    """How one content database is checked without running its tool."""
+
+    tool: str
+    relpath: tuple[str, ...]
+    read_built: Callable[[Path], datetime]
+
+
+# Keyed by CONTENT_DATABASES name, like content_db_staleness.MEASURERS. A test
+# holds every key to a registry name, so a database cannot be checkable without
+# being declared.
+OFFLINE_CHECKERS: Dict[str, OfflineChecker] = {
+    "grype-db": OfflineChecker(
+        "grype", (str(_GRYPE_SCHEMA), "vulnerability.db"), _grype_built
+    ),
+    "trivy-db": OfflineChecker("trivy", ("db", "trivy.db"), _trivy_built),
+}
+
+# The CLI's --tool choices come from the registry above.
+OfflineCacheTool = Enum(
+    "OfflineCacheTool",
+    {checker.tool.upper(): checker.tool for checker in OFFLINE_CHECKERS.values()},
+    type=str,
+    module=__name__,
+)
+
+
 def check_offline_cache(
     tool: OfflineCacheTool, config: AshConfig, now: datetime | None = None
 ) -> OfflineCacheResult:
     now = now or datetime.now(timezone.utc)
     environ = snapshot_environ()
-    entry = get(f"{tool.value}-db")
+    name, checker = next(
+        (name, checker)
+        for name, checker in OFFLINE_CHECKERS.items()
+        if checker.tool == tool.value
+    )
+    entry = get(name)
     policy, source = cache_check_policy(entry, config, now, environ)
-    root = default_cache_dir(tool.value, environ)
-    if tool == OfflineCacheTool.GRYPE:
-        db_path = root / str(_GRYPE_SCHEMA) / "vulnerability.db"
-        read_built = _grype_built
-    else:
-        db_path = root / "db" / "trivy.db"
-        read_built = _trivy_built
+    db_path = default_cache_dir(checker.tool, environ).joinpath(*checker.relpath)
+    read_built = checker.read_built
 
     built = None
     detail = None
