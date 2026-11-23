@@ -264,7 +264,7 @@ def no_scanner_ran(
     )
 
 
-def _partial_coverage(metric) -> tuple[int, int] | None:
+def _partial_coverage(metric: Any) -> tuple[int, int] | None:
     """``(attempted, failed)`` when *metric* lost some of its input, else None.
 
     The tri-state on ``targets_attempted`` is the whole content of this function.
@@ -758,7 +758,7 @@ def incomplete_converters(
     return listed
 
 
-def _result_rule_id(result) -> str:
+def _result_rule_id(result: Any) -> str:
     """The rule a SARIF result names: ``ruleId``, else ``rule.id``.
 
     SARIF lets a result name its rule either way (3.27.5 ``ruleId`` and 3.27.6
@@ -896,12 +896,12 @@ def unevaluated_rules(results: Optional[AshAggregatedResults]) -> List[str]:
                 if getattr(level, "value", level) != "error":
                     continue
                 associated = getattr(notification, "associatedRule", None)
-                rule_id = getattr(getattr(associated, "root", None), "id", None)
-                if rule_id:
-                    rule_id = str(rule_id)
-                    if rule_id in has_result and rule_id not in unsuppressed:
+                named_rule = getattr(getattr(associated, "root", None), "id", None)
+                if named_rule:
+                    notified_id = str(named_rule)
+                    if notified_id in has_result and notified_id not in unsuppressed:
                         continue
-                    reported.add(rule_id)
+                    reported.add(notified_id)
                     continue
                 message = getattr(getattr(notification, "message", None), "root", None)
                 text = str(getattr(message, "text", "") or "").strip()

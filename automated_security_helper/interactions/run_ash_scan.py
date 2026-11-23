@@ -137,25 +137,27 @@ from automated_security_helper.utils import scan_completeness as _scan_completen
 # can use them without importing this module. They are bound here under their old names:
 # callers and tests that reach them through ``run_ash_scan`` (including a patch of
 # ``run_ash_scan.<name>``) see the same objects as before.
+# The ``X as X`` form is mypy's explicit re-export: a plain ``from m import X`` is not
+# re-exported under ``--no-implicit-reexport`` (``attr-defined`` at every caller).
 from automated_security_helper.utils.scan_completeness import (  # noqa: F401
-    _COMPLETE_SCANNER_STATUSES,
-    _INCOMPLETE_SCANNER_REASONS,
-    _INCOMPLETE_SCANNER_STATUSES,
-    _MISSING_ON_SOME_FILES,
-    _RAN_SCANNER_STATUSES,
-    IncompleteConverter,
-    ScanIncompleteness,
-    _failed_inputs_reason,
-    _limit_refusals_reason,
-    _listed_only_for_a_stale_database,
-    _partial_coverage,
-    _result_rule_id,
-    incomplete_converters,
-    incomplete_scanner_reason,
-    incomplete_scanners,
-    scan_incompleteness,
-    scanner_statuses,
-    scanners_that_could_not_stop,
+    _COMPLETE_SCANNER_STATUSES as _COMPLETE_SCANNER_STATUSES,
+    _INCOMPLETE_SCANNER_REASONS as _INCOMPLETE_SCANNER_REASONS,
+    _INCOMPLETE_SCANNER_STATUSES as _INCOMPLETE_SCANNER_STATUSES,
+    _MISSING_ON_SOME_FILES as _MISSING_ON_SOME_FILES,
+    _RAN_SCANNER_STATUSES as _RAN_SCANNER_STATUSES,
+    IncompleteConverter as IncompleteConverter,
+    ScanIncompleteness as ScanIncompleteness,
+    _failed_inputs_reason as _failed_inputs_reason,
+    _limit_refusals_reason as _limit_refusals_reason,
+    _listed_only_for_a_stale_database as _listed_only_for_a_stale_database,
+    _partial_coverage as _partial_coverage,
+    _result_rule_id as _result_rule_id,
+    incomplete_converters as incomplete_converters,
+    incomplete_scanner_reason as incomplete_scanner_reason,
+    incomplete_scanners as incomplete_scanners,
+    scan_incompleteness as scan_incompleteness,
+    scanner_statuses as scanner_statuses,
+    scanners_that_could_not_stop as scanners_that_could_not_stop,
 )
 from automated_security_helper.utils.converter_refusals import inert_text
 from automated_security_helper.utils.directory_refusals import output_dir_unmakeable
