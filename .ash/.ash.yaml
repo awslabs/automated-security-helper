@@ -719,6 +719,36 @@ global_settings:
         GHSA-vvf4-9x63-8xvv (CVE-2026-128089): dnspython 2.8.0 in uv.lock, the Python 3.10
         entry. The fixed release 2.9.2 requires Python 3.11; the Python 3.11 and later entry
         is at 2.9.2. Revisit when requires-python rises or a supporting release ships.
+    # === Time-boxed: wcmatch GHSA-53pm-wgxf-c6qf on Python 3.10 (expires 2026-12-27) ===
+    # uv.lock holds two wcmatch entries. The one for Python 3.11 and later is at 12.0.1,
+    # which is outside the affected range (11.1 and earlier). The one for Python 3.10
+    # stays at 11.1 because the first fixed release, 11.2, requires Python 3.11 and
+    # requires-python is >=3.10. wcmatch comes in through igittigitt. The version is
+    # pinned in the entry, so the 12.0.1 entry is never covered and a different 3.10
+    # version reports again. grype reports the GHSA id with the package name appended and
+    # trivy reports the CVE alias, which fnmatch cannot bridge, so there is one entry per
+    # spelling. Revisit when requires-python rises or a wcmatch release supporting
+    # Python 3.10 ships.
+    - rule_id: "GHSA-53pm-wgxf-c6qf*"
+      path: "uv.lock"
+      package_name: "wcmatch"
+      package_version: "11.1"
+      expires: "2026-12-27"
+      reason: >-
+        GHSA-53pm-wgxf-c6qf: wcmatch 11.1 in uv.lock, the Python 3.10 entry only. The first
+        fixed release, 11.2, requires Python 3.11; the Python 3.11 and later entry is upgraded
+        to 12.0.1 in this same change. Revisit when requires-python rises or a supporting
+        release ships.
+    - rule_id: "CVE-2026-132276*"
+      path: "uv.lock"
+      package_name: "wcmatch"
+      package_version: "11.1"
+      expires: "2026-12-27"
+      reason: >-
+        CVE-2026-132276 is the CVE alias spelling of GHSA-53pm-wgxf-c6qf, as reported by trivy:
+        wcmatch 11.1 in uv.lock, the Python 3.10 entry only. The first fixed release, 11.2,
+        requires Python 3.11; the Python 3.11 and later entry is upgraded to 12.0.1 in this
+        same change. Revisit when requires-python rises or a supporting release ships.
     # === Time-boxed: filelock, thirteen advisories with no patched version on Python 3.10 (expires 2026-12-27) ===
     # filelock is affected through 4.2.0 and fixed in 4.2.1, but 4.1.1 and later
     # require Python 3.11 and this project supports 3.10, so uv.lock carries a
