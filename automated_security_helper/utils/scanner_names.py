@@ -195,3 +195,14 @@ def canonical_scanner_name(name: str) -> str:
     module has no logger on purpose.
     """
     return SCANNER_NAME_ALIASES.get(_reduced_name(name), name)
+
+
+def selection_key(name: str) -> str:
+    """The key two scanner names are compared on when a run selects scanners.
+
+    Lower-cased and stripped, with a retired name resolved to the scanner that
+    serves it, so ``" Semgrep "`` and ``"opengrep"`` compare equal. The scan
+    phase, the selection helpers and the MCP result filters all compare names
+    through this one function.
+    """
+    return canonical_scanner_name(name.strip()).lower().strip()

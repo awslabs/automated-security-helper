@@ -29,7 +29,7 @@ from dataclasses import dataclass
 from typing import Dict, Iterable, List, Literal, Mapping, Sequence
 
 from automated_security_helper.core.exceptions import ScannerSelectionError
-from automated_security_helper.utils.scanner_names import canonical_scanner_name
+from automated_security_helper.utils.scanner_names import selection_key
 
 #: Who made the scanner selection: the CLI's ``--scanners`` and
 #: ``--exclude-scanners``, or the MCP workspace tool's ``scanners`` and
@@ -69,12 +69,6 @@ _SELECTION_NAMES: Dict[str, SelectionNames] = {
 def selection_names(origin: SelectionOrigin = "cli") -> SelectionNames:
     """The names for *origin*'s selection inputs; the CLI's for any other value."""
     return _SELECTION_NAMES.get(origin, _SELECTION_NAMES["cli"])
-
-
-def _selection_key(name: str) -> str:
-    """The key two selection names are compared on: lower-cased, stripped, with a
-    retired name resolved to the scanner that serves it."""
-    return canonical_scanner_name(name.strip()).lower().strip()
 
 
 def selection_after_exclusions(
@@ -125,8 +119,8 @@ def selection_after_exclusions(
     # ``--scanners opengrep --exclude-scanners semgrep`` is the cancelled selection
     # it is: the scan phase serves ``semgrep`` with opengrep and would otherwise
     # run nothing for an allowlist this check let through.
-    excluded_keys = {_selection_key(name) for name in excluded}
-    remaining = [name for name in enabled if _selection_key(name) not in excluded_keys]
+    excluded_keys = {selection_key(name) for name in excluded}
+    remaining = [name for name in enabled if selection_key(name) not in excluded_keys]
     if remaining:
         return remaining
     names = selection_names(origin)
@@ -159,10 +153,10 @@ def refuse_selection_matching_no_scanner(
         origin: Who made the selection; the refusal names that caller's own
             input, the flag or the parameter.
     """
-    registered = sorted({_selection_key(name) for name in registered_names})
+    registered = sorted({selection_key(name) for name in registered_names})
     if not requested or not registered:
         return
-    if any(_selection_key(name) in registered for name in requested):
+    if any(selection_key(name) in registered for name in requested):
         return
     shown = sorted(name for name in requested if name.strip()) or ["(an empty name)"]
     raise ScannerSelectionError(
@@ -199,11 +193,11 @@ def unloaded_community_scanners(
         community_module_for,
     )
 
-    known = {_selection_key(str(name)) for name in known_names}
+    known = {selection_key(str(name)) for name in known_names}
     loaded = {str(getattr(cls, "__module__", "")) for cls in scanner_classes}
     unloaded: Dict[str, str] = {}
     for name in requested:
-        if _selection_key(name) in known:
+        if selection_key(name) in known:
             continue
         module = community_module_for(name)
         if module and not any(
@@ -250,8 +244,8 @@ def community_scanner_refusal(
     scanner_classes = list(scanner_classes)
     if not requested or not scanner_classes:
         return ""
-    known = {_selection_key(str(name)) for name in known_names}
-    if any(_selection_key(name) in known for name in requested):
+    known = {selection_key(str(name)) for name in known_names}
+    if any(selection_key(name) in known for name in requested):
         return ""
     unloaded = unloaded_community_scanners(requested, known, scanner_classes)
     if not unloaded:
@@ -289,12 +283,12 @@ def exclusions_matching_no_scanner(
             ``excluded_scanners``.
         registered_names: The registered scanners' selectable names.
     """
-    registered = {_selection_key(name) for name in registered_names}
+    registered = {selection_key(name) for name in registered_names}
     if not registered:
         return []
     unmatched: Dict[str, str] = {}
     for name in excluded:
-        key = _selection_key(name)
+        key = selection_key(name)
         if key and key not in registered:
             unmatched.setdefault(key, name.strip())
     return list(unmatched.values())

@@ -10,7 +10,7 @@ mcp_get_scan_results into smaller, purpose-specific views.
 
 import copy
 from typing import Any, Dict, List, Optional, TypeGuard
-from automated_security_helper.utils.scanner_names import canonical_scanner_name
+from automated_security_helper.utils.scanner_names import selection_key
 from automated_security_helper.utils.severity_ladder import (
     SEVERITY_THRESHOLDS,
     result_severity,
@@ -251,9 +251,7 @@ def _seed_scanners_the_sarif_never_named(
 # same resolution every other entry point applies. Both sides go through it:
 # the request, and the stored report names, so a results file written before
 # the retirement (its rows named ``semgrep``) still answers a request for either
-# spelling.
-def _scanner_key(name: str) -> str:
-    return canonical_scanner_name(name.strip()).lower()
+# spelling. The comparison key is ``selection_key``, the one the scan selects by.
 
 
 def filter_summary(results: Dict[str, Any]) -> Dict[str, Any]:
@@ -847,7 +845,7 @@ def apply_content_filters(
     scanner_list = _filter_names(scanners)
     if scanner_list:
         # Deduplicated in request order: ``opengrep,semgrep`` names one scanner.
-        scanner_list = list(dict.fromkeys(_scanner_key(s) for s in scanner_list))
+        scanner_list = list(dict.fromkeys(selection_key(s) for s in scanner_list))
     severity_list = _filter_names(severities)
 
     if severity_list:
@@ -860,7 +858,7 @@ def apply_content_filters(
     if scanner_list:
         known = _scanner_names_in(results)
         if known is not None:
-            known = {_scanner_key(name) for name in known}
+            known = {selection_key(name) for name in known}
             unknown = sorted(set(scanner_list) - known)
             if unknown:
                 raise ResultFilterInputError(
@@ -879,7 +877,7 @@ def apply_content_filters(
         filtered_results["scanner_reports"] = {
             name: data
             for name, data in filtered_results["scanner_reports"].items()
-            if _scanner_key(name) in scanner_list
+            if selection_key(name) in scanner_list
         }
 
     if (
@@ -890,7 +888,7 @@ def apply_content_filters(
         if scanner_list:
             new_scanner_results = {}
             for name, data in orig.items():
-                if _scanner_key(name) in scanner_list:
+                if selection_key(name) in scanner_list:
                     if severity_list and _records_a_breakdown(
                         data.get("severity_counts")
                     ):
@@ -928,7 +926,7 @@ def apply_content_filters(
             for name, data in filtered_results["raw_results"][
                 "additional_reports"
             ].items()
-            if _scanner_key(name) in scanner_list
+            if selection_key(name) in scanner_list
         }
 
     _severity_keys = set(_SEVERITY_KEYS)
@@ -1218,7 +1216,7 @@ def _sarif_result_selected(
     if scanner_list:
         props = result.get("properties") or {}
         scanner = props.get("scanner_name") if isinstance(props, dict) else None
-        if not isinstance(scanner, str) or _scanner_key(scanner) not in scanner_list:
+        if not isinstance(scanner, str) or selection_key(scanner) not in scanner_list:
             return False
     if severity_list:
         from automated_security_helper.utils.sarif_utils import is_result_suppressed
