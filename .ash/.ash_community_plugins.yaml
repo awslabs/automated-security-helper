@@ -1875,7 +1875,7 @@ global_settings:
       path: tests/unit/utils/test_ash_install_failures_are_logged_redacted.py
       expires: "2027-05-06"
       reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file. Reviewed at the expiry date."
-    # === Time-boxed: dnspython CVE-2026-114605 / GHSA-45c3-73f7-pv4m on Python 3.10 (expires 2026-11-27) ===
+    # === Time-boxed: dnspython CVE-2026-114605 / GHSA-45c3-73f7-pv4m on Python 3.10 (expires 2026-12-27) ===
     # Same decision as the dnspython entries in .ash/.ash.yaml, restated here because
     # a suppression list is not inherited across config files. uv.lock holds two
     # dnspython entries. The one for Python 3.11 and later is at 2.9.0, the first
@@ -1891,12 +1891,12 @@ global_settings:
       path: "uv.lock"
       package_name: "dnspython"
       package_version: "2.8.0"
-      expires: "2026-11-27"
+      expires: "2026-12-27"
       reason: >-
         CVE-2026-114605 (GHSA-45c3-73f7-pv4m): dnspython 2.8.0 in uv.lock, the Python 3.10
         entry. The fixed release 2.9.0 requires Python 3.11; the Python 3.11 and later entry
         is at 2.9.0. Revisit when requires-python rises or a supporting release ships.
-    # === Time-boxed: dnspython CVE-2026-128089 / GHSA-vvf4-9x63-8xvv on Python 3.10 (expires 2026-11-27) ===
+    # === Time-boxed: dnspython CVE-2026-128089 / GHSA-vvf4-9x63-8xvv on Python 3.10 (expires 2026-12-27) ===
     # Same decision as the dnspython CVE-2026-128089 entries in .ash/.ash.yaml, restated
     # here because a suppression list is not inherited across config files. Same Python
     # 3.10 entry as above: the fixed release 2.9.2 requires Python 3.11, so the 3.10
@@ -1909,7 +1909,7 @@ global_settings:
       path: "uv.lock"
       package_name: "dnspython"
       package_version: "2.8.0"
-      expires: "2026-11-27"
+      expires: "2026-12-27"
       reason: >-
         CVE-2026-128089 (GHSA-vvf4-9x63-8xvv): dnspython 2.8.0 in uv.lock, the Python 3.10
         entry. The fixed release 2.9.2 requires Python 3.11; the Python 3.11 and later entry
@@ -1936,7 +1936,7 @@ global_settings:
         cannot reach it. Fix = aws-cdk-lib >= none released yet (2.277.0 declares minimatch
         ^10.2.6; the fix is minimatch 11.0.1). Revisit when a release bundles minimatch
         >=11.0.1.
-    # === Time-boxed: picomatch GHSA-fc5q-39xc-vjpf, no patched version (expires 2026-11-27) ===
+    # === Time-boxed: picomatch GHSA-fc5q-39xc-vjpf, no patched version (expires 2026-12-27) ===
     # Kept in step with .ash/.ash.yaml: suppression lists are not inherited across
     # config files, so the npm-audit entries live in both. picomatch up to and
     # including 4.0.7 is affected (ReDoS through single-branch repeated extglobs) and
@@ -1952,7 +1952,7 @@ global_settings:
       package_name: "picomatch"
       package_version: "2.3.2"
       package_path: "deploy/cdk/node_modules/picomatch"
-      expires: "2026-11-27"
+      expires: "2026-12-27"
       reason: >-
         GHSA-fc5q-39xc-vjpf: picomatch 2.3.2 in deploy/cdk/package-lock.json, hoisted for
         anymatch. No patched version exists (newest release is 4.0.7, inside the affected
@@ -1963,7 +1963,7 @@ global_settings:
       package_name: "picomatch"
       package_version: "4.0.7"
       package_path: "deploy/cdk/node_modules/@parcel/watcher/node_modules/picomatch"
-      expires: "2026-11-27"
+      expires: "2026-12-27"
       reason: >-
         GHSA-fc5q-39xc-vjpf: picomatch 4.0.7 under @parcel/watcher in
         deploy/cdk/package-lock.json. No patched version exists. Dev dependency of the
@@ -1974,7 +1974,7 @@ global_settings:
       package_name: "picomatch"
       package_version: "4.0.7"
       package_path: "deploy/cdk/node_modules/jest-haste-map/node_modules/picomatch"
-      expires: "2026-11-27"
+      expires: "2026-12-27"
       reason: >-
         GHSA-fc5q-39xc-vjpf: picomatch 4.0.7 under jest-haste-map in
         deploy/cdk/package-lock.json. No patched version exists. Dev dependency of the
@@ -1985,7 +1985,7 @@ global_settings:
       package_name: "picomatch"
       package_version: "4.0.7"
       package_path: "deploy/cdk/node_modules/jest-message-util/node_modules/picomatch"
-      expires: "2026-11-27"
+      expires: "2026-12-27"
       reason: >-
         GHSA-fc5q-39xc-vjpf: picomatch 4.0.7 under jest-message-util in
         deploy/cdk/package-lock.json. No patched version exists. Dev dependency of the
@@ -1996,7 +1996,7 @@ global_settings:
       package_name: "picomatch"
       package_version: "4.0.7"
       package_path: "deploy/cdk/node_modules/jest-util/node_modules/picomatch"
-      expires: "2026-11-27"
+      expires: "2026-12-27"
       reason: >-
         GHSA-fc5q-39xc-vjpf: picomatch 4.0.7 under jest-util in
         deploy/cdk/package-lock.json. No patched version exists. Dev dependency of the
@@ -2007,7 +2007,7 @@ global_settings:
       package_name: "picomatch"
       package_version: "4.0.7"
       package_path: "deploy/cdk-constructs/node_modules/picomatch"
-      expires: "2026-11-27"
+      expires: "2026-12-27"
       reason: >-
         GHSA-fc5q-39xc-vjpf: picomatch 4.0.7 in deploy/cdk-constructs/package-lock.json,
         hoisted for fdir and the jest 30 tree. No patched version exists. Dev dependency of
@@ -2018,7 +2018,7 @@ global_settings:
       package_name: "picomatch"
       package_version: "2.3.2"
       package_path: "deploy/cdk-constructs/node_modules/anymatch/node_modules/picomatch"
-      expires: "2026-11-27"
+      expires: "2026-12-27"
       reason: >-
         GHSA-fc5q-39xc-vjpf: picomatch 2.3.2 under anymatch in
         deploy/cdk-constructs/package-lock.json. No patched version exists. Dev dependency
@@ -2029,7 +2029,7 @@ global_settings:
       package_name: "picomatch"
       package_version: "2.3.2"
       package_path: "deploy/cdk-constructs/node_modules/micromatch/node_modules/picomatch"
-      expires: "2026-11-27"
+      expires: "2026-12-27"
       reason: >-
         GHSA-fc5q-39xc-vjpf: picomatch 2.3.2 under micromatch in
         deploy/cdk-constructs/package-lock.json. No patched version exists. Dev dependency
