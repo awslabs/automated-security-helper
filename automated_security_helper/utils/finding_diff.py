@@ -6,7 +6,7 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from automated_security_helper.utils.finding_identity import canonical
 
@@ -31,7 +31,7 @@ class FindingDiff:
     suppression_changed: list[tuple[FlatVulnerability, FlatVulnerability]]
 
 
-def fallback_key(finding: FlatVulnerability) -> tuple | None:
+def fallback_key(finding: FlatVulnerability) -> tuple[Any, ...] | None:
     if finding._identity is None or finding.source_report is not None:
         return None
     if any(
@@ -51,7 +51,7 @@ def fallback_key(finding: FlatVulnerability) -> tuple | None:
     )
 
 
-def _order(finding: FlatVulnerability) -> tuple:
+def _order(finding: FlatVulnerability) -> tuple[Any, ...]:
     return (
         finding.line_start if finding.line_start is not None else -1,
         finding.line_end if finding.line_end is not None else -1,
@@ -97,7 +97,7 @@ def match_findings(
         matched_before.add(i)
         matched_after.add(j)
 
-    def loose_key(finding):
+    def loose_key(finding: FlatVulnerability) -> tuple[Any, ...] | None:
         key = fallback_key(finding)
         return None if key is None else key[:2]
 
