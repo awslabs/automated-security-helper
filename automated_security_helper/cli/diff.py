@@ -11,13 +11,17 @@ import typer
 from rich.table import Table
 
 from automated_security_helper.config.config_validator import describe_results_error
-from automated_security_helper.core.enums import ScannerStatus
-from automated_security_helper.interactions.run_ash_scan import scan_incompleteness
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 from automated_security_helper.utils.command_safe_stream import json_commands_broken
 from automated_security_helper.utils.console import ash_console, echo
-from automated_security_helper.utils.finding_diff import compare_findings
+from automated_security_helper.utils.finding_diff import (
+    ComparabilityRefusal,
+    check_comparable,
+    compare_findings,
+    comparable_findings,
+    coverage_warnings,
+)
 from automated_security_helper.utils.terminal_text import (
     raw_controls_on_one_line,
     shown_on_one_line,
@@ -64,54 +68,11 @@ def _load_results(path: Path) -> AshAggregatedResults:
     except ValueError as exc:
         _refuse(describe_results_error(exc), path)
 
-    if result.workspace is not None:
-        _refuse("use the per-project results instead of a workspace aggregate", path)
-    if result.metadata.shard is not None:
-        _refuse("use ash merge before comparing sharded results", path)
-    changed_files_only = metadata.get("changed_files_only")
-    if changed_files_only is True:
-        _refuse("cannot compare results filtered by --changed-files-only", path)
-    if changed_files_only is not None and changed_files_only is not False:
-        _refuse("invalid changed-files-only marker", path)
-    project = metadata.get("workspace_project")
-    if project is not None and (not isinstance(project, str) or not project.strip()):
-        _refuse("invalid workspace project marker", path)
+    try:
+        check_comparable(result)
+    except ComparabilityRefusal as exc:
+        _refuse(str(exc), path)
     return result
-
-
-def _evaluated_scanners(results: AshAggregatedResults) -> set[str]:
-    return {
-        name
-        for name, row in results.scanner_results.items()
-        if not row.excluded
-        and row.status in {ScannerStatus.PASSED, ScannerStatus.FAILED}
-    }
-
-
-def _coverage_warnings(
-    baseline: AshAggregatedResults, current: AshAggregatedResults
-) -> list[str]:
-    warnings = []
-    if set(baseline.metadata.expected_scanners) != set(
-        current.metadata.expected_scanners
-    ) or _evaluated_scanners(baseline) != _evaluated_scanners(current):
-        warnings.append("Scanner coverage differs between scans.")
-    if (
-        baseline.metadata.ignore_file_exclusions
-        != current.metadata.ignore_file_exclusions
-    ):
-        warnings.append("Recorded ignore-file exclusions differ between scans.")
-    for label, result in (("Baseline", baseline), ("Current", current)):
-        missing = set(result.metadata.expected_scanners) - result.scanner_results.keys()
-        if missing or scan_incompleteness(result, gate=True):
-            warnings.append(f"{label} scan has incomplete scanner coverage.")
-        elif not result.metadata.expected_scanners or not result.scanner_results:
-            warnings.append(
-                f"{label} scan does not record enough scanner coverage to establish comparability."
-            )
-        if result.metadata.inputs_not_scanned:
-            warnings.append(f"{label} scan records inputs that were not scanned.")
-    return warnings
 
 
 def _finding_row(finding: FlatVulnerability) -> dict[str, Any]:
@@ -126,21 +87,14 @@ def _finding_row(finding: FlatVulnerability) -> dict[str, Any]:
     }
 
 
-def _unique_findings(
-    results: AshAggregatedResults, label: str
-) -> list[FlatVulnerability]:
-    findings = results.to_flat_vulnerabilities()
-    if len({finding.id for finding in findings}) != len(findings):
-        _refuse(f"{label} scan contains duplicate finding IDs")
-    return findings
-
-
 def _result_payload(
     baseline: AshAggregatedResults, current: AshAggregatedResults
 ) -> dict[str, Any]:
-    diff = compare_findings(
-        _unique_findings(baseline, "Baseline"), _unique_findings(current, "Current")
-    )
+    try:
+        before_findings, after_findings = comparable_findings(baseline, current)
+    except ComparabilityRefusal as exc:
+        _refuse(str(exc))
+    diff = compare_findings(before_findings, after_findings)
     return {
         "new": [_finding_row(finding) for finding in diff.new],
         "absent_after": [_finding_row(finding) for finding in diff.absent_after],
@@ -156,7 +110,7 @@ def _result_payload(
             {**_finding_row(after), "before_is_suppressed": before.is_suppressed}
             for before, after in diff.suppression_changed
         ],
-        "warnings": _coverage_warnings(baseline, current),
+        "warnings": coverage_warnings(baseline, current),
     }
 
 
@@ -213,16 +167,6 @@ def diff_command(
     """Compare the findings in two saved ASH scans without running a scan."""
     baseline = _load_results(before)
     current = _load_results(after)
-    baseline_workspace = getattr(baseline.metadata, "workspace_project", None)
-    current_workspace = getattr(current.metadata, "workspace_project", None)
-    if (baseline_workspace is None) != (current_workspace is None):
-        _refuse("cannot mix standalone and workspace project results")
-    if baseline_workspace != current_workspace or (
-        baseline.metadata.project_name
-        and current.metadata.project_name
-        and baseline.metadata.project_name != current.metadata.project_name
-    ):
-        _refuse("the results name different projects")
     payload = _result_payload(baseline, current)
     if output_format == DiffFormat.JSON:
         document = json_commands_broken(

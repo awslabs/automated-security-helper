@@ -4822,26 +4822,18 @@ def mcp_diff_scan_results(
             ),
         }
 
-    for results in (before_results, after_results):
-        metadata = results.metadata
-        if getattr(metadata, "changed_files_only", None) is True:
-            return {
-                "success": False,
-                "error": "cannot compare results filtered by --changed-files-only",
-            }
-        if metadata.shard is not None or results.workspace is not None:
-            return {
-                "success": False,
-                "error": "cannot compare sharded or workspace aggregate results",
-            }
+    from automated_security_helper.utils.finding_diff import (
+        ComparabilityRefusal,
+        comparable_findings,
+        compare_findings,
+    )
 
-    from automated_security_helper.utils.finding_diff import compare_findings
-
-    before_findings = before_results.to_flat_vulnerabilities()
-    after_findings = after_results.to_flat_vulnerabilities()
-    for findings in (before_findings, after_findings):
-        if len({finding.id for finding in findings}) != len(findings):
-            return {"success": False, "error": "scan contains duplicate finding IDs"}
+    try:
+        before_findings, after_findings = comparable_findings(
+            before_results, after_results
+        )
+    except ComparabilityRefusal as exc:
+        return {"success": False, "error": str(exc)}
     diff = compare_findings(before_findings, after_findings)
     return {
         "new": [finding.model_dump() for finding in diff.new],
