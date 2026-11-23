@@ -18534,6 +18534,7 @@ _PAGES_STEPS_THAT_RUN_A_TOOL = {
         "Install scanner tools",
         "Run ASH",
         "Run ASH",
+        "Run ASH",
         "Install ASH",
         "Scan in Nix mode",
     ],
@@ -18597,9 +18598,9 @@ def _commands_acted_on(output: str) -> List[str]:
 def test_the_pages_ash_steps_stop_workflow_commands_as_the_scan_workflow_does(
     tmp_path: Path, stopped: bool
 ) -> None:
-    """github-actions.md (Write the steps yourself, Cache tools and databases, and Scan
-    only the files a pull request changes) and scale-large-repos.md (Sharding in
-    GitHub Actions).
+    """github-actions.md (Write the steps yourself, Cache tools and databases, Scan
+    only the files a pull request changes, and Gate on new findings) and
+    scale-large-repos.md (Sharding in GitHub Actions).
 
     Every GitHub Actions block of every page is read. Each step that runs ``uv`` or
     ``ash`` makes its token, and prints its stop and resume lines, the way the scan

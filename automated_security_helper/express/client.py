@@ -33,14 +33,16 @@ never wrong.
 
 from __future__ import annotations
 
+import json
 import os
 import select
+import stat
 import signal
 import socket
 import sys
 import time
 from types import FrameType
-from typing import Any, Mapping, Optional, Union
+from typing import Any, Mapping, NoReturn, Optional, Union
 
 #: A socket path as this module passes it around: runtime.socket_path gives a
 #: pathlib.Path, the tests hand in strings.
@@ -185,6 +187,63 @@ def completion_in_progress(environ: Mapping[str, str]) -> bool:
     return False
 
 
+def _json_input_needs_cold(argv: list[str]) -> bool:
+    from urllib.request import url2pathname
+
+    sources = []
+    for index, arg in enumerate(argv):
+        if arg == "--cli-json-input":
+            sources.append(argv[index + 1] if index + 1 < len(argv) else "-")
+        elif arg.startswith("--cli-json-input="):
+            sources.append(arg.split("=", 1)[1])
+    if not sources:
+        return False
+    if len(sources) != 1 or sources[0] == "-":
+        return True
+    path = sources[0]
+    if path.startswith("file://"):
+        path = path[7:]
+        if path[:10].lower() == "localhost/":
+            path = path[9:]
+        if path.startswith("/"):
+            path = url2pathname(path.replace("?", "%3F").replace("#", "%23"))
+
+    def unique(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("duplicate key")
+            result[key] = value
+        return result
+
+    def invalid_constant(value: str) -> NoReturn:
+        raise ValueError(value)
+
+    try:
+        if not stat.S_ISREG(os.stat(path).st_mode):
+            return True
+        fd = os.open(
+            path,
+            os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOCTTY", 0),
+        )
+        with os.fdopen(fd, "rb") as stream:
+            if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+                return True
+            data = stream.read(1024 * 1024 + 1)
+        if len(data) > 1024 * 1024:
+            return True
+        document = json.loads(
+            data.decode("utf-8-sig"),
+            object_pairs_hook=unique,
+            parse_constant=invalid_constant,
+        )
+        return not isinstance(document, dict) or any(
+            document.get(key) is not None for key in ("baseline", "--baseline")
+        )
+    except (OSError, ValueError, RecursionError):
+        return True
+
+
 def _delegated_exit_code(argv: list[str], environ: Mapping[str, str]) -> Optional[int]:
     # ASH_EXPRESS_CHILD (the spelling behind runtime.CHILD_ENV) is set in
     # every forked scan child's environment, so a scan already running inside
@@ -194,6 +253,12 @@ def _delegated_exit_code(argv: list[str], environ: Mapping[str, str]) -> Optiona
     if completion_in_progress(environ):
         return None
     if not is_scan_invocation(argv):
+        return None
+    if (
+        environ.get("ASH_BASELINE")
+        or _json_input_needs_cold(argv)
+        or any(arg == "--baseline" or arg.startswith("--baseline=") for arg in argv)
+    ):
         return None
     if not runtime.express_supported():
         # The silent cold fallback, except that --express asked for the daemon

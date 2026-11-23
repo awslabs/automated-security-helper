@@ -56,6 +56,12 @@
   unambiguous. The MCP diff tool uses the same matching, so moved findings are no longer
   in its new and resolved lists.
 
+- **`ash scan --baseline PATH` gates on new findings.** A trusted full-scan artifact
+  outside the checkout is matched against the scan, including findings that moved
+  lines, and matched SARIF findings are left out of reports, summary counts and the exit
+  code. Local and precommit modes support it; Security Hub will not archive absent
+  findings from these partial results.
+
 - **`ash --mode precommit --staged` scans the staged files instead of the whole repository.**
   The list comes from `git diff --cached` (no deletions; a rename is scanned at its new
   path): bandit and checkov are handed the staged files as targets, the scanners that pick

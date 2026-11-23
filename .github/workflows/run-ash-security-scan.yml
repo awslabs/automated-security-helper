@@ -352,6 +352,7 @@ jobs:
       # Empty when nothing was uploaded; the report job and the caller's SARIF job
       # start only when it is set.
       artifact-id: ${{ steps.ash-output.outputs.artifact-id }}
+      baseline: ${{ steps.baseline_check.outputs.baseline }}
       # The checked values the report job uses, so it reads no input as given.
       output-dir: ${{ steps.inputs.outputs.output_dir }}
       repository-owner: ${{ steps.inputs.outputs.repository_owner }}
@@ -903,7 +904,7 @@ jobs:
           # is its value, so a `--mode` there (`--output-dir --mode`) is not the
           # mode. A bare word, or anything after `--`, is Run ASH's to refuse.
           read -r -a args <<< "${ASH_ARGS}"
-          ASH_VALUE_OPTIONS="--add-scanners --ash-config-from-host --ash-plugin-modules --ash-revision-to-install --base-ref --build-target --config --config-file-from-another-checkout --config-file-from-scanned-repository --config-overrides --container-gid --container-uid --custom-build-arg --custom-containerfile --exclude-scanners --format --formats --log-level --min-severity --mode --oci --oci-runner --offline-semgrep-rulesets --only-scanners --output-dir --output-format --output-formats --phases --runner --sandbox --scanners --shard-count --shard-index --source-dir --strategy --workspace --workspace-config -c -f -g -o -u"
+          ASH_VALUE_OPTIONS="--add-scanners --ash-config-from-host --ash-plugin-modules --ash-revision-to-install --baseline --base-ref --build-target --config --config-file-from-another-checkout --config-file-from-scanned-repository --config-overrides --container-gid --container-uid --custom-build-arg --custom-containerfile --exclude-scanners --format --formats --log-level --min-severity --mode --oci --oci-runner --offline-semgrep-rulesets --only-scanners --output-dir --output-format --output-formats --phases --runner --sandbox --scanners --shard-count --shard-index --source-dir --strategy --workspace --workspace-config -c -f -g -o -u"
           mode="${ASH_MODE}"
           value_of=""
           for word in ${args[@]+"${args[@]}"}; do
@@ -2206,7 +2207,7 @@ jobs:
           # reads every word as bare. ASH_VALUE_OPTIONS is the ash group's options
           # that take a value; tests/unit/test_reusable_workflow_ash_args.py holds
           # it to the CLI's. The refusals name the word by position, not by value.
-          ASH_VALUE_OPTIONS="--add-scanners --ash-config-from-host --ash-plugin-modules --ash-revision-to-install --base-ref --build-target --config --config-file-from-another-checkout --config-file-from-scanned-repository --config-overrides --container-gid --container-uid --custom-build-arg --custom-containerfile --exclude-scanners --format --formats --log-level --min-severity --mode --oci --oci-runner --offline-semgrep-rulesets --only-scanners --output-dir --output-format --output-formats --phases --runner --sandbox --scanners --shard-count --shard-index --source-dir --strategy --workspace --workspace-config -c -f -g -o -u"
+          ASH_VALUE_OPTIONS="--add-scanners --ash-config-from-host --ash-plugin-modules --ash-revision-to-install --baseline --base-ref --build-target --config --config-file-from-another-checkout --config-file-from-scanned-repository --config-overrides --container-gid --container-uid --custom-build-arg --custom-containerfile --exclude-scanners --format --formats --log-level --min-severity --mode --oci --oci-runner --offline-semgrep-rulesets --only-scanners --output-dir --output-format --output-formats --phases --runner --sandbox --scanners --shard-count --shard-index --source-dir --strategy --workspace --workspace-config -c -f -g -o -u"
           takes_value=""
           position=0
           for word in "${ASH_ARGS_LIST[@]}"; do
@@ -2346,6 +2347,35 @@ jobs:
       # (a matrix or a caller that calls this workflow twice must give each call
       # its own artifact-name), while a re-run of failed jobs replaces its own
       # earlier upload instead of failing on the name collision.
+      - name: Check for baseline results
+        id: baseline_check
+        if: (success() || failure()) && steps.inputs.outcome == 'success'
+        shell: bash
+        env:
+          RESULTS_PATH: ${{ steps.inputs.outputs.output_dir }}/ash_aggregated_results.json
+        run: |
+          python3 -I - <<'PYTHON'
+          import json
+          import os
+          try:
+              def reject(constant):
+                  raise ValueError(constant)
+              with open(os.environ["RESULTS_PATH"], encoding="utf-8") as source:
+                  data = json.load(source, parse_constant=reject)
+              metadata = data["metadata"]
+              if not isinstance(metadata, dict):
+                  raise TypeError("metadata")
+              baseline = "true" if "baseline" in metadata else "false"
+          except (OSError, ValueError, TypeError, KeyError):
+              baseline = "unknown"
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"baseline={baseline}\n")
+          if baseline == "true":
+              print("::notice::SARIF upload skipped because the scan results were filtered by a baseline.")
+          elif baseline == "unknown":
+              print("::notice::SARIF upload skipped because the scan results could not be read to rule out a baseline.")
+          PYTHON
+
       - name: Collect ASH output artifact
         id: ash-output
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -2561,6 +2591,7 @@ jobs:
         if: >-
           inputs.collect-sarif-report
           && github.event_name == 'pull_request'
+          && needs.ash.outputs.baseline == 'false'
           && (success() || failure())
         with:
           sarif_file: ${{ needs.ash.outputs.output-dir }}/reports/ash.ghas.sarif

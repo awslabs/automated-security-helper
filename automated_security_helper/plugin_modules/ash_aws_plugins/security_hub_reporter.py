@@ -842,6 +842,8 @@ class SecurityHubReporter(ReporterPluginBase[SecurityHubReporterConfig]):
             )
         if getattr(model.metadata, "shard", None) is not None:
             return None, "the results are one shard of a split scan"
+        if model.baseline_filtered:
+            return None, "the results leave out findings already in a baseline"
         marker = getattr(model.metadata, "changed_files_only", None)
         if marker is True:
             return None, (

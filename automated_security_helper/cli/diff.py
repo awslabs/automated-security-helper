@@ -4,23 +4,25 @@
 import json
 from enum import Enum
 from pathlib import Path
-from stat import S_ISREG
 from typing import Annotated, Any, NoReturn
 
 import typer
 from rich.table import Table
 
-from automated_security_helper.config.config_validator import describe_results_error
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 from automated_security_helper.utils.command_safe_stream import json_commands_broken
 from automated_security_helper.utils.console import ash_console, echo
 from automated_security_helper.utils.finding_diff import (
     ComparabilityRefusal,
-    check_comparable,
     compare_findings,
     comparable_findings,
     coverage_warnings,
+)
+from automated_security_helper.utils.scan_results_file import (
+    ScanResultsRefused,
+    parse_full_scan_results,
+    read_regular_file,
 )
 from automated_security_helper.utils.terminal_text import (
     raw_controls_on_one_line,
@@ -41,38 +43,9 @@ def _refuse(reason: str, path: Path | None = None) -> NoReturn:
 
 def _load_results(path: Path) -> AshAggregatedResults:
     try:
-        if not S_ISREG(path.stat().st_mode):
-            _refuse("expected a regular scan results file", path)
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except OSError as exc:
-        _refuse(exc.strerror or type(exc).__name__, path)
-    except json.JSONDecodeError as exc:
-        _refuse(f"invalid JSON at line {exc.lineno}, column {exc.colno}", path)
-    except UnicodeDecodeError as exc:
-        _refuse(describe_results_error(exc), path)
-    except (ValueError, RecursionError):
-        _refuse("invalid path or JSON data", path)
-
-    if not isinstance(data, dict):
-        _refuse("expected scan results with metadata and SARIF runs", path)
-    metadata, sarif = data.get("metadata"), data.get("sarif")
-    if (
-        not isinstance(metadata, dict)
-        or not isinstance(sarif, dict)
-        or not isinstance(sarif.get("runs"), list)
-    ):
-        _refuse("expected scan results with metadata and SARIF runs", path)
-
-    try:
-        result = AshAggregatedResults.model_validate(data)
-    except ValueError as exc:
-        _refuse(describe_results_error(exc), path)
-
-    try:
-        check_comparable(result)
-    except ComparabilityRefusal as exc:
-        _refuse(str(exc), path)
-    return result
+        return parse_full_scan_results(read_regular_file(path))
+    except ScanResultsRefused as exc:
+        _refuse(exc.reason, path)
 
 
 def _finding_row(finding: FlatVulnerability) -> dict[str, Any]:

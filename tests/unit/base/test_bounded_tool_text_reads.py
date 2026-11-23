@@ -371,6 +371,10 @@ _ALLOWED_SIZED_READS = {
     "and discarded; kernel wakeup bytes, never tool text",
     (
         "express/client.py",
+        "_json_input_needs_cold",
+    ): "bounded operator JSON input, parsed to decide delegation and never shown",
+    (
+        "express/client.py",
         "_await_readiness",
     ): "the one readiness byte a starting daemon writes on its pipe after "
     "binding its socket (read by autostart and by spawn_daemon_process alike); "

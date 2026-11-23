@@ -39,6 +39,8 @@ def check_comparable(results: AshAggregatedResults) -> None:
         )
     if changed_files_only is not None and changed_files_only is not False:
         raise ComparabilityRefusal("invalid changed-files-only marker")
+    if results.baseline_filtered:
+        raise ComparabilityRefusal("cannot use results filtered by --baseline")
     project = getattr(results.metadata, "workspace_project", None)
     if project is not None and (not isinstance(project, str) or not project.strip()):
         raise ComparabilityRefusal("invalid workspace project marker")
@@ -110,7 +112,7 @@ def coverage_warnings(
     ):
         warnings.append("Recorded ignore-file exclusions differ between scans.")
     for label, result in (("Baseline", baseline), ("Current", current)):
-        missing = set(result.metadata.expected_scanners) - result.scanner_results.keys()
+        missing = set(result.metadata.expected_scanners) - _evaluated_scanners(result)
         if missing or scan_incompleteness(result, gate=True):
             warnings.append(f"{label} scan has incomplete scanner coverage.")
         elif not result.metadata.expected_scanners or not result.scanner_results:
@@ -163,6 +165,15 @@ def _order(finding: FlatVulnerability) -> tuple[Any, ...]:
 def match_findings(
     before: Iterable[FlatVulnerability], after: Iterable[FlatVulnerability]
 ) -> FindingMatch:
+    """Pair findings from ``before`` with findings from ``after``.
+
+    ``moved`` pairs differ only in their lines. This matcher is for display as
+    well as gating, and the two deliberately differ on secrets: ``ash diff``
+    reports a moved secret as moved, while ``apply_baseline`` refuses to drop
+    one. The refusal is not applied here. A gating consumer must apply
+    ``FlatVulnerability.requires_exact_identity_match`` and
+    ``has_fingerprint_identity`` to each pair, as ``apply_baseline`` does.
+    """
     before = list(before)
     after = list(after)
     before_ids = defaultdict(list)

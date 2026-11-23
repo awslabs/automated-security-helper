@@ -163,6 +163,11 @@ fails, because a scan with findings exits 2:
 [Run ASH in GitHub Actions](ci/github-actions.md) has the complete workflow, including
 the reusable workflows ASH ships.
 
+Do not upload the SARIF of a scan run with `--baseline`: it holds only the findings the
+baseline lacks, and GitHub replaces earlier results for the same tool and category with
+whatever an upload carries. The reusable workflows skip that upload and print a notice
+([Gate on new findings](ci/github-actions.md#baseline)).
+
 ## GitLab {#gitlab}
 
 GitLab reads three of the files, each under its own `artifacts:reports` keyword:

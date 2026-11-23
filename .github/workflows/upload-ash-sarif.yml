@@ -144,7 +144,34 @@ jobs:
           name: ${{ inputs.artifact-name }}
           path: ${{ runner.temp }}/ash_output
 
+      - name: Check for baseline results
+        id: baseline_check
+        if: success() || failure()
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        env:
+          RESULTS_PATH: ${{ runner.temp }}/ash_output/ash_aggregated_results.json
+        with:
+          script: |
+            const fs = require("fs");
+            let baseline = "unknown";
+            try {
+              const text = new TextDecoder("utf-8", { fatal: true }).decode(fs.readFileSync(process.env.RESULTS_PATH));
+              const metadata = JSON.parse(text).metadata;
+              if (metadata && typeof metadata === "object" && !Array.isArray(metadata)) {
+                baseline = Object.prototype.hasOwnProperty.call(metadata, "baseline") ? "true" : "false";
+              }
+            } catch (error) {
+              baseline = "unknown";
+            }
+            core.setOutput("baseline", baseline);
+            if (baseline === "true") {
+              core.notice("SARIF upload skipped because the scan results were filtered by a baseline.");
+            } else if (baseline === "unknown") {
+              core.notice("SARIF upload skipped because the scan results could not be read to rule out a baseline.");
+            }
+
       - name: Upload ASH SARIF file
+        if: steps.baseline_check.outputs.baseline == 'false'
         uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           sarif_file: ${{ runner.temp }}/ash_output/reports/ash.ghas.sarif
