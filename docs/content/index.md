@@ -170,7 +170,7 @@ ASH leaves its own output out of the scan, whether or not `.gitignore` lists it:
 <details>
 <summary>How do I run ASH in an offline/air-gapped environment?</summary>
 
-Build an offline image with `ashx --mode container --offline --offline-semgrep-rulesets p/ci --no-run`, push to your private registry, then use `ashx --mode container --offline --no-build` in your air-gapped environment. The `--offline-semgrep-rulesets` flag keeps its historical name but now feeds the opengrep rules cache.
+Build an offline image with `ashx --mode container --offline --offline-rulesets p/ci --no-run`, push to your private registry, then use `ashx --mode container --offline --no-build` in your air-gapped environment. The `--offline-rulesets` flag feeds the opengrep rules cache. Its old spelling, `--offline-semgrep-rulesets`, is deprecated: it still works, prints a warning on stderr, and is scheduled for removal.
 </details>
 
 <details>

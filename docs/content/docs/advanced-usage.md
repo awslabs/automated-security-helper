@@ -345,7 +345,7 @@ For air-gapped environments:
 <!-- doctest: illustrative reason="needs a container runtime" -->
 ```bash
 # Build an offline image
-ashx build-image --offline --offline-semgrep-rulesets p/ci
+ashx build-image --offline --offline-rulesets p/ci
 
 # Run in offline mode
 ashx --mode container --offline
@@ -452,12 +452,12 @@ reported MISSING and the scan exits 1. ASH does not fall back to downloading the
 rules.
 
 For the container, build the image with `--offline`. The build downloads each ruleset
-in `--offline-semgrep-rulesets` (space-separated, default `p/ci`; the flag keeps its
-historical name) into `/deps/.opengrep` and sets `OPENGREP_RULES_CACHE_DIR`:
+in `--offline-rulesets` (space-separated, default `p/ci`; the deprecated spelling
+`--offline-semgrep-rulesets` still works and warns) into `/deps/.opengrep` and sets `OPENGREP_RULES_CACHE_DIR`:
 
 <!-- doctest: illustrative reason="needs a container runtime" -->
 ```bash
-ashx build-image --offline --offline-semgrep-rulesets "p/ci p/python"
+ashx build-image --offline --offline-rulesets "p/ci p/python"
 ```
 
 For a local scan, download the rulesets yourself while online, using the same URL the

@@ -98,8 +98,7 @@ sandboxed offline scan of a file with a known finding reports it.
 
 `ashx build-image --offline` and `ashx scan --mode container --offline` build the image with
 `OFFLINE=YES`. The build needs network access: it downloads the grype database, the trivy
-database, and the opengrep rulesets named by `--offline-semgrep-rulesets` (default `p/ci`;
-the flag keeps its historical name), and fails if any of them is empty. The image has
+database, and the opengrep rulesets named by `--offline-rulesets` (default `p/ci`), and fails if any of them is empty. The image has
 `ASH_OFFLINE` set, so every scan in it runs offline. npm-audit cannot run in it; see
 [What each scanner does offline](#scanners).
 
@@ -120,8 +119,10 @@ The image has to carry the name ASH runs, `automated-security-helper:<target>`, 
 one `ASH_IMAGE_NAME` names.
 
 Offline and online builds share one tag, `automated-security-helper:<target>`, so building
-one replaces the other. Set `ASH_IMAGE_NAME` to keep both. `--offline-semgrep-rulesets`
-only affects the image build; it does nothing in local mode.
+one replaces the other. Set `ASH_IMAGE_NAME` to keep both. `--offline-rulesets`
+only affects the image build; it does nothing in local mode. The old spelling,
+`--offline-semgrep-rulesets`, is deprecated: it still works, prints a warning on stderr,
+and is scheduled for removal.
 
 ## Refresh cadence {#refresh}
 
