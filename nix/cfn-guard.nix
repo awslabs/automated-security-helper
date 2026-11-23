@@ -19,7 +19,7 @@
 }:
 
 let
-  version = "3.2.1";
+  version = "3.3.0";
 
   # cfn-guard names its assets without a version; the version is the release tag in the
   # URL, so the hash is the whole pin. Each hash carries detect-secrets' allowlist
@@ -27,19 +27,19 @@ let
   assets = {
     x86_64-linux = {
       name = "cfn-guard-v3-x86_64-linux-latest";
-      hash = "sha256-jGbvsZxj5sK/JrmkG7zy+FuqipN7AdNQlAGU+q9kzx0=";  # pragma: allowlist secret
+      hash = "sha256-7PJdWGyYBXg2+sKKjkmFafba3tjzhv0TMnyCpNqkXW4=";  # pragma: allowlist secret
     };
     aarch64-linux = {
       name = "cfn-guard-v3-aarch64-linux-latest";
-      hash = "sha256-zTeAJtrQ+GWSarHRwILi+vgl9/2Iip/mtcFCzfF1wSk=";  # pragma: allowlist secret
+      hash = "sha256-e4p7S+/fR+f1PAAjqMeXmbfY3eaauKd84weCEZIMj/Q=";  # pragma: allowlist secret
     };
     x86_64-darwin = {
       name = "cfn-guard-v3-x86_64-macos-latest";
-      hash = "sha256-UInfqgWnZs8RigIFGOYvd+3b1DrPOgtp02sjF1xsb9o=";  # pragma: allowlist secret
+      hash = "sha256-nEw/dbnQUZ/ssXG0ksjTL2bd4tHRMSH8w0cXGlk09yI=";  # pragma: allowlist secret
     };
     aarch64-darwin = {
       name = "cfn-guard-v3-aarch64-macos-latest";
-      hash = "sha256-TB6xDAYXMRWeqvDn29Rl25+kt2e4IYakq0iWccwAt9A=";  # pragma: allowlist secret
+      hash = "sha256-nMX9KuP+vlbszNrQyqc+RpMTFjKHGhMFx85JolY+g24=";  # pragma: allowlist secret
     };
   };
 

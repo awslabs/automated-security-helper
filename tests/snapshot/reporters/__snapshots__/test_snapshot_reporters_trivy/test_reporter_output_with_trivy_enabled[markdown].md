@@ -57,6 +57,7 @@ Showing 10 of 10 actionable findings, highest severity first.
 - Scanner: trivy
 - Rule ID: CVE-2021-23337
 - Location: /src/package-lock.json:13-17
+- CVE: CVE-2021-23337
 
 Package: lodash
 Installed Version: 4.17.20
@@ -76,6 +77,7 @@ Link: \[CVE-2021-23337\](`https://avd.aquasec.com/nvd/cve-2021-23337`)
 - Scanner: trivy
 - Rule ID: CVE-2026-4800
 - Location: /src/package-lock.json:13-17
+- CVE: CVE-2026-4800
 
 Package: lodash
 Installed Version: 4.17.20
@@ -95,6 +97,7 @@ Link: \[CVE-2026-4800\](`https://avd.aquasec.com/nvd/cve-2026-4800`)
 - Scanner: trivy
 - Rule ID: CVE-2018-18074
 - Location: /src/requirements.txt:2
+- CVE: CVE-2018-18074
 
 Package: requests
 Installed Version: 2.19.1
@@ -114,6 +117,7 @@ Link: \[CVE-2018-18074\](`https://avd.aquasec.com/nvd/cve-2018-18074`)
 - Scanner: trivy
 - Rule ID: CVE-2020-28500
 - Location: /src/package-lock.json:13-17
+- CVE: CVE-2020-28500
 
 Package: lodash
 Installed Version: 4.17.20
@@ -133,6 +137,7 @@ Link: \[CVE-2020-28500\](`https://avd.aquasec.com/nvd/cve-2020-28500`)
 - Scanner: trivy
 - Rule ID: CVE-2025-13465
 - Location: /src/package-lock.json:13-17
+- CVE: CVE-2025-13465
 
 Package: lodash
 Installed Version: 4.17.20
@@ -152,6 +157,7 @@ Link: \[CVE-2025-13465\](`https://avd.aquasec.com/nvd/cve-2025-13465`)
 - Scanner: trivy
 - Rule ID: CVE-2026-2950
 - Location: /src/package-lock.json:13-17
+- CVE: CVE-2026-2950
 
 Package: lodash
 Installed Version: 4.17.20
@@ -171,6 +177,7 @@ Link: \[CVE-2026-2950\](`https://avd.aquasec.com/nvd/cve-2026-2950`)
 - Scanner: trivy
 - Rule ID: CVE-2023-32681
 - Location: /src/requirements.txt:2
+- CVE: CVE-2023-32681
 
 Package: requests
 Installed Version: 2.19.1
@@ -190,6 +197,7 @@ Link: \[CVE-2023-32681\](`https://avd.aquasec.com/nvd/cve-2023-32681`)
 - Scanner: trivy
 - Rule ID: CVE-2024-35195
 - Location: /src/requirements.txt:2
+- CVE: CVE-2024-35195
 
 Package: requests
 Installed Version: 2.19.1
@@ -209,6 +217,7 @@ Link: \[CVE-2024-35195\](`https://avd.aquasec.com/nvd/cve-2024-35195`)
 - Scanner: trivy
 - Rule ID: CVE-2024-47081
 - Location: /src/requirements.txt:2
+- CVE: CVE-2024-47081
 
 Package: requests
 Installed Version: 2.19.1
@@ -228,6 +237,7 @@ Link: \[CVE-2024-47081\](`https://avd.aquasec.com/nvd/cve-2024-47081`)
 - Scanner: trivy
 - Rule ID: CVE-2026-25645
 - Location: /src/requirements.txt:2
+- CVE: CVE-2026-25645
 
 Package: requests
 Installed Version: 2.19.1

@@ -13,13 +13,16 @@ from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 from automated_security_helper.utils.command_safe_stream import json_commands_broken
 from automated_security_helper.utils.console import ash_console, echo
-from automated_security_helper.utils.finding_diff import compare_findings
+from automated_security_helper.utils.finding_diff import (
+    ComparabilityRefusal,
+    compare_findings,
+    comparable_findings,
+    coverage_warnings,
+)
 from automated_security_helper.utils.scan_results_file import (
     ScanResultsRefused,
-    coverage_warnings as _coverage_warnings,
     parse_full_scan_results,
     read_regular_file,
-    unique_findings,
 )
 from automated_security_helper.utils.terminal_text import (
     raw_controls_on_one_line,
@@ -57,21 +60,14 @@ def _finding_row(finding: FlatVulnerability) -> dict[str, Any]:
     }
 
 
-def _unique_findings(
-    results: AshAggregatedResults, label: str
-) -> list[FlatVulnerability]:
-    try:
-        return unique_findings(results)
-    except ScanResultsRefused as exc:
-        _refuse(f"{label} {exc.reason}")
-
-
 def _result_payload(
     baseline: AshAggregatedResults, current: AshAggregatedResults
 ) -> dict[str, Any]:
-    diff = compare_findings(
-        _unique_findings(baseline, "Baseline"), _unique_findings(current, "Current")
-    )
+    try:
+        before_findings, after_findings = comparable_findings(baseline, current)
+    except ComparabilityRefusal as exc:
+        _refuse(str(exc))
+    diff = compare_findings(before_findings, after_findings)
     return {
         "new": [_finding_row(finding) for finding in diff.new],
         "absent_after": [_finding_row(finding) for finding in diff.absent_after],
@@ -87,7 +83,7 @@ def _result_payload(
             {**_finding_row(after), "before_is_suppressed": before.is_suppressed}
             for before, after in diff.suppression_changed
         ],
-        "warnings": _coverage_warnings(baseline, current),
+        "warnings": coverage_warnings(baseline, current),
     }
 
 
@@ -144,16 +140,6 @@ def diff_command(
     """Compare the findings in two saved ASH scans without running a scan."""
     baseline = _load_results(before)
     current = _load_results(after)
-    baseline_workspace = getattr(baseline.metadata, "workspace_project", None)
-    current_workspace = getattr(current.metadata, "workspace_project", None)
-    if (baseline_workspace is None) != (current_workspace is None):
-        _refuse("cannot mix standalone and workspace project results")
-    if baseline_workspace != current_workspace or (
-        baseline.metadata.project_name
-        and current.metadata.project_name
-        and baseline.metadata.project_name != current.metadata.project_name
-    ):
-        _refuse("the results name different projects")
     payload = _result_payload(baseline, current)
     if output_format == DiffFormat.JSON:
         document = json_commands_broken(

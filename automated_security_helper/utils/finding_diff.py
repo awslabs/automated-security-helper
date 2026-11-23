@@ -8,10 +8,120 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from automated_security_helper.utils.finding_identity import canonical
+from automated_security_helper.core.enums import ScannerStatus
+from automated_security_helper.utils.finding_identity import canonical, key_base
 
 if TYPE_CHECKING:
+    from automated_security_helper.models.asharp_model import AshAggregatedResults
     from automated_security_helper.models.flat_vulnerability import FlatVulnerability
+
+
+class ComparabilityRefusal(ValueError):
+    """Two scans, or one of them, cannot be compared; the text says why."""
+
+
+def check_comparable(results: AshAggregatedResults) -> None:
+    """Refuse one scan's results that no comparison can use.
+
+    The CLI runs this as each file loads (it names the file); the MCP tool runs it
+    through :func:`comparable_findings`.
+    """
+    if results.workspace is not None:
+        raise ComparabilityRefusal(
+            "use the per-project results instead of a workspace aggregate"
+        )
+    if results.metadata.shard is not None:
+        raise ComparabilityRefusal("use ash merge before comparing sharded results")
+    changed_files_only = getattr(results.metadata, "changed_files_only", None)
+    if changed_files_only is True:
+        raise ComparabilityRefusal(
+            "cannot compare results filtered by --changed-files-only"
+        )
+    if changed_files_only is not None and changed_files_only is not False:
+        raise ComparabilityRefusal("invalid changed-files-only marker")
+    if results.baseline_filtered:
+        raise ComparabilityRefusal("cannot use results filtered by --baseline")
+    project = getattr(results.metadata, "workspace_project", None)
+    if project is not None and (not isinstance(project, str) or not project.strip()):
+        raise ComparabilityRefusal("invalid workspace project marker")
+
+
+def check_same_project(
+    baseline: AshAggregatedResults, current: AshAggregatedResults
+) -> None:
+    """Refuse two scans of different projects, or a standalone and a workspace one."""
+    baseline_workspace = getattr(baseline.metadata, "workspace_project", None)
+    current_workspace = getattr(current.metadata, "workspace_project", None)
+    if (baseline_workspace is None) != (current_workspace is None):
+        raise ComparabilityRefusal(
+            "cannot mix standalone and workspace project results"
+        )
+    if baseline_workspace != current_workspace or (
+        baseline.metadata.project_name
+        and current.metadata.project_name
+        and baseline.metadata.project_name != current.metadata.project_name
+    ):
+        raise ComparabilityRefusal("the results name different projects")
+
+
+def unique_findings(
+    results: AshAggregatedResults, label: str
+) -> list[FlatVulnerability]:
+    """*results*' findings, refusing a scan in which two share an ID."""
+    findings = results.to_flat_vulnerabilities()
+    if len({finding.id for finding in findings}) != len(findings):
+        raise ComparabilityRefusal(f"{label} scan contains duplicate finding IDs")
+    return findings
+
+
+def comparable_findings(
+    baseline: AshAggregatedResults, current: AshAggregatedResults
+) -> tuple[list[FlatVulnerability], list[FlatVulnerability]]:
+    """Both scans' findings, once the pair has passed every comparability check."""
+    check_comparable(baseline)
+    check_comparable(current)
+    check_same_project(baseline, current)
+    return unique_findings(baseline, "Baseline"), unique_findings(current, "Current")
+
+
+def _evaluated_scanners(results: AshAggregatedResults) -> set[str]:
+    return {
+        name
+        for name, row in results.scanner_results.items()
+        if not row.excluded
+        and row.status in {ScannerStatus.PASSED, ScannerStatus.FAILED}
+    }
+
+
+def coverage_warnings(
+    baseline: AshAggregatedResults, current: AshAggregatedResults
+) -> list[str]:
+    """What makes a comparison of the two scans less than like for like."""
+    from automated_security_helper.interactions.run_ash_scan import (
+        scan_incompleteness,
+    )
+
+    warnings = []
+    if set(baseline.metadata.expected_scanners) != set(
+        current.metadata.expected_scanners
+    ) or _evaluated_scanners(baseline) != _evaluated_scanners(current):
+        warnings.append("Scanner coverage differs between scans.")
+    if (
+        baseline.metadata.ignore_file_exclusions
+        != current.metadata.ignore_file_exclusions
+    ):
+        warnings.append("Recorded ignore-file exclusions differ between scans.")
+    for label, result in (("Baseline", baseline), ("Current", current)):
+        missing = set(result.metadata.expected_scanners) - _evaluated_scanners(result)
+        if missing or scan_incompleteness(result, gate=True):
+            warnings.append(f"{label} scan has incomplete scanner coverage.")
+        elif not result.metadata.expected_scanners or not result.scanner_results:
+            warnings.append(
+                f"{label} scan does not record enough scanner coverage to establish comparability."
+            )
+        if result.metadata.inputs_not_scanned:
+            warnings.append(f"{label} scan records inputs that were not scanned.")
+    return warnings
 
 
 @dataclass(frozen=True)
@@ -36,11 +146,8 @@ def fallback_key(finding: FlatVulnerability) -> tuple[Any, ...] | None:
         return None
     if finding.has_fingerprint_identity:
         return None
-    base = dict(finding._identity.base)
-    if finding._assigned_identity_key is not None:
-        base["project"] = finding._assigned_identity_key.get(
-            "project", base.get("project")
-        )
+    key = finding._assigned_identity_key
+    base = key_base(key) if key is not None else dict(finding._identity.base)
     return (
         canonical(base),
         finding._identity_message or "",

@@ -9,10 +9,10 @@ from automated_security_helper.config.sandbox_grants import in_tree_reason, is_w
 from automated_security_helper.core.exceptions import ASHValidationError
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
+from automated_security_helper.utils.finding_diff import unique_findings
 from automated_security_helper.utils.scan_results_file import (
     ScanResultsRefused,
     parse_full_scan_results,
-    unique_findings,
 )
 from automated_security_helper.utils.scan_source import is_relative_scan_source
 
@@ -64,7 +64,7 @@ def read_baseline(path: Path, *, source_dir: Path, output_dir: Path) -> ScanBase
         finally:
             opened.close()
         results = parse_full_scan_results(data)
-        findings = tuple(unique_findings(results))
+        findings = tuple(unique_findings(results, "Baseline"))
     except (ScanResultsRefused, OSError, ValueError) as exc:
         raise BaselineRefused(getattr(exc, "reason", str(exc))) from exc
     return ScanBaseline(sha256(data).hexdigest(), results, findings)
@@ -94,10 +94,10 @@ def apply_baseline(
     results: AshAggregatedResults, baseline: ScanBaseline
 ) -> BaselineOutcome:
     from automated_security_helper.interactions.run_ash_scan import incomplete_scanners
-    from automated_security_helper.utils.finding_diff import match_findings
-    from automated_security_helper.utils.scan_results_file import (
+    from automated_security_helper.utils.finding_diff import (
         _evaluated_scanners,
         coverage_warnings,
+        match_findings,
     )
     from automated_security_helper.utils.secret_masking import mask_secrets_in_results
     from automated_security_helper.core.scanner_statistics_calculator import (

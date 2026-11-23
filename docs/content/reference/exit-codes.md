@@ -211,6 +211,19 @@ A scan's own errors end that scan as failed, not the server. On Windows a stdio 
 ash mcp --transport bogus
 ```
 
+## `ash dependencies check` {#dependencies-check}
+
+`ash dependencies check --offline` reads the cached grype and trivy database metadata and compares its age with the staleness policy. It never fails on findings.
+
+| Code | Condition |
+|---|---|
+| 0 | Every checked cache meets the policy, including a stale cache that the policy permits with `warn` |
+| 1 | A checked cache is missing, its metadata cannot be read or has an unsupported schema, or the policy blocks its age |
+| 3 | The `--config` file cannot be used |
+| 5 | A usage error, including a call without `--offline` |
+
+The check downloads nothing and starts no scanner ([Check cached database ages](../how-to/run-offline.md#check-caches)).
+
 ## `ash config` {#config}
 
 | Command | Code | Condition |

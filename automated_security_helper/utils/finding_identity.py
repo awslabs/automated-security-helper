@@ -388,6 +388,28 @@ def canonical(key: Mapping[str, Any]) -> str:
     )
 
 
+#: Key fields that say where a result is or which of several it is, not what it is.
+_LOCATION_KEY_FIELDS = frozenset(
+    {"startLine", "endLine", "occurrence", "ordinal", *FINGERPRINT_KINDS}
+)
+
+
+def key_is_fingerprinted(key: Optional[Mapping[str, Any]]) -> bool:
+    """Whether the assigned identity *key* is keyed by a fingerprint, not by lines."""
+    return any(kind in (key or {}) for kind in FINGERPRINT_KINDS)
+
+
+def key_base(key: Mapping[str, Any]) -> Dict[str, Any]:
+    """*key* without its location fields: scanner, rule, file, package, project, tree.
+
+    The project is the one :func:`identity_keys` folded in, so a caller does not
+    re-apply the run's default project.
+    """
+    return {
+        name: value for name, value in key.items() if name not in _LOCATION_KEY_FIELDS
+    }
+
+
 def finding_id(key: Mapping[str, Any]) -> str:
     """``<scanner>-<rule>-<12 hex digits>``, the id of a flattened finding."""
     digest = hashlib.sha256(canonical(key).encode("utf-8")).hexdigest()
