@@ -24,6 +24,9 @@ from automated_security_helper.utils.terminal_text import shown_not_obeyed
 DEPRECATED_OPTION_SPELLINGS = {
     "--ash-revision": "--ash-revision-to-install",
     "-rev": "--ash-revision-to-install",
+    # The offline ruleset cache is served by the opengrep plugin; the flag no
+    # longer names a retired scanner. The old spelling still binds the same value.
+    "--offline-semgrep-rulesets": "--offline-rulesets",
 }
 
 

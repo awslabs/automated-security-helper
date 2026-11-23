@@ -1890,7 +1890,7 @@ def _build_image(
             "--build-arg",
             f"OFFLINE={'YES' if offline else 'NO'}",
             "--build-arg",
-            f"OFFLINE_SEMGREP_RULESETS={offline_semgrep_rulesets}",
+            f"OFFLINE_RULESETS={offline_semgrep_rulesets}",
             # A new value re-runs the Dockerfile's core stage from its apt-get
             # upgrade step down, offline download included; see ARG BUILD_DATE_EPOCH
             # there. One value per UTC day, so rebuilds on the same day come from the

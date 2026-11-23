@@ -251,7 +251,9 @@ def test_every_forwarded_option_is_spelled_as_the_scan_cli_reads_it(tmp_path):
     assert _after_flag(argv, "--phases") == [ExecutionPhase.SCAN.value]
     assert _after_flag(argv, "--strategy") == [ExecutionStrategy.SEQUENTIAL.value]
     assert _after_flag(argv, "--log-level") == [AshLogLevel.DEBUG.value]
-    assert _after_flag(argv, "--offline-semgrep-rulesets") == ["p/custom"]
+    assert _after_flag(argv, "--offline-rulesets") == ["p/custom"]
+    # The deprecated spelling is not re-emitted: the inner scan would warn about it.
+    assert _after_flag(argv, "--offline-semgrep-rulesets") == []
     assert _after_flag(argv, "--min-severity") == ["high"]
     assert _after_flag(argv, "--base-ref") == ["origin/trunk"]
     assert _after_flag(argv, "--shard-index") == ["1"]
@@ -492,7 +494,7 @@ _FORWARDED = {
     "phases",
     "strategy",
     "offline",
-    "offline_semgrep_rulesets",
+    "offline_rulesets",
     "progress",
     "color",
     "show_summary",
@@ -593,7 +595,7 @@ _VARIED = {
     "phases": ({}, [ExecutionPhase.SCAN]),
     "strategy": ({}, ExecutionStrategy.SEQUENTIAL),
     "offline": ({}, True),
-    "offline_semgrep_rulesets": ({}, "p/custom"),
+    "offline_rulesets": ({}, "p/custom"),
     "progress": ({}, False),
     "color": ({}, False),
     "show_summary": ({}, False),

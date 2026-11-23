@@ -213,10 +213,12 @@ FROM ${BASE_IMAGE} AS core
 # the running container, not the shell `RUN` uses at build time.
 ENV SHELL="bash"
 ARG OFFLINE="NO"
-# The historical name is kept so existing build invocations keep working; the
-# rulesets it names are downloaded for the opengrep scanner, which serves the
-# retired semgrep scanner's alias and reads the same registry packs.
+# OFFLINE_RULESETS is the canonical build argument; the rulesets it names are
+# downloaded for the opengrep scanner. OFFLINE_SEMGREP_RULESETS is the deprecated
+# spelling and stays accepted: a build that passes only the old one still gets its
+# value, because the canonical argument defaults to it.
 ARG OFFLINE_SEMGREP_RULESETS="p/ci"
+ARG OFFLINE_RULESETS="${OFFLINE_SEMGREP_RULESETS}"
 ARG ASH_BIN_PATH="/.ash/bin"
 
 ARG INSTALL_ASH_REVISION="LOCAL"
@@ -231,7 +233,9 @@ ENV ASH_OFFLINE="${OFFLINE}"
 # (OFFLINE_IMAGE_POLICIES in utils/content_databases.py), so it must keep following the
 # build argument and nothing else.
 ENV ASH_OFFLINE_AT_BUILD_TIME="${OFFLINE}"
-ENV OFFLINE_SEMGREP_RULESETS="${OFFLINE_SEMGREP_RULESETS}"
+ENV OFFLINE_RULESETS="${OFFLINE_RULESETS}"
+# The deprecated name follows the canonical one, so a reader of either sees the value in use.
+ENV OFFLINE_SEMGREP_RULESETS="${OFFLINE_RULESETS}"
 ENV TZ=UTC
 RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
@@ -509,7 +513,7 @@ RUN gitleaks --version
 RUN set -uex; if [ "${OFFLINE}" = "YES" ]; then \
     with-retry 'grype db update'; \
     mkdir -p ${OPENGREP_RULES_CACHE_DIR}; \
-    for i in $OFFLINE_SEMGREP_RULESETS; do \
+    for i in ${OFFLINE_RULESETS:-$OFFLINE_SEMGREP_RULESETS}; do \
         outfile="${OPENGREP_RULES_CACHE_DIR}/$(basename "${i}").yml"; \
         with-retry "curl -sSf https://semgrep.dev/c/${i} -o ${outfile}"; \
     done; \

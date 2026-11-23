@@ -99,8 +99,11 @@ def build_ash_image_cli_command(
     offline_semgrep_rulesets: Annotated[
         str,
         typer.Option(
+            "--offline-rulesets",
+            # Deprecated spelling, still accepted; warn_deprecated_option_spellings
+            # names the replacement when it is used.
             "--offline-semgrep-rulesets",
-            help="Specify rulesets to bake into the opengrep offline cache for ASH offline mode (the flag keeps its historical name; the semgrep scanner is served by the opengrep plugin)",
+            help="Specify rulesets to bake into the opengrep offline cache for ASH offline mode",
         ),
     ] = "p/ci",
     container_uid: Annotated[

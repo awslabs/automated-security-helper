@@ -250,3 +250,73 @@ class TestDeprecatedRevisionSpellingWarns:
         captured = capsys.readouterr()
         assert captured.out == ""
         assert "--ash-revision" in captured.err
+
+
+class TestDeprecatedOfflineRulesetsSpellingWarns:
+    """``--offline-semgrep-rulesets`` is accepted, warns once, and names
+    ``--offline-rulesets``, which takes the same value."""
+
+    def test_the_old_spelling_warns_and_names_the_replacement(self, capsys):
+        from automated_security_helper.cli.deprecations import (
+            warn_deprecated_option_spellings,
+        )
+
+        with mock.patch.object(
+            sys, "argv", ["ashx", "--offline-semgrep-rulesets", "p/ci"]
+        ):
+            warn_deprecated_option_spellings()
+        err = capsys.readouterr().err
+        assert "--offline-semgrep-rulesets" in err
+        assert "--offline-rulesets" in err
+
+    def test_the_old_spelling_with_equals_warns_once(self, capsys):
+        from automated_security_helper.cli.deprecations import (
+            warn_deprecated_option_spellings,
+        )
+
+        with mock.patch.object(
+            sys,
+            "argv",
+            [
+                "ashx",
+                "--offline-semgrep-rulesets=p/ci",
+                "--offline-semgrep-rulesets=p/python",
+            ],
+        ):
+            warn_deprecated_option_spellings()
+        err = capsys.readouterr().err
+        assert err.count("is deprecated") == 1
+
+    def test_the_canonical_spelling_is_silent(self, capsys):
+        from automated_security_helper.cli.deprecations import (
+            warn_deprecated_option_spellings,
+        )
+
+        with mock.patch.object(sys, "argv", ["ashx", "--offline-rulesets", "p/ci"]):
+            warn_deprecated_option_spellings()
+        assert capsys.readouterr().err == ""
+
+    @pytest.mark.parametrize(
+        "spelling", ["--offline-rulesets", "--offline-semgrep-rulesets"]
+    )
+    def test_both_spellings_bind_the_same_scan_parameter(self, spelling):
+        import typer
+
+        from automated_security_helper.cli.main import app
+
+        scan = typer.main.get_command(app).commands["scan"]
+        parsed = scan.make_context(
+            "scan", [spelling, "p/custom"], resilient_parsing=False
+        ).params
+        assert parsed["offline_semgrep_rulesets"] == "p/custom"
+
+    @pytest.mark.parametrize("field", ["offline_rulesets", "offline_semgrep_rulesets"])
+    def test_scan_options_accepts_either_field_name(self, field, tmp_path):
+        from automated_security_helper.interactions.run_ash_scan import ScanOptions
+
+        opts = ScanOptions(
+            source_dir=tmp_path / "src",
+            output_dir=tmp_path / "out",
+            **{field: "p/custom"},
+        )
+        assert opts.offline_rulesets == "p/custom"

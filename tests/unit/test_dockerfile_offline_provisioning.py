@@ -221,6 +221,17 @@ class TestGrypeAndRulesetStep:
         )
         assert names == [".ash-rules-fetched-at", "ci.yml", "secrets.yml"]
 
+    def test_the_canonical_name_wins_over_the_deprecated_one(self, shell, stub_env):
+        """OFFLINE_RULESETS is the build argument; OFFLINE_SEMGREP_RULESETS (set to
+        both rulesets in stub_env) is only the fallback when it is empty or unset,
+        which the control above covers."""
+        result = _run(shell, _step(self.STEP), stub_env, OFFLINE_RULESETS="p/ci")
+        assert result.returncode == 0, result.stderr
+        names = sorted(
+            p.name for p in Path(stub_env["OPENGREP_RULES_CACHE_DIR"]).iterdir()
+        )
+        assert names == [".ash-rules-fetched-at", "ci.yml"]
+
 
 _QUOTED = re.compile(r"'[^']*'" + r'|"(?:[^"\\]|\\.)*"')
 

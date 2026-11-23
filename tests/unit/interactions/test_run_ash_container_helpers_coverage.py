@@ -1064,7 +1064,10 @@ class TestBuildImage:
 
         cmd = recorded_commands[0]
         assert "OFFLINE=YES" in cmd
-        assert "OFFLINE_SEMGREP_RULESETS=p/python" in cmd
+        assert "OFFLINE_RULESETS=p/python" in cmd
+        # The canonical build argument is the only one passed; the Dockerfile
+        # keeps OFFLINE_SEMGREP_RULESETS as a deprecated alias for older callers.
+        assert "OFFLINE_SEMGREP_RULESETS=p/python" not in cmd
         assert "INSTALL_ASH_REVISION=LOCAL" in cmd
 
     def test_the_build_context_is_the_dockerfile_directory(

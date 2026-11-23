@@ -32,7 +32,14 @@ from typing import (
 )
 
 import typer
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+)
 from rich.text import Text
 
 # `print` shadows the builtin on purpose: this is rich's documented import
@@ -346,7 +353,12 @@ class ScanOptions(BaseModel):
     force: bool = False
     oci_runner: Optional[str] = None
     build_target: Optional[BuildTarget] = None
-    offline_semgrep_rulesets: str = "p/ci"
+    # Rulesets baked into the opengrep offline cache. ``offline_semgrep_rulesets``
+    # is the deprecated spelling of this field and is still accepted on input.
+    offline_rulesets: str = Field(
+        "p/ci",
+        validation_alias=AliasChoices("offline_rulesets", "offline_semgrep_rulesets"),
+    )
     container_uid: Optional[str] = None
     container_gid: Optional[str] = None
     ash_revision_to_install: Optional[str] = None
@@ -5596,7 +5608,7 @@ def _run_container_mode(
         force=opts.force,
         oci_runner=opts.oci_runner,
         build_target=opts.build_target,
-        offline_semgrep_rulesets=opts.offline_semgrep_rulesets,
+        offline_semgrep_rulesets=opts.offline_rulesets,
         container_uid=opts.container_uid,
         container_gid=opts.container_gid,
         # The host path: run_ash_container mounts the file read-only and hands
@@ -5984,8 +5996,8 @@ def _nix_inner_argv(opts: ScanOptions) -> List[str]:
     argv.extend(["--strategy", value_of(opts.strategy)])
     if opts.offline:
         argv.append("--offline")
-    if opts.offline_semgrep_rulesets != "p/ci":
-        argv.extend(["--offline-semgrep-rulesets", opts.offline_semgrep_rulesets])
+    if opts.offline_rulesets != "p/ci":
+        argv.extend(["--offline-rulesets", opts.offline_rulesets])
     if not opts.progress:
         argv.append("--no-progress")
     if not opts.color:
@@ -8235,7 +8247,7 @@ def run_ash_scan(
         force=force,
         oci_runner=oci_runner,
         build_target=build_target,
-        offline_semgrep_rulesets=offline_semgrep_rulesets,
+        offline_rulesets=offline_semgrep_rulesets,
         container_uid=container_uid,
         container_gid=container_gid,
         ash_revision_to_install=ash_revision_to_install,
