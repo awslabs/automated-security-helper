@@ -3787,7 +3787,9 @@ also counts from the database's upstream build, and more often still to keep tri
 findings current. Rebuild online images at least weekly, so the scanner tools get their
 fixes. Keep <code>content_db_staleness: fail</code> in the operator config; a repository cannot
 relax it while you pass <code>--config</code>. To hold trivy's database to its bound in an
-offline image too, also set <code>content_db_staleness_offline_image_default: false</code>. <a href="../../how-to/run-offline/">Run ASH offline</a> covers air-gapped hosts,
+offline image too, also set <code>content_db_staleness_offline_image_default: false</code>. To read the age of the cached grype and trivy databases against those bounds without
+running a scan, use <a href="../../reference/cli/#dependencies-check"><code>ash dependencies check --offline</code></a>
+(<a href="../../how-to/run-offline/#check-caches">Check cached database ages</a>). <a href="../../how-to/run-offline/">Run ASH offline</a> covers air-gapped hosts,
 and <a href="../../concepts/content-databases/">Content databases</a> lists every bound.</p>
 <h2 id="6-send-findings-where-your-team-reads-them">6. Send findings where your team reads them<a class="headerlink" href="#6-send-findings-where-your-team-reads-them" title="Permanent link">&para;</a></h2>
 <p>Every scan writes its reports to <code>reports/</code> in the output directory. Send each to the

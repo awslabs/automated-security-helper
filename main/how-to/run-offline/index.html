@@ -1177,6 +1177,23 @@ SOFTWARE.
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Prepare a host for offline scans">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#check-caches" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Check cached database ages
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -3418,6 +3435,23 @@ SOFTWARE.
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Prepare a host for offline scans">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#check-caches" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Check cached database ages
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -3659,6 +3693,24 @@ semgrep and opengrep can read only the directories the sandbox mounts. Keep the 
 cache under a system directory such as <code>/opt</code>, or add it to <code>sandbox.extra_read_paths</code> in
 a config file outside every git checkout (<a href="../../docs/scanner-sandbox/#who-may-grant">Who may grant</a>) or with <code>--config-overrides</code>. Then check that a
 sandboxed offline scan of a file with a known finding reports it.</p>
+<h3 id="check-caches">Check cached database ages<a class="headerlink" href="#check-caches" title="Permanent link">&para;</a></h3>
+<p>Run <a href="../../reference/cli/#dependencies-check"><code>ash dependencies check --offline</code></a>
+from the project directory on the host that will scan it:</p>
+<!-- doctest: illustrative reason="checks databases already provisioned on the scan host" -->
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>ash<span class="w"> </span>dependencies<span class="w"> </span>check<span class="w"> </span>--offline
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>ash<span class="w"> </span>dependencies<span class="w"> </span>check<span class="w"> </span>--offline<span class="w"> </span>--tool<span class="w"> </span>grype
+</span></code></pre></div>
+<p>The check reads Grype's schema 6 SQLite metadata and Trivy's schema 2 <code>metadata.json</code>.
+It reports the database path, build or update time, and ASH's age policy. Copying a
+stale database does not make it fresh. Name the same <code>--config</code>, <code>--source-dir</code>,
+and stale-database flag you will use on the scan if those differ from the defaults.
+The <code>GRYPE_DB_CACHE_DIR</code> and <code>TRIVY_CACHE_DIR</code> values are resolved the same way as
+for the local scanners.</p>
+<p>Exit 0 means the checked cache metadata meets the policy, including a stale cache
+permitted by <code>warn</code>. Exit 1 means a cache is missing, its metadata cannot be read,
+or policy blocks its age. The check neither downloads data nor starts a scanner.
+It does not verify the installed tools, database integrity, the Trivy Java index,
+or that the scan will cover every input.</p>
 <h2 id="offline-image">The offline image<a class="headerlink" href="#offline-image" title="Permanent link">&para;</a></h2>
 <p><code>ash build-image --offline</code> and <code>ash scan --mode container --offline</code> build the image with
 <code>OFFLINE=YES</code>. The build needs network access: it downloads the grype database, the trivy
@@ -3674,7 +3726,7 @@ downloads them.
 The same holds for <code>./ash --offline</code> and <code>Invoke-ASH -Offline</code>. Container mode builds the image before every scan unless you pass
 <code>--no-build</code>, so on a host without network access, scan with the image you moved there:</p>
 <!-- doctest: illustrative reason="needs a container runtime and an offline image built elsewhere" -->
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>ash<span class="w"> </span>scan<span class="w"> </span>--mode<span class="w"> </span>container<span class="w"> </span>--offline<span class="w"> </span>--no-build
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>ash<span class="w"> </span>scan<span class="w"> </span>--mode<span class="w"> </span>container<span class="w"> </span>--offline<span class="w"> </span>--no-build
 </span></code></pre></div>
 <p>The image has to carry the name ASH runs, <code>automated-security-helper:&lt;target&gt;</code>, or the
 one <code>ASH_IMAGE_NAME</code> names.</p>
@@ -3737,12 +3789,12 @@ warning in the reports. In the offline image, <code>trivy-db</code> is already h
 scan there too (<a href="../../concepts/content-databases/#what-happens-when-a-database-is-stale">Content databases</a>). To relax one database for a limited time, add an entry with an
 expiration date and a reason:</p>
 <!-- doctest: config kind=ash -->
-<div class="language-yaml highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nt">content_db_staleness</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">fail</span>
-</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="nt">content_db_staleness_overrides</span><span class="p">:</span>
-</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">database</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">trivy-db</span>
-</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">    </span><span class="nt">policy</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">warn</span>
-</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="w">    </span><span class="nt">expiration</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;2027-06-30&quot;</span>
-</span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="w">    </span><span class="nt">reason</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Air-gapped runners get a new image weekly until the mirror is ready.</span>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nt">content_db_staleness</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">fail</span>
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="nt">content_db_staleness_overrides</span><span class="p">:</span>
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">database</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">trivy-db</span>
+</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">    </span><span class="nt">policy</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">warn</span>
+</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="w">    </span><span class="nt">expiration</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;2027-06-30&quot;</span>
+</span><span id="__span-5-6"><a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="w">    </span><span class="nt">reason</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Air-gapped runners get a new image weekly until the mirror is ready.</span>
 </span></code></pre></div>
 <p>The entry applies until 00:00 UTC on its expiration date, then ASH ignores it and logs a
 warning. Quote the date: an unquoted date makes the whole config invalid.</p>

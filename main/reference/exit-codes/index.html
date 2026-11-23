@@ -2288,6 +2288,17 @@ SOFTWARE.
 </li>
       
         <li class="md-nav__item">
+  <a href="#dependencies-check" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ash dependencies check
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#config" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3554,6 +3565,17 @@ SOFTWARE.
 </li>
       
         <li class="md-nav__item">
+  <a href="#dependencies-check" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ash dependencies check
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#config" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3974,6 +3996,35 @@ SOFTWARE.
 <!-- doctest: run expect-exit=5 -->
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>ash<span class="w"> </span>mcp<span class="w"> </span>--transport<span class="w"> </span>bogus
 </span></code></pre></div>
+<h2 id="dependencies-check"><code>ash dependencies check</code><a class="headerlink" href="#dependencies-check" title="Permanent link">&para;</a></h2>
+<p><code>ash dependencies check --offline</code> reads the cached grype and trivy database metadata and compares its age with the staleness policy. It never fails on findings.</p>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>Condition</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td>Every checked cache meets the policy, including a stale cache that the policy permits with <code>warn</code></td>
+</tr>
+<tr>
+<td>1</td>
+<td>A checked cache is missing, its metadata cannot be read or has an unsupported schema, or the policy blocks its age</td>
+</tr>
+<tr>
+<td>3</td>
+<td>The <code>--config</code> file cannot be used</td>
+</tr>
+<tr>
+<td>5</td>
+<td>A usage error, including a call without <code>--offline</code></td>
+</tr>
+</tbody>
+</table>
+<p>The check downloads nothing and starts no scanner (<a href="../../how-to/run-offline/#check-caches">Check cached database ages</a>).</p>
 <h2 id="config"><code>ash config</code><a class="headerlink" href="#config" title="Permanent link">&para;</a></h2>
 <table>
 <thead>

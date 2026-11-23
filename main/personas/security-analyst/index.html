@@ -3500,7 +3500,10 @@ pinned ASH with uv instead
 (<a href="../../getting-started/platform-teams/#uv-rollout">Pin ASH with uv</a>).</p>
 <p>The same page covers the part that ages: grype and trivy read vulnerability
 databases with age bounds, and ASH fails a scan whose database is stale, so
-image rebuilds go on a schedule rather than waiting for the first failed scan.</p>
+image rebuilds go on a schedule rather than waiting for the first failed scan.
+<code>ash dependencies check --offline</code> reads the age of the cached databases against
+those bounds without running a scan
+(<a href="../../how-to/run-offline/#check-caches">Check cached database ages</a>).</p>
 <h2 id="reports-your-systems-read">Reports your systems read<a class="headerlink" href="#reports-your-systems-read" title="Permanent link">&para;</a></h2>
 <p>Every scan writes its reports to <code>reports/</code> in the output directory; thirteen
 reporters are on by default, and each writes its own file
