@@ -36,6 +36,7 @@ from automated_security_helper.schemas.ocsf.ocsf_vulnerability_finding import (
 from automated_security_helper.schemas.sarif_schema_model import Result, Suppression
 from automated_security_helper.utils.error_text import error_text
 from automated_security_helper.utils.get_ash_version import get_ash_version
+from automated_security_helper.utils.taxonomy_ids import cve_of_rule_id
 import json
 import re
 from datetime import datetime, timezone
@@ -254,13 +255,6 @@ SKIPPED_PROJECT_UID_PREFIX = "ash-workspace-skipped-project:"
 #: Other (99). Every record this reporter emits is the creation of a finding.
 #: The name was "Scan", which is not an activity of the class, beside the id 1.
 ACTIVITY_NAME = "Create"
-
-#: A CVE identifier at the head of a rule id, the only value OCSF's ``cve.uid``
-#: is defined to hold. Grype names its rules ``<CVE id>-<package>``
-#: (``CVE-2022-40897-setuptools``), so the identifier is read off the front and
-#: the package suffix is left behind; a scanner's own rule id (``B602``), or an
-#: id that only contains a CVE id further in, carries no cve.
-_CVE_ID = re.compile(r"^(CVE-\d{4}-\d{4,})(?:-|$)", re.IGNORECASE)
 
 #: The namespace every finding's ``finding_info.uid`` is derived under. A uid was
 #: a fresh uuid4 on every run, so the same finding reached a SIEM under a new
@@ -556,10 +550,12 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
             # rule) published there told a SIEM that every finding was a known
             # CVE. The rule id is the vulnerability's ``title`` either way.
             try:
-                cve_match = _CVE_ID.match(rule_id) if rule_id else None
-                if cve_match:
+                # The reading is shared with the flat model's cve_id
+                # (utils/taxonomy_ids.py).
+                cve_uid = cve_of_rule_id(rule_id)
+                if cve_uid:
                     vuln_dict["cve"] = {
-                        "uid": cve_match.group(1).upper(),
+                        "uid": cve_uid,
                         "desc": desc,
                     }
             except Exception as e:
