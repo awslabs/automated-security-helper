@@ -18,7 +18,8 @@ for amd64 and arm64, taken 2026-10-07 and cut down to the stanzas of the pinned
 packages, under ``tests/test_data/apt_indices/<host>/<path>``. The
 bookworm-security ca-certificates stanza was refreshed on 2026-10-27, when the
 archive replaced 20250419~deb12u1 with 20250419~deb12u2 and the image build
-started failing on the old pin. The Debian ones are
+started failing on the old pin. The NodeSource stanzas gained 22.23.5 on
+2026-11-23, when the Dockerfile pin moved to it. The Debian ones are
 served xz-compressed, as the archive serves them, so the decompression path runs
 too. No test reaches the network: the HTTP and HTTPS transports fail the test if
 anything reaches them.
@@ -317,7 +318,7 @@ class TestAgainstTheRecordedIndexes:
                 _drop(
                     f"deb.nodesource.com/node_22.x/dists/nodistro/main/binary-{arch}/Packages",
                     "nodejs",
-                    "22.23.4-1nodesource1",
+                    "22.23.5-1nodesource1",
                 )
             )
         results = _check(overrides)
