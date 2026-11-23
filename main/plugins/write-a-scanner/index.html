@@ -2948,6 +2948,56 @@ SOFTWARE.
 </li>
       
         <li class="md-nav__item">
+  <a href="#inherit-the-base-class-mechanisms-do-not-copy-them" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Inherit the base class mechanisms, do not copy them
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Inherit the base class mechanisms, do not copy them">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#drop-the-results-under-ashs-output-directory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Drop the results under ASH's output directory
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#gate-an-option-that-only-the-operator-may-set" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Gate an option that only the operator may set
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keep-the-tools-stderr-out-of-the-failure-text" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Keep the tool's stderr out of the failure text
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#declare-what-the-scanner-needs-under-the-sandbox" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3498,6 +3548,56 @@ SOFTWARE.
 </li>
       
         <li class="md-nav__item">
+  <a href="#inherit-the-base-class-mechanisms-do-not-copy-them" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Inherit the base class mechanisms, do not copy them
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Inherit the base class mechanisms, do not copy them">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#drop-the-results-under-ashs-output-directory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Drop the results under ASH's output directory
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#gate-an-option-that-only-the-operator-may-set" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Gate an option that only the operator may set
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keep-the-tools-stderr-out-of-the-failure-text" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Keep the tool's stderr out of the failure text
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#declare-what-the-scanner-needs-under-the-sandbox" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3774,11 +3874,11 @@ SOFTWARE.
 </tr>
 <tr>
 <td><code>self._ash_output_dirs_inside(target)</code></td>
-<td>ASH writes its output under the source directory by default. ASH leaves its own files there out of the scan set and drops the results a scanner reports in them, but a tool that walks the whole directory still reads ASH's earlier reports and converted files, so pass each of these paths to the tool's exclude option. They are ASH's output directories inside <code>target</code>, relative to it: this run's output directory and an earlier run's <code>.ash/ash_output</code>, less those that hold files git tracks, which ASH scans. The list is empty for the converted target.</td>
+<td>ASH writes its output under the source directory by default. ASH leaves its own files there out of the scan set and drops the results a scanner reports in them, but a tool that walks the whole directory still reads ASH's earlier reports and converted files, so pass each of these paths to the tool's exclude option. They are ASH's output directories inside <code>target</code>, relative to it: this run's output directory and an earlier run's <code>.ash/ash_output</code>, less those that hold files git tracks, which ASH scans. The list is empty for the converted target. If the tool has no exclude option, call <code>self._drop_results_under_output_dir(sarif_report, target)</code> instead (<a href="#inherit-the-base-class-mechanisms-do-not-copy-them">below</a>).</td>
 </tr>
 <tr>
 <td><code>ruff check --isolated</code></td>
-<td>ruff, like many tools, reads its configuration from files in the repository it checks, which would let the repository turn off the rules you selected, so pass the tool's option for ignoring those files. If your plugin takes an option that names a file the tool reads as configuration, use <code>operator_path</code> from <code>automated_security_helper.utils.config_trust</code>, the check ASH's own scanners use, which accepts the value only when the operator set it and the file is outside the scanned tree.</td>
+<td>ruff, like many tools, reads its configuration from files in the repository it checks, which would let the repository turn off the rules you selected, so pass the tool's option for ignoring those files. If your plugin takes an option that names a file the tool reads as configuration, use <code>operator_path</code> from <code>automated_security_helper.utils.config_trust</code>, the check ASH's own scanners use, which accepts the value only when the operator set it and the file is outside the scanned tree. For any other option that widens what a scan reads, trusts, or sends, use <code>self._operator_gated(...)</code> (<a href="#inherit-the-base-class-mechanisms-do-not-copy-them">below</a>).</td>
 </tr>
 <tr>
 <td>The module-level list</td>
@@ -3786,43 +3886,57 @@ SOFTWARE.
 </tr>
 </tbody>
 </table>
+<h2 id="inherit-the-base-class-mechanisms-do-not-copy-them">Inherit the base class mechanisms, do not copy them<a class="headerlink" href="#inherit-the-base-class-mechanisms-do-not-copy-them" title="Permanent link">&para;</a></h2>
+<p>Three mechanisms that the first secrets scanners each carried as a private copy now live in <code>ScannerPluginBase</code>. Subclass it and use them. A copy keeps the behavior it had on the day it was made, while the base class's version is fixed for every scanner at once, so write none of the three yourself.</p>
+<h3 id="drop-the-results-under-ashs-output-directory">Drop the results under ASH's output directory<a class="headerlink" href="#drop-the-results-under-ashs-output-directory" title="Permanent link">&para;</a></h3>
+<p>A scanner that hands a whole directory to a tool with no exclude option makes the tool read ASH's own files, so its report can hold findings in them. After the SARIF is read, for example in <code>_post_process_sarif</code>, call <code>self._drop_results_under_output_dir(sarif_report, target)</code>. It removes the results located under ASH's output directories inside <code>target</code>, this run's and an earlier run's <code>.ash/ash_output</code>, and keeps a result in a file the repository committed there. It removes nothing when the output directory is outside <code>target</code>, which is the case for the converted target.</p>
+<h3 id="gate-an-option-that-only-the-operator-may-set">Gate an option that only the operator may set<a class="headerlink" href="#gate-an-option-that-only-the-operator-may-set" title="Permanent link">&para;</a></h3>
+<p>An option that widens what a scan reads, trusts, or sends must not take effect when it comes from a file inside the scanned tree or from an MCP client. Do not compare provenance and log the refusal yourself. Call <code>self._operator_gated(key, wanted, default, refusal)</code>, where <code>key</code> is the option's dotted path, <code>scanners.&lt;name&gt;.options.&lt;option&gt;</code>, and <code>wanted</code> is the value the scanner is about to use. It returns <code>wanted</code> when the operator set the option. Otherwise it returns <code>default</code> and logs <code>refusal</code> as a warning once for that option on that scanner instance. Return early before the call when the option is off, since there is then nothing to refuse. Use <code>operator_path</code> from the table above for an option that names a file.</p>
+<h3 id="keep-the-tools-stderr-out-of-the-failure-text">Keep the tool's stderr out of the failure text<a class="headerlink" href="#keep-the-tools-stderr-out-of-the-failure-text" title="Permanent link">&para;</a></h3>
+<p>By default the failure text and <code>self.errors</code> carry the tool's stderr, which is what an author debugging a plugin wants. A tool's stderr can also hold text from the scanned tree or an answer from a provider, as when a secrets scanner quotes a line of an ignore file, and the failure text reaches <code>ash.log</code>, the console, and every results file. A scanner whose stderr can hold such text sets two class variables:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">ClassVar</span><span class="p">,</span> <span class="n">Optional</span>
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>
+</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="n">quote_tool_stderr</span><span class="p">:</span> <span class="n">ClassVar</span><span class="p">[</span><span class="nb">bool</span><span class="p">]</span> <span class="o">=</span> <span class="kc">False</span>
+</span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="n">unquoted_failure_tool_name</span><span class="p">:</span> <span class="n">ClassVar</span><span class="p">[</span><span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]]</span> <span class="o">=</span> <span class="s2">&quot;acme-scan&quot;</span>
+</span></code></pre></div>
+<p>With <code>quote_tool_stderr</code> False, ASH drops the <code>stderr</code> key from the tool's response before it records errors, and the failure text names the scanner's <code>.stderr.log</code> file next to the results file and does not quote it. The exit code is still recorded, and the log file keeps the whole stream. <code>unquoted_failure_tool_name</code> is the tool's name in that text. Left as <code>None</code>, it reads the name in the plugin config, and then "its tool".</p>
 <h2 id="declare-what-the-scanner-needs-under-the-sandbox">Declare what the scanner needs under the sandbox<a class="headerlink" href="#declare-what-the-scanner-needs-under-the-sandbox" title="Permanent link">&para;</a></h2>
 <p>Under <code>--sandbox</code>, a scanner gets the strictest policy unless it declares more: no network, no extra read paths, and no environment beyond the sandbox's allowlist (<a href="../../concepts/sandbox/">Scanner sandbox</a>). <code>ruff-security</code> needs nothing more, so it declares nothing. A scanner whose tool downloads a rule pack into a cache would add a <code>sandbox_requirements</code> class attribute, or a property when the need depends on the scanner's options:</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">ClassVar</span>
-</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>
-</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="kn">from</span><span class="w"> </span><span class="nn">automated_security_helper.utils.sandbox.policy</span><span class="w"> </span><span class="kn">import</span> <span class="n">SandboxRequirements</span>
-</span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>
-</span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="n">sandbox_requirements</span><span class="p">:</span> <span class="n">ClassVar</span><span class="p">[</span><span class="n">SandboxRequirements</span><span class="p">]</span> <span class="o">=</span> <span class="n">SandboxRequirements</span><span class="p">(</span>
-</span><span id="__span-8-6"><a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>    <span class="n">network</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
-</span><span id="__span-8-7"><a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>    <span class="n">cache_paths</span><span class="o">=</span><span class="p">(</span><span class="s2">&quot;~/.cache/acme-rules&quot;</span><span class="p">,),</span>
-</span><span id="__span-8-8"><a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>    <span class="n">cache_env</span><span class="o">=</span><span class="p">(</span><span class="s2">&quot;ACME_CACHE_DIR&quot;</span><span class="p">,),</span>
-</span><span id="__span-8-9"><a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a>    <span class="n">env_prefixes</span><span class="o">=</span><span class="p">(</span><span class="s2">&quot;ACME_&quot;</span><span class="p">,),</span>
-</span><span id="__span-8-10"><a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a><span class="p">)</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">ClassVar</span>
+</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>
+</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="kn">from</span><span class="w"> </span><span class="nn">automated_security_helper.utils.sandbox.policy</span><span class="w"> </span><span class="kn">import</span> <span class="n">SandboxRequirements</span>
+</span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>
+</span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="n">sandbox_requirements</span><span class="p">:</span> <span class="n">ClassVar</span><span class="p">[</span><span class="n">SandboxRequirements</span><span class="p">]</span> <span class="o">=</span> <span class="n">SandboxRequirements</span><span class="p">(</span>
+</span><span id="__span-9-6"><a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>    <span class="n">network</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+</span><span id="__span-9-7"><a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>    <span class="n">cache_paths</span><span class="o">=</span><span class="p">(</span><span class="s2">&quot;~/.cache/acme-rules&quot;</span><span class="p">,),</span>
+</span><span id="__span-9-8"><a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>    <span class="n">cache_env</span><span class="o">=</span><span class="p">(</span><span class="s2">&quot;ACME_CACHE_DIR&quot;</span><span class="p">,),</span>
+</span><span id="__span-9-9"><a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a>    <span class="n">env_prefixes</span><span class="o">=</span><span class="p">(</span><span class="s2">&quot;ACME_&quot;</span><span class="p">,),</span>
+</span><span id="__span-9-10"><a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a><span class="p">)</span>
 </span></code></pre></div>
 <p><code>network</code> asks for a network on online scans, <code>read_paths</code> for read-only host paths, and <code>cache_paths</code> for cache directories the tool keeps. Those are writable through a throwaway overlay under bwrap, where bwrap and the kernel support one, and read-only everywhere else, so a tool that has to write its cache also needs <code>cache_env</code>: variables that move the cache, which ASH points at a private, empty directory wherever <code>cache_paths</code> are read-only. <code>env_prefixes</code> and <code>env_names</code> are for environment variables. A variable whose name marks it as a credential passes only when <code>env_names</code> names it exactly.</p>
 <p>If the read paths or environment variables come from the scanner's own options, which the scanned repository can write, also set <code>read_paths_require_grant=True</code> or <code>env_requires_grant=True</code>. The sandbox then mounts those paths only for a scanner named in <code>sandbox.read_path_scanners</code>, and only when a path resolves inside the source tree or an <code>extra_read_paths</code> entry and is a regular file or a directory. It passes those variables only to a scanner named in <code>sandbox.env_scanners</code>, and with <code>read_paths_require_grant</code> it never mounts the scanner's <code>cache_paths</code>. Only the operator can set those lists (<a href="../../docs/scanner-sandbox/#grants">Give a scanner more access</a>).</p>
 <h2 id="declare-whether-the-scanner-is-python-only">Declare whether the scanner is Python-only<a class="headerlink" href="#declare-whether-the-scanner-is-python-only" title="Permanent link">&para;</a></h2>
 <p><code>ash scan --python-only</code> runs only the scanners that need nothing but Python, and records every other scanner SKIPPED without looking for its tool. A scanner says which it is with the <code>python_only</code> class variable. <code>True</code> puts it in a <code>--python-only</code> run, <code>False</code> keeps it out, and a scanner that declares nothing (<code>None</code>) counts as Python-only only when it runs its tool through uv (<code>use_uv_tool</code>). <code>ruff-security</code> runs the <code>ruff</code> program from <code>PATH</code> and declares nothing, so a <code>--python-only</code> run leaves it out. With no other scanner selected, that scan would run no scanner and report itself clean, so ASH refuses it with exit code 5 and names the scanner it left out:</p>
 <!-- doctest: run expect-exit=5 -->
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>ash<span class="w"> </span>scan<span class="w"> </span>--ash-plugin-modules<span class="w"> </span>acme_ash_plugins<span class="w"> </span>--scanners<span class="w"> </span>ruff-security<span class="w"> </span>--python-only
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>ash<span class="w"> </span>scan<span class="w"> </span>--ash-plugin-modules<span class="w"> </span>acme_ash_plugins<span class="w"> </span>--scanners<span class="w"> </span>ruff-security<span class="w"> </span>--python-only
 </span></code></pre></div>
 <p>A scanner that does its work in ASH's own process, such as the one in <a href="#a-scanner-with-no-external-tool">A scanner with no external tool</a>, declares <code>True</code> in its class body; one that runs a binary, Node.js, or anything else that is not a Python package declares <code>False</code>:</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">ClassVar</span>
-</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>
-</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="n">python_only</span><span class="p">:</span> <span class="n">ClassVar</span><span class="p">[</span><span class="nb">bool</span><span class="p">]</span> <span class="o">=</span> <span class="kc">True</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">ClassVar</span>
+</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>
+</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="n">python_only</span><span class="p">:</span> <span class="n">ClassVar</span><span class="p">[</span><span class="nb">bool</span><span class="p">]</span> <span class="o">=</span> <span class="kc">True</span>
 </span></code></pre></div>
 <h2 id="set-the-severity">Set the severity<a class="headerlink" href="#set-the-severity" title="Permanent link">&para;</a></h2>
 <p>ASH takes a finding's severity from, in order: the result's <code>properties.issue_severity</code> (CRITICAL, HIGH, MEDIUM, LOW, or INFO); the <code>security-severity</code> score in its rule's properties; or its SARIF level, where <code>error</code> counts as critical, <code>warning</code> as medium, <code>note</code> as low, and <code>none</code> as info. A result with no level counts as medium: SARIF's default level is <code>warning</code>. The summary counts, the gate, and the finding reports read the severity this way. ruff marks every result <code>error</code>, so both findings above count as critical. To report them as HIGH, add this method to <code>RuffSecurityScanner</code> and import <code>PropertyBag</code> at the top of the module:</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">automated_security_helper.schemas.sarif_schema_model</span><span class="w"> </span><span class="kn">import</span> <span class="n">PropertyBag</span>
-</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>
-</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>
-</span><span id="__span-11-4"><a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="k">def</span><span class="w"> </span><span class="nf">_post_process_sarif</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">sarif_report</span><span class="p">,</span> <span class="n">final_args</span><span class="p">,</span> <span class="n">target</span><span class="p">):</span>
-</span><span id="__span-11-5"><a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>    <span class="k">for</span> <span class="n">run</span> <span class="ow">in</span> <span class="n">sarif_report</span><span class="o">.</span><span class="n">runs</span><span class="p">:</span>
-</span><span id="__span-11-6"><a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>        <span class="k">for</span> <span class="n">result</span> <span class="ow">in</span> <span class="n">run</span><span class="o">.</span><span class="n">results</span> <span class="ow">or</span> <span class="p">[]:</span>
-</span><span id="__span-11-7"><a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a>            <span class="k">if</span> <span class="n">result</span><span class="o">.</span><span class="n">properties</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
-</span><span id="__span-11-8"><a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a>                <span class="n">result</span><span class="o">.</span><span class="n">properties</span> <span class="o">=</span> <span class="n">PropertyBag</span><span class="p">()</span>
-</span><span id="__span-11-9"><a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a>            <span class="n">result</span><span class="o">.</span><span class="n">properties</span><span class="o">.</span><span class="n">issue_severity</span> <span class="o">=</span> <span class="s2">&quot;HIGH&quot;</span>
-</span><span id="__span-11-10"><a id="__codelineno-11-10" name="__codelineno-11-10" href="#__codelineno-11-10"></a>    <span class="k">return</span> <span class="n">sarif_report</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">automated_security_helper.schemas.sarif_schema_model</span><span class="w"> </span><span class="kn">import</span> <span class="n">PropertyBag</span>
+</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>
+</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>
+</span><span id="__span-12-4"><a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="k">def</span><span class="w"> </span><span class="nf">_post_process_sarif</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">sarif_report</span><span class="p">,</span> <span class="n">final_args</span><span class="p">,</span> <span class="n">target</span><span class="p">):</span>
+</span><span id="__span-12-5"><a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a>    <span class="k">for</span> <span class="n">run</span> <span class="ow">in</span> <span class="n">sarif_report</span><span class="o">.</span><span class="n">runs</span><span class="p">:</span>
+</span><span id="__span-12-6"><a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a>        <span class="k">for</span> <span class="n">result</span> <span class="ow">in</span> <span class="n">run</span><span class="o">.</span><span class="n">results</span> <span class="ow">or</span> <span class="p">[]:</span>
+</span><span id="__span-12-7"><a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a>            <span class="k">if</span> <span class="n">result</span><span class="o">.</span><span class="n">properties</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+</span><span id="__span-12-8"><a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a>                <span class="n">result</span><span class="o">.</span><span class="n">properties</span> <span class="o">=</span> <span class="n">PropertyBag</span><span class="p">()</span>
+</span><span id="__span-12-9"><a id="__codelineno-12-9" name="__codelineno-12-9" href="#__codelineno-12-9"></a>            <span class="n">result</span><span class="o">.</span><span class="n">properties</span><span class="o">.</span><span class="n">issue_severity</span> <span class="o">=</span> <span class="s2">&quot;HIGH&quot;</span>
+</span><span id="__span-12-10"><a id="__codelineno-12-10" name="__codelineno-12-10" href="#__codelineno-12-10"></a>    <span class="k">return</span> <span class="n">sarif_report</span>
 </span></code></pre></div>
 <p>ASH calls <code>_post_process_sarif</code> after reading the SARIF file. The other hooks you can override are <code>_process_config_options</code> (turn options into arguments before the scan), <code>_read_results_file</code> (parse a file that is not SARIF JSON), and <code>validate_plugin_dependencies</code> (a different availability check; call <code>super()</code> from it to keep the in-tree tool refusal and its MISSING reason).</p>
 <h2 id="test-the-plugin">Test the plugin<a class="headerlink" href="#test-the-plugin" title="Permanent link">&para;</a></h2>
@@ -3831,23 +3945,23 @@ SOFTWARE.
 <p>Each scan logs to its own <code>ash.log</code>. ASH knows which scan a line belongs to from the context the line is logged in, and ASH's own scanner threads carry that context. A thread your plugin starts with <code>threading.Thread</code>, or a task it submits to a <code>ThreadPoolExecutor</code>, starts in an empty context, so its lines belong to no scan. A CLI scan's <code>ash.log</code> still takes them, because that scan is the process's only one. The MCP server runs several sessions' scans in one process, so it puts such lines in no scan's <code>ash.log</code>, only in the server's own log (stderr, at the level the server was started with — its own log-level option, <code>INFO</code> when not given; <code>quiet</code> and <code>simple</code> name no logging level, so with either it is <code>ASH_LOG_LEVEL</code>, or <code>WARNING</code> when that is unset — when the server has no handler of its own on that logger). So start every thread your plugin makes with <code>ash_thread</code>: when the MCP server runs your plugin, a line from a thread without the scan's context never reaches the scan's <code>ash.log</code>.</p>
 <p>Under <code>ash scan</code>, a line no handler takes reaches stderr at the scan's console level: its flags first, then <code>ASH_DEBUG</code> or <code>ASH_VERBOSE</code>, then <code>INFO</code>, and <code>ERROR</code> for <code>--quiet</code> and <code>--simple</code> unless <code>--verbose</code> or <code>--debug</code> is also given. <code>--log-level INFO</code> reads as the default, so it does not override <code>ASH_DEBUG</code> or <code>ASH_VERBOSE</code>; every other <code>--log-level</code> does. <code>ASH_LOG_LEVEL</code> does not change it there; under the MCP server it is the fallback for <code>quiet</code> and <code>simple</code>.</p>
 <p>Start the thread with <code>ash_thread</code>, which runs the target in a copy of the scan's context, and submit to an executor through a copy the same way:</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">contextvars</span>
-</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">concurrent.futures</span><span class="w"> </span><span class="kn">import</span> <span class="n">ThreadPoolExecutor</span>
-</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>
-</span><span id="__span-12-4"><a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="kn">from</span><span class="w"> </span><span class="nn">automated_security_helper.utils.log</span><span class="w"> </span><span class="kn">import</span> <span class="n">ASH_LOGGER</span>
-</span><span id="__span-12-5"><a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="kn">from</span><span class="w"> </span><span class="nn">automated_security_helper.utils.threads</span><span class="w"> </span><span class="kn">import</span> <span class="n">ash_thread</span>
-</span><span id="__span-12-6"><a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a>
-</span><span id="__span-12-7"><a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a>
-</span><span id="__span-12-8"><a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a><span class="k">def</span><span class="w"> </span><span class="nf">check_one</span><span class="p">(</span><span class="n">path</span><span class="p">):</span>
-</span><span id="__span-12-9"><a id="__codelineno-12-9" name="__codelineno-12-9" href="#__codelineno-12-9"></a>    <span class="n">ASH_LOGGER</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;checked </span><span class="si">%s</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">path</span><span class="p">)</span>
-</span><span id="__span-12-10"><a id="__codelineno-12-10" name="__codelineno-12-10" href="#__codelineno-12-10"></a>
-</span><span id="__span-12-11"><a id="__codelineno-12-11" name="__codelineno-12-11" href="#__codelineno-12-11"></a>
-</span><span id="__span-12-12"><a id="__codelineno-12-12" name="__codelineno-12-12" href="#__codelineno-12-12"></a><span class="n">worker</span> <span class="o">=</span> <span class="n">ash_thread</span><span class="p">(</span><span class="n">check_one</span><span class="p">,</span> <span class="n">args</span><span class="o">=</span><span class="p">(</span><span class="s2">&quot;app.py&quot;</span><span class="p">,),</span> <span class="n">name</span><span class="o">=</span><span class="s2">&quot;my-plugin-worker&quot;</span><span class="p">)</span>
-</span><span id="__span-12-13"><a id="__codelineno-12-13" name="__codelineno-12-13" href="#__codelineno-12-13"></a><span class="n">worker</span><span class="o">.</span><span class="n">start</span><span class="p">()</span>
-</span><span id="__span-12-14"><a id="__codelineno-12-14" name="__codelineno-12-14" href="#__codelineno-12-14"></a><span class="n">worker</span><span class="o">.</span><span class="n">join</span><span class="p">()</span>
-</span><span id="__span-12-15"><a id="__codelineno-12-15" name="__codelineno-12-15" href="#__codelineno-12-15"></a>
-</span><span id="__span-12-16"><a id="__codelineno-12-16" name="__codelineno-12-16" href="#__codelineno-12-16"></a><span class="k">with</span> <span class="n">ThreadPoolExecutor</span><span class="p">(</span><span class="mi">4</span><span class="p">)</span> <span class="k">as</span> <span class="n">pool</span><span class="p">:</span>
-</span><span id="__span-12-17"><a id="__codelineno-12-17" name="__codelineno-12-17" href="#__codelineno-12-17"></a>    <span class="n">pool</span><span class="o">.</span><span class="n">submit</span><span class="p">(</span><span class="n">contextvars</span><span class="o">.</span><span class="n">copy_context</span><span class="p">()</span><span class="o">.</span><span class="n">run</span><span class="p">,</span> <span class="n">check_one</span><span class="p">,</span> <span class="s2">&quot;lib.py&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">result</span><span class="p">()</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">contextvars</span>
+</span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">concurrent.futures</span><span class="w"> </span><span class="kn">import</span> <span class="n">ThreadPoolExecutor</span>
+</span><span id="__span-13-3"><a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>
+</span><span id="__span-13-4"><a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="kn">from</span><span class="w"> </span><span class="nn">automated_security_helper.utils.log</span><span class="w"> </span><span class="kn">import</span> <span class="n">ASH_LOGGER</span>
+</span><span id="__span-13-5"><a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="kn">from</span><span class="w"> </span><span class="nn">automated_security_helper.utils.threads</span><span class="w"> </span><span class="kn">import</span> <span class="n">ash_thread</span>
+</span><span id="__span-13-6"><a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a>
+</span><span id="__span-13-7"><a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a>
+</span><span id="__span-13-8"><a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a><span class="k">def</span><span class="w"> </span><span class="nf">check_one</span><span class="p">(</span><span class="n">path</span><span class="p">):</span>
+</span><span id="__span-13-9"><a id="__codelineno-13-9" name="__codelineno-13-9" href="#__codelineno-13-9"></a>    <span class="n">ASH_LOGGER</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;checked </span><span class="si">%s</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">path</span><span class="p">)</span>
+</span><span id="__span-13-10"><a id="__codelineno-13-10" name="__codelineno-13-10" href="#__codelineno-13-10"></a>
+</span><span id="__span-13-11"><a id="__codelineno-13-11" name="__codelineno-13-11" href="#__codelineno-13-11"></a>
+</span><span id="__span-13-12"><a id="__codelineno-13-12" name="__codelineno-13-12" href="#__codelineno-13-12"></a><span class="n">worker</span> <span class="o">=</span> <span class="n">ash_thread</span><span class="p">(</span><span class="n">check_one</span><span class="p">,</span> <span class="n">args</span><span class="o">=</span><span class="p">(</span><span class="s2">&quot;app.py&quot;</span><span class="p">,),</span> <span class="n">name</span><span class="o">=</span><span class="s2">&quot;my-plugin-worker&quot;</span><span class="p">)</span>
+</span><span id="__span-13-13"><a id="__codelineno-13-13" name="__codelineno-13-13" href="#__codelineno-13-13"></a><span class="n">worker</span><span class="o">.</span><span class="n">start</span><span class="p">()</span>
+</span><span id="__span-13-14"><a id="__codelineno-13-14" name="__codelineno-13-14" href="#__codelineno-13-14"></a><span class="n">worker</span><span class="o">.</span><span class="n">join</span><span class="p">()</span>
+</span><span id="__span-13-15"><a id="__codelineno-13-15" name="__codelineno-13-15" href="#__codelineno-13-15"></a>
+</span><span id="__span-13-16"><a id="__codelineno-13-16" name="__codelineno-13-16" href="#__codelineno-13-16"></a><span class="k">with</span> <span class="n">ThreadPoolExecutor</span><span class="p">(</span><span class="mi">4</span><span class="p">)</span> <span class="k">as</span> <span class="n">pool</span><span class="p">:</span>
+</span><span id="__span-13-17"><a id="__codelineno-13-17" name="__codelineno-13-17" href="#__codelineno-13-17"></a>    <span class="n">pool</span><span class="o">.</span><span class="n">submit</span><span class="p">(</span><span class="n">contextvars</span><span class="o">.</span><span class="n">copy_context</span><span class="p">()</span><span class="o">.</span><span class="n">run</span><span class="p">,</span> <span class="n">check_one</span><span class="p">,</span> <span class="s2">&quot;lib.py&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">result</span><span class="p">()</span>
 </span></code></pre></div>
 <p><code>ash_thread</code> takes the copy when it makes the thread, so make it in your scanner's own code (inside <code>scan()</code>), not at import time. It returns the thread unstarted, as <code>threading.Thread</code> does.</p>
 <h2 id="a-scanner-with-no-external-tool">A scanner with no external tool<a class="headerlink" href="#a-scanner-with-no-external-tool" title="Permanent link">&para;</a></h2>
