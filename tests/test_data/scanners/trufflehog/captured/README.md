@@ -19,7 +19,7 @@ clean file:
 
 - `src/app.py`, line 4: an assignment.
 - `src/services/settings.py`, line 3: an assignment followed by a
-  `trufflehog:ignore` comment. It is reported because of `--no-ignore-tag`.
+  `trufflehog:ignore` comment. It is reported because of `trufflehog --no-ignore-tag`.
 - `src/remote.cfg`, line 2: the token as the password of an `https://` URL. Both
   the `Github` and the generic `URI` detector report it.
 
