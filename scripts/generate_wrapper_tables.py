@@ -153,7 +153,13 @@ BLOCKS: dict[str, list[tuple[str, Renderer]]] = {
         ("ps1-runner-discovery", ps_runner_discovery),
         ("ps1-build-target-completer", ps_build_target_completer),
     ],
-    ASH: [],
+    ASH: [
+        ("sh-subcommands", sh_subcommands),
+        ("sh-dash-o-subcommands", sh_dash_o_subcommands),
+        ("sh-root-value-options", sh_root_value_options),
+        ("sh-takes-quiet-and-color", sh_takes_quiet_and_color),
+        ("sh-takes-sandbox", sh_takes_sandbox),
+    ],
 }
 
 
