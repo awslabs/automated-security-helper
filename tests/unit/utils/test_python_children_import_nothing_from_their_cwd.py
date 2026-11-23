@@ -342,6 +342,10 @@ RAW_PYTHON_ARGV_ALLOWED = {
         "plugin_modules/ash_builtin/scanners/opengrep_scanner.py",
         "_refuse_unverified_install_command",
     ),
+    (
+        "plugin_modules/ash_builtin/scanners/opengrep_scanner.py",
+        "_refuse_windows_zip_install_command",
+    ),
     ("cli/dependencies.py", "_with_path_imported"),
     ("utils/cdk_nag_worker.py", "_run_child"),
 }
