@@ -25,6 +25,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import lru_cache
+from typing import Any
 
 
 #: The options a wrapper adds, or reads, in front of the subcommand's own arguments,
@@ -72,7 +73,7 @@ NO_OCI_RUNNER_EXIT = 3
 CI_CATCH_FALLBACK_EXIT = 1
 
 
-def _options(command) -> set[str]:
+def _options(command: Any) -> set[str]:
     found: set[str] = set()
     for param in command.params:
         found.update(getattr(param, "opts", None) or [])
@@ -80,7 +81,7 @@ def _options(command) -> set[str]:
     return found
 
 
-def _tree_options(command) -> set[str]:
+def _tree_options(command: Any) -> set[str]:
     """The options of a command and of every command nested under it."""
     found = _options(command)
     for sub in (getattr(command, "commands", None) or {}).values():
@@ -135,7 +136,7 @@ def contract() -> WrapperContract:
     from automated_security_helper.core.enums import BuildTarget
     from automated_security_helper.interactions import run_ash_container as rac
 
-    root = typer.main.get_command(app)
+    root: Any = typer.main.get_command(app)
     commands = dict(root.commands)
     subcommands = tuple(commands)
 
