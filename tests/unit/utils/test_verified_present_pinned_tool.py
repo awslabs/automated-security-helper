@@ -569,7 +569,7 @@ class TestTheExecutableDigestTable:
         opengrep = get_tool_asset("opengrep", "linux", "amd64")
         assert opengrep.archive is False
         assert opengrep.executable_digest == opengrep.sha256
-        assert "opengrep_manylinux_x86" not in _EXECUTABLE_DIGESTS
+        assert "opengrep_linux_x86" not in _EXECUTABLE_DIGESTS
 
         archived = SimpleNamespace(
             executable_sha256=None, archive=True, sha256="ab" * 32

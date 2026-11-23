@@ -181,6 +181,32 @@ def _refuse_unverified_install_command(
     )
 
 
+def windows_zip_refusal(version: str, asset: str) -> str:
+    """The message a custom opengrep 2.x version on Windows is refused with."""
+    pinned = TOOL_VERSIONS["opengrep"]
+    return (
+        f"Refusing to install opengrep {version} on windows/amd64: from 2.0.0 the "
+        f"Windows release asset is a zip ({asset}) holding opengrep.exe and the DLLs "
+        f"it loads, and a configured version is downloaded as a single file. Drop "
+        f"scanners.opengrep.options.version to use the pinned {pinned}, whose zip ASH "
+        f"extracts and verifies member by member, or install opengrep {version} "
+        f"yourself and put it on PATH."
+    )
+
+
+def _refuse_windows_zip_install_command(version: str, url: str) -> CustomCommand:
+    """An install command that prints ``windows_zip_refusal`` and exits 1."""
+    return CustomCommand(
+        args=[
+            sys.executable,
+            "-c",
+            "import sys; sys.exit(sys.argv[1])",
+            windows_zip_refusal(version, url.rsplit("/", 1)[-1]),
+        ],
+        shell=False,
+    )
+
+
 def _release_number(version: str) -> str:
     """``version`` without the one leading ``v`` a release tag may carry."""
     return version.removeprefix("v")
@@ -317,7 +343,8 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
             return self
 
         digests = self.config.options.sha256
-        # TODO: detect manylinux vs musllinux
+        # TODO: detect manylinux vs musllinux. Only matters for a 1.x version: from
+        # 2.0.0 the Linux build is one static executable (get_opengrep_url).
         for target_platform, arch in (
             ("linux", "amd64"),
             ("linux", "arm64"),
@@ -329,7 +356,14 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
                 target_platform, arch, version=version, linux_type="manylinux"
             )
             digest = digests.get(f"{target_platform}/{arch}")
-            if digest is None:
+            if url.endswith(".zip"):
+                # From 2.0.0 the Windows asset is a zip of opengrep.exe and its DLLs.
+                # The URL download installs the file it fetches as the executable, so
+                # a zip would land at opengrep.exe unextracted. Only the pinned
+                # version has the archive handling (tool_downloads.py), so this
+                # refuses whether or not a digest was configured.
+                command = _refuse_windows_zip_install_command(version, url)
+            elif digest is None:
                 command = _refuse_unverified_install_command(
                     version, target_platform, arch, url.rsplit("/", 1)[-1]
                 )

@@ -379,3 +379,35 @@ def test_get_opengrep_url():
             url
             == "https://github.com/opengrep/opengrep/releases/download/v1.1.5/opengrep_manylinux_x86"
         )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("version", ["v2.0.0", "2.0.0", "v2.1.3", "v10.0.0"])
+def test_get_opengrep_url_uses_the_renamed_assets_from_2_0_0(version):
+    """v2.0.0 renamed opengrep_manylinux_* to opengrep_linux_* and zipped Windows."""
+    base = f"https://github.com/opengrep/opengrep/releases/download/{version}"
+    # linux_type no longer applies: one static build.
+    assert get_opengrep_url("linux", "amd64", version) == f"{base}/opengrep_linux_x86"
+    assert (
+        get_opengrep_url("linux", "arm64", version, "musllinux")
+        == f"{base}/opengrep_linux_aarch64"
+    )
+    assert get_opengrep_url("darwin", "amd64", version) == f"{base}/opengrep_osx_x86"
+    assert get_opengrep_url("darwin", "arm64", version) == f"{base}/opengrep_osx_arm64"
+    assert (
+        get_opengrep_url("windows", "amd64", version)
+        == f"{base}/opengrep_windows_x86.zip"
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("version", ["v1.33.1", "1.0.0", "v0.9.0", "latest"])
+def test_get_opengrep_url_keeps_the_old_names_before_2_0_0(version):
+    base = f"https://github.com/opengrep/opengrep/releases/download/{version}"
+    assert (
+        get_opengrep_url("linux", "amd64", version) == f"{base}/opengrep_manylinux_x86"
+    )
+    assert (
+        get_opengrep_url("windows", "amd64", version)
+        == f"{base}/opengrep_windows_x86.exe"
+    )
