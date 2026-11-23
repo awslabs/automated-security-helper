@@ -153,13 +153,16 @@ OFFLINE_CHECKERS: Dict[str, OfflineChecker] = {
     "trivy-db": OfflineChecker("trivy", ("db", "trivy.db"), _trivy_built),
 }
 
-# The CLI's --tool choices come from the registry above.
-OfflineCacheTool = Enum(
-    "OfflineCacheTool",
-    {checker.tool.upper(): checker.tool for checker in OFFLINE_CHECKERS.values()},
-    type=str,
-    module=__name__,
-)
+
+class OfflineCacheTool(str, Enum):
+    """The CLI's --tool choices.
+
+    Written out literally so mypy can read the members. A test holds these to
+    the tools declared in OFFLINE_CHECKERS, in both directions.
+    """
+
+    GRYPE = "grype"
+    TRIVY = "trivy"
 
 
 def check_offline_cache(

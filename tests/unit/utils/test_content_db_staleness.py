@@ -1276,6 +1276,18 @@ class TestEveryDatabaseIsBoundedAndMeasurable:
         ]
         assert [t.value for t in occ.OfflineCacheTool] == ["grype", "trivy"]
 
+    def test_the_offline_check_tool_enum_and_checkers_cover_each_other(self):
+        from automated_security_helper.utils import offline_cache_check as occ
+
+        enum_tools = {t.value for t in occ.OfflineCacheTool}
+        registry_tools = {c.tool for c in occ.OFFLINE_CHECKERS.values()}
+        # Every registry tool has an enum member, and every member a checker.
+        assert registry_tools <= enum_tools
+        assert enum_tools <= registry_tools
+        assert {t.name for t in occ.OfflineCacheTool} == {
+            c.tool.upper() for c in occ.OFFLINE_CHECKERS.values()
+        }
+
     def test_only_grype_is_cacheable_in_ci(self):
         assert [e.name for e in cdb.CONTENT_DATABASES if e.cacheable] == ["grype-db"]
 
