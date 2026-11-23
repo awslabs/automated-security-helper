@@ -124,6 +124,7 @@ from typing import (
 from pydantic import Field, PrivateAttr, field_validator
 
 from automated_security_helper.base.options import ScannerOptionsBase
+from automated_security_helper.base.plugin_base import read_log_bounded
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
@@ -144,10 +145,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
 )
 from automated_security_helper.utils.config_trust import set_by_operator
 from automated_security_helper.utils.log import ASH_LOGGER
-from automated_security_helper.utils.sandbox.fs_guard import (
-    open_for_write,
-    read_bytes_at_most,
-)
+from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.utils.scan_output_dirs import committed_output_files
 from automated_security_helper.utils.subprocess_utils import find_executable
@@ -169,7 +167,7 @@ GIT_DIR_PATTERN = r"(^|[/\\])\.git([/\\]|$)"
 GENERIC_DETECTORS = frozenset({"URI"})
 
 #: What TruffleHog logs for a file it could not read. The scan goes on and exits 0.
-FILE_ERROR_LOG = b"error scanning file"
+FILE_ERROR_LOG = "error scanning file"
 
 #: The most of TruffleHog's log ASH reads to count ``FILE_ERROR_LOG`` lines.
 _LOG_READ_LIMIT = 16 * 1024 * 1024
@@ -489,7 +487,9 @@ class TruffleHogScanner(ScannerPluginBase[TruffleHogScannerConfig]):
         named; its lines, which name the files, are not quoted.
         """
         try:
-            log = read_bytes_at_most(log_path, _LOG_READ_LIMIT)
+            # The text is only counted, never shown, so no values are redacted; the
+            # reviewed helper owns the bound, the known cut and the edge trim.
+            log, _cut = read_log_bounded(log_path, _LOG_READ_LIMIT, ())
         except OSError:
             return
         unread = log.count(FILE_ERROR_LOG)
