@@ -981,23 +981,23 @@ _THIRD_PARTY_HASHES: dict[str, str] = {
     "hadolint commit": "2eece55955ced00200be9729e9728cb7dacca505",  # pragma: allowlist secret
     "hadolint/LICENSE": "589ed823e9a84c56feb95ac58e7cf384626b9cbf4fda2a907bc36e103de1bad2",  # pragma: allowlist secret
     "hadolint/ThirdPartyNotices.txt": "424561d8aade37960e8db594ca5403f9a4a98f593ff1126a296298f11d3d1a27",  # pragma: allowlist secret
-    "libgit2 commit": "49e408b3208bc3093757a1c2db938d3590f3f412",  # pragma: allowlist secret
-    "libgit2/AUTHORS": "4dcad1137963b32d192da9771ca6055d84b20c41e6cd23bdfa6c47782d8a54f9",  # pragma: allowlist secret
-    "libgit2/COPYING": "e0938121c0554985fe17196ac38fc590d149268e9c46e0c0e7a2eae1354fae71",  # pragma: allowlist secret
+    "libgit2 commit": "0060d9cf5666f015b1067129bd874c6cc4c9c7ac",  # pragma: allowlist secret
+    "libgit2/AUTHORS": "126ed06438e488d71f5232b39436b3a1dffccb9c2697e3a332fbe868975cd55f",  # pragma: allowlist secret
+    "libgit2/COPYING": "e3712465634e97cfd850822a4eb5ac7d2f8a10f753189366d5a2060046f28288",  # pragma: allowlist secret
     "libssh2 commit": "a312b43325e3383c865a87bb1d26cb52e3292641",  # pragma: allowlist secret
     "libssh2/COPYING": "f7f9633cf9ff2f1333f3d7ce46973a8716a4d2a2815ad56f30d437d5fea7bafe",  # pragma: allowlist secret
     "opengrep commit": "092c80faa0817840228349f93eff12a50fb9cf6b",  # pragma: allowlist secret
     "opengrep/COPYRIGHT": "0f90eaca8e598c6c67a6cda7beb4470518fb2dababc996b3898344d380769aca",  # pragma: allowlist secret
     "opengrep/LICENSE": "20c17d8b8c48a600800dfd14f95d5cb9ff47066a9641ddeab48dc54aec96e331",  # pragma: allowlist secret
-    "openssl commit": "45e844fa2a14ec92d146bd8f5778ac130b6625fb",  # pragma: allowlist secret
+    "openssl commit": "42768eafab40d3e2f0851caa84aa9801139c74ab",  # pragma: allowlist secret
     "openssl-1.1 commit": "e04bd3433fd84e1861bf258ea37928d9845e6a86",  # pragma: allowlist secret
     "openssl-1.1/LICENSE": "c32913b33252e71190af2066f08115c69bc9fddadf3bf29296e20c835389841c",  # pragma: allowlist secret
     "openssl/LICENSE.txt": "7d5450cb2d142651b8afa315b5f238efc805dad827d91ba367d8516bc9d49e7a",  # pragma: allowlist secret
     "pcre commit": "c8dd39955982faaf63176bedc456746e5cf43e2f",  # pragma: allowlist secret
     "pcre/LICENCE": "f998c0f52eb704eff28f503580cfca3f2547280aa212994f6cf2d8e317587c1c",  # pragma: allowlist secret
-    "pygit2 commit": "4a4b749b70417e1718c2e770f26c56f7690a77dc",  # pragma: allowlist secret
-    "pygit2/AUTHORS.md": "c6520c3475f9e1625618878aff153f3a6ef7809a933e9c4ea5a6eb8f15ae3b2c",  # pragma: allowlist secret
-    "pygit2/COPYING": "b0ce6edbdfcaa6b86618229ac8af3fdb6292b4b5069ceb8f8187c6fb59430764",  # pragma: allowlist secret
+    "pygit2 commit": "d88fa3dcbab21a7eb33ff354222c4ec8e5ff6ece",  # pragma: allowlist secret
+    "pygit2/AUTHORS.md": "4ecad3164600b3c7a216cdd636288d1434afd6307737cfeba8fc1372dc04ba20",  # pragma: allowlist secret
+    "pygit2/COPYING": "3f2a642de5f24ed216404873b875e9d1c5dd112a4e0ae27a42f7303583f69683",  # pragma: allowlist secret
     "semgrep commit": "a5844e7c2d9d04548f86048f525d467a00742656",  # pragma: allowlist secret
     "semgrep/COPYRIGHT": "0f90eaca8e598c6c67a6cda7beb4470518fb2dababc996b3898344d380769aca",  # pragma: allowlist secret
     "semgrep/LICENSE": "20c17d8b8c48a600800dfd14f95d5cb9ff47066a9641ddeab48dc54aec96e331",  # pragma: allowlist secret
@@ -1233,8 +1233,8 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
     # pinned pygit2 wheel bundles, read from pygit2 in that environment.
     "libgit2": ThirdPartyLicense(
         tool="libgit2",
-        bundled_in="the pygit2 1.21.0 manylinux wheel",
-        version="v1.9.7",
+        bundled_in="the pygit2 1.18.2 manylinux wheel",
+        version="v1.9.1",
         license="GPL-2.0-only WITH GCC-exception-2.0",
         repository="https://github.com/libgit2/libgit2",
         commit=_THIRD_PARTY_HASHES["libgit2 commit"],
@@ -1250,10 +1250,10 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
     ),
     # Bundled in the pygit2 wheel (pygit2.libs/libssh2-*.so) for libgit2's SSH
     # transport; libgit2's COPYING does not cover it. 1.11.1 in both the x86_64
-    # and the aarch64 manylinux wheels of pygit2 1.21.0.
+    # and the aarch64 manylinux wheels of pygit2 1.18.2.
     "libssh2": ThirdPartyLicense(
         tool="libssh2",
-        bundled_in="the pygit2 1.21.0 manylinux wheel",
+        bundled_in="the pygit2 1.18.2 manylinux wheel",
         version="libssh2-1.11.1",
         license="BSD-3-Clause",
         repository="https://github.com/libssh2/libssh2",
@@ -1283,14 +1283,14 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
         ),
     ),
     # Bundled in the pygit2 wheel (pygit2.libs/libcrypto-*.so.3 and libssl-*.so.3)
-    # for libssh2 and libgit2's HTTPS transport. OpenSSL 3.5.9 in both manylinux
-    # wheels of pygit2 1.21.0. Apache-2.0; the release has no NOTICE file. Only
+    # for libssh2 and libgit2's HTTPS transport. OpenSSL 3.3.3 in both manylinux
+    # wheels of pygit2 1.18.2. Apache-2.0; the release has no NOTICE file. Only
     # libcrypto is probed: libssl embeds no "OpenSSL x.y.z" string, and the two are
     # one OpenSSL build (same release, grafted together by auditwheel).
     "openssl": ThirdPartyLicense(
         tool="openssl",
-        bundled_in="the pygit2 1.21.0 manylinux wheel",
-        version="openssl-3.5.9",
+        bundled_in="the pygit2 1.18.2 manylinux wheel",
+        version="openssl-3.3.3",
         license="Apache-2.0",
         repository="https://github.com/openssl/openssl",
         commit=_THIRD_PARTY_HASHES["openssl commit"],
@@ -1337,7 +1337,7 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
     # 8.42." in the project's archived PCRE1 repository.
     "pcre": ThirdPartyLicense(
         tool="pcre",
-        bundled_in="the pygit2 1.21.0 manylinux wheel",
+        bundled_in="the pygit2 1.18.2 manylinux wheel",
         tag="",
         version="8.42",
         license="BSD-3-Clause",
@@ -1355,7 +1355,7 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
     # (PYGIT2_VERSION), so these files describe the copy that ships.
     "pygit2": ThirdPartyLicense(
         tool="pygit2",
-        version="v1.21.0",
+        version="v1.18.2",
         license="GPL-2.0-only WITH GCC-exception-2.0",
         repository="https://github.com/libgit2/pygit2",
         commit=_THIRD_PARTY_HASHES["pygit2 commit"],

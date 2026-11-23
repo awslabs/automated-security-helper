@@ -791,7 +791,7 @@ def test_an_entry_without_a_source_note_is_unchanged():
 
 def test_a_bundled_librarys_source_notice_says_what_built_it():
     notice = THIRD_PARTY_LICENSES["libgit2"].source_notice()
-    assert "the pygit2 1.21.0 manylinux wheel" in notice
+    assert "the pygit2 1.18.2 manylinux wheel" in notice
     assert "as published by its upstream project" not in notice
 
 

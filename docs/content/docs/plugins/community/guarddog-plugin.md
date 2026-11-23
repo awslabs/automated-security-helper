@@ -211,7 +211,7 @@ uv tool install --python '>=3.10,<3.14' 'guarddog==3.2.0'
 
 In the container image, GuardDog's pygit2 is pinned to the release whose license
 files the image ships under `/usr/share/doc/ash/third-party/`. The pin is a uv
-constraint file, `/etc/ash/uv-constraints.txt` (`pygit2==1.21.0`), set image-wide
+constraint file, `/etc/ash/uv-constraints.txt` (`pygit2==1.18.2`), set image-wide
 with `UV_CONSTRAINT`, so it also applies to any `uv` command you run in the
 container. It changes nothing for an install that does not pull pygit2 in; unset
 `UV_CONSTRAINT` to drop it.

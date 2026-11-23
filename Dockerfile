@@ -631,7 +631,7 @@ RUN with-retry 'install-pinned-tool --licenses-only libgit2 libssh2 opengrep ope
 # back from GuardDog's environment. A constraint, not a requirement: it changes
 # nothing for a uv install that does not pull pygit2 in. ENV, so the non-root
 # stage's own `ash dependencies install` resolves the same pygit2.
-ARG PYGIT2_VERSION="1.21.0"
+ARG PYGIT2_VERSION="1.18.2"
 RUN mkdir -p /etc/ash && printf 'pygit2==%s\n' "${PYGIT2_VERSION}" > /etc/ash/uv-constraints.txt
 ENV UV_CONSTRAINT="/etc/ash/uv-constraints.txt"
 
