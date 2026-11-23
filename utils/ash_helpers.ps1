@@ -12,7 +12,10 @@ function Invoke-ASH {
     an image name or ASH_BASE_IMAGE_OVERRIDE that starts with '-' or holds a character
     other than A-Z, a-z, 0-9 and . _ : / @ -, an -AshArgs it cannot read, a
     --workspace or --workspace-config among ASH's arguments (Invoke-ASH scans one
-    directory), no OCI runner, and a malformed ASH_BASE_OCI_LAYOUT. The exceptions are
+    directory), no OCI runner, an OCI_RUNNER environment variable that is a relative path
+    (the same path given as -OCIRunner is used as written), a GITHUB_ACTIONS, TF_BUILD or
+    TEAMCITY_VERSION that holds a newline while OCI_RUNNER_WRAPPER is set, and a malformed
+    ASH_BASE_OCI_LAYOUT. The exceptions are
     the usage errors `ash` itself refuses with 5, refused the same way with 5 and its
     text: a --sandbox among ASH's arguments with a mode other than off, because the
     scanners run unsandboxed inside the container; a parameter given an empty or blank
@@ -1943,6 +1946,20 @@ function Invoke-ASH {
     }
     process {
         try {
+            # A relative path that came from the OCI_RUNNER environment variable (or the
+            # deprecated ASH_OCI_RUNNER) names a file under the working directory, usually
+            # the repository being scanned. It is refused, as ./ash and the ash CLI refuse
+            # it: not run, and not replaced by looking for another runtime. The same path
+            # given as -OCIRunner is the caller's own, typed where they stand, and is used
+            # as written. A leading ~ is not expanded from the environment, so ~/bin/docker
+            # is refused as a relative path, as ./ash refuses it. Thrown from a variable,
+            # with $LASTEXITCODE set first.
+            if (-not $PSBoundParameters.ContainsKey('OCIRunner') -and -not [string]::IsNullOrEmpty($OCIRunner) -and
+                $OCIRunner -match '[\\/]' -and -not [System.IO.Path]::IsPathRooted($OCIRunner)) {
+                $envRunnerRefusal = "OCI_RUNNER starts with the relative path $(Format-AshShownValue $OCIRunner), which names a file under the working directory (usually the repository being scanned), so it is not run, and no other runtime is looked for in its place. Set OCI_RUNNER to a command name or an absolute path."
+                $global:LASTEXITCODE = $refusalExitCode
+                throw $envRunnerRefusal
+            }
             $RESOLVED_OCI_RUNNER = $null
             foreach ($runner in $runners) {
                 if ($FOUND = Get-Command $runner -ErrorAction SilentlyContinue) {
@@ -1987,6 +2004,41 @@ function Invoke-ASH {
                         $wrapperRefusal = "OCI_RUNNER_WRAPPER starts with the relative path $(Format-AshShownValue $wrapperWord), which names a file under the working directory (usually the repository being scanned), so it is not run, and the OCI runner does not start without the wrapper. Start OCI_RUNNER_WRAPPER with a command name or an absolute path."
                         $global:LASTEXITCODE = $refusalExitCode
                         throw $wrapperRefusal
+                    }
+                }
+
+                # Under a runner that reads workflow commands from the job's output (GitHub
+                # Actions, Azure Pipelines, TeamCity), ash checks a terminal's lines too, but
+                # only when it sees the runner's variable, so each one that is set goes into
+                # the container, as ./ash and the ash CLI pass it: by name, or with its value
+                # when OCI_RUNNER_WRAPPER is set, which need not pass this session's
+                # environment on (sudo does not by default). These are public markers of the
+                # CI system, not secrets, and no other variable's value goes on the command
+                # line. A value holding a newline is refused before anything is built, as
+                # ./ash refuses it. Only a run that will happen passes them.
+                $ciRunnerMarkerArgs = @()
+                if (-not $NoRun) {
+                    $ciRunnerMarkers = [ordered]@{
+                        GITHUB_ACTIONS   = $env:GITHUB_ACTIONS
+                        TF_BUILD         = $env:TF_BUILD
+                        TEAMCITY_VERSION = $env:TEAMCITY_VERSION
+                    }
+                    foreach ($markerName in $ciRunnerMarkers.Keys) {
+                        $markerValue = $ciRunnerMarkers[$markerName]
+                        if ([string]::IsNullOrEmpty($markerValue)) {
+                            continue
+                        }
+                        elseif ($OCI_WRAPPER.Count -eq 0) {
+                            $ciRunnerMarkerArgs += '-e', $markerName
+                        }
+                        elseif ($markerValue -match "[`r`n]") {
+                            $markerRefusal = "$markerName holds a newline, so it is not passed to the container: with OCI_RUNNER_WRAPPER set, GITHUB_ACTIONS, TF_BUILD and TEAMCITY_VERSION go on the runner's command line with their values. Remove the newline from $markerName, or unset OCI_RUNNER_WRAPPER so the container gets the variable by name."
+                            $global:LASTEXITCODE = $refusalExitCode
+                            throw $markerRefusal
+                        }
+                        else {
+                            $ciRunnerMarkerArgs += '-e', "$markerName=$markerValue"
+                        }
                     }
                 }
 
@@ -2118,6 +2170,7 @@ function Invoke-ASH {
                         "-e", "ASH_SOURCE_DIR=/src"
                         "-e", "ASH_OUTPUT_DIR=/out"
                     )
+                    $runCmd += $ciRunnerMarkerArgs
 
                     # Add source directory mount, read-only wherever the output
                     # directory is: the output has its own mount at /out and the scan

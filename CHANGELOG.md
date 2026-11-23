@@ -61,6 +61,18 @@
   test fail when a block is stale. The generated text is the text the wrappers already
   held, so no option, exit code or message changes.
 
+### Fixes
+
+- **`Invoke-ASH` now matches `./ash` and the `ash` CLI on two container-run details.**
+  It passes `GITHUB_ACTIONS`, `TF_BUILD` and `TEAMCITY_VERSION` into the container when
+  set (by name, or with their values when `OCI_RUNNER_WRAPPER` is set; a value that holds
+  a newline is refused with exit 3 before anything is built), so a scan started by
+  `Invoke-ASH` inside GitHub Actions sees the runner's variable as the other two
+  entrypoints do. And a relative path in the `OCI_RUNNER` environment variable (or the
+  deprecated `ASH_OCI_RUNNER`), such as `./bin/docker`, is refused with exit 3 instead of
+  being run from the working directory, which is usually the repository being scanned.
+  The same path given as `-OCIRunner` is used as written, as before.
+
 ### Features
 
 - **`default_scanners` sets the default scanners in a trusted config.** `only`

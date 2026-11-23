@@ -2142,6 +2142,8 @@ _INTERPOLATED_AS_IS = {
     "$runnerRefusal",  # the OCI_RUNNER refusal, built from $tried
     "$mountRefusal",  # the --mount refusal, built from shown paths and a held phrase
     "$wrapperRefusal",  # the OCI_RUNNER_WRAPPER refusal, built from the shown wrapper word
+    "$envRunnerRefusal",  # the relative OCI_RUNNER refusal, built from the shown value
+    "$markerRefusal",  # the CI marker newline refusal, built from a fixed variable name
     "$outputHint",  # '' or the fixed hint naming -OutputDir, chosen by the helper
 }
 
@@ -2341,6 +2343,83 @@ def test_oci_runner_wrapper_is_split_into_words(tmp_path):
     runs = [call for call in calls if call[3:4] == ["run"]]
     assert len(runs) == 1, calls
     assert runs[0][:4] == ["wrapme", "--keep-env", "finch", "run"], runs[0]
+
+
+_WRAPME = (
+    "function global:wrapme { Add-Content -LiteralPath $env:RUNNER_LOG -Value "
+    "(ConvertTo-Json -Compress -InputObject (@('wrapme') + @($args | "
+    "ForEach-Object { [string]$_ }))); $global:LASTEXITCODE = 0 }\n"
+)
+
+
+def _run_environment_words(run_call: list[str]) -> list[str]:
+    """The word after each ``-e`` before the image name: ``NAME`` or ``NAME=value``."""
+    before_image = run_call[: run_call.index("ash")]
+    return [
+        before_image[i + 1] for i, arg in enumerate(before_image[:-1]) if arg == "-e"
+    ]
+
+
+@pytest.mark.integration
+def test_the_ci_runner_markers_that_are_set_go_into_the_container_by_name(tmp_path):
+    # As ./ash and the ash CLI pass them: ash checks a terminal's lines for workflow
+    # commands only when it sees the CI system's variable. An empty one is unset.
+    result, calls = _invoke(
+        tmp_path,
+        "Invoke-ASH -NoBuild -SourceDir src -OutputDir out",
+        GITHUB_ACTIONS="true",
+        TF_BUILD="",
+        TEAMCITY_VERSION="2023.1 (build 5)",
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    words = _run_environment_words(_run_call(result, calls))
+    assert "GITHUB_ACTIONS" in words, words
+    assert "TEAMCITY_VERSION" in words, words
+    assert "TF_BUILD" not in words, words
+    assert not [w for w in words if w.startswith(("GITHUB_ACTIONS=", "TEAMCITY_"))]
+
+
+@pytest.mark.integration
+def test_under_a_runner_wrapper_the_ci_markers_go_on_the_command_line_with_values(
+    tmp_path,
+):
+    # OCI_RUNNER_WRAPPER need not pass this session's environment on (sudo does not by
+    # default), so the value goes on the command line, one word, spaces and all.
+    result, calls = _invoke(
+        tmp_path,
+        "Invoke-ASH -NoBuild -SourceDir src -OutputDir out",
+        preamble=_WRAPME,
+        OCI_RUNNER_WRAPPER="wrapme",
+        GITHUB_ACTIONS="true",
+        TF_BUILD="",
+        TEAMCITY_VERSION="2023.1 (build 5)",
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    runs = [call for call in calls if call[2:3] == ["run"]]
+    assert len(runs) == 1, calls
+    words = _run_environment_words(runs[0])
+    assert "GITHUB_ACTIONS=true" in words, words
+    assert "TEAMCITY_VERSION=2023.1 (build 5)" in words, words
+    assert not [w for w in words if w.startswith("TF_BUILD")], words
+
+
+@pytest.mark.integration
+def test_a_ci_marker_holding_a_newline_under_a_wrapper_is_refused_before_anything_runs(
+    tmp_path,
+):
+    result, calls = _run_script(
+        tmp_path,
+        "try { Invoke-ASH -SourceDir src -OutputDir out } "
+        "catch { Write-Host $_.Exception.Message; "
+        "exit $(if ($LASTEXITCODE) { $LASTEXITCODE } else { 1 }) }\n"
+        "exit [int]$LASTEXITCODE\n",
+        preamble=_WRAPME,
+        OCI_RUNNER_WRAPPER="wrapme",
+        GITHUB_ACTIONS="true\nfalse",
+    )
+    assert result.returncode == 3, result.stdout + result.stderr
+    assert "GITHUB_ACTIONS holds a newline" in result.stdout, result.stdout
+    assert calls == [], "the build or the run started before the refusal"
 
 
 _RECORDING_ID_STUB = (

@@ -1034,6 +1034,61 @@ def test_a_relative_runner_wrapper_is_refused_and_nothing_runs(
     assert not log.exists(), log.read_text(encoding="utf-8")
 
 
+@pytest.mark.integration
+@pytest.mark.skipif(
+    os.name == "nt", reason="the stand-in runners are POSIX shell scripts"
+)
+@pytest.mark.parametrize(
+    "given", ["OCI_RUNNER", "ASH_OCI_RUNNER", "-OCIRunner"], ids=lambda g: g
+)
+def test_a_relative_runner_from_the_environment_is_refused_and_nothing_runs(
+    given, pwsh, tmp_path
+):
+    """A relative path in OCI_RUNNER (or the deprecated ASH_OCI_RUNNER) names a file
+    under the working directory, usually the repository being scanned. Invoke-ASH
+    refuses it with exit 3, as ./ash and the ash CLI do, and does not look for another
+    runtime. The same path given as -OCIRunner is the caller's own, typed where they
+    stand, and runs: the control that the refusal is about where the value came from."""
+    (tmp_path / "src").mkdir()
+    log = tmp_path / "runner-calls.txt"
+    _self_recording_runner(tmp_path / "bin", log)
+    parameter = " -OCIRunner './bin/docker'" if given == "-OCIRunner" else ""
+    script = (
+        f"$ErrorActionPreference = 'Stop'; . '{HELPERS.as_posix()}'; "
+        f"try {{ Invoke-ASH{parameter} -NoBuild -SourceDir src -OutputDir out }} "
+        "catch { Write-Error -ErrorRecord $_ -ErrorAction Continue; "
+        "exit $(if ($LASTEXITCODE) { $LASTEXITCODE } else { 1 }) }; "
+        "exit [int]$LASTEXITCODE"
+    )
+    env = inherited_env(
+        "PATH", "ASH_CONFIG", "OCI_RUNNER", "ASH_OCI_RUNNER", "OCI_RUNNER_WRAPPER"
+    )
+    env["PATH"] = Path(pwsh).resolve().parent.as_posix()
+    env.update(scratch_home(tmp_path))
+    if given != "-OCIRunner":
+        env[given] = "./bin/docker"
+
+    result = subprocess.run(  # nosec B603 - fixed interpreter, script built here
+        [pwsh, "-NoProfile", "-NonInteractive", "-Command", script],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=120,
+        check=False,
+    )
+
+    shown = result.stdout + result.stderr
+    if given == "-OCIRunner":
+        assert result.returncode == 0, shown
+        assert log.read_text(encoding="utf-8").splitlines()[-1].endswith(" run"), shown
+    else:
+        assert result.returncode == 3, shown
+        assert "OCI_RUNNER starts with the relative path" in " ".join(shown.split())
+        assert not log.exists(), log.read_text(encoding="utf-8")
+
+
 # ---------------------------------------------------------------------------
 # What reaches the run command: the config, the stage, the scanner lists
 # ---------------------------------------------------------------------------
