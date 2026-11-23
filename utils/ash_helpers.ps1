@@ -848,12 +848,17 @@ function Invoke-ASH {
         # the tables against the real commands, and
         # tests/unit/test_sandbox_refused_by_every_container_entrypoint.py checks these
         # lists against ./ash's and the real commands and options.
+        # BEGIN generated: ps1-subcommands (scripts/generate_wrapper_tables.py)
         $ashSubcommands = @('scan', 'build-image', 'report', 'diff', 'merge', 'mcp', 'get-genai-guide', 'config', 'dependencies', 'inspect', 'plugin', 'express')
         $ashTakesSandbox = @('scan')
+        # END generated: ps1-subcommands
         # The root ash options that take a value, ASH_ROOT_VALUE_OPTIONS in ./ash. A value
         # can be a subcommand's name (`--phases report`, `--source-dir report`), so the
         # word after one of these is the option's value, not the subcommand.
+        # BEGIN generated: ps1-root-value-options (scripts/generate_wrapper_tables.py)
         $ashRootValueOptions = @('--add-scanners', '--ash-config-from-host', '--ash-plugin-modules', '--ash-revision-to-install', '--baseline', '--base-ref', '--build-target', '--config', '--config-file-from-another-checkout', '--config-file-from-scanned-repository', '--config-overrides', '--container-gid', '--container-uid', '--custom-build-arg', '--custom-containerfile', '--exclude-scanners', '--format', '--formats', '--log-level', '--min-severity', '--mode', '--oci', '--oci-runner', '--offline-semgrep-rulesets', '--only-scanners', '--output-dir', '--output-format', '--output-formats', '--phases', '--require-scanner-selection', '--runner', '--sandbox', '--scanners', '--shard-count', '--shard-index', '--source-dir', '--strategy', '--workspace', '--workspace-config', '-c', '-f', '-g', '-o', '-u')
+        # END generated: ps1-root-value-options
+        # BEGIN generated: ps1-option-subcommands (scripts/generate_wrapper_tables.py)
         $ashOptionSubcommands = @{
             '--quiet'                = 'scan build-image mcp'
             '--no-color'             = 'scan build-image report merge mcp'
@@ -871,6 +876,7 @@ function Invoke-ASH {
             '--exclude-scanners'     = 'scan'
             '--ignore-suppressions'  = 'scan merge'
         }
+        # END generated: ps1-option-subcommands
         $subcommandAt = -1
         $subcommand = ''
         $skipValue = $false
@@ -1724,12 +1730,14 @@ function Invoke-ASH {
         # empty name. An unbound -OCIRunner whose OCI_RUNNER default is empty falls back
         # to discovery, in the order ./ash and the ash CLI use; an explicit -OCIRunner ''
         # was refused with 5, the usage-error code, when Invoke-ASH started.
+        # BEGIN generated: ps1-runner-discovery (scripts/generate_wrapper_tables.py)
         $runners = if (-not [string]::IsNullOrEmpty($OCIRunner)) {
             @($OCIRunner)
         }
         else {
             @('finch', 'docker', 'nerdctl', 'podman')
         }
+        # END generated: ps1-runner-discovery
 
         # Resolve source and output directories
         $sourceDirFull = Get-Item -LiteralPath $SourceDir | Select-Object -ExpandProperty FullName
@@ -2336,7 +2344,9 @@ Register-ArgumentCompleter -CommandName Invoke-ASH -ParameterName 'OCIRunner' -S
 # checks the value in its body, so a stage it does not have is refused with exit 3.
 Register-ArgumentCompleter -CommandName Invoke-ASH -ParameterName 'BuildTarget' -ScriptBlock {
     param($commandName, $parameterName, $wordToComplete, $commandAst, $fakeBoundParameter)
+    # BEGIN generated: ps1-build-target-completer (scripts/generate_wrapper_tables.py)
     @('ci', 'non-root') | Where-Object { $_ -like "$wordToComplete*" } | ForEach-Object {
+    # END generated: ps1-build-target-completer
         [System.Management.Automation.CompletionResult]::new(
             $_, $_, 'ParameterValue', $_)
     }
