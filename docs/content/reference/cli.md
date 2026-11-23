@@ -33,6 +33,7 @@ The Environment variable column names the variable click reads for the option; a
 | [`ash dependencies`](#dependencies) | Check or install dependencies for ASH plugins |
 | [`ash dependencies check`](#dependencies-check) | Check Grype and Trivy cache metadata without running or downloading tools. |
 | [`ash dependencies install`](#dependencies-install) | Install dependencies for ASH plugins. |
+| [`ash diff`](#diff) | Compare the findings in two saved ASH scans without running a scan. |
 | [`ash express`](#express) | Manage the express daemon: a resident warm ASH process that removes startup cost from every scan. Unix only; scans fall back to ordinary cold runs wherever the daemon is unavailable. |
 | [`ash express start`](#express-start) | Start the express daemon for this user and ASH version (idempotent). |
 | [`ash express status`](#express-status) | Report whether the express daemon is running, and what it has served. |
@@ -66,7 +67,7 @@ Options that only `ash` itself accepts:
 | <a id="ash--install-completion"></a>`--install-completion` | flag | off |  | Install completion for the current shell. |
 | <a id="ash--show-completion"></a>`--show-completion` | flag | off |  | Show completion for the current shell, to copy it or customize the installation. |
 
-Subcommands: [`ash build-image`](#build-image), [`ash config`](#config), [`ash dependencies`](#dependencies), [`ash express`](#express), [`ash get-genai-guide`](#get-genai-guide), [`ash inspect`](#inspect), [`ash mcp`](#mcp), [`ash merge`](#merge), [`ash plugin`](#plugin), [`ash report`](#report), [`ash scan`](#scan).
+Subcommands: [`ash build-image`](#build-image), [`ash config`](#config), [`ash dependencies`](#dependencies), [`ash diff`](#diff), [`ash express`](#express), [`ash get-genai-guide`](#get-genai-guide), [`ash inspect`](#inspect), [`ash mcp`](#mcp), [`ash merge`](#merge), [`ash plugin`](#plugin), [`ash report`](#report), [`ash scan`](#scan).
 
 ## <a id="build-image"></a>`ash build-image`
 
@@ -421,6 +422,27 @@ ash dependencies install [OPTIONS]
 | <a id="dependencies-install--verbose"></a>`--verbose`, `-v` | flag | off |  | Enable verbose logging |
 | <a id="dependencies-install--debug"></a>`--debug`, `-d` | flag | off |  | Enable debug logging |
 | <a id="dependencies-install--color"></a>`--color` / `--no-color` | flag | on |  | Enable/disable colorized output |
+
+## <a id="diff"></a>`ash diff`
+
+Compare the findings in two saved ASH scans without running a scan.
+
+```text
+ash diff [OPTIONS] {before} {after}
+```
+
+<!-- doctest: options of=cli.diff -->
+| Argument | Type | Default | Environment variable | Description |
+|----------|------|---------|----------------------|-------------|
+| <a id="diff--arg-before"></a>`before` | path | required |  | Baseline ASH scan results JSON file. |
+| <a id="diff--arg-after"></a>`after` | path | required |  | Current ASH scan results JSON file. |
+
+<!-- doctest: options of=cli.diff -->
+| Option | Type | Default | Environment variable | Description |
+|--------|------|---------|----------------------|-------------|
+| <a id="diff--format"></a>`--format` | one of `text`, `json` | `text` |  | Output format (text or json). |
+| <a id="diff--cli-json-input"></a>`--cli-json-input` | text | not set |  | Read parameter values from a JSON object: a path, a file:// URI, or '-' for stdin. Keys are parameter names (output_dir) or long flag spellings (--output-dir). Flags given on the command line override the file; the file overrides environment variables. Run with --generate-cli-skeleton for a template. |
+| <a id="diff--generate-cli-skeleton"></a>`--generate-cli-skeleton` | flag | off |  | Print a JSON template for --cli-json-input, listing every parameter of this command with its default, or null where it is required or an environment variable backs it, and exit. |
 
 ## <a id="express"></a>`ash express`
 

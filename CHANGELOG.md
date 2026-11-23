@@ -51,6 +51,11 @@
 - `ash dependencies check --offline` checks the local Grype and Trivy vulnerability
   database metadata against the configured age policy without running either tool.
 
+- **`ash diff BEFORE AFTER` compares two saved scans.** It lists new, absent, moved and
+  changed findings. A finding that only moved lines is paired only when the match is
+  unambiguous. The MCP diff tool uses the same matching, so moved findings are no longer
+  in its new and resolved lists.
+
 - **`ash --mode precommit --staged` scans the staged files instead of the whole repository.**
   The list comes from `git diff --cached` (no deletions; a rename is scanned at its new
   path): bandit and checkov are handed the staged files as targets, the scanners that pick

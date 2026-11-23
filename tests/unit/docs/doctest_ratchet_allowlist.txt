@@ -24,6 +24,5 @@ docs/plugins/community/index.md
 how-to/agent-plugins.md
 how-to/pre-commit.md
 personas/index.md
-personas/sdlc-aidlc.md
 reference/index.md
 support.md
