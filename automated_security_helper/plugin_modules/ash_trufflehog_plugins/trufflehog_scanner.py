@@ -175,6 +175,11 @@ _LOG_READ_LIMIT = 16 * 1024 * 1024
 _LEVEL_RANK = {Level.error: 1}
 
 
+def _rank(level: Optional[Level]) -> int:
+    """How strongly a result's level ranks; an unset level ranks lowest."""
+    return 0 if level is None else _LEVEL_RANK.get(level, 0)
+
+
 class TruffleHogScannerConfigOptions(ScannerOptionsBase):
     verify: Annotated[
         bool,
@@ -640,7 +645,7 @@ class TruffleHogScanner(ScannerPluginBase[TruffleHogScannerConfig]):
                 where = self._where(result)
                 if where is None or result.ruleId in GENERIC_DETECTORS:
                     continue
-                rank = _LEVEL_RANK.get(result.level, 0)
+                rank = _rank(result.level)
                 strongest[where] = max(rank, strongest.get(where, -1))
             run.results = [
                 result
@@ -648,7 +653,7 @@ class TruffleHogScanner(ScannerPluginBase[TruffleHogScannerConfig]):
                 if not (
                     result.ruleId in GENERIC_DETECTORS
                     and (where := self._where(result)) is not None
-                    and strongest.get(where, -1) >= _LEVEL_RANK.get(result.level, 0)
+                    and strongest.get(where, -1) >= _rank(result.level)
                 )
             ]
 
