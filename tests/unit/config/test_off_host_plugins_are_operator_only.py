@@ -98,6 +98,12 @@ OFF_HOST: Dict[Plugin, str] = {
         "each candidate secret, to the service that issued it, when the "
         "verification filter is configured (detect_secrets_scanner.py:245-268)"
     ),
+    ("scanners", "trufflehog"): (
+        "each credential it finds, to the service that issued it or to a host the "
+        "scanned file names, when the operator sets `verify` "
+        "(trufflehog_scanner.py `_verify`, `_build_arguments`); otherwise it runs "
+        "with `--no-verification`"
+    ),
     ("reporters", "s3"): "the results, to an S3 bucket (s3_reporter.py:230, :305)",
     ("reporters", "aws-security-hub"): (
         "requests to Security Hub and STS with the operator's credentials "

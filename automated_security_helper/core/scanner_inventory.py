@@ -76,6 +76,7 @@ _VENDORED_SCANNER_PLUGIN_PACKAGES = (
     "automated_security_helper.plugin_modules.ash_hadolint_plugins",
     "automated_security_helper.plugin_modules.ash_snyk_plugins",
     "automated_security_helper.plugin_modules.ash_trivy_plugins",
+    "automated_security_helper.plugin_modules.ash_trufflehog_plugins",
 )
 
 

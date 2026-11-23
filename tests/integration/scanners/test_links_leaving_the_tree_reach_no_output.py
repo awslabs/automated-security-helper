@@ -159,6 +159,7 @@ PLUGIN_MODULES = [
     "automated_security_helper.plugin_modules.ash_hadolint_plugins",
     "automated_security_helper.plugin_modules.ash_guarddog_plugins",
     "automated_security_helper.plugin_modules.ash_betterleaks_plugins",
+    "automated_security_helper.plugin_modules.ash_trufflehog_plugins",
 ]
 
 
@@ -498,6 +499,8 @@ CONTROLS = {
     "hadolint": Control(commands=("hadolint",), in_tree="images/Dockerfile"),
     # Reads the fabricated token gitleaks reports: its rules are the same.
     "betterleaks": Control(commands=("betterleaks",), in_tree="gitleaks_settings.py"),
+    # Its Github detector reports the same fabricated token.
+    "trufflehog": Control(commands=("trufflehog",), in_tree="gitleaks_settings.py"),
     "guarddog": Control(
         commands=("guarddog",), uv_tool=True, in_tree="pypi_suspicious/setup.py"
     ),

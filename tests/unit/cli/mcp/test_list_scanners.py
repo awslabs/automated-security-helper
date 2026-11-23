@@ -678,6 +678,8 @@ def _expected_entries() -> Dict[str, Tuple[Optional[str], Optional[bool], bool]]
         "snyk_code": (None, False, False),
         "syft": ("1.99.8", True, False),
         "trivy_repo": ("0.99.9", True, False),
+        # A binary found on PATH that ASH never installs: none here.
+        "trufflehog": (None, False, False),
     }
 
 

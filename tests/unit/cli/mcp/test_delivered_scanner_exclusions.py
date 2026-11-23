@@ -1468,6 +1468,9 @@ def _scanner_option_models() -> Dict[str, Any]:
     from automated_security_helper.plugin_modules.ash_trivy_plugins import (
         trivy_repo_scanner,
     )
+    from automated_security_helper.plugin_modules.ash_trufflehog_plugins import (
+        trufflehog_scanner,
+    )
 
     return {
         "actionlint": actionlint_scanner.ActionlintScannerConfigOptions,
@@ -1492,6 +1495,7 @@ def _scanner_option_models() -> Dict[str, Any]:
         "guarddog": guarddog_scanner.GuardDogScannerConfigOptions,
         "hadolint": hadolint_scanner.HadolintScannerConfigOptions,
         "betterleaks": betterleaks_scanner.BetterleaksScannerConfigOptions,
+        "trufflehog": trufflehog_scanner.TruffleHogScannerConfigOptions,
     }
 
 
@@ -1581,6 +1585,9 @@ def _denied_plugin_option_defaults() -> Dict[tuple, Any]:
     from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scanner import (
         TrivyRepoScannerConfigOptions,
     )
+    from automated_security_helper.plugin_modules.ash_trufflehog_plugins.trufflehog_scanner import (
+        TruffleHogScannerConfigOptions,
+    )
 
     denied = RuntimeOverridesConfig().denied_paths
     keys = known_plugin_keys(None)
@@ -1592,6 +1599,7 @@ def _denied_plugin_option_defaults() -> Dict[tuple, Any]:
         ("betterleaks", BetterleaksScannerConfigOptions()),
         ("snyk-code", SnykCodeScannerConfigOptions()),
         ("trivy-repo", TrivyRepoScannerConfigOptions()),
+        ("trufflehog", TruffleHogScannerConfigOptions()),
     ):
         for option in type(model).model_fields:
             pointer = f"/scanners/{scanner}/options/{option}"
