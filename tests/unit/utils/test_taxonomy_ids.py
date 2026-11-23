@@ -15,6 +15,8 @@ from automated_security_helper.utils.taxonomy_ids import (
     cwes_of_tags,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def test_both_consumers_use_the_same_helper_object():
     assert flat_vulnerability.cve_of_rule_id is taxonomy_ids.cve_of_rule_id
