@@ -220,7 +220,11 @@ if TYPE_CHECKING:
 class ScanOptions(BaseModel):
     """All parameters for a single run_ash_scan invocation."""
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    # populate_by_name: ``offline_rulesets`` carries a validation_alias of two
+    # spellings, which the pydantic mypy plugin reads as a dynamic alias. Accepting
+    # the field name by name is what lets the plugin build the constructor
+    # signature from it; both spellings still bind through the AliasChoices.
+    model_config = ConfigDict(arbitrary_types_allowed=True, populate_by_name=True)
 
     # Core paths
     source_dir: Path
