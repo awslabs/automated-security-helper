@@ -210,6 +210,7 @@ A value in a configuration file that begins with `${NAME}` or `${NAME:default}` 
 These reads take the variable name from a value the generator cannot resolve without running ASH: a name read from a configuration file, built at run time, or passed in from somewhere it cannot follow. A variable read only through one of these sites is not in the tables above.
 
 ```text
+automated_security_helper/cli/scan.py (run_ash_scan_cli_command) [environ.get] if os.environ.get(CHILD_ENV):
 automated_security_helper/config/ash_config.py (env_reference_value) [environ.get] resolved = os.environ.get(reference.var_name, None)
 automated_security_helper/config/config_sources.py (_empty_key_reference_names.walk) [environ.get] if resolved is None and os.environ.get(name) is not None:
 automated_security_helper/config/config_validator.py (_reference_variable_is_set) [environ.get] value = os.environ.get(reference.group(1))
