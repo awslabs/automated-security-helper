@@ -39,6 +39,7 @@ from automated_security_helper.base.scanner_plugin import (
     plugin_explains_its_own_refusal,
     plugin_missing_dependency_reason,
 )
+from automated_security_helper.cli.dependency_check import check_dependencies
 from automated_security_helper.cli.params import from_environment
 from automated_security_helper.config.named_config import (
     refuse_a_named_config_that_does_not_exist,
@@ -119,6 +120,14 @@ dependencies_app = typer.Typer(
     # environment, which every line it prints is redacted with (utils/log.py).
     pretty_exceptions_show_locals=show_debug_locals(),
 )
+
+dependencies_cli_app = typer.Typer(
+    name="dependencies",
+    help="Check or install dependencies for ASH plugins",
+    pretty_exceptions_show_locals=show_debug_locals(),
+)
+dependencies_cli_app.add_typer(dependencies_app, name="")
+dependencies_cli_app.command(name="check")(check_dependencies)
 
 console = ash_console(theme=rich_theme())
 # Deprecation warnings go to stderr so a script that parses this command's stdout
