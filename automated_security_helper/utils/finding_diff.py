@@ -9,11 +9,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from automated_security_helper.core.enums import ScannerStatus
-from automated_security_helper.utils.finding_identity import (
-    canonical,
-    key_base,
-    key_is_fingerprinted,
-)
+from automated_security_helper.utils.finding_identity import canonical
 
 if TYPE_CHECKING:
     from automated_security_helper.models.asharp_model import AshAggregatedResults
@@ -144,15 +140,14 @@ class FindingDiff:
 
 
 def fallback_key(finding: FlatVulnerability) -> tuple[Any, ...] | None:
-    if finding._identity is None or finding.source_report is not None:
+    base = finding.identity_base
+    if base is None or finding.source_report is not None:
         return None
-    key = finding._assigned_identity_key
-    if key_is_fingerprinted(key):
+    if finding.has_fingerprint_identity:
         return None
-    base = key_base(key) if key is not None else dict(finding._identity.base)
     return (
         canonical(base),
-        finding._identity_message or "",
+        finding.identity_message or "",
         (finding.severity or "").upper(),
     )
 
@@ -185,14 +180,13 @@ def match_findings(
             continue
         i, j = before_ids[finding_id][0], after_ids[finding_id][0]
         previous, current = before[i], after[j]
-        if previous._identity is not None and current._identity is not None:
+        if previous.identity is not None and current.identity is not None:
             fingerprinted = all(
-                key_is_fingerprinted(finding._assigned_identity_key)
-                for finding in (previous, current)
+                finding.has_fingerprint_identity for finding in (previous, current)
             )
             if (
                 not fingerprinted
-                and previous._identity_message != current._identity_message
+                and previous.identity_message != current.identity_message
             ):
                 continue
         exact.append((previous, current))
