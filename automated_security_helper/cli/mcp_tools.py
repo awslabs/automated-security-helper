@@ -4842,7 +4842,7 @@ def mcp_diff_scan_results(
     except ComparabilityRefusal as exc:
         return {
             "success": False,
-            "error": str(exc),
+            "error": raw_controls_on_one_line(str(exc)),
             "error_type": RESULTS_NOT_COMPARABLE,
         }
     diff = compare_findings(before_findings, after_findings)
