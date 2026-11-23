@@ -56,6 +56,7 @@ Showing 4 of 4 actionable findings, highest severity first.
 - Scanner: actionlint
 - Rule ID: credentials
 - Location: .github/workflows/vulnerable.yml:17
+- CWE: CWE-798
 
 "password" section in "db" service should be specified via secrets. do not put password value directly
 
