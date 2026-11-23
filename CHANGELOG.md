@@ -54,6 +54,12 @@
   them: their scanners live in `automated_security_helper/plugin_modules/ash_builtin/`.
   No supported invocation changes; `./ash`, `utils/ash_helpers.sh` (`invoke-ash`) and
   `utils/ash_helpers.ps1` (`Invoke-ASH`) are unchanged.
+- The subcommand and option tables that `./ash` and `utils/ash_helpers.ps1` carry
+  (subcommand names, the root options that take a value, which subcommands take the
+  options a wrapper adds, the OCI runner order) are now generated from the `ash` CLI by
+  `scripts/generate_wrapper_tables.py` into marked blocks, and the lint job and a unit
+  test fail when a block is stale. The generated text is the text the wrappers already
+  held, so no option, exit code or message changes.
 
 ### Features
 
