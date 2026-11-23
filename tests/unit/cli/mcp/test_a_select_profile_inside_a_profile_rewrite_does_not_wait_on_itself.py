@@ -38,7 +38,7 @@ from tests.utils.bounded_wait import finishes_within
 
 pytestmark = pytest.mark.unit
 
-SESSION = "binding-lock-holder"
+CLIENT_ID = "binding-lock-holder"
 WAIT_SECONDS = 30.0
 
 
@@ -70,11 +70,11 @@ def test_select_profile_on_the_thread_that_holds_the_binding_lock_completes() ->
     wait failed the test."""
 
     def nested() -> Dict[str, Any]:
-        with binding_writes(SESSION):
+        with binding_writes(CLIENT_ID):
             return mcp_select_profile(
                 "op",
                 patch_ops=[{"op": "replace", "path": "/project_name", "value": "re"}],
-                session_id=SESSION,
+                session_id=CLIENT_ID,
             )
 
     result = finishes_within(WAIT_SECONDS, nested)
@@ -90,12 +90,12 @@ def test_another_thread_still_waits_for_the_holder_of_the_binding_lock() -> None
     entered = threading.Event()
 
     def holder() -> None:
-        with binding_writes(SESSION):
+        with binding_writes(CLIENT_ID):
             holding.set()
             leave.wait(WAIT_SECONDS)
 
     def other() -> None:
-        with binding_writes(SESSION):
+        with binding_writes(CLIENT_ID):
             entered.set()
 
     first = threading.Thread(target=holder, daemon=True)

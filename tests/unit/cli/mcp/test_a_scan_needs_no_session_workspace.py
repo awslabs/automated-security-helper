@@ -122,13 +122,13 @@ def test_a_scan_of_a_granted_directory_creates_no_session_directory(
 
 
 def test_a_refused_change_leaves_no_session_directory(root) -> None:
-    session = sessions.get_default_registry().session_for("fresh")
-    assert session.try_claim_scan()
+    entry = sessions.get_default_registry().session_for("fresh")
+    assert entry.try_claim_scan()
     try:
         with pytest.raises(sd.SourceDeliveryBusyError):
             sd.clear_source(session_id="fresh")
     finally:
-        session.release_scan()
+        entry.release_scan()
 
     assert not (root / "fresh").exists()
 
@@ -138,7 +138,7 @@ def test_get_or_create_still_gives_a_session_with_its_directory(root) -> None:
     in_memory = registry.session_for("later")
     assert not in_memory.workspace_root.exists()
 
-    session = registry.get_or_create("later")
+    entry = registry.get_or_create("later")
 
-    assert session is in_memory
-    assert (session.workspace_root / ".ash-mcp-session").is_file()
+    assert entry is in_memory
+    assert (entry.workspace_root / ".ash-mcp-session").is_file()

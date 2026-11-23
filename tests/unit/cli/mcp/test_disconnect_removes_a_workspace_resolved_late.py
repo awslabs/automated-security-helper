@@ -63,8 +63,8 @@ def test_a_session_handed_out_without_a_path_has_its_directory_removed(
 ) -> None:
     registry = sessions.MCPSessionRegistry(workspace_parent=root)
     calls = _failing_then_real(monkeypatch, failures=1)
-    session = registry.session_for(LATE)
-    assert session.workspace_root is None, "the precondition: no path was resolved"
+    entry = registry.session_for(LATE)
+    assert entry.workspace_root is None, "the precondition: no path was resolved"
     assert calls["failed"] == 1
     # What a delivery does for the session meanwhile: it builds the directory.
     sandbox = mark_session_workspace(root / LATE)

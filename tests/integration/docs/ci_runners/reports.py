@@ -504,8 +504,8 @@ class _JobCondition:
         if isinstance(condition, bool):
             return _and_values(self._success(needs), condition) is not False
         try:
-            tokens = _tokens(_expression_body(str(condition)))
-            value, rest = self._or(tokens, needs)
+            terms = _tokens(_expression_body(str(condition)))
+            value, rest = self._or(terms, needs)
             if rest:
                 raise ValueError(f"unread tail {rest!r}")
         except ValueError:
@@ -515,7 +515,7 @@ class _JobCondition:
             if any(function in str(condition) for function in _STATUS_FUNCTIONS):
                 return True
             return _and_values(self._success(needs), None) is not False
-        if not any(token in _STATUS_FUNCTIONS for token in tokens):
+        if not any(term in _STATUS_FUNCTIONS for term in terms):
             value = _and_values(self._success(needs), value)
         return value is not False
 
@@ -545,64 +545,64 @@ class _JobCondition:
 
     def evaluate(self, text: str, needs: list[str]) -> Any:
         """The value of expression ``text`` alone, without the implicit ``success()``."""
-        tokens = _tokens(_expression_body(text))
-        value, rest = self._or(tokens, needs)
+        terms = _tokens(_expression_body(text))
+        value, rest = self._or(terms, needs)
         if rest:
             raise ValueError(f"unread tail {rest!r}")
         return value
 
-    def _or(self, tokens: list[str], needs: list[str]) -> tuple[Any, list[str]]:
-        value, tokens = self._and(tokens, needs)
-        while tokens and tokens[0] == "||":
-            other, tokens = self._and(tokens[1:], needs)
+    def _or(self, terms: list[str], needs: list[str]) -> tuple[Any, list[str]]:
+        value, terms = self._and(terms, needs)
+        while terms and terms[0] == "||":
+            other, terms = self._and(terms[1:], needs)
             left, right = _truth(value), _truth(other)
             value = (
                 True
                 if left or right
                 else (False if left is False and right is False else None)
             )
-        return value, tokens
+        return value, terms
 
-    def _and(self, tokens: list[str], needs: list[str]) -> tuple[Any, list[str]]:
-        value, tokens = self._not(tokens, needs)
-        while tokens and tokens[0] == "&&":
-            other, tokens = self._not(tokens[1:], needs)
+    def _and(self, terms: list[str], needs: list[str]) -> tuple[Any, list[str]]:
+        value, terms = self._not(terms, needs)
+        while terms and terms[0] == "&&":
+            other, terms = self._not(terms[1:], needs)
             value = _and_values(value, other)
-        return value, tokens
+        return value, terms
 
-    def _not(self, tokens: list[str], needs: list[str]) -> tuple[Any, list[str]]:
-        if tokens and tokens[0] == "!":
-            value, tokens = self._not(tokens[1:], needs)
+    def _not(self, terms: list[str], needs: list[str]) -> tuple[Any, list[str]]:
+        if terms and terms[0] == "!":
+            value, terms = self._not(terms[1:], needs)
             truth = _truth(value)
-            return (None if truth is None else not truth), tokens
-        return self._comparison(tokens, needs)
+            return (None if truth is None else not truth), terms
+        return self._comparison(terms, needs)
 
-    def _comparison(self, tokens: list[str], needs: list[str]) -> tuple[Any, list[str]]:
-        value, tokens = self._primary(tokens, needs)
-        if tokens and tokens[0] in ("==", "!="):
-            other, rest = self._primary(tokens[1:], needs)
+    def _comparison(self, terms: list[str], needs: list[str]) -> tuple[Any, list[str]]:
+        value, terms = self._primary(terms, needs)
+        if terms and terms[0] in ("==", "!="):
+            other, rest = self._primary(terms[1:], needs)
             if value is None or other is None:
                 return None, rest
             equal = _github_equal(value, other)
-            return (equal if tokens[0] == "==" else not equal), rest
-        return value, tokens
+            return (equal if terms[0] == "==" else not equal), rest
+        return value, terms
 
-    def _primary(self, tokens: list[str], needs: list[str]) -> tuple[Any, list[str]]:
-        if not tokens:
+    def _primary(self, terms: list[str], needs: list[str]) -> tuple[Any, list[str]]:
+        if not terms:
             raise ValueError("an operand is missing")
-        token, rest = tokens[0], tokens[1:]
-        if token == "(":
+        term, rest = terms[0], terms[1:]
+        if term == "(":
             value, rest = self._or(rest, needs)
             if not rest or rest[0] != ")":
                 raise ValueError("a parenthesis is not closed")
             return value, rest[1:]
-        if token.startswith("'"):
-            return token[1:-1].replace("''", "'"), rest
-        if token in _LITERALS:
-            return _LITERALS[token], rest
-        if _NUMBER_TEXT.fullmatch(token):
-            return float(token), rest
-        return self._path(token, needs), rest
+        if term.startswith("'"):
+            return term[1:-1].replace("''", "'"), rest
+        if term in _LITERALS:
+            return _LITERALS[term], rest
+        if _NUMBER_TEXT.fullmatch(term):
+            return float(term), rest
+        return self._path(term, needs), rest
 
     def _path(self, token: str, needs: list[str]) -> Any:
         if token == "always()":
@@ -654,18 +654,16 @@ class _StepCondition(_JobCondition):
 
 
 def _tokens(text: str) -> list[str]:
-    tokens = []
+    terms = []
     position = 0
     text = text.strip()
     while position < len(text):
         match = _EXPRESSION_TOKEN.match(text, position)
         if match is None or match.end() == position:
             raise ValueError(f"cannot read {text[position:]!r}")
-        tokens.append(
-            match["string"] or match["op"] or match["number"] or match["path"]
-        )
+        terms.append(match["string"] or match["op"] or match["number"] or match["path"])
         position = match.end()
-    return tokens
+    return terms
 
 
 def _truth(value: Any) -> bool | None:

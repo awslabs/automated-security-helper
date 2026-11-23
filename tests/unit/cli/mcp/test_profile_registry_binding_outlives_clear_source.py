@@ -36,7 +36,7 @@ from automated_security_helper.cli.mcp_tools import mcp_select_profile
 
 pytestmark = pytest.mark.unit
 
-SESSION = "bound-then-cleared"
+CLIENT_ID = "bound-then-cleared"
 REGISTERED_NAME = "operator-registered"
 PATCHED_NAME = "client-patched"
 PATCH_OPS = [{"op": "replace", "path": "/project_name", "value": PATCHED_NAME}]
@@ -68,7 +68,7 @@ def _server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
 def _bind(patched: bool) -> None:
     result = mcp_select_profile(
-        "op", patch_ops=PATCH_OPS if patched else None, session_id=SESSION
+        "op", patch_ops=PATCH_OPS if patched else None, session_id=CLIENT_ID
     )
     assert result["success"] is True, result
 
@@ -79,27 +79,27 @@ def _project_name(path: str) -> str:
 
 def test_the_registered_profile_is_written_again_after_a_clear(tmp_path) -> None:
     _bind(patched=False)
-    before = resolve_session_config_path(SESSION)
+    before = resolve_session_config_path(CLIENT_ID)
     assert before is not None and Path(before).is_file()
 
-    clear_source(SESSION)
+    clear_source(CLIENT_ID)
     assert not Path(before).exists(), "the clear left the materialized profile"
 
-    after = resolve_session_config_path(SESSION)
+    after = resolve_session_config_path(CLIENT_ID)
 
     assert after is not None, "a bound session resolved no config after the clear"
     assert Path(after).is_file()
     assert _project_name(after) == REGISTERED_NAME
-    assert resolve_session_trusted_config_path(SESSION) == after
-    assert get_session_state(SESSION).config_path == after
+    assert resolve_session_trusted_config_path(CLIENT_ID) == after
+    assert get_session_state(CLIENT_ID).config_path == after
 
 
 def test_a_patched_binding_writes_both_copies_again(tmp_path) -> None:
     _bind(patched=True)
-    clear_source(SESSION)
+    clear_source(CLIENT_ID)
 
-    config_path = resolve_session_config_path(SESSION)
-    trusted = resolve_session_trusted_config_path(SESSION)
+    config_path = resolve_session_config_path(CLIENT_ID)
+    trusted = resolve_session_trusted_config_path(CLIENT_ID)
 
     assert config_path is not None and trusted is not None
     assert config_path != trusted
@@ -113,11 +113,11 @@ def test_a_binding_whose_profile_is_gone_refuses_rather_than_unbinding(
     tmp_path,
 ) -> None:
     _bind(patched=False)
-    clear_source(SESSION)
+    clear_source(CLIENT_ID)
     clear_profile_registry()
 
     with pytest.raises(ProfileRegistryError) as refused:
-        resolve_session_config_path(SESSION)
+        resolve_session_config_path(CLIENT_ID)
 
     assert "select_profile" in str(refused.value)
     # Refused, not unbound: asked again, the session is still bound to the
@@ -125,7 +125,7 @@ def test_a_binding_whose_profile_is_gone_refuses_rather_than_unbinding(
     # dropped the binding would answer None here, and the scan would run under
     # in-tree discovery, the shape this file exists to refuse.
     with pytest.raises(ProfileRegistryError):
-        resolve_session_config_path(SESSION)
+        resolve_session_config_path(CLIENT_ID)
 
 
 def test_an_unbound_session_still_resolves_nothing() -> None:

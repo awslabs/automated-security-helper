@@ -86,10 +86,10 @@ def at_the_limit(layout, monkeypatch):
         encoding="utf-8",
     )
     monkeypatch.setenv("ASH_CONFIG", str(operator))
-    session = sessions.get_default_registry().session_for(SESSION)
-    assert session.try_start_scan(1)
-    yield session
-    session.scan_returned()
+    entry = sessions.get_default_registry().session_for(SESSION)
+    assert entry.try_start_scan(1)
+    yield entry
+    entry.scan_returned()
 
 
 @pytest.fixture
@@ -189,12 +189,12 @@ class TestARefusalIsAnsweredWhenTheRemovalFails:
 
         _scan(directory_path=str(layout["scan"]))
 
-        session = sessions.get_default_registry().session_for(SESSION)
+        entry = sessions.get_default_registry().session_for(SESSION)
         # No claim held: a change can begin. No count held: a limit of one admits.
-        assert session.try_begin_change() is None, "the scan's claim is still held"
-        session.end_change()
-        assert session.try_start_scan(1), "the scan is still counted"
-        session.scan_returned()
+        assert entry.try_begin_change() is None, "the scan's claim is still held"
+        entry.end_change()
+        assert entry.try_start_scan(1), "the scan is still counted"
+        entry.scan_returned()
 
 
 class TestTheRemovalRunsOffTheEventLoop:

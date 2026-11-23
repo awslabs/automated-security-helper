@@ -39,8 +39,8 @@ def test_a_retired_scopes_handler_takes_nothing_and_homes_nothing(monkeypatch):
     monkeypatch.setattr(ASH_LOGGER, "propagate", False)
 
     # A hosted run that opened and closed, as a cancelled scan's does.
-    scope, token = ash_log.open_run_log_scope()
-    ash_log.end_run_log_scope(scope, token)
+    scope, reset_handle = ash_log.open_run_log_scope()
+    ash_log.end_run_log_scope(scope, reset_handle)
 
     # The orphan: a handler a thread still in that run's context would add,
     # tagged and filtered as run_handler tags one.

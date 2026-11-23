@@ -51,7 +51,7 @@ from automated_security_helper.cli.mcp.sessions import reset_default_registry_fo
 from automated_security_helper.cli.mcp_tools import mcp_set_source_git
 
 URL = "https://git.example.invalid/team/repo.git"
-SESSION = "session-gitdecode"
+CLIENT_ID = "session-gitdecode"
 
 #: Invalid as UTF-8 (each is a continuation byte with no lead byte) and undefined
 #: in code page 1252.
@@ -110,7 +110,7 @@ def stand_in_git(tmp_path, monkeypatch) -> Iterator[Dict[str, Any]]:
         )
         monkeypatch.setattr(sd, "_GIT_ARGV", (sys.executable, str(script)))
 
-    yield {"install": install, "source": workspace / SESSION / "source", "runs": runs}
+    yield {"install": install, "source": workspace / CLIENT_ID / "source", "runs": runs}
     reset_default_registry_for_tests()
 
 
@@ -125,7 +125,7 @@ def _ran(git: Dict[str, Any]) -> List[List[str]]:
 
 
 def _deliver(**arguments: Any) -> Dict[str, Any]:
-    return mcp_set_source_git(url=URL, session_id=SESSION, **arguments)
+    return mcp_set_source_git(url=URL, session_id=CLIENT_ID, **arguments)
 
 
 def _nothing_of_the_clone_is_left(git: Dict[str, Any], what: str) -> None:
@@ -155,7 +155,7 @@ def test_a_clone_git_fails_with_output_that_is_not_utf8_is_a_failed_clone(
     assert "fatal: unable to read" in result["error"], result
     _keeps_the_bytes(result)
     _nothing_of_the_clone_is_left(stand_in_git, "the failed clone")
-    assert sd.get_session_source_dir(SESSION) is None
+    assert sd.get_session_source_dir(CLIENT_ID) is None
 
 
 @pytest.mark.integration
@@ -174,7 +174,7 @@ def test_a_fetch_git_fails_with_output_that_is_not_utf8_is_still_tolerated(
     # The fetch failed, so the checkout looks for the ref in the clone itself.
     assert ran[2][1] == "release", ran
     assert Path(result["source_dir"]) == stand_in_git["source"]
-    assert sd.get_session_source_dir(SESSION) == stand_in_git["source"]
+    assert sd.get_session_source_dir(CLIENT_ID) == stand_in_git["source"]
 
 
 @pytest.mark.integration
@@ -193,7 +193,7 @@ def test_a_checkout_git_fails_with_output_that_is_not_utf8_is_a_failed_checkout(
     assert "did not match" in result["error"], result
     _keeps_the_bytes(result)
     _nothing_of_the_clone_is_left(stand_in_git, "the failed checkout")
-    assert sd.get_session_source_dir(SESSION) is None
+    assert sd.get_session_source_dir(CLIENT_ID) is None
 
 
 @pytest.mark.parametrize("step", ["clone", "fetch", "checkout"])
@@ -220,7 +220,7 @@ def test_a_step_git_completes_with_output_that_is_not_utf8_delivers(
     assert [name for name, _last in ran] == ["clone", "fetch", "checkout"], ran
     # The fetch succeeded, so the checkout takes what it fetched.
     assert ran[2][1] == "FETCH_HEAD", ran
-    assert sd.get_session_source_dir(SESSION) == stand_in_git["source"]
+    assert sd.get_session_source_dir(CLIENT_ID) == stand_in_git["source"]
 
 
 @pytest.mark.integration

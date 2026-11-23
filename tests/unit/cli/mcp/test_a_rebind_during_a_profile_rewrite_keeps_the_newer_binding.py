@@ -34,7 +34,7 @@ from automated_security_helper.config.ash_config import AshConfig
 
 pytestmark = pytest.mark.unit
 
-SESSION = "client-7"
+CLIENT_ID = "client-7"
 
 
 @pytest.fixture
@@ -63,7 +63,7 @@ def test_the_rewrite_does_not_overwrite_a_binding_made_while_it_ran(
     bound and written, so the session's config file held p while its binding
     said q."""
     entries = two_registered_profiles
-    config_dir = tmp_path / "workspaces" / SESSION / "config"
+    config_dir = tmp_path / "workspaces" / CLIENT_ID / "config"
     config_dir.mkdir(parents=True)
     written = config_dir / "ash.yaml"
     rewrite_started = threading.Event()
@@ -89,7 +89,7 @@ def test_the_rewrite_does_not_overwrite_a_binding_made_while_it_ran(
     )
     # Bound to p with its file gone, so the next read writes it again.
     profile_registry.bind_session_config(
-        SESSION,
+        CLIENT_ID,
         config=entries["p"].config,
         profile_name="p",
         config_path=str(written),
@@ -98,10 +98,10 @@ def test_the_rewrite_does_not_overwrite_a_binding_made_while_it_ran(
     outcomes = {}
 
     def rewrite_p():
-        outcomes["rewrite"] = profile_registry.resolve_session_config_path(SESSION)
+        outcomes["rewrite"] = profile_registry.resolve_session_config_path(CLIENT_ID)
 
     def bind_q():
-        outcomes["bind"] = mcp_tools.mcp_select_profile("q", session_id=SESSION)
+        outcomes["bind"] = mcp_tools.mcp_select_profile("q", session_id=CLIENT_ID)
 
     rewrite = threading.Thread(target=rewrite_p, name="rewrite-p")
     rewrite.start()
@@ -124,7 +124,7 @@ def test_the_rewrite_does_not_overwrite_a_binding_made_while_it_ran(
     assert waited_on_the_rewrite, "select_profile ran while the rewrite was writing"
     assert outcomes["rewrite"] == str(written), outcomes["rewrite"]
     assert outcomes["bind"].get("success") is True, outcomes["bind"]
-    state = profile_registry.get_session_state(SESSION)
+    state = profile_registry.get_session_state(CLIENT_ID)
     assert state is not None and state.profile_name == "q", state
     assert written.read_text(encoding="utf-8") == "q", (
         "the session's config file holds the older profile",
@@ -148,7 +148,7 @@ def a_bind_lands_before_the_rewrites_hold(
     from automated_security_helper.cli.mcp import sessions
 
     entries = two_registered_profiles
-    config_dir = tmp_path / "workspaces" / SESSION / "config"
+    config_dir = tmp_path / "workspaces" / CLIENT_ID / "config"
     config_dir.mkdir(parents=True)
     written = config_dir / "ash.yaml"
     order = []
@@ -165,7 +165,7 @@ def a_bind_lands_before_the_rewrites_hold(
         a_write_that_names_its_profile,
     )
     profile_registry.bind_session_config(
-        SESSION,
+        CLIENT_ID,
         config=entries["p"].config,
         profile_name="p",
         config_path=str(written),
@@ -179,7 +179,7 @@ def a_bind_lands_before_the_rewrites_hold(
         if not fired:
             # Once: select_profile takes this same hold, and must not bind again.
             fired.append("once")
-            outcome = mcp_tools.mcp_select_profile("q", session_id=SESSION)
+            outcome = mcp_tools.mcp_select_profile("q", session_id=CLIENT_ID)
             assert outcome.get("success") is True, outcome
             for step in after_the_bind:
                 step()
@@ -198,9 +198,9 @@ def test_a_binding_made_before_the_hold_is_the_answer_and_p_is_never_written(
     older profile's file is never written over them."""
     written, order, _ = a_bind_lands_before_the_rewrites_hold
 
-    answered = profile_registry.resolve_session_config_path(SESSION)
+    answered = profile_registry.resolve_session_config_path(CLIENT_ID)
 
-    state = profile_registry.get_session_state(SESSION)
+    state = profile_registry.get_session_state(CLIENT_ID)
     assert state is not None and state.profile_name == "q", state
     assert answered == state.config_path, (answered, state.config_path)
     assert order == ["q"], ("the older profile was written", order)
@@ -217,10 +217,10 @@ def test_a_newer_binding_whose_files_are_gone_is_written_again_from_itself(
     written, order, after_the_bind = a_bind_lands_before_the_rewrites_hold
     after_the_bind.append(written.unlink)
 
-    answered = profile_registry.resolve_session_config_path(SESSION)
+    answered = profile_registry.resolve_session_config_path(CLIENT_ID)
 
     assert answered is not None and Path(answered).is_file(), answered
     assert written.read_text(encoding="utf-8") == "q", order
     assert order == ["q", "q"], ("select_profile's write, then the rewrite's", order)
-    state = profile_registry.get_session_state(SESSION)
+    state = profile_registry.get_session_state(CLIENT_ID)
     assert state is not None and state.profile_name == "q", state

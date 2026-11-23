@@ -163,16 +163,16 @@ class TestTheReasonIsShownAsAnErrorMessageIs:
         assert "\n" not in detail
 
     def test_an_environment_value_is_redacted(self, tmp_path):
-        secret = "s3cr3t-Value-zqxj-ptlm-rwvn"  # pragma: allowlist secret
+        invented = "s3cr3t-Value-zqxj-ptlm-rwvn"  # pragma: allowlist secret
         _write_results(
-            tmp_path, self._skipped_with(f"could not build: {secret} was refused")
+            tmp_path, self._skipped_with(f"could not build: {invented} was refused")
         )
 
-        detail = summarize_scanner_statuses(tmp_path, environment_values=(secret,))[
+        detail = summarize_scanner_statuses(tmp_path, environment_values=(invented,))[
             "skipped_scanners"
         ][0]["detail"]
 
-        assert secret not in detail
+        assert invented not in detail
         assert "was refused" in detail
 
     def test_plain_text_is_unchanged_without_values(self, tmp_path):

@@ -62,7 +62,7 @@ def test_an_unshown_display_does_not_swallow_a_line_no_scan_owns(monkeypatch):
     for handler in held_back:
         ASH_LOGGER.removeHandler(handler)
     monkeypatch.setattr(ASH_LOGGER, "propagate", False)
-    scope, token = ash_log.open_run_log_scope()
+    scope, reset_handle = ash_log.open_run_log_scope()
     displays = []
 
     def a_pool_worker_builds_the_projects_display() -> None:
@@ -86,7 +86,7 @@ def test_an_unshown_display_does_not_swallow_a_line_no_scan_owns(monkeypatch):
     finally:
         for display in displays:
             _without(display)
-        ash_log.end_run_log_scope(scope, token)
+        ash_log.end_run_log_scope(scope, reset_handle)
         for handler in held_back:
             if handler not in ASH_LOGGER.handlers:
                 ASH_LOGGER.addHandler(handler)

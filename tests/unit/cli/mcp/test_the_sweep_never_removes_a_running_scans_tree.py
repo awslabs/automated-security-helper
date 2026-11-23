@@ -69,14 +69,14 @@ def _sandbox(root: Path, session_id: str, age: float = 400 * DAY) -> Path:
 @pytest.mark.unit
 def test_a_session_whose_scan_runs_is_skipped_not_queued(root, hold) -> None:
     sandbox = _sandbox(root, "busy")
-    session = sessions.get_default_registry().session_for("busy")
+    entry = sessions.get_default_registry().session_for("busy")
 
     if hold == "claim":
-        assert session.try_claim_scan()
+        assert entry.try_claim_scan()
         removed = sessions.sweep_stale_workspaces(DAY)
-        session.release_scan()
+        entry.release_scan()
     else:
-        with session.lock:
+        with entry.lock:
             removed = sessions.sweep_stale_workspaces(DAY)
     # What a scan does when it returns.
     sessions.finish_ended_session("busy")

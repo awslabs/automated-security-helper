@@ -36,7 +36,7 @@ from automated_security_helper.cli.mcp_tools import mcp_set_source_git
 
 HOST = "git.example.invalid"
 URL = f"https://{HOST}/team/repo.git"
-SESSION = "session-unprintable"
+CLIENT_ID = "session-unprintable"
 
 _STAND_IN_GIT = """\
 import sys
@@ -117,7 +117,7 @@ def _steps_run(delivery: Dict[str, Any]) -> List[str]:
 def _nothing_was_started(delivery: Dict[str, Any]) -> None:
     assert _steps_run(delivery) == [], "git ran for a value that had to be refused"
     assert not delivery["workspace"].exists(), "a refused request made a workspace"
-    assert sd.get_session_source_dir(SESSION) is None
+    assert sd.get_session_source_dir(CLIENT_ID) is None
 
 
 @pytest.mark.parametrize("ref", REFS)
@@ -125,7 +125,7 @@ def _nothing_was_started(delivery: Dict[str, Any]) -> None:
 def test_a_ref_with_an_unprintable_character_is_refused_before_anything_runs(
     delivery, ref
 ) -> None:
-    result = mcp_set_source_git(url=URL, ref=ref, session_id=SESSION)
+    result = mcp_set_source_git(url=URL, ref=ref, session_id=CLIENT_ID)
 
     assert result.get("success") is False, result
     assert result.get("error_type") == "clone_ref_not_permitted", result
@@ -139,7 +139,7 @@ def test_set_source_git_refuses_the_same_ref_before_it_makes_the_session(
     delivery, ref
 ) -> None:
     with pytest.raises(ValueError, match="ref"):
-        sd.set_source_git(url=URL, ref=ref, session_id=SESSION)
+        sd.set_source_git(url=URL, ref=ref, session_id=CLIENT_ID)
 
     _nothing_was_started(delivery)
 
@@ -149,7 +149,7 @@ def test_set_source_git_refuses_the_same_ref_before_it_makes_the_session(
 def test_a_url_with_an_unprintable_character_is_refused_before_anything_runs(
     delivery, url
 ) -> None:
-    result = mcp_set_source_git(url=url, session_id=SESSION)
+    result = mcp_set_source_git(url=url, session_id=CLIENT_ID)
 
     assert result.get("success") is False, result
     assert result.get("error_type") == "clone_url_not_permitted", result
@@ -162,7 +162,7 @@ def test_set_source_git_refuses_the_same_url_before_it_makes_the_session(
     delivery, url
 ) -> None:
     with pytest.raises(ValueError, match="url"):
-        sd.set_source_git(url=url, session_id=SESSION)
+        sd.set_source_git(url=url, session_id=CLIENT_ID)
 
     _nothing_was_started(delivery)
 
@@ -172,7 +172,7 @@ def test_set_source_git_refuses_the_same_url_before_it_makes_the_session(
 def test_a_url_with_a_nul_or_a_c0_control_stays_refused(delivery, url) -> None:
     """Control: ``remote_clone_host`` refused these before. They stay refused, and
     git does not run for them."""
-    result = mcp_set_source_git(url=url, session_id=SESSION)
+    result = mcp_set_source_git(url=url, session_id=CLIENT_ID)
 
     assert result.get("success") is False, result
     assert result.get("error_type") == "clone_url_not_permitted", result
@@ -183,7 +183,7 @@ def test_a_url_with_a_nul_or_a_c0_control_stays_refused(delivery, url) -> None:
 def test_the_refusal_does_not_quote_the_value(delivery) -> None:
     """The text names the parameter and the kind of character, not the value, so a
     control character or a surrogate does not reach the client's terminal or log."""
-    result = mcp_set_source_git(url=URL, ref="release\x1b[31mx", session_id=SESSION)
+    result = mcp_set_source_git(url=URL, ref="release\x1b[31mx", session_id=CLIENT_ID)
 
     assert result.get("error_type") == "clone_ref_not_permitted", result
     assert "\x1b" not in result["error"], result
@@ -194,11 +194,13 @@ def test_the_refusal_does_not_quote_the_value(delivery) -> None:
 def test_a_plain_ref_is_still_delivered(delivery) -> None:
     """Control for the stand-in and for the new check: a ref with the characters git
     accepts in a name (a slash, a plus, an at sign, a dot) is cloned and checked out."""
-    result = mcp_set_source_git(url=URL, ref="release/v1.0+build@2", session_id=SESSION)
+    result = mcp_set_source_git(
+        url=URL, ref="release/v1.0+build@2", session_id=CLIENT_ID
+    )
 
     assert result.get("success") is True, result
     assert _steps_run(delivery) == ["clone", "fetch", "checkout"]
-    assert sd.get_session_source_dir(SESSION) is not None
+    assert sd.get_session_source_dir(CLIENT_ID) is not None
 
 
 @pytest.mark.parametrize(
@@ -213,15 +215,15 @@ def test_a_refused_value_leaves_the_previous_clone_delivered(delivery, refused) 
     """The refusal comes before anything is created, so a clone that was delivered
     earlier keeps its tree and its record. ``_nothing_was_started`` cannot say so: it
     reads a session that never delivered anything."""
-    first = mcp_set_source_git(url=URL, session_id=SESSION)
+    first = mcp_set_source_git(url=URL, session_id=CLIENT_ID)
     assert first["success"] is True, first
     source = Path(first["source_dir"])
     (source / "kept.txt").write_text("kept\n", encoding="utf-8")
     steps_before = _steps_run(delivery)
 
-    result = mcp_set_source_git(**{"url": URL, **refused}, session_id=SESSION)
+    result = mcp_set_source_git(**{"url": URL, **refused}, session_id=CLIENT_ID)
 
     assert result.get("success") is False, result
     assert _steps_run(delivery) == steps_before, "git ran for a refused value"
     assert (source / "kept.txt").read_text(encoding="utf-8") == "kept\n"
-    assert sd.get_session_source_dir(SESSION) == source
+    assert sd.get_session_source_dir(CLIENT_ID) == source

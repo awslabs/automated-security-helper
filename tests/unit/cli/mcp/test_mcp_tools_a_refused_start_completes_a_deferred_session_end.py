@@ -109,9 +109,9 @@ def test_a_start_that_fails_after_the_claim_completes_the_end(
     assert response["success"] is False, response
     _the_end_was_completed()
     # The claim itself went back too.
-    session = sessions.get_default_registry().session_for(SESSION)
-    assert session.try_begin_change() is None
-    session.end_change()
+    registry_entry = sessions.get_default_registry().session_for(SESSION)
+    assert registry_entry.try_begin_change() is None
+    registry_entry.end_change()
 
 
 def test_a_scan_turned_away_at_the_limit_completes_the_end(layout, monkeypatch) -> None:
@@ -131,8 +131,8 @@ def test_a_scan_turned_away_at_the_limit_completes_the_end(layout, monkeypatch) 
         "_start_scan_task",
         lambda scan_id, coroutine, **kwargs: coroutine.close(),
     )
-    session = sessions.get_default_registry().session_for(SESSION)
-    assert session.try_start_scan(1)
+    registry_entry = sessions.get_default_registry().session_for(SESSION)
+    assert registry_entry.try_start_scan(1)
     real_try_start_scan = sessions.MCPSession.try_start_scan
 
     def end_while_the_claim_is_held(self, limit):
@@ -147,7 +147,7 @@ def test_a_scan_turned_away_at_the_limit_completes_the_end(layout, monkeypatch) 
     try:
         response = _scan(directory_path=str(layout["scan"]))
     finally:
-        session.scan_returned()
+        registry_entry.scan_returned()
 
     assert response["error_type"] == "session_scan_limit", response
     _the_end_was_completed()
@@ -186,9 +186,9 @@ def test_a_task_cancelled_before_it_ran_gives_everything_back(layout) -> None:
     assert entry.status is MCScanStatus.FAILED, entry.status
     assert "could not be started" in (entry.error_message or ""), entry.error_message
     _the_end_was_completed()
-    session = sessions.get_default_registry().session_for(SESSION)
-    assert session.try_begin_change() is None, "the scan's claim is still held"
-    session.end_change()
+    registry_entry = sessions.get_default_registry().session_for(SESSION)
+    assert registry_entry.try_begin_change() is None, "the scan's claim is still held"
+    registry_entry.end_change()
 
 
 def test_the_scan_thread_completes_an_end_the_lock_refused(layout) -> None:

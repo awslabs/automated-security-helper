@@ -946,8 +946,8 @@ def launch(
     ``run`` replaces run_in_new_session in tests: one that starts nothing leaves
     nothing to stop or remove.
     """
-    token = secrets.token_hex(16)
-    env = {**env, LAUNCH_MARKER: token}
+    marker_hex = secrets.token_hex(16)
+    env = {**env, LAUNCH_MARKER: marker_hex}
     command = launch_argv(env, argv)
     sweep = ContainerSweep(dict(env)) if remove_containers else None
     log = Path(log)
@@ -965,7 +965,7 @@ def launch(
                 timeout=timeout,
                 start_new_session=True,
                 containers=sweep,
-                marker=f"{LAUNCH_MARKER}={token}",
+                marker=f"{LAUNCH_MARKER}={marker_hex}",
             )
         except subprocess.TimeoutExpired as expired:
             problems = list(getattr(expired, "problems", []))
