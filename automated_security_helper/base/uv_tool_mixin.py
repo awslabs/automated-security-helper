@@ -277,7 +277,12 @@ def _without_whitespace(requirement: str) -> str:
 
 
 class UVToolMixin:
-    """UV tool management methods extracted from PluginBase."""
+    """UV tool management methods extracted from PluginBase.
+
+    Version-reading opt-ins for the runner are declared once, in
+    ``_uv_runner_version_kwargs``; a new capability is added there, not
+    threaded by hand into each call site.
+    """
 
     # Private attributes of PluginBase, typed here for the methods below. An
     # underscore-named annotation is never a pydantic field, so these two are
