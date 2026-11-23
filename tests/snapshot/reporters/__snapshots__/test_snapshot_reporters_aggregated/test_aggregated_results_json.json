@@ -419,7 +419,7 @@
           "severity": [],
           "metrics": "auto",
           "patterns": [],
-          "version": "v1.33.1",
+          "version": "v2.0.0",
           "sha256": {}
         }
       },
