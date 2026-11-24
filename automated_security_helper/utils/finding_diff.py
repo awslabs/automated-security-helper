@@ -264,7 +264,9 @@ def match_findings(
     after_places = (
         new.filter(pl.col("base").is_not_null())
         .join(
-            exact.select("i_a", pl.col("base").alias("pb"), pl.col("key_message").alias("pm")),
+            exact.select(
+                "i_a", pl.col("base").alias("pb"), pl.col("key_message").alias("pm")
+            ),
             left_on="i",
             right_on="i_a",
             how="left",
@@ -280,21 +282,29 @@ def match_findings(
     )
     ambiguous = (
         before_places.join(after_places, on=_LOOSE)
-        .filter(pl.col("mixed") & ~((pl.col("n") == pl.col("n_a")) & pl.col("partnered")))
+        .filter(
+            pl.col("mixed") & ~((pl.col("n") == pl.col("n_a")) & pl.col("partnered"))
+        )
         .select(_LOOSE)
     )
-    exact = exact.join(ambiguous, on=_LOOSE, how="anti").join(
-        ambiguous,
-        left_on=["base_a", "key_message_a"],
-        right_on=_LOOSE,
-        how="anti",
-    ).sort("id")
+    exact = (
+        exact.join(ambiguous, on=_LOOSE, how="anti")
+        .join(
+            ambiguous,
+            left_on=["base_a", "key_message_a"],
+            right_on=_LOOSE,
+            how="anti",
+        )
+        .sort("id")
+    )
 
     # Moved: what is left, grouped by the full key. A group moves when it has no
     # more after than before findings and its before findings agree on
     # suppression; they pair off in line order, in order of key.
     def unmatched(side: pl.DataFrame, matched: pl.Series) -> pl.DataFrame:
-        return side.filter(~pl.col("i").is_in(matched.implode()) & pl.col("base").is_not_null())
+        return side.filter(
+            ~pl.col("i").is_in(matched.implode()) & pl.col("base").is_not_null()
+        )
 
     left_old = unmatched(old, exact["i"])
     left_new = unmatched(new, exact["i_a"])
@@ -322,7 +332,9 @@ def match_findings(
 
     def leftover(side: pl.DataFrame, matched: list[pl.Series]) -> pl.Series:
         taken = pl.concat(matched)
-        return side.filter(~pl.col("i").is_in(taken.implode())).sort([pl.col("id"), *_PLACE])["i"]
+        return side.filter(~pl.col("i").is_in(taken.implode())).sort(
+            [pl.col("id"), *_PLACE]
+        )["i"]
 
     return FindingMatch(
         [(before[i], after[j]) for i, j in exact.select("i", "i_a").iter_rows()],
