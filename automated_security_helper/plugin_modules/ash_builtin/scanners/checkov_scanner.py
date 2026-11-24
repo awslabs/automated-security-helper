@@ -58,10 +58,8 @@ from automated_security_helper.utils.link_exclusions import (
 )
 from automated_security_helper.utils.error_text import text_without_values
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
-from automated_security_helper.plugin_modules.ash_builtin.scanners.checkov_vcs_frameworks import (
-    vcs_conf_dir_env_vars,
-    vcs_config_fetch_env_vars,
-    vcs_configuration_frameworks,
+from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+    checkov_vcs_frameworks,
 )
 from automated_security_helper.utils.package_identity import ASH_RESOURCE_ID_KEY
 from automated_security_helper.utils.process_env import snapshot_environ
@@ -117,16 +115,16 @@ CheckFrameworks = Literal[
 # list, the set and its environment variables are derived from the frameworks
 # mirrored in ``CheckFrameworks`` by checkov's own naming rule
 # (checkov_vcs_frameworks has the rule, its measurements and its drift gates).
-_VCS_CONFIGURATION_FRAMEWORKS: Tuple[str, ...] = vcs_configuration_frameworks(
-    get_args(CheckFrameworks)
+_VCS_CONFIGURATION_FRAMEWORKS: Tuple[str, ...] = (
+    checkov_vcs_frameworks.vcs_configuration_frameworks(get_args(CheckFrameworks))
 )
 
-_VCS_CONF_DIR_ENV_VARS: Tuple[Tuple[str, str], ...] = vcs_conf_dir_env_vars(
-    _VCS_CONFIGURATION_FRAMEWORKS
+_VCS_CONF_DIR_ENV_VARS: Tuple[Tuple[str, str], ...] = (
+    checkov_vcs_frameworks.vcs_conf_dir_env_vars(_VCS_CONFIGURATION_FRAMEWORKS)
 )
 
-_VCS_CONFIG_FETCH_ENV_VARS: Tuple[str, ...] = vcs_config_fetch_env_vars(
-    _VCS_CONFIGURATION_FRAMEWORKS
+_VCS_CONFIG_FETCH_ENV_VARS: Tuple[str, ...] = (
+    checkov_vcs_frameworks.vcs_config_fetch_env_vars(_VCS_CONFIGURATION_FRAMEWORKS)
 )
 
 
