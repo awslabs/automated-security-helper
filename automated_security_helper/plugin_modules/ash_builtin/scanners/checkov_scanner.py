@@ -52,6 +52,7 @@ from automated_security_helper.utils.link_exclusions import (
 )
 from automated_security_helper.utils.error_text import text_without_values
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
+from automated_security_helper.utils.process_env import snapshot_environ
 from automated_security_helper.utils.sandbox.fs_guard import open_for_atomic_write
 from automated_security_helper.utils.scanned_tree import REASON_LINK_LEAVES_TREE
 from automated_security_helper.utils.suppression_matcher import active_ignore_paths
@@ -96,6 +97,28 @@ CheckFrameworks = Literal[
     "sast_golang",
     "3d_policy",
 ]
+
+# Checkov's "all" framework set includes VCS server-configuration frameworks
+# that audit remote platform settings via API tokens (such as
+# CI_SERVER_URL/CI_JOB_TOKEN in GitLab CI) and write fetched config caches under
+# cwd rather than scanning repository files.
+_VCS_CONFIGURATION_FRAMEWORKS: Tuple[str, ...] = (
+    "gitlab_configuration",
+    "github_configuration",
+    "bitbucket_configuration",
+)
+
+_VCS_CONF_DIR_ENV_VARS: Tuple[Tuple[str, str], ...] = (
+    ("CKV_GITLAB_CONF_DIR_NAME", "gitlab_conf"),
+    ("CKV_GITHUB_CONF_DIR_NAME", "github_conf"),
+    ("CKV_BITBUCKET_CONF_DIR_NAME", "bitbucket_conf"),
+)
+
+_VCS_CONFIG_FETCH_ENV_VARS: Tuple[str, ...] = (
+    "CKV_GITLAB_CONFIG_FETCH_DATA",
+    "CKV_GITHUB_CONFIG_FETCH_DATA",
+    "CKV_BITBUCKET_CONFIG_FETCH_DATA",
+)
 
 
 # Characters an output directory's path cannot hold for ASH to pass it to checkov
@@ -981,7 +1004,16 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
             frameworks = list(file_frameworks)
         for item in frameworks:
             self.args.extra_args.append(ToolExtraArg(key="--framework", value=item))
-        for item in self.config.options.skip_frameworks:
+        skip_frameworks = list(self.config.options.skip_frameworks)
+        if "all" in frameworks:
+            # Checkov's "all" includes VCS server-configuration frameworks that
+            # audit remote server settings over the network rather than files in
+            # the scanned tree. Skip them unless explicitly requested via
+            # frameworks (or an external checkov config file's framework key).
+            for vcs_framework in _VCS_CONFIGURATION_FRAMEWORKS:
+                if vcs_framework not in skip_frameworks:
+                    skip_frameworks.append(vcs_framework)
+        for item in skip_frameworks:
             self.args.extra_args.append(
                 ToolExtraArg(key="--skip-framework", value=item)
             )
@@ -1127,7 +1159,8 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
                 "checkov's terraform scan, so checkov would read the file it points at."
             )
         skips.extend(links)
-        if self._scanner_offline():
+        offline = self._scanner_offline()
+        if offline:
             # Decided here, per scan, for the reason _process_config_options gives.
             skips_offline = [ToolExtraArg(key="--skip-download", value="")]
             ASH_LOGGER.info(
@@ -1191,7 +1224,21 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
             )
         finally:
             self.args.extra_args = original_extra_args
-        return _directory_as_one_token(final_args), results_file, None
+        # Point checkov's VCS configuration cache directories inside this
+        # scanner's results directory rather than letting them resolve relative
+        # to _subprocess_cwd (the filesystem root, where non-root runs fail with
+        # PermissionError: '/gitlab_conf' and root runs pollute '/'). This also
+        # protects runs where the operator explicitly enables one of those
+        # frameworks, while respecting any explicit CKV_*_CONF_DIR_NAME value.
+        subprocess_env = snapshot_environ()
+        for env_var, conf_subdir in _VCS_CONF_DIR_ENV_VARS:
+            subprocess_env.setdefault(
+                env_var, str(target_results_dir.joinpath(conf_subdir))
+            )
+        if offline:
+            for fetch_var in _VCS_CONFIG_FETCH_ENV_VARS:
+                subprocess_env[fetch_var] = "False"
+        return _directory_as_one_token(final_args), results_file, subprocess_env
 
     def _ignore_skip_patterns(
         self, target: Path, global_ignore_paths: List[IgnorePathWithReason] | None
