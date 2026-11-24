@@ -614,8 +614,8 @@ global_settings:
     # look like high-entropy secrets because a SHA256 is high-entropy.
     - path: automated_security_helper/utils/tool_downloads.py
       rule_id: API_KEY_OR_SECRET
-      line_start: 368
-      line_end: 493
+      line_start: 398
+      line_end: 538
       reason: >-
         False positive — every string in this range is a published SHA256 release
         checksum or the SHA256 of what one of those verified archives extracts to.
@@ -626,7 +626,9 @@ global_settings:
         asset. _EXECUTABLE_DIGESTS, the second table in the range, holds the SHA256
         of the executable extracted from each verified archive, and
         _BUNDLE_CONTENTS_DIGESTS, the third, the SHA256 over the names and digests of
-        the rule files extracted from a rules bundle archive. A 64-character hex
+        the rule files extracted from a rules bundle archive, and _COMPANION_DIGESTS,
+        the fourth, the SHA256 of each DLL an archive carries beside its executable.
+        A 64-character hex
         string is what an entropy detector is built to find, so every one is
         reported at 95% confidence, but a release checksum is public by construction
         and is the opposite of a credential: it exists so anyone can compare against
@@ -638,8 +640,8 @@ global_settings:
         would silently swallow a real secret added here later.
     - path: automated_security_helper/utils/tool_downloads.py
       rule_id: API_KEY_OR_SECRET
-      line_start: 966
-      line_end: 1011
+      line_start: 1012
+      line_end: 1057
       reason: >-
         False positive, the same shape as the entry above, over _THIRD_PARTY_HASHES:
         the commit SHA each bundled tool's release tag points to, and the SHA256 of
@@ -1578,8 +1580,8 @@ global_settings:
       reason: "file:///etc/passwd is a URL the test asserts is refused before opening."
     - rule_id: threat-runtime-obfuscation-base64exec
       path: tests/unit/utils/test_opengrep_pinned_download.py
-      line_start: 417
-      line_end: 417
+      line_start: 613
+      line_end: 613
       reason: "Decodes a nix SRI hash to hex to compare with the pinned table; nothing is executed."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/plugin_modules/ash_builtin/converters/archive_converter.py
