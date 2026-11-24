@@ -134,20 +134,20 @@ class FacetDecl(BaseModel):
 
     @model_validator(mode="after")
     def _state_requirements(self) -> "FacetDecl":
-        if self.state in (FacetState.MAPPED, FacetState.DROPPED) and not (
-            self.native_field or ""
-        ).strip():
+        if (
+            self.state in (FacetState.MAPPED, FacetState.DROPPED)
+            and not (self.native_field or "").strip()
+        ):
             raise ValueError(
                 f"a {self.state.value} facet must name its native field "
                 "verbatim; if the output was never read, declare n/a with "
                 "the reason instead"
             )
-        if self.state in (FacetState.NA, FacetState.DROPPED) and not (
-            self.reason or ""
-        ).strip():
-            raise ValueError(
-                f"a {self.state.value} facet must carry a one-line reason"
-            )
+        if (
+            self.state in (FacetState.NA, FacetState.DROPPED)
+            and not (self.reason or "").strip()
+        ):
+            raise ValueError(f"a {self.state.value} facet must carry a one-line reason")
         return self
 
 
@@ -192,9 +192,10 @@ class ScannerFacets(BaseModel):
         half (a conformance row over the recorded native output) is the test
         suite's.
         """
-        if self.resource_id.state is FacetState.MAPPED and not (
-            self.resource_id.example or ""
-        ).strip():
+        if (
+            self.resource_id.state is FacetState.MAPPED
+            and not (self.resource_id.example or "").strip()
+        ):
             raise ValueError(
                 "a mapped resource_id requires an example value from a real "
                 "read (a committed fixture or a tool run)"

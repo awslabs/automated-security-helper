@@ -51,8 +51,7 @@ def test_every_facet_field_is_required_and_a_facet_decl() -> None:
     for name, field in ScannerFacets.model_fields.items():
         assert field.is_required(), f"facet field {name!r} must be required"
         assert field.annotation is FacetDecl, (
-            f"facet field {name!r} must be typed FacetDecl, "
-            f"not {field.annotation!r}"
+            f"facet field {name!r} must be typed FacetDecl, not {field.annotation!r}"
         )
 
 
@@ -111,9 +110,7 @@ def test_na_requires_a_reason() -> None:
 
 def test_mapped_resource_id_requires_an_example() -> None:
     kwargs = _full_kwargs()
-    kwargs["resource_id"] = FacetDecl(
-        state=FacetState.MAPPED, native_field="resource"
-    )
+    kwargs["resource_id"] = FacetDecl(state=FacetState.MAPPED, native_field="resource")
     with pytest.raises(ValidationError):
         ScannerFacets(**kwargs)
     kwargs["resource_id"] = FacetDecl(

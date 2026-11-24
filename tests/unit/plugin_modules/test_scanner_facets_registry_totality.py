@@ -93,9 +93,7 @@ def test_the_enumeration_sees_builtin_and_community_scanners() -> None:
     )
 
 
-@pytest.mark.parametrize(
-    "scanner_cls", SCANNER_CLASSES, ids=lambda cls: cls.__name__
-)
+@pytest.mark.parametrize("scanner_cls", SCANNER_CLASSES, ids=lambda cls: cls.__name__)
 def test_every_registered_scanner_declares_its_facets(scanner_cls: type) -> None:
     """Fail closed: an undeclared registered scanner is a failure naming it."""
     declared = vars(scanner_cls).get(SCANNER_FACETS_ATTR)
