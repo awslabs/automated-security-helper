@@ -116,6 +116,20 @@
   semantics, exit codes); note its new detectors (NHS/CHI numbers, GB/Ontario/Quebec
   licenses, ITINs, card track data) can surface new findings in previously clean
   scans. The recommended version stays 2.5.3 until the full fixture-matrix pass runs.
+- **A checkov finding names its resource.** checkov's SARIF report says which rule
+  failed and where, and not on which resource, so a finding's `resource_id` was empty
+  and a suppression scoped to a resource (`resource_id`) never matched a checkov
+  finding. Two instances of one module, or two resources of a Terraform plan (every
+  plan finding is on the plan file), gave findings that differed in nothing. ASH now
+  reads the resource from checkov's JSON report, for Terraform, Terraform plans,
+  Terraform JSON, CloudFormation, Kubernetes, ARM and Bicep: `aws_db_instance.this`,
+  `module.db.aws_db_instance.this`, `AWS::S3::Bucket.Bucket`, `Deployment.shop.web`,
+  `Microsoft.Storage/storageAccounts.st`.
+  It is in the `resource_id` of the flat JSON and CSV reports, and a `resource_id`
+  suppression now binds to it. checkov is always asked for its JSON report for this,
+  so `results_json.json` is in checkov's results directory on every run, not only when
+  `additional_formats` lists `json`. Dockerfile and secrets findings name no resource
+  and are unchanged.
 - **Scanner findings carry their CVE and CWE.** The `cve_id` and `cwe_id` of a finding
   were empty for every finding a scanner reported, so the CVE and CWE lines of the HTML,
   Markdown and text reports, the two CSV and flat JSON columns, and the same two fields
