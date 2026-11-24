@@ -220,9 +220,7 @@ def test_history_and_files_give_the_same_series(tmp_path):
     from_files = json.loads(trend(tmp_path, *runs).stdout)
     from_history = json.loads(
         CliRunner()
-        .invoke(
-            app, ["trend", "--history", str(tmp_path / "out"), "--format", "json"]
-        )
+        .invoke(app, ["trend", "--history", str(tmp_path / "out"), "--format", "json"])
         .stdout
     )
     assert from_history["series"] == from_files["series"]

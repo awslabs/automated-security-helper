@@ -95,11 +95,7 @@ def _print_text(payload: dict[str, Any]) -> None:
     runs = payload["runs"]
     echo(f"Runs: {len(runs)} (oldest first)")
     for index, run in enumerate(runs):
-        echo(
-            shown_on_one_line(
-                f"  {index}: {run['label']} ({run['findings']} findings)"
-            )
-        )
+        echo(shown_on_one_line(f"  {index}: {run['label']} ({run['findings']} findings)"))
 
     totals: dict[tuple[int, str], int] = {}
     for entry in payload["series"]:
@@ -140,8 +136,8 @@ def _print_text(payload: dict[str, Any]) -> None:
         table = Table("Run", "Scanner", "Severity", "New", "Carried", "Fixed")
         cells: dict[tuple[int, str | None, str], dict[str, int]] = {}
         for entry in payload["series"]:
-            key = (entry["run"], entry["scanner"], entry["severity"])
-            cells.setdefault(key, {})[entry["status"]] = entry["count"]
+            cell = (entry["run"], entry["scanner"], entry["severity"])
+            cells.setdefault(cell, {})[entry["status"]] = entry["count"]
         for (run, scanner, severity), counts in sorted(
             cells.items(), key=lambda item: (item[0][0], item[0][1] or "", item[0][2])
         ):
