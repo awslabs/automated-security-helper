@@ -295,6 +295,19 @@ snapshots next to collected ones would fail the default run as unused. To update
 build the image (or have Nix) and run the module with `pytest -n 0 --snapshot-update`
 and its flag; see the module docstrings for the environment they read.
 
+### The PowerShell wrapper against recording runners
+
+`tests/snapshot/wrappers/` runs the real `utils/ash_helpers.ps1` under `pwsh` against
+recording stand-ins for finch, docker, nerdctl and podman, so it needs no runtime and
+is not deselected: it runs in the normal test tiers on every OS, which is how
+`Invoke-ASH` is exercised end to end on Windows, where the hosted runners cannot run a
+Linux container. There is one snapshot per test, shared by every OS. Platform defaults
+(the build target, the container UID and GID) are passed explicitly, and the paths, the
+day's build epoch and the console size are normalized, so a difference in command
+assembly on one OS fails that OS's leg. To update them, run
+`uv run pytest tests/snapshot/wrappers -n 0 --snapshot-update` on any host with `pwsh`
+7; no selection flag is needed.
+
 ## Development Commands
 
 - Format and lint code:
