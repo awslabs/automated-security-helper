@@ -1411,6 +1411,14 @@ def bump_steps(
             f"{', '.join(PIN_KINDS)} only"
         )
     steps = kind_steps(pins, pin, latest)
+    hold = held_pins(pins).get(pin.tool)
+    if hold is not None:
+        steps.append(
+            f'HELD_PINS["{pin.tool}"] (acknowledged {hold.acknowledged}): the hold '
+            f"was written for a pin below that release; once {pin.tool} is bumped "
+            "to it or past it, delete the entry, and if the hold's reason still "
+            "applies, update its acknowledged version, reason and until"
+        )
     args = _dockerfile_args(pin.tool, dockerfile)
     if args:
         steps.append(f"ARG {_arg_stem(pin.tool)}_VERSION in {', '.join(args)}")
