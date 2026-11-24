@@ -2143,6 +2143,7 @@ _INTERPOLATED_AS_IS = {
     "$mountRefusal",  # the --mount refusal, built from shown paths and a held phrase
     "$wrapperRefusal",  # the OCI_RUNNER_WRAPPER refusal, built from the shown wrapper word
     "$envRunnerRefusal",  # the relative OCI_RUNNER refusal, built from the shown value
+    "$ociRunnerSource",  # 'OCI_RUNNER' or 'ASH_OCI_RUNNER', the variable the value came from
     "$markerRefusal",  # the CI marker newline refusal, built from a fixed variable name
     "$outputHint",  # '' or the fixed hint naming -OutputDir, chosen by the helper
 }

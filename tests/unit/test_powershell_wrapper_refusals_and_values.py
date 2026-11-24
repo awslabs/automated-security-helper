@@ -1085,7 +1085,9 @@ def test_a_relative_runner_from_the_environment_is_refused_and_nothing_runs(
         assert log.read_text(encoding="utf-8").splitlines()[-1].endswith(" run"), shown
     else:
         assert result.returncode == 3, shown
-        assert "OCI_RUNNER starts with the relative path" in " ".join(shown.split())
+        # The refusal names the variable the value came from, so a caller who set
+        # only the deprecated name is not told to fix one they did not set.
+        assert f"{given} starts with the relative path" in " ".join(shown.split())
         assert not log.exists(), log.read_text(encoding="utf-8")
 
 

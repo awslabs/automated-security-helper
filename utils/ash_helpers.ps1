@@ -1722,9 +1722,13 @@ function Invoke-ASH {
         # OCI_RUNNER is what ./ash and the ash CLI read. ASH_OCI_RUNNER, a deprecated name
         # only this function reads, applies when OCI_RUNNER is unset and no -OCIRunner
         # was passed, so a profile that sets it keeps the runner it chose.
+        # $ociRunnerSource names the variable the value came from, for the refusal of a
+        # relative path below.
+        $ociRunnerSource = 'OCI_RUNNER'
         if (-not $PSBoundParameters.ContainsKey('OCIRunner') -and [string]::IsNullOrEmpty($OCIRunner) -and -not [string]::IsNullOrEmpty($env:ASH_OCI_RUNNER)) {
             Write-Warning "ASH_OCI_RUNNER is deprecated; set OCI_RUNNER instead, which ./ash and the ash CLI also read."
             $OCIRunner = $env:ASH_OCI_RUNNER
+            $ociRunnerSource = 'ASH_OCI_RUNNER'
         }
 
         # Resolve OCI runner. IsNullOrEmpty, not `$null -ne`: $OCIRunner is a [string]
@@ -1959,7 +1963,7 @@ function Invoke-ASH {
             if (-not $PSBoundParameters.ContainsKey('OCIRunner') -and -not [string]::IsNullOrEmpty($OCIRunner) -and
                 $OCIRunner -match '[\\/]' -and
                 ($OCIRunner.IndexOfAny([System.IO.Path]::GetInvalidPathChars()) -ge 0 -or -not [System.IO.Path]::IsPathRooted($OCIRunner))) {
-                $envRunnerRefusal = "OCI_RUNNER starts with the relative path $(Format-AshShownValue $OCIRunner), which names a file under the working directory (usually the repository being scanned), so it is not run, and no other runtime is looked for in its place. Set OCI_RUNNER to a command name or an absolute path."
+                $envRunnerRefusal = "$ociRunnerSource starts with the relative path $(Format-AshShownValue $OCIRunner), which names a file under the working directory (usually the repository being scanned), so it is not run, and no other runtime is looked for in its place. Set OCI_RUNNER to a command name or an absolute path."
                 $global:LASTEXITCODE = $refusalExitCode
                 throw $envRunnerRefusal
             }
