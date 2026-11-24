@@ -1089,6 +1089,53 @@ def test_a_relative_runner_from_the_environment_is_refused_and_nothing_runs(
         assert not log.exists(), log.read_text(encoding="utf-8")
 
 
+@pytest.mark.integration
+@pytest.mark.skipif(
+    os.name != "nt",
+    reason="a < in a path is invalid only on Windows, where IsPathRooted can throw on it",
+)
+@pytest.mark.parametrize("variable", ["OCI_RUNNER", "OCI_RUNNER_WRAPPER"])
+def test_a_relative_value_with_an_invalid_path_character_is_refused_not_thrown_on(
+    variable, pwsh, tmp_path
+):
+    """``bin/<docker`` holds a character a Windows path cannot hold. On Windows
+    PowerShell 5.1 ``IsPathRooted`` throws for it, which would end in a generic
+    exception with no exit code. Invoke-ASH refuses it as a relative path, exit 3."""
+    (tmp_path / "src").mkdir()
+    script = (
+        f"$ErrorActionPreference = 'Stop'; . '{HELPERS.as_posix()}'; "
+        "try { Invoke-ASH -NoBuild -SourceDir src -OutputDir out } "
+        "catch { Write-Error -ErrorRecord $_ -ErrorAction Continue; "
+        "exit $(if ($LASTEXITCODE) { $LASTEXITCODE } else { 1 }) }; "
+        "exit [int]$LASTEXITCODE"
+    )
+    env = inherited_env("PATH", "ASH_CONFIG", "OCI_RUNNER", "ASH_OCI_RUNNER")
+    env.pop("OCI_RUNNER_WRAPPER", None)
+    runner = _self_recording_runner(
+        tmp_path / "path-bin", tmp_path / "runner-calls.txt"
+    )
+    env["PATH"] = os.pathsep.join(
+        [runner.parent.as_posix(), Path(pwsh).resolve().parent.as_posix()]
+    )
+    env.update(scratch_home(tmp_path))
+    env[variable] = "bin/<docker"
+
+    result = subprocess.run(  # nosec B603 - fixed interpreter, script built here
+        [pwsh, "-NoProfile", "-NonInteractive", "-Command", script],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=120,
+        check=False,
+    )
+
+    shown = result.stdout + result.stderr
+    assert result.returncode == 3, shown
+    assert f"{variable} starts with the relative path" in " ".join(shown.split())
+
+
 # ---------------------------------------------------------------------------
 # What reaches the run command: the config, the stage, the scanner lists
 # ---------------------------------------------------------------------------

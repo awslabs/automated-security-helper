@@ -1952,10 +1952,13 @@ function Invoke-ASH {
             # it: not run, and not replaced by looking for another runtime. The same path
             # given as -OCIRunner is the caller's own, typed where they stand, and is used
             # as written. A leading ~ is not expanded from the environment, so ~/bin/docker
-            # is refused as a relative path, as ./ash refuses it. Thrown from a variable,
-            # with $LASTEXITCODE set first.
+            # is refused as a relative path, as ./ash refuses it. A value holding a
+            # character a path cannot hold is refused the same way: Windows PowerShell
+            # 5.1's IsPathRooted throws on one, which would end in a generic exception
+            # with no exit code set. Thrown from a variable, with $LASTEXITCODE set first.
             if (-not $PSBoundParameters.ContainsKey('OCIRunner') -and -not [string]::IsNullOrEmpty($OCIRunner) -and
-                $OCIRunner -match '[\\/]' -and -not [System.IO.Path]::IsPathRooted($OCIRunner)) {
+                $OCIRunner -match '[\\/]' -and
+                ($OCIRunner.IndexOfAny([System.IO.Path]::GetInvalidPathChars()) -ge 0 -or -not [System.IO.Path]::IsPathRooted($OCIRunner))) {
                 $envRunnerRefusal = "OCI_RUNNER starts with the relative path $(Format-AshShownValue $OCIRunner), which names a file under the working directory (usually the repository being scanned), so it is not run, and no other runtime is looked for in its place. Set OCI_RUNNER to a command name or an absolute path."
                 $global:LASTEXITCODE = $refusalExitCode
                 throw $envRunnerRefusal
@@ -2000,7 +2003,8 @@ function Invoke-ASH {
                 # $LASTEXITCODE set first, as the runner refusal above.
                 if ($OCI_WRAPPER.Count -gt 0) {
                     $wrapperWord = [string]$OCI_WRAPPER[0]
-                    if ($wrapperWord -match '[\\/]' -and -not [System.IO.Path]::IsPathRooted($wrapperWord)) {
+                    if ($wrapperWord -match '[\\/]' -and
+                        ($wrapperWord.IndexOfAny([System.IO.Path]::GetInvalidPathChars()) -ge 0 -or -not [System.IO.Path]::IsPathRooted($wrapperWord))) {
                         $wrapperRefusal = "OCI_RUNNER_WRAPPER starts with the relative path $(Format-AshShownValue $wrapperWord), which names a file under the working directory (usually the repository being scanned), so it is not run, and the OCI runner does not start without the wrapper. Start OCI_RUNNER_WRAPPER with a command name or an absolute path."
                         $global:LASTEXITCODE = $refusalExitCode
                         throw $wrapperRefusal
