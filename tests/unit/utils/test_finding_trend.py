@@ -173,14 +173,14 @@ def test_a_like_for_like_boundary_has_no_warnings():
 @pytest.mark.parametrize(
     "earlier,later",
     [
-        (dict(), dict()),
-        (dict(scanners=("bandit", "semgrep")), dict()),
-        (dict(expected=("bandit", "semgrep")), dict()),
-        (dict(), dict(expected=("bandit", "semgrep"))),
-        (dict(inputs_not_scanned=["a.txt"]), dict()),
-        (dict(), dict(inputs_not_scanned=["a.txt"])),
-        (dict(expected=()), dict()),
-        (dict(scanners=()), dict(scanners=())),
+        ({}, {}),
+        ({"scanners": ("bandit", "semgrep")}, {}),
+        ({"expected": ("bandit", "semgrep")}, {}),
+        ({}, {"expected": ("bandit", "semgrep")}),
+        ({"inputs_not_scanned": [{"path": "a.txt", "reason": "too big"}]}, {}),
+        ({}, {"inputs_not_scanned": [{"path": "a.txt", "reason": "too big"}]}),
+        ({"expected": ()}, {}),
+        ({"scanners": ()}, {"scanners": ()}),
     ],
 )
 def test_record_coverage_warnings_equal_the_diffs(earlier, later):
@@ -227,11 +227,25 @@ def test_the_json_form_is_versioned_and_serializable():
 
 
 def test_a_path_with_a_lone_surrogate_survives_the_series():
+    # Rows are edited directly (a results file cannot carry the surrogate), with
+    # different ids so that the pair is made by the fallback key, which holds the path.
     odd = "src/\udcffname.py"
-    trend = series(
-        results(finding("B101", path=odd), second=1),
-        results(finding("B101", path=odd, line=12), second=2),
-    )
+
+    def record(second, row_id, line):
+        record = scan_history.run_record_body(results(finding("B101"), second=second))
+        row = record["findings"][0]
+        row.update(
+            id=row_id,
+            file_path=odd,
+            line_start=line,
+            line_end=line,
+            identity_base=json.dumps({"file": odd, "rule": "B101"}),
+            has_identity=True,
+            has_fingerprint_identity=False,
+        )
+        return finding_trend.run_from_record(record, f"r{second}")
+
+    trend = build_trend([record(1, "x-1", 10), record(2, "x-2", 12)])
     assert trend.streaks[0]["file_path"] == odd
     assert counts(trend, 1) == {("bandit", "HIGH", "carried"): 1}
 
@@ -302,15 +316,14 @@ def test_different_projects_are_refused_naming_the_file():
 
 
 def test_a_baseline_filtered_run_is_refused_naming_the_file():
-    run = results(finding("B101"), second=2)
-    run.baseline_filtered = True
+    run = results(finding("B101"), second=2, baseline={"source": "x"})
     with pytest.raises(TrendRefusal, match=r"run1\.json: .*--baseline"):
         series(results(finding("B101"), second=1), run)
 
 
 def test_an_unmerged_shard_is_refused():
     run = results(
-        finding("B101"), second=1, shard={"index": 1, "count": 2, "mode": "scanner"}
+        finding("B101"), second=1, shard={"shard_index": 1, "shard_count": 2}
     )
     with pytest.raises(TrendRefusal, match="ash merge"):
         run_from_results(run, "shard.json")

@@ -58,7 +58,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Any, Sequence
+from typing import TYPE_CHECKING, Any, Sequence, cast
 
 import polars as pl
 
@@ -298,7 +298,8 @@ def build_trend(runs: Sequence[TrendRun]) -> Trend:
     changes: list[dict[str, Any]] = []
     series_rows: list[tuple[int, str | None, str, str, int]] = []
     for k in range(1, len(runs)):
-        match = match_findings(rows[k - 1], rows[k])
+        # The matcher reads only the attributes _Row carries; its pairs are our rows.
+        match: Any = match_findings(cast(Any, rows[k - 1]), cast(Any, rows[k]))
         paired = match.exact + match.moved
         for before, after in paired:
             track_of[k][after.index] = track_of[k - 1][before.index]
