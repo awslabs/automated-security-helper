@@ -1,0 +1,843 @@
+[
+ {
+  "check_type": "terraform",
+  "results": {
+   "failed_checks": [
+    {
+     "check_id": "CKV_AWS_161",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/modules/db/main.tf",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/modules/db/main.tf",
+     "file_line_range": [
+      9,
+      16
+     ],
+     "resource": "aws_db_instance.this"
+    },
+    {
+     "check_id": "CKV_AWS_293",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/modules/db/main.tf",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/modules/db/main.tf",
+     "file_line_range": [
+      9,
+      16
+     ],
+     "resource": "aws_db_instance.this"
+    },
+    {
+     "check_id": "CKV_AWS_353",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/modules/db/main.tf",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/modules/db/main.tf",
+     "file_line_range": [
+      9,
+      16
+     ],
+     "resource": "aws_db_instance.this"
+    },
+    {
+     "check_id": "CKV_AWS_157",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/modules/db/main.tf",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/modules/db/main.tf",
+     "file_line_range": [
+      9,
+      16
+     ],
+     "resource": "aws_db_instance.this"
+    },
+    {
+     "check_id": "CKV_AWS_129",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/modules/db/main.tf",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/modules/db/main.tf",
+     "file_line_range": [
+      9,
+      16
+     ],
+     "resource": "aws_db_instance.this"
+    },
+    {
+     "check_id": "CKV_AWS_226",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/modules/db/main.tf",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/modules/db/main.tf",
+     "file_line_range": [
+      9,
+      16
+     ],
+     "resource": "aws_db_instance.this"
+    },
+    {
+     "check_id": "CKV_AWS_118",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/modules/db/main.tf",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/modules/db/main.tf",
+     "file_line_range": [
+      9,
+      16
+     ],
+     "resource": "aws_db_instance.this"
+    },
+    {
+     "check_id": "CKV_AWS_161",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/tf/main.tf",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/tf/main.tf",
+     "file_line_range": [
+      1,
+      7
+     ],
+     "resource": "aws_db_instance.a"
+    },
+    {
+     "check_id": "CKV_AWS_293",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/tf/main.tf",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/tf/main.tf",
+     "file_line_range": [
+      1,
+      7
+     ],
+     "resource": "aws_db_instance.a"
+    },
+    {
+     "check_id": "CKV_AWS_353",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/tf/main.tf",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/tf/main.tf",
+     "file_line_range": [
+      1,
+      7
+     ],
+     "resource": "aws_db_instance.a"
+    },
+    {
+     "check_id": "CKV_AWS_157",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/tf/main.tf",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/tf/main.tf",
+     "file_line_range": [
+      1,
+      7
+     ],
+     "resource": "aws_db_instance.a"
+    },
+    {
+     "check_id": "CKV_AWS_129",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/tf/main.tf",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/tf/main.tf",
+     "file_line_range": [
+      1,
+      7
+     ],
+     "resource": "aws_db_instance.a"
+    },
+    {
+     "check_id": "CKV_AWS_226",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/tf/main.tf",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/tf/main.tf",
+     "file_line_range": [
+      1,
+      7
+     ],
+     "resource": "aws_db_instance.a"
+    },
+    {
+     "check_id": "CKV_AWS_17",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/tf/main.tf",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/tf/main.tf",
+     "file_line_range": [
+      1,
+      7
+     ],
+     "resource": "aws_db_instance.a"
+    },
+    {
+     "check_id": "CKV_AWS_118",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/tf/main.tf",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/tf/main.tf",
+     "file_line_range": [
+      1,
+      7
+     ],
+     "resource": "aws_db_instance.a"
+    },
+    {
+     "check_id": "CKV_AWS_16",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/tf/main.tf",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/tf/main.tf",
+     "file_line_range": [
+      1,
+      7
+     ],
+     "resource": "aws_db_instance.a"
+    },
+    {
+     "check_id": "CKV_AWS_161",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/tf/main.tf",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/tf/main.tf",
+     "file_line_range": [
+      9,
+      16
+     ],
+     "resource": "aws_db_instance.b"
+    },
+    {
+     "check_id": "CKV_AWS_293",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/tf/main.tf",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/tf/main.tf",
+     "file_line_range": [
+      9,
+      16
+     ],
+     "resource": "aws_db_instance.b"
+    },
+    {
+     "check_id": "CKV_AWS_353",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/tf/main.tf",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/tf/main.tf",
+     "file_line_range": [
+      9,
+      16
+     ],
+     "resource": "aws_db_instance.b"
+    },
+    {
+     "check_id": "CKV_AWS_157",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/tf/main.tf",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/tf/main.tf",
+     "file_line_range": [
+      9,
+      16
+     ],
+     "resource": "aws_db_instance.b"
+    },
+    {
+     "check_id": "CKV_AWS_129",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/tf/main.tf",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/tf/main.tf",
+     "file_line_range": [
+      9,
+      16
+     ],
+     "resource": "aws_db_instance.b"
+    },
+    {
+     "check_id": "CKV_AWS_226",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/tf/main.tf",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/tf/main.tf",
+     "file_line_range": [
+      9,
+      16
+     ],
+     "resource": "aws_db_instance.b"
+    },
+    {
+     "check_id": "CKV_AWS_118",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/tf/main.tf",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/tf/main.tf",
+     "file_line_range": [
+      9,
+      16
+     ],
+     "resource": "aws_db_instance.b"
+    },
+    {
+     "check_id": "CKV_AWS_16",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/tf/main.tf",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/tf/main.tf",
+     "file_line_range": [
+      9,
+      16
+     ],
+     "resource": "aws_db_instance.b"
+    },
+    {
+     "check_id": "CKV2_AWS_60",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/modules/db/main.tf",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/modules/db/main.tf",
+     "file_line_range": [
+      9,
+      16
+     ],
+     "resource": "aws_db_instance.this"
+    },
+    {
+     "check_id": "CKV2_AWS_60",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/tf/main.tf",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/tf/main.tf",
+     "file_line_range": [
+      1,
+      7
+     ],
+     "resource": "aws_db_instance.a"
+    },
+    {
+     "check_id": "CKV2_AWS_60",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/tf/main.tf",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/tf/main.tf",
+     "file_line_range": [
+      9,
+      16
+     ],
+     "resource": "aws_db_instance.b"
+    },
+    {
+     "check_id": "CKV2_AWS_30",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/modules/db/main.tf",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/modules/db/main.tf",
+     "file_line_range": [
+      9,
+      16
+     ],
+     "resource": "aws_db_instance.this"
+    },
+    {
+     "check_id": "CKV2_AWS_30",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/tf/main.tf",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/tf/main.tf",
+     "file_line_range": [
+      1,
+      7
+     ],
+     "resource": "aws_db_instance.a"
+    },
+    {
+     "check_id": "CKV2_AWS_30",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/tf/main.tf",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/tf/main.tf",
+     "file_line_range": [
+      9,
+      16
+     ],
+     "resource": "aws_db_instance.b"
+    }
+   ],
+   "skipped_checks": [
+    {
+     "check_id": "CKV_AWS_17",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/tf/main.tf",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/tf/main.tf",
+     "file_line_range": [
+      9,
+      16
+     ],
+     "resource": "aws_db_instance.b"
+    }
+   ]
+  }
+ },
+ {
+  "check_type": "cloudformation",
+  "results": {
+   "failed_checks": [
+    {
+     "check_id": "CKV_AWS_18",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/cfn/template.yaml",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/cfn/template.yaml",
+     "file_line_range": [
+      3,
+      4
+     ],
+     "resource": "AWS::S3::Bucket.Bucket"
+    },
+    {
+     "check_id": "CKV_AWS_53",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/cfn/template.yaml",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/cfn/template.yaml",
+     "file_line_range": [
+      3,
+      4
+     ],
+     "resource": "AWS::S3::Bucket.Bucket"
+    },
+    {
+     "check_id": "CKV_AWS_54",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/cfn/template.yaml",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/cfn/template.yaml",
+     "file_line_range": [
+      3,
+      4
+     ],
+     "resource": "AWS::S3::Bucket.Bucket"
+    },
+    {
+     "check_id": "CKV_AWS_21",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/cfn/template.yaml",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/cfn/template.yaml",
+     "file_line_range": [
+      3,
+      4
+     ],
+     "resource": "AWS::S3::Bucket.Bucket"
+    },
+    {
+     "check_id": "CKV_AWS_55",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/cfn/template.yaml",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/cfn/template.yaml",
+     "file_line_range": [
+      3,
+      4
+     ],
+     "resource": "AWS::S3::Bucket.Bucket"
+    },
+    {
+     "check_id": "CKV_AWS_56",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/cfn/template.yaml",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/cfn/template.yaml",
+     "file_line_range": [
+      3,
+      4
+     ],
+     "resource": "AWS::S3::Bucket.Bucket"
+    },
+    {
+     "check_id": "CKV_AWS_27",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/cfn/template.yaml",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/cfn/template.yaml",
+     "file_line_range": [
+      5,
+      6
+     ],
+     "resource": "AWS::SQS::Queue.Queue"
+    }
+   ],
+   "skipped_checks": []
+  }
+ },
+ {
+  "check_type": "kubernetes",
+  "results": {
+   "failed_checks": [
+    {
+     "check_id": "CKV_K8S_37",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/k8s/deploy.yaml",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/k8s/deploy.yaml",
+     "file_line_range": [
+      1,
+      16
+     ],
+     "resource": "Deployment.shop.web"
+    },
+    {
+     "check_id": "CKV_K8S_31",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/k8s/deploy.yaml",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/k8s/deploy.yaml",
+     "file_line_range": [
+      1,
+      16
+     ],
+     "resource": "Deployment.shop.web"
+    },
+    {
+     "check_id": "CKV_K8S_8",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/k8s/deploy.yaml",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/k8s/deploy.yaml",
+     "file_line_range": [
+      1,
+      16
+     ],
+     "resource": "Deployment.shop.web"
+    },
+    {
+     "check_id": "CKV_K8S_12",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/k8s/deploy.yaml",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/k8s/deploy.yaml",
+     "file_line_range": [
+      1,
+      16
+     ],
+     "resource": "Deployment.shop.web"
+    },
+    {
+     "check_id": "CKV_K8S_20",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/k8s/deploy.yaml",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/k8s/deploy.yaml",
+     "file_line_range": [
+      1,
+      16
+     ],
+     "resource": "Deployment.shop.web"
+    },
+    {
+     "check_id": "CKV_K8S_13",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/k8s/deploy.yaml",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/k8s/deploy.yaml",
+     "file_line_range": [
+      1,
+      16
+     ],
+     "resource": "Deployment.shop.web"
+    },
+    {
+     "check_id": "CKV_K8S_40",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/k8s/deploy.yaml",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/k8s/deploy.yaml",
+     "file_line_range": [
+      1,
+      16
+     ],
+     "resource": "Deployment.shop.web"
+    },
+    {
+     "check_id": "CKV_K8S_10",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/k8s/deploy.yaml",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/k8s/deploy.yaml",
+     "file_line_range": [
+      1,
+      16
+     ],
+     "resource": "Deployment.shop.web"
+    },
+    {
+     "check_id": "CKV_K8S_22",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/k8s/deploy.yaml",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/k8s/deploy.yaml",
+     "file_line_range": [
+      1,
+      16
+     ],
+     "resource": "Deployment.shop.web"
+    },
+    {
+     "check_id": "CKV_K8S_9",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/k8s/deploy.yaml",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/k8s/deploy.yaml",
+     "file_line_range": [
+      1,
+      16
+     ],
+     "resource": "Deployment.shop.web"
+    },
+    {
+     "check_id": "CKV_K8S_28",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/k8s/deploy.yaml",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/k8s/deploy.yaml",
+     "file_line_range": [
+      1,
+      16
+     ],
+     "resource": "Deployment.shop.web"
+    },
+    {
+     "check_id": "CKV_K8S_29",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/k8s/deploy.yaml",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/k8s/deploy.yaml",
+     "file_line_range": [
+      1,
+      16
+     ],
+     "resource": "Deployment.shop.web"
+    },
+    {
+     "check_id": "CKV_K8S_30",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/k8s/deploy.yaml",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/k8s/deploy.yaml",
+     "file_line_range": [
+      1,
+      16
+     ],
+     "resource": "Deployment.shop.web"
+    },
+    {
+     "check_id": "CKV_K8S_14",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/k8s/deploy.yaml",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/k8s/deploy.yaml",
+     "file_line_range": [
+      1,
+      16
+     ],
+     "resource": "Deployment.shop.web"
+    },
+    {
+     "check_id": "CKV_K8S_38",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/k8s/deploy.yaml",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/k8s/deploy.yaml",
+     "file_line_range": [
+      1,
+      16
+     ],
+     "resource": "Deployment.shop.web"
+    },
+    {
+     "check_id": "CKV_K8S_23",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/k8s/deploy.yaml",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/k8s/deploy.yaml",
+     "file_line_range": [
+      1,
+      16
+     ],
+     "resource": "Deployment.shop.web"
+    },
+    {
+     "check_id": "CKV_K8S_43",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/k8s/deploy.yaml",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/k8s/deploy.yaml",
+     "file_line_range": [
+      1,
+      16
+     ],
+     "resource": "Deployment.shop.web"
+    },
+    {
+     "check_id": "CKV_K8S_11",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/k8s/deploy.yaml",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/k8s/deploy.yaml",
+     "file_line_range": [
+      1,
+      16
+     ],
+     "resource": "Deployment.shop.web"
+    },
+    {
+     "check_id": "CKV2_K8S_6",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/k8s/deploy.yaml",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/k8s/deploy.yaml",
+     "file_line_range": [
+      1,
+      16
+     ],
+     "resource": "Pod.shop.web.app-web"
+    }
+   ],
+   "skipped_checks": []
+  }
+ },
+ {
+  "check_type": "terraform_plan",
+  "results": {
+   "failed_checks": [
+    {
+     "check_id": "CKV_AWS_161",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/tfplan.json",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/tfplan.json",
+     "file_line_range": [
+      170,
+      212
+     ],
+     "resource": "module.db.aws_db_instance.this"
+    },
+    {
+     "check_id": "CKV_AWS_293",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/tfplan.json",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/tfplan.json",
+     "file_line_range": [
+      170,
+      212
+     ],
+     "resource": "module.db.aws_db_instance.this"
+    },
+    {
+     "check_id": "CKV_AWS_353",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/tfplan.json",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/tfplan.json",
+     "file_line_range": [
+      170,
+      212
+     ],
+     "resource": "module.db.aws_db_instance.this"
+    },
+    {
+     "check_id": "CKV_AWS_157",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/tfplan.json",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/tfplan.json",
+     "file_line_range": [
+      170,
+      212
+     ],
+     "resource": "module.db.aws_db_instance.this"
+    },
+    {
+     "check_id": "CKV_AWS_129",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/tfplan.json",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/tfplan.json",
+     "file_line_range": [
+      170,
+      212
+     ],
+     "resource": "module.db.aws_db_instance.this"
+    },
+    {
+     "check_id": "CKV_AWS_17",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/tfplan.json",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/tfplan.json",
+     "file_line_range": [
+      170,
+      212
+     ],
+     "resource": "module.db.aws_db_instance.this"
+    },
+    {
+     "check_id": "CKV_AWS_118",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/tfplan.json",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/tfplan.json",
+     "file_line_range": [
+      170,
+      212
+     ],
+     "resource": "module.db.aws_db_instance.this"
+    },
+    {
+     "check_id": "CKV_AWS_16",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/tfplan.json",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/tfplan.json",
+     "file_line_range": [
+      170,
+      212
+     ],
+     "resource": "module.db.aws_db_instance.this"
+    },
+    {
+     "check_id": "CKV_AWS_161",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/tfplan.json",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/tfplan.json",
+     "file_line_range": [
+      244,
+      286
+     ],
+     "resource": "module.db2.aws_db_instance.this"
+    },
+    {
+     "check_id": "CKV_AWS_293",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/tfplan.json",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/tfplan.json",
+     "file_line_range": [
+      244,
+      286
+     ],
+     "resource": "module.db2.aws_db_instance.this"
+    },
+    {
+     "check_id": "CKV_AWS_353",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/tfplan.json",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/tfplan.json",
+     "file_line_range": [
+      244,
+      286
+     ],
+     "resource": "module.db2.aws_db_instance.this"
+    },
+    {
+     "check_id": "CKV_AWS_157",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/tfplan.json",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/tfplan.json",
+     "file_line_range": [
+      244,
+      286
+     ],
+     "resource": "module.db2.aws_db_instance.this"
+    },
+    {
+     "check_id": "CKV_AWS_129",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/tfplan.json",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/tfplan.json",
+     "file_line_range": [
+      244,
+      286
+     ],
+     "resource": "module.db2.aws_db_instance.this"
+    },
+    {
+     "check_id": "CKV_AWS_17",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/tfplan.json",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/tfplan.json",
+     "file_line_range": [
+      244,
+      286
+     ],
+     "resource": "module.db2.aws_db_instance.this"
+    },
+    {
+     "check_id": "CKV_AWS_118",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/tfplan.json",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/tfplan.json",
+     "file_line_range": [
+      244,
+      286
+     ],
+     "resource": "module.db2.aws_db_instance.this"
+    },
+    {
+     "check_id": "CKV2_AWS_60",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/tfplan.json",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/tfplan.json",
+     "file_line_range": [
+      170,
+      212
+     ],
+     "resource": "module.db.aws_db_instance.this"
+    },
+    {
+     "check_id": "CKV2_AWS_60",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/tfplan.json",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/tfplan.json",
+     "file_line_range": [
+      244,
+      286
+     ],
+     "resource": "module.db2.aws_db_instance.this"
+    },
+    {
+     "check_id": "CKV2_AWS_30",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/tfplan.json",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/tfplan.json",
+     "file_line_range": [
+      170,
+      212
+     ],
+     "resource": "module.db.aws_db_instance.this"
+    },
+    {
+     "check_id": "CKV2_AWS_30",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/tfplan.json",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/tfplan.json",
+     "file_line_range": [
+      244,
+      286
+     ],
+     "resource": "module.db2.aws_db_instance.this"
+    }
+   ],
+   "skipped_checks": []
+  }
+ },
+ {
+  "check_type": "dockerfile",
+  "results": {
+   "failed_checks": [
+    {
+     "check_id": "CKV_DOCKER_7",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/Dockerfile",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/Dockerfile",
+     "file_line_range": [
+      1,
+      1
+     ],
+     "resource": "/Dockerfile.FROM"
+    },
+    {
+     "check_id": "CKV_DOCKER_5",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/Dockerfile",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/Dockerfile",
+     "file_line_range": [
+      2,
+      2
+     ],
+     "resource": "/Dockerfile.RUN"
+    },
+    {
+     "check_id": "CKV_DOCKER_2",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/Dockerfile",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/Dockerfile",
+     "file_line_range": [
+      1,
+      2
+     ],
+     "resource": "/Dockerfile."
+    },
+    {
+     "check_id": "CKV_DOCKER_3",
+     "repo_file_path": "/private/tmp/ash-checkov-fixture/proj/Dockerfile",
+     "file_abs_path": "/private/tmp/ash-checkov-fixture/proj/Dockerfile",
+     "file_line_range": [
+      1,
+      2
+     ],
+     "resource": "/Dockerfile."
+    }
+   ],
+   "skipped_checks": []
+  }
+ }
+]
