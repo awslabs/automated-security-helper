@@ -7,7 +7,8 @@ opengrep 2.0.0 exits 2 ("Error: fatal error") when a ruleset named by a registry
 reference such as ``p/ci`` cannot be fetched, which is what a run with no network
 (a sandbox) meets. The command also names ASH's bundled rules by path, so the
 scanner repeats the run once without the registry references and says so in one
-warning. Any other failure, a run that did fetch, and a command with no local
+warning. A ruleset that downloads but is rejected as invalid YAML (exit 7) takes the
+same fallback. Any other failure, a run that did fetch, and a command with no local
 ruleset left keep their first result.
 """
 
@@ -93,6 +94,89 @@ def test_a_failed_registry_download_repeats_the_run_on_the_local_rules(
     # The command the invocation record shows is the one that ran.
     assert command == child.commands[1]
     assert response == {"returncode": 0}
+
+
+INVALID_YAML = (
+    "[00.90][INFO]: trying to download from https://semgrep.dev/c/p/ci\n"
+    "[01.10][ERROR]: Invalid YAML in rules: Unknown or duplicate properties "
+    "found in YAML object: missed\n"
+)
+
+
+def test_a_downloaded_ruleset_that_fails_to_parse_repeats_the_run_on_local_rules(
+    test_plugin_context, tmp_path
+):
+    """Exit 7 with opengrep's invalid-YAML error: the second argv has no registry ref."""
+    rules = tmp_path / "appsec.yaml"
+    rules.write_text("rules: []")
+
+    child, command, response = _run(
+        _scanner(test_plugin_context),
+        tmp_path,
+        rules,
+        [(7, INVALID_YAML), (0, "")],
+    )
+
+    assert len(child.commands) == 2
+    assert "p/ci" in child.commands[0]
+    assert "p/ci" not in child.commands[1]
+    assert str(rules) in child.commands[1]
+    assert command == child.commands[1]
+    assert response == {"returncode": 0}
+
+
+def test_the_parse_fallback_warns_once_naming_the_rejected_ruleset(
+    test_plugin_context, tmp_path
+):
+    rules = tmp_path / "appsec.yaml"
+    rules.write_text("rules: []")
+
+    with patch(
+        "automated_security_helper.plugin_modules.ash_builtin.scanners."
+        "opengrep_scanner.ASH_LOGGER"
+    ) as logger:
+        _run(
+            _scanner(test_plugin_context),
+            tmp_path,
+            rules,
+            [(7, INVALID_YAML), (0, "")],
+        )
+
+    assert logger.warning.call_count == 1
+    message = logger.warning.call_args.args[0] % logger.warning.call_args.args[1:]
+    assert "p/ci" in message
+
+
+def test_exit_7_without_the_invalid_yaml_error_is_not_repeated(
+    test_plugin_context, tmp_path
+):
+    rules = tmp_path / "appsec.yaml"
+    rules.write_text("rules: []")
+
+    child, _command, response = _run(
+        _scanner(test_plugin_context),
+        tmp_path,
+        rules,
+        [(7, "[00.10][INFO]: something else\n")],
+    )
+
+    assert len(child.commands) == 1
+    assert response == {"returncode": 7}
+
+
+def test_a_parse_failure_with_no_local_ruleset_keeps_the_failure(
+    test_plugin_context, tmp_path
+):
+    child = _Child(tmp_path, [(7, INVALID_YAML)])
+    command = ["opengrep", "scan", "--config", "p/ci", "src"]
+    with patch.object(PluginBase, "_run_subprocess", child.run):
+        response = _scanner(test_plugin_context)._run_subprocess(
+            command=command, results_dir=tmp_path, cwd=tmp_path
+        )
+
+    assert len(child.commands) == 1
+    assert "p/ci" in command
+    assert response == {"returncode": 7}
 
 
 def test_a_run_that_fetched_its_rules_is_not_repeated(test_plugin_context, tmp_path):

@@ -212,6 +212,10 @@ def _refuse_windows_zip_install_command(version: str, url: str) -> CustomCommand
 #: registry reference (``p/ci``) cannot be downloaded, before it exits 2.
 _REGISTRY_FETCH_MARKER = "trying to download from"
 _REGISTRY_FETCH_FATAL = "Error: fatal error"
+#: opengrep 2.0.0 exits 7 when a ruleset it did download is not rules YAML it accepts
+#: ("Invalid YAML ... Unknown or duplicate properties found in YAML object: ...").
+_PARSE_EXIT_CODE = 7
+_INVALID_YAML_MARKER = "Invalid YAML"
 _STDERR_TAIL_BYTES = 256 * 1024
 
 
@@ -227,6 +231,21 @@ def _is_registry_reference(value: str) -> bool:
     if os.path.exists(value) or value.lower().endswith((".yml", ".yaml", ".json")):
         return False
     return value == "auto" or value.startswith(("p/", "r/", "http://", "https://"))
+
+
+def registry_configs(command: List[str]) -> List[str]:
+    """The ``--config`` values in ``command`` that name a ruleset to download."""
+    found: List[str] = []
+    for index, argument in enumerate(command):
+        if argument == "--config" and index + 1 < len(command):
+            value = command[index + 1]
+        elif argument.startswith("--config="):
+            value = argument.split("=", 1)[1]
+        else:
+            continue
+        if _is_registry_reference(value):
+            found.append(value)
+    return found
 
 
 def without_registry_configs(command: List[str]) -> List[str]:
@@ -505,27 +524,42 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
         run's result stands.
         """
         response = super()._run_subprocess(command, *args, **kwargs)
-        if not self._registry_fetch_failed(response, kwargs.get("results_dir")):
+        failure = self._registry_failure(response, kwargs.get("results_dir"))
+        if failure is None:
             return response
         fallback = without_registry_configs(command)
         if fallback == command or not _has_local_config(fallback):
             return response
-        ASH_LOGGER.warning(
-            "opengrep could not download a ruleset from the registry (no network?); "
-            "scanning with the local rulesets only: ASH's bundled rules and any "
-            "rule cache."
-        )
+        if failure == "parse":
+            rejected = ", ".join(registry_configs(command))
+            ASH_LOGGER.warning(
+                "opengrep rejected the downloaded ruleset %s as invalid YAML "
+                "(exit 7); scanning with the local rulesets only: ASH's bundled "
+                "rules and any rule cache.",
+                rejected,
+            )
+        else:
+            ASH_LOGGER.warning(
+                "opengrep could not download a ruleset from the registry (no "
+                "network?); scanning with the local rulesets only: ASH's bundled "
+                "rules and any rule cache."
+            )
         # In place, so the invocation record shows the command that ran.
         command[:] = fallback
         return super()._run_subprocess(command, *args, **kwargs)
 
     @staticmethod
-    def _registry_fetch_failed(response, results_dir) -> bool:
-        """Whether this run ended on opengrep's failed-ruleset-download exit."""
-        if not isinstance(response, dict) or response.get("returncode") != 2:
-            return False
-        if results_dir is None:
-            return False
+    def _registry_failure(response, results_dir) -> str | None:
+        """How this run failed on a registry ruleset, or ``None``.
+
+        ``"download"``: opengrep's failed-ruleset-download exit (2). ``"parse"``:
+        the ruleset downloaded but opengrep refused it as invalid YAML (exit 7).
+        """
+        if not isinstance(response, dict) or results_dir is None:
+            return None
+        returncode = response.get("returncode")
+        if returncode not in (2, _PARSE_EXIT_CODE):
+            return None
         log = Path(results_dir) / "OpengrepScanner.stderr.log"
         try:
             with open(log, "rb") as handle:
@@ -533,8 +567,17 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
                 handle.seek(max(0, handle.tell() - _STDERR_TAIL_BYTES))
                 text = handle.read().decode("utf-8", errors="replace")
         except OSError:
-            return False
-        return _REGISTRY_FETCH_MARKER in text and _REGISTRY_FETCH_FATAL in text
+            return None
+        if returncode == 2:
+            if _REGISTRY_FETCH_MARKER in text and _REGISTRY_FETCH_FATAL in text:
+                return "download"
+            return None
+        return "parse" if _INVALID_YAML_MARKER in text else None
+
+    @staticmethod
+    def _registry_fetch_failed(response, results_dir) -> bool:
+        """Whether this run ended on opengrep's failed-ruleset-download exit."""
+        return OpengrepScanner._registry_failure(response, results_dir) == "download"
 
     def extra_subprocess_env(self) -> dict | None:
         """Git's ``safe.directory`` for the one directory this scan reads.
