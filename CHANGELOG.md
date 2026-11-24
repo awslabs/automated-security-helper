@@ -131,6 +131,11 @@
   `additional_formats` lists `json`. Dockerfile and secrets findings name no resource
   and are unchanged.
 
+### Fixes
+
+- cfn-nag evaluates templates containing `AWS::EKS::AccessEntry` without passing
+  EKS access policy associations to the OpenSearch and Elasticsearch policy rules.
+
 ## v3.8.0 (2026-11-12)
 
 ### Breaking behavior changes in a minor release
