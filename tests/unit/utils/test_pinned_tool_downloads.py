@@ -1317,8 +1317,9 @@ class TestAssetResolution:
             i + 1 for i, line in enumerate(source) if line.startswith("_DIGESTS")
         )
 
-        # The range covers _DIGESTS, _EXECUTABLE_DIGESTS and _BUNDLE_CONTENTS_DIGESTS,
-        # each directly after the one before so one suppression covers all three.
+        # The range covers _DIGESTS, _EXECUTABLE_DIGESTS, _BUNDLE_CONTENTS_DIGESTS and
+        # _COMPANION_DIGESTS, each directly after the one before so one suppression
+        # covers all four.
         def table_lines(name: str) -> "tuple[int, int]":
             start = next(
                 i + 1 for i, line in enumerate(source) if line.startswith(f"{name}:")
@@ -1330,7 +1331,12 @@ class TestAssetResolution:
 
         tables = [
             table_lines(name)
-            for name in ("_DIGESTS", "_EXECUTABLE_DIGESTS", "_BUNDLE_CONTENTS_DIGESTS")
+            for name in (
+                "_DIGESTS",
+                "_EXECUTABLE_DIGESTS",
+                "_BUNDLE_CONTENTS_DIGESTS",
+                "_COMPANION_DIGESTS",
+            )
         ]
         assert tables[0][0] == opens
         for (_, previous_close), (next_open, _) in zip(tables, tables[1:]):
@@ -1359,7 +1365,7 @@ class TestAssetResolution:
             f"suppression starts at {entry['line_start']} but _DIGESTS opens at {opens}"
         )
         assert entry["line_end"] == closes, (
-            f"suppression ends at {entry['line_end']} but _BUNDLE_CONTENTS_DIGESTS "
+            f"suppression ends at {entry['line_end']} but _COMPANION_DIGESTS "
             f"closes at {closes}"
         )
 

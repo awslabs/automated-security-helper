@@ -59,9 +59,18 @@ Known limitations
   ``scripts/check_pinned_tool_versions.py`` compares every pin here with its
   upstream's latest release and lists what a bump must change; the weekly ASH -
   Pinned Tool Versions workflow runs it and fails when a pin is behind.
-* opengrep is pinned for manylinux only. The scanner has always installed the
-  manylinux build (``opengrep_scanner`` hardcodes it, with a TODO to detect musl),
-  and pinning musllinux too would be two digests for a path nothing takes.
+* opengrep is pinned for one Linux build per architecture. Through v1.x that was the
+  manylinux build (the scanner hardcoded it, with a TODO to detect musl). v2.0.0
+  removed Python from opengrep and renamed the Linux assets ``opengrep_linux_*``; they
+  are statically linked executables, so one build serves glibc and musl hosts alike
+  and there is no second Linux build to pin. ``get_opengrep_url`` still names the
+  manylinux asset for a configured v1.x version.
+* opengrep's Windows asset is a zip from v2.0.0 on (it was a bare ``.exe``). The zip
+  holds ``opengrep.exe`` and six MinGW runtime DLLs. The executable's import table
+  names libgmp, libpcre2, libstdc++ and libzstd; libgcc_s_seh and libwinpthread are
+  those libraries' own runtime. An ``.exe`` extracted alone would not start. The DLLs are pinned in
+  ``_COMPANION_DIGESTS`` and installed beside the executable, each checked against its
+  own digest.
 * opengrep's version is a user-facing scanner option, and this table has digests
   only for the version it pins. A configuration naming another version must also
   supply that release's digest per platform in ``scanners.opengrep.options.sha256``;
@@ -98,7 +107,7 @@ class ToolAsset:
     arbitrarily.
 
     ``archive`` is False when the release asset *is* the executable, which is how
-    opengrep and hadolint publish. There is nothing to extract, ``member_name`` is
+    hadolint and, except for its Windows zip, opengrep publish. There is nothing to extract, ``member_name`` is
     unused, and the pinned digest then covers the very bytes that will be executed
     -- which is what lets a cached copy be checked against the pin directly. It is
     a field rather than something inferred from the filename's extension because
@@ -115,6 +124,12 @@ class ToolAsset:
     # SHA256 of the executable inside the archive, from _EXECUTABLE_DIGESTS. None
     # when no executable digest is pinned for the asset; see executable_digest.
     executable_sha256: Optional[str] = None
+    # (basename, SHA256) of files the archive carries that the executable needs
+    # beside it, from _COMPANION_DIGESTS. Empty for every asset but opengrep's Windows
+    # zip. Each is extracted next to the executable and refused unless it hashes to
+    # its digest; the installer places the executable last, so an executable on disk
+    # means its companions are too.
+    companion_sha256: tuple[tuple[str, str], ...] = ()
 
     @property
     def executable_digest(self) -> Optional[str]:
@@ -154,7 +169,7 @@ TOOL_VERSIONS: dict[str, str] = {
     "gitleaks": "v8.30.1",
     "grype": "v0.122.1",
     "hadolint": "v2.15.1",
-    "opengrep": "v1.33.1",
+    "opengrep": "v2.0.0",
     "syft": "v1.57.2",
     "trivy": "v0.76.2",
     # Tagged without a leading "v" upstream, so the release URL has none either.
@@ -252,13 +267,15 @@ _SYFT_ASSETS: dict[PlatformArch, str] = {
     ("windows", "arm64"): "syft_1.57.2_windows_arm64.zip",
 }
 
-# Bare executables, not archives. The names carry no version; see _DIGESTS_TAKEN_AT.
+# Bare executables, except the Windows zip. The names carry no version; see
+# _DIGESTS_TAKEN_AT. v2.0.0 renamed the Linux assets from ``opengrep_manylinux_*`` and
+# ships Windows as a zip of ``opengrep.exe`` plus its DLLs (_COMPANION_DIGESTS).
 _OPENGREP_ASSETS: dict[PlatformArch, str] = {
-    ("linux", "amd64"): "opengrep_manylinux_x86",
-    ("linux", "arm64"): "opengrep_manylinux_aarch64",
+    ("linux", "amd64"): "opengrep_linux_x86",
+    ("linux", "arm64"): "opengrep_linux_aarch64",
     ("darwin", "amd64"): "opengrep_osx_x86",
     ("darwin", "arm64"): "opengrep_osx_arm64",
-    ("windows", "amd64"): "opengrep_windows_x86.exe",
+    ("windows", "amd64"): "opengrep_windows_x86.zip",
     # windows/arm64: upstream publishes no such asset for this release.
 }
 
@@ -306,15 +323,23 @@ _TRIVY_ASSETS: dict[PlatformArch, str] = {
 #   as downloaded on 2026-10-06.
 #
 # opengrep publishes no checksums file. Its five digests were obtained two ways on
-# 2026-11-10 and both agreed byte for byte: the `digest` field GitHub reports for
-# each asset of the v1.33.1 release (`gh api repos/opengrep/opengrep/releases/tags/
-# v1.33.1`) and sha256sum over each asset downloaded once. On 2026-11-13 each
-# pinned asset's `.sig` was also checked with openssl against the public key in
-# its `.cert`, and every certificate's identity is opengrep's rolling-release.yml
-# workflow at refs/heads/release-v1.33.1 with the GitHub Actions OIDC issuer, the
-# same check the v1.30.2 pins had; it is not made at install time (see the module
-# docstring). tests/unit/utils/test_pinned_tool_downloads.py
+# 2026-11-23 and both agreed byte for byte: the `digest` field GitHub reports for
+# each asset of the v2.0.0 release (`gh api repos/opengrep/opengrep/releases/tags/
+# v2.0.0`) and sha256sum over each asset downloaded once. The same day each pinned
+# asset's `.sig` was also checked with openssl against the public key in its `.cert`
+# ("Verified OK" for all five), and every certificate's identity is opengrep's
+# rolling-release.yml workflow at refs/heads/main, built from commit 526deafe (the
+# commit the v2.0.0 tag points to), with the GitHub Actions OIDC issuer. The v1.33.1
+# certificates named refs/heads/release-v1.33.1 instead: from v2.0.0 the release is
+# built from main. The check is not made at install time (see the module docstring).
+# tests/unit/utils/test_opengrep_pinned_download.py
 # keeps nix/opengrep.nix's SRI copy of the four non-Windows digests equal to this one.
+#
+# The six DLLs in _COMPANION_DIGESTS and the SHA256 of opengrep.exe in
+# _EXECUTABLE_DIGESTS were taken from the pinned zip's members on 2026-11-23, after the
+# zip matched its digest: Python's zipfile read each member and hashed it, and the member
+# listing (seven regular files, no directories, no nested paths) was read with the same
+# module.
 #
 # uv publishes a `<asset>.sha256` beside each asset. Those two files were downloaded
 # with the assets, and each agreed with sha256sum over its asset and with the `digest`
@@ -359,9 +384,14 @@ _TRIVY_ASSETS: dict[PlatformArch, str] = {
 # does not hash to it, and an installed bundle is checked against it and nothing else.
 #
 # hadolint has no entry: its asset is the executable itself, so the asset digest
-# already covers the bytes that run (ToolAsset.executable_digest; the same holds for opengrep).
+# already covers the bytes that run (ToolAsset.executable_digest; the same holds for
+# opengrep's Linux and macOS assets, but not its Windows zip, which has one).
 #
-# The three tables are adjacent so that one line-pinned suppression covers them (see
+# _COMPANION_DIGESTS, last, holds the SHA256 of each file a zip carries that its
+# executable needs beside it. Derived the same way as the executable digests, for the
+# one asset that has any (opengrep's Windows zip).
+#
+# The four tables are adjacent so that one line-pinned suppression covers them (see
 # .ash/.ash_community_plugins.yaml); keep nothing but digests between them.
 # ---------------------------------------------------------------------------
 
@@ -421,12 +451,12 @@ _DIGESTS: dict[str, str] = {
     "trivy_0.76.2_macOS-64bit.tar.gz": "e08bb9ea449ecf66c6bfb03cbb8697c503ff33d35fc585c9747e3eaeb7ed4c7b",  # pragma: allowlist secret
     "trivy_0.76.2_macOS-ARM64.tar.gz": "ae7ea358326960406b703c77b2ac490190797d80b306b5b50c2a27221da0a5b8",  # pragma: allowlist secret
     "trivy_0.76.2_windows-64bit.zip": "691f737a7e5566a673c3a74dab9160552ec32101e953b659e5c77443d16dddb6",  # pragma: allowlist secret
-    # opengrep v1.33.1
-    "opengrep_manylinux_x86": "46e8133cc490f9f50518061590ce2f6be5a08afaeda034471c0ceda4b3899808",  # pragma: allowlist secret
-    "opengrep_manylinux_aarch64": "d1433f63a90b8bc0b6ad4b498a13b372b856ce9a754a43484ba4920fe2d76dcf",  # pragma: allowlist secret
-    "opengrep_osx_x86": "c3bd18e0d898d44e28419d95dad57c8928bb46ab32889a0ee1f72a87ad9627af",  # pragma: allowlist secret
-    "opengrep_osx_arm64": "a17c1881bb40e3214266a7a291cf4f2ae3bc56c1715628b5712d2ec816bc3e2d",  # pragma: allowlist secret
-    "opengrep_windows_x86.exe": "132e606e071bdd3928286fddc893198a6106a90820d46e21197e0ace1a23e0c1",  # pragma: allowlist secret
+    # opengrep v2.0.0
+    "opengrep_linux_x86": "37e93f4da5fd04a18c5c1febbdd12f7e98dfccd4d0c9cf2593bcb25eeb462da0",  # pragma: allowlist secret
+    "opengrep_linux_aarch64": "6257b65423a744b704af2ff9beeb8f222c2f6925236af386b56b031d4c06d6d8",  # pragma: allowlist secret
+    "opengrep_osx_x86": "51d2f918d7aad0afc1426bb4fbf56e32fc70c3ffd5ddb78e32e7d61e51c029a2",  # pragma: allowlist secret
+    "opengrep_osx_arm64": "b51b3d83f165a2e0934497b8f1b08abb1c3041ef20ef911c97e04cb39af1ad55",  # pragma: allowlist secret
+    "opengrep_windows_x86.zip": "899a17e2b15863367cfd15032c93cdf482fd4e7ec8719c69de46f4f38b227864",  # pragma: allowlist secret
     # uv 0.13.9
     "uv-x86_64-unknown-linux-gnu.tar.gz": "a7fbaff2b9a271d85c1bdb540941090fd1ce011797b4abeb48e4dcd39c2471d5",  # pragma: allowlist secret
     "uv-aarch64-unknown-linux-gnu.tar.gz": "0797542018e541a9288855df555c8077eed06f7a47d206362030480e8ecc9f3d",  # pragma: allowlist secret
@@ -481,6 +511,8 @@ _EXECUTABLE_DIGESTS: dict[str, str] = {
     "trivy_0.76.2_macOS-64bit.tar.gz": "d92df6dbfad2bc30e05e10508d43cdbc43f1e8553285f9d04473a10545f2e928",  # pragma: allowlist secret
     "trivy_0.76.2_macOS-ARM64.tar.gz": "7a15c426f963473a485a4f315e21f8e2c881269d500bf0de35da13a4421fa108",  # pragma: allowlist secret
     "trivy_0.76.2_windows-64bit.zip": "dd07adf881a72b54d1a922191d62fa939938df2155be85a727da93b67b24e617",  # pragma: allowlist secret
+    # opengrep v2.0.0 (the Windows zip only; its other assets are bare executables)
+    "opengrep_windows_x86.zip": "3c9d000363cfe48df8ea153f3023cbe05fb848cb1d31fbc2858c0eed1361ea25",  # pragma: allowlist secret
     # uv 0.13.9
     "uv-x86_64-unknown-linux-gnu.tar.gz": "b73acdf73b96c3ac9e56d2fa933427b3ee6a901e3cce6ba1e3ecb3f91ca0d86a",  # pragma: allowlist secret
     "uv-aarch64-unknown-linux-gnu.tar.gz": "6109e47a75f2380d1cc90b00a6ee82b7b5792ddf66588625ec168545ae17512e",  # pragma: allowlist secret
@@ -492,12 +524,25 @@ _BUNDLE_CONTENTS_DIGESTS: dict[str, str] = {
     "ruleset-build-v1.0.2.zip": "5b5c48e45051dbd862894d9fd494deee1f52319163ea19ebabd8fb08896cd323",  # pragma: allowlist secret
 }
 
+# Files an archive carries beside its executable, by member name; see before _DIGESTS.
+_COMPANION_DIGESTS: dict[str, dict[str, str]] = {
+    # opengrep v2.0.0 Windows: the MinGW runtime beside opengrep.exe
+    "opengrep_windows_x86.zip": {
+        "libgcc_s_seh-1.dll": "645763b1b6f52c6a755444dfb781e6a606e1fda3061b2a3d9806780bb3dc54b4",  # pragma: allowlist secret
+        "libgmp-10.dll": "c188e570157c109181e6788c2837fcead79747a7b10209cd82ebf5365787f508",  # pragma: allowlist secret
+        "libpcre2-8-0.dll": "563cb7436d6eba69b18080557bacaa5f620789a3b7a528a6eb2f8fad485e3dea",  # pragma: allowlist secret
+        "libstdc++-6.dll": "6244b77e3635c735ec7d463dcd748beef08a7e6facfa6e47e5463f388fa3b178",  # pragma: allowlist secret
+        "libwinpthread-1.dll": "fe0259c7c8bf875cce79dc63f7af2c350138e77e60c51cb44d35aaee4d45e3ee",  # pragma: allowlist secret
+        "libzstd-1.dll": "bbf5c934a2a80cf28b944e2e493aef3b4886fa6f9b4b026f42531f3f53c62907",  # pragma: allowlist secret
+    },
+}
+
 # The version each unversioned tool's digests above were taken from.
 #
 # The other tools put the version in every asset name, so bumping
 # TOOL_VERSIONS without the table changes every URL to a filename the digest table
 # has no entry for, and get_tool_asset refuses it by name. opengrep and uv do not:
-# `opengrep_manylinux_x86` is the name of that asset in every release. Bumping the
+# `opengrep_linux_x86` is the name of that asset in every 2.x release. Bumping the
 # version alone would therefore resolve the new URL to the OLD release's digest. That
 # still fails closed -- the download would not match -- but as a SHA256 mismatch, the
 # message that means "possible supply-chain substitution", for what is a half-applied
@@ -505,11 +550,12 @@ _BUNDLE_CONTENTS_DIGESTS: dict[str, str] = {
 _DIGESTS_TAKEN_AT: dict[str, str] = {
     "cfn-guard": "3.3.0",
     "hadolint": "v2.15.1",
-    "opengrep": "v1.33.1",
+    "opengrep": "v2.0.0",
     "uv": "0.13.9",
 }
 
-# Tools whose release asset is the executable itself rather than an archive.
+# Tools whose release asset is the executable itself rather than an archive, except an
+# asset whose name says it is one (opengrep's Windows zip; see get_tool_asset).
 _BARE_EXECUTABLE_TOOLS = frozenset({"hadolint", "opengrep"})
 
 
@@ -986,7 +1032,7 @@ _THIRD_PARTY_HASHES: dict[str, str] = {
     "libgit2/COPYING": "e3712465634e97cfd850822a4eb5ac7d2f8a10f753189366d5a2060046f28288",  # pragma: allowlist secret
     "libssh2 commit": "a312b43325e3383c865a87bb1d26cb52e3292641",  # pragma: allowlist secret
     "libssh2/COPYING": "f7f9633cf9ff2f1333f3d7ce46973a8716a4d2a2815ad56f30d437d5fea7bafe",  # pragma: allowlist secret
-    "opengrep commit": "092c80faa0817840228349f93eff12a50fb9cf6b",  # pragma: allowlist secret
+    "opengrep commit": "526deafe6f0519c272bbee316fea8df26dd85dfa",  # pragma: allowlist secret
     "opengrep/COPYRIGHT": "0f90eaca8e598c6c67a6cda7beb4470518fb2dababc996b3898344d380769aca",  # pragma: allowlist secret
     "opengrep/LICENSE": "20c17d8b8c48a600800dfd14f95d5cb9ff47066a9641ddeab48dc54aec96e331",  # pragma: allowlist secret
     "openssl commit": "42768eafab40d3e2f0851caa84aa9801139c74ab",  # pragma: allowlist secret
@@ -1269,7 +1315,7 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
     # with no archive around it, so both files come from the repository.
     "opengrep": ThirdPartyLicense(
         tool="opengrep",
-        version="v1.33.1",
+        version="v2.0.0",
         # COPYRIGHT: "GNU Lesser General Public License (LGPL) version 2.1", with
         # no "or later".
         license="LGPL-2.1-only",
@@ -1581,6 +1627,9 @@ def get_tool_asset(tool: str, target_platform: str, arch: str) -> ToolAsset:
         sha256=digest,
         member_name=f"{tool}{suffix}",
         install_as=f"{tool}{suffix}",
-        archive=tool not in _BARE_EXECUTABLE_TOOLS,
+        # A tool that otherwise publishes bare executables can still publish one
+        # archive: opengrep's Windows asset is a zip from v2.0.0 on.
+        archive=tool not in _BARE_EXECUTABLE_TOOLS or filename.endswith(".zip"),
         executable_sha256=_EXECUTABLE_DIGESTS.get(filename),
+        companion_sha256=tuple(sorted(_COMPANION_DIGESTS.get(filename, {}).items())),
     )

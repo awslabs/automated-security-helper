@@ -1103,7 +1103,7 @@
                 "severity": [],
                 "severity_threshold": null,
                 "sha256": {},
-                "version": "v1.33.1"
+                "version": "v2.0.0"
               }
             },
             "semgrep": {
@@ -5225,7 +5225,7 @@
             "severity": [],
             "severity_threshold": null,
             "sha256": {},
-            "version": "v1.33.1"
+            "version": "v2.0.0"
           },
           "description": "Configure Opengrep scanner"
         }
@@ -5413,7 +5413,7 @@
           "type": "object"
         },
         "version": {
-          "default": "v1.33.1",
+          "default": "v2.0.0",
           "description": "Version of OpenGrep to use.",
           "title": "Version",
           "type": "string"
@@ -6468,7 +6468,7 @@
               "severity": [],
               "severity_threshold": null,
               "sha256": {},
-              "version": "v1.33.1"
+              "version": "v2.0.0"
             }
           },
           "description": "Configure the options for Opengrep"
