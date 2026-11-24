@@ -22,6 +22,11 @@ from yaml import YAMLError
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.core.constants import ASH_DOCS_URL, ASH_REPO_URL
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
+from automated_security_helper.base.scanner_facets import (
+    FacetDecl,
+    FacetState,
+    ScannerFacets,
+)
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.plugin_base import CustomCommand
@@ -1125,6 +1130,108 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
     #: Homebrew, Debian without python-is-python3) has none on PATH. The installer
     #: counts ``sys.executable`` as cdk-nag's tool instead of looking the name up.
     runs_in_ash_interpreter: ClassVar[bool] = True
+
+    #: The facets register row (base/scanner_facets.py). Declaration only: the
+    #: attachment itself has shipped for as long as the wrapper has -- cdk-nag
+    #: writes ``ash_resource_id``/``ash_resource_type`` (plus the legacy
+    #: ``cdk_nag_finding``/``cfn_resource`` bags) while GENERATING its report
+    #: (utils/cdk_nag_wrapper.py), which is why the native fields below name
+    #: the wrapper's own inputs: cdk-nag has no tool output file; the report
+    #: is synthesized from the nag packs' violations and the template text.
+    facets: ClassVar[ScannerFacets] = ScannerFacets(
+        rule_id=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='violation "ruleName"',
+        ),
+        severity=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='violation "severity" (normalized rule level)',
+        ),
+        file_path=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="the scanned template's path (the wrapper's own scan input)",
+        ),
+        line_range=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="template text line of the resource's logical id",
+        ),
+        column=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="template text column of the resource's logical id",
+        ),
+        message=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='violation "description"',
+        ),
+        resource_id=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='construct "constructPath"',
+            example="test-yaml/--src--test.yaml/S3Bucket3",
+        ),
+        resource_type=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='template Resources[<logical id>]."Type"',
+        ),
+        package_name=FacetDecl(
+            state=FacetState.NA,
+            reason="findings are CloudFormation template resources; no "
+            "package exists in nag pack output",
+        ),
+        package_version=FacetDecl(
+            state=FacetState.NA,
+            reason="findings are CloudFormation template resources; no "
+            "package exists in nag pack output",
+        ),
+        package_path=FacetDecl(
+            state=FacetState.NA,
+            reason="findings are CloudFormation template resources; no "
+            "package exists in nag pack output",
+        ),
+        taxonomy_cve=FacetDecl(
+            state=FacetState.NA,
+            reason="nag packs publish their own rule ids; no CVE taxonomy "
+            "in the violations",
+        ),
+        taxonomy_cwe=FacetDecl(
+            state=FacetState.NA,
+            reason="nag packs publish their own rule ids; no CWE taxonomy "
+            "in the violations",
+        ),
+        fingerprints=FacetDecl(
+            state=FacetState.NA,
+            reason="the synthesized report writes no fingerprints; finding "
+            "identity keys on scanner/rule/file",
+        ),
+        fix_available=FacetDecl(
+            state=FacetState.NA,
+            reason="nag violations carry no fix state or fixed version",
+        ),
+        remediation_text=FacetDecl(
+            state=FacetState.NA,
+            reason='violation "description" states the rule, not a '
+            "remediation; no remediation field exists",
+        ),
+        snippet=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="the matched resource's template block, "
+            "YAML-rendered into Region.snippet",
+        ),
+        references=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="per-pack rule help URI (_rule_help_uri, "
+            "ReportingDescriptor.helpUri)",
+        ),
+        tags=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="pack name, rule id, logical id and CFN type, "
+            "written as PropertyBag tags",
+        ),
+        extras=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='"cdk_nag_finding" and "cfn_resource" property bags '
+            "(the legacy bags extract_resource_identity also reads)",
+        ),
+    )
 
     def _environment_values(self) -> Tuple[str, ...]:
         """The configuration's environment values, plus the node path ``JSII_NODE``
