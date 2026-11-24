@@ -259,7 +259,10 @@ class TestDerivedResourceId:
         raw = json.loads(capture.read_text())["runs"][0]["results"]
         assert len(raw) == 24  # the denominator
         shape = re.compile(
-            r"^Check was not compliant as property \[[^\]]+\].*? "
+            # The property can itself hold brackets (``Foo[*].Bar``), so the
+            # name runs to the closing bracket that the wording follows.
+            r"^Check was not compliant as property \[[^\n]+?\] "
+            r"(?:to compare from )?is missing\. "
             r"Value traversed to \[Path=/Resources/([A-Za-z0-9]+)/Properties"
             r"\[L:\d+,C:\d+\] Value=\{.*\}\]\.\s",
             re.DOTALL,
@@ -290,7 +293,10 @@ class TestDerivedResourceId:
         """Real cfn-guard output for a template string spelling the genuine
         prefix: the resolved-comparison shape has no genuine segment."""
         raw = json.loads(CAPTURED_PLANTED_PINNED.read_text())
-        assert raw["runs"][0]["tool"]["driver"]["semanticVersion"] == TOOL_VERSIONS["cfn-guard"]
+        assert (
+            raw["runs"][0]["tool"]["driver"]["semanticVersion"]
+            == TOOL_VERSIONS["cfn-guard"]
+        )
         assert len(raw["runs"][0]["results"]) == 2  # the denominator
         results = CfnGuardScanner.normalize_results(
             SarifReport.model_validate(raw), "templates/planted.yaml"
@@ -301,14 +307,13 @@ class TestDerivedResourceId:
             None,
         ]
 
-    def test_every_captured_finding_gets_the_id_its_message_names(self):
+    @pytest.mark.parametrize("capture", [CAPTURED_INSECURE, CAPTURED_INSECURE_PINNED])
+    def test_every_captured_finding_gets_the_id_its_message_names(self, capture):
         results = CfnGuardScanner.normalize_results(
-            _load(CAPTURED_INSECURE), "templates/insecure.yaml"
+            _load(capture), "templates/insecure.yaml"
         )
         assert len(results) == 24
-        attached = collections.Counter(
-            r.properties.ash_resource_id for r in results
-        )
+        attached = collections.Counter(r.properties.ash_resource_id for r in results)
         assert attached == self.EXPECTED_IDS
 
     def test_the_overlapping_rule_sets_attach_on_every_distinct_result(self):
@@ -325,12 +330,20 @@ class TestDerivedResourceId:
     def test_no_match_attaches_nothing(self):
         assert _attached("Check was not compliant. No path in this one.") is None
         # drift: a differently spelled prefix must not attach
-        assert _attached(
-            TestDerivedResourceId.GENUINE.replace("Path=/Resources", "Location=/Resources")
-        ) is None
-        assert _attached(
-            TestDerivedResourceId.GENUINE.replace("/Resources/", "/Parameters/")
-        ) is None
+        assert (
+            _attached(
+                TestDerivedResourceId.GENUINE.replace(
+                    "Path=/Resources", "Location=/Resources"
+                )
+            )
+            is None
+        )
+        assert (
+            _attached(
+                TestDerivedResourceId.GENUINE.replace("/Resources/", "/Parameters/")
+            )
+            is None
+        )
 
     def test_a_non_alphanumeric_id_attaches_nothing(self):
         genuine = TestDerivedResourceId.GENUINE
