@@ -114,6 +114,52 @@ _GRYPE_PACKAGE_MESSAGE = re.compile(
     r"was found at: "
 )
 
+#: One ``Key: value`` line of the help text grype's SARIF presenter writes on each
+#: rule ("Vulnerability <id>\nSeverity: ...\nPackage: ...\nVersion: ...\nFix
+#: Version: ...\nType: ...").
+_GRYPE_HELP_LINE = re.compile(
+    r"^(?P<key>Package|Version|Fix Version):[ \t]*(?P<value>.*?)[ \t]*$"
+)
+
+
+def _rule_fix_statements(run) -> dict[str, tuple[str, str, str]]:
+    """Each rule's ``(package, version, fix versions)`` from its help text.
+
+    Only a rule whose id is unique in the run and whose help text names exactly
+    one ``Package``, one ``Version`` and one ``Fix Version`` line is read; the
+    fix versions are the (possibly empty) text after ``Fix Version:``. A rule
+    with a repeated id, a repeated or missing line, or no help text is left out,
+    so a result naming it gets nothing attached.
+    """
+    driver = run.tool.driver if run.tool else None
+    rules = (driver.rules if driver else None) or []
+    seen: dict[str, int] = {}
+    for rule in rules:
+        seen[rule.id] = seen.get(rule.id, 0) + 1
+    statements: dict[str, tuple[str, str, str]] = {}
+    for rule in rules:
+        if seen[rule.id] != 1 or rule.help is None:
+            continue
+        found: dict[str, list[str]] = {}
+        for line in rule.help.text.splitlines():
+            line_match = _GRYPE_HELP_LINE.match(line)
+            if line_match:
+                found.setdefault(line_match.group("key"), []).append(
+                    line_match.group("value")
+                )
+        if any(
+            len(found.get(key, [])) != 1
+            for key in ("Package", "Version", "Fix Version")
+        ):
+            continue
+        statements[rule.id] = (
+            found["Package"][0],
+            found["Version"][0],
+            found["Fix Version"][0],
+        )
+    return statements
+
+
 #: What grype writes for a file-name byte that is not UTF-8: Go strings hold the
 #: replacement character (U+FFFD) where such a byte sits, so grype's SARIF cannot
 #: spell the name.
@@ -439,10 +485,14 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
             "fingerprints or partialFingerprints",
         ),
         fix_available=FacetDecl(
-            state=FacetState.DROPPED,
-            native_field="matches[].vulnerability.fix",
-            reason="the native fix {state, versions} is never read; the flat "
-            "model reads fix_available but this adapter never writes it",
+            state=FacetState.MAPPED,
+            native_field='SARIF rule help.text line "Fix Version: <versions>" '
+            "(grype's rendering of matches[].vulnerability.fix.versions), "
+            "written as fix_available=True only for a non-empty list on a "
+            "uniquely named rule whose Package and Version lines match the "
+            "result's own message; an empty list (not-fixed, wont-fix, "
+            "unknown) is never written as False",
+            example="GHSA-3h5v-q93c-6h6q-ws: Fix Version: 8.17.1",
         ),
         remediation_text=FacetDecl(
             state=FacetState.NA,
@@ -1049,10 +1099,57 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
     ) -> SarifReport:
         """Strip leading slashes from artifact URIs and attach package identity."""
         lock_index = NpmLockIndex(target)
-        for result in sarif_report.get_all_results():
-            self._normalize_result_uris(result, target)
-            self._attach_package_identity(result, lock_index)
+        for run in sarif_report.runs or []:
+            fixes = _rule_fix_statements(run)
+            for result in run.results or []:
+                self._normalize_result_uris(result, target)
+                self._attach_package_identity(result, lock_index)
+                self._attach_fix_available(result, run, fixes)
         return sarif_report
+
+    @staticmethod
+    def _attach_fix_available(
+        result, run, fixes: Mapping[str, tuple[str, str, str]]
+    ) -> None:
+        """Record ``fix_available = True`` for a result grype says has a fix.
+
+        grype's presenter writes the vulnerability's native ``fix.versions`` into
+        the rule's help text as ``Fix Version: <versions>``, one rule per
+        (vulnerability, package) pair; ``fixes`` holds each uniquely named rule's
+        statement (see ``_rule_fix_statements``). Only a non-empty list is
+        written, and only as True: an empty ``Fix Version:`` is what grype writes
+        for every non-``fixed`` state (``not-fixed``, ``wont-fix``, ``unknown``),
+        so it cannot say that no fix exists and nothing is attached.
+
+        The result must match its rule, or nothing is attached: the rule is the
+        one the result's ``ruleId`` names, any ``ruleIndex`` points at that same
+        rule, and the package and version the rule's help names are the ones the
+        result's own message names. grype keys a rule by vulnerability and
+        package name alone, so a second copy of the package at another version
+        shares the rule and would carry the first copy's statement.
+        """
+        rule_id = result.ruleId
+        statement = fixes.get(rule_id) if rule_id else None
+        if statement is None:
+            return
+        index = result.ruleIndex
+        if index is not None and index >= 0:
+            rules = run.tool.driver.rules or []
+            if index >= len(rules) or rules[index].id != rule_id:
+                return
+        message = result.message.root.text if result.message else None
+        match = _GRYPE_PACKAGE_MESSAGE.search(message or "")
+        if not match:
+            return
+        name, version, fix_versions = statement
+        if (name, version) != (match.group("name"), match.group("version")):
+            return
+        if not fix_versions:
+            return
+        if result.properties is None:
+            result.properties = PropertyBag(fix_available=True)
+        else:
+            setattr(result.properties, "fix_available", True)
 
     @staticmethod
     def _attach_package_identity(result, lock_index: NpmLockIndex) -> None:
