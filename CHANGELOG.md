@@ -131,6 +131,12 @@
 
 - cfn-nag evaluates templates containing `AWS::EKS::AccessEntry` without passing
   EKS access policy associations to the OpenSearch and Elasticsearch policy rules.
+- checkov no longer fails with `PermissionError: '/gitlab_conf'` in a GitLab CI job run
+  by a user that is not root, which ended the scan as incomplete. Its GitLab, GitHub
+  and Bitbucket configuration frameworks write the settings they fetch below the
+  scanner's results directory instead of below checkov's working directory, the
+  filesystem root. A directory set in `CKV_GITLAB_CONF_DIR_NAME`,
+  `CKV_GITHUB_CONF_DIR_NAME` or `CKV_BITBUCKET_CONF_DIR_NAME` is used as set.
 
 ## v3.8.0 (2026-11-12)
 

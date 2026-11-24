@@ -52,6 +52,7 @@ from automated_security_helper.utils.link_exclusions import (
 )
 from automated_security_helper.utils.error_text import text_without_values
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
+from automated_security_helper.utils.process_env import snapshot_environ
 from automated_security_helper.utils.sandbox.fs_guard import open_for_atomic_write
 from automated_security_helper.utils.scanned_tree import REASON_LINK_LEAVES_TREE
 from automated_security_helper.utils.suppression_matcher import active_ignore_paths
@@ -103,6 +104,22 @@ CheckFrameworks = Literal[
 # module finder builds from every --skip-path value. See
 # CheckovScanner._output_dir_skip_patterns.
 _CHECKOV_UNSAFE_SKIP_PATH_CHARS = frozenset("()")
+
+# checkov's GitHub, GitLab and Bitbucket configuration frameworks fetch the
+# repository host's settings through its API and write them to a directory below
+# checkov's working directory, which these variables name. ASH runs checkov from
+# the filesystem root (CheckovScanner._subprocess_cwd), which a user that is not
+# root cannot write to, so the scan stopped with a PermissionError
+# (``/gitlab_conf``) and checkov exited 2. Writing into the scanned tree is what
+# moving the working directory avoided. Each directory goes under the scanner's
+# results directory instead, unless the operator named one. checkov joins the
+# value to its working directory with ``os.path.join``, so an absolute path is
+# used as it is.
+_CHECKOV_VCS_CONF_DIR_ENV = {
+    "CKV_GITHUB_CONF_DIR_NAME": "github_conf",
+    "CKV_GITLAB_CONF_DIR_NAME": "gitlab_conf",
+    "CKV_BITBUCKET_CONF_DIR_NAME": "bitbucket_conf",
+}
 
 
 def _known_ignore_skip_pattern(entry: str) -> str:
@@ -1191,7 +1208,25 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
             )
         finally:
             self.args.extra_args = original_extra_args
-        return _directory_as_one_token(final_args), results_file, None
+        return (
+            _directory_as_one_token(final_args),
+            results_file,
+            self._vcs_conf_environment(target_results_dir),
+        )
+
+    def _vcs_conf_environment(self, results_dir: Path) -> dict[str, str]:
+        """The environment checkov runs with: the host's, with a conf directory
+        under ``results_dir`` for each VCS configuration framework whose variable
+        the operator did not set (see ``_CHECKOV_VCS_CONF_DIR_ENV``).
+
+        The directories are below a ``vcs-config`` directory of their own, because
+        checkov's GitHub framework removes its directory when it exists.
+        """
+        environment = snapshot_environ()
+        conf_root = results_dir.joinpath("vcs-config")
+        for variable, name in _CHECKOV_VCS_CONF_DIR_ENV.items():
+            environment.setdefault(variable, str(conf_root.joinpath(name)))
+        return environment
 
     def _ignore_skip_patterns(
         self, target: Path, global_ignore_paths: List[IgnorePathWithReason] | None
