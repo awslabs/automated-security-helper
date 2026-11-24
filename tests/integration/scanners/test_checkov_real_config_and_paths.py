@@ -24,12 +24,14 @@ import pytest
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.plugin_modules.ash_builtin.scanners.checkov_scanner import (
-    _KNOWN_VCS_CONFIGURATION_FRAMEWORKS,
-    _VCS_CONFIGURATION_FRAMEWORKS,
     CheckFrameworks,
     CheckovScanner,
     CheckovScannerConfig,
     CheckovScannerConfigOptions,
+)
+from automated_security_helper.plugin_modules.ash_builtin.scanners.checkov_vcs_frameworks import (
+    KNOWN_VCS_CONFIGURATION_FRAMEWORKS,
+    vcs_configuration_frameworks,
 )
 
 PluginContext.model_rebuild()
@@ -242,7 +244,7 @@ def _installed_checkov_frameworks(checkov_path: str) -> set:
     no checkov code. A missing file or an empty parse FAILS rather than skips:
     checkov is installed (``_checkov()`` passed), so either means a checkov
     refactor moved the registry and the VCS-configuration derivation in
-    checkov_scanner.py must be re-measured.
+    checkov_vcs_frameworks.py must be re-measured.
     """
     with open(checkov_path, "rb") as handle:
         first_line = handle.readline().strip()
@@ -269,7 +271,7 @@ def _installed_checkov_frameworks(checkov_path: str) -> set:
         pytest.fail(
             f"checkov is installed but {check_type_py} does not exist: checkov "
             "moved its framework registry; re-measure the VCS-configuration "
-            "derivation in checkov_scanner.py against this checkov"
+            "derivation in checkov_vcs_frameworks.py against this checkov"
         )
     tree = ast.parse(check_type_py.read_text(encoding="utf-8"))
     for node in tree.body:
@@ -286,7 +288,7 @@ def _installed_checkov_frameworks(checkov_path: str) -> set:
     pytest.fail(
         f"{check_type_py} no longer holds a CheckType class with string "
         "constants: checkov refactored its framework registry; re-measure the "
-        "VCS-configuration derivation in checkov_scanner.py"
+        "VCS-configuration derivation in checkov_vcs_frameworks.py"
     )
 
 
@@ -315,9 +317,9 @@ def test_framework_mirror_and_vcs_derivation_match_installed_checkov():
     )
     assert {
         framework for framework in installed if framework.endswith("_configuration")
-    } == set(_KNOWN_VCS_CONFIGURATION_FRAMEWORKS), (
+    } == set(KNOWN_VCS_CONFIGURATION_FRAMEWORKS), (
         "the installed checkov's VCS configuration frameworks differ from the "
-        "measured floor in checkov_scanner.py; re-measure the derivation (env "
-        "var pattern included) and update _KNOWN_VCS_CONFIGURATION_FRAMEWORKS"
+        "measured floor in checkov_vcs_frameworks.py; re-measure the derivation "
+        "(env var pattern included) and update KNOWN_VCS_CONFIGURATION_FRAMEWORKS"
     )
-    assert set(_VCS_CONFIGURATION_FRAMEWORKS) <= installed
+    assert set(vcs_configuration_frameworks(get_args(CheckFrameworks))) <= installed

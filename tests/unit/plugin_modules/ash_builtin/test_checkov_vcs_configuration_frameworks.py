@@ -23,17 +23,10 @@ import pytest
 
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.ash_config import AshConfig
-from typing import get_args
-
 from automated_security_helper.plugin_modules.ash_builtin.scanners.checkov_scanner import (
-    _KNOWN_VCS_CONFIGURATION_FRAMEWORKS,
     _VCS_CONF_DIR_ENV_VARS,
     _VCS_CONFIG_FETCH_ENV_VARS,
     _VCS_CONFIGURATION_FRAMEWORKS,
-    _vcs_conf_dir_env_vars,
-    _vcs_config_fetch_env_vars,
-    _vcs_configuration_frameworks,
-    CheckFrameworks,
     CheckovScanner,
     CheckovScannerConfig,
     CheckovScannerConfigOptions,
@@ -59,72 +52,6 @@ def _scanner(source: Path, output: Path, **opts) -> CheckovScanner:
 
 def _flag_values(extra_args, flag: str) -> list[str]:
     return [arg.value for arg in extra_args if arg.key == flag and arg.value]
-
-
-class TestVcsConfigurationFrameworkDerivation:
-    """The skip set is derived from the ``CheckFrameworks`` mirror by checkov's
-    naming rule for VCS configuration runners, not hardcoded per vendor.
-
-    These gates make drift loud: a derivation that stops covering the measured
-    floor, a derived member outside the structural rule, or an environment
-    variable that stops matching the pattern checkov's VCS DALs read fails
-    here. The companion integration gate
-    (tests/integration/scanners/test_checkov_real_config_and_paths.py) checks
-    the mirror itself against the installed checkov's registry.
-    """
-
-    def test_derived_set_covers_measured_floor(self):
-        assert set(_VCS_CONFIGURATION_FRAMEWORKS) >= {
-            "github_configuration",
-            "gitlab_configuration",
-            "bitbucket_configuration",
-        }
-
-    def test_every_derived_member_matches_structural_rule(self):
-        mirror = set(get_args(CheckFrameworks))
-        for framework in _VCS_CONFIGURATION_FRAMEWORKS:
-            assert framework.endswith("_configuration")
-            # A non-empty vendor name precedes the suffix.
-            assert framework.removesuffix("_configuration")
-            assert framework in mirror
-
-    def test_env_var_derivation_matches_checkov_measured_pattern(self):
-        # Measured at checkov 3.4.5: gitlab/dal.py:18 and :67,
-        # github/dal.py:24 and :225, bitbucket/dal.py:18 and :77.
-        conf_dirs = dict(_VCS_CONF_DIR_ENV_VARS)
-        assert conf_dirs["CKV_GITLAB_CONF_DIR_NAME"] == "gitlab_conf"
-        assert conf_dirs["CKV_GITHUB_CONF_DIR_NAME"] == "github_conf"
-        assert conf_dirs["CKV_BITBUCKET_CONF_DIR_NAME"] == "bitbucket_conf"
-        assert set(_VCS_CONFIG_FETCH_ENV_VARS) >= {
-            "CKV_GITLAB_CONFIG_FETCH_DATA",
-            "CKV_GITHUB_CONFIG_FETCH_DATA",
-            "CKV_BITBUCKET_CONFIG_FETCH_DATA",
-        }
-        # One cache-directory tuple and one fetch toggle per skipped framework.
-        assert len(_VCS_CONF_DIR_ENV_VARS) == len(_VCS_CONFIGURATION_FRAMEWORKS)
-        assert len(_VCS_CONFIG_FETCH_ENV_VARS) == len(_VCS_CONFIGURATION_FRAMEWORKS)
-
-    def test_new_configuration_framework_is_auto_covered(self):
-        derived = _vcs_configuration_frameworks(
-            ["all", "terraform", "gitea_configuration"]
-        )
-        assert "gitea_configuration" in derived
-        assert ("CKV_GITEA_CONF_DIR_NAME", "gitea_conf") in _vcs_conf_dir_env_vars(
-            derived
-        )
-        assert "CKV_GITEA_CONFIG_FETCH_DATA" in _vcs_config_fetch_env_vars(derived)
-        assert set(derived) >= set(_KNOWN_VCS_CONFIGURATION_FRAMEWORKS)
-
-    def test_non_matching_names_are_not_vcs_configuration_frameworks(self):
-        derived = _vcs_configuration_frameworks(
-            ["_configuration", "gitlab_ci", "github_actions", "terraform", "all"]
-        )
-        assert set(derived) == set(_KNOWN_VCS_CONFIGURATION_FRAMEWORKS)
-
-    def test_empty_framework_list_falls_back_to_measured_floor(self):
-        assert _vcs_configuration_frameworks([]) == tuple(
-            sorted(_KNOWN_VCS_CONFIGURATION_FRAMEWORKS)
-        )
 
 
 class TestVcsConfigurationFrameworkDefaults:
