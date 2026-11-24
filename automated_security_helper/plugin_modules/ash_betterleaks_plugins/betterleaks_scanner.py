@@ -132,7 +132,6 @@ from pathlib import Path
 from typing import (
     Annotated,
     Any,
-    Callable,
     ClassVar,
     Dict,
     List,
@@ -142,7 +141,7 @@ from typing import (
     Tuple,
 )
 
-from pydantic import Field, PrivateAttr, model_validator
+from pydantic import Field, model_validator
 
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.scanner_plugin import (
@@ -168,7 +167,6 @@ from automated_security_helper.utils.config_trust import (
     LEADS_OUT_OF_THE_TREE,
     operator_path,
     refusal_warning,
-    set_by_operator,
 )
 from automated_security_helper.utils.download_utils import (
     pinned_tool_install_commands,
@@ -178,7 +176,6 @@ from automated_security_helper.utils.process_env import snapshot_environ
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.utils.sandbox.scope import active_scope
-from automated_security_helper.utils.scan_output_dirs import committed_output_files
 from automated_security_helper.utils.subprocess_utils import find_executable
 
 #: The text Betterleaks writes in place of a secret under ``--redact``.
@@ -327,9 +324,12 @@ class BetterleaksScanner(ScannerPluginBase[BetterleaksScannerConfig]):
     # The strict default; see "Sandbox" in the module docstring.
     sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements()
 
-    # Whether each tree-set option refusal was already logged.
-    _ignores_refusal_logged: bool = PrivateAttr(default=False)
-    _tree_ignore_refusal_logged: bool = PrivateAttr(default=False)
+    # With honor_tree_ignore_files on, Betterleaks' stderr can quote the scanned
+    # tree's ignore file (see _mask_quoted_ignore_entries), and the scanner
+    # executor copies errors into the scan's results: the base class keeps the
+    # stream out of both and out of the failure text. It stays in the log file.
+    quote_tool_stderr: ClassVar[bool] = False
+    unquoted_failure_tool_name: ClassVar[Optional[str]] = "betterleaks"
 
     def model_post_init(self, context: Any) -> None:
         if self.config is None:
@@ -426,42 +426,30 @@ class BetterleaksScanner(ScannerPluginBase[BetterleaksScannerConfig]):
         """Whether Betterleaks may apply ``betterleaks:allow`` comments in the tree."""
         if not self._options().honor_inline_ignores:
             return False
-        config = self.context.config if self.context is not None else None
-        if set_by_operator(
-            config, "scanners.betterleaks.options.honor_inline_ignores", True
-        ):
-            return True
-        if not self._ignores_refusal_logged:
-            self._ignores_refusal_logged = True
-            self._plugin_log(
-                "scanners.betterleaks.options.honor_inline_ignores is true in a "
-                "config inside a git checkout or the scanned directory, or from an "
-                "MCP client, so it is ignored: Betterleaks runs with "
-                "--ignore-gitleaks-allow and allow comments do not apply; suppress "
-                f"findings with ASH suppressions. {KEEP_A_SETTING}",
-                level=logging.WARNING,
-            )
-        return False
+        return self._operator_gated(
+            "scanners.betterleaks.options.honor_inline_ignores",
+            True,
+            False,
+            "scanners.betterleaks.options.honor_inline_ignores is true in a "
+            "config inside a git checkout or the scanned directory, or from an "
+            "MCP client, so it is ignored: Betterleaks runs with "
+            "--ignore-gitleaks-allow and allow comments do not apply; suppress "
+            f"findings with ASH suppressions. {KEEP_A_SETTING}",
+        )
 
     def _honor_tree_ignore_files(self) -> bool:
         """Whether a tree's ignore file may stand, when the operator said so."""
         if not self._options().honor_tree_ignore_files:
             return False
-        config = self.context.config if self.context is not None else None
-        if set_by_operator(
-            config, "scanners.betterleaks.options.honor_tree_ignore_files", True
-        ):
-            return True
-        if not self._tree_ignore_refusal_logged:
-            self._tree_ignore_refusal_logged = True
-            self._plugin_log(
-                "scanners.betterleaks.options.honor_tree_ignore_files is true in a "
-                "config inside a git checkout or the scanned directory, or from an "
-                "MCP client, so it is ignored: a tree that holds a .betterleaksignore "
-                f"or .gitleaksignore still fails the scan. {KEEP_A_SETTING}",
-                level=logging.WARNING,
-            )
-        return False
+        return self._operator_gated(
+            "scanners.betterleaks.options.honor_tree_ignore_files",
+            True,
+            False,
+            "scanners.betterleaks.options.honor_tree_ignore_files is true in a "
+            "config inside a git checkout or the scanned directory, or from an "
+            "MCP client, so it is ignored: a tree that holds a .betterleaksignore "
+            f"or .gitleaksignore still fails the scan. {KEEP_A_SETTING}",
+        )
 
     def _resolve_config_file(self) -> Optional[Path]:
         """The config to pass as ``--config``; None leaves it to Betterleaks.
@@ -634,17 +622,6 @@ class BetterleaksScanner(ScannerPluginBase[BetterleaksScannerConfig]):
             )
         return super()._read_results_file(results_file)
 
-    def _process_command_response(self, response: Dict[str, Any]) -> None:
-        """Count the exit code, and keep Betterleaks' stderr out of ``self.errors``.
-
-        With ``honor_tree_ignore_files`` on, the stderr can quote the scanned tree's
-        ignore file (see ``_mask_quoted_ignore_entries``), and the scanner executor
-        copies ``errors`` into the scan's results. The stream stays in the log file.
-        """
-        super()._process_command_response(
-            {key: value for key, value in response.items() if key != "stderr"}
-        )
-
     def _run_subprocess(  # type: ignore[override]
         self,
         command: List[str],
@@ -659,120 +636,9 @@ class BetterleaksScanner(ScannerPluginBase[BetterleaksScannerConfig]):
             )
         return response
 
-    def _describe_scan_failure(
-        self,
-        exc: Exception,
-        results_file: Optional[Path],
-        tool_started: bool = True,
-    ) -> str:
-        """The failure and where Betterleaks' log is, without quoting the log."""
-        detail = f"{self.__class__.__name__} scan failed: {exc}"
-        if not tool_started or results_file is None:
-            return f"{detail} (betterleaks was not started)"
-        log_path = Path(results_file).parent / f"{self.__class__.__name__}.stderr.log"
-        if self.scan_could_not_stop is not None:
-            return (
-                f"{detail} (no exit code: ASH could not stop betterleaks). "
-                f"betterleaks' log is not quoted here; see {log_path.as_posix()}"
-            )
-        verdict = (
-            "an accepted exit code for this scanner"
-            if self._exit_code_accepted()
-            else "not an accepted exit code; success_exit_codes="
-            f"{sorted(self.success_exit_codes)}"
-        )
-        return (
-            f"{detail} (exit code {self.exit_code}: {verdict}). betterleaks' log is "
-            f"not quoted here; see {log_path.as_posix()}"
-        )
-
     # ------------------------------------------------------------------
     # The report
     # ------------------------------------------------------------------
-
-    def _committed_file_test(self) -> Callable[[Path], bool]:
-        """A test, of a path, for a file the repository committed under ASH's output.
-
-        The files ``scan_output_dirs.committed_output_files`` reads, as the executor's
-        drop and the suppression step read them. Read when the test is first asked.
-        Where git cannot say what is tracked the set is empty, and every file under the
-        output directory is treated as ASH's.
-        """
-        committed: Optional[Set[Path]] = None
-
-        def is_committed(path: Path) -> bool:
-            nonlocal committed
-            if committed is None:
-                committed = committed_output_files(self.context)
-            try:
-                return path.resolve() in committed
-            except (OSError, RuntimeError, ValueError):
-                return False
-
-        return is_committed
-
-    def _output_dirs_inside_target(self, target: Path) -> List[Path]:
-        """ASH's output directories inside ``target``, relative to it."""
-        found: List[Path] = []
-        own = self._output_dir_inside(target)
-        if own is not None:
-            found.append(own)
-        for relative in self._ash_output_dirs_inside(target):
-            if relative not in found:
-                found.append(relative)
-        return found
-
-    def _drop_results_under_output_dir(
-        self, sarif_report: SarifReport, target: Path
-    ) -> None:
-        """Remove the results located under ASH's output directory inside ``target``.
-
-        Betterleaks has no exclude flag, so when the output directory is inside the
-        source target (the default ``.ash/ash_output``) it reads ASH's own files,
-        including the converted copies the converted target's run reports. A result in
-        a file the repository committed there is kept. Nothing is removed when the
-        output directory is not inside ``target``. A URI is joined to the target and
-        normalized lexically, and its backslashes are separators only on Windows.
-        """
-        if self.context is None:
-            return
-        outputs_inside = self._output_dirs_inside_target(target)
-        if not outputs_inside:
-            return
-        target_abs = Path(target).absolute()
-        output_roots = [Path(os.path.normpath(target_abs / o)) for o in outputs_inside]
-        committed = self._committed_file_test()
-
-        def under_output_dir(result: Any) -> bool:
-            for location in result.locations or []:
-                physical = location.physicalLocation
-                artifact = physical.root.artifactLocation if physical else None
-                uri = artifact.uri if artifact else None
-                if not uri:
-                    continue
-                if os.sep == "\\":
-                    uri = uri.replace("\\", "/")
-                path = Path(os.path.normpath(target_abs / uri))
-                if any(path.is_relative_to(root) for root in output_roots) and (
-                    not committed(path)
-                ):
-                    return True
-            return False
-
-        dropped = 0
-        for run in sarif_report.runs or []:
-            if not run.results:
-                continue
-            kept = [result for result in run.results if not under_output_dir(result)]
-            dropped += len(run.results) - len(kept)
-            run.results = kept
-        if dropped:
-            self._plugin_log(
-                f"Dropped {dropped} finding(s) under ASH's output directory: copies "
-                "of the files ASH converted, which the converted target's run "
-                "reports, or files ASH wrote.",
-                level=logging.DEBUG,
-            )
 
     def _post_process_sarif(
         self,

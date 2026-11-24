@@ -277,7 +277,12 @@ def _without_whitespace(requirement: str) -> str:
 
 
 class UVToolMixin:
-    """UV tool management methods extracted from PluginBase."""
+    """UV tool management methods extracted from PluginBase.
+
+    Version-reading opt-ins for the runner are declared once, in
+    ``_uv_runner_version_kwargs``; a new capability is added there, not
+    threaded by hand into each call site.
+    """
 
     # Private attributes of PluginBase, typed here for the methods below. An
     # underscore-named annotation is never a pydantic field, so these two are
@@ -546,8 +551,7 @@ class UVToolMixin:
                 # probe used to go online for a scanner offline by its options.
                 offline=self._is_offline_mode(),
                 package=self._uv_package(),
-                **self._uv_python_kwargs(),
-                **self._uv_metadata_kwargs(),
+                **self._uv_runner_version_kwargs(),
             )
             if version:
                 self._plugin_log(
@@ -2725,6 +2729,7 @@ class UVToolMixin:
                 self._checked_uv_from_spec(),
                 offline=self._is_offline_mode(),
                 package=self._uv_package(),
+                **self._uv_runner_version_kwargs(),
             )
             info["tool_name"] = self.command
 
@@ -2897,6 +2902,18 @@ class UVToolMixin:
         runner with exactly the arguments it did before.
         """
         return {"from_metadata": True} if self._tool_version_from_metadata() else {}
+
+    def _uv_runner_version_kwargs(self) -> Dict[str, Any]:
+        """The plugin's declared opt-ins for every runner call that reads a version.
+
+        The one place a plugin's version-reading capabilities
+        (``_uv_python_kwargs``, ``_uv_metadata_kwargs``) are gathered, so a call
+        to ``get_tool_version`` or ``get_tool_installation_info`` spreads this
+        one bundle and cannot drop an opt-in the other call site passes. A new
+        capability is added here, once. Install and run calls pass
+        ``_uv_python_kwargs`` alone: they read no version.
+        """
+        return {**self._uv_python_kwargs(), **self._uv_metadata_kwargs()}
 
     def _get_tool_with_dependencies(self) -> Optional[List[str]]:
         """Get additional dependencies to install with the tool using --with flag.

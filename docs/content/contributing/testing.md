@@ -51,8 +51,8 @@ when no test file differs. Its functions can also be imported, for example
 CI runs the suite by tier, selected by marker. The unit-test jobs run `-m unit` in four
 shards per operating system and Python version and measure coverage of
 `automated_security_helper/` without a threshold. The `unit-coverage` job then combines
-the unit tier's coverage data of each operating system family at Python 3.12 and fails
-when total coverage is under 80%. The integration-test jobs run `-m integration` in
+the coverage data of every unit-test leg, across all operating systems and Python
+versions, into one figure and fails when total coverage is under 80%. The integration-test jobs run `-m integration` in
 four shards per operating system and Python version, and the e2e-test jobs run `-m e2e`
 once per runner on Python 3.12; neither measures coverage. The test step passes the
 options itself (`.github/actions/run-unit-tests/action.yml`); `.coveragerc` says what to

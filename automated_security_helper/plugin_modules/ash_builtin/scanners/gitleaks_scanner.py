@@ -150,7 +150,6 @@ from typing import (
     Annotated,
     Any,
     BinaryIO,
-    Callable,
     ClassVar,
     Dict,
     List,
@@ -194,14 +193,12 @@ from automated_security_helper.utils.config_trust import (
     LEADS_OUT_OF_THE_TREE,
     operator_path,
     refusal_warning,
-    set_by_operator,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.process_env import snapshot_environ
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.utils.sandbox.scope import active_scope
-from automated_security_helper.utils.scan_output_dirs import committed_output_files
 from automated_security_helper.utils.scanned_tree import (
     TreeInputRefused,
     open_in_scanned_tree,
@@ -563,10 +560,13 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
     # _describe_scan_failure, which otherwise describes the first run's exit
     # code and log. None until a re-scan fails; reset per target.
     _rescan_failure_log: Optional[Path] = PrivateAttr(default=None)
-    # Whether the tree-set honor_inline_ignores refusal was already logged.
-    _ignores_refusal_logged: bool = PrivateAttr(default=False)
-    # Whether the tree-set max_target_megabytes refusal was already logged.
-    _size_refusal_logged: bool = PrivateAttr(default=False)
+
+    # gitleaks' stderr can quote the scanned tree's .gitleaksignore (see
+    # _mask_quoted_ignore_entries), and the scanner executor copies errors into
+    # the scan's results: the base class keeps the stream out of both and out of
+    # the failure text. It stays in the log file.
+    quote_tool_stderr: ClassVar[bool] = False
+    unquoted_failure_tool_name: ClassVar[Optional[str]] = "gitleaks"
 
     def model_post_init(self, context: Any) -> None:
         if self.config is None:
@@ -668,22 +668,16 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
         """
         if not self._options().honor_inline_ignores:
             return False
-        config = self.context.config if self.context is not None else None
-        if set_by_operator(
-            config, "scanners.gitleaks.options.honor_inline_ignores", True
-        ):
-            return True
-        if not self._ignores_refusal_logged:
-            self._ignores_refusal_logged = True
-            self._plugin_log(
-                "scanners.gitleaks.options.honor_inline_ignores is true in a config "
-                "inside a git checkout or the scanned directory, or from an MCP "
-                "client, so it is ignored: gitleaks runs with --ignore-gitleaks-allow "
-                "and gitleaks:allow comments do not apply; suppress findings with "
-                f"ASH suppressions. {KEEP_A_SETTING}",
-                level=logging.WARNING,
-            )
-        return False
+        return self._operator_gated(
+            "scanners.gitleaks.options.honor_inline_ignores",
+            True,
+            False,
+            "scanners.gitleaks.options.honor_inline_ignores is true in a config "
+            "inside a git checkout or the scanned directory, or from an MCP "
+            "client, so it is ignored: gitleaks runs with --ignore-gitleaks-allow "
+            "and gitleaks:allow comments do not apply; suppress findings with "
+            f"ASH suppressions. {KEEP_A_SETTING}",
+        )
 
     def _max_target_megabytes(self) -> Optional[int]:
         """The size above which gitleaks skips a file, when the operator set one.
@@ -694,21 +688,16 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
         value = self._options().max_target_megabytes
         if not value:
             return None
-        config = self.context.config if self.context is not None else None
-        if set_by_operator(
-            config, "scanners.gitleaks.options.max_target_megabytes", value
-        ):
-            return int(value)
-        if not self._size_refusal_logged:
-            self._size_refusal_logged = True
-            self._plugin_log(
-                f"scanners.gitleaks.options.max_target_megabytes ({value}) is set "
-                "in a config inside a git checkout or the scanned directory, or "
-                "from an MCP client, so it is ignored and gitleaks scans files of "
-                f"every size. {KEEP_A_SETTING}",
-                level=logging.WARNING,
-            )
-        return None
+        granted = self._operator_gated(
+            "scanners.gitleaks.options.max_target_megabytes",
+            value,
+            None,
+            f"scanners.gitleaks.options.max_target_megabytes ({value}) is set "
+            "in a config inside a git checkout or the scanned directory, or "
+            "from an MCP client, so it is ignored and gitleaks scans files of "
+            f"every size. {KEEP_A_SETTING}",
+        )
+        return None if granted is None else int(granted)
 
     def _resolve_config_file(self) -> Optional[Path]:
         """The config to pass as ``--config``; None leaves it to the environment.
@@ -992,17 +981,6 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
             )
         return data
 
-    def _process_command_response(self, response: Dict[str, Any]) -> None:
-        """Count the exit code, and keep gitleaks' stderr out of ``self.errors``.
-
-        gitleaks' stderr can quote the scanned tree's ``.gitleaksignore`` (see
-        ``_mask_quoted_ignore_entries``), and the scanner executor copies
-        ``errors`` into the scan's results. The stream stays in the log file.
-        """
-        super()._process_command_response(
-            {key: value for key, value in response.items() if key != "stderr"}
-        )
-
     def _run_subprocess(  # type: ignore[override]
         self,
         command: List[str],
@@ -1025,42 +1003,27 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
     ) -> str:
         """The failure and where gitleaks' log is, without quoting the log.
 
-        The base class quotes the tool's stderr. gitleaks' can quote the scanned
-        tree's ``.gitleaksignore``, and this message reaches ``ash.log``, the
-        console and every results file. A failure before gitleaks started gives
-        no exit code, as the base class's does, and so does a tool ASH could not
-        stop: it may still be running, and the code the timeout recorded is not
-        one gitleaks returned. A re-scan that failed names its own log beside
-        the first run's: ``self.exit_code`` is the first run's, which was
-        accepted, so that reading alone misdescribed the failure.
+        The base class says it for a scanner with ``quote_tool_stderr`` False
+        (``_describe_scan_failure_unquoted``). A re-scan that failed names its
+        own log beside the first run's: ``self.exit_code`` is the first run's,
+        which was accepted, so that reading alone misdescribed the failure.
         """
-        detail = f"{self.__class__.__name__} scan failed: {exc}"
-        if not tool_started or results_file is None:
-            # _execute_scan raised: gitleaks was not run, so there is no exit code.
-            return f"{detail} (gitleaks was not started)"
-        log_path = Path(results_file).parent / f"{self.__class__.__name__}.stderr.log"
-        if self._rescan_failure_log is not None:
+        if (
+            tool_started
+            and results_file is not None
+            and self._rescan_failure_log is not None
+        ):
+            detail = f"{self.__class__.__name__} scan failed: {exc}"
+            log_path = (
+                Path(results_file).parent / f"{self.__class__.__name__}.stderr.log"
+            )
             return (
                 f"{detail} (the first gitleaks run exited {self.exit_code}; the "
                 f"re-scan of the files the tree's {IGNORE_FILE_NAME} names failed). "
                 "gitleaks' logs are not quoted here; see "
                 f"{self._rescan_failure_log.as_posix()} and {log_path.as_posix()}"
             )
-        if self.scan_could_not_stop is not None:
-            return (
-                f"{detail} (no exit code: ASH could not stop gitleaks). gitleaks' "
-                f"log is not quoted here; see {log_path.as_posix()}"
-            )
-        verdict = (
-            "an accepted exit code for this scanner"
-            if self._exit_code_accepted()
-            else "not an accepted exit code; success_exit_codes="
-            f"{sorted(self.success_exit_codes)}"
-        )
-        return (
-            f"{detail} (exit code {self.exit_code}: {verdict}). gitleaks' log is "
-            f"not quoted here; see {log_path.as_posix()}"
-        )
+        return super()._describe_scan_failure(exc, results_file, tool_started)
 
     def _gitleaksignore_files(
         self, target: Path, data: Optional[bytes] = None
@@ -1661,125 +1624,6 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
             if uri:
                 # Cleaned, as gitleaks' filepath.Join cleans each path it walks.
                 artifact["uri"] = posixpath.normpath(f"{scan_path}/{uri}")
-
-    def _committed_file_test(self) -> Callable[[Path], bool]:
-        """A test, of a path, for a file the repository committed under ASH's output.
-
-        The output directory is a path inside the scanned tree, and a repository
-        can commit files to it. Those files are the tree's own, so a finding in
-        one is about the tree and not a copy of something ASH wrote. They are the
-        files ``scan_output_dirs.committed_output_files`` reads: the files of the
-        scan set that are under ASH's output directories, which in a git checkout
-        are the ones git tracks. The executor's drop and the suppression step read
-        the same set, and keep the results located in those files.
-
-        The set is read when the test is first asked, so a run with nothing under
-        the output directory reads nothing, and a path is compared resolved, as
-        the set is. Outside a checkout, and where git cannot say what is tracked,
-        the set is empty: every file under the output directory is then ASH's.
-
-        A path that cannot be resolved, such as a symlink loop or a name holding a
-        null byte, which an entry in the tree's ``.gitleaksignore`` can spell, is
-        not committed. The file stays treated as ASH's own, as it was before.
-        """
-        committed: Optional[Set[Path]] = None
-
-        def is_committed(path: Path) -> bool:
-            nonlocal committed
-            if committed is None:
-                committed = committed_output_files(self.context)
-            try:
-                return path.resolve() in committed
-            except (OSError, RuntimeError, ValueError):
-                return False
-
-        return is_committed
-
-    def _drop_results_under_output_dir(
-        self, sarif_report: SarifReport, target: Path
-    ) -> None:
-        """Remove the results located under ASH's output directory inside ``target``.
-
-        See "Paths" in the module docstring. Nothing is removed when the output
-        directory is not inside ``target`` (``_output_dir_inside``): when it is
-        outside, and for the converted target, which lives under it. A location
-        is joined to the target and normalized lexically, without resolving
-        symlinks, as ``_output_dir_inside`` compares the two directories.
-
-        A result in a file the repository committed under the output directory is
-        kept (``_committed_file_test``): only what ASH wrote there is dropped.
-
-        Every ASH output directory inside the target counts
-        (``_output_dirs_inside_target``): this run's, and the default
-        ``.ash/ash_output`` an earlier run left in the tree, as every other
-        directory-walking scanner skips both.
-
-        A URI's backslashes are read as separators only where the platform
-        writes them (Windows, where gitleaks joins paths with ``\\``). On POSIX
-        a backslash is a character of a file's name, and reading it as a
-        separator let a file named like ``out\\x`` read as a path under the
-        output directory, and its findings were dropped.
-        """
-        if self.context is None:
-            return
-        outputs_inside = self._output_dirs_inside_target(target)
-        if not outputs_inside:
-            return
-        target_abs = Path(target).absolute()
-        output_roots = [Path(os.path.normpath(target_abs / o)) for o in outputs_inside]
-        committed = self._committed_file_test()
-
-        def under_output_dir(result: Any) -> bool:
-            for location in result.locations or []:
-                physical = location.physicalLocation
-                artifact = physical.root.artifactLocation if physical else None
-                uri = artifact.uri if artifact else None
-                if not uri:
-                    continue
-                if os.sep == "\\":
-                    uri = uri.replace("\\", "/")
-                path = Path(os.path.normpath(target_abs / uri))
-                if any(path.is_relative_to(root) for root in output_roots) and (
-                    not committed(path)
-                ):
-                    return True
-            return False
-
-        dropped = 0
-        for run in sarif_report.runs or []:
-            if not run.results:
-                continue
-            kept = [result for result in run.results if not under_output_dir(result)]
-            dropped += len(run.results) - len(kept)
-            run.results = kept
-        if dropped:
-            self._plugin_log(
-                f"Dropped {dropped} finding(s) under ASH's output directory: copies "
-                "of the files ASH converted, which the converted target's run "
-                "reports, or files ASH wrote.",
-                level=logging.DEBUG,
-            )
-
-    def _output_dirs_inside_target(self, target: Path) -> List[Path]:
-        """ASH's output directories inside ``target``, relative to it.
-
-        This run's output directory when it sits inside the target
-        (``_output_dir_inside``), whole, and the directories
-        ``_ash_output_dirs_inside`` names: the default ``.ash/ash_output`` an
-        earlier run left in the tree, and for a directory holding committed
-        files ASH's own directories in it. The first keeps the drop of every
-        uncommitted file under this run's output, the files at its root
-        included, which the second lists only in part. Empty for the converted
-        target, which lives under the output directory.
-        """
-        found: List[Path] = []
-        own = self._output_dir_inside(target)
-        if own is not None:
-            found.append(own)
-        for relative in self._ash_output_dirs_inside(target):
-            if relative not in found:
-                found.append(relative)
-        return found
 
     def _report_rescan_skipped(self, sarif_report: SarifReport) -> None:
         """Record the names the re-scan did not reach as a run that is incomplete.

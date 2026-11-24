@@ -3936,6 +3936,7 @@ CONTAINER_ENV_NOT_PASSED = frozenset(
         "ASH_MODE",
         "ASH_VERBOSE",
         "ASH_CHANGED_FILES_ONLY",
+        "ASH_BASELINE",
         "ASH_BASE_REF",
         "ASH_STAGED",
         "ASH_BIN_PATH",
@@ -4339,8 +4340,7 @@ def _write_env_file(
                 "the value in the config file instead."
             )
     directory = Path(tempfile.mkdtemp(prefix="ash-container-env-"))
-    # Named in a record, so a SIGKILL that strands it can be told from a directory
-    # that is merely old (container_leftovers.sweep_env_dirs).
+
     record_env_dir(directory)
     real = _real_path(directory)
     # By real path, and by the directories' identity (_is_at_or_above): a bind

@@ -31,6 +31,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
 from automated_security_helper.utils import sarif_rule_descriptors as descriptors_module
 from automated_security_helper.utils.sarif_rule_descriptors import (
     rule_descriptors_by_result,
+    rule_of_result,
 )
 
 pytestmark = pytest.mark.unit
@@ -248,3 +249,32 @@ class TestTheAnswerIsOnePerResult:
             None,
             "text two",
         ]
+
+
+class TestTheRuleItselfIsFoundTheSameWay:
+    """``rule_of_result`` gives the rule a descriptor is built from, so a caller
+    can read what the rule declares beyond its message strings."""
+
+    def test_the_rule_comes_from_the_extension_the_results_scanner_names(self):
+        trivy_rule = _rule("R1", "trivy text")
+        grype_rule = _rule("R1", "grype text")
+        tool = Tool(
+            driver=_component("ASH"),
+            extensions=[
+                _component("trivy", trivy_rule),
+                _component("grype", grype_rule),
+            ],
+        )
+
+        found = rule_of_result(
+            _result(properties=PropertyBag(scanner_name="grype")), tool
+        )
+
+        assert found is tool.extensions[1].rules[0]
+        assert _default_text(found) == "grype text"
+
+    def test_a_result_with_no_rule_id_or_an_undeclared_one_has_none(self):
+        tool = Tool(driver=_component("ASH", _rule("R1", "text")))
+
+        assert rule_of_result(_result(None), tool) is None
+        assert rule_of_result(_result("MISSING"), tool) is None

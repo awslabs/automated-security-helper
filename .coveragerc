@@ -9,8 +9,8 @@ omit =
 # Show missing lines in reports
 show_missing = True
 # No fail_under. The 80% threshold is passed as --fail-under 80 by the unit-coverage
-# job in .github/workflows/ash-unified-ci.yml, to the combine step of the unit tier's
-# coverage data (.github/scripts/combine-unit-coverage.py). Here it also gated every
+# job in .github/workflows/ash-unified-ci.yml, once, to the combine of the coverage data
+# of every unit leg (.github/scripts/combine-unit-coverage.py). Here it also gated every
 # `pytest --cov` of a subset.
 
 [html]
@@ -24,5 +24,13 @@ output = test-results/pytest.coverage.xml
 output = test-results/pytest.coverage.json
 pretty_print = True
 
+# `coverage combine` folds the source paths each leg recorded into the first entry, which is
+# the checkout the unit-coverage job combines in. A leg records absolute paths of its own
+# runner (/home/runner/work/<repo>/<repo>/ on Linux, /Users/runner/work/... on macOS,
+# D:\a\<repo>\<repo>\ on Windows), so without these aliases the combine would count one file
+# once per operating system and the total would be a mean of three partial figures.
 [paths]
-source = automated_security_helper/**/*.py
+source =
+    automated_security_helper/
+    */automated_security_helper/
+    *\automated_security_helper\

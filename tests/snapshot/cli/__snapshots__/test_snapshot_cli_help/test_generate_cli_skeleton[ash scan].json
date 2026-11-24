@@ -54,5 +54,6 @@
   "container_gid": null,
   "ash_revision_to_install": null,
   "custom_containerfile": null,
-  "custom_build_arg": null
+  "custom_build_arg": null,
+  "baseline": null
 }

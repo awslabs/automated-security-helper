@@ -79,8 +79,8 @@ _INSTALLED_BY_THE_SCRIPT = sorted(
 )
 
 
-# The pinned SHA256 of the syft executable inside syft_1.57.1_linux_amd64.tar.gz.
-_SYFT_LINUX_AMD64_EXECUTABLE = "de3982edbbc250c4a40764c7b1f30bbf54b681f9b99391ee6b85bfdfa5d4dffe"  # pragma: allowlist secret
+# The pinned SHA256 of the syft executable inside syft_1.57.2_linux_amd64.tar.gz.
+_SYFT_LINUX_AMD64_EXECUTABLE = "17cc40c1e40dbfdeb8c84b6d9928909bceb793f22e8a8023ef408625f1d96ec5"  # pragma: allowlist secret
 
 
 def _pins_dir(tmp_path: Path, digest_overrides: dict | None = None) -> Path:
@@ -344,7 +344,7 @@ class TestTheDigestCheckCanFail:
         pins = _pins_dir(
             tmp_path,
             {
-                "bf52519eb57f675d47c07d43213cb6dff6449f3d6d1147ff6701ed91f44eef0c": "0"  # pragma: allowlist secret
+                "ad92bd3ec1b94a3df01d4d0aec199afa9c42b72e86da436ff5f837914d32706b": "0"  # pragma: allowlist secret
                 * 64
             },
         )
@@ -384,7 +384,7 @@ class TestTheDigestCheckCanFail:
         pins = _pins_dir(
             tmp_path,
             {
-                "bf52519eb57f675d47c07d43213cb6dff6449f3d6d1147ff6701ed91f44eef0c": real_digest,  # pragma: allowlist secret
+                "ad92bd3ec1b94a3df01d4d0aec199afa9c42b72e86da436ff5f837914d32706b": real_digest,  # pragma: allowlist secret
                 # The executable digest too: the fixture's member is not the real
                 # syft, and the installer checks the member against its own pin.
                 _SYFT_LINUX_AMD64_EXECUTABLE: hashlib.sha256(payload).hexdigest(),
@@ -470,7 +470,7 @@ class TestABareExecutableAsset:
         pins = _pins_dir(
             tmp_path,
             {
-                "46e8133cc490f9f50518061590ce2f6be5a08afaeda034471c0ceda4b3899808": hashlib.sha256(  # pragma: allowlist secret
+                "37e93f4da5fd04a18c5c1febbdd12f7e98dfccd4d0c9cf2593bcb25eeb462da0": hashlib.sha256(  # pragma: allowlist secret
                     payload
                 ).hexdigest()
             },
@@ -524,7 +524,7 @@ class TestTheExecutableDigestIsChecked:
         pins = _pins_dir(
             tmp_path,
             {
-                "bf52519eb57f675d47c07d43213cb6dff6449f3d6d1147ff6701ed91f44eef0c": archive_digest,  # pragma: allowlist secret
+                "ad92bd3ec1b94a3df01d4d0aec199afa9c42b72e86da436ff5f837914d32706b": archive_digest,  # pragma: allowlist secret
                 _SYFT_LINUX_AMD64_EXECUTABLE: executable_digest
                 or hashlib.sha256(payload).hexdigest(),
             },
@@ -762,7 +762,7 @@ from automated_security_helper.utils.tool_downloads import (  # noqa: E402
     THIRD_PARTY_LICENSES,
 )
 
-_SYFT_ARCHIVE_DIGEST = "bf52519eb57f675d47c07d43213cb6dff6449f3d6d1147ff6701ed91f44eef0c"  # pragma: allowlist secret
+_SYFT_ARCHIVE_DIGEST = "ad92bd3ec1b94a3df01d4d0aec199afa9c42b72e86da436ff5f837914d32706b"  # pragma: allowlist secret
 _TRIVY_ARCHIVE_DIGEST = "bc0fc726e017b8927a62b2d3531d7a84ee01769daf5c99ed866dced54089fdbf"  # pragma: allowlist secret
 _TRIVY_LINUX_AMD64_EXECUTABLE = "6a972c69606c7b3ea4c6bdcc6fc9332ea9ad38381624310c1e85cc77345909f3"  # pragma: allowlist secret
 
@@ -958,7 +958,7 @@ class TestLicenseFilesTravelWithTheBinary:
         pins = _pins_dir(
             tmp_path,
             {
-                'version="v1.57.1",\n        license="Apache-2.0",\n'
+                'version="v1.57.2",\n        license="Apache-2.0",\n'
                 '        repository="https://github.com/anchore/syft"': (
                     'version="v1.0.0",\n        license="Apache-2.0",\n'
                     '        repository="https://github.com/anchore/syft"'
@@ -1203,7 +1203,7 @@ class TestVerifyThirdParty:
         pins, third_party, path = self._tree(tmp_path)
         exe = Path(path) / "grype"
         exe.write_text('#!/bin/sh\necho "grype 0.119.0"\n')
-        self._fails(pins, third_party, path, "does not report 0.121.3")
+        self._fails(pins, third_party, path, "does not report 0.122.1")
 
     def test_an_executable_missing_from_path(self, tmp_path):
         pins, third_party, path = self._tree(tmp_path)

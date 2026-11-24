@@ -225,3 +225,61 @@ class TestDiffScanResultsMissingFile:
 
         assert result.get("success") is False
         assert "error" in result
+
+
+@pytest.mark.parametrize("side", ["before", "after"])
+@pytest.mark.parametrize(
+    "marker,value",
+    [
+        ("baseline", {"sha256": "x", "matched": 1, "matched_without_lines": 0}),
+        ("changed_files_only", True),
+    ],
+)
+def test_partial_results_are_not_reported_as_resolved(tmp_path, side, marker, value):
+    before = _make_aggregated_json([_make_vuln("A")])
+    after = _make_aggregated_json([])
+    (before if side == "before" else after)["metadata"][marker] = value
+    before_file, after_file = tmp_path / "before.json", tmp_path / "after.json"
+    before_file.write_text(json.dumps(before))
+    after_file.write_text(json.dumps(after))
+    response = mcp_diff_scan_results(str(before_file), str(after_file))
+    assert response["success"] is False
+    assert "filtered" in response["error"]
+
+
+@pytest.mark.parametrize(
+    "before_metadata,after_metadata",
+    [
+        ({"project_name": "one"}, {"project_name": "another"}),
+        ({"workspace_project": "one"}, {"workspace_project": "another"}),
+        ({}, {"workspace_project": "one"}),
+    ],
+)
+def test_results_of_different_projects_are_refused(
+    tmp_path, before_metadata, after_metadata
+):
+    before = _make_aggregated_json([_make_vuln("A")])
+    after = _make_aggregated_json([_make_vuln("A")])
+    before["metadata"].update(before_metadata)
+    after["metadata"].update(after_metadata)
+    before_file, after_file = tmp_path / "before.json", tmp_path / "after.json"
+    before_file.write_text(json.dumps(before))
+    after_file.write_text(json.dumps(after))
+    response = mcp_diff_scan_results(str(before_file), str(after_file))
+    assert response["success"] is False
+    assert "project" in response["error"]
+
+
+@pytest.mark.parametrize("duplicate_side", ["before", "after"])
+def test_duplicate_finding_ids_are_refused(tmp_path, duplicate_side):
+    before, after = tmp_path / "before.json", tmp_path / "after.json"
+    duplicate = _make_vuln("duplicate")
+    _write_results(
+        before, [duplicate, duplicate] if duplicate_side == "before" else [duplicate]
+    )
+    _write_results(
+        after, [duplicate, duplicate] if duplicate_side == "after" else [duplicate]
+    )
+    result = mcp_diff_scan_results(str(before), str(after))
+    assert result["success"] is False
+    assert "duplicate" in result["error"].lower()

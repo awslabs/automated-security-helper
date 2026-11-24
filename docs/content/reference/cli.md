@@ -30,8 +30,10 @@ The Environment variable column names the variable click reads for the option; a
 | [`ash config validate`](#config-validate) | Validate an ASH configuration file the way a scan loads it. |
 | [`ash config validate-plugin-dependencies`](#config-validate-plugin-dependencies) | Check that the configuration resolves and names a project. |
 | [`ash config wizard`](#config-wizard) | Interactive configuration wizard. |
-| [`ash dependencies`](#dependencies) | Install dependencies for ASH plugins |
+| [`ash dependencies`](#dependencies) | Check or install dependencies for ASH plugins |
+| [`ash dependencies check`](#dependencies-check) | Check Grype and Trivy cache metadata without running or downloading tools. |
 | [`ash dependencies install`](#dependencies-install) | Install dependencies for ASH plugins. |
+| [`ash diff`](#diff) | Compare the findings in two saved ASH scans without running a scan. |
 | [`ash express`](#express) | Manage the express daemon: a resident warm ASH process that removes startup cost from every scan. Unix only; scans fall back to ordinary cold runs wherever the daemon is unavailable. |
 | [`ash express start`](#express-start) | Start the express daemon for this user and ASH version (idempotent). |
 | [`ash express status`](#express-status) | Report whether the express daemon is running, and what it has served. |
@@ -55,7 +57,7 @@ Automated Security Helper, the agentic security harness · one workflow for your
 ash [OPTIONS] COMMAND [ARGS]...
 ```
 
-Run with no command, `ash` runs a scan. It accepts these options of [`ash scan`](#scan), with the same types, defaults and environment variables: [`--source-dir`](#scan--source-dir), [`--output-dir`](#scan--output-dir), [`--scanners`](#scan--scanners), [`--exclude-scanners`](#scan--exclude-scanners), [`--only-scanners`](#scan--only-scanners), [`--add-scanners`](#scan--add-scanners), [`--ash-plugin-modules`](#scan--ash-plugin-modules), [`--config-overrides`](#scan--config-overrides), [`--offline`](#scan--offline), [`--sandbox`](#scan--sandbox), [`--express`](#scan--express), [`--offline-semgrep-rulesets`](#scan--offline-semgrep-rulesets), [`--strategy`](#scan--strategy), [`--progress`](#scan--progress), [`--output-formats`](#scan--output-formats), [`--cleanup`](#scan--cleanup), [`--phases`](#scan--phases), [`--inspect`](#scan--inspect), [`--use-existing`](#scan--use-existing), [`--version`](#scan--version), [`--mode`](#scan--mode), [`--python-only`](#scan--python-only), [`--show-summary`](#scan--show-summary), [`--quiet`](#scan--quiet), [`--log-level`](#scan--log-level), [`--config`](#scan--config), [`--verbose`](#scan--verbose), [`--debug`](#scan--debug), [`--color`](#scan--color), [`--fail-on-findings`](#scan--fail-on-findings), [`--fail-on-incomplete-scanners`](#scan--fail-on-incomplete-scanners), [`--allow-stale-content-db`](#scan--allow-stale-content-db), [`--simple`](#scan--simple), [`--ignore-suppressions`](#scan--ignore-suppressions), [`--honor-ignore-files`](#scan--honor-ignore-files), [`--min-severity`](#scan--min-severity), [`--compact-report`](#scan--compact-report), [`--changed-files-only`](#scan--changed-files-only), [`--base-ref`](#scan--base-ref), [`--staged`](#scan--staged), [`--allow-in-tree-tools`](#scan--allow-in-tree-tools), [`--shard-index`](#scan--shard-index), [`--shard-count`](#scan--shard-count), [`--config-from-scanned-repository`](#scan--config-from-scanned-repository), [`--config-file-from-scanned-repository`](#scan--config-file-from-scanned-repository), [`--config-file-from-another-checkout`](#scan--config-file-from-another-checkout), [`--ash-config-from-host`](#scan--ash-config-from-host), [`--workspace`](#scan--workspace), [`--workspace-config`](#scan--workspace-config), [`--allow-missing-projects`](#scan--allow-missing-projects), [`--dry-run`](#scan--dry-run), [`--build`](#scan--build), [`--run`](#scan--run), [`--force`](#scan--force), [`--oci-runner`](#scan--oci-runner), [`--build-target`](#scan--build-target), [`--container-uid`](#scan--container-uid), [`--container-gid`](#scan--container-gid), [`--ash-revision-to-install`](#scan--ash-revision-to-install), [`--custom-containerfile`](#scan--custom-containerfile), [`--custom-build-arg`](#scan--custom-build-arg).
+Run with no command, `ash` runs a scan. It accepts these options of [`ash scan`](#scan), with the same types, defaults and environment variables: [`--source-dir`](#scan--source-dir), [`--output-dir`](#scan--output-dir), [`--scanners`](#scan--scanners), [`--exclude-scanners`](#scan--exclude-scanners), [`--only-scanners`](#scan--only-scanners), [`--add-scanners`](#scan--add-scanners), [`--ash-plugin-modules`](#scan--ash-plugin-modules), [`--config-overrides`](#scan--config-overrides), [`--offline`](#scan--offline), [`--sandbox`](#scan--sandbox), [`--express`](#scan--express), [`--offline-semgrep-rulesets`](#scan--offline-semgrep-rulesets), [`--strategy`](#scan--strategy), [`--progress`](#scan--progress), [`--output-formats`](#scan--output-formats), [`--cleanup`](#scan--cleanup), [`--phases`](#scan--phases), [`--inspect`](#scan--inspect), [`--use-existing`](#scan--use-existing), [`--version`](#scan--version), [`--mode`](#scan--mode), [`--python-only`](#scan--python-only), [`--show-summary`](#scan--show-summary), [`--quiet`](#scan--quiet), [`--log-level`](#scan--log-level), [`--config`](#scan--config), [`--verbose`](#scan--verbose), [`--debug`](#scan--debug), [`--color`](#scan--color), [`--fail-on-findings`](#scan--fail-on-findings), [`--fail-on-incomplete-scanners`](#scan--fail-on-incomplete-scanners), [`--allow-stale-content-db`](#scan--allow-stale-content-db), [`--simple`](#scan--simple), [`--ignore-suppressions`](#scan--ignore-suppressions), [`--honor-ignore-files`](#scan--honor-ignore-files), [`--min-severity`](#scan--min-severity), [`--compact-report`](#scan--compact-report), [`--changed-files-only`](#scan--changed-files-only), [`--base-ref`](#scan--base-ref), [`--staged`](#scan--staged), [`--allow-in-tree-tools`](#scan--allow-in-tree-tools), [`--shard-index`](#scan--shard-index), [`--shard-count`](#scan--shard-count), [`--config-from-scanned-repository`](#scan--config-from-scanned-repository), [`--config-file-from-scanned-repository`](#scan--config-file-from-scanned-repository), [`--config-file-from-another-checkout`](#scan--config-file-from-another-checkout), [`--ash-config-from-host`](#scan--ash-config-from-host), [`--workspace`](#scan--workspace), [`--workspace-config`](#scan--workspace-config), [`--allow-missing-projects`](#scan--allow-missing-projects), [`--dry-run`](#scan--dry-run), [`--build`](#scan--build), [`--run`](#scan--run), [`--force`](#scan--force), [`--oci-runner`](#scan--oci-runner), [`--build-target`](#scan--build-target), [`--container-uid`](#scan--container-uid), [`--container-gid`](#scan--container-gid), [`--ash-revision-to-install`](#scan--ash-revision-to-install), [`--custom-containerfile`](#scan--custom-containerfile), [`--custom-build-arg`](#scan--custom-build-arg), [`--baseline`](#scan--baseline).
 
 Options that only `ash` itself accepts:
 
@@ -65,7 +67,7 @@ Options that only `ash` itself accepts:
 | <a id="ash--install-completion"></a>`--install-completion` | flag | off |  | Install completion for the current shell. |
 | <a id="ash--show-completion"></a>`--show-completion` | flag | off |  | Show completion for the current shell, to copy it or customize the installation. |
 
-Subcommands: [`ash build-image`](#build-image), [`ash config`](#config), [`ash dependencies`](#dependencies), [`ash express`](#express), [`ash get-genai-guide`](#get-genai-guide), [`ash inspect`](#inspect), [`ash mcp`](#mcp), [`ash merge`](#merge), [`ash plugin`](#plugin), [`ash report`](#report), [`ash scan`](#scan).
+Subcommands: [`ash build-image`](#build-image), [`ash config`](#config), [`ash dependencies`](#dependencies), [`ash diff`](#diff), [`ash express`](#express), [`ash get-genai-guide`](#get-genai-guide), [`ash inspect`](#inspect), [`ash mcp`](#mcp), [`ash merge`](#merge), [`ash plugin`](#plugin), [`ash report`](#report), [`ash scan`](#scan).
 
 ## <a id="build-image"></a>`ash build-image`
 
@@ -369,7 +371,7 @@ ash config wizard [OPTIONS]
 
 ## <a id="dependencies"></a>`ash dependencies`
 
-Install dependencies for ASH plugins
+Check or install dependencies for ASH plugins
 
 ```text
 ash dependencies [OPTIONS] COMMAND [ARGS]...
@@ -377,7 +379,24 @@ ash dependencies [OPTIONS] COMMAND [ARGS]...
 
 This command takes no options.
 
-Subcommands: [`ash dependencies install`](#dependencies-install).
+Subcommands: [`ash dependencies check`](#dependencies-check), [`ash dependencies install`](#dependencies-install).
+
+### <a id="dependencies-check"></a>`ash dependencies check`
+
+Check Grype and Trivy cache metadata without running or downloading tools.
+
+```text
+ash dependencies check [OPTIONS]
+```
+
+<!-- doctest: options of=cli.dependencies.check -->
+| Option | Type | Default | Environment variable | Description |
+|--------|------|---------|----------------------|-------------|
+| <a id="dependencies-check--offline"></a>`--offline` | flag | off |  | Check local offline cache files. |
+| <a id="dependencies-check--tool"></a>`--tool` | one of `grype`, `trivy`, repeatable | not set |  | Check this tool only. Repeat to select both tools. |
+| <a id="dependencies-check--config"></a>`--config`, `-c` | text | not set |  | Use the staleness policy from this ASH config file. |
+| <a id="dependencies-check--source-dir"></a>`--source-dir` | directory | `.` |  | Directory the offline scan would scan. |
+| <a id="dependencies-check--allow-stale-content-db"></a>`--allow-stale-content-db` / `--no-allow-stale-content-db` | flag | not set |  | Override the configured age policy for all checked databases. |
 
 ### <a id="dependencies-install"></a>`ash dependencies install`
 
@@ -403,6 +422,27 @@ ash dependencies install [OPTIONS]
 | <a id="dependencies-install--verbose"></a>`--verbose`, `-v` | flag | off |  | Enable verbose logging |
 | <a id="dependencies-install--debug"></a>`--debug`, `-d` | flag | off |  | Enable debug logging |
 | <a id="dependencies-install--color"></a>`--color` / `--no-color` | flag | on |  | Enable/disable colorized output |
+
+## <a id="diff"></a>`ash diff`
+
+Compare the findings in two saved ASH scans without running a scan.
+
+```text
+ash diff [OPTIONS] {before} {after}
+```
+
+<!-- doctest: options of=cli.diff -->
+| Argument | Type | Default | Environment variable | Description |
+|----------|------|---------|----------------------|-------------|
+| <a id="diff--arg-before"></a>`before` | path | required |  | Baseline ASH scan results JSON file. |
+| <a id="diff--arg-after"></a>`after` | path | required |  | Current ASH scan results JSON file. |
+
+<!-- doctest: options of=cli.diff -->
+| Option | Type | Default | Environment variable | Description |
+|--------|------|---------|----------------------|-------------|
+| <a id="diff--format"></a>`--format` | one of `text`, `json` | `text` |  | Output format (text or json). |
+| <a id="diff--cli-json-input"></a>`--cli-json-input` | text | not set |  | Read parameter values from a JSON object: a path, a file:// URI, or '-' for stdin. Keys are parameter names (output_dir) or long flag spellings (--output-dir). Flags given on the command line override the file; the file overrides environment variables. Run with --generate-cli-skeleton for a template. |
+| <a id="diff--generate-cli-skeleton"></a>`--generate-cli-skeleton` | flag | off |  | Print a JSON template for --cli-json-input, listing every parameter of this command with its default, or null where it is required or an environment variable backs it, and exit. |
 
 ## <a id="express"></a>`ash express`
 
@@ -726,5 +766,6 @@ ash scan [OPTIONS]
 | <a id="scan--ash-revision-to-install"></a>`--ash-revision-to-install` | text | not set |  | ASH branch, tag or full commit id to install in the container image for usage during containerized scans |
 | <a id="scan--custom-containerfile"></a>`--custom-containerfile` | text | not set |  | Path to a custom container definition (e.g. Dockerfile) that you would like to build \*after\* the ASH container image builds. This is typically used when building a custom container image for ASH and including custom tooling that ASH does not come with by default. The fully qualified image name for the ASH image is passed in as the `ASH_BASE_IMAGE` build-arg so you can use it as a base. IMPORTANT: When a custom_containerfile path is provided, the build-target is set to `ci` so the container run-as configuration is not shifted to the non-root user. If you are using this parameter, you are responsible for securing your final container as appropriate. |
 | <a id="scan--custom-build-arg"></a>`--custom-build-arg` | text, repeatable | not set |  | Custom build arguments to pass to the container build |
+| <a id="scan--baseline"></a>`--baseline` | text | not set | `ASH_BASELINE` | Leave out findings already present in this saved ash_aggregated_results.json from a full scan (for example the default branch's), so the reports, the summary and the exit code count only new findings. Matching tolerates findings that only moved lines. The file must be outside the scanned checkout and the output directory. Supported with --mode local and precommit only (exit 5 otherwise). |
 | <a id="scan--cli-json-input"></a>`--cli-json-input` | text | not set |  | Read parameter values from a JSON object: a path, a file:// URI, or '-' for stdin. Keys are parameter names (output_dir) or long flag spellings (--output-dir). Flags given on the command line override the file; the file overrides environment variables. Run with --generate-cli-skeleton for a template. |
 | <a id="scan--generate-cli-skeleton"></a>`--generate-cli-skeleton` | flag | off |  | Print a JSON template for --cli-json-input, listing every parameter of this command with its default, or null where it is required or an environment variable backs it, and exit. |

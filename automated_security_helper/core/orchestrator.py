@@ -398,6 +398,7 @@ class ASHScanOrchestrator(BaseModel):
     ]
 
     # Core components
+    before_output: Optional[Callable[[Any], None]] = Field(default=None, exclude=True)
     execution_engine: Annotated[ScanExecutionEngine | None, Field()] = None
 
     output_formats: List[ExportFormat] = []
@@ -760,6 +761,8 @@ class ASHScanOrchestrator(BaseModel):
             self._refuse_linked_output_dir()
         self._build_engine(config)
         self._refuse_committed_results_paths()
+        if self.before_output is not None:
+            self.before_output(self)
 
         if self.existing_results_path is None:
             if self.keep_previous_results:
@@ -978,6 +981,10 @@ class ASHScanOrchestrator(BaseModel):
         if self.execution_engine is not None:
             self.execution_engine.restrict_to_changed_files(changed_files)
 
+    def restrict_to_baseline(self, baseline) -> None:
+        if self.execution_engine is not None:
+            self.execution_engine.restrict_to_baseline(baseline)
+
     def _apply_metadata(self) -> None:
         """Copy ``self.metadata`` onto the results model's own metadata.
 
@@ -1073,6 +1080,8 @@ class ASHScanOrchestrator(BaseModel):
                 # This run's directory, not the one the saved results scanned:
                 # "." over a saved services/api would archive the whole
                 # repository's findings outside services/api.
+                continue
+            if key == "baseline" and loaded and value is None:
                 continue
             if key == "changed_files_only" and value is not True:
                 # A run without the flag says False (run_ash_scan writes it on
