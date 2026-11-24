@@ -49,11 +49,11 @@ def test_scan_results_container_with_target():
     """Test creating a ScanResultsContainer with a target path."""
     target_path = Path("/path/to/target")
     container = ScanResultsContainer(
-        scanner_name="test_scanner", target=target_path, target_type="file"
+        scanner_name="test_scanner", target=target_path, target_type="converted"
     )
 
     assert container.target == target_path
-    assert container.target_type == "file"
+    assert container.target_type == "converted"
 
 
 def test_scan_results_container_with_timing():
