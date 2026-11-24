@@ -158,6 +158,27 @@ def test_markers_mounts_and_environment_names():
     )
 
 
+def test_the_shared_refusal_texts_are_re_exported_not_copied():
+    from automated_security_helper.interactions import wrapper_contract as spec
+    from automated_security_helper.utils import directory_refusals as owner
+
+    # The codes are pinned as literals; the functions must be the owner's own objects,
+    # so a change to a refusal text in directory_refusals reaches the spec at once.
+    assert spec.REFUSED_NOT_A_DIRECTORY == "not_a_directory"
+    assert spec.REFUSED_CANNOT_BE_ENTERED == "cannot_be_entered"
+    assert spec.REFUSED_CANNOT_BE_CREATED == "cannot_be_created"
+    assert spec.REFUSED_CANNOT_BE_WRITTEN == "cannot_be_written"
+    assert spec.REFUSED_NOT_A_VALID_PATH == "not_a_valid_path"
+    for name in (
+        "source_dir_refusal",
+        "output_dir_refusal",
+        "output_dir_invalid_path",
+        "output_dir_unmakeable",
+        "output_dir_unwritable",
+    ):
+        assert getattr(spec, name) is getattr(owner, name), name
+
+
 def test_takers_names_an_unknown_option():
     with pytest.raises(KeyError):
         contract().takers("--not-an-option")

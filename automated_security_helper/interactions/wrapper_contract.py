@@ -27,6 +27,22 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any
 
+# The directory refusals both wrappers quote. ``directory_refusals`` owns the texts and
+# the codes that name each refusal; they are re-exported here so the wrapper contract
+# has one import for everything the wrappers must agree on, and nothing is copied.
+from automated_security_helper.utils.directory_refusals import (  # noqa: F401
+    REFUSED_CANNOT_BE_CREATED,
+    REFUSED_CANNOT_BE_ENTERED,
+    REFUSED_CANNOT_BE_WRITTEN,
+    REFUSED_NOT_A_DIRECTORY,
+    REFUSED_NOT_A_VALID_PATH,
+    output_dir_invalid_path,
+    output_dir_refusal,
+    output_dir_unmakeable,
+    output_dir_unwritable,
+    source_dir_refusal,
+)
+
 
 #: The options a wrapper adds, or reads, in front of the subcommand's own arguments,
 #: in the order the wrappers list them. Which subcommands take each is read from the
