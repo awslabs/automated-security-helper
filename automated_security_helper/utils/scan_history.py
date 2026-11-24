@@ -1,0 +1,358 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""A compact record of each completed scan, kept beside its output for ``ash trend``.
+
+Why this exists
+---------------
+A scan's output directory holds one run: the next scan clears it
+(``core/previous_results.RESULT_ENTRIES``). Answering "which findings are new,
+fixed and carried over the last N runs" needs the findings of N runs, and a CI
+that does not archive each ``ash_aggregated_results.json`` has only the last.
+
+With ``global_settings.history.enabled`` a completed scan appends one run record
+to ``<output dir>/history/<report_id>.json``. ``history/`` is deliberately not
+among ``RESULT_ENTRIES`` or ``WORKING_DIR_NAMES``, so a new scan appends to it and
+never clears it, as the logs are never cleared by the scan-start sweep.
+
+What a record is
+----------------
+Not a copy of the results file. That file carries masked-but-present snippets, raw
+scanner payloads and the whole resolved configuration, and fifty of them are a
+disk and privacy cost a trend never reads. A record holds one row per finding
+with what ``utils.finding_diff.match_findings`` needs to pair it with the same
+finding in the next run (its id, scanner, rule, severity, suppression state, place,
+and the identity ingredients ``fallback_key`` reads), plus the run's metadata and
+the coverage markers ``coverage_warnings`` compares. ``record_version`` is 1.
+
+Which scans are recorded
+------------------------
+Only scans a comparison would accept (``finding_diff.check_comparable``): a
+workspace aggregate, an un-merged shard, a ``--changed-files-only`` run and a
+baseline-filtered run are left out, so a series never contains a point a trend
+would have to refuse. A scan with no usable ``report_id`` is left out too: the
+record is named by it, and the name is what orders the series and what pruning
+reads.
+
+Retention and tolerance
+-----------------------
+Pruning is by run count (``keep_runs``, default 50) at append time: the oldest
+records, by the timestamp in their name, go. A count rather than an age because
+age needs a clock and deletes without warning. Only files whose name is a run
+record's are ever counted or removed; anything else in ``history/`` (a note, a
+record a newer ASH wrote under another name) is left alone. A record that is
+corrupt, from a newer ``record_version``, or not a run record at all is skipped
+when the history is read, never an error.
+
+Nothing here raises into a scan: recording is a convenience, and a failure to
+record is a warning.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Iterable
+
+from automated_security_helper.utils.finding_diff import (
+    ComparabilityRefusal,
+    _evaluated_scanners,
+    check_comparable,
+)
+from automated_security_helper.utils.finding_identity import canonical
+from automated_security_helper.utils.log import ASH_LOGGER
+
+if TYPE_CHECKING:
+    from automated_security_helper.models.asharp_model import AshAggregatedResults
+    from automated_security_helper.models.flat_vulnerability import FlatVulnerability
+
+#: The directory under the output directory that holds the run records.
+HISTORY_DIR_NAME = "history"
+
+#: Written into every record; a reader skips a record it does not know.
+RECORD_VERSION = 1
+
+#: How many run records are kept when the config does not say.
+DEFAULT_KEEP_RUNS = 50
+
+#: The name of a run record: the report id (``new_report_id``'s shape, a prefix, the
+#: UTC start second, twelve hex digits) and ``.json``. Strict on purpose: the name
+#: is used as a path component and is what pruning is allowed to delete.
+_RECORD_NAME = re.compile(
+    r"^(?P<id>(?P<prefix>[A-Za-z][A-Za-z0-9-]*)-(?P<stamp>\d{14})-(?P<token>[0-9a-f]{12}))\.json$"
+)
+
+
+#: A record larger than this is not read: a history of fifty is meant to be small.
+_MAX_RECORD_BYTES = 64 * 1024 * 1024
+
+
+class HistoryRefused(RuntimeError):
+    """The history cannot be written or read here; the text says why."""
+
+
+def record_file_name(report_id: str | None) -> str | None:
+    """The file name a run with *report_id* is recorded under, or None.
+
+    None for an id that is not ``new_report_id``'s shape, so that an id with a
+    separator or a dot never becomes a path.
+    """
+    if not isinstance(report_id, str):
+        return None
+    name = f"{report_id}.json"
+    return name if _RECORD_NAME.match(name) else None
+
+
+def _order_key(name: str) -> tuple[str, str, str]:
+    """How record names sort: by start second, then token, then name."""
+    match = _RECORD_NAME.match(name)
+    assert match is not None
+    return (match["stamp"], match["token"], name)
+
+
+def _finding_row(finding: "FlatVulnerability") -> dict[str, Any]:
+    base = finding.identity_base
+    return {
+        "id": finding.id,
+        "scanner": finding.scanner,
+        "rule_id": finding.rule_id,
+        "severity": finding.severity,
+        "is_suppressed": finding.is_suppressed,
+        "file_path": finding.file_path,
+        "line_start": finding.line_start,
+        "line_end": finding.line_end,
+        "has_identity": finding.identity is not None,
+        "has_fingerprint_identity": finding.has_fingerprint_identity,
+        "identity_base": canonical(base) if base is not None else None,
+        "identity_message": finding.identity_message,
+        "source_report": finding.source_report,
+    }
+
+
+def _coverage(results: "AshAggregatedResults") -> dict[str, Any]:
+    from automated_security_helper.interactions.run_ash_scan import (
+        scan_incompleteness,
+    )
+
+    metadata = results.metadata
+    exclusions = metadata.ignore_file_exclusions
+    return {
+        "expected_scanners": sorted(metadata.expected_scanners),
+        "evaluated_scanners": sorted(_evaluated_scanners(results)),
+        "ignore_file_exclusions": (
+            exclusions.model_dump(mode="json") if exclusions is not None else None
+        ),
+        "incomplete": bool(scan_incompleteness(results, gate=True)),
+        "scanner_results_recorded": bool(results.scanner_results),
+        "inputs_not_scanned": bool(metadata.inputs_not_scanned),
+    }
+
+
+def build_run_record(results: "AshAggregatedResults") -> dict[str, Any] | None:
+    """The run record for *results*, or None when this scan is not recorded.
+
+    See the module docstring for which scans are left out.
+    """
+    if record_file_name(results.metadata.report_id) is None:
+        return None
+    try:
+        check_comparable(results)
+    except ComparabilityRefusal:
+        return None
+    metadata = results.metadata
+    return {
+        "record_version": RECORD_VERSION,
+        "report_id": metadata.report_id,
+        "generated_at": metadata.generated_at,
+        "project_name": metadata.project_name,
+        "workspace_project": getattr(metadata, "workspace_project", None),
+        "tool_version": metadata.tool_version,
+        "coverage": _coverage(results),
+        "findings": [_finding_row(f) for f in results.to_flat_vulnerabilities()],
+    }
+
+
+def history_dir(output_dir: str | os.PathLike[str]) -> Path:
+    return Path(output_dir) / HISTORY_DIR_NAME
+
+
+def _ensure_history_dir(output_dir: Path) -> Path:
+    """``<output dir>/history``, made if missing, never through a link."""
+    directory = history_dir(output_dir)
+    if directory.is_symlink():
+        raise HistoryRefused(f"{directory} is a link")
+    try:
+        directory.mkdir(exist_ok=True)
+    except FileExistsError:
+        pass
+    if directory.is_symlink() or not directory.is_dir():
+        raise HistoryRefused(f"{directory} is not a directory")
+    return directory
+
+
+def _record_names(directory: Path) -> list[str]:
+    """Names in *directory* that are run records' (regular files, never links)."""
+    names = []
+    with os.scandir(directory) as entries:
+        for entry in entries:
+            if not _RECORD_NAME.match(entry.name):
+                continue
+            if entry.is_symlink() or not entry.is_file(follow_symlinks=False):
+                continue
+            names.append(entry.name)
+    return sorted(names, key=_order_key)
+
+
+def prune_history(
+    output_dir: str | os.PathLike[str], keep_runs: int = DEFAULT_KEEP_RUNS
+) -> list[str]:
+    """Remove all but the newest *keep_runs* run records; the names removed.
+
+    Only files named as run records are counted or removed. A record that is
+    corrupt still holds its place in the count: pruning reads names, not content.
+    """
+    if keep_runs < 1:
+        raise ValueError("keep_runs must be at least 1")
+    directory = history_dir(output_dir)
+    if directory.is_symlink() or not directory.is_dir():
+        return []
+    names = _record_names(directory)
+    removed = []
+    for name in names[: max(0, len(names) - keep_runs)]:
+        try:
+            (directory / name).unlink()
+        except FileNotFoundError:
+            continue
+        removed.append(name)
+    return removed
+
+
+def write_run_record(
+    results: "AshAggregatedResults",
+    output_dir: str | os.PathLike[str],
+    keep_runs: int = DEFAULT_KEEP_RUNS,
+) -> Path | None:
+    """Append *results*' run record to the history and prune; its path, or None.
+
+    None when this scan is not recorded (:func:`build_run_record`). A second call
+    for the same ``report_id`` replaces the record. Raises on a write failure; see
+    :func:`record_run` for the form a scan calls.
+    """
+    from automated_security_helper.utils.atomic_write import write_text_atomically
+
+    if keep_runs < 1:
+        raise ValueError("keep_runs must be at least 1")
+    record = build_run_record(results)
+    if record is None:
+        return None
+    root = Path(output_dir)
+    directory = _ensure_history_dir(root)
+    path = directory / f"{record['report_id']}.json"
+    # ensure_ascii keeps a lone surrogate in a path as an escape, which json.loads
+    # turns back into the same text.
+    text = json.dumps(record, sort_keys=True, ensure_ascii=True, separators=(",", ":"))
+    write_text_atomically(path, text + "\n", root=root)
+    prune_history(root, keep_runs)
+    return path
+
+
+def record_run(
+    results: "AshAggregatedResults",
+    output_dir: str | os.PathLike[str],
+    keep_runs: int = DEFAULT_KEEP_RUNS,
+) -> Path | None:
+    """:func:`write_run_record` for a scan: a failure is logged, never raised."""
+    try:
+        path = write_run_record(results, output_dir, keep_runs)
+    except Exception as exc:  # noqa: BLE001 - recording must not fail a scan
+        ASH_LOGGER.warning(f"Could not record this scan in the history: {exc}")
+        return None
+    if path is None:
+        ASH_LOGGER.info(
+            "This scan is not recorded in the history: it is a shard, a workspace "
+            "aggregate, or filtered by --changed-files-only or --baseline."
+        )
+    return path
+
+
+def _valid_record(data: Any) -> bool:
+    return (
+        isinstance(data, dict)
+        and data.get("record_version") == RECORD_VERSION
+        and isinstance(data.get("report_id"), str)
+        and isinstance(data.get("findings"), list)
+        and all(isinstance(row, dict) for row in data["findings"])
+        and isinstance(data.get("coverage"), dict)
+    )
+
+
+def read_run_record(path: str | os.PathLike[str]) -> dict[str, Any] | None:
+    """The run record at *path*, or None for anything that is not one.
+
+    None for a missing, unreadable, corrupt or oversized file, a link, a record
+    from another ``record_version``, and a record whose ``report_id`` is not the
+    name of the file it is in.
+    """
+    record_path = Path(path)
+    match = _RECORD_NAME.match(record_path.name)
+    if match is None or record_path.is_symlink():
+        return None
+    try:
+        if record_path.stat().st_size > _MAX_RECORD_BYTES:
+            return None
+        data = json.loads(record_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not _valid_record(data) or data["report_id"] != match["id"]:
+        return None
+    return data
+
+
+def read_history(output_dir: str | os.PathLike[str]) -> list[dict[str, Any]]:
+    """Every readable run record in the history, oldest first.
+
+    Skips what :func:`read_run_record` skips, and says how many it skipped at debug.
+    """
+    directory = history_dir(output_dir)
+    if directory.is_symlink() or not directory.is_dir():
+        return []
+    records: list[dict[str, Any]] = []
+    skipped = 0
+    for name in _record_names(directory):
+        record = read_run_record(directory / name)
+        if record is None:
+            skipped += 1
+        else:
+            records.append(record)
+    if skipped:
+        ASH_LOGGER.debug(f"Skipped {skipped} unreadable run record(s) in {directory}")
+    return records
+
+
+def history_enabled(history_config: Any) -> bool:
+    """Whether a ``global_settings.history`` section asks for recording."""
+    return getattr(history_config, "enabled", False) is True
+
+
+def record_run_if_enabled(
+    history_config: Any,
+    results: "AshAggregatedResults",
+    output_dir: str | os.PathLike[str],
+) -> Path | None:
+    """Record the run when the config section enables it; otherwise do nothing."""
+    if not history_enabled(history_config):
+        return None
+    keep = getattr(history_config, "keep_runs", DEFAULT_KEEP_RUNS)
+    if not isinstance(keep, int) or isinstance(keep, bool) or keep < 1:
+        keep = DEFAULT_KEEP_RUNS
+    return record_run(results, output_dir, keep)
+
+
+def record_names(output_dir: str | os.PathLike[str]) -> Iterable[str]:
+    """The names of the run records in the history, oldest first."""
+    directory = history_dir(output_dir)
+    if directory.is_symlink() or not directory.is_dir():
+        return []
+    return _record_names(directory)

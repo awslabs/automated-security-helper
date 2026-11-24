@@ -1753,6 +1753,22 @@ class ASHScanOrchestrator(BaseModel):
         except ScanCancelled:
             self._remove_results_file_written_before_a_cancel()
             raise
+        # After the cancel check: a cancelled scan leaves no results file, so it
+        # leaves no history record either.
+        self._record_history(results)
+
+    def _record_history(self, results: AshAggregatedResults) -> None:
+        """Append the run to the output directory's history when the config asks.
+
+        Off unless ``global_settings.history.enabled``. Never raises: recording
+        logs its own failures (utils/scan_history).
+        """
+        from automated_security_helper.utils.scan_history import record_run_if_enabled
+
+        global_settings = getattr(self.config, "global_settings", None)
+        record_run_if_enabled(
+            getattr(global_settings, "history", None), results, self._output_path
+        )
 
     def settle_previous_results(self, restore: bool) -> None:
         """Put the previous results back, or drop them. Never raises.

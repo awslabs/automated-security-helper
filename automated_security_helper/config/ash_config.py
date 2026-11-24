@@ -1944,6 +1944,35 @@ class AshDeduplicationConfig(RedactedSection):
     ] = False
 
 
+class AshHistoryConfig(RedactedSection):
+    """Run history: a compact record of each completed scan, for ``ash trend``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: Annotated[
+        bool,
+        Field(
+            description=(
+                "Append a compact run record to '<output dir>/history/' after each "
+                "completed scan. Off by default: it adds files to the output "
+                "directory on every scan."
+            )
+        ),
+    ] = False
+
+    keep_runs: Annotated[
+        int,
+        Field(
+            ge=1,
+            le=10000,
+            description=(
+                "How many run records to keep when history is enabled; the oldest "
+                "are removed when a new one is written."
+            ),
+        ),
+    ] = 50
+
+
 class AshConfigGlobalSettingsSection(RedactedSection):
     # validate_default is here because `severity_threshold`'s default is derived
     # from an environment variable, and pydantic does not validate a default no
@@ -2000,6 +2029,13 @@ class AshConfigGlobalSettingsSection(RedactedSection):
             description="Cross-scanner duplicate annotation in the flat reports (opt-in; off by default)."
         ),
     ] = AshDeduplicationConfig()
+
+    history: Annotated[
+        AshHistoryConfig,
+        Field(
+            description="Run history recording (a compact record of each completed scan)."
+        ),
+    ] = AshHistoryConfig()
 
 
 # Distinguishes "caller did not pass cpu_count" from "caller passed None", which
