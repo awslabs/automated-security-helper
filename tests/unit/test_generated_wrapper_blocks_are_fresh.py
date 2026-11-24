@@ -107,7 +107,19 @@ def test_a_perturbed_block_is_reported_by_file_and_block(
     drifts = generator.check(root)
 
     assert [(d.file, d.block) for d in drifts] == [(file, block)]
-    assert new in drifts[0].diff or "-" in drifts[0].diff
+    # The diff shows the change itself: the perturbed text on a removed line and the
+    # generated text on an added one. A diff that names the block but carries neither
+    # (an empty body, or the header lines alone) fails here, which the old check, true
+    # of every unified diff's "---" header, could not.
+    body = [
+        line
+        for line in drifts[0].diff.split("\n")
+        if not line.startswith(("---", "+++"))
+    ]
+    removed = "\n".join(line for line in body if line.startswith("-"))
+    added = "\n".join(line for line in body if line.startswith("+"))
+    assert new.strip() in removed, drifts[0].diff
+    assert old.strip() in added, drifts[0].diff
 
 
 def test_regenerating_a_perturbed_copy_restores_the_committed_text(generator, tmp_path):
