@@ -22,7 +22,7 @@ import fnmatch
 from datetime import date
 
 import pytest
-from hypothesis import HealthCheck, given, reject, settings
+from hypothesis import HealthCheck, event, given, reject, settings
 from hypothesis import strategies as st
 from pydantic import ValidationError
 
@@ -241,7 +241,21 @@ RULES = st.one_of(
 )
 
 COMPONENTS = st.sampled_from(
-    ["src", "tests", "a.py", "B.PY", "café", "ß", "日本", "..", ".", "a b", "x[1]", "x*", "?"]
+    [
+        "src",
+        "tests",
+        "a.py",
+        "B.PY",
+        "café",
+        "ß",
+        "日本",
+        "..",
+        ".",
+        "a b",
+        "x[1]",
+        "x*",
+        "?",
+    ]
 )
 PATH_PATTERN_PARTS = st.sampled_from(
     ["src", "tests", "*", "**", "*.py", "a.py", "café", "ß", "[ab]*", "?", ".", ""]
@@ -284,7 +298,15 @@ PACKAGE_PATHS = st.one_of(
 RESOURCE_VALUES = st.one_of(
     st.none(),
     st.sampled_from(
-        ["Stack/Role", "stack/role", "Stack/*", "AWS::IAM::Policy", "aws::iam::policy", "a[b]c", "a[b]*"]
+        [
+            "Stack/Role",
+            "stack/role",
+            "Stack/*",
+            "AWS::IAM::Policy",
+            "aws::iam::policy",
+            "a[b]c",
+            "a[b]*",
+        ]
     ),
 )
 SCANNERS = st.sampled_from([ENGINE, "ghost", "bandit"])
@@ -299,14 +321,18 @@ SCOPES = st.one_of(
             "resource_type": RESOURCE_VALUES.filter(bool),
             "engines": st.dictionaries(
                 st.sampled_from([ENGINE, "ghost"]),
-                st.fixed_dictionaries({"marker": st.sampled_from(["B602", "Rule", "x"])}),
+                st.fixed_dictionaries(
+                    {"marker": st.sampled_from(["B602", "Rule", "x"])}
+                ),
                 max_size=2,
             ),
             "bogus": st.just(1),
         },
     ),
 )
-EXPIRES = st.sampled_from([None, None, None, "2000-01-01", "2999-12-31", "not-a-date", ""])
+EXPIRES = st.sampled_from(
+    [None, None, None, "2000-01-01", "2999-12-31", "not-a-date", ""]
+)
 
 
 def build_finding(values) -> FlatVulnerability:
@@ -330,7 +356,9 @@ def findings(draw):
             "line_start": draw(LINES),
             "line_end": draw(LINES),
             "package_name": draw(PACKAGE_NAMES),
-            "package_version": draw(st.one_of(st.none(), st.sampled_from(["1.0.0", "2.x"]))),
+            "package_version": draw(
+                st.one_of(st.none(), st.sampled_from(["1.0.0", "2.x"]))
+            ),
             "package_path": draw(PACKAGE_PATHS),
             "resource_id": draw(RESOURCE_VALUES),
             "resource_type": draw(RESOURCE_VALUES),
@@ -338,27 +366,95 @@ def findings(draw):
     )
 
 
+def _near(draw, value, alternatives):
+    """Half the time a value drawn to hit ``value``, else one of ``alternatives``."""
+    return draw(st.one_of(st.just(value), alternatives))
+
+
 @st.composite
-def suppressions(draw):
+def suppression_for(draw, finding):
+    """An entry drawn mostly to cover ``finding`` (or to miss it by one field).
+
+    Independent draws almost never agree on every field, so the match arm of the
+    predicate would go untested; each field is therefore taken from the finding,
+    a glob of it, or an unrelated value.
+    """
+    rule = finding.rule_id
+    rule_choices = st.one_of(st.none(), RULES)
+    if rule:
+        base = rule.split("[")[0]
+        derived = [rule, rule.swapcase(), rule[:1] + "*", base, base + "*", "*"]
+        rule_choices = st.one_of(
+            rule_choices, st.sampled_from(derived), st.sampled_from(derived)
+        )
+    path = finding.file_path
+    path_choices = st.one_of(PATH_PATTERNS, st.just("**"))
+    if path:
+        head = path.replace("\\", "/").split("/")[0]
+        derived_paths = [path, head + "/**", "**/" + path.split("/")[-1]]
+        path_choices = st.one_of(
+            path_choices, st.sampled_from(derived_paths), st.sampled_from(derived_paths)
+        )
+    near_line = st.integers(-2, 14)
     values = {
-        "path": draw(PATH_PATTERNS),
+        "path": draw(path_choices),
         "reason": "r",
-        "rule_id": draw(st.one_of(st.none(), RULES)),
-        "line_start": draw(LINES),
-        "line_end": draw(LINES),
-        "package_name": draw(PACKAGE_NAMES),
-        "package_version": draw(st.one_of(st.none(), st.sampled_from(["1.0.0", "2.*", "x"]))),
+        "rule_id": draw(rule_choices),
+        "line_start": draw(st.one_of(st.none(), near_line, LINES)),
+        "line_end": draw(st.one_of(st.none(), near_line, LINES)),
+        "package_name": draw(
+            st.one_of(
+                st.none(),
+                PACKAGE_NAMES,
+                st.just((finding.package_name or "x")[:2] + "*"),
+            )
+        ),
+        "package_version": draw(
+            st.one_of(st.none(), st.sampled_from(["1.0.0", "2.*", "x"]))
+        ),
         "package_path": draw(PACKAGE_PATHS),
-        "symbol": draw(SYMBOLS),
-        "expires": draw(EXPIRES),
+        "symbol": draw(st.one_of(st.none(), st.none(), st.none(), SYMBOLS)),
+        "expires": draw(st.one_of(st.none(), st.none(), st.none(), EXPIRES)),
     }
-    scope = draw(SCOPES)
+    scope = draw(
+        st.one_of(
+            st.none(),
+            st.none(),
+            SCOPES,
+            st.just(
+                {
+                    "resource_id": finding.resource_id or "x",
+                    "engines": {
+                        finding.scanner or "ghost": {"marker": finding.rule_id or "x"}
+                    },
+                }
+            ),
+            st.just({"resource_type": finding.resource_type or "x"}),
+            # engines that do not list the finding's scanner
+            st.just({"engines": {"unlisted-engine": {"marker": "x"}}}),
+            st.just(
+                {
+                    "engines": {
+                        "unlisted-engine": {"marker": "x"},
+                        finding.scanner or "ghost": {"marker": finding.rule_id or "x"},
+                    }
+                }
+            ),
+            st.just(
+                {
+                    "engines": {
+                        finding.scanner or "ghost": {"marker": finding.rule_id or "x"}
+                    }
+                }
+            ),
+        )
+    )
     if scope is not None:
         values["scope"] = scope
     values = {k: v for k, v in values.items() if v is not None}
     # every entry is built the way a results file keeps one, the one route that
     # admits the shapes a config refuses (blank ids, bad dates, unknown keys)
-    if draw(st.booleans()):
+    if draw(st.integers(0, 9)) == 0:
         values["bogus_key"] = 1
     try:
         return AshSuppression.model_validate(
@@ -366,6 +462,16 @@ def suppressions(draw):
         )
     except (ValidationError, ValueError):
         reject()
+
+
+@st.composite
+def cases(draw, min_size=1, max_size=1, repeat=1):
+    """A finding and the entries to check it against."""
+    finding = draw(findings())
+    entries = draw(
+        st.lists(suppression_for(finding), min_size=min_size, max_size=max_size)
+    )
+    return finding, (entries * repeat)[:130] if repeat > 1 else entries
 
 
 def resolver_answers(draw_bool):
@@ -393,7 +499,14 @@ def run_both(operation, entries, finding, answers):
         finally:
             registry._ENGINE_HOOKS.clear()
             registry._ENGINE_HOOKS.update(previous)
-        out.append((verdict, journal.events, sorted(warned), sorted(registry._NO_ENGINE_WARNED)))
+        out.append(
+            (
+                verdict,
+                journal.events,
+                sorted(warned),
+                sorted(registry._NO_ENGINE_WARNED),
+            )
+        )
         registry.reset_unmatched_engine_warnings()
     return out
 
@@ -408,67 +521,84 @@ SETTINGS = settings(
 @pytest.mark.usefixtures("pinned_today")
 class TestFrameLayerAgreesWithTheReference:
     @SETTINGS
-    @given(entry=suppressions(), finding=findings(), answer=st.booleans(), use_resolver=st.booleans())
-    def test_a_pair_verdict_and_every_call_made(self, entry, finding, answer, use_resolver):
+    @given(case=cases(), answer=st.booleans(), use_resolver=st.booleans())
+    def test_a_pair_verdict_and_every_call_made(self, case, answer, use_resolver):
+        finding, [entry] = case
+
         def operation(impl, entries, f, resolver, warned):
             r = resolver if use_resolver else None
             if impl == "reference":
                 return REFERENCE.matches(entries[0], f, r, warned)
             return suppression_frame.matches(entries[0], f, r, warned)
 
-        reference, frame = run_both(operation, [entry], finding, resolver_answers(answer))
+        reference, frame = run_both(
+            operation, [entry], finding, resolver_answers(answer)
+        )
+        event(f"verdict={reference[0]}")
         assert frame == reference
 
     @SETTINGS
-    @given(entry=suppressions(), finding=findings(), answer=st.booleans())
-    def test_the_public_method_is_the_layer(self, entry, finding, answer):
+    @given(case=cases(), answer=st.booleans())
+    def test_the_public_method_is_the_layer(self, case, answer):
+        finding, [entry] = case
+
         def operation(impl, entries, f, resolver, warned):
             if impl == "reference":
                 return REFERENCE.matches(entries[0], f, resolver, warned)
             return entries[0].matches(f, resolver, warned)
 
-        reference, frame = run_both(operation, [entry], finding, resolver_answers(answer))
+        reference, frame = run_both(
+            operation, [entry], finding, resolver_answers(answer)
+        )
         assert frame == reference
 
     @SETTINGS
-    @given(
-        entries=st.lists(suppressions(), min_size=0, max_size=40),
-        finding=findings(),
-        answer=st.booleans(),
-    )
-    def test_the_first_match_and_nothing_read_after_it(self, entries, finding, answer):
-        def operation(impl, entries, f, resolver, warned):
-            if impl == "reference":
-                return REFERENCE.first(entries, f, resolver, warned)
-            hit = should_suppress_finding(f, entries, resolver, warned_engines=warned)
-            return None if hit[1] is None else next(
-                i for i, e in enumerate(entries) if e is hit[1]
-            )
-
-        reference, frame = run_both(operation, entries, finding, resolver_answers(answer))
-        assert frame == reference
-
-    @SETTINGS
-    @given(finding=findings(), answer=st.booleans(), data=st.data())
-    def test_a_list_longer_than_one_chunk_keeps_list_order(self, finding, answer, data):
-        base = data.draw(st.lists(suppressions(), min_size=1, max_size=4))
-        entries = (base * 40)[:130]
+    @given(case=cases(min_size=0, max_size=40), answer=st.booleans())
+    def test_the_first_match_and_nothing_read_after_it(self, case, answer):
+        finding, entries = case
 
         def operation(impl, entries, f, resolver, warned):
             if impl == "reference":
                 return REFERENCE.first(entries, f, resolver, warned)
             hit = should_suppress_finding(f, entries, resolver, warned_engines=warned)
-            return None if hit[1] is None else next(
-                i for i, e in enumerate(entries) if e is hit[1]
+            return (
+                None
+                if hit[1] is None
+                else next(i for i, e in enumerate(entries) if e is hit[1])
             )
 
-        reference, frame = run_both(operation, entries, finding, resolver_answers(answer))
+        reference, frame = run_both(
+            operation, entries, finding, resolver_answers(answer)
+        )
         assert frame == reference
 
     @SETTINGS
-    @given(entry=suppressions(), finding=findings())
-    def test_the_line_range_column_alone(self, entry, finding):
+    @given(case=cases(min_size=1, max_size=4, repeat=40), answer=st.booleans())
+    def test_a_list_longer_than_one_chunk_keeps_list_order(self, case, answer):
+        finding, entries = case
+
+        def operation(impl, entries, f, resolver, warned):
+            if impl == "reference":
+                return REFERENCE.first(entries, f, resolver, warned)
+            hit = should_suppress_finding(f, entries, resolver, warned_engines=warned)
+            return (
+                None
+                if hit[1] is None
+                else next(i for i, e in enumerate(entries) if e is hit[1])
+            )
+
+        reference, frame = run_both(
+            operation, entries, finding, resolver_answers(answer)
+        )
+        assert frame == reference
+
+    @SETTINGS
+    @given(case=cases())
+    def test_the_line_range_column_alone(self, case):
+        finding, [entry] = case
         assert suppression_frame.line_range_overlaps(finding, [entry]) == [
             REFERENCE.line_range(entry, finding)
         ]
-        assert entry._line_range_matches(finding) is REFERENCE.line_range(entry, finding)
+        assert entry._line_range_matches(finding) is REFERENCE.line_range(
+            entry, finding
+        )

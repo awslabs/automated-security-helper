@@ -34,7 +34,7 @@ What is a frame expression and what is not, and why:
 from __future__ import annotations
 
 import fnmatch
-from typing import TYPE_CHECKING, Callable, List, Optional, Sequence, Set, Tuple
+from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Sequence, Set, Tuple
 
 import polars as pl
 
@@ -67,7 +67,9 @@ def _inert(entry: "AshSuppression") -> bool:
     return entry.rule_id is not None and not entry.rule_id.strip()
 
 
-def _rule_columns(entry: "AshSuppression", finding: "FlatVulnerability") -> Tuple[bool, bool]:
+def _rule_columns(
+    entry: "AshSuppression", finding: "FlatVulnerability"
+) -> Tuple[bool, bool]:
     """``(rule holds, engine base id still to be read)`` for a live entry.
 
     The finding's id is compared with the entry's lowercased, equal or as a
@@ -88,9 +90,10 @@ def _rule_columns(entry: "AshSuppression", finding: "FlatVulnerability") -> Tupl
 
 def _base_rule_matches(entry: "AshSuppression", finding: "FlatVulnerability") -> bool:
     """Whether the entry's rule id names the base of a qualified engine id."""
-    assert entry.rule_id is not None and finding.rule_id is not None
-    base, qualifier = split_rule_qualifier_for(finding.scanner, finding.rule_id)
-    wanted = entry.rule_id.lower()
+    # Both ids are set here: _rule_columns only offers the base split for a
+    # finding that has a rule id and an entry that names one.
+    base, qualifier = split_rule_qualifier_for(finding.scanner, finding.rule_id or "")
+    wanted = (entry.rule_id or "").lower()
     return qualifier is not None and (
         base.lower() == wanted or fnmatch.fnmatch(base.lower(), wanted)
     )
@@ -159,27 +162,31 @@ def _engine_block_matches(
     Fails closed, with a warn-once note naming the engine, when no plugin is
     registered for the scanner.
     """
-    assert entry.scope is not None and entry.scope.engines is not None
-    assert finding.scanner is not None
-    hooks = engine_hooks_for(finding.scanner)
-    if hooks is None:
-        warn_once_unmatched_engine(finding.scanner, warned_engines)
+    # _scope_gate asks for a block only when the scope lists the scanner.
+    engines = entry.scope.engines if entry.scope is not None else None
+    scanner = finding.scanner
+    if engines is None or scanner is None:
         return False
-    return hooks.suppression_scope_matches(
-        entry.scope.engines[finding.scanner], finding
-    )
+    hooks = engine_hooks_for(scanner)
+    if hooks is None:
+        warn_once_unmatched_engine(scanner, warned_engines)
+        return False
+    return hooks.suppression_scope_matches(engines[scanner], finding)
 
 
-def _line_ranks(values: Sequence[Optional[int]]) -> dict:
+def _line_ranks(values: Sequence[Optional[int]]) -> Dict[int, int]:
     """Dense ranks of the distinct line numbers, so order and ties survive.
 
     Line numbers are unbounded Python ints; an Int64 frame column would raise
     on a huge one. Every comparison the overlap makes is on order alone.
     """
-    return {value: rank for rank, value in enumerate(sorted({v for v in values if v is not None}))}
+    return {
+        value: rank
+        for rank, value in enumerate(sorted({v for v in values if v is not None}))
+    }
 
 
-def _line_ok(finding: "FlatVulnerability", ranks: dict) -> pl.Expr:
+def _line_ok(finding: "FlatVulnerability", ranks: Dict[int, int]) -> pl.Expr:
     """The line-range overlap as a frame expression over columns ``s`` and ``e``.
 
     No entry range: any line. An entry range and a finding without a line:
@@ -215,7 +222,9 @@ def line_range_overlaps(
     )
     frame = pl.DataFrame(
         {
-            "s": [None if e.line_start is None else ranks[e.line_start] for e in entries],
+            "s": [
+                None if e.line_start is None else ranks[e.line_start] for e in entries
+            ],
             "e": [None if e.line_end is None else ranks[e.line_end] for e in entries],
         },
         schema={"s": pl.Int64, "e": pl.Int64},
@@ -245,9 +254,14 @@ def _chunk_frame(
         base.append(base_pending)
         rest.append(gate_ok)
         engine.append(needs_engine)
+    # Lines are read only for an entry every earlier column already holds for, as
+    # the one-pair check read them: a finding that is never asked about its lines
+    # (every entry inert, or ruled out by rule id, path, package or scope) need
+    # not carry any.
+    reached = rest
     ranks = _line_ranks(
-        [finding.line_start, finding.line_end]
-        + [v for e in chunk for v in (e.line_start, e.line_end)]
+        ([finding.line_start, finding.line_end] if any(reached) else [])
+        + [v for e, r in zip(chunk, reached) if r for v in (e.line_start, e.line_end)]
     )
     frame = pl.DataFrame(
         {
@@ -256,8 +270,14 @@ def _chunk_frame(
             "base": base,
             "rest": rest,
             "engine": engine,
-            "s": [None if e.line_start is None else ranks[e.line_start] for e in chunk],
-            "e": [None if e.line_end is None else ranks[e.line_end] for e in chunk],
+            "s": [
+                ranks[e.line_start] if r and e.line_start is not None else None
+                for e, r in zip(chunk, reached)
+            ],
+            "e": [
+                ranks[e.line_end] if r and e.line_end is not None else None
+                for e, r in zip(chunk, reached)
+            ],
         },
         schema={
             "live": pl.Boolean,
@@ -269,8 +289,9 @@ def _chunk_frame(
             "e": pl.Int64,
         },
     )
+    lines_hold = _line_ok(finding, ranks) if any(reached) else pl.lit(False)
     return frame.with_columns(
-        (pl.col("live") & pl.col("rest") & _line_ok(finding, ranks)).alias("static_ok")
+        (pl.col("live") & pl.col("rest") & lines_hold).alias("static_ok")
     )
 
 
@@ -306,9 +327,7 @@ def first_match(
             if not columns["live"][offset]:
                 continue
             if not columns["rule"][offset]:
-                if not (
-                    columns["base"][offset] and _base_rule_matches(entry, finding)
-                ):
+                if not (columns["base"][offset] and _base_rule_matches(entry, finding)):
                     continue
             if not columns["static_ok"][offset]:
                 continue
