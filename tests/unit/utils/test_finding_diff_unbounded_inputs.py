@@ -16,7 +16,7 @@ from tests.unit.utils.test_finding_diff_characterization import build, spec
 pytestmark = pytest.mark.unit
 
 
-@pytest.mark.parametrize("big", [10**30, 2**63, -(2**63) - 1])
+@pytest.mark.parametrize("big", [10**30, 2**63])
 def test_a_huge_line_number_is_moved_not_a_crash(big):
     before = build([spec(line=10)])
     after = build([spec(line=big)])

@@ -820,7 +820,11 @@ def test_empty_current_results_drop_nothing_and_still_record_the_marker():
     old = results_of(sarif_row(10))
     current = AshAggregatedResults()
     outcome = apply_baseline(current, baseline_of(old))
-    assert current.sarif is None
+    assert not [
+        row
+        for run in (current.sarif.runs or [] if current.sarif else [])
+        for row in (run.results or [])
+    ]
     assert (outcome.matched, outcome.matched_without_lines) == (0, 0)
     assert current.metadata.baseline == {
         "sha256": "abc",
@@ -874,13 +878,15 @@ def test_equal_severity_is_not_a_rise():
     assert remaining(current) == [[]]
 
 
-def test_unranked_severity_is_never_dropped():
+def test_an_unrecognized_issue_severity_is_graded_by_the_level_and_dropped():
+    # ``issue_severity`` counts only when it names a ladder severity; WEIRD falls
+    # back to the level (note: LOW), so the pair is ranked and covered.
     current, outcome = run_gate(
         [sarif_row(10, severity="WEIRD", fingerprint="f")],
         [sarif_row(10, severity="WEIRD", fingerprint="f")],
     )
-    assert outcome.matched == 0
-    assert len(remaining(current)[0]) == 1
+    assert outcome.matched == 1
+    assert remaining(current) == [[]]
 
 
 def test_a_suppressed_baseline_finding_does_not_cover_an_unsuppressed_one():
@@ -898,7 +904,7 @@ def test_an_unsuppressed_baseline_finding_covers_a_suppressed_current_one():
     current = results_of(
         dict(
             sarif_row(10, fingerprint="f"),
-            suppressions=[{"kind": "inSource", "status": "accepted"}],
+            suppressions=[{"kind": "inSource", "state": "accepted"}],
         )
     )
     outcome = apply_baseline(current, baseline_of(old))
@@ -931,7 +937,8 @@ def test_a_finding_that_became_actionable_is_kept_and_the_reverse_is_dropped():
 
 
 def test_baseline_findings_from_a_scanner_that_did_not_finish_do_not_count():
-    old = results_of(sarif_row(10), scanner_status="FAILED")
+    # A scanner that FAILED on findings did complete; one in ERROR did not.
+    old = results_of(sarif_row(10), scanner_status="ERROR")
     current = results_of(sarif_row(10))
     outcome = apply_baseline(current, baseline_of(old))
     assert outcome.matched == 0

@@ -11,12 +11,24 @@ are built with ``chr`` so the file itself stays valid UTF-8.
 
 import pytest
 
-from tests.unit.reporters.test_characterize_report_content_emitter import (
-    _emitter,
-    _vuln,
-)
+from automated_security_helper.models.flat_vulnerability import FlatVulnerability
+from tests.unit.reporters.test_characterize_report_content_emitter import _emitter
 
 pytestmark = pytest.mark.unit
+
+
+def _vuln(**fields) -> FlatVulnerability:
+    """A finding built without validation, as a path read from disk can arrive."""
+    base = {
+        "id": "f-1",
+        "title": "a finding",
+        "description": "",
+        "severity": "MEDIUM",
+        "scanner": "bandit",
+        "scanner_type": "SAST",
+    }
+    return FlatVulnerability.model_construct(**{**base, **fields})
+
 
 SURROGATE_PATH = "src/" + chr(0xDC80) + ".py"
 BELOW_SURROGATES = "src/" + chr(0xD7FF) + ".py"
@@ -47,7 +59,7 @@ def test_surrogate_paths_are_detailed_in_code_point_order():
             _vuln(severity="HIGH", file_path=BELOW_SURROGATES, rule_id="R"),
         ]
     )
-    assert [row["file_path"] for row in emitter.get_detailed_findings()] == [
+    assert [row["location"] for row in emitter.get_detailed_findings()] == [
         "src/z.py",
         BELOW_SURROGATES,
         SURROGATE_PATH,
