@@ -378,12 +378,13 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
     #: ruleId, level, message, locations; the driver has no rules array). The
     #: logical resource id exists only inside the message prose
     #: ("Value traversed to [Path=/Resources/<LogicalId>/..."), so
-    #: resource_id is MAPPED-derived: ``_derived_resource_id`` parses the first
-    #: ``Value traversed to [Path=/Resources/<LogicalId>/`` segment of the
-    #: message prose (the one attach in the adapter that reads prose, owner
-    #: decision D7) and attaches nothing when there is no match or the message
-    #: carries a second, different logical id. ``_MESSAGE_PATH_SHAPE`` is the
-    #: shape pinned by the ROT-GUARD test over the committed fixtures.
+    #: resource_id is MAPPED-derived: ``_derived_resource_id`` parses the
+    #: ``Value traversed to [Path=/Resources/<LogicalId>/`` segment that opens a
+    #: missing-property message (the one attach in the adapter that reads prose,
+    #: owner decision D7) and attaches nothing for any other message shape, the
+    #: resolved-comparison messages that dump template strings included.
+    #: ``_MESSAGE_PATH_SHAPE`` is the shape pinned by the ROT-GUARD test over the
+    #: committed captures of the pinned tool version.
     facets: ClassVar[ScannerFacets] = ScannerFacets(
         rule_id=FacetDecl(
             state=FacetState.MAPPED,
@@ -417,8 +418,8 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
             state=FacetState.MAPPED,
             native_field='DERIVED: result message.text "Value traversed to '
             '[Path=/Resources/<LogicalId>/" segment, parsed by '
-            "_derived_resource_id (first match only; no match or a second, "
-            "different logical id attaches nothing)",
+            "_derived_resource_id (anchored at the start of a missing-property "
+            "message; any other message shape attaches nothing)",
             example="LegacyFunction",
         ),
         resource_type=FacetDecl(
@@ -1033,13 +1034,19 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
         )
 
     #: The message shape the derived resource id is read from, as cfn-guard
-    #: 3.2.1 writes it: ``... Value traversed to [Path=/Resources/<LogicalId>/
-    #: Properties[L:13,C:6] Value={...}]``. A CloudFormation logical id is
-    #: alphanumeric. The ``Value=`` dump after the path is the template's own
-    #: text, so only the first match counts and any later match naming a
-    #: different id makes the message ambiguous.
+    #: 3.2.1 and 3.3.0 write a missing-property result: ``Check was not
+    #: compliant as property [<Prop>] is missing. Value traversed to
+    #: [Path=/Resources/<LogicalId>/Properties[L:13,C:6] Value={...}]. ``. A
+    #: CloudFormation logical id is alphanumeric. The match is anchored at the
+    #: start of the message: the ``Value=`` dump
+    #: and the resolved-comparison messages ("... as property value [Path=...
+    #: Value="<template string>"] not equal to value ...") carry the template's
+    #: own text, which can spell the same words, so only a message that opens
+    #: with the genuine prefix attaches, and the id is the one in that prefix.
     _MESSAGE_PATH_SHAPE: ClassVar["re.Pattern[str]"] = re.compile(
-        r"Value traversed to \[Path=/Resources/([A-Za-z0-9]+)[/\[]"
+        r"Check was not compliant as property \[[^\]\s]+\] is missing\. "
+        r"Value traversed to \[Path=/Resources/([A-Za-z0-9]+)/Properties"
+        r"\[L:\d+,C:\d+\] Value=\{"
     )
 
     @classmethod
@@ -1049,10 +1056,8 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
         text = getattr(getattr(message, "root", None), "text", None)
         if not isinstance(text, str):
             return None
-        ids = {m.group(1) for m in cls._MESSAGE_PATH_SHAPE.finditer(text)}
-        if len(ids) != 1:
-            return None
-        return next(iter(ids))
+        match = cls._MESSAGE_PATH_SHAPE.match(text)
+        return match.group(1) if match else None
 
     @staticmethod
     def normalize_results(report: SarifReport, uri: str) -> List[Result]:

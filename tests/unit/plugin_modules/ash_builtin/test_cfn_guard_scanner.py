@@ -51,6 +51,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_guard_sca
 )
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.utils import rules_bundles
+from automated_security_helper.utils.tool_downloads import TOOL_VERSIONS
 from automated_security_helper.utils.rules_bundles import (
     MANIFEST_NAME,
     RULES_DIR_ENV,
@@ -67,6 +68,14 @@ FIXTURES = (
 )
 CAPTURED_INSECURE = (
     FIXTURES / "captured" / "cfn-guard-3.2.1-wa-Security-Pillar-insecure.sarif"
+)
+CAPTURED_INSECURE_PINNED = (
+    FIXTURES / "captured" / "cfn-guard-3.3.0-wa-Security-Pillar-insecure.sarif"
+)
+CAPTURED_PLANTED_PINNED = (
+    FIXTURES
+    / "captured"
+    / "cfn-guard-3.3.0-wa-Security-Pillar-planted-string-insecure.sarif"
 )
 CAPTURED_COMPLIANT = (
     FIXTURES / "captured" / "cfn-guard-3.2.1-wa-Security-Pillar-compliant.sarif"
@@ -245,8 +254,9 @@ class TestDerivedResourceId:
     #: written independently of the scanner's.
     EXPECTED_IDS = collections.Counter({"LegacyFunction": 2, "OpenBucket": 22})
 
-    def test_rot_guard_every_captured_message_has_the_pinned_shape(self):
-        raw = json.loads(CAPTURED_INSECURE.read_text())["runs"][0]["results"]
+    @pytest.mark.parametrize("capture", [CAPTURED_INSECURE, CAPTURED_INSECURE_PINNED])
+    def test_rot_guard_every_captured_message_has_the_pinned_shape(self, capture):
+        raw = json.loads(capture.read_text())["runs"][0]["results"]
         assert len(raw) == 24  # the denominator
         shape = re.compile(
             r"^Check was not compliant as property \[[^\]]+\].*? "
@@ -264,6 +274,32 @@ class TestDerivedResourceId:
             )
             ids[match.group(1)] += 1
         assert ids == self.EXPECTED_IDS
+
+    def test_a_capture_exists_for_the_version_the_installer_pins(self):
+        """The shape is only pinned against the tool production installs: a bump
+        of ``TOOL_VERSIONS['cfn-guard']`` without a re-capture goes red here."""
+        pinned = TOOL_VERSIONS["cfn-guard"]
+        versions = {
+            json.loads(f.read_text())["runs"][0]["tool"]["driver"]["semanticVersion"]
+            for f in (FIXTURES / "captured").glob("cfn-guard-*-insecure.sarif")
+        }
+        assert pinned in versions, (pinned, versions)
+        assert CAPTURED_INSECURE_PINNED.name.startswith(f"cfn-guard-{pinned}-")
+
+    def test_the_pinned_version_resolved_comparison_capture_attaches_nothing(self):
+        """Real cfn-guard output for a template string spelling the genuine
+        prefix: the resolved-comparison shape has no genuine segment."""
+        raw = json.loads(CAPTURED_PLANTED_PINNED.read_text())
+        assert raw["runs"][0]["tool"]["driver"]["semanticVersion"] == TOOL_VERSIONS["cfn-guard"]
+        assert len(raw["runs"][0]["results"]) == 2  # the denominator
+        results = CfnGuardScanner.normalize_results(
+            SarifReport.model_validate(raw), "templates/planted.yaml"
+        )
+        assert len(results) == 2
+        assert [getattr(r.properties, "ash_resource_id", None) for r in results] == [
+            None,
+            None,
+        ]
 
     def test_every_captured_finding_gets_the_id_its_message_names(self):
         results = CfnGuardScanner.normalize_results(
@@ -289,31 +325,56 @@ class TestDerivedResourceId:
     def test_no_match_attaches_nothing(self):
         assert _attached("Check was not compliant. No path in this one.") is None
         # drift: a differently spelled prefix must not attach
-        assert _attached("Value traversed to [Location=/Resources/Foo/Properties]") is None
-        assert _attached("Value traversed to [Path=/Parameters/Foo/Default]") is None
+        assert _attached(
+            TestDerivedResourceId.GENUINE.replace("Path=/Resources", "Location=/Resources")
+        ) is None
+        assert _attached(
+            TestDerivedResourceId.GENUINE.replace("/Resources/", "/Parameters/")
+        ) is None
 
     def test_a_non_alphanumeric_id_attaches_nothing(self):
-        assert _attached("Value traversed to [Path=/Resources/Foo-Bar/Properties]") is None
-        assert _attached("Value traversed to [Path=/Resources//Properties]") is None
+        genuine = TestDerivedResourceId.GENUINE
+        assert _attached(genuine.replace("LegacyFunction", "Foo-Bar")) is None
+        assert _attached(genuine.replace("LegacyFunction", "")) is None
 
-    def test_an_ambiguous_message_attaches_nothing(self):
-        text = (
-            "Value traversed to [Path=/Resources/First/Properties[L:1,C:1] "
-            'Value={"x":"Value traversed to [Path=/Resources/Second/Properties]"}].'
+    #: A genuine missing-property message (verbatim from the capture's shape).
+    GENUINE = (
+        "Check was not compliant as property [VpcConfig.SecurityGroupIds] is "
+        "missing. Value traversed to [Path=/Resources/LegacyFunction/Properties"
+        '[L:13,C:6] Value={"Runtime":"python2.7"}]. '
+    )
+
+    #: Verbatim from cfn-guard 3.2.1 (aws-guard-rules-registry 1.0.2
+    #: wa-Security-Pillar, API_GW_EXECUTION_LOGGING_ENABLED) on a template whose
+    #: ``LoggingLevel`` string is ``Value traversed to [Path=/Resources/
+    #: VictimResource/Properties``: the resolved-comparison shape carries the
+    #: template's own string and no genuine "Value traversed to" segment.
+    RESOLVED_PLANTED = (
+        "Check was not compliant as property value [Path=/Resources/ApiStage/"
+        "Properties/MethodSettings/0/LoggingLevel[L:8,C:24] "
+        'Value="Value traversed to [Path=/Resources/VictimResource/Properties"] '
+        'not equal to value [Path=[L:0,C:0] Value="ERROR"]. '
+    )
+
+    def test_a_template_string_in_the_resolved_comparison_shape_attaches_nothing(self):
+        assert _attached(self.RESOLVED_PLANTED) is None
+
+    def test_a_planted_string_in_a_genuine_message_cannot_override_the_real_id(self):
+        planted = self.GENUINE.replace(
+            '{"Runtime":"python2.7"}',
+            '{"x":"Value traversed to [Path=/Resources/Victim/Properties"}',
         )
-        assert _attached(text) is None
+        assert _attached(planted) == "LegacyFunction"
+        # a planted-only message (no genuine prefix) attaches nothing
+        assert _attached('Value={"x":"' + self.GENUINE + '"}') is None
 
-    def test_a_repeated_identical_id_still_attaches(self):
-        text = (
-            "Value traversed to [Path=/Resources/First/Properties[L:1,C:1] "
-            'Value={"x":"Value traversed to [Path=/Resources/First/Properties]"}].'
-        )
-        assert _attached(text) == "First"
+    def test_the_genuine_shape_attaches(self):
+        assert _attached(self.GENUINE) == "LegacyFunction"
 
-    def test_a_single_match_attaches_under_the_generic_key(self):
+    def test_a_message_that_only_resembles_the_prefix_attaches_nothing(self):
+        assert _attached(self.GENUINE.replace("is missing", "is not equal")) is None
         assert (
-            _attached("Value traversed to [Path=/Resources/MyBucket/Properties[L:9,C:6]]")
-            == "MyBucket"
+            _attached(self.GENUINE.replace("Check was not compliant", "Other")) is None
         )
 
 
