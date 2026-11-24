@@ -210,6 +210,16 @@ _MAPPED_WRITERS: dict[str, tuple[str, str]] = {
         ),
         "checkov/src.test.yaml.json",
     ),
+    # DERIVED: the id is parsed from message prose, so the example is read as
+    # a path segment of the committed SARIF text. The parse itself and its
+    # rot guard are in test_cfn_guard_scanner.py.
+    "CfnGuardScanner": (
+        (
+            "automated_security_helper.plugin_modules.ash_builtin.scanners."
+            "cfn_guard_scanner"
+        ),
+        "cfn_lint_guard/captured/cfn-guard-3.2.1-wa-Security-Pillar-insecure.sarif",
+    ),
 }
 
 
@@ -259,6 +269,15 @@ def test_a_mapped_resource_id_is_written_and_its_example_is_in_the_fixture(
     )
     example = vars(cls)[SCANNER_FACETS_ATTR].resource_id.example
     assert example, f"{name}: a mapped resource_id carries its example"
+    if fixture.endswith(".sarif"):
+        with open(_FIXTURES / fixture, encoding="utf-8") as handle:
+            fixture_text = handle.read()
+        example_probe = f"Path=/Resources/{example}/"
+        assert example_probe in fixture_text, (
+            f"{name}: the declared example {example!r} is not a Path= segment "
+            f"of the committed fixture {fixture}"
+        )
+        return
     cells = _fixture_cells(_FIXTURES / fixture)
     assert example in cells, (
         f"{name}: the declared example {example!r} is not a cell of the "
@@ -276,11 +295,6 @@ def test_a_mapped_resource_id_is_written_and_its_example_is_in_the_fixture(
 #: A key of ``None`` means the id lives in message prose (cfn-guard), so the
 #: value is read as a substring of the fixture text instead of under a key.
 _DROPPED_FIXTURES: dict[str, tuple[str, str | None, str]] = {
-    "CfnGuardScanner": (
-        ("cfn_lint_guard/captured/cfn-guard-3.2.1-wa-Security-Pillar-insecure.sarif"),
-        None,
-        "Path=/Resources/LegacyFunction",
-    ),
     "CfnLintScanner": (
         "cfn_lint_guard/captured/cfn-lint-1.61.0-m0-bad-property.json",
         "Path",

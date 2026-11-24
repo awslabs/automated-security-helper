@@ -199,6 +199,7 @@ from pydantic import Field, PrivateAttr, model_validator
 
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.plugin_base import worse_exit_code
+from automated_security_helper.base import scanner_operational_facets as opsf
 from automated_security_helper.base.scanner_facets import (
     FacetDecl,
     FacetState,
@@ -1350,6 +1351,97 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
             native_field="ASH-written result properties (issue_severity and "
             "actionlint_kind, from errors[].kind); no native property bag",
         ),
+    )
+
+    #: The operational register row (base/scanner_operational_facets.py),
+    #: checked against the production declarations it mirrors by
+    #: tests/unit/plugin_modules/test_scanner_operational_facets_consistency.py.
+    operational_facets: ClassVar[opsf.ScannerOperationalFacets] = (
+        opsf.ScannerOperationalFacets(
+            scanner_name="actionlint",
+            network=opsf.NetworkFacet(
+                fetch_kind=opsf.FetchKind.NONE,
+                fetches=(),
+                prefetch=(),
+                offline_outcome=opsf.OfflineOutcome.UNCHANGED,
+                offline_strategy=OfflineStrategy.BUNDLED,
+                sandbox_network=opsf.SandboxNetwork.NONE,
+                source="actionlint_scanner.py offline_strategy, sandbox_requirements",
+            ),
+            output=opsf.OutputFacet(
+                native_formats=(opsf.OutputFormat.TOOL_JSON,),
+                side_reports=(),
+                non_finding_artifacts=(),
+                note="the tool's JSON through a Go template; SARIF is built by ASH",
+            ),
+            targets=opsf.TargetsFacet(
+                kinds=(opsf.TargetKind.GITHUB_ACTIONS_WORKFLOWS,),
+                tool_type=ScannerToolType.IAC,
+                selection=(
+                    ".github/workflows files chosen by ASH from the scan set; the "
+                    "tool's own nearest-directory discovery is deliberately replaced"
+                ),
+                tool_type_note=(
+                    "actionlint (IAC) and zizmor (SAST) scan the same workflow files; the "
+                    "split is defensible (linting versus security analysis) and changing "
+                    "either moves reporter-side type exclusions, so it is recorded here "
+                    "and changed in neither (design E3)"
+                ),
+            ),
+            runtime=opsf.RuntimeFacet(
+                kind=opsf.RuntimeKind.PINNED_BINARY,
+                external_programs=(),
+                invocations=opsf.Invocations.ONE,
+                tool_versions_key="actionlint",
+                python_only=False,
+                use_uv_tool=False,
+            ),
+            platforms=opsf.PlatformsFacet(
+                provisionable=opsf.PLATFORMS_ALL,
+                note="asset table lists all six platform/arch pairs",
+            ),
+            severity=opsf.SeverityFacet(
+                severity_class=opsf.SeverityClass.DERIVED,
+                note="ASH's own table plus an untrusted-input regex raise",
+            ),
+            silencing=opsf.SilencingFacet(
+                tool_side=(
+                    opsf.SilencingLayer(
+                        layer=opsf.SilencingLayerKind.IGNORE_FILE,
+                        writer=opsf.SilencingWriter.REPOSITORY,
+                        honored=opsf.Honored.NO,
+                        surface=".github/actionlint.yaml or .yml in the scanned tree",
+                        cite="actionlint_scanner.py module header: ignored with a note; the operator's config is staged outside the tree",
+                    ),
+                ),
+            ),
+            identity=opsf.IdentityFacet(
+                fingerprint_class=opsf.FingerprintClass.POSITIONAL_ONLY,
+                note="identity is file and line through the shared floor",
+            ),
+            extensibility=opsf.ExtensibilityFacet(
+                custom_rules=opsf.CustomRules.OPERATOR_PATHS,
+                env_prefixes=(),
+                options_surface="an operator config staged outside the tree",
+            ),
+            exit_codes=opsf.ExitCodesFacet(
+                success_exit_codes=(0, 1),
+                semantics="the base default {0, 1}; an exit code that disagrees with the findings is raised, not read as clean",
+            ),
+            provenance=opsf.ProvenanceFacet(
+                tier=opsf.Tier.BUILTIN_DEFAULT,
+                source=opsf.ProvenanceSource.PINNED_RELEASE_BINARY,
+                selection_surfaces=(),
+                upstream_license=(
+                    "MIT (source: utils/tool_downloads.py "
+                    "THIRD_PARTY_LICENSES['actionlint'], pinned commit 914e7df)"
+                ),
+            ),
+            prerequisites=opsf.PrerequisitesFacet(
+                kinds=(opsf.Prerequisite.NONE,),
+                note="workflow files in the scan set",
+            ),
+        )
     )
 
     # Integrations already reported as refused, so each is logged once per scan.

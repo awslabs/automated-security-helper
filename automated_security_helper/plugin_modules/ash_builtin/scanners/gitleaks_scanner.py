@@ -162,6 +162,7 @@ from typing import (
 from pydantic import Field, PrivateAttr, model_validator
 
 from automated_security_helper.base.options import ScannerOptionsBase
+from automated_security_helper.base import scanner_operational_facets as opsf
 from automated_security_helper.base.scanner_facets import (
     FacetDecl,
     FacetState,
@@ -635,6 +636,103 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
             native_field='result properties "issue_severity" written by the adapter',
         ),
     )
+
+    #: The operational register row (base/scanner_operational_facets.py),
+    #: checked against the production declarations it mirrors by
+    #: tests/unit/plugin_modules/test_scanner_operational_facets_consistency.py.
+    operational_facets: ClassVar[opsf.ScannerOperationalFacets] = (
+        opsf.ScannerOperationalFacets(
+            scanner_name="gitleaks",
+            network=opsf.NetworkFacet(
+                fetch_kind=opsf.FetchKind.NONE,
+                fetches=(),
+                prefetch=(),
+                offline_outcome=opsf.OfflineOutcome.UNCHANGED,
+                offline_strategy=OfflineStrategy.BUNDLED,
+                sandbox_network=opsf.SandboxNetwork.NONE,
+                source="gitleaks_scanner.py offline_strategy, sandbox_requirements",
+            ),
+            output=opsf.OutputFacet(
+                native_formats=(opsf.OutputFormat.SARIF,),
+                side_reports=(),
+                non_finding_artifacts=(),
+            ),
+            targets=opsf.TargetsFacet(
+                kinds=(opsf.TargetKind.SECRETS_CONTENTS,),
+                tool_type=ScannerToolType.SECRETS,
+                selection=(
+                    "`gitleaks dir` over the target (subcommands = ['dir']); history "
+                    "scanning is deliberately not offered (module header)"
+                ),
+                covers_note=(
+                    "no scanner claims git-history secrets: gitleaks and betterleaks run "
+                    "dir mode only (UNCLAIMED_TARGET_KINDS)"
+                ),
+            ),
+            runtime=opsf.RuntimeFacet(
+                kind=opsf.RuntimeKind.PINNED_BINARY,
+                external_programs=(),
+                invocations=opsf.Invocations.MULTI_PASS,
+                invocation_note="a second run over a copy of the files a .gitleaksignore names, to add back what the ignore file dropped",
+                tool_versions_key="gitleaks",
+                python_only=False,
+                use_uv_tool=False,
+            ),
+            platforms=opsf.PlatformsFacet(
+                provisionable=opsf.PLATFORMS_ALL,
+                note="asset table lists all six platform/arch pairs",
+            ),
+            severity=opsf.SeverityFacet(
+                severity_class=opsf.SeverityClass.CONSTANT,
+                note="every finding is CRITICAL",
+            ),
+            silencing=opsf.SilencingFacet(
+                tool_side=(
+                    opsf.SilencingLayer(
+                        layer=opsf.SilencingLayerKind.IGNORE_FILE,
+                        writer=opsf.SilencingWriter.REPOSITORY,
+                        honored=opsf.Honored.NO,
+                        surface=".gitleaksignore in the scan root",
+                        cite="gitleaks_scanner.py module header: gitleaks reads it whatever flag is passed; ASH re-scans a copy and adds every dropped finding back",
+                    ),
+                    opsf.SilencingLayer(
+                        layer=opsf.SilencingLayerKind.INLINE_COMMENT,
+                        writer=opsf.SilencingWriter.REPOSITORY,
+                        honored=opsf.Honored.NO,
+                        surface="gitleaks:allow comments; options.honor_inline_ignores turns them back on when the operator sets it",
+                        cite="gitleaks_scanner.py module header: ASH passes --ignore-gitleaks-allow",
+                    ),
+                ),
+            ),
+            identity=opsf.IdentityFacet(
+                fingerprint_class=opsf.FingerprintClass.POSITIONAL_ONLY,
+                note="the git-metadata fingerprints are empty and dropped in dir mode; identity is file and line",
+            ),
+            extensibility=opsf.ExtensibilityFacet(
+                custom_rules=opsf.CustomRules.OPERATOR_PATHS,
+                env_prefixes=(),
+                options_surface="an operator .gitleaks.toml whose rules and allowlists apply on top of ASH suppressions; a repository-written config is refused with a note",
+            ),
+            exit_codes=opsf.ExitCodesFacet(
+                success_exit_codes=(0, 2),
+                semantics="ASH passes --exit-code=2 because the tool's default 1 means both leaks and some errors",
+            ),
+            provenance=opsf.ProvenanceFacet(
+                tier=opsf.Tier.BUILTIN_DEFAULT,
+                source=opsf.ProvenanceSource.PINNED_RELEASE_BINARY,
+                selection_surfaces=("options.honor_inline_ignores",),
+                upstream_license=(
+                    "MIT (source: utils/tool_downloads.py "
+                    "THIRD_PARTY_LICENSES['gitleaks'], pinned commit 83d9cd6)"
+                ),
+            ),
+            prerequisites=opsf.PrerequisitesFacet(
+                kinds=(opsf.Prerequisite.NONE,),
+                note="no git repository is required and no history is read",
+            ),
+        )
+    )
+
     success_exit_codes: ClassVar[Set[int]] = {0, LEAKS_EXIT_CODE}
     # The strict default: no network, and no variables or paths beyond the
     # baseline. GITLEAKS_CONFIG and GITLEAKS_CONFIG_TOML are not passed into a

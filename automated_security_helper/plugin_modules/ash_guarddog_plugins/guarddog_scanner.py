@@ -123,6 +123,7 @@ from automated_security_helper.base.options import (
 )
 from automated_security_helper.base.plugin_base import CustomCommand
 from automated_security_helper.base.plugin_context import PluginContext
+from automated_security_helper.base import scanner_operational_facets as opsf
 from automated_security_helper.base.scanner_facets import (
     FacetDecl,
     FacetState,
@@ -907,6 +908,101 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
             native_field="extra_properties merged into the result PropertyBag "
             "(package_name and package_version in verify mode)",
         ),
+    )
+
+    #: The operational register row (base/scanner_operational_facets.py),
+    #: checked against the production declarations it mirrors by
+    #: tests/unit/plugin_modules/test_scanner_operational_facets_consistency.py.
+    operational_facets: ClassVar[opsf.ScannerOperationalFacets] = (
+        opsf.ScannerOperationalFacets(
+            scanner_name="guarddog",
+            network=opsf.NetworkFacet(
+                fetch_kind=opsf.FetchKind.CONTENT_FETCH,
+                fetches=(opsf.Fetched.PACKAGE_DOWNLOADS,),
+                prefetch=(),
+                offline_outcome=opsf.OfflineOutcome.DEGRADED,
+                offline_reason=(
+                    "scan mode is unchanged (the YARA rules ship in the package); the "
+                    "opt-in verify mode is not attempted and each manifest is listed "
+                    "with the reason"
+                ),
+                offline_strategy=OfflineStrategy.BUNDLED,
+                sandbox_network=opsf.SandboxNetwork.NONE,
+                sandbox_tension=(
+                    "verify mode (options.verify, opt-in) downloads every dependency a "
+                    "manifest names from its registry, but the sandbox declaration "
+                    "grants no network, so under --sandbox verify runs without one"
+                ),
+                source=(
+                    "guarddog_scanner.py offline_strategy comment and sandbox "
+                    "declaration; module header on verify mode"
+                ),
+            ),
+            output=opsf.OutputFacet(
+                native_formats=(opsf.OutputFormat.TOOL_JSON,),
+                side_reports=(),
+                non_finding_artifacts=(),
+            ),
+            targets=opsf.TargetsFacet(
+                kinds=(opsf.TargetKind.PACKAGE_SOURCES,),
+                tool_type=ScannerToolType.SCA,
+                selection=(
+                    "package roots by per-ecosystem manifest sets across pypi, npm, go, "
+                    "github_action, rubygems and crates (GUARDDOG_ECOSYSTEMS); verify "
+                    "mode reads dependency manifests such as requirements.txt"
+                ),
+                covers_note="a community scanner; it declares no covers display string",
+            ),
+            runtime=opsf.RuntimeFacet(
+                kind=opsf.RuntimeKind.UV_PYTHON,
+                external_programs=(),
+                invocations=opsf.Invocations.PER_TARGET,
+                invocation_note="one scan per package root and ecosystem",
+                python_only=True,
+                use_uv_tool=True,
+            ),
+            platforms=opsf.PlatformsFacet(
+                provisionable=(),
+                note="a PyPI package run through uv; it is not installable offline and the remedy (pre-install) is named by the scanner",
+            ),
+            severity=opsf.SeverityFacet(
+                severity_class=opsf.SeverityClass.DERIVED,
+                note="a risk ladder",
+            ),
+            silencing=opsf.SilencingFacet(
+                tool_side=(),
+                none_reason="GuardDog's rules ship in its package and no tool-side silencing surface was surveyed; ASH suppressions are the surface this register records",
+            ),
+            identity=opsf.IdentityFacet(
+                fingerprint_class=opsf.FingerprintClass.STABLE_COMPUTED,
+                note="a computed sha256 under guarddog/v1",
+            ),
+            extensibility=opsf.ExtensibilityFacet(
+                custom_rules=opsf.CustomRules.NONE,
+                env_prefixes=(),
+                options_surface="typed options (ecosystems, verify); no rules path",
+            ),
+            exit_codes=opsf.ExitCodesFacet(
+                success_exit_codes=(0, 1),
+                semantics="the base default {0, 1}; the adapter notes a registry-lookup-failure exit",
+            ),
+            provenance=opsf.ProvenanceFacet(
+                tier=opsf.Tier.COMMUNITY_OPTIN,
+                source=opsf.ProvenanceSource.PYPI_VIA_UV,
+                selection_surfaces=(
+                    "ash_guarddog_plugins in ash_plugin_modules",
+                    "options.verify (opt-in)",
+                ),
+                upstream_license=(
+                    "Apache-2.0 (source: utils/tool_downloads.py "
+                    "THIRD_PARTY_LICENSES['guarddog'], pinned commit 3da1726)"
+                ),
+            ),
+            prerequisites=opsf.PrerequisitesFacet(
+                kinds=(opsf.Prerequisite.MANIFEST,),
+                note="a package manifest per ecosystem defines each root; verify mode also needs the manifests' registries reachable",
+            ),
+        )
     )
 
     # The strict default. ``scan`` reads the staged package files with rules shipped

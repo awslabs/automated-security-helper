@@ -36,6 +36,7 @@ from automated_security_helper.models.core import (
     IgnorePathWithReason,
     ToolExtraArg,
 )
+from automated_security_helper.base import scanner_operational_facets as opsf
 from automated_security_helper.base.scanner_facets import (
     FacetDecl,
     FacetState,
@@ -899,6 +900,87 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
             state=FacetState.MAPPED,
             native_field="results[].properties (issue_confidence, issue_severity)",
         ),
+    )
+
+    #: The operational register row (base/scanner_operational_facets.py). Each
+    #: mirrored field is checked against the production declaration it names
+    #: by tests/unit/plugin_modules/test_scanner_operational_facets_consistency.py.
+    operational_facets: ClassVar[opsf.ScannerOperationalFacets] = (
+        opsf.ScannerOperationalFacets(
+            scanner_name="bandit",
+            network=opsf.NetworkFacet(
+                fetch_kind=opsf.FetchKind.NONE,
+                fetches=(),
+                prefetch=(),
+                offline_outcome=opsf.OfflineOutcome.UNCHANGED,
+                offline_strategy=OfflineStrategy.BUNDLED,
+                sandbox_network=opsf.SandboxNetwork.NONE,
+                source="bandit_scanner.py offline_strategy, sandbox_requirements",
+            ),
+            output=opsf.OutputFacet(
+                native_formats=(opsf.OutputFormat.SARIF,),
+                side_reports=(),
+                non_finding_artifacts=(),
+                note="a JSON capture also exists as a fixture (tests/test_data/scanners/bandit/captured)",
+            ),
+            targets=opsf.TargetsFacet(
+                kinds=(opsf.TargetKind.SOURCE_CODE,),
+                tool_type=ScannerToolType.SAST,
+                selection="tool-side over the directory; staged_scope_patterns ('*.py',) in precommit",
+            ),
+            runtime=opsf.RuntimeFacet(
+                kind=opsf.RuntimeKind.UV_PYTHON,
+                external_programs=(),
+                invocations=opsf.Invocations.ONE,
+                python_only=True,
+                use_uv_tool=True,
+            ),
+            platforms=opsf.PlatformsFacet(
+                provisionable=(),
+                note="a PyPI package run through uv; platform support is the package's and was not read here",
+            ),
+            severity=opsf.SeverityFacet(
+                severity_class=opsf.SeverityClass.NATIVE,
+                note="the tool's own per-finding severity is mapped",
+            ),
+            silencing=opsf.SilencingFacet(
+                tool_side=(
+                    opsf.SilencingLayer(
+                        layer=opsf.SilencingLayerKind.INLINE_COMMENT,
+                        writer=opsf.SilencingWriter.REPOSITORY,
+                        honored=opsf.Honored.YES,
+                        surface="# nosec comments; options.ignore_nosec turns them off",
+                        cite="bandit_scanner.py ignore_nosec option and its --ignore-nosec flag",
+                    ),
+                ),
+            ),
+            identity=opsf.IdentityFacet(
+                fingerprint_class=opsf.FingerprintClass.POSITIONAL_ONLY,
+                note="identity is file and line through the shared floor",
+            ),
+            extensibility=opsf.ExtensibilityFacet(
+                custom_rules=opsf.CustomRules.NONE,
+                env_prefixes=("BANDIT_",),
+                options_surface="--ini config and construction-time excludes; ignore_nosec",
+            ),
+            exit_codes=opsf.ExitCodesFacet(
+                success_exit_codes=(0, 1),
+                semantics="0 clean, 1 findings: the native-tool convention",
+            ),
+            provenance=opsf.ProvenanceFacet(
+                tier=opsf.Tier.BUILTIN_DEFAULT,
+                source=opsf.ProvenanceSource.PYPI_VIA_UV,
+                selection_surfaces=("options.ignore_nosec",),
+                upstream_license=(
+                    "Apache-2.0 (source: utils/tool_downloads.py "
+                    "THIRD_PARTY_LICENSES['bandit'], pinned commit 92ae8b8)"
+                ),
+            ),
+            prerequisites=opsf.PrerequisitesFacet(
+                kinds=(opsf.Prerequisite.NONE,),
+                note="Python files in the scan set",
+            ),
+        )
     )
 
     def model_post_init(self, context):

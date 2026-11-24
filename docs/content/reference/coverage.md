@@ -79,7 +79,7 @@ them to the tool.
 | guarddog | SCA | Selected files: for each directory that holds a package manifest (`setup.py`, `package.json`, `go.mod`, `action.yml`, a `*.gemspec`, `Cargo.toml`, and the others the [GuardDog page](../docs/plugins/community/guarddog-plugin.md) lists), a temporary copy of the files in the scan set under it | yes | no |
 | hadolint | IaC | Selected files: Dockerfiles, named `Dockerfile`, `Containerfile`, `*.Dockerfile`, or `Dockerfile.*`, with that exact capitalization | no | no |
 | snyk-code | SAST | Whole directory, sent to Snyk's service | no | no |
-| trivy-repo | SAST | Whole directory: `trivy repository` with the vulnerability, secret, misconfiguration, and license scanners | no | no |
+| trivy-repo | SCA | Whole directory: `trivy repository` with the vulnerability, secret, misconfiguration, and license scanners | no | no |
 
 `--python-only` runs only the scanners marked yes and reports the rest `SKIPPED`, whether
 or not their tools are installed.

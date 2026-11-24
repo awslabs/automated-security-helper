@@ -23,13 +23,14 @@ from pydantic import Field, PrivateAttr, model_validator
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.base.options import ScannerOptionsBase, release_tag
 from automated_security_helper.base.plugin_base import CustomCommand
+from automated_security_helper.base import scanner_operational_facets as opsf
 from automated_security_helper.base.scanner_facets import (
     FacetDecl,
     FacetState,
     ScannerFacets,
 )
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
-from automated_security_helper.core.enums import ScannerToolType
+from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import ToolArgs
 from automated_security_helper.plugin_modules.ash_builtin.scanners._grep_scanner_base import (
@@ -388,6 +389,113 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
             native_field="results[].properties (SARIF property bag, passed "
             "through unmodified)",
         ),
+    )
+
+    #: The operational register row (base/scanner_operational_facets.py),
+    #: checked against the production declarations it mirrors by
+    #: tests/unit/plugin_modules/test_scanner_operational_facets_consistency.py.
+    operational_facets: ClassVar[opsf.ScannerOperationalFacets] = (
+        opsf.ScannerOperationalFacets(
+            scanner_name="opengrep",
+            network=opsf.NetworkFacet(
+                fetch_kind=opsf.FetchKind.CONTENT_FETCH,
+                fetches=(opsf.Fetched.RULESET_REGISTRY,),
+                prefetch=(opsf.Prefetch.IMAGE_BUILD,),
+                offline_outcome=opsf.OfflineOutcome.DEGRADED,
+                offline_reason=(
+                    "runs against the operator's local rules or the validated offline "
+                    "ruleset cache as --config; a registry fetch that fails online exits "
+                    "2 and ASH reruns once on the local configs only"
+                ),
+                offline_strategy=OfflineStrategy.CACHE_FLAGS,
+                sandbox_network=opsf.SandboxNetwork.ONLINE,
+                content_database="opengrep-offline-rules",
+                source=(
+                    "opengrep_scanner.py sandbox_requirements and default rulesets; "
+                    "_grep_scanner_base.py offline_strategy; utils/content_databases.py"
+                ),
+            ),
+            output=opsf.OutputFacet(
+                native_formats=(opsf.OutputFormat.SARIF,),
+                side_reports=(),
+                non_finding_artifacts=(),
+            ),
+            targets=opsf.TargetsFacet(
+                kinds=(opsf.TargetKind.SOURCE_CODE,),
+                tool_type=ScannerToolType.SAST,
+                selection=(
+                    "whole scan set, languages defined by the ruleset; .semgrepignore "
+                    "normalized to ASH's ignore model (_grep_scanner_base.py)"
+                ),
+            ),
+            runtime=opsf.RuntimeFacet(
+                kind=opsf.RuntimeKind.PINNED_BINARY,
+                external_programs=(),
+                invocations=opsf.Invocations.ONE,
+                tool_versions_key="opengrep",
+                python_only=False,
+                use_uv_tool=False,
+            ),
+            platforms=opsf.PlatformsFacet(
+                provisionable=opsf.PLATFORMS_NO_WINDOWS_ARM64,
+                note=(
+                    "one static Linux build per architecture since v2.0.0; no "
+                    "windows/arm64 asset (tool_downloads.py _OPENGREP_ASSETS)"
+                ),
+            ),
+            severity=opsf.SeverityFacet(
+                severity_class=opsf.SeverityClass.NATIVE,
+                note="the SARIF level only: three grades",
+            ),
+            silencing=opsf.SilencingFacet(
+                tool_side=(
+                    opsf.SilencingLayer(
+                        layer=opsf.SilencingLayerKind.IGNORE_FILE,
+                        writer=opsf.SilencingWriter.REPOSITORY,
+                        honored=opsf.Honored.NO,
+                        surface=".semgrepignore in the scanned tree",
+                        cite="_grep_scanner_base.py:359-375; ASH warns and names global_settings.ignore_paths",
+                    ),
+                ),
+            ),
+            identity=opsf.IdentityFacet(
+                fingerprint_class=opsf.FingerprintClass.UNCONFIRMED,
+                note="whether the fork emits matchBasedId; one fixture read settles it",
+            ),
+            extensibility=opsf.ExtensibilityFacet(
+                custom_rules=opsf.CustomRules.BOTH,
+                env_prefixes=("OPENGREP_", "SEMGREP_"),
+                options_surface=(
+                    "options.config: a registry entry, a URL, or a local rule file or "
+                    "directory through the path-trust resolver; a refused or missing "
+                    "value declines the scanner"
+                ),
+            ),
+            exit_codes=opsf.ExitCodesFacet(
+                success_exit_codes=(0, 1),
+                semantics="the base default {0, 1}; an exit 2 on a failed registry fetch is rerun once locally",
+            ),
+            provenance=opsf.ProvenanceFacet(
+                tier=opsf.Tier.BUILTIN_DEFAULT,
+                source=opsf.ProvenanceSource.PINNED_RELEASE_BINARY,
+                selection_surfaces=("options.config",),
+                upstream_license=(
+                    "LGPL-2.1-only (source: utils/tool_downloads.py "
+                    "THIRD_PARTY_LICENSES['opengrep'], pinned commit 526deaf)"
+                ),
+            ),
+            prerequisites=opsf.PrerequisitesFacet(
+                kinds=(opsf.Prerequisite.GIT_CHECKOUT,),
+                note=(
+                    "opengrep runs git ls-files itself and exits 2 when git refuses the "
+                    "directory; ASH supplies safe.directory"
+                ),
+                unconfirmed=(
+                    "behavior on a tree that is not a git checkout was not read; the "
+                    "declared prerequisite is the conservative reading"
+                ),
+            ),
+        )
     )
 
     def model_post_init(self, context):

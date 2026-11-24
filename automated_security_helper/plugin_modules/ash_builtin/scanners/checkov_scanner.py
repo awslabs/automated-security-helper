@@ -29,6 +29,7 @@ from automated_security_helper.config.path_trust import (
     honored_path,
     resolved_path,
 )
+from automated_security_helper.base import scanner_operational_facets as opsf
 from automated_security_helper.base.scanner_facets import (
     FacetDecl,
     FacetState,
@@ -749,7 +750,7 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
 
     display_name = "Checkov"
     docs_summary = "Infrastructure policy checks"
-    covers = ("Terraform", "Kubernetes", "CloudFormation")
+    covers = ("Terraform", "Kubernetes", "CloudFormation", "Other IaC frameworks")
 
     #: checkov is a Python package ASH runs through uv. See
     #: ScannerPluginBase.python_only.
@@ -884,6 +885,132 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
             "whether results carry a property bag is open; one SARIF run "
             "settles it",
         ),
+    )
+
+    #: The operational register row (base/scanner_operational_facets.py),
+    #: checked against the production declarations it mirrors by
+    #: tests/unit/plugin_modules/test_scanner_operational_facets_consistency.py.
+    operational_facets: ClassVar[opsf.ScannerOperationalFacets] = (
+        opsf.ScannerOperationalFacets(
+            scanner_name="checkov",
+            network=opsf.NetworkFacet(
+                fetch_kind=opsf.FetchKind.CONTENT_FETCH,
+                fetches=(opsf.Fetched.PLATFORM_POLICIES,),
+                prefetch=(),
+                offline_outcome=opsf.OfflineOutcome.DEGRADED,
+                offline_reason=(
+                    "--skip-download is passed per scan so platform policies are not "
+                    "fetched; the policies bundled in the pinned package still run, and "
+                    "the PyPI update check is killed by CKV_SKIP_PACKAGE_UPDATE_CHECK"
+                ),
+                offline_strategy=OfflineStrategy.CACHE_FLAGS,
+                sandbox_network=opsf.SandboxNetwork.NONE,
+                sandbox_tension=(
+                    "the sandbox declaration grants checkov no network even online, so a "
+                    "sandboxed-online run and an unsandboxed-online run may differ in "
+                    "platform policies"
+                ),
+                source=(
+                    "checkov_scanner.py offline_strategy, sandbox_requirements, "
+                    "--skip-download; utils/content_databases.py "
+                    "SCANNERS_WITHOUT_CONTENT_DATABASE['checkov']"
+                ),
+                #: Design E5, measured 2026-11-24 on a desk lane: checkov 3.4.7 (the
+                #: pinned version) on one two-resource Terraform fixture, env -i, no
+                #: platform API key, the desk online. With --skip-download and without
+                #: it, both runs reported the same 10 failed checks (same check ids and
+                #: resources, empty set difference both ways), so the sandbox/online
+                #: difference named in sandbox_tension did not show for this fixture
+                #: and configuration. Not measured: why (the fetch path was not
+                #: traced), a run with a platform API key, other frameworks.
+                unconfirmed=None,
+            ),
+            output=opsf.OutputFacet(
+                native_formats=(opsf.OutputFormat.SARIF,),
+                side_reports=("results_json.json",),
+                non_finding_artifacts=(),
+                note="the side report is read by the resource-id attach (#1024)",
+            ),
+            targets=opsf.TargetsFacet(
+                kinds=(
+                    opsf.TargetKind.IAC_TERRAFORM,
+                    opsf.TargetKind.IAC_KUBERNETES,
+                    opsf.TargetKind.IAC_CLOUDFORMATION,
+                    opsf.TargetKind.IAC_OTHER,
+                ),
+                tool_type=ScannerToolType.IAC,
+                selection=(
+                    "directory scan; precommit per-file with same-directory .tf/.tfvars "
+                    "siblings (staged_scope_patterns)"
+                ),
+                covers_note=(
+                    "covers named three frameworks; staged_scope_patterns also name "
+                    "serverless, ansible, argo, azure-pipelines, circleci, github-actions, "
+                    "gitlab-ci, openapi and bicep (iac_other); the display string was "
+                    "widened and the register declares the wired truth"
+                ),
+            ),
+            runtime=opsf.RuntimeFacet(
+                kind=opsf.RuntimeKind.UV_PYTHON,
+                external_programs=(),
+                invocations=opsf.Invocations.ONE,
+                python_only=True,
+                use_uv_tool=True,
+            ),
+            platforms=opsf.PlatformsFacet(
+                provisionable=(),
+                note="a PyPI package run through uv; platform support is the package's and was not read here",
+            ),
+            severity=opsf.SeverityFacet(
+                severity_class=opsf.SeverityClass.NATIVE,
+                note="the tool's own per-finding severity is mapped",
+            ),
+            silencing=opsf.SilencingFacet(
+                tool_side=(
+                    opsf.SilencingLayer(
+                        layer=opsf.SilencingLayerKind.INLINE_COMMENT,
+                        writer=opsf.SilencingWriter.REPOSITORY,
+                        honored=opsf.Honored.UNCONFIRMED,
+                        surface="#checkov:skip comments",
+                        cite="tool feature; checkov_scanner.py was not read for an ASH-side switch",
+                        reason=(
+                            "whether ASH leaves the tool's skip comments on was not read at "
+                            "the adapter; one adapter read settles it"
+                        ),
+                    ),
+                ),
+            ),
+            identity=opsf.IdentityFacet(
+                fingerprint_class=opsf.FingerprintClass.UNCONFIRMED,
+                note="no fixture read classifies checkov's fingerprints; reads as positional-only until one does",
+            ),
+            extensibility=opsf.ExtensibilityFacet(
+                custom_rules=opsf.CustomRules.NONE,
+                env_prefixes=("CHECKOV_", "CKV_"),
+                options_surface=(
+                    "frameworks, skip_frameworks, additional_formats; no external-checks "
+                    "directory option exists at the adapter, so custom policies are a "
+                    "declared NO today"
+                ),
+            ),
+            exit_codes=opsf.ExitCodesFacet(
+                success_exit_codes=(0, 1),
+                semantics="0 clean, 1 findings: the native-tool convention",
+            ),
+            provenance=opsf.ProvenanceFacet(
+                tier=opsf.Tier.BUILTIN_DEFAULT,
+                source=opsf.ProvenanceSource.PYPI_VIA_UV,
+                selection_surfaces=("options.frameworks", "options.skip_frameworks"),
+                upstream_license=(
+                    "Apache-2.0 (source: utils/tool_downloads.py "
+                    "THIRD_PARTY_LICENSES['checkov'], pinned commit 2f107f8)"
+                ),
+            ),
+            prerequisites=opsf.PrerequisitesFacet(
+                kinds=(opsf.Prerequisite.NONE,),
+                note="IaC files in the scan set",
+            ),
+        )
     )
 
     #: --mode precommit --staged: checkov is handed each staged file as

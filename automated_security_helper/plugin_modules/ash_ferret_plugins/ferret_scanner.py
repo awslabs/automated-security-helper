@@ -57,6 +57,7 @@ from automated_security_helper.base.plugin_base import (
     pep440_requirement,
 )
 from automated_security_helper.utils.uv_tool_runner import checked_requirement
+from automated_security_helper.base import scanner_operational_facets as opsf
 from automated_security_helper.base.scanner_facets import (
     FacetDecl,
     FacetState,
@@ -1185,6 +1186,87 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
             state=FacetState.MAPPED,
             native_field='result properties "confidenceLevel" and "validator"',
         ),
+    )
+
+    #: The operational register row (base/scanner_operational_facets.py),
+    #: checked against the production declarations it mirrors by
+    #: tests/unit/plugin_modules/test_scanner_operational_facets_consistency.py.
+    operational_facets: ClassVar[opsf.ScannerOperationalFacets] = (
+        opsf.ScannerOperationalFacets(
+            scanner_name="ferret-scan",
+            network=opsf.NetworkFacet(
+                fetch_kind=opsf.FetchKind.NONE,
+                fetches=(),
+                prefetch=(),
+                offline_outcome=opsf.OfflineOutcome.UNCHANGED,
+                offline_strategy=OfflineStrategy.BUNDLED,
+                sandbox_network=opsf.SandboxNetwork.NONE,
+                source=(
+                    "ferret_scanner.py offline_strategy, sandbox_requirements and the "
+                    "option text 'Fully offline: no data leaves the host'; its "
+                    "validators are local confidence validators, not issuer-API "
+                    "verification"
+                ),
+            ),
+            output=opsf.OutputFacet(
+                native_formats=(opsf.OutputFormat.SARIF,),
+                side_reports=(),
+                non_finding_artifacts=(),
+                note="always --format sarif, as ASH requires",
+            ),
+            targets=opsf.TargetsFacet(
+                kinds=(opsf.TargetKind.SECRETS_CONTENTS,),
+                tool_type=ScannerToolType.SECRETS,
+                selection="the scan set, with local confidence validators under a time budget",
+                covers_note="a community scanner; it declares no covers display string",
+            ),
+            runtime=opsf.RuntimeFacet(
+                kind=opsf.RuntimeKind.PYPI_PACKAGE,
+                external_programs=("ferret-scan",),
+                invocations=opsf.Invocations.ONE,
+                python_only=False,
+                use_uv_tool=False,
+            ),
+            platforms=opsf.PlatformsFacet(
+                provisionable=(),
+                note="a PyPI package under a version constraint (a bare install resolves differently); platform support was not read here",
+            ),
+            severity=opsf.SeverityFacet(
+                severity_class=opsf.SeverityClass.NATIVE,
+                note="the tool's own per-finding severity is mapped",
+            ),
+            silencing=opsf.SilencingFacet(
+                tool_side=(),
+                none_reason="no tool-side silencing surface was surveyed; the adapter drafts a suppression reason into the finding's details for the ASH-side suppression",
+            ),
+            identity=opsf.IdentityFacet(
+                fingerprint_class=opsf.FingerprintClass.UNCONFIRMED,
+                note="no fixture read classifies ferret's fingerprints; reads as positional-only until one does",
+            ),
+            extensibility=opsf.ExtensibilityFacet(
+                custom_rules=opsf.CustomRules.NONE,
+                env_prefixes=("FERRET_",),
+                options_surface="typed options; a ferret-config.yaml ships with the plugin and an operator rules path was not surveyed",
+            ),
+            exit_codes=opsf.ExitCodesFacet(
+                success_exit_codes=(0, 3),
+                semantics="exit 3 is an accepted coverage-accounting outcome",
+            ),
+            provenance=opsf.ProvenanceFacet(
+                tier=opsf.Tier.COMMUNITY_OPTIN,
+                source=opsf.ProvenanceSource.PYPI_PINNED_DEPENDENCY,
+                selection_surfaces=("ash_ferret_plugins in ash_plugin_modules",),
+                upstream_license=(
+                    "Apache-2.0 (source: the ferret-scan row of the 2026-11-24 "
+                    "scanner license check, a live GitHub license read; not pinned to the version the plugin "
+                    "installs and not in THIRD_PARTY_LICENSES)"
+                ),
+            ),
+            prerequisites=opsf.PrerequisitesFacet(
+                kinds=(opsf.Prerequisite.NONE,),
+                note="files in the scan set",
+            ),
+        )
     )
 
     # The absolute target of the scan in progress, set by scan() and read by

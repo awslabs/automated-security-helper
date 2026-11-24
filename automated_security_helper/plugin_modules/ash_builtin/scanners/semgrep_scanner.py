@@ -20,13 +20,14 @@ from automated_security_helper.base.options import (
     ScannerOptionsBase,
     tool_version_constraint,
 )
+from automated_security_helper.base import scanner_operational_facets as opsf
 from automated_security_helper.base.scanner_facets import (
     FacetDecl,
     FacetState,
     ScannerFacets,
 )
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
-from automated_security_helper.core.enums import ScannerToolType
+from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.models.core import ToolArgs
 from automated_security_helper.plugin_modules.ash_builtin.scanners._grep_scanner_base import (
     DEFAULT_EXCLUDES,
@@ -254,6 +255,119 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
             native_field="results[].properties (SARIF property bag, passed "
             "through unmodified)",
         ),
+    )
+
+    #: The operational register row (base/scanner_operational_facets.py),
+    #: checked against the production declarations it mirrors by
+    #: tests/unit/plugin_modules/test_scanner_operational_facets_consistency.py.
+    operational_facets: ClassVar[opsf.ScannerOperationalFacets] = (
+        opsf.ScannerOperationalFacets(
+            scanner_name="semgrep",
+            network=opsf.NetworkFacet(
+                fetch_kind=opsf.FetchKind.CONTENT_FETCH,
+                fetches=(opsf.Fetched.RULESET_REGISTRY,),
+                prefetch=(opsf.Prefetch.IMAGE_BUILD,),
+                offline_outcome=opsf.OfflineOutcome.DEGRADED,
+                offline_reason=(
+                    "runs with --metrics off against the operator's local rules or the "
+                    "validated offline ruleset cache as --config; never a silent fallback "
+                    "to the registry ruleset, and no cache means MISSING with the seeding "
+                    "remedy named"
+                ),
+                offline_strategy=OfflineStrategy.CACHE_FLAGS,
+                sandbox_network=opsf.SandboxNetwork.ONLINE,
+                content_database="semgrep-offline-rules",
+                source=(
+                    "semgrep_scanner.py sandbox_requirements and default rulesets; "
+                    "_grep_scanner_base.py offline_strategy; utils/content_databases.py"
+                ),
+                unconfirmed=(
+                    "whether metrics 'auto' sends metrics on every registry-rules run at "
+                    "the pinned version; one semgrep documentation read settles it"
+                ),
+            ),
+            output=opsf.OutputFacet(
+                native_formats=(opsf.OutputFormat.SARIF,),
+                side_reports=(),
+                non_finding_artifacts=(),
+            ),
+            targets=opsf.TargetsFacet(
+                kinds=(opsf.TargetKind.SOURCE_CODE,),
+                tool_type=ScannerToolType.SAST,
+                selection=(
+                    "whole scan set, languages defined by the ruleset; .semgrepignore "
+                    "normalized to ASH's ignore model (_grep_scanner_base.py)"
+                ),
+            ),
+            runtime=opsf.RuntimeFacet(
+                kind=opsf.RuntimeKind.UV_PYTHON,
+                external_programs=(),
+                invocations=opsf.Invocations.ONE,
+                python_only=True,
+                use_uv_tool=True,
+            ),
+            platforms=opsf.PlatformsFacet(
+                provisionable=(),
+                note="a PyPI package run through uv; platform support is the package's and was not read here",
+            ),
+            severity=opsf.SeverityFacet(
+                severity_class=opsf.SeverityClass.NATIVE,
+                note="the SARIF level only: three grades",
+            ),
+            silencing=opsf.SilencingFacet(
+                tool_side=(
+                    opsf.SilencingLayer(
+                        layer=opsf.SilencingLayerKind.INLINE_COMMENT,
+                        writer=opsf.SilencingWriter.REPOSITORY,
+                        honored=opsf.Honored.UNCONFIRMED,
+                        surface="nosemgrep comments",
+                        cite="tool feature; _grep_scanner_base.py was not read for an ASH-side switch",
+                        reason=(
+                            "whether ASH leaves nosemgrep on was not read at the adapter; "
+                            "one adapter read settles it"
+                        ),
+                    ),
+                    opsf.SilencingLayer(
+                        layer=opsf.SilencingLayerKind.IGNORE_FILE,
+                        writer=opsf.SilencingWriter.REPOSITORY,
+                        honored=opsf.Honored.NO,
+                        surface=".semgrepignore in the scanned tree",
+                        cite="_grep_scanner_base.py:359-375; ASH warns and names global_settings.ignore_paths",
+                    ),
+                ),
+            ),
+            identity=opsf.IdentityFacet(
+                fingerprint_class=opsf.FingerprintClass.STABLE_NATIVE,
+                note="matchBasedId/v1; the 'requires login' placeholder is discarded",
+            ),
+            extensibility=opsf.ExtensibilityFacet(
+                custom_rules=opsf.CustomRules.BOTH,
+                env_prefixes=("SEMGREP_",),
+                options_surface=(
+                    "options.config: a registry entry, a URL, or a local rule file or "
+                    "directory through the path-trust resolver; a refused or missing "
+                    "value declines the scanner"
+                ),
+            ),
+            exit_codes=opsf.ExitCodesFacet(
+                success_exit_codes=(0, 1),
+                semantics="the base default {0, 1}; _grep_scanner_base.py notes it matches the tool",
+            ),
+            provenance=opsf.ProvenanceFacet(
+                tier=opsf.Tier.BUILTIN_DEFAULT,
+                source=opsf.ProvenanceSource.PYPI_VIA_UV,
+                selection_surfaces=("options.config",),
+                upstream_license=(
+                    "LGPL-2.1-only (source: utils/tool_downloads.py "
+                    "THIRD_PARTY_LICENSES['semgrep'], pinned commit a5844e7; the "
+                    "rules it downloads carry their own license, not read)"
+                ),
+            ),
+            prerequisites=opsf.PrerequisitesFacet(
+                kinds=(opsf.Prerequisite.NONE,),
+                note="source files in the scan set",
+            ),
+        )
     )
 
     def model_post_init(self, context):

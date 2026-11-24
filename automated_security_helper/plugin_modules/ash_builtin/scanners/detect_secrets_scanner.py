@@ -54,6 +54,7 @@ from automated_security_helper.config.secret_verification_trust import (
 )
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.uv_tool_mixin import guarded_values_read
+from automated_security_helper.base import scanner_operational_facets as opsf
 from automated_security_helper.base.scanner_facets import (
     FacetDecl,
     FacetState,
@@ -452,6 +453,107 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             state=FacetState.NA,
             reason="the result property bag carries the tags only",
         ),
+    )
+
+    #: The operational register row (base/scanner_operational_facets.py),
+    #: checked against the production declarations it mirrors by
+    #: tests/unit/plugin_modules/test_scanner_operational_facets_consistency.py.
+    operational_facets: ClassVar[opsf.ScannerOperationalFacets] = (
+        opsf.ScannerOperationalFacets(
+            scanner_name="detect-secrets",
+            network=opsf.NetworkFacet(
+                fetch_kind=opsf.FetchKind.CONTENT_FETCH,
+                fetches=(opsf.Fetched.ISSUER_VERIFICATION,),
+                prefetch=(),
+                offline_outcome=opsf.OfflineOutcome.DEGRADED,
+                offline_reason=(
+                    "verification reads as unverified: more findings are reported and "
+                    "none are dropped; a declared degradation, not a skip"
+                ),
+                offline_strategy=OfflineStrategy.BUNDLED,
+                sandbox_network=opsf.SandboxNetwork.VERIFYING,
+                source=(
+                    "detect_secrets_scanner.py sandbox_requirements (a property: "
+                    "network follows the baseline's verification filter, "
+                    "network_requires_grant is always True)"
+                ),
+            ),
+            output=opsf.OutputFacet(
+                native_formats=(opsf.OutputFormat.PYTHON_API,),
+                side_reports=(),
+                non_finding_artifacts=(),
+                consumed_by_deviation="no results file exists; Results are built in-process",
+            ),
+            targets=opsf.TargetsFacet(
+                kinds=(opsf.TargetKind.SECRETS_CONTENTS,),
+                tool_type=ScannerToolType.SECRETS,
+                selection="an in-process worker over every text file of the scan set; git history is not read",
+            ),
+            runtime=opsf.RuntimeFacet(
+                kind=opsf.RuntimeKind.IN_PROCESS,
+                external_programs=(),
+                invocations=opsf.Invocations.ONE,
+                python_only=True,
+                use_uv_tool=False,
+            ),
+            platforms=opsf.PlatformsFacet(
+                provisionable=(),
+                note="a pinned Python dependency imported in-process; platform support is the package's and was not read here",
+            ),
+            severity=opsf.SeverityFacet(
+                severity_class=opsf.SeverityClass.CONSTANT,
+                note="every finding is error",
+            ),
+            silencing=opsf.SilencingFacet(
+                tool_side=(
+                    opsf.SilencingLayer(
+                        layer=opsf.SilencingLayerKind.TOOL_DEFAULT_FILTER,
+                        writer=opsf.SilencingWriter.TOOL_DEFAULT,
+                        honored=opsf.Honored.YES,
+                        surface="the verification filter, when enabled, drops issuer-rejected candidates",
+                        cite="detect_secrets_scanner.py sandbox_requirements and the verification note",
+                    ),
+                    opsf.SilencingLayer(
+                        layer=opsf.SilencingLayerKind.IGNORE_FILE,
+                        writer=opsf.SilencingWriter.REPOSITORY,
+                        honored=opsf.Honored.UNCONFIRMED,
+                        surface="the baseline file's trust, echo and suppression joins",
+                        cite="detect_secrets_scanner.py IS_BASELINE_FILE_FILTER; the baseline is read once at configuration",
+                        reason=(
+                            "the baseline is trust-gated, but whether a repository-written "
+                            "baseline silences findings was not re-read here"
+                        ),
+                    ),
+                ),
+            ),
+            identity=opsf.IdentityFacet(
+                fingerprint_class=opsf.FingerprintClass.DROPPED_BY_POLICY,
+                note="the secret hash is baseline-join state that deliberately never enters the SARIF",
+            ),
+            extensibility=opsf.ExtensibilityFacet(
+                custom_rules=opsf.CustomRules.NONE,
+                env_prefixes=(),
+                options_surface="the baseline and scan settings; no rules path",
+            ),
+            exit_codes=opsf.ExitCodesFacet(
+                success_exit_codes=(0, 1),
+                semantics="the base default {0, 1}; the scan is in-process, so there is no tool exit",
+            ),
+            provenance=opsf.ProvenanceFacet(
+                tier=opsf.Tier.BUILTIN_DEFAULT,
+                source=opsf.ProvenanceSource.PYPI_PINNED_DEPENDENCY,
+                selection_surfaces=("verification (baseline-driven)",),
+                upstream_license=(
+                    "Apache-2.0 (source: the detect-secrets row of the 2026-11-24 "
+                    "scanner license check, a live GitHub license read; not pinned to the version in "
+                    "uv.lock and not in THIRD_PARTY_LICENSES)"
+                ),
+            ),
+            prerequisites=opsf.PrerequisitesFacet(
+                kinds=(opsf.Prerequisite.NONE,),
+                note="a baseline file is an optional input that changes trust and suppression behavior",
+            ),
+        )
     )
 
     # The baseline as parsed when the scanner was configured, read once from its

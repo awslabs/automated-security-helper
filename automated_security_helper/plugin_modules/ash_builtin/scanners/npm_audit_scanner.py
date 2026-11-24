@@ -14,6 +14,7 @@ from typing import Annotated, ClassVar, Dict, List, Literal, Any, Sequence, Set
 from pydantic import Field, PrivateAttr, model_validator
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.base.options import ScannerOptionsBase
+from automated_security_helper.base import scanner_operational_facets as opsf
 from automated_security_helper.base.scanner_facets import (
     FacetDecl,
     FacetState,
@@ -552,6 +553,94 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             "recommendation, severity, cwe, cvss, package identity) passed "
             "through to the flat properties",
         ),
+    )
+
+    #: The operational register row (base/scanner_operational_facets.py),
+    #: checked against the production declarations it mirrors by
+    #: tests/unit/plugin_modules/test_scanner_operational_facets_consistency.py.
+    operational_facets: ClassVar[opsf.ScannerOperationalFacets] = (
+        opsf.ScannerOperationalFacets(
+            scanner_name="npm-audit",
+            network=opsf.NetworkFacet(
+                fetch_kind=opsf.FetchKind.CONTENT_FETCH,
+                fetches=(
+                    opsf.Fetched.ADVISORY_FEED,
+                    opsf.Fetched.PACKAGE_METADATA,
+                ),
+                prefetch=(),
+                offline_outcome=opsf.OfflineOutcome.NOT_RUN,
+                offline_reason=(
+                    "npm, yarn and pnpm audit a lockfile by asking the registry, so an "
+                    "offline run would read every lockfile as clean; the scanner does "
+                    "not run, each lockfile is listed as not scanned with the reason, "
+                    "and it is MISSING when lockfiles exist and SKIPPED when none do"
+                ),
+                offline_strategy=OfflineStrategy.SKIP_OFFLINE,
+                sandbox_network=opsf.SandboxNetwork.ONLINE,
+                source=(
+                    "npm_audit_scanner.py offline_strategy, sandbox_requirements and "
+                    "dependency_unavailable_reason; the audit is the network call"
+                ),
+            ),
+            output=opsf.OutputFacet(
+                native_formats=(opsf.OutputFormat.TOOL_JSON,),
+                side_reports=(),
+                non_finding_artifacts=(),
+                note="three dialects: npm, yarn and pnpm; the SARIF URI is synthesized",
+            ),
+            targets=opsf.TargetsFacet(
+                kinds=(opsf.TargetKind.DEPENDENCY_LOCKFILES,),
+                tool_type=ScannerToolType.SCA,
+                selection=(
+                    "lockfile discovery over the scan set: package-lock.json, "
+                    "npm-shrinkwrap.json, yarn.lock, pnpm-lock.yaml; one audit per "
+                    "lockfile, shrinkwrap outranks package-lock"
+                ),
+            ),
+            runtime=opsf.RuntimeFacet(
+                kind=opsf.RuntimeKind.NODE_SUBCOMMAND,
+                external_programs=("node", "npm", "yarn", "pnpm"),
+                invocations=opsf.Invocations.PER_TARGET,
+                invocation_note="one subprocess per lockfile, by the package manager that owns it",
+                python_only=False,
+                use_uv_tool=False,
+            ),
+            platforms=opsf.PlatformsFacet(
+                provisionable=(),
+                note="the Node.js toolchain is the user's; ASH installs none of it",
+            ),
+            severity=opsf.SeverityFacet(
+                severity_class=opsf.SeverityClass.NATIVE,
+                note="npm's own critical/high/moderate/low/info scale is mapped (npm_audit_scanner.py severity tables)",
+            ),
+            silencing=opsf.SilencingFacet(
+                tool_side=(),
+                none_reason="no tool-side silencing surface was surveyed for npm audit; ASH suppressions are the surface this register records",
+            ),
+            identity=opsf.IdentityFacet(
+                fingerprint_class=opsf.FingerprintClass.POSITIONAL_ONLY,
+                note="identity is the synthesized lockfile location through the shared floor",
+            ),
+            extensibility=opsf.ExtensibilityFacet(
+                custom_rules=opsf.CustomRules.NONE,
+                env_prefixes=("npm_config_", "NPM_CONFIG_"),
+                options_surface="typed options only; npm's own configuration is passed through the environment under the sandbox",
+            ),
+            exit_codes=opsf.ExitCodesFacet(
+                success_exit_codes=(0, 1),
+                semantics="the base default {0, 1}; the adapter owns the audit-failure handling",
+            ),
+            provenance=opsf.ProvenanceFacet(
+                tier=opsf.Tier.BUILTIN_DEFAULT,
+                source=opsf.ProvenanceSource.USER_INSTALLED,
+                selection_surfaces=(),
+                upstream_license=opsf.LICENSE_NOT_READ,
+            ),
+            prerequisites=opsf.PrerequisitesFacet(
+                kinds=(opsf.Prerequisite.LOCKFILE, opsf.Prerequisite.NODE_RUNTIME),
+                note="a lockfile must exist (a manifest alone is not auditable) and the Node.js runtime must be installed",
+            ),
+        )
     )
 
     #: Lockfiles the ignore paths dropped from the last package selection

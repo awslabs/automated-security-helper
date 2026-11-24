@@ -9,6 +9,7 @@ from typing import Annotated, Any, ClassVar, List, Literal, Optional, Set
 from pydantic import Field
 
 from automated_security_helper.base.options import ScannerOptionsBase
+from automated_security_helper.base import scanner_operational_facets as opsf
 from automated_security_helper.base.scanner_facets import (
     FacetDecl,
     FacetState,
@@ -29,7 +30,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners._trivy_scanne
 from automated_security_helper.base.scanner_plugin import (
     redacted_command_record,
 )
-from automated_security_helper.core.enums import ScannerToolType
+from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.schemas.sarif_schema_model import (
@@ -299,12 +300,145 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
         ),
     )
 
+    #: The operational register row (base/scanner_operational_facets.py),
+    #: checked against the production declarations it mirrors by
+    #: tests/unit/plugin_modules/test_scanner_operational_facets_consistency.py.
+    operational_facets: ClassVar[opsf.ScannerOperationalFacets] = (
+        opsf.ScannerOperationalFacets(
+            scanner_name="trivy-repo",
+            network=opsf.NetworkFacet(
+                fetch_kind=opsf.FetchKind.CONTENT_FETCH,
+                fetches=(
+                    opsf.Fetched.VULN_DB,
+                    opsf.Fetched.CHECKS_BUNDLE,
+                    opsf.Fetched.MODULE_SOURCES,
+                ),
+                prefetch=(opsf.Prefetch.CONTENT_DB_REFRESH,),
+                offline_outcome=opsf.OfflineOutcome.DEGRADED,
+                offline_reason=(
+                    "--skip-db-update, --skip-java-db-update and --skip-check-update "
+                    "against the cached databases; Terraform checks are removed from the "
+                    "misconfiguration set offline with the reason logged; a scan that "
+                    "reads the vulnerability database with none cached is refused before "
+                    "the scan"
+                ),
+                offline_strategy=OfflineStrategy.CACHE_FLAGS,
+                sandbox_network=opsf.SandboxNetwork.ONLINE,
+                content_database="trivy-db",
+                source=(
+                    "_trivy_scanner_base.py offline_strategy, sandbox_requirements, "
+                    "SCAN_FLAGS and OFFLINE_FLAGS; utils/content_databases.py trivy-db "
+                    "(declared for trivy-repo)"
+                ),
+                unconfirmed=(
+                    "the default scanner set is all four, so the online Terraform module "
+                    "fetch and the offline misconfig degradation apply by default here, "
+                    "unlike the builtin trivy scanner"
+                ),
+            ),
+            output=opsf.OutputFacet(
+                native_formats=(opsf.OutputFormat.SARIF,),
+                side_reports=(),
+                non_finding_artifacts=(),
+            ),
+            targets=opsf.TargetsFacet(
+                kinds=(
+                    opsf.TargetKind.DEPENDENCY_LOCKFILES,
+                    opsf.TargetKind.SECRETS_CONTENTS,
+                    opsf.TargetKind.IAC_TERRAFORM,
+                    opsf.TargetKind.IAC_KUBERNETES,
+                    opsf.TargetKind.IAC_CLOUDFORMATION,
+                    opsf.TargetKind.DOCKERFILES,
+                ),
+                tool_type=ScannerToolType.SCA,
+                selection="`trivy repository` over the target; scanners default to vuln, secret, misconfig and license",
+                covers_note="a community scanner; it declares no covers display string",
+                tool_type_note=(
+                    "was SAST, which contradicted what it runs (vuln, secret, misconfig "
+                    "and license scanners, no source analysis) and fed the reporter-side "
+                    "scanner-type exclusions the wrong type; corrected to SCA, the type "
+                    "the builtin trivy scanner declares"
+                ),
+            ),
+            runtime=opsf.RuntimeFacet(
+                kind=opsf.RuntimeKind.PINNED_BINARY,
+                external_programs=(),
+                invocations=opsf.Invocations.ONE,
+                tool_versions_key="trivy",
+                python_only=False,
+                use_uv_tool=False,
+            ),
+            platforms=opsf.PlatformsFacet(
+                provisionable=opsf.PLATFORMS_NO_WINDOWS_ARM64,
+                note="no windows/arm64 and no 32-bit macOS asset (tool_downloads.py docstring)",
+            ),
+            severity=opsf.SeverityFacet(
+                severity_class=opsf.SeverityClass.DERIVED,
+                note="issue_severity is computed from the message and tags",
+            ),
+            silencing=opsf.SilencingFacet(
+                tool_side=(
+                    opsf.SilencingLayer(
+                        layer=opsf.SilencingLayerKind.TOOL_DEFAULT_FILTER,
+                        writer=opsf.SilencingWriter.TOOL_DEFAULT,
+                        honored=opsf.Honored.YES,
+                        surface="options.ignore_unfixed defaults to True and pre-filters tool-side",
+                        cite="trivy_repo_scanner.py ignore_unfixed option and the warning at :273",
+                    ),
+                    opsf.SilencingLayer(
+                        layer=opsf.SilencingLayerKind.IGNORE_FILE,
+                        writer=opsf.SilencingWriter.REPOSITORY,
+                        honored=opsf.Honored.UNCONFIRMED,
+                        surface="a trivy ignore file in the scanned tree",
+                        cite="tool feature; _trivy_scanner_base.py lists TRIVY_IGNORE_* and TRIVY_SKIP_* as passed-through variables",
+                        reason=(
+                            "whether a repository-written ignore file can silence findings "
+                            "under ASH was not read; one adapter read settles it"
+                        ),
+                    ),
+                ),
+            ),
+            identity=opsf.IdentityFacet(
+                fingerprint_class=opsf.FingerprintClass.POSITIONAL_ONLY,
+                note="identity is file and line through the shared floor",
+            ),
+            extensibility=opsf.ExtensibilityFacet(
+                custom_rules=opsf.CustomRules.NONE,
+                env_prefixes=("TRIVY_",),
+                options_surface="typed options (scanners, ignore_unfixed, license_full); ASH always passes its own --config",
+            ),
+            exit_codes=opsf.ExitCodesFacet(
+                success_exit_codes=(0,),
+                semantics="trivy reports findings in the file, not through its exit code",
+            ),
+            provenance=opsf.ProvenanceFacet(
+                tier=opsf.Tier.COMMUNITY_OPTIN,
+                source=opsf.ProvenanceSource.PINNED_RELEASE_BINARY,
+                selection_surfaces=(
+                    "ash_trivy_plugins in ash_plugin_modules",
+                    "options.scanners (all four on by default)",
+                ),
+                upstream_license=(
+                    "Apache-2.0 (source: utils/tool_downloads.py "
+                    "THIRD_PARTY_LICENSES['trivy'], pinned commit 3f6334d; the "
+                    "trivy binary this plugin invokes)"
+                ),
+            ),
+            prerequisites=opsf.PrerequisitesFacet(
+                kinds=(opsf.Prerequisite.NONE,),
+                note="a directory",
+            ),
+        )
+    )
+
     def model_post_init(self, context):
         if self.config is None:
             self.config = TrivyRepoScannerConfig()
         self.command = "trivy"
         self.subcommands = ["repository"]
-        self.tool_type = ScannerToolType.SAST
+        # SCA, not SAST: it runs the vuln, secret, misconfig and license
+        # scanners and no source analysis (operational_facets.targets).
+        self.tool_type = ScannerToolType.SCA
         self.args = ToolArgs(
             format_arg="--format",
             format_arg_value="sarif",
