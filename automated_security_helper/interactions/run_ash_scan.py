@@ -283,7 +283,7 @@ class ScanOptions(BaseModel):
     # a different thing from an empty list, so this field is NOT in the
     # none-to-empty-list validator below: when it is a list, it states the whole
     # selection and the precommit mode default and the config's precommit keys
-    # are not consulted (_selected_scanners). The CLI refuses it together with
+    # are not consulted (SelectionLayers.fold). The CLI refuses it together with
     # --scanners or --add-scanners; a library caller that sets it alongside them
     # gets only_scanners, which wins by the same precedence.
     only_scanners: Optional[List[str]] = None
@@ -6262,13 +6262,8 @@ def _resolved_precommit_config(opts: ScanOptions):
 
 
 def _selection_layers(opts: ScanOptions, logger) -> SelectionLayers:
-    """The selection layers this scan's options and host-side config give.
-
-    Everything except the operator's ``scanner_selection``, which only the
-    orchestrator's settled config supplies (``SelectionLayers.fold``). In
-    precommit mode, the mode default and the ``precommit`` keys; in every mode,
-    the command line.
-    """
+    """The selection layers except the operator's ``scanner_selection``, which
+    the orchestrator folds in from its settled config."""
     additive = list(opts.scanners or []) + list(opts.add_scanners or [])
     if opts.only_scanners is not None:
         return SelectionLayers(cli_only=list(opts.only_scanners))
@@ -6294,46 +6289,13 @@ def _selection_layers(opts: ScanOptions, logger) -> SelectionLayers:
     )
 
 
-def _selected_scanners(opts: ScanOptions, logger) -> List[str]:
-    """The scanner allowlist the orchestrator is created with, precedence applied.
-
-    The precedence lives in ``SelectionLayers.fold``; the CLI help, the config
-    sections' descriptions and docs/content/how-to/pre-commit.md describe it.
-    Lowest to highest:
-
-    1. The mode default: ``--mode precommit`` starts from
-       ``PRECOMMIT_MODE_SCANNERS``; every other mode starts empty (no
-       narrowing).
-    2. The operator's ``scanner_selection`` section, in every mode. It is not
-       read here: it comes from the config the orchestrator settles, which
-       folds it in at that point (``ASHScanOrchestrator.selection_layers``).
-    3. The config's ``precommit`` section, in precommit mode only:
-       ``only_scanners`` replaces the lower layers, ``add_scanners`` adds to
-       them (the model refuses both at once).
-    4. The command line: ``--only-scanners`` states the whole selection, so the
-       lower layers are not consulted at all; ``--add-scanners`` and the
-       deprecated ``--scanners`` add to whatever base stands. The CLI refuses
-       ``--only-scanners`` beside either additive flag.
-
-    ``--exclude-scanners`` is not applied here: the engine subtracts it after
-    selection (``selection_after_exclusions``), so an excluded name wins over
-    any inclusion, whichever of the sources above named it.
-
-    This list is the selection without layer 2, which is what the orchestrator
-    uses when it has no settled config to fold with. De-duplicated preserving
-    first appearance, so the log and the SKIPPED rows read the same from run to
-    run; the engine compares names case-insensitively either way.
-    """
-    return _selection_layers(opts, logger).fold().names
-
-
 def _folded_scanner_allowlist(opts: ScanOptions) -> List[str]:
     """The inclusion flags folded to one allowlist, for the paths with no
     precommit union: workspace mode, and the list container mode forwards.
     There every inclusion flag means the same thing, an allowlist entry, so
     ``--only-scanners`` is the list when given and the additive flags
     concatenate otherwise. Precommit mode's union stays in
-    :func:`_selected_scanners`; the container's inner scan runs in local mode
+    :func:`_selection_layers`; the container's inner scan runs in local mode
     and the workspace executor applies no mode default, so nothing is folded
     away.
     """

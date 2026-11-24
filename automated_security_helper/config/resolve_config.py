@@ -2949,7 +2949,12 @@ def resolve_config(
         config, trusted, tier_two_overrides, list(in_tree), source=tier_two_source
     )
     confine_scanner_selection(
-        config, trusted, tier_two_overrides, list(in_tree), source=tier_two_source
+        config,
+        trusted,
+        tier_two_overrides,
+        list(in_tree),
+        source=tier_two_source,
+        repository=repository,
     )
     tier_two_reason = CLIENT_SUPPLIED if client_supplied else REPOSITORY_WRITTEN
     honor_reason = tier_two_reason

@@ -927,6 +927,8 @@ class ASHScanOrchestrator(BaseModel):
             enabled_scanners = folded.names
             if folded.origin == "operator":
                 selection_origin = "config"
+            elif folded.origin == "cli+operator":
+                selection_origin = "cli+config"
 
         # Under this scan's run id, so the context records its directories on
         # *config* as this run's (config/path_trust.derived_roots_scope) and

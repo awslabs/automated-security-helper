@@ -124,6 +124,9 @@ if TYPE_CHECKING:
         EnvironmentReference,
     )
 
+SCANNER_SELECTION_FIELD = "scanner_selection"
+SCANNER_SELECTION_KEYS = ("only_scanners", "add_scanners")
+
 #: Reporter section name -> the options in it only the operator may set.
 OPERATOR_ONLY_OPTIONS: Dict[str, Tuple[str, ...]] = {
     "aws-security-hub": ("findings_scope", "archive_resolved_findings"),
@@ -397,7 +400,8 @@ class RepositorySettings:
     supplied), it gives back the
     document the file resolved to without any option in OPERATOR_ONLY_OPTIONS
     or OPERATOR_ONLY_SCANNER_OPTIONS, under any section spelling the
-    configuration reads as that plugin's, and records what it left out. The
+    configuration reads as that plugin's, and without the top-level
+    ``scanner_selection`` section, and records what it left out. The
     document a file resolved to holds what its own bases set and what its
     ``patch`` wrote, so those are left out too. Every value is left out, one
     the option's model would refuse included, so what the repository writes for
@@ -444,6 +448,7 @@ class RepositorySettings:
         #: The places a file with an established location left an option out of.
         self._located_places: Set[str] = set()
         self.document: Any = None
+        self.selection_written: Dict[str, Any] = {}
 
     def _membership(self, real: Path, named: Path) -> Tuple[bool, bool]:
         """Whether the file is the repository's, and whether that rests on a
@@ -492,6 +497,7 @@ class RepositorySettings:
         *data* itself when it has none."""
         if not isinstance(data, dict):
             return data
+        data = self._without_scanner_selection(data)
         places = [
             (kind, plugin, key, option)
             for kind, listed, sections_of in _CONFINED_KINDS
@@ -520,6 +526,20 @@ class RepositorySettings:
             value = stripped[kind][key]["options"].pop(option)
             self.found.append((kind, plugin, key, option, value))
         return stripped
+
+    def _without_scanner_selection(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        if SCANNER_SELECTION_FIELD not in data:
+            return data
+        section = data[SCANNER_SELECTION_FIELD]
+        if isinstance(section, dict):
+            for name in SCANNER_SELECTION_KEYS:
+                if name in section:
+                    self.selection_written[name] = section[name]
+        elif section is not None:
+            self.selection_written[SCANNER_SELECTION_FIELD] = section
+        return {
+            key: value for key, value in data.items() if key != SCANNER_SELECTION_FIELD
+        }
 
     def written(self, kind: str) -> Dict[Tuple[str, str, str], Any]:
         """By (plugin, section key, option) of *kind*: the value the

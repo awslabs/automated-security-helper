@@ -297,6 +297,138 @@ class TestARepositoryCannotChangeTheOperatorsSelection:
         assert _warnings_naming(ash_log, "scanner_selection")
 
 
+class TestTheWarningNamesOnlyWhatARepositoryWrote:
+    @pytest.fixture
+    def operator_base(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+        path = _operator(tmp_path, _selecting("bandit"))
+        monkeypatch.setenv("ASH_CONFIG", str(path))
+        return path
+
+    def test_a_checkout_file_without_the_section_draws_no_warning(
+        self, tmp_path: Path, operator_base: Path, ash_log
+    ) -> None:
+        repo = _repo(tmp_path, {"project_name": "repo"})
+
+        config = resolve_config(source_dir=repo)
+
+        assert _only(config) == ["bandit"]
+        assert not _warnings_naming(ash_log, "scanner_selection")
+
+    def test_a_named_checkout_file_without_the_section_draws_no_warning(
+        self, tmp_path: Path, operator_base: Path, ash_log
+    ) -> None:
+        repo = _repo(tmp_path, {"project_name": "repo"})
+
+        config = resolve_config(
+            config_path=repo / ".ash" / ".ash.yaml", source_dir=repo
+        )
+
+        assert _only(config) == ["bandit"]
+        assert not _warnings_naming(ash_log, "scanner_selection")
+
+    def test_the_warning_names_the_one_key_the_file_wrote_once(
+        self, tmp_path: Path, operator_base: Path, ash_log
+    ) -> None:
+        repo = _repo(tmp_path, _selecting("trivy"))
+
+        resolve_config(source_dir=repo)
+
+        said = _warnings_naming(ash_log, "scanner_selection")
+        assert len(said) == 1
+        assert said[0].count("scanner_selection.only_scanners") == 1
+        assert "add_scanners" not in said[0]
+
+    def test_a_file_that_wrote_an_add_list_is_named_by_that_key_only(
+        self, tmp_path: Path, operator_base: Path, ash_log
+    ) -> None:
+        repo = _repo(tmp_path, {"scanner_selection": {"add_scanners": ["trivy"]}})
+
+        resolve_config(source_dir=repo)
+
+        said = _warnings_naming(ash_log, "scanner_selection")
+        assert len(said) == 1
+        assert said[0].count("scanner_selection.add_scanners") == 1
+        assert "only_scanners" not in said[0]
+
+    def test_an_extends_chain_naming_the_key_in_two_files_names_it_once(
+        self, tmp_path: Path, operator_base: Path, ash_log
+    ) -> None:
+        repo = _repo(tmp_path, {})
+        _write(repo / ".ash" / "base.yaml", _selecting("trivy"))
+        _write(
+            repo / ".ash" / ".ash.yaml",
+            {"extends": "base.yaml", **_selecting("checkov")},
+        )
+
+        resolve_config(source_dir=repo)
+
+        said = _warnings_naming(ash_log, "scanner_selection")
+        assert len(said) == 1
+        assert said[0].count("scanner_selection.only_scanners") == 1
+
+
+class TestAnOperatorOverrideIsNotBlockedByAnIgnoredFile:
+    def test_an_only_override_over_a_checkout_add_list(self, tmp_path: Path) -> None:
+        repo = _repo(tmp_path, {"scanner_selection": {"add_scanners": ["trivy"]}})
+
+        config = resolve_config(
+            source_dir=repo,
+            config_overrides=['scanner_selection.only_scanners=["bandit"]'],
+        )
+
+        assert _only(config) == ["bandit"]
+        assert _add(config) == []
+
+    def test_an_add_override_over_a_checkout_only_list(self, tmp_path: Path) -> None:
+        repo = _repo(tmp_path, _selecting("trivy"))
+
+        config = resolve_config(
+            source_dir=repo,
+            config_overrides=['scanner_selection.add_scanners=["checkov"]'],
+        )
+
+        assert _add(config) == ["checkov"]
+        assert _only(config) == []
+
+    def test_a_checkout_file_writing_both_lists_does_not_make_the_config_unloadable(
+        self, tmp_path: Path
+    ) -> None:
+        repo = _repo(
+            tmp_path,
+            {"scanner_selection": {"only_scanners": ["a"], "add_scanners": ["b"]}},
+        )
+
+        config = resolve_config(source_dir=repo)
+
+        assert _only(config) == []
+        assert _add(config) == []
+
+    def test_the_override_still_conflicts_with_the_operators_own_file(
+        self, tmp_path: Path
+    ) -> None:
+        repo = _repo(tmp_path, {})
+        operator = _operator(tmp_path, _selecting("bandit"))
+
+        with pytest.raises(ASHConfigValidationError, match="cannot be set together"):
+            resolve_config(
+                config_path=operator,
+                source_dir=repo,
+                config_overrides=['scanner_selection.add_scanners=["checkov"]'],
+            )
+
+    def test_the_override_still_conflicts_with_the_operators_ash_config(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        repo = _repo(tmp_path, {})
+        monkeypatch.setenv("ASH_CONFIG", str(_operator(tmp_path, _selecting("bandit"))))
+
+        with pytest.raises(ASHConfigValidationError, match="cannot be set together"):
+            resolve_config(
+                source_dir=repo,
+                config_overrides=['scanner_selection.add_scanners=["checkov"]'],
+            )
+
+
 class TestAClientPatchIsRefused:
     @pytest.fixture
     def session(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

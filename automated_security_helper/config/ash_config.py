@@ -2097,9 +2097,10 @@ class PrecommitModeConfig(RedactedSection):
     file, so a repository can state once what its hook runs instead of every
     committer spelling flags in ``.pre-commit-config.yaml``.
 
-    Precedence, lowest to highest (``run_ash_scan._selected_scanners`` applies
-    it): the mode default; then ``only_scanners`` (replaces the default) and
-    ``add_scanners`` (adds to it); then the command line, where
+    Precedence, lowest to highest (``SelectionLayers.fold`` in
+    ``core/scanner_selection.py`` applies it): the mode default; then the
+    operator's ``scanner_selection`` section; then ``only_scanners`` (replaces
+    what is below) and ``add_scanners`` (adds to it); then the command line, where
     ``--only-scanners`` replaces everything this section and the mode give, and
     ``--add-scanners`` (or the deprecated ``--scanners``) adds to it.
     ``--exclude-scanners`` applies after all of them: an excluded name wins over

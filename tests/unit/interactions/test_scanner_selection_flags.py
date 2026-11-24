@@ -14,14 +14,17 @@ things that say what they do: ``--only-scanners`` (the whole selection),
 keeps its behavior and gains a deprecation line.
 
 The precedence under test, lowest to highest
-(``run_ash_scan._selected_scanners`` is the one place it is implemented):
+(``SelectionLayers.fold`` in ``core/scanner_selection.py`` is the one place it is
+implemented):
 
 1. mode default (``PRECOMMIT_MODE_SCANNERS`` in precommit mode, empty elsewhere)
-2. config: ``precommit.only_scanners`` replaces the default,
+2. the operator's ``scanner_selection`` (every mode), folded by the orchestrator
+   against its settled config
+3. config: ``precommit.only_scanners`` replaces the lower layers,
    ``precommit.add_scanners`` adds (both at once is refused by the model)
-3. CLI: ``--only-scanners`` replaces everything above; ``--add-scanners`` and
+4. CLI: ``--only-scanners`` replaces everything above; ``--add-scanners`` and
    the deprecated ``--scanners`` add
-4. ``--exclude-scanners`` applies after selection, in the engine, so exclusion
+5. ``--exclude-scanners`` applies after selection, in the engine, so exclusion
    wins over inclusion -- these tests assert it is handed through untouched
 
 No scanner runs here: the orchestrator's ``create`` is replaced and recorded,
@@ -44,7 +47,6 @@ from automated_security_helper.interactions.run_ash_scan import (
     ScanOptions,
     _folded_scanner_allowlist,
     _run_local_mode,
-    _selected_scanners,
 )
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 
@@ -95,6 +97,21 @@ class _StubOrchestrator:
         return self._results
 
 
+def _selected(opts: ScanOptions, logger: _RecordingLogger) -> List[str]:
+    from automated_security_helper.core.orchestrator import ASHScanOrchestrator
+
+    recorded: List[Dict[str, Any]] = []
+
+    def fake_create(**kwargs):
+        recorded.append(kwargs)
+        return _StubOrchestrator(AshAggregatedResults())
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(ASHScanOrchestrator, "create", staticmethod(fake_create))
+        _run_local_mode(opts, logger)
+    return list(recorded[0]["enabled_scanners"])
+
+
 @pytest.fixture
 def logger() -> _RecordingLogger:
     return _RecordingLogger()
@@ -135,7 +152,7 @@ class TestSelectionPrecedence:
     def test_precommit_default_is_the_mode_set(self, tmp_path, logger):
         opts = _opts(tmp_path, tmp_path / "out", mode=RunMode.precommit)
 
-        selected = _selected_scanners(opts, logger)
+        selected = _selected(opts, logger)
 
         assert sorted(selected) == sorted(PRECOMMIT_MODE_SCANNERS)
 
@@ -146,7 +163,7 @@ class TestSelectionPrecedence:
         )
         opts = _opts(tmp_path, tmp_path / "out", mode=RunMode.precommit, config=config)
 
-        assert _selected_scanners(opts, logger) == ["bandit"]
+        assert _selected(opts, logger) == ["bandit"]
 
     def test_config_add_scanners_adds_to_the_mode_default(self, tmp_path, logger):
         config = _config_file(
@@ -155,7 +172,7 @@ class TestSelectionPrecedence:
         )
         opts = _opts(tmp_path, tmp_path / "out", mode=RunMode.precommit, config=config)
 
-        selected = _selected_scanners(opts, logger)
+        selected = _selected(opts, logger)
 
         assert sorted(selected) == sorted(list(PRECOMMIT_MODE_SCANNERS) + ["grype"])
 
@@ -168,7 +185,7 @@ class TestSelectionPrecedence:
             config_overrides=["precommit.only_scanners=[bandit]"],
         )
 
-        assert _selected_scanners(opts, logger) == ["bandit"]
+        assert _selected(opts, logger) == ["bandit"]
 
     def test_cli_only_scanners_replaces_mode_default_and_config(self, tmp_path, logger):
         config = _config_file(
@@ -183,7 +200,7 @@ class TestSelectionPrecedence:
             only_scanners=["checkov"],
         )
 
-        assert _selected_scanners(opts, logger) == ["checkov"]
+        assert _selected(opts, logger) == ["checkov"]
 
     def test_cli_add_scanners_adds_to_the_mode_default(self, tmp_path, logger):
         opts = _opts(
@@ -193,7 +210,7 @@ class TestSelectionPrecedence:
             add_scanners=["grype"],
         )
 
-        selected = _selected_scanners(opts, logger)
+        selected = _selected(opts, logger)
 
         assert sorted(selected) == sorted(list(PRECOMMIT_MODE_SCANNERS) + ["grype"])
 
@@ -210,7 +227,7 @@ class TestSelectionPrecedence:
             add_scanners=["grype"],
         )
 
-        assert sorted(_selected_scanners(opts, logger)) == ["bandit", "grype"]
+        assert sorted(_selected(opts, logger)) == ["bandit", "grype"]
 
     def test_legacy_scanners_stays_additive_in_precommit(self, tmp_path, logger):
         """--scanners behavior is unchanged: additive to the mode default."""
@@ -221,7 +238,7 @@ class TestSelectionPrecedence:
             scanners=["grype"],
         )
 
-        selected = _selected_scanners(opts, logger)
+        selected = _selected(opts, logger)
 
         assert sorted(selected) == sorted(list(PRECOMMIT_MODE_SCANNERS) + ["grype"])
 
@@ -238,14 +255,14 @@ class TestSelectionPrecedence:
             scanners=["grype"],
         )
 
-        assert _selected_scanners(opts, logger) == ["grype"]
+        assert _selected(opts, logger) == ["grype"]
 
     def test_local_mode_only_scanners_is_the_allowlist(self, tmp_path, logger):
         opts = _opts(
             tmp_path, tmp_path / "out", mode=RunMode.local, only_scanners=["bandit"]
         )
 
-        assert _selected_scanners(opts, logger) == ["bandit"]
+        assert _selected(opts, logger) == ["bandit"]
 
     def test_the_selection_is_deduplicated_in_first_appearance_order(
         self, tmp_path, logger
@@ -258,7 +275,7 @@ class TestSelectionPrecedence:
             add_scanners=["bandit", "grype"],
         )
 
-        selected = _selected_scanners(opts, logger)
+        selected = _selected(opts, logger)
 
         assert selected.count("bandit") == 1
         assert set(selected) == set(PRECOMMIT_MODE_SCANNERS) | {"grype"}
@@ -366,9 +383,7 @@ class TestPrecommitConfigModel:
         opts = _opts(tmp_path, tmp_path / "out", mode=RunMode.precommit, config=config)
 
         assert _resolved_precommit_config(opts) is None
-        assert sorted(_selected_scanners(opts, logger)) == sorted(
-            PRECOMMIT_MODE_SCANNERS
-        )
+        assert sorted(_selected(opts, logger)) == sorted(PRECOMMIT_MODE_SCANNERS)
 
 
 # --------------------------------------------------------------------------- #
@@ -605,7 +620,7 @@ class TestTheFold:
         folded = _fold(operator_only=["bandit"], cli_additive=["checkov"])
 
         assert folded.names == ["checkov", "bandit"]
-        assert folded.origin == "cli"
+        assert folded.origin == "cli+operator"
 
     def test_cli_additions_alone_are_the_allowlist(self):
         assert _fold(cli_additive=["checkov"]).names == ["checkov"]
@@ -934,3 +949,76 @@ class TestLocalModeHandsTheLayersToTheOrchestrator:
         assert list(layers.cli_additive) == ["grype"]
         assert layers.cli_only is None
         assert created["enabled_scanners"] == layers.fold().names
+
+
+class TestTheExistingCliPathKeepsItsDuplicates:
+    def test_only_scanners_is_handed_over_as_given(self, tmp_path, logger):
+        opts = _opts(
+            tmp_path,
+            tmp_path / "out",
+            mode=RunMode.local,
+            only_scanners=["bandit", "bandit"],
+        )
+
+        assert _selected(opts, logger) == ["bandit", "bandit"]
+
+    def test_the_local_additive_flags_are_handed_over_as_given(self, tmp_path, logger):
+        opts = _opts(
+            tmp_path,
+            tmp_path / "out",
+            mode=RunMode.local,
+            scanners=["grype", "grype"],
+            add_scanners=["grype"],
+        )
+
+        assert _selected(opts, logger) == ["grype", "grype", "grype"]
+
+    def test_the_precommit_union_stays_deduplicated(self, tmp_path, logger):
+        opts = _opts(
+            tmp_path,
+            tmp_path / "out",
+            mode=RunMode.precommit,
+            scanners=["bandit", "bandit"],
+        )
+
+        assert _selected(opts, logger).count("bandit") == 1
+
+
+class TestAMixedSelectionIsNotAttributedToTheFlagsAlone:
+    def test_the_refusal_names_the_flags_and_the_config(self, tmp_path, operator_home):
+        from automated_security_helper.core.exceptions import ScannerSelectionError
+
+        config = _operator_config(
+            tmp_path, "scanner_selection:\n  only_scanners: [bandit]\n"
+        )
+
+        with pytest.raises(ScannerSelectionError) as refusal:
+            _engine_allowlist(
+                tmp_path,
+                operator_home,
+                config,
+                add_scanners=["checkov"],
+                excluded=["checkov", "bandit"],
+            )
+
+        text = str(refusal.value)
+        assert "--scanners" in text
+        assert "scanner_selection in the ASH config" in text
+        assert "bandit" in text and "checkov" in text
+
+    def test_flags_alone_keep_the_flag_wording(self, tmp_path, operator_home):
+        from automated_security_helper.core.exceptions import ScannerSelectionError
+
+        config = _operator_config(tmp_path)
+
+        with pytest.raises(ScannerSelectionError) as refusal:
+            _engine_allowlist(
+                tmp_path,
+                operator_home,
+                config,
+                scanners=["checkov"],
+                excluded=["checkov"],
+            )
+
+        assert "scanner_selection" not in str(refusal.value)
+        assert "named by --scanners" in str(refusal.value)
