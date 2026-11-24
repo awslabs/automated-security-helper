@@ -157,7 +157,8 @@ class TestTheIdentitiesAgreeWithTheRowByRowPass:
         rng = random.Random(20261124)
         rules = ["R1", "R2", "R3"]
         texts = ["m", "n", "café", "\udcfe", "a|b", "a\\|b"]
-        paths = ["a.py", "b/c.py", "d\\e.py", None, "\udcff.py", "x|y.py"]
+        plain_paths = ["a.py", "b/c.py", "d\\e.py", "x|y.py"]
+        paths = plain_paths + [None, "\udcff.py"]
         results, shared = [], []
         for _ in range(150):
             results.append(
@@ -166,7 +167,7 @@ class TestTheIdentitiesAgreeWithTheRowByRowPass:
                 else _result(
                     rule=rng.choice(rules),
                     text=rng.choice(texts[:3] + texts[4:]),
-                    uri=rng.choice([p for p in paths if p and "\udc" not in p]),
+                    uri=rng.choice(plain_paths),
                     line=rng.choice([1, 2, 3]),
                     kind=rng.choice([None, None, None, Kind.pass_]),
                     level=Level.error,
