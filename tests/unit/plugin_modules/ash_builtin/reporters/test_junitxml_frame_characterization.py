@@ -318,12 +318,12 @@ def _sarif(results: list[dict]) -> SarifReport:
 
 
 def _project(key: str, **fields) -> WorkspaceProjectResult:
+    fields.setdefault("severity_threshold", "MEDIUM")
     return WorkspaceProjectResult(
         project=key,
         relative_path=key,
         display_label=key,
         status=ProjectRunStatus.COMPLETED,
-        severity_threshold="MEDIUM",
         output_path=f"projects/{key}",
         **fields,
     )
