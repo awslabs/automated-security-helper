@@ -1,4 +1,4 @@
-# GuardDog scanner (community plugin)
+# GuardDog scanner (alpha plugin)
 
 > **Pending licensing review.** The GuardDog plugin, and GuardDog and the libraries it bundles that the ASH container image ships for it, are pending licensing review.
 
@@ -10,7 +10,7 @@ local source needs no network.
 
 ## Enabling it
 
-GuardDog is a community plugin that ships with ASH. Its plugin module is loaded only when you list it, so an `ash scan` that does not list it is unchanged: no row in the results, the summary, the reports or the SARIF.
+GuardDog is an alpha plugin that ships with ASH. Its plugin module is loaded only when you list it, so an `ash scan` that does not list it is unchanged: no row in the results, the summary, the reports or the SARIF.
 
 ```yaml
 # .ash/.ash.yaml

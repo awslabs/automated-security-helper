@@ -108,9 +108,9 @@ where each one comes from:
 | npm-audit | `npm` | install Node.js; a `yarn.lock` or `pnpm-lock.yaml` also needs yarn or pnpm |
 
 The `jupyter` converter, which converts notebooks for the scanners, uses `nbconvert`,
-installed with `uv tool` like bandit. The opt-in community scanners (ferret-scan,
+installed with `uv tool` like bandit. The opt-in alpha scanners (ferret-scan,
 snyk-code, and trivy-repo) are covered in
-[Community plugins](plugins/community/index.md).
+[Alpha plugins](plugins/alpha/index.md).
 
 ## Where ASH looks for a tool
 

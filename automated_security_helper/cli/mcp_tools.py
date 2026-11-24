@@ -4341,7 +4341,7 @@ def _builtin_scanner_classes() -> list:
     """The scanners ASH ships in ash_builtin: the set a default scan runs.
 
     Not ``_loaded_scanner_classes``, which list_scanners uses: that also imports
-    the community plugin packages and every installed ``ash_*_plugins``
+    the alpha plugin packages and every installed ``ash_*_plugins``
     distribution, and an installation check has no reason to run their code.
     """
     from automated_security_helper.plugin_modules.ash_builtin import ASH_SCANNERS

@@ -3287,7 +3287,7 @@ global_settings:
       reason: "subprocess.run of `<tool> --version` on an installed binary in a throwaway HOME; nothing downloaded is executed."
     # === GuardDog: hits the self-scan reports with max_hits: 0 ===
     # Measured with GuardDog 3.2.0 over the tree the plugin stages, with no hit limit
-    # (scanners.guarddog.options.max_hits: 0 in .ash/.ash_community_plugins.yaml, the
+    # (scanners.guarddog.options.max_hits: 0 in .ash/.ash_alpha_plugins.yaml, the
     # config the self-scan runs GuardDog under). Each is code whose text is what the
     # rule describes: an input a check must reject, a file planted under a test's
     # temporary directory, a command string a test inspects, or one variable read by
@@ -3914,7 +3914,7 @@ global_settings:
     # hatch_build.py because the shipped Dockerfile's build context is the assets
     # directory and cannot COPY from outside it. Both originals are scanned at
     # their tracked paths, so every finding here would be a duplicate of one
-    # already accounted for. Kept in step with .ash/.ash_community_plugins.yaml,
+    # already accounted for. Kept in step with .ash/.ash_alpha_plugins.yaml,
     # where the same copy caused 16 CRITICAL findings; ignored by exact path
     # rather than by an assets/*.py glob so a genuinely new Python asset is still
     # scanned.

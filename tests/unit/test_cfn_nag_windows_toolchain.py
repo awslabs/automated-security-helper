@@ -64,7 +64,7 @@ Git for Windows ships the same shell, being MSYS2-derived, so promoting Git Bash
 is not a fix either.
 
 Measured on ``scan (python-local, windows-latest)`` at 1c492f28, and identically
-on the ``- Community Plugins`` cell, which is itself the evidence that the cause
+on the ``- Alpha Plugins`` cell, which is itself the evidence that the cause
 is environmental rather than config-specific::
 
     .../msys64/usr/bin/ash: 0: Illegal option --          <- ash --version
@@ -118,7 +118,7 @@ WINDOWS_SCAN_STEP = "Validate ASH using Python Local (Windows)"
 PROMOTE_STEP = "Put ASH's entry point ahead of the MSYS2 toolchain (Windows)"
 
 # A command invocation of `ash`, anchored at the start of a line so that a path
-# argument such as `--config .ash/.ash_community_plugins.yaml` is not counted, and
+# argument such as `--config .ash/.ash_alpha_plugins.yaml` is not counted, and
 # allowing pwsh's call operator so `& ash report` is.
 ASH_INVOCATION = re.compile(r"^\s*(?:&\s*)?ash\s", re.MULTILINE)
 
@@ -319,7 +319,7 @@ def test_every_windows_ash_invocation_follows_the_promotion(steps):
     # Control: the steps this is protecting must actually be found by the same
     # detector, or the test above would pass by matching nothing at all. The three
     # in-window pwsh steps call `ash` (the scan, the plugin-error check and the
-    # community hadolint check), so the count is three.
+    # alpha hadolint check), so the count is three.
     callers = [
         step.get("name")
         for step in steps[promote + 1 :]

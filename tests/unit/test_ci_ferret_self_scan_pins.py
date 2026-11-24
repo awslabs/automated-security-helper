@@ -5,7 +5,7 @@
 
 Why this exists
 ---------------
-``.ash/.ash_community_plugins.yaml`` excuses hits in the ferret plugin's files by line.
+``.ash/.ash_alpha_plugins.yaml`` excuses hits in the ferret plugin's files by line.
 Each entry was written for a line of its file when the plugin was added. The files
 changed after that, the entries did not move, and a pin that points at a blank line, a
 comment or an unrelated statement excuses nothing. It happened to the two
@@ -21,12 +21,12 @@ in the config as one that works.
 ids, and detect-secrets is off in that config (``scanners.detect-secrets.enabled:
 false``, as it was when the entries were added), so no scan of that config reads the
 entries for those two rule ids today. This test keeps them accurate in case
-detect-secrets is turned on for the self-scan. It reads only the community-plugins
+detect-secrets is turned on for the self-scan. It reads only the alpha-plugins
 config; ``.ash/.ash.yaml`` has no pin of this kind.
 
 What this checks
 ----------------
-Every ``SECRET-SECRET-KEYWORD`` entry with a line in the community-plugins config, and
+Every ``SECRET-SECRET-KEYWORD`` entry with a line in the alpha-plugins config, and
 every entry with a line for a rule that has a row in ``_RANGED_PIN_MARKERS``, needs both
 ``line_start`` and ``line_end`` as integers. ASH reads a ``line_start`` with no
 ``line_end`` as running to the end of the file (``utils/suppression_matcher.py``), so a
@@ -63,7 +63,7 @@ import yaml
 pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-COMMUNITY_CONFIG = REPO_ROOT / ".ash" / ".ash_community_plugins.yaml"
+ALPHA_CONFIG = REPO_ROOT / ".ash" / ".ash_alpha_plugins.yaml"
 RULE = "SECRET-SECRET-KEYWORD"
 
 PLUGIN_DIR = "automated_security_helper/plugin_modules/ash_ferret_plugins"
@@ -152,7 +152,7 @@ _RANGED_PIN_MARKERS: dict[tuple[str, str], list[_Marker]] = {
 }
 
 
-def _ranged_keyword_pins(config_path: Path = COMMUNITY_CONFIG) -> list[dict[str, Any]]:
+def _ranged_keyword_pins(config_path: Path = ALPHA_CONFIG) -> list[dict[str, Any]]:
     config = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
     entries = (config.get("global_settings") or {}).get("suppressions") or []
     return [
@@ -164,7 +164,7 @@ def _ranged_keyword_pins(config_path: Path = COMMUNITY_CONFIG) -> list[dict[str,
 
 
 def _ranged_pins_with_rows(
-    config_path: Path = COMMUNITY_CONFIG,
+    config_path: Path = ALPHA_CONFIG,
     rows: dict[tuple[str, str], list[_Marker]] = _RANGED_PIN_MARKERS,
 ) -> list[dict[str, Any]]:
     config = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
@@ -284,7 +284,7 @@ def _row_pin_id(entry: dict[str, Any]) -> str:
 
 @pytest.mark.parametrize("entry", _PINS, ids=_pin_id)
 def test_every_ranged_keyword_pin_names_the_line_it_was_written_for(entry):
-    where = f"{COMMUNITY_CONFIG.name}: {RULE} {entry['path']}"
+    where = f"{ALPHA_CONFIG.name}: {RULE} {entry['path']}"
     range_problem = _range_problem(entry)
     assert range_problem is None, f"{where}: {range_problem}"
 
@@ -307,7 +307,7 @@ def test_every_marker_row_still_has_a_pin():
     # collects zero cases above and passes.
     pinned = {entry["path"] for entry in _PINS}
     assert sorted(set(_PIN_MARKERS) - pinned) == [], (
-        f"{COMMUNITY_CONFIG.name} has no line-pinned {RULE} entry for these paths, "
+        f"{ALPHA_CONFIG.name} has no line-pinned {RULE} entry for these paths, "
         "so drop their rows from _PIN_MARKERS"
     )
 
@@ -325,12 +325,12 @@ def test_every_keyword_marker_is_covered_by_exactly_one_pin():
             for problem in _cover_problems(_lines_of(path), ranges, markers)
         ]
 
-    assert problems == [], f"{COMMUNITY_CONFIG.name}: {RULE}: {'; '.join(problems)}"
+    assert problems == [], f"{ALPHA_CONFIG.name}: {RULE}: {'; '.join(problems)}"
 
 
 @pytest.mark.parametrize("entry", _ROW_PINS, ids=_row_pin_id)
 def test_every_ranged_pin_with_a_marker_row_names_the_lines_it_was_written_for(entry):
-    where = f"{COMMUNITY_CONFIG.name}: {entry['rule_id']} {entry['path']}"
+    where = f"{ALPHA_CONFIG.name}: {entry['rule_id']} {entry['path']}"
     range_problem = _range_problem(entry)
     assert range_problem is None, f"{where}: {range_problem}"
 
@@ -350,7 +350,7 @@ def test_every_ranged_pin_row_still_has_an_entry():
     # collects zero cases above and passes.
     pinned = {(entry["rule_id"], entry["path"]) for entry in _ROW_PINS}
     assert sorted(set(_RANGED_PIN_MARKERS) - pinned) == [], (
-        f"{COMMUNITY_CONFIG.name} has no line-pinned entry for these (rule, path) "
+        f"{ALPHA_CONFIG.name} has no line-pinned entry for these (rule, path) "
         "pairs, so drop their rows from _RANGED_PIN_MARKERS"
     )
 
@@ -369,7 +369,7 @@ def test_every_ranged_pin_marker_is_covered_by_exactly_one_pin():
             for problem in _cover_problems(_lines_of(path), ranges, markers)
         ]
 
-    assert problems == [], f"{COMMUNITY_CONFIG.name}: {'; '.join(problems)}"
+    assert problems == [], f"{ALPHA_CONFIG.name}: {'; '.join(problems)}"
 
 
 # Controls: the predicates above, fed input whose verdict is known.

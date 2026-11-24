@@ -1,11 +1,15 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Which in-tree community plugin module provides each community scanner.
+"""Which in-tree alpha plugin module provides each alpha scanner.
+
+Alpha is the maturity tier of the opt-in scanners ASH ships but does not yet
+promote as supported. (Before the tier was renamed this module was
+``core.community_scanners``.)
 
 Why this exists
 ---------------
-The community scanners that ship inside ASH (``plugin_modules/ash_*_plugins``)
+The alpha scanners that ship inside ASH (``plugin_modules/ash_*_plugins``)
 are loaded only when their module is listed in ``ash_plugin_modules`` or passed
 with ``--ash-plugin-modules``. A ``--scanners snyk-code`` run without
 ``ash_snyk_plugins`` listed names a scanner ASH has but did not load, and the
@@ -28,6 +32,27 @@ from typing import Dict, Optional
 
 _PLUGIN_MODULES = Path(__file__).resolve().parent.parent / "plugin_modules"
 _PACKAGE = "automated_security_helper.plugin_modules"
+
+#: The release that stops accepting the pre-rename "community" spellings. They are
+#: aliases for one release: accepted, mapped to the alpha spelling, and warned about.
+COMMUNITY_ALIASES_DROPPED_IN = "3.9.0"
+
+_WARNED_COMMUNITY_ALIASES: set[str] = set()
+
+
+def warn_community_alias(old: str, new: str) -> None:
+    """Say once per process that the "community" spelling *old* is now *new*."""
+    if old in _WARNED_COMMUNITY_ALIASES:
+        return
+    _WARNED_COMMUNITY_ALIASES.add(old)
+    # Imported here: the log module is not needed to map scanners to modules.
+    from automated_security_helper.utils.log import ASH_LOGGER
+
+    ASH_LOGGER.warning(
+        f"'{old}' is deprecated: the community tier is now called alpha, so use "
+        f"'{new}'. The old spelling is accepted until ASH {COMMUNITY_ALIASES_DROPPED_IN}.",
+        extra={"markup": False},
+    )
 
 
 def _scanner_config_names(source: str) -> list[str]:
@@ -55,7 +80,7 @@ def _scanner_config_names(source: str) -> list[str]:
 
 
 @functools.lru_cache(maxsize=1)
-def community_scanner_modules() -> Dict[str, str]:
+def alpha_scanner_modules() -> Dict[str, str]:
     """``{scanner name, lowercased: dotted module path}`` for every in-tree module."""
     mapping: Dict[str, str] = {}
     for package in sorted(_PLUGIN_MODULES.glob("ash_*_plugins")):
@@ -67,6 +92,6 @@ def community_scanner_modules() -> Dict[str, str]:
     return mapping
 
 
-def community_module_for(scanner_name: str) -> Optional[str]:
+def alpha_module_for(scanner_name: str) -> Optional[str]:
     """The module that provides *scanner_name*, or None if no in-tree one does."""
-    return community_scanner_modules().get(str(scanner_name).lower().strip())
+    return alpha_scanner_modules().get(str(scanner_name).lower().strip())

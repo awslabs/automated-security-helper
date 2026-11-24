@@ -35,7 +35,7 @@ name: ASH - Offline-capable scanners (non-blocking)
 #
 # NOT COVERED: the scanners whose offline outcome is degraded or not-run (grype,
 # trivy, semgrep, opengrep, detect-secrets, checkov, guarddog, npm-audit, snyk) and
-# the community scanners that need extra module loading (betterleaks, hadolint,
+# the alpha scanners that need extra module loading (betterleaks, hadolint,
 # ferret-scan); syft is left to the real-scanner offline tests in ash-unified-ci.yml.
 
 on:

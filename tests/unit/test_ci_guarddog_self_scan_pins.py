@@ -8,7 +8,7 @@ Why this exists
 ---------------
 GuardDog stops a rule after 1, 3 or 5 hits per package root unless
 ``scanners.guarddog.options.max_hits`` says otherwise. With the default, the
-repository's own self-scan (``.ash/.ash_community_plugins.yaml``) stopped
+repository's own self-scan (``.ash/.ash_alpha_plugins.yaml``) stopped
 threat-filesystem-read at its 5th hit, so matches past it were never reported or
 reviewed. The self-scan sets ``max_hits: 0`` so every hit is visible, and each hit
 it reports that is a test or fixture doing what the rule describes is suppressed
@@ -31,7 +31,7 @@ What this checks
   id. A rule id with no row in ``_RULE_LINE_MARKERS`` fails, so the first pin for a
   new rule adds its row.
 * Both configs carry the same GuardDog suppressions, as their comments say: the
-  self-scan reads only the community config, and ``.ash/.ash.yaml`` keeps the
+  self-scan reads only the alpha config, and ``.ash/.ash.yaml`` keeps the
   same entries for a scan that lists the GuardDog module there.
 """
 
@@ -44,7 +44,7 @@ import yaml
 pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SELF_SCAN = REPO_ROOT / ".ash" / ".ash_community_plugins.yaml"
+SELF_SCAN = REPO_ROOT / ".ash" / ".ash_alpha_plugins.yaml"
 DEFAULT = REPO_ROOT / ".ash" / ".ash.yaml"
 GLOB_CHARACTERS = set("*?[")
 

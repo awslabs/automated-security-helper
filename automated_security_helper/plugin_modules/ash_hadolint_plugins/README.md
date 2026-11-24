@@ -58,4 +58,4 @@ scanners:
 
 ## Documentation
 
-Severity mapping, suppressions, offline use and every option: [the hadolint plugin page](https://awslabs.github.io/automated-security-helper/docs/plugins/community/hadolint-plugin/).
+Severity mapping, suppressions, offline use and every option: [the hadolint plugin page](https://awslabs.github.io/automated-security-helper/docs/plugins/alpha/hadolint-plugin/).

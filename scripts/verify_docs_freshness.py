@@ -599,7 +599,7 @@ def check_reporters() -> list[str]:
 
 def scanner_names() -> dict[str, str]:
     """Every scanner ASH ships, by config name: the fields of ScannerConfigSegment
-    (the built-in scanners) and the scanner config classes of the community plugin
+    (the built-in scanners) and the scanner config classes of the alpha plugin
     modules in the package, which are configured under the same ``scanners`` key."""
     from automated_security_helper.config.ash_config import ScannerConfigSegment
 

@@ -249,8 +249,8 @@ class TestStoredResults:
             AshAggregatedResults.model_validate_json(text)
         return [str(c.args[0]) for c in log.warning.call_args_list]
 
-    def test_community_plugins_declared_options_load_without_warnings(self):
-        """A community or AWS plugin's section is not typed by the config model,
+    def test_alpha_plugins_declared_options_load_without_warnings(self):
+        """An alpha or AWS plugin's section is not typed by the config model,
         so a results file cannot check its options. Its declared options must not
         be reported as unknown because the generic base does not declare them."""
         data = json.loads(self.FIXTURE.read_text(encoding="utf-8"))

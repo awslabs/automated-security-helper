@@ -537,7 +537,7 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
                 kinds=(opsf.TargetKind.SOURCE_CODE,),
                 tool_type=ScannerToolType.SAST,
                 selection="a staged copy of the scan set outside the tree (_stage_source); exit 3 means no supported project",
-                covers_note="a community scanner; it declares no covers display string",
+                covers_note="an alpha scanner; it declares no covers display string",
             ),
             runtime=opsf.RuntimeFacet(
                 kind=opsf.RuntimeKind.USER_INSTALLED_CLI,
@@ -584,7 +584,7 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
                 semantics="from the CLI's exit codes: 0 no issues, 1 issues found, 2 an error, 3 no supported project (read through the staged-refusal logic)",
             ),
             provenance=opsf.ProvenanceFacet(
-                tier=opsf.Tier.COMMUNITY_OPTIN,
+                tier=opsf.Tier.ALPHA_OPTIN,
                 source=opsf.ProvenanceSource.USER_INSTALLED,
                 selection_surfaces=("ash_snyk_plugins in ash_plugin_modules",),
                 upstream_license=opsf.LICENSE_NOT_READ,

@@ -752,7 +752,7 @@ runs:
         # by default, so the scan above runs the image's copy of each, and each is listed
         # here so a missing binary fails this check.
         #
-        # GuardDog and hadolint are community scanners, so the scan above lists their
+        # GuardDog and hadolint are alpha scanners, so the scan above lists their
         # modules with --ash-plugin-modules; otherwise they would be absent from the
         # report and this list could not check that the image ships them.
         image_supplied = [
@@ -894,7 +894,7 @@ runs:
     # the container, so the scan cannot create ash.log there and exits 1 before any
     # scanner runs. The `ci` stage runs as root, which rootless podman maps to the
     # runner.
-    - name: "Scan with the image's hadolint (community plugin)"
+    - name: "Scan with the image's hadolint (alpha plugin)"
       shell: bash
       env:
         # `ash scan --mode container` rebuilds the image, so it gets the build's

@@ -1,8 +1,8 @@
-# Community Plugins
+# Alpha Plugins
 
-This section is dedicated to community-developed plugins for ASH. Community plugins extend ASH's functionality with additional scanners, reporters, converters, and event handlers developed by the community.
+This section covers the alpha plugins for ASH. Alpha plugins extend ASH's functionality with additional scanners, reporters, converters, and event handlers. Alpha is a maturity label, not a trust level: these are opt-in plugins that ASH ships but does not yet promote as supported.
 
-## Available Community Plugins
+## Available Alpha Plugins
 
 ### Security Scanners
 
@@ -18,11 +18,11 @@ plugin module in `ash_plugin_modules` or `--ash-plugin-modules`, as its page sho
 The MCP `list_scanners` tool reports them either way; listing one does not add it to
 any scan.
 
-## Contributing a Community Plugin
+## Contributing an Alpha Plugin
 
 We encourage the community to develop and share plugins that extend ASH's capabilities.
 
-To contribute a community plugin:
+To contribute an alpha plugin:
 
 1. Develop your plugin following the [Plugin Development Guide](../../../plugins/write-a-scanner.md)
 2. Host your plugin in a public repository
@@ -36,7 +36,7 @@ To contribute a community plugin:
 
 ## Plugin Submission Guidelines
 
-To ensure quality and security, community plugins should:
+To ensure quality and security, alpha plugins should:
 
 - Be open source with a compatible license
 - Include comprehensive documentation
@@ -103,4 +103,4 @@ plugins:
 ash scan --ash-plugin-modules my_plugin
 ```
 
-> [!CAUTION] > **Community Plugin Security**: The community plugins listed above ship with ASH, in `automated_security_helper/plugin_modules`, and need no separate package. `ash scan` loads one only when its module is listed in `ash_plugin_modules` or passed with `--ash-plugin-modules`. Each runs an external tool: the container image includes trivy, Betterleaks, GuardDog and hadolint, and you install the Snyk CLI and ferret-scan yourself, so check where each tool comes from. A plugin published outside ASH is a third-party package you install separately (for example with `pip install`), and ASH imports it into its own process, so verify its source and trustworthiness before installing it.
+> [!CAUTION] > **Alpha Plugin Security**: The alpha plugins listed above ship with ASH, in `automated_security_helper/plugin_modules`, and need no separate package. `ash scan` loads one only when its module is listed in `ash_plugin_modules` or passed with `--ash-plugin-modules`. Each runs an external tool: the container image includes trivy, Betterleaks, GuardDog and hadolint, and you install the Snyk CLI and ferret-scan yourself, so check where each tool comes from. A plugin published outside ASH is a third-party package you install separately (for example with `pip install`), and ASH imports it into its own process, so verify its source and trustworthiness before installing it.
