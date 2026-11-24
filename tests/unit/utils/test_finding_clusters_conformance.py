@@ -110,7 +110,7 @@ def _every_report(context, model):
 
 def _surviving(model):
     return [
-        (run.tool.driver.name, result.ruleId.root)
+        (run.tool.driver.name, result.ruleId)
         for run in model.sarif.runs
         for result in (run.results or [])
     ]
