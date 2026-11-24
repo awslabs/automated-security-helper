@@ -27,4 +27,4 @@
   Showing 3 of 4 · Suppressed hidden · Enter: details
 
 q Quit f Filters / Search h Suppressed r Reset x Suppress
-                                Build with <3 at Amazon Web Services
+                                Built with <3 at Amazon Web Services

@@ -19,7 +19,7 @@ and floating-navigation defaults.
 - Flat 16px containers and 8px inputs; shadows on overlays.
 - Text identity without a custom logo.
 - Short labels, commands, factual bullets, and sentence-case headings.
-- `Build with <3 at Amazon Web Services` in human-facing footers.
+- `Built with <3 at Amazon Web Services` in human-facing footers.
 
 The homepage uses Anime.js 4.5.0 (MIT) for local SVG motion. Phosphor icons use
 MIT; Open Sans uses the SIL Open Font License. Licenses ship with the assets.

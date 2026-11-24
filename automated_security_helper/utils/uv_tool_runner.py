@@ -2916,20 +2916,31 @@ class UVToolRunner:
         *,
         offline: Optional[bool] = None,
         package: Optional[str] = None,
+        python_request: Optional[str] = None,
+        from_metadata: bool = False,
     ) -> Dict[str, Any]:
         """Get comprehensive installation information for a tool.
 
-        ``offline`` and ``package`` have the meaning they have for
-        ``get_tool_version``: the caller's own offline mode reaches the version
-        probe (a scanner offline by its options probed online here), and the
-        package the spec was built around is checked before the probe.
+        ``offline``, ``package``, ``python_request`` and ``from_metadata`` have
+        the meaning they have for ``get_tool_version`` (``from_metadata`` is the
+        plugin's ``_tool_version_from_metadata`` opt-in): the caller's own offline mode reaches the
+        version probe (a scanner offline by its options probed online here), the
+        package the spec was built around is checked before the probe, and the
+        probe runs under the interpreter the scan runs under (a tool whose
+        dependencies publish no wheels for uv's default pick was probed, here,
+        in an environment the scan never uses).
         """
         is_uv_installed = (
             self.is_tool_installed(tool_name) if self.is_uv_available() else False
         )
         uv_version = (
             self.get_tool_version(
-                tool_name, package_name, offline=offline, package=package
+                tool_name,
+                package_name,
+                offline=offline,
+                package=package,
+                python_request=python_request,
+                from_metadata=from_metadata,
             )
             if is_uv_installed
             else None

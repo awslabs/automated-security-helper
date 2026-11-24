@@ -74,6 +74,12 @@ clones are often shallow, so fetch the base branch's history first; the
 
 The option is not available over MCP.
 
+`--baseline` is the other way to narrow the verdict. `--changed-files-only` drops the
+findings in files the change did not touch, and `--baseline` drops the findings a saved
+full scan already holds, in any file. A scan can use both, and the findings that remain are
+the new ones in the changed files. [Gate only on new findings](set-the-gate.md#baseline)
+explains the baseline and its tradeoff.
+
 ## Split a scan across runners {#sharding}
 
 `--shard-index` and `--shard-count` (or `ASH_SHARD_INDEX` and `ASH_SHARD_COUNT`) give each

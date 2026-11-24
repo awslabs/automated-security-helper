@@ -107,6 +107,11 @@ _ALLOWED_HELPER_CALLS = {
 # the two sanctioned readers' own bodies.
 _ALLOWED_SIZED_READS = {
     (
+        "utils/offline_cache_check.py",
+        "_trivy_built",
+    ): "one byte to check database readability and bounded+1 metadata JSON; "
+    "only the parsed timestamp leaves the reader",
+    (
         "assets/install-pinned-tool.py",
         "download",
     ): "chunked download into a hash and a file; network bytes, never shown",
@@ -364,6 +369,10 @@ _ALLOWED_SIZED_READS = {
         "ExpressDaemon._drain",
     ): "the daemon's own signal-wakeup self-pipe, drained in 4096-byte chunks "
     "and discarded; kernel wakeup bytes, never tool text",
+    (
+        "express/client.py",
+        "_json_input_needs_cold",
+    ): "bounded operator JSON input, parsed to decide delegation and never shown",
     (
         "express/client.py",
         "_await_readiness",
