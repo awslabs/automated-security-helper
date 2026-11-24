@@ -122,9 +122,11 @@ def _legacy_merge(held: CycloneDXReport, incoming: CycloneDXReport) -> dict[str,
     return dumped
 
 
-_REFS = ["1", "2", "3", "pkg:a@1", "pkg:b@1", "pkg:c@1", "x\ud800y", "é", "x\udfffy"]
-_PURLS = [None, "", "pkg:a@1", "pkg:b@1", "pkg:c@1", "pkg:d@1", "pkg:s\ud800@1"]
-_NAMES = ["a", "b", "c", "n\ud800"]
+# "§" and "¤" stand for lone surrogates, which pydantic refuses to validate; the
+# report is built with them and then given the surrogates (see ``_taint``).
+_REFS = ["1", "2", "3", "pkg:a@1", "pkg:b@1", "pkg:c@1", "x§y", "é", "x¤y"]
+_PURLS = [None, "", "pkg:a@1", "pkg:b@1", "pkg:c@1", "pkg:d@1", "pkg:s§@1"]
+_NAMES = ["a", "b", "c", "n§"]
 _VERSIONS = [None, "", "1", "2"]
 _GROUPS = [None, "", "g"]
 _TYPES = ["library", "file", "application"]
@@ -153,8 +155,31 @@ def _component(rng: random.Random, depth: int = 0) -> dict[str, Any]:
     return component
 
 
+def _surrogates(text: str) -> str:
+    return text.replace("§", "\ud800").replace("¤", "\udfff")
+
+
+def _taint(report: CycloneDXReport) -> CycloneDXReport:
+    """Give the marked texts of *report* the lone surrogates they stand for."""
+    for component in _walk(report.components):
+        if component.bom_ref is not None:
+            component.bom_ref.root = _surrogates(component.bom_ref.root)
+        if component.purl:
+            component.purl = _surrogates(component.purl)
+        component.name = _surrogates(component.name)
+    for dependency in report.dependencies or []:
+        dependency.ref.root.root = _surrogates(dependency.ref.root.root)
+        for ref in dependency.dependsOn or []:
+            ref.root.root = _surrogates(ref.root.root)
+    return report
+
+
 def _report(rng: random.Random) -> CycloneDXReport:
     refs = [c for c in _REFS if c]
+    return _taint(_build(rng, refs))
+
+
+def _build(rng: random.Random, refs: list[str]) -> CycloneDXReport:
     return CycloneDXReport.model_validate(
         {
             "bomFormat": "CycloneDX",
@@ -187,11 +212,19 @@ def test_the_merged_sbom_is_the_one_the_pass_made(seed: int):
     rng = random.Random(10_000 + seed)
     held, incoming = _report(rng), _report(rng)
     held_before = held.model_dump(mode="python", by_alias=True)
-    expected = _legacy_merge(held, incoming)
-    merged = merge_cyclonedx_reports(held, incoming)
-    assert merged is not None
-    actual = merged.model_dump(mode="python", by_alias=True)
-    actual.pop("serialNumber", None)
+    # A new bom-ref is hashed from the purl or identity, which raises for a lone
+    # surrogate; that is how the sequential original behaved too, and is kept.
+    try:
+        expected: Any = _legacy_merge(held, incoming)
+    except UnicodeEncodeError:
+        expected = UnicodeEncodeError
+    try:
+        merged = merge_cyclonedx_reports(held, incoming)
+        assert merged is not None
+        actual: Any = merged.model_dump(mode="python", by_alias=True)
+        actual.pop("serialNumber", None)
+    except UnicodeEncodeError:
+        actual = UnicodeEncodeError
     assert actual == expected
     assert held.model_dump(mode="python", by_alias=True) == held_before
 
@@ -227,13 +260,17 @@ def test_a_shared_ref_is_told_apart_from_a_repeat_and_a_new_package():
 
 
 def test_a_lone_surrogate_in_a_key_is_a_repeat_of_itself():
-    ref = "pkg:s\ud800@1"
-    body = {"type": "library", "name": "s\ud800", "bom-ref": ref, "purl": ref}
-    held = CycloneDXReport.model_validate(
-        {"bomFormat": "CycloneDX", "specVersion": "1.6", "components": [body]}
+    ref = "pkg:s§@1"
+    body = {"type": "library", "name": "s§", "bom-ref": ref, "purl": ref}
+    held = _taint(
+        CycloneDXReport.model_validate(
+            {"bomFormat": "CycloneDX", "specVersion": "1.6", "components": [body]}
+        )
     )
-    incoming = CycloneDXReport.model_validate(
-        {"bomFormat": "CycloneDX", "specVersion": "1.6", "components": [body]}
+    incoming = _taint(
+        CycloneDXReport.model_validate(
+            {"bomFormat": "CycloneDX", "specVersion": "1.6", "components": [body]}
+        )
     )
     assert _verdicts(held.components, incoming.components)[0] == [_REPEAT]
 
