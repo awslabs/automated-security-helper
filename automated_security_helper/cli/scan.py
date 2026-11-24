@@ -1628,6 +1628,16 @@ def run_ash_scan_cli_command(
             help="Custom build arguments to pass to the container build",
         ),
     ] = None,
+    baseline: Annotated[
+        Optional[str],
+        typer.Option(
+            "--baseline",
+            metavar="PATH",
+            envvar="ASH_BASELINE",
+            rich_help_panel="CI and sharding",
+            help="Leave out findings already present in this saved ash_aggregated_results.json from a full scan (for example the default branch's), so the reports, the summary and the exit code count only new findings. Matching tolerates findings that only moved lines. The file must be outside the scanned checkout and the output directory. Supported with --mode local and precommit only (exit 5 otherwise).",
+        ),
+    ] = None,
 ):
     """Scan code, infrastructure, secrets, and dependencies.
 
@@ -1691,6 +1701,44 @@ def run_ash_scan_cli_command(
             simple=simple,
         ).value
     )
+
+    if baseline is not None:
+        from automated_security_helper.express.runtime import CHILD_ENV
+
+        if os.environ.get(CHILD_ENV):
+            _fail_usage(
+                "--baseline is not supported by the express daemon; "
+                "run the scan again with --no-express"
+            )
+        if use_existing:
+            _fail_usage(
+                "--baseline needs a fresh scan; it cannot be applied to saved results with --use-existing"
+            )
+        if express is True:
+            _fail_usage(
+                shown_on_one_line(
+                    f"Error reading --baseline {baseline}: --express is not supported"
+                )
+            )
+        if (
+            mode not in (None, RunMode.local, RunMode.precommit)
+            or workspace
+            or shard_index is not None
+            or shard_count is not None
+        ):
+            _fail_usage(
+                shown_on_one_line(
+                    f"Error reading --baseline {baseline}: not supported with this scan scope"
+                )
+            )
+        if phases is not None and not (
+            {ExecutionPhase.SCAN, ExecutionPhase.REPORT} & set(phases)
+        ):
+            _fail_usage(
+                shown_on_one_line(
+                    f"Error reading --baseline {baseline}: not supported without scan or report phase"
+                )
+            )
 
     _validate_shard_options(shard_index, shard_count, workspace)
     _refuse_sandbox_in_container_mode(sandbox, mode)
@@ -2020,6 +2068,24 @@ def run_ash_scan_cli_command(
         mode=mode,
         workspace=workspace_plan is not None,
     )
+    baseline_data = None
+    if baseline is not None:
+        from automated_security_helper.utils.scan_baseline import (
+            BaselineRefused,
+            read_baseline,
+        )
+
+        try:
+            baseline_data = read_baseline(
+                Path(baseline),
+                source_dir=Path(source_dir),
+                output_dir=Path(str(output_dir)),
+            )
+        except BaselineRefused as exc:
+            _fail_usage(
+                shown_on_one_line(f"Error reading --baseline {baseline}: {exc.reason}")
+            )
+
     if workspace_plan is not None and dry_run:
         # After the preflight above, in the real run's order, so the dry run
         # refuses what the run refuses and names the same first problem.
@@ -2086,7 +2152,7 @@ def run_ash_scan_cli_command(
                 err=True,
             )
             raise typer.Exit(ASH_EXIT_USAGE_ERROR)
-        if not staged_for_scan:
+        if not staged_for_scan and baseline is None:
             echo(
                 "--staged: nothing is staged inside the scanned directory, so "
                 "there is nothing to scan. Exiting clean."
@@ -2133,6 +2199,11 @@ def run_ash_scan_cli_command(
                 fail_on_incomplete_scanners=fail_on_incomplete_scanners,
                 ignore_suppressions=ignore_suppressions,
                 min_severity=MinSeverity(min_severity).value,
+                **(
+                    {"baseline": str(baseline), "baseline_data": baseline_data}
+                    if baseline is not None
+                    else {}
+                ),
                 changed_files_only=changed_files_only,
                 base_ref=base_ref,
                 staged=staged,

@@ -290,4 +290,4 @@ Bucket name is hardcoded; derive it from a variable.
 
 
 
-Build with <3 at Amazon Web Services
+Built with <3 at Amazon Web Services

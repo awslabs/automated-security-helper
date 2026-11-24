@@ -9,11 +9,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from automated_security_helper.core.enums import ScannerStatus
-from automated_security_helper.utils.finding_identity import (
-    canonical,
-    key_base,
-    key_is_fingerprinted,
-)
+from automated_security_helper.utils.finding_identity import canonical
 
 if TYPE_CHECKING:
     from automated_security_helper.models.asharp_model import AshAggregatedResults
@@ -43,6 +39,8 @@ def check_comparable(results: AshAggregatedResults) -> None:
         )
     if changed_files_only is not None and changed_files_only is not False:
         raise ComparabilityRefusal("invalid changed-files-only marker")
+    if results.baseline_filtered:
+        raise ComparabilityRefusal("cannot use results filtered by --baseline")
     project = getattr(results.metadata, "workspace_project", None)
     if project is not None and (not isinstance(project, str) or not project.strip()):
         raise ComparabilityRefusal("invalid workspace project marker")
@@ -114,7 +112,7 @@ def coverage_warnings(
     ):
         warnings.append("Recorded ignore-file exclusions differ between scans.")
     for label, result in (("Baseline", baseline), ("Current", current)):
-        missing = set(result.metadata.expected_scanners) - result.scanner_results.keys()
+        missing = set(result.metadata.expected_scanners) - _evaluated_scanners(result)
         if missing or scan_incompleteness(result, gate=True):
             warnings.append(f"{label} scan has incomplete scanner coverage.")
         elif not result.metadata.expected_scanners or not result.scanner_results:
@@ -144,15 +142,14 @@ class FindingDiff:
 
 
 def fallback_key(finding: FlatVulnerability) -> tuple[Any, ...] | None:
-    if finding._identity is None or finding.source_report is not None:
+    base = finding.identity_base
+    if base is None or finding.source_report is not None:
         return None
-    key = finding._assigned_identity_key
-    if key_is_fingerprinted(key):
+    if finding.has_fingerprint_identity:
         return None
-    base = key_base(key) if key is not None else dict(finding._identity.base)
     return (
         canonical(base),
-        finding._identity_message or "",
+        finding.identity_message or "",
         (finding.severity or "").upper(),
     )
 
@@ -168,6 +165,15 @@ def _order(finding: FlatVulnerability) -> tuple[Any, ...]:
 def match_findings(
     before: Iterable[FlatVulnerability], after: Iterable[FlatVulnerability]
 ) -> FindingMatch:
+    """Pair findings from ``before`` with findings from ``after``.
+
+    ``moved`` pairs differ only in their lines. This matcher is for display as
+    well as gating, and the two deliberately differ on secrets: ``ash diff``
+    reports a moved secret as moved, while ``apply_baseline`` refuses to drop
+    one. The refusal is not applied here. A gating consumer must apply
+    ``FlatVulnerability.requires_exact_identity_match`` and
+    ``has_fingerprint_identity`` to each pair, as ``apply_baseline`` does.
+    """
     before = list(before)
     after = list(after)
     before_ids = defaultdict(list)
@@ -185,14 +191,13 @@ def match_findings(
             continue
         i, j = before_ids[finding_id][0], after_ids[finding_id][0]
         previous, current = before[i], after[j]
-        if previous._identity is not None and current._identity is not None:
+        if previous.identity is not None and current.identity is not None:
             fingerprinted = all(
-                key_is_fingerprinted(finding._assigned_identity_key)
-                for finding in (previous, current)
+                finding.has_fingerprint_identity for finding in (previous, current)
             )
             if (
                 not fingerprinted
-                and previous._identity_message != current._identity_message
+                and previous.identity_message != current.identity_message
             ):
                 continue
         exact.append((previous, current))

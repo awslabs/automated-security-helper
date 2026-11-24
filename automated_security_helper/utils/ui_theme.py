@@ -28,7 +28,11 @@ COLORS = {
     "error": "#ff7a7a",
 }
 
-FOOTER_CREDIT = "Build with <3 at Amazon Web Services"
+FOOTER_CREDIT = "Built with <3 at Amazon Web Services"
+
+#: The same credit as a small markdown blockquote, for the Markdown report that is
+#: posted as the pinned pull request comment.
+FOOTER_CREDIT_SMALL_BLOCKQUOTE = f"> <sub>{FOOTER_CREDIT}</sub>"
 
 #: The severities a finding carries, the only palette keys severity_color reads.
 SEVERITY_LEVELS = ("critical", "high", "medium", "low", "info")

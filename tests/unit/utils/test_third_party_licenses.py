@@ -806,6 +806,6 @@ def test_a_release_tag_spelled_unlike_the_version_is_named_as_upstream_spells_it
 
 
 def test_the_release_tag_defaults_to_the_version_as_upstream_spells_it():
-    assert "Release tag:         v1.33.1" in (
+    assert "Release tag:         v2.0.0" in (
         THIRD_PARTY_LICENSES["opengrep"].source_notice()
     )

@@ -1998,6 +1998,18 @@ def install_pinned_tool(
                 downloaded, target, expected_sha256=asset.sha256, mode=0o755
             )
         else:
+            # Files the executable needs beside it (opengrep's Windows DLLs) go
+            # first, each through the same staged, pin-checked extraction, so the
+            # executable is only ever placed once everything it loads is there. A
+            # companion that does not hash to its pin stops the install before the
+            # executable is touched.
+            for companion_name, companion_digest in asset.companion_sha256:
+                _extract_single_member(
+                    downloaded,
+                    companion_name,
+                    bin_dir.joinpath(companion_name),
+                    expected_member_sha256=companion_digest,
+                )
             installed_digest = _extract_single_member(
                 downloaded,
                 asset.member_name,
@@ -2436,14 +2448,22 @@ def get_opengrep_url(
 ) -> str:
     """Get the URL for the opengrep binary based on platform and architecture.
 
+    Release 2.0.0 renamed the Linux assets (``opengrep_manylinux_*`` became
+    ``opengrep_linux_*``, one statically linked build, so ``linux_type`` no longer
+    applies) and ships Windows as ``opengrep_windows_x86.zip`` instead of a bare
+    ``.exe``. The names follow the version: a release whose major version cannot be
+    read from ``version`` is taken to be one of the 1.x releases.
+
     Args:
         target_platform: The platform (e.g., "linux", "darwin", "windows")
         arch: The architecture (e.g., "amd64", "arm64")
         version: The version of opengrep to download (default: "v1.1.5")
-        linux_type: Type of Linux build to use (manylinux or musllinux)
+        linux_type: Type of Linux build to use for a 1.x version (manylinux or
+            musllinux); ignored for 2.0.0 and later
 
     Returns:
-        URL for the opengrep binary
+        URL for the opengrep binary (for Windows from 2.0.0 on, of the zip that
+        carries it)
     """
     # Base URL for opengrep releases
     base_url = f"https://github.com/opengrep/opengrep/releases/download/{version}"
@@ -2451,6 +2471,9 @@ def get_opengrep_url(
     # platform.machine() answers "AMD64" on Windows and "x86_64" or "aarch64"
     # elsewhere; the comparisons below are on the lowercase names.
     arch = arch.lower()
+
+    major_match = re.match(r"v?(\d+)\.", version)
+    renamed_assets = major_match is not None and int(major_match.group(1)) >= 2
 
     # Map platform and architecture to the appropriate binary name
     if target_platform == "linux":
@@ -2460,11 +2483,12 @@ def get_opengrep_url(
                 f"Invalid linux_type: {linux_type}, defaulting to manylinux"
             )
             linux_type = "manylinux"
+        linux_name = "linux" if renamed_assets else linux_type
 
         if arch == "amd64" or arch == "x86_64":
-            return f"{base_url}/opengrep_{linux_type}_x86"
+            return f"{base_url}/opengrep_{linux_name}_x86"
         elif arch == "arm64" or arch == "aarch64":
-            return f"{base_url}/opengrep_{linux_type}_aarch64"
+            return f"{base_url}/opengrep_{linux_name}_aarch64"
     elif target_platform == "darwin" or target_platform == "macos":
         if arch == "amd64" or arch == "x86_64":
             return f"{base_url}/opengrep_osx_x86"
@@ -2481,6 +2505,8 @@ def get_opengrep_url(
                     "opengrep has no Windows arm64 build; installing its x86-64 "
                     "build, which Windows on ARM runs under emulation"
                 )
+            if renamed_assets:
+                return f"{base_url}/opengrep_windows_x86.zip"
             return f"{base_url}/opengrep_windows_x86.exe"
 
     # Default case

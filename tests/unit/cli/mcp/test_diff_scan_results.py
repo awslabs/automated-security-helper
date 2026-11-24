@@ -228,7 +228,13 @@ class TestDiffScanResultsMissingFile:
 
 
 @pytest.mark.parametrize("side", ["before", "after"])
-@pytest.mark.parametrize("marker,value", [("changed_files_only", True)])
+@pytest.mark.parametrize(
+    "marker,value",
+    [
+        ("baseline", {"sha256": "x", "matched": 1, "matched_without_lines": 0}),
+        ("changed_files_only", True),
+    ],
+)
 def test_partial_results_are_not_reported_as_resolved(tmp_path, side, marker, value):
     before = _make_aggregated_json([_make_vuln("A")])
     after = _make_aggregated_json([])

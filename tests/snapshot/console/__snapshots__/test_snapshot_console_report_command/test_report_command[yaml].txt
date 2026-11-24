@@ -502,7 +502,7 @@ ash_config:
         severity: []
         severity_threshold: CRITICAL
         sha256: {}
-        version: v1.33.1
+        version: v2.0.0
     semgrep:
       enabled: true
       name: semgrep

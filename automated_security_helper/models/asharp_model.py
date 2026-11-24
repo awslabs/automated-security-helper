@@ -1790,6 +1790,19 @@ class AshAggregatedResults(RecordModel):
         )
         return (sarif, self.additional_reports, results, entries, suppressions)
 
+    @property
+    def baseline_filtered(self) -> bool:
+        """True when ``--baseline`` removed findings from these results.
+
+        ``apply_baseline`` records the marker in ``metadata.model_extra``. The
+        test is presence, not value, so a marker written as ``null`` still counts
+        as filtered: a gate that refuses derived results errs toward refusing.
+        Consumers that must not treat such results as a whole scan (merge,
+        comparison, archiving of resolved findings) read this rather than
+        spelling the lookup themselves.
+        """
+        return "baseline" in (self.metadata.model_extra or {})
+
     def _invalidate_flat_cache(self) -> None:
         """Forget the flattened findings, so the next to_flat_vulnerabilities
         flattens again.
