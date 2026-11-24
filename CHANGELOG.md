@@ -107,16 +107,6 @@
   semantics, exit codes); note its new detectors (NHS/CHI numbers, GB/Ontario/Quebec
   licenses, ITINs, card track data) can surface new findings in previously clean
   scans. The recommended version stays 2.5.3 until the full fixture-matrix pass runs.
-- **Scanner findings carry their CVE and CWE.** The `cve_id` and `cwe_id` of a finding
-  were empty for every finding a scanner reported, so the CVE and CWE lines of the HTML,
-  Markdown and text reports, the two CSV and flat JSON columns, and the same two fields
-  of the MCP `explain_finding` tool never showed a value. The CVE is now read from the
-  head of the rule id (`CVE-2019-20477` from trivy, `CVE-2022-40897-setuptools` from
-  grype), as the OCSF reporter already reads it. The CWE is read from the tags of the
-  finding and of its rule: bandit's `external/cwe/cwe-78` gives `CWE-78`, semgrep's and
-  opengrep's `CWE-798: Use of Hard-coded Credentials` gives `CWE-798`, and a rule that
-  names several lists each once (`CWE-1357, CWE-353`). A finding whose rule id is
-  an advisory id (`GHSA-...`) or whose rule has no CWE tag keeps both empty.
 - **A checkov finding names its resource.** checkov's SARIF report says which rule
   failed and where, and not on which resource, so a finding's `resource_id` was empty
   and a suppression scoped to a resource (`resource_id`) never matched a checkov
@@ -130,6 +120,16 @@
   so `results_json.json` is in checkov's results directory on every run, not only when
   `additional_formats` lists `json`. Dockerfile and secrets findings name no resource
   and are unchanged.
+- **Scanner findings carry their CVE and CWE.** The `cve_id` and `cwe_id` of a finding
+  were empty for every finding a scanner reported, so the CVE and CWE lines of the HTML,
+  Markdown and text reports, the two CSV and flat JSON columns, and the same two fields
+  of the MCP `explain_finding` tool never showed a value. The CVE is now read from the
+  head of the rule id (`CVE-2019-20477` from trivy, `CVE-2022-40897-setuptools` from
+  grype), as the OCSF reporter already reads it. The CWE is read from the tags of the
+  finding and of its rule: bandit's `external/cwe/cwe-78` gives `CWE-78`, semgrep's and
+  opengrep's `CWE-798: Use of Hard-coded Credentials` gives `CWE-798`, and a rule that
+  names several lists each once (`CWE-1357, CWE-353`). A finding whose rule id is
+  an advisory id (`GHSA-...`) or whose rule has no CWE tag keeps both empty.
 
 ### Fixes
 
