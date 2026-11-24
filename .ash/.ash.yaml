@@ -3649,8 +3649,8 @@ global_settings:
       reason: "file:///etc/passwd is a URL the test asserts is refused before opening."
     - rule_id: threat-runtime-obfuscation-base64exec
       path: tests/unit/utils/test_opengrep_pinned_download.py
-      line_start: 417
-      line_end: 417
+      line_start: 613
+      line_end: 613
       reason: "Decodes a nix SRI hash to hex to compare with the pinned table; nothing is executed."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/plugin_modules/ash_builtin/converters/archive_converter.py
