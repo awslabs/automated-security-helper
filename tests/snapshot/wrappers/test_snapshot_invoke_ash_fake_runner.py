@@ -28,8 +28,10 @@ name. Two things make that hold:
   ``BUILD_DATE_EPOCH`` by :func:`_without_the_build_date`, and the console size the
   wrapper forwards by :func:`_without_the_terminal_size`.
 
-Regenerate with ``pytest tests/snapshot/wrappers -n 0 --snapshot-update`` on any host
-with ``pwsh`` 7 on PATH; no selection flag is needed. The fake-runner helpers are
+Regenerate with ``pytest tests/snapshot/wrappers -n 0 --run-integration
+--snapshot-update`` on any host with ``pwsh`` 7 on PATH. ``--run-integration`` is
+required: the module is marked ``integration``, and without the flag every test is
+skipped, so nothing is written. The fake-runner helpers are
 imported from the parity suite; moving them to ``tests/utils`` is the cleanup once the
 open changes to that file have landed.
 """
@@ -53,6 +55,14 @@ from tests.unit.test_powershell_wrapper_matches_ash import (
 
 pytestmark = pytest.mark.integration
 
+#: Whether a CI runner started pytest. Read at import, during collection: the snapshot
+#: conftest's autouse fixture deletes CI and GITHUB_ACTIONS from ``os.environ`` before
+#: any other fixture body runs, so a read inside a fixture would always see them unset.
+_IN_CI = any(
+    os.environ.get(name, "").strip().lower() not in ("", "false", "0")
+    for name in ("CI", "GITHUB_ACTIONS")
+)
+
 #: Two inputs that read the base image from the environment of whoever runs the test.
 #: A CI leg that prepulled a base image sets them; an empty value is unset to pwsh.
 _NO_BASE_IMAGE_OVERRIDES = {"ASH_BASE_OCI_LAYOUT": "", "ASH_BASE_IMAGE_OVERRIDE": ""}
@@ -61,12 +71,9 @@ _NO_BASE_IMAGE_OVERRIDES = {"ASH_BASE_OCI_LAYOUT": "", "ASH_BASE_IMAGE_OVERRIDE"
 @pytest.fixture(autouse=True)
 def _require_pwsh() -> None:
     # The parity suite's gate does not travel across modules. The snapshot fixtures
-    # unset CI, so the decision reads the variables of the process that started pytest.
+    # unset CI, so the decision uses the import-time read above, not os.environ now.
     if PWSH is None:
-        if any(
-            os.environ.get(name, "").strip().lower() not in ("", "false", "0")
-            for name in ("CI", "GITHUB_ACTIONS")
-        ):
+        if _IN_CI:
             pytest.fail("pwsh is not on PATH; CI runners must run these tests")
         pytest.skip("pwsh is not on PATH (local run only; CI fails instead)")
 
@@ -78,7 +85,7 @@ def _without_the_build_date(argv: list[str]) -> list[str]:
 
 def _without_the_terminal_size(argv: list[str]) -> list[str]:
     """The wrapper hands the container the console's size, which is the machine's."""
-    return [re.sub(r"^(COLUMNS|LINES)=-?\d+$", r"\1=<size>", arg) for arg in argv]
+    return [re.sub(r"^(COLUMNS|LINES)=(-?\d+)?$", r"\1=<size>", arg) for arg in argv]
 
 
 def test_invoke_ash_scan_command_assembly_is_the_same_on_every_os(snapshot, tmp_path):

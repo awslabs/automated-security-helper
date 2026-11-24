@@ -13,7 +13,7 @@ an image already built:
 
     ASH_IMAGE_NAME=<tag> OCI_RUNNER=docker \\
         pytest tests/snapshot/container/runtime/test_container_image_permissions.py \\
-        --run-container-snapshots --no-cov -n 0
+        --run-container-snapshots --run-integration --no-cov -n 0
 
 The rule:
 

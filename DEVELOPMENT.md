@@ -293,7 +293,9 @@ Nix legs do after their scans. Keep such modules in `runtime/`: syrupy reads eve
 `__snapshots__` directory once one test beside it runs, so a deselected module's
 snapshots next to collected ones would fail the default run as unused. To update them,
 build the image (or have Nix) and run the module with `pytest -n 0 --snapshot-update`
-and its flag; see the module docstrings for the environment they read.
+and its flag, plus `pytest --run-integration` (the modules carry the integration or e2e
+tier marker, and without it every test is skipped); see the module docstrings for the
+environment they read.
 
 ### The PowerShell wrapper against recording runners
 
@@ -305,8 +307,9 @@ Linux container. There is one snapshot per test, shared by every OS. Platform de
 (the build target, the container UID and GID) are passed explicitly, and the paths, the
 day's build epoch and the console size are normalized, so a difference in command
 assembly on one OS fails that OS's leg. To update them, run
-`uv run pytest tests/snapshot/wrappers -n 0 --snapshot-update` on any host with `pwsh`
-7; no selection flag is needed.
+`uv run pytest tests/snapshot/wrappers -n 0 --run-integration --snapshot-update` on any
+host with `pwsh` 7. The module is marked `integration`, so `pytest --run-integration`
+is required: without it every test is skipped and nothing is written.
 
 ## Development Commands
 

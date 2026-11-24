@@ -10,7 +10,7 @@ same snapshots. Locally: build the image, then
 
     ASH_IMAGE_NAME=<tag> OCI_RUNNER=docker \\
         pytest tests/snapshot/container/runtime/test_snapshot_container_runtime.py \\
-        --run-container-snapshots --no-cov -n 0
+        --run-container-snapshots --run-integration --no-cov -n 0
 
 Inputs: ``OCI_RUNNER`` (default ``docker``), ``OCI_RUNNER_WRAPPER`` (``sudo`` for
 finch in CI) and ``ASH_IMAGE_NAME`` (default ``automated-security-helper:ci``, the

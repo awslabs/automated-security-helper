@@ -1026,7 +1026,9 @@ runs:
     # built is what makes them runnable here, which is why this is a step and not a job.
     #
     # Every container leg compares against the same snapshots, so a runtime whose output or
-    # exit status differs from docker's fails here by name. `--no-cov`: coverage is the
+    # exit status differs from docker's fails here by name. `--run-integration`: these
+    # modules carry the integration or e2e tier marker, and without the flag every test is
+    # skipped, so the step would pass having compared nothing. `--no-cov`: coverage is the
     # unit-test legs' gate. `-n 0`: four containers at once on a podman or finch runner buys
     # nothing and costs memory. OCI_RUNNER and OCI_RUNNER_WRAPPER come from the job env.
     # Last, so a snapshot diff never hides one of the scan's own diagnostics above. Runs
@@ -1043,4 +1045,4 @@ runs:
           tests/snapshot/container/runtime/test_snapshot_container_runtime.py \
           tests/snapshot/container/runtime/test_snapshot_container_bash_wrapper.py \
           tests/snapshot/container/runtime/test_container_image_permissions.py \
-          --run-container-snapshots --no-cov -n 0
+          --run-container-snapshots --run-integration --no-cov -n 0
