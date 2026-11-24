@@ -226,6 +226,10 @@ def test_history_and_files_give_the_same_series(tmp_path):
         .stdout
     )
     assert from_history["series"] == from_files["series"]
+    # Only the label differs: a file's label is its path, a record's its report id.
+    for streaks in (from_history["streaks"], from_files["streaks"]):
+        for row in streaks:
+            del row["open_since"]
     assert from_history["streaks"] == from_files["streaks"]
 
 

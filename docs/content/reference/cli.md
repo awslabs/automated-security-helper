@@ -48,6 +48,7 @@ The Environment variable column names the variable click reads for the option; a
 | [`ash plugin list`](#plugin-list) | The `plugin list` command lists what a scan with this configuration loads, on or off. |
 | [`ash report`](#report) | Generate a report from ASH scan results using the specified reporter plugin. |
 | [`ash scan`](#scan) | Scan code, infrastructure, secrets, and dependencies. |
+| [`ash trend`](#trend) | Show new, carried and fixed findings over a series of saved ASH scans. |
 
 ## `ash`
 
@@ -67,7 +68,7 @@ Options that only `ash` itself accepts:
 | <a id="ash--install-completion"></a>`--install-completion` | flag | off |  | Install completion for the current shell. |
 | <a id="ash--show-completion"></a>`--show-completion` | flag | off |  | Show completion for the current shell, to copy it or customize the installation. |
 
-Subcommands: [`ash build-image`](#build-image), [`ash config`](#config), [`ash dependencies`](#dependencies), [`ash diff`](#diff), [`ash express`](#express), [`ash get-genai-guide`](#get-genai-guide), [`ash inspect`](#inspect), [`ash mcp`](#mcp), [`ash merge`](#merge), [`ash plugin`](#plugin), [`ash report`](#report), [`ash scan`](#scan).
+Subcommands: [`ash build-image`](#build-image), [`ash config`](#config), [`ash dependencies`](#dependencies), [`ash diff`](#diff), [`ash express`](#express), [`ash get-genai-guide`](#get-genai-guide), [`ash inspect`](#inspect), [`ash mcp`](#mcp), [`ash merge`](#merge), [`ash plugin`](#plugin), [`ash report`](#report), [`ash scan`](#scan), [`ash trend`](#trend).
 
 ## <a id="build-image"></a>`ash build-image`
 
@@ -774,3 +775,24 @@ ash scan [OPTIONS]
 | <a id="scan--baseline"></a>`--baseline` | text | not set | `ASH_BASELINE` | Leave out findings already present in this saved ash_aggregated_results.json from a full scan (for example the default branch's), so the reports, the summary and the exit code count only new findings. Matching tolerates findings that only moved lines. The file must be outside the scanned checkout and the output directory. Supported with --mode local and precommit only (exit 5 otherwise). |
 | <a id="scan--cli-json-input"></a>`--cli-json-input` | text | not set |  | Read parameter values from a JSON object: a path, a file:// URI, or '-' for stdin. Keys are parameter names (output_dir) or long flag spellings (--output-dir). Flags given on the command line override the file; the file overrides environment variables. Run with --generate-cli-skeleton for a template. |
 | <a id="scan--generate-cli-skeleton"></a>`--generate-cli-skeleton` | flag | off |  | Print a JSON template for --cli-json-input, listing every parameter of this command with its default, or null where it is required or an environment variable backs it, and exit. |
+
+## <a id="trend"></a>`ash trend`
+
+Show new, carried and fixed findings over a series of saved ASH scans.
+
+```text
+ash trend [OPTIONS] [files]...
+```
+
+<!-- doctest: options of=cli.trend -->
+| Argument | Type | Default | Environment variable | Description |
+|----------|------|---------|----------------------|-------------|
+| <a id="trend--arg-files"></a>`files` | path, any number | not set |  | ASH scan results JSON files, one per run. They are put in chronological order by report id. At least two. |
+
+<!-- doctest: options of=cli.trend -->
+| Option | Type | Default | Environment variable | Description |
+|--------|------|---------|----------------------|-------------|
+| <a id="trend--history"></a>`--history` | path | not set |  | Read the run history recorded under this scan output directory (global_settings.history.enabled) instead of results files. |
+| <a id="trend--format"></a>`--format` | one of `text`, `json` | `text` |  | Output format (text or json). |
+| <a id="trend--cli-json-input"></a>`--cli-json-input` | text | not set |  | Read parameter values from a JSON object: a path, a file:// URI, or '-' for stdin. Keys are parameter names (output_dir) or long flag spellings (--output-dir). Flags given on the command line override the file; the file overrides environment variables. Run with --generate-cli-skeleton for a template. |
+| <a id="trend--generate-cli-skeleton"></a>`--generate-cli-skeleton` | flag | off |  | Print a JSON template for --cli-json-input, listing every parameter of this command with its default, or null where it is required or an environment variable backs it, and exit. |
