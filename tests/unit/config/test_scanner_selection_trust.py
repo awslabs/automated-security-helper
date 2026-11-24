@@ -526,3 +526,51 @@ class TestAClientPatchIsRefused:
                 untrusted_config=True,
                 remote_client=True,
             )
+
+
+class TestTheLinterAgreesWithTheScan:
+    def _lint(self, *args: str):
+        from typer.testing import CliRunner
+
+        from automated_security_helper.cli.main import app
+
+        return CliRunner().invoke(app, ["config", "lint", *args])
+
+    @pytest.mark.parametrize(
+        "section",
+        [
+            {"only_scanner": ["bandit"]},
+            {"only_scanners": ["a"], "add_scanners": ["b"]},
+        ],
+        ids=["unknown-subkey", "both-lists"],
+    )
+    def test_an_operator_file_with_a_bad_section_is_reported_as_blocking(
+        self, tmp_path: Path, section: Dict[str, Any]
+    ) -> None:
+        operator = _operator(tmp_path, {"scanner_selection": section})
+        source = tmp_path / "src"
+        source.mkdir()
+
+        result = self._lint("--config", str(operator), "--source-dir", str(source))
+
+        assert "scanner_selection" in result.output
+        assert "blocks the scan" in result.output
+
+    @pytest.mark.parametrize(
+        "section",
+        [
+            {"only_scanner": ["bandit"]},
+            {"only_scanners": ["a"], "add_scanners": ["b"]},
+        ],
+        ids=["unknown-subkey", "both-lists"],
+    )
+    def test_a_repository_file_with_a_bad_section_is_ignored_not_a_veto(
+        self, tmp_path: Path, section: Dict[str, Any]
+    ) -> None:
+        repo = _repo(tmp_path, {"scanner_selection": section})
+
+        scanned = resolve_config(source_dir=repo)
+        result = self._lint("--source-dir", str(repo))
+
+        assert list(scanned.scanner_selection.only_scanners) == []
+        assert "blocks the scan" not in result.output, result.output

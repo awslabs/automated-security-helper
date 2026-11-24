@@ -48,6 +48,15 @@
 
 ### Features
 
+- **`scanner_selection` sets the default scanners in a trusted config.** `only_scanners`
+  replaces a mode's default selection and `add_scanners` extends a fixed one such as
+  precommit's; a repository config, an MCP client or a patch cannot set it. The command
+  line still wins (`--only-scanners` replaces, `--add-scanners` adds, `--exclude-scanners`
+  applies last), workspace projects share one selection plus the scanners the workspace
+  policy requires, and a nonempty `scanners` argument of the MCP workspace tool limits the
+  run. A container scan relying on it needs an image built from this release; an older
+  image refuses with exit 3 before any scanner starts. Without the section nothing changes.
+
 - `ash dependencies check --offline` checks the local Grype and Trivy vulnerability
   database metadata against the configured age policy without running either tool.
 

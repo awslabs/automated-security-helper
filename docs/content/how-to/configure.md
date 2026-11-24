@@ -78,6 +78,29 @@ So is one whose `ASH_CONFIG` names such a file, also when `--config` names a fil
 ASH_CONFIG=no-such-config.yaml ash --source-dir . --scanners detect-secrets --offline --no-progress
 ```
 
+## Choose which scanners run by default {#scanner-selection}
+
+Set the default selection once, in a trusted config: a file outside every git checkout and the scanned directory that you name with `--config` or `ASH_CONFIG`, or `--config-overrides`.
+
+<!-- doctest: config kind=ash -->
+```yaml
+project_name: platform
+scanner_selection:
+  only_scanners:
+    - bandit
+    - trivy
+```
+
+`only_scanners` replaces the mode's default selection in every mode. `add_scanners` adds names to a default that has a fixed set, such as the five scanners of [precommit mode](pre-commit.md#scanner-selection), and leaves a mode that runs every scanner unrestricted. Empty or missing lists change nothing. Naming both is refused with exit 3.
+
+A `scanner_selection` in a config inside the scanned tree, or from an MCP client, is ignored with a warning, and an MCP client's patch to it is refused. The operator's value stays in force. Selecting a scanner does not enable it or install its tool: a scanner with `enabled: false` stays off, and a selected scanner whose tool is missing is reported as missing.
+
+The order, later entries winning: the mode's default, `scanner_selection`, the `precommit` keys in precommit mode, then the command line. `--only-scanners` replaces it; `--add-scanners` and the deprecated `--scanners` add to it; `--exclude-scanners` applies last, and a selection that exclusions empty, or that names no registered scanner, is refused as before. Without a `scanner_selection`, nothing changes.
+
+In a workspace scan, every project runs the same selection, plus every scanner the workspace policy requires, whether or not a project already runs it. `--only-scanners` limits every project to the scanners it names. A nonempty `scanners` argument of the MCP workspace tool limits every project to those scanners and does not add to the default. `ash scan --workspace --dry-run` applies the same rule as the scan.
+
+Container mode needs an image built from this ASH release when the selection comes from the config: the command passes the image the lists it read on the host, an older image rejects that option, and the run ends with exit 3 and a request to rebuild before any scanner starts. Nix mode runs this installation and forwards `--only-scanners` and `--add-scanners` as they are.
+
 ## Share settings with `extends` {#extends}
 
 A config file can build on other files. `extends` names one base file or a list of them, relative to the file that names it:
