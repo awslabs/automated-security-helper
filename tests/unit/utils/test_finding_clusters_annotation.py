@@ -74,7 +74,7 @@ class TestTheSwitch:
     def test_an_unknown_deduplication_key_is_refused(self):
         with pytest.raises(ValidationError):
             AshConfig.model_validate(
-                {"global_settings": {"deduplication": {"fold": True}}}
+                {"global_settings": {"deduplication": {"frobnicate": True}}}
             )
 
     @pytest.mark.parametrize("annotate", [False, None, "yes", 1, MagicMock()])

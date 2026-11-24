@@ -28,6 +28,7 @@ from automated_security_helper.utils.converter_refusals import (
 from automated_security_helper.plugin_modules.ash_builtin.reporters.report_content_emitter import (
     ReportContentEmitter,
     coverage_shortfall_text,
+    deduplicated_summary_text,
     refuse_negative_limit,
 )
 from automated_security_helper.plugin_modules.ash_builtin.reporters.workspace_section import (
@@ -217,6 +218,22 @@ def _findings_table(findings) -> list[str]:
     line, as the rule ID, title and path come from the scan.
     """
     keys = ("severity", "scanner", "rule_id", "title", "file_path")
+    # A column for the fold's note, only when some row has one: with the fold
+    # off the table is the one it has always been.
+    noted = any(finding.get("duplicate_note") for finding in findings)
+    if noted:
+        return [
+            "| Severity | Scanner | Rule ID | Title | File | Duplicates |",
+            "| --- | --- | --- | --- | --- | --- |",
+            *(
+                "| "
+                + " | ".join(_cell(shown_on_one_line(finding[key])) for key in keys)
+                + " | "
+                + _cell(shown_on_one_line(finding.get("duplicate_note") or ""))
+                + " |"
+                for finding in findings
+            ),
+        ]
     return [
         "| Severity | Scanner | Rule ID | Title | File |",
         "| --- | --- | --- | --- | --- |",
@@ -241,6 +258,7 @@ def outcome_markdown(summary: Dict[str, Any]) -> str:
     alert = {"danger": "CAUTION", "warning": "WARNING", "success": "TIP"}[
         summary["tone"]
     ]
+    deduplicated = deduplicated_summary_text(summary)
     return "\n".join(
         [
             f"> [!{alert}]",
@@ -261,6 +279,7 @@ def outcome_markdown(summary: Dict[str, Any]) -> str:
                 + f"{summary['suppressed']} suppressed · "
                 f"{summary['completed']}/{summary['scanners']} scanners completed"
             ),
+            *([">", f"> {deduplicated}"] if deduplicated else []),
             ">",
             f"> Next action: {summary['next_step']}\n",
         ]
@@ -606,9 +625,7 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
         if options.include_detailed_findings:
             findings = emitter.get_detailed_findings(options.max_detailed_findings)
             if findings:
-                total = sum(
-                    emitter.is_finding_actionable(v) for v in emitter.flat_vulns
-                )
+                total = emitter.actionable_finding_count()
                 parts.extend(
                     [
                         "## Detailed findings\n",
@@ -651,6 +668,10 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
                             parts.append(
                                 f"- {label}: {_text(shown_on_one_line(finding[key]))}"
                             )
+                    if finding.get("duplicate_note"):
+                        parts.append(
+                            f"- Duplicates: {_text(shown_on_one_line(finding['duplicate_note']))}"
+                        )
                     parts.append(
                         f"\n{_block_text(shown_not_obeyed(finding['description']))}\n"
                     )

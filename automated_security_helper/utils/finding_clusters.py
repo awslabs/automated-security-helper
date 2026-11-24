@@ -339,3 +339,132 @@ def assign_clusters_by_project(
         ):
             assignments[index] = assigned
     return assignments
+
+
+def fold_enabled(model: Any) -> bool:
+    """Whether *model*'s config turns the fold of duplicates on in human reports.
+
+    Only a literal ``True`` counts, as for :func:`annotate_enabled`.
+    """
+    settings = getattr(getattr(model, "ash_config", None), "global_settings", None)
+    dedup = getattr(settings, "deduplication", None)
+    return getattr(dedup, "fold", False) is True
+
+
+def clusters_by_project(rows: Sequence[FlatVulnerability]) -> List[FindingCluster]:
+    """:func:`cluster_findings`, run once per workspace project.
+
+    The positions in each cluster are positions in *rows*, not in the project's
+    slice, so the clusters read directly against the full list. Clusters never
+    span projects, as for :func:`assign_clusters_by_project`.
+    """
+    groups: Dict[Optional[str], List[int]] = {}
+    for index, row in enumerate(rows):
+        groups.setdefault(row.workspace_project, []).append(index)
+    if len(groups) <= 1:
+        return cluster_findings(rows)
+    clusters: List[FindingCluster] = []
+    for indexes in groups.values():
+        for found in cluster_findings([rows[i] for i in indexes]):
+            clusters.append(
+                FindingCluster(
+                    cluster_id=found.cluster_id,
+                    finding_class=found.finding_class,
+                    foldable=found.foldable,
+                    members=tuple(indexes[m] for m in found.members),
+                    primary=indexes[found.primary],
+                    sources=found.sources,
+                )
+            )
+    clusters.sort(key=lambda c: c.members[0])
+    return clusters
+
+
+def fold_positions(
+    rows: Sequence[FlatVulnerability],
+    clusters: Sequence[FindingCluster],
+    shown: Sequence[int],
+) -> List[Tuple[int, Tuple[int, ...]]]:
+    """The rows of a view, one per foldable cluster, each with what it stands for.
+
+    *shown* is the view as positions in *rows*, in display order (a list of
+    actionable findings, a table of every finding). Each returned pair is a
+    position that stays in the view and the positions folded under it, ascending;
+    a row in no foldable cluster stays alone. The order of *shown* is kept.
+
+    Two rules keep a fold honest. Only the members that are in the view fold, so
+    a cluster half hidden by a filter folds what is left of it, and its
+    representative is the cluster's primary when that is in the view, else the
+    best of the rest by the primary's own ranking. And suppressed and live
+    members never fold together: a suppressed duplicate is not hidden under a live
+    row, and a live row is not hidden under a suppressed one. Clusters that do not
+    fold (``foldable`` False, the IaC class) leave every row in place.
+    """
+    in_view = set(shown)
+    stands_for: Dict[int, Tuple[int, ...]] = {}
+    folded_away: set[int] = set()
+    for cluster in clusters:
+        if not cluster.foldable:
+            continue
+        for suppressed in (False, True):
+            present = [
+                m
+                for m in cluster.members
+                if m in in_view and bool(rows[m].is_suppressed) is suppressed
+            ]
+            if len(present) < 2:
+                continue
+            representative = (
+                cluster.primary
+                if cluster.primary in present
+                else _primary(rows, present)
+            )
+            others = tuple(m for m in present if m != representative)
+            stands_for[representative] = others
+            folded_away.update(others)
+    return [
+        (position, stands_for.get(position, ()))
+        for position in shown
+        if position not in folded_away
+    ]
+
+
+def provenance_entries(
+    rows: Sequence[FlatVulnerability], others: Iterable[int]
+) -> List[Dict[str, Any]]:
+    """The provenance of a folded row: one dict per row it stands for.
+
+    ``scanner``, ``rule_id`` and ``severity`` of each, in a fixed order (scanner,
+    rule, id), so the same view always reads the same.
+    """
+    ordered = sorted(
+        others,
+        key=lambda i: (rows[i].scanner or "", rows[i].rule_id or "", rows[i].id or ""),
+    )
+    return [
+        {
+            "scanner": rows[i].scanner,
+            "rule_id": rows[i].rule_id,
+            "severity": rows[i].severity,
+        }
+        for i in ordered
+    ]
+
+
+def provenance_note(entries: Sequence[Dict[str, Any]]) -> Optional[str]:
+    """The sentence a folded row carries, or None when it stands for no other row.
+
+    Each entry reads ``scanner rule (SEVERITY)``; a missing part is left out.
+    """
+    if not entries:
+        return None
+    parts = []
+    for entry in entries:
+        label = " ".join(
+            str(part) for part in (entry.get("scanner"), entry.get("rule_id")) if part
+        )
+        severity = entry.get("severity")
+        if severity:
+            label = f"{label} ({severity})" if label else f"({severity})"
+        parts.append(label or "unknown")
+    return "Also reported by " + "; ".join(parts)

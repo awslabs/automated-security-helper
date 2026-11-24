@@ -677,6 +677,7 @@
       'global_settings': dict({
         'deduplication': dict({
           'annotate': False,
+          'fold': False,
         }),
         'ignore_paths': list([
         ]),
@@ -1320,6 +1321,7 @@
       'global_settings': dict({
         'deduplication': dict({
           'annotate': False,
+          'fold': False,
         }),
         'ignore_paths': list([
         ]),

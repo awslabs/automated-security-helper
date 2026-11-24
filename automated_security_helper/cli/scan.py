@@ -1423,6 +1423,14 @@ def run_ash_scan_cli_command(
             help="Add `cluster_id`, `duplicate_of` and `duplicate_sources` columns to the CSV and flat-JSON reports, naming findings that two scanners report for one defect (same CVE and package, same IaC resource, or same line and CWE). Rows, ids, counts, SARIF, suppressions and baselines are unchanged. Adds three columns to the CSV header, so it is off by default. Sets `global_settings.deduplication.annotate`.",
         ),
     ] = False,
+    fold_duplicates: Annotated[
+        bool,
+        typer.Option(
+            "--fold-duplicates",
+            rich_help_panel="Reports",
+            help="Show one row per duplicate cluster in the HTML, Markdown and text reports, with a note naming the other scanners that reported it, and add deduplicated counts beside the per-scanner counts. Only the same CVE and package, or the same line and CWE, fold. Finding ids, SARIF, per-scanner counts, suppressions, baselines, the CSV, flat-JSON and JUnit reports and the exit code are unchanged. Off by default because it changes row counts. Sets `global_settings.deduplication.fold`.",
+        ),
+    ] = False,
     changed_files_only: Annotated[
         bool,
         typer.Option(
@@ -1952,6 +1960,8 @@ def run_ash_scan_cli_command(
     # a run without it leaves the config file's value alone.
     if annotate_duplicates:
         config_overrides.append("global_settings.deduplication.annotate=true")
+    if fold_duplicates:
+        config_overrides.append("global_settings.deduplication.fold=true")
     # The same route as --compact-report, for the same reason and one more: as a config
     # override it reaches every mode unchanged -- local, nix, workspace, and the container,
     # which is handed config_overrides verbatim -- and overrides are applied after the

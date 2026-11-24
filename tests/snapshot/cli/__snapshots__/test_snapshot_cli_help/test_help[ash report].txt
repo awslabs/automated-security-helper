@@ -73,6 +73,17 @@
 │                                                                      CSV header, so it is off by │
 │                                                                      default. Sets               │
 │                                                                      `global_settings.deduplica… │
+│ --fold-duplicates                                                    Show one row per duplicate  │
+│                                                                      cluster in the HTML,        │
+│                                                                      Markdown and text reports,  │
+│                                                                      with a note naming the      │
+│                                                                      other scanners that         │
+│                                                                      reported it, and add        │
+│                                                                      deduplicated counts beside  │
+│                                                                      the per-scanner counts. Off │
+│                                                                      by default because it       │
+│                                                                      changes row counts. Sets    │
+│                                                                      `global_settings.deduplica… │
 │ --verbose              -v                                            Enable verbose logging      │
 │ --debug                -d                                            Enable debug logging        │
 │ --color                    --no-color                                Enable/disable colorized    │

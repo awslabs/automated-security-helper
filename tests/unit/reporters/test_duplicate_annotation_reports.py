@@ -242,6 +242,5 @@ def test_scan_and_report_declare_the_flag_off_by_default():
     for command in (run_ash_scan_cli_command, report_command):
         parameter = inspect.signature(command).parameters["annotate_duplicates"]
         assert parameter.default is False
-        assert (
-            "--annotate-duplicates" in parameter.annotation.__metadata__[0].param_decls
-        )
+        # typer reads a leading string as the option's name.
+        assert parameter.annotation.__metadata__[0].default == "--annotate-duplicates"

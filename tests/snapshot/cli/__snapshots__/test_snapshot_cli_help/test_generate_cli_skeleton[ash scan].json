@@ -36,6 +36,7 @@
   "min_severity": "low",
   "compact_report": false,
   "annotate_duplicates": false,
+  "fold_duplicates": false,
   "changed_files_only": null,
   "base_ref": null,
   "staged": null,

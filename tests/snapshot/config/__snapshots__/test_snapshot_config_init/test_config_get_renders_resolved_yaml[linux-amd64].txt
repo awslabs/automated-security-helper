@@ -130,6 +130,7 @@ global_settings:
       replace_default_denied_paths: false
   deduplication:
     annotate: false
+    fold: false
 fail_on_findings: false
 fail_on_incomplete_scanners: true
 fail_on_unknown_keys: false

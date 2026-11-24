@@ -197,7 +197,8 @@
         }
       },
       "deduplication": {
-        "annotate": false
+        "annotate": false,
+        "fold": false
       }
     },
     "fail_on_findings": true,

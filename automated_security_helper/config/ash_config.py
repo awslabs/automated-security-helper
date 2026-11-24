@@ -1924,6 +1924,25 @@ class AshDeduplicationConfig(RedactedSection):
         ),
     ] = False
 
+    fold: Annotated[
+        bool,
+        Field(
+            description=(
+                "When true, the HTML, Markdown and text reports show one row per "
+                "duplicate cluster (the primary finding, with a note naming the "
+                "other scanners that reported it) in their findings tables, "
+                "detailed findings, finding cards and hotspots, and add "
+                "deduplicated counts beside, never in place of, the per-scanner "
+                "counts. Only clusters of the same CVE and package, or the same "
+                "line and CWE, fold; IaC resource clusters are annotated only. "
+                "Finding ids, SARIF, per-scanner metrics, suppressions, "
+                "baselines, the CSV, flat-JSON and JUnit reports and the exit "
+                "code are unchanged. Off by default because it changes row "
+                "counts. CLI: `--fold-duplicates` on `ash scan` and `ash report`."
+            )
+        ),
+    ] = False
+
 
 class AshConfigGlobalSettingsSection(RedactedSection):
     # validate_default is here because `severity_threshold`'s default is derived
