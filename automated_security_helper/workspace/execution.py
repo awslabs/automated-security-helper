@@ -313,7 +313,7 @@ import time
 import contextvars
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from contextlib import AbstractContextManager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath
 from threading import Event, Lock
 from typing import (
@@ -347,7 +347,9 @@ from automated_security_helper.core.cancellation import (
 from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
 from automated_security_helper.core.previous_results import holds_restored_results
 from automated_security_helper.core.scanner_selection import (
+    SelectionLayers,
     SelectionOrigin,
+    refuse_unmet_selection_marker,
     selection_after_exclusions,
 )
 from automated_security_helper.core.exceptions import (
@@ -488,6 +490,8 @@ class ProjectScanSettings:
     #: SKIPPED rows and selection refusals name its scanners and excluded_scanners
     #: parameters; "cli" for the flags.
     selection_origin: SelectionOrigin = "cli"
+    selection_layers: Optional[SelectionLayers] = None
+    required_scanner_selection: Optional[str] = None
     output_formats: Tuple[str, ...] = ()
     config_overrides: Tuple[str, ...] = ()
     #: ``config_overrides`` came from an MCP client, not the operator; see
@@ -919,6 +923,42 @@ def workspace_reporter_classes(
         return _reporter_classes_of_run(plan, settings)
 
 
+def workspace_default_scanners(
+    plan: WorkspacePlan, settings: ProjectScanSettings
+) -> Tuple[Tuple[str, ...], Tuple[str, ...]]:
+    active = plan.active_projects
+    if not active:
+        return (), ()
+    selection = _project_config_with_policy(active[0], settings).default_scanners
+    return tuple(selection.only), tuple(selection.add)
+
+
+def settled_scanner_selection(
+    plan: WorkspacePlan, settings: ProjectScanSettings
+) -> ProjectScanSettings:
+    layers = settings.selection_layers
+    if layers is None:
+        return settings
+    only, add = workspace_default_scanners(plan, settings)
+    if settings.required_scanner_selection is not None:
+        refuse_unmet_selection_marker(settings.required_scanner_selection, only, add)
+    folded = replace(layers, workspace_required=tuple(plan.required_scanners)).fold(
+        only, add
+    )
+    origin = settings.selection_origin
+    if folded.origin == "operator":
+        origin = "mcp-config" if origin == "mcp" else "config"
+    elif folded.origin == "cli+operator":
+        origin = "cli+config"
+    return replace(
+        settings,
+        enabled_scanners=tuple(folded.names),
+        selection_origin=origin,
+        selection_layers=None,
+        required_scanner_selection=None,
+    )
+
+
 def refuse_unresolvable_scanner_selection(
     plan: WorkspacePlan, settings: ProjectScanSettings
 ) -> None:
@@ -974,6 +1014,7 @@ def refuse_unresolvable_scanner_selection(
     from automated_security_helper.plugins import ash_plugin_manager
     from automated_security_helper.plugins.loader import plugins_of
 
+    settings = settled_scanner_selection(plan, settings)
     # Split as the engine splits, so `--scanners bandit,semgrep` is two names here
     # too. Read whole, it was one name no scanner has, and the workspace refused a
     # selection every single scan accepts.
@@ -2047,7 +2088,10 @@ def _project_config_with_policy(
     # fallback as this project's config_source when one applied -- this branch
     # covers a plan built without it, and a hand-built plan.
     config_path = project.config_source or settings.default_config_path
-    if config_path is not None:
+    if config_path is not None and not (
+        project.config_source is not None
+        and project._config_source_is_operator_fallback
+    ):
         # Checked again here, not only by the plan: the file is read now, and a
         # link can change between the two (config_sources, "Base paths").
         check_discovered_source(Path(config_path), settings.config_base_gate)
@@ -2967,6 +3011,7 @@ def execute_workspace(
                 )
                 if cls in loaded
             ]
+    settings = settled_scanner_selection(plan, settings)
     refuse_unresolvable_scanner_selection(plan, settings)
 
     reports_requested = _REPORT_PHASE in settings.phases

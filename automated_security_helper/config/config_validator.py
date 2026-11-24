@@ -3864,6 +3864,8 @@ class ConfigValidator:
         "workspace",
         # Scanner selection for --mode precommit (only_scanners, add_scanners).
         "precommit",
+        # The operator's default scanners, read in every mode (only, add).
+        "default_scanners",
         # Loader directives (#289), resolved before the config is validated.
         EXTENDS_KEY,
         PATCH_KEY,
@@ -4390,12 +4392,27 @@ class ConfigValidator:
         ):
             if place not in ignored_places:
                 ignored_places.append(place)
+        selection_ignored, selection_unknown = cls._ignored_default_scanners(
+            repository, config_overrides, ash_config
+        )
+        for place in selection_ignored:
+            if place not in ignored_places:
+                ignored_places.append(place)
         for place in ignored_places:
             result.warnings.append(
                 result.redact(
                     f"{place} is set in a config file inside the scanned tree, "
                     "and a scan ignores that value: only --config-overrides or a "
                     "config file outside the tree set it."
+                )
+            )
+        for place in selection_unknown:
+            result.warnings.append(
+                result.redact(
+                    f"{place} is not a default_scanners key, and a scan ignores "
+                    "the default_scanners section a config file inside the "
+                    "scanned tree writes: only --config-overrides or a config file "
+                    "outside the tree set it."
                 )
             )
         result.ash_config_errors = ash_config_errors
@@ -4463,6 +4480,25 @@ class ConfigValidator:
         return ignored_operator_only_options(
             built, trusted, config_overrides, repository
         )
+
+    @classmethod
+    def _ignored_default_scanners(
+        cls,
+        repository: Any,
+        config_overrides: Optional[List[str]],
+        ash_config: "_AshConfigCheck",
+    ) -> Tuple[List[str], List[str]]:
+        from automated_security_helper.config.ash_config import AshConfig
+        from automated_security_helper.config.default_scanners_trust import (
+            ignored_default_scanners,
+        )
+
+        if repository is None:
+            return [], []
+        trusted = AshConfig()
+        if ash_config.loaded is not None and not ash_config.in_tree:
+            trusted = ash_config.loaded
+        return ignored_default_scanners(trusted, config_overrides, repository)
 
     @classmethod
     def _ignored_reporter_destinations(

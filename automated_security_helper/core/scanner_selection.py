@@ -25,15 +25,21 @@ that package loads ``config.ash_config``, and ``run_ash_scan`` has to leave it
 unloaded (see tests/unit/models/test_forward_ref_resolves_in_any_import_order.py).
 """
 
+import json
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Literal, Mapping, Sequence
+from typing import Dict, Iterable, List, Literal, Mapping, Optional, Sequence
 
-from automated_security_helper.core.exceptions import ScannerSelectionError
+from automated_security_helper.core.exceptions import (
+    ASHConfigValidationError,
+    ScannerSelectionError,
+)
 
 #: Who made the scanner selection: the CLI's ``--scanners`` and
 #: ``--exclude-scanners``, or the MCP workspace tool's ``scanners`` and
 #: ``excluded_scanners`` parameters. Only the MCP tool sets "mcp".
-SelectionOrigin = Literal["cli", "mcp"]
+SelectionOrigin = Literal["cli", "mcp", "config", "cli+config", "mcp-config"]
+
+AllowlistOrigin = Literal["mode", "operator", "precommit", "cli", "cli+operator"]
 
 
 @dataclass(frozen=True)
@@ -62,7 +68,79 @@ _SELECTION_NAMES: Dict[str, SelectionNames] = {
         exclusion="the excluded_scanners parameter",
         drop_one="Drop one of the two.",
     ),
+    "cli+config": SelectionNames(
+        allowlist="--scanners and default_scanners in the ASH config",
+        exclusion="--exclude-scanners",
+        drop_one=(
+            "Drop the exclusion, or change the flags or default_scanners in the "
+            "operator's ASH config."
+        ),
+    ),
+    "mcp-config": SelectionNames(
+        allowlist="default_scanners in the ASH config",
+        exclusion="the excluded_scanners parameter",
+        drop_one=(
+            "Drop the exclusion, or change default_scanners in the operator's "
+            "ASH config."
+        ),
+    ),
+    "config": SelectionNames(
+        allowlist="default_scanners in the ASH config",
+        exclusion="--exclude-scanners",
+        drop_one=(
+            "Drop the exclusion, or change default_scanners in the operator's "
+            "ASH config."
+        ),
+    ),
 }
+
+
+@dataclass(frozen=True)
+class FoldedSelection:
+    names: List[str]
+    origin: Optional[AllowlistOrigin]
+
+
+def _unique(names: Iterable[str]) -> List[str]:
+    return list(dict.fromkeys(names))
+
+
+@dataclass(frozen=True)
+class SelectionLayers:
+    mode_default: Sequence[str] = ()
+    precommit_only: Sequence[str] = ()
+    precommit_add: Sequence[str] = ()
+    cli_only: Optional[Sequence[str]] = None
+    cli_additive: Sequence[str] = ()
+    workspace_required: Sequence[str] = ()
+
+    def fold(
+        self,
+        operator_only: Sequence[str] = (),
+        operator_add: Sequence[str] = (),
+    ) -> FoldedSelection:
+        if self.cli_only is not None:
+            return FoldedSelection(list(self.cli_only), "cli")
+        base: List[str] = list(self.mode_default)
+        origin: Optional[AllowlistOrigin] = "mode" if base else None
+        if operator_only:
+            base, origin = list(operator_only), "operator"
+        elif operator_add and base:
+            base, origin = base + list(operator_add), "operator"
+        if self.precommit_only:
+            base, origin = list(self.precommit_only), "precommit"
+        elif self.precommit_add and base:
+            base, origin = base + list(self.precommit_add), "precommit"
+        if base:
+            base += list(self.workspace_required)
+        if not self.cli_additive:
+            return FoldedSelection(_unique(base), origin)
+        if not base:
+            return FoldedSelection(list(self.cli_additive), "cli")
+        return FoldedSelection(
+            _unique([*self.cli_additive, *base]),
+            "cli+operator" if origin == "operator" else "cli",
+        )
 
 
 def selection_names(origin: SelectionOrigin = "cli") -> SelectionNames:
@@ -287,3 +365,45 @@ def exclusions_matching_no_scanner(
         if key and key not in registered:
             unmatched.setdefault(key, name.strip())
     return list(unmatched.values())
+
+
+def _normalized(names: Iterable[str]) -> List[str]:
+    return list(dict.fromkeys(n.strip().lower() for n in names if n.strip()))
+
+
+def selection_marker(only: Iterable[str], add: Iterable[str]) -> str:
+    return json.dumps(
+        {"only": _normalized(only), "add": _normalized(add)}, sort_keys=True
+    )
+
+
+def refuse_unmet_selection_marker(
+    marker: str, only: Iterable[str], add: Iterable[str]
+) -> None:
+    try:
+        wanted = json.loads(marker)
+        ok = (
+            isinstance(wanted, dict)
+            and set(wanted) == {"only", "add"}
+            and all(
+                isinstance(wanted[key], list)
+                and all(isinstance(n, str) for n in wanted[key])
+                for key in wanted
+            )
+        )
+    except ValueError:
+        ok = False
+    if not ok:
+        raise ASHConfigValidationError(
+            "The default_scanners check this scan was asked to make is not "
+            "readable, so no scanner was started."
+        )
+    if json.loads(selection_marker(wanted["only"], wanted["add"])) != json.loads(
+        selection_marker(only, add)
+    ):
+        raise ASHConfigValidationError(
+            "The default_scanners this scan settled differs from the one the "
+            "host read from the operator's config, so no scanner was started. "
+            "The operator's config may not be mounted in the container, or the "
+            "image reads it differently."
+        )

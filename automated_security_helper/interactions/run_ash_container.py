@@ -2250,6 +2250,7 @@ CONTAINER_ENV_CONFIG_ROOT = "/ash-env-config"
 #: Tells the scan inside the container that its --config was written by the
 #: repository being scanned, with every file it extends; see _config_marks.
 CONFIG_FROM_SCANNED_REPOSITORY_FLAG = "--config-from-scanned-repository"
+REQUIRE_SCANNER_SELECTION_FLAG = "--require-scanner-selection"
 #: Tells the scan inside the container that one file the --config extends was
 #: written by the repository being scanned, by its container path; see _config_marks.
 CONFIG_FILE_FROM_SCANNED_REPOSITORY_FLAG = "--config-file-from-scanned-repository"
@@ -3193,6 +3194,7 @@ class OperatorConfigReads:
             Tuple[str | None, str | None, str, Tuple[Path, ...]], List[str]
         ] = {}
         self._env_config: Tuple[str | None] | None = None
+        self.selected_document: Tuple[Any] | None = None
         self._env_config_named: Dict[Tuple[str, str], bool] = {}
         #: Each config file's ``extends`` entries, read once for the record's
         #: lifetime, with the variables an entry the resolution dropped read;
@@ -4753,6 +4755,9 @@ def _assemble_run_command(
     workspace_config: str | None = None,
     ignore_suppressions: bool = False,
     min_severity: str | None = None,
+    only_scanners: List[str] | None = None,
+    add_scanners: List[str] | None = None,
+    require_scanner_selection: str | None = None,
     log_level: AshLogLevel | str | None = None,
     outer_run_id: str | None = None,
     environment_names: List[str] | None = None,
@@ -5098,6 +5103,15 @@ def _assemble_run_command(
     for scanner in scanners:
         ash_args.extend(["--scanners", scanner])
 
+    for scanner in only_scanners or []:
+        ash_args.extend(["--only-scanners", scanner])
+
+    for scanner in add_scanners or []:
+        ash_args.extend(["--add-scanners", scanner])
+
+    if require_scanner_selection is not None:
+        ash_args.extend([REQUIRE_SCANNER_SELECTION_FLAG, require_scanner_selection])
+
     for scanner in exclude_scanners:
         ash_args.extend(["--exclude-scanners", scanner])
 
@@ -5358,6 +5372,9 @@ def run_ash_container(
     workspace_config: str | None = None,
     ignore_suppressions: bool = False,
     min_severity: str | None = None,
+    only_scanners: List[str] | None = None,
+    add_scanners: List[str] | None = None,
+    require_scanner_selection: str | None = None,
     outer_run_id: str | None = None,
     reads: OperatorConfigReads | None = None,
 ):
@@ -5893,6 +5910,9 @@ def run_ash_container(
                     workspace_config=workspace_config,
                     ignore_suppressions=ignore_suppressions,
                     min_severity=min_severity,
+                    only_scanners=only_scanners,
+                    add_scanners=add_scanners,
+                    require_scanner_selection=require_scanner_selection,
                     log_level=log_level,
                     outer_run_id=outer_run_id,
                     environment_names=environment_names,

@@ -362,6 +362,8 @@ SHIPPED_DEFAULT_DENIED_PATHS: Tuple[FrozenSet[str], ...] = tuple(
             "/sandbox/**",
             "/ash_plugin_modules",
             "/ash_plugin_modules/**",
+            "/default_scanners",
+            "/default_scanners/**",
             "/scanners/detect-secrets/options/scan_settings/filters_used",
             "/scanners/detect-secrets/options/scan_settings/filters_used/**",
             "/scanners/detect-secrets/options/scan_settings/plugins_used",
