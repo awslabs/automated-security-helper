@@ -981,7 +981,9 @@ def test_an_explicit_runner_path_runs_that_path(given, pwsh, tmp_path):
     os.name == "nt", reason="the stand-in runners are POSIX shell scripts"
 )
 @pytest.mark.parametrize(
-    "wrapper_value", ["bin/wrap -n", "~/bin/wrap -n"], ids=["relative", "tilde"]
+    "wrapper_value",
+    ["bin/wrap -n", "~/bin/wrap -n", "C:\\bin\\|docker"],
+    ids=["relative", "tilde", "rooted-windows-invalid-char"],
 )
 def test_a_relative_runner_wrapper_is_refused_and_nothing_runs(
     pwsh, tmp_path, wrapper_value
