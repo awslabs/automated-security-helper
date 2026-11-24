@@ -1731,10 +1731,21 @@ jobs:
         env:
           ASH_IMAGE_NAME: automated-security-helper:non-root
           OCI_RUNNER: docker
-        run: >-
-          uv run --extra cdk pytest
-          tests/snapshot/container/runtime/test_container_image_permissions.py
-          --run-container-snapshots --run-integration --no-cov -n 0
+        run: |
+          # Same guard as run-scan-test's snapshot step: the tier gate in
+          # tests/conftest.py skips every item here when a gate flag is missing and
+          # pytest exits 0 on an all-skipped run, so a green step proves nothing
+          # without a count. Fail unless at least one test actually executed.
+          uv run --extra cdk pytest \
+            tests/snapshot/container/runtime/test_container_image_permissions.py \
+            --run-container-snapshots --run-integration --no-cov -n 0 \
+            | tee "${RUNNER_TEMP}/image-permissions-pytest.log"
+          executed="$(awk '/^=+ .* =+$/ { line = $0 } END { n = 0; while (match(line, /[0-9]+ (passed|failed|xpassed|xfailed|error)/)) { n += substr(line, RSTART, RLENGTH) + 0; line = substr(line, RSTART + RLENGTH) }; print n }' "${RUNNER_TEMP}/image-permissions-pytest.log")"
+          if [ "${executed}" -eq 0 ]; then
+            echo "Image-permissions step executed 0 tests: the tier gate skipped everything, so nothing was checked."
+            exit 1
+          fi
+          echo "Image-permissions step executed ${executed} test(s)."
 
   # ---------------------------------------------------------------------------
   # External-target scan: assert on what comes back when ASH scans a directory
