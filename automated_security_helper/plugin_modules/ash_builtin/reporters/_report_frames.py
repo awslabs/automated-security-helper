@@ -25,6 +25,8 @@ from typing import Any, Iterable, List, Sequence
 
 import polars as pl
 
+from automated_security_helper.utils.frame_text import ranks, unwire, wire
+
 
 def graded_frame(
     levels: Sequence[str],
@@ -72,30 +74,35 @@ def top_locations(locations: Iterable[str], limit: int | None) -> List[tuple[str
     if limit is not None and limit <= 0:
         return []
     ranked = (
-        pl.DataFrame({"location": pl.Series(list(locations), dtype=pl.String)})
+        pl.DataFrame(
+            {"location": pl.Series([wire(item) for item in locations], dtype=pl.String)}
+        )
         .group_by("location", maintain_order=True)
         .len()
         .sort("len", descending=True, maintain_order=True)
     )
     if limit is not None:
         ranked = ranked.head(limit)
-    return [(location, int(count)) for location, count in ranked.iter_rows()]
+    return [(unwire(location), int(count)) for location, count in ranked.iter_rows()]
 
 
 def severity_order(keys: Sequence[tuple[int, str, int, str]]) -> List[int]:
     """The positions of *keys* in ascending order, ties in their given order.
 
-    Each key is ``(severity place, file, line, rule)``.
+    Each key is ``(severity place, file, line, rule)``. A file or rule may hold a
+    lone surrogate and a line is an unbounded int, so text goes in as
+    :func:`wire` and lines as their ranks.
     """
     if not keys:
         return []
+    line_rank = ranks(k[2] for k in keys)
     ordered = (
         pl.DataFrame(
             {
                 "place": pl.Series([k[0] for k in keys], dtype=pl.Int64),
-                "file": pl.Series([k[1] for k in keys], dtype=pl.String),
-                "line": pl.Series([k[2] for k in keys], dtype=pl.Int64),
-                "rule": pl.Series([k[3] for k in keys], dtype=pl.String),
+                "file": pl.Series([wire(k[1]) for k in keys], dtype=pl.String),
+                "line": pl.Series([line_rank[k[2]] for k in keys], dtype=pl.Int64),
+                "rule": pl.Series([wire(k[3]) for k in keys], dtype=pl.String),
             }
         )
         .with_row_index("position")

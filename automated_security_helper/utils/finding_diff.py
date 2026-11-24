@@ -11,6 +11,7 @@ import polars as pl
 
 from automated_security_helper.core.enums import ScannerStatus
 from automated_security_helper.utils.finding_identity import canonical
+from automated_security_helper.utils.frame_text import ranks, wire
 
 if TYPE_CHECKING:
     from automated_security_helper.models.asharp_model import AshAggregatedResults
@@ -164,9 +165,7 @@ def _wire(text: str | None) -> str | None:
     are one-to-one with the text, and sorting them sorts as the text's code
     points do.
     """
-    if text is None:
-        return None
-    return text.encode("utf-8", "surrogatepass").decode("latin-1")
+    return wire(text)
 
 
 _SIDE_SCHEMA = {
@@ -202,6 +201,14 @@ def _side(findings: list[FlatVulnerability]) -> pl.DataFrame:
     null for a finding :func:`fallback_key` does not key.
     """
     columns: dict[str, list[Any]] = {name: [] for name in _SIDE_SCHEMA}
+    # Lines are unbounded ints and the frame column is 64-bit, so the column
+    # holds each line's rank (no line is -1, as the old sort key had it). Only
+    # the order of lines is ever used.
+    line_rank = ranks(
+        -1 if line is None else line
+        for finding in findings
+        for line in (finding.line_start, finding.line_end)
+    )
     for index, finding in enumerate(findings):
         key = fallback_key(finding)
         row = (
@@ -214,8 +221,8 @@ def _side(findings: list[FlatVulnerability]) -> pl.DataFrame:
             _wire(key[1]) if key else None,
             _wire(key[2]) if key else None,
             finding.is_suppressed,
-            finding.line_start,
-            finding.line_end,
+            line_rank[-1 if finding.line_start is None else finding.line_start],
+            line_rank[-1 if finding.line_end is None else finding.line_end],
         )
         for name, value in zip(columns, row):
             columns[name].append(value)
