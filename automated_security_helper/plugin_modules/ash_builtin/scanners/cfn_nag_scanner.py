@@ -412,8 +412,7 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
         ),
         resource_id=FacetDecl(
             state=FacetState.DROPPED,
-            native_field='violation "logical_resource_ids" (the JSON '
-            "output format)",
+            native_field='violation "logical_resource_ids" (the JSON output format)',
             reason="UNCONFIRMED: no SARIF run is committed, so whether the id "
             "is a structured SARIF field or only one result per id is open "
             "(M0 item b FATALed); the unit that attaches it (M3a) picks its "

@@ -397,13 +397,11 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
         ),
         line_range=FacetDecl(
             state=FacetState.MAPPED,
-            native_field="result locations[].physicalLocation.region "
-            "startLine",
+            native_field="result locations[].physicalLocation.region startLine",
         ),
         column=FacetDecl(
             state=FacetState.MAPPED,
-            native_field="result locations[].physicalLocation.region "
-            "startColumn",
+            native_field="result locations[].physicalLocation.region startColumn",
         ),
         message=FacetDecl(
             state=FacetState.MAPPED,
@@ -411,8 +409,7 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
         ),
         resource_id=FacetDecl(
             state=FacetState.DROPPED,
-            native_field='result message.text "Path=/Resources/<LogicalId>/" '
-            "segment",
+            native_field='result message.text "Path=/Resources/<LogicalId>/" segment',
             reason="recoverable only by parsing message prose (a derivation, "
             "not a field copy, and a message-format change would silently "
             "stop it); attaching it is a later unit gated on an owner "

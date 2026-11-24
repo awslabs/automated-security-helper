@@ -632,13 +632,11 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
         ),
         file_path=FacetDecl(
             state=FacetState.MAPPED,
-            native_field="result locations[].physicalLocation."
-            "artifactLocation.uri",
+            native_field="result locations[].physicalLocation.artifactLocation.uri",
         ),
         line_range=FacetDecl(
             state=FacetState.MAPPED,
-            native_field="result locations[].physicalLocation.region "
-            "startLine/endLine",
+            native_field="result locations[].physicalLocation.region startLine/endLine",
         ),
         column=FacetDecl(
             state=FacetState.MAPPED,
@@ -704,8 +702,7 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
         ),
         snippet=FacetDecl(
             state=FacetState.NA,
-            reason="the SARIF regions carry line and column only, no "
-            "snippet",
+            reason="the SARIF regions carry line and column only, no snippet",
         ),
         references=FacetDecl(
             state=FacetState.MAPPED,
