@@ -3893,8 +3893,16 @@ installs them first, and turns a missing one into a failure:</p>
   in <code>tests/snapshot/container/runtime/</code>. They are deselected, not skipped, unless you
   pass <code>pytest --run-container-snapshots</code> or <code>pytest --run-nix-snapshots</code>; the scan
   jobs that have the runtime pass them. To update them, build the image (or install
-  Nix) and run the module with its flag plus <code>pytest -n 0 --snapshot-update</code>; each
-  module's docstring lists the environment variables it reads.</li>
+  Nix) and run the module with its flag plus <code>pytest -n 0 --run-integration
+  --snapshot-update</code> (these modules carry the integration or e2e tier marker, and
+  without <code>pytest --run-integration</code> every test is skipped); each module's docstring lists
+  the environment variables it reads.</li>
+<li><code>tests/snapshot/wrappers/</code> runs the PowerShell wrapper (<code>utils/ash_helpers.ps1</code>)
+  end to end under <code>pwsh</code> against recording stand-ins for the container runners. It
+  needs no runtime, so it is not deselected: it runs in the normal test tiers on every
+  OS, Windows included. There is one snapshot per test, shared by every OS. To update
+  them, run <code>pytest tests/snapshot/wrappers -n 0 --run-integration --snapshot-update</code>
+  on any host with <code>pwsh</code> 7.</li>
 </ul>
 <h2 id="snapshot-tests">Snapshot tests<a class="headerlink" href="#snapshot-tests" title="Permanent link">&para;</a></h2>
 <p>What ASH prints and writes is pinned by snapshot tests, so a change to user-visible output
