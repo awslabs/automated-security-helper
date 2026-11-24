@@ -143,3 +143,26 @@ def test_a_cell_is_written_from_the_text_it_was_given_not_its_wire_form(
     # U+00A0 is whitespace to the check, so the "::" after it is a line start; a
     # title that begins with it does not begin with a formula character.
     assert rows[1] == ["V1", "\u00e9\n\u00a0\\x3a:x", "\u00a0=a"]
+
+
+def test_the_cell_frame_has_one_string_column_per_field_and_one_row_per_finding():
+    import polars as pl
+
+    from automated_security_helper.plugin_modules.ash_builtin.reporters.csv_reporter import (
+        ROW_TYPE_COLUMN,
+        cell_frame,
+    )
+    from automated_security_helper.utils.frame_text import unwire
+
+    frame = cell_frame(
+        [{"a": "=x", "n": -3}, {"a": None}, {"a": "\ud800"}],
+        [ROW_TYPE_COLUMN, "a", "n"],
+    )
+
+    assert frame.shape == (3, 3)
+    assert set(frame.dtypes) == {pl.String}
+    assert [[unwire(c) for c in row] for row in frame.iter_rows()] == [
+        ["finding", "'=x", "-3"],
+        ["finding", "", ""],
+        ["finding", "\ud800", ""],
+    ]
