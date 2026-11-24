@@ -214,8 +214,10 @@ _MAPPED_WRITERS: dict[str, tuple[str, str]] = {
     # a path segment of the committed SARIF text. The parse itself and its
     # rot guard are in test_cfn_guard_scanner.py.
     "CfnGuardScanner": (
-        "automated_security_helper.plugin_modules.ash_builtin.scanners."
-        "cfn_guard_scanner",
+        (
+            "automated_security_helper.plugin_modules.ash_builtin.scanners."
+            "cfn_guard_scanner"
+        ),
         "cfn_lint_guard/captured/cfn-guard-3.2.1-wa-Security-Pillar-insecure.sarif",
     ),
 }

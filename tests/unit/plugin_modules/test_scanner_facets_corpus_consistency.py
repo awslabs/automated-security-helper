@@ -459,7 +459,9 @@ def _prep_guarddog(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]
 
 #: Registered preps: native, non-SARIF or adapter-normalized fixtures through
 #: the adapter's own pure function. A prep never runs a tool.
-_PREPS: Mapping[str, Callable[[CorpusSpec], Iterator[tuple[SarifReport, list[Result]]]]] = {
+_PREPS: Mapping[
+    str, Callable[[CorpusSpec], Iterator[tuple[SarifReport, list[Result]]]]
+] = {
     "cfn-guard": _prep_cfn_guard,
     "cfn-lint": _prep_cfn_lint,
     "guarddog": _prep_guarddog,
@@ -640,7 +642,13 @@ def test_planted_a_dropped_facet_over_a_populated_column_fails() -> None:
         (FacetState.DROPPED, (0, 4)),
         (FacetState.DROPPED, None),
     ],
-    ids=["mapped-populated", "na-empty", "na-no-corpus", "dropped-empty", "dropped-no-corpus"],
+    ids=[
+        "mapped-populated",
+        "na-empty",
+        "na-no-corpus",
+        "dropped-empty",
+        "dropped-no-corpus",
+    ],
 )
 def test_planted_legitimate_cells_pass(
     state: FacetState, observed: Optional[tuple[int, int]]
@@ -706,7 +714,9 @@ def test_planted_a_fixture_with_the_mapped_field_removed_is_flagged(
             for r in run.results or []
         ]
         non_null = sum(1 for f in flats if _text(f.file_path))
-        verdict = judge("planted", "file_path", FacetState.MAPPED, (non_null, len(flats)))
+        verdict = judge(
+            "planted", "file_path", FacetState.MAPPED, (non_null, len(flats))
+        )
         assert verdict.outcome == expected, verdict.detail
 
 
