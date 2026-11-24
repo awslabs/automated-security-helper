@@ -573,7 +573,11 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                 tier=opsf.Tier.BUILTIN_DEFAULT,
                 source=opsf.ProvenanceSource.GEMFILE_LOCK,
                 selection_surfaces=(),
-                upstream_license=opsf.LICENSE_NOT_READ,
+                upstream_license=(
+                    "MIT (source: the cfn-nag row of the 2026-11-24 "
+                    "scanner license check, a live GitHub license read; not pinned to the gem version ASH builds and not in "
+                    "THIRD_PARTY_LICENSES)"
+                ),
             ),
             prerequisites=opsf.PrerequisitesFacet(
                 kinds=(opsf.Prerequisite.TEMPLATE,),

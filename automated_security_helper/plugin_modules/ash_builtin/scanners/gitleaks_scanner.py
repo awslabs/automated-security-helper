@@ -721,7 +721,10 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
                 tier=opsf.Tier.BUILTIN_DEFAULT,
                 source=opsf.ProvenanceSource.PINNED_RELEASE_BINARY,
                 selection_surfaces=("options.honor_inline_ignores",),
-                upstream_license=opsf.LICENSE_NOT_READ,
+                upstream_license=(
+                    "MIT (source: utils/tool_downloads.py "
+                    "THIRD_PARTY_LICENSES['gitleaks'], pinned commit 83d9cd6)"
+                ),
             ),
             prerequisites=opsf.PrerequisitesFacet(
                 kinds=(opsf.Prerequisite.NONE,),

@@ -1432,7 +1432,10 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
                 tier=opsf.Tier.BUILTIN_DEFAULT,
                 source=opsf.ProvenanceSource.PINNED_RELEASE_BINARY,
                 selection_surfaces=(),
-                upstream_license=opsf.LICENSE_NOT_READ,
+                upstream_license=(
+                    "MIT (source: utils/tool_downloads.py "
+                    "THIRD_PARTY_LICENSES['actionlint'], pinned commit 914e7df)"
+                ),
             ),
             prerequisites=opsf.PrerequisitesFacet(
                 kinds=(opsf.Prerequisite.NONE,),

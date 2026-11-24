@@ -418,7 +418,11 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
                     "ash_trivy_plugins in ash_plugin_modules",
                     "options.scanners (all four on by default)",
                 ),
-                upstream_license=opsf.LICENSE_NOT_READ,
+                upstream_license=(
+                    "Apache-2.0 (source: utils/tool_downloads.py "
+                    "THIRD_PARTY_LICENSES['trivy'], pinned commit 3f6334d; the "
+                    "trivy binary this plugin invokes)"
+                ),
             ),
             prerequisites=opsf.PrerequisitesFacet(
                 kinds=(opsf.Prerequisite.NONE,),

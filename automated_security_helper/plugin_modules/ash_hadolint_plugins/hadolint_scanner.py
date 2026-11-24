@@ -449,7 +449,10 @@ class HadolintScanner(ScannerPluginBase[HadolintScannerConfig]):
                 tier=opsf.Tier.COMMUNITY_OPTIN,
                 source=opsf.ProvenanceSource.PINNED_RELEASE_BINARY,
                 selection_surfaces=("ash_hadolint_plugins in ash_plugin_modules",),
-                upstream_license=opsf.LICENSE_NOT_READ,
+                upstream_license=(
+                    "GPL-3.0-only (source: utils/tool_downloads.py "
+                    "THIRD_PARTY_LICENSES['hadolint'], pinned commit 2eece55)"
+                ),
             ),
             prerequisites=opsf.PrerequisitesFacet(
                 kinds=(opsf.Prerequisite.NONE,),

@@ -560,7 +560,10 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
                 tier=opsf.Tier.BUILTIN_DEFAULT,
                 source=opsf.ProvenanceSource.PINNED_RELEASE_BINARY,
                 selection_surfaces=("options.rule_sets", "options.rules_paths"),
-                upstream_license=opsf.LICENSE_NOT_READ,
+                upstream_license=(
+                    "Apache-2.0 (source: utils/tool_downloads.py "
+                    "THIRD_PARTY_LICENSES['cfn-guard'], pinned commit db494a1)"
+                ),
             ),
             prerequisites=opsf.PrerequisitesFacet(
                 kinds=(opsf.Prerequisite.TEMPLATE,),

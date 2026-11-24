@@ -971,7 +971,10 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
                 tier=opsf.Tier.BUILTIN_DEFAULT,
                 source=opsf.ProvenanceSource.PYPI_VIA_UV,
                 selection_surfaces=("options.ignore_nosec",),
-                upstream_license=opsf.LICENSE_NOT_READ,
+                upstream_license=(
+                    "Apache-2.0 (source: utils/tool_downloads.py "
+                    "THIRD_PARTY_LICENSES['bandit'], pinned commit 92ae8b8)"
+                ),
             ),
             prerequisites=opsf.PrerequisitesFacet(
                 kinds=(opsf.Prerequisite.NONE,),

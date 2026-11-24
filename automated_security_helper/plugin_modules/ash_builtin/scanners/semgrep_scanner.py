@@ -357,7 +357,11 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
                 tier=opsf.Tier.BUILTIN_DEFAULT,
                 source=opsf.ProvenanceSource.PYPI_VIA_UV,
                 selection_surfaces=("options.config",),
-                upstream_license=opsf.LICENSE_NOT_READ,
+                upstream_license=(
+                    "LGPL-2.1-only (source: utils/tool_downloads.py "
+                    "THIRD_PARTY_LICENSES['semgrep'], pinned commit a5844e7; the "
+                    "rules it downloads carry their own license, not read)"
+                ),
             ),
             prerequisites=opsf.PrerequisitesFacet(
                 kinds=(opsf.Prerequisite.NONE,),

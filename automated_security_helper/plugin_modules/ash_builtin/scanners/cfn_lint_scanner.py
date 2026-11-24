@@ -796,7 +796,10 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
                 tier=opsf.Tier.BUILTIN_DEFAULT,
                 source=opsf.ProvenanceSource.PYPI_VIA_UV,
                 selection_surfaces=(),
-                upstream_license=opsf.LICENSE_NOT_READ,
+                upstream_license=(
+                    "MIT-0 (source: utils/tool_downloads.py "
+                    "THIRD_PARTY_LICENSES['cfn-lint'], pinned commit 720c5cc)"
+                ),
             ),
             prerequisites=opsf.PrerequisitesFacet(
                 kinds=(opsf.Prerequisite.TEMPLATE,),

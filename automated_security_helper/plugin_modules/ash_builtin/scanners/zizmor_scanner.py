@@ -933,7 +933,10 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
                 tier=opsf.Tier.BUILTIN_DEFAULT,
                 source=opsf.ProvenanceSource.PYPI_VIA_UV,
                 selection_surfaces=("options.online_audits (off by default)",),
-                upstream_license=opsf.LICENSE_NOT_READ,
+                upstream_license=(
+                    "MIT (source: utils/tool_downloads.py "
+                    "THIRD_PARTY_LICENSES['zizmor'], pinned commit 0af0be9)"
+                ),
             ),
             prerequisites=opsf.PrerequisitesFacet(
                 kinds=(opsf.Prerequisite.NONE,),

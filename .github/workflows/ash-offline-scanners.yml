@@ -1,0 +1,117 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+name: ASH - Offline-capable scanners (non-blocking)
+# Runs the scanners the operational register declares as needing no network
+# (sandbox network "none", offline outcome "unchanged") with `--offline` and every
+# proxy pointed at a closed port, and requires each of them to complete.
+#
+# WHY THIS WORKFLOW EXISTS
+#
+# The register (automated_security_helper/base/scanner_operational_facets.py) says
+# these scanners do not need the network. A declaration nothing exercises is a
+# claim, so this job is the exercise: if one of them quietly reaches for the
+# network, or refuses to run offline, the run says so.
+#
+# WHAT IT MIRRORS
+#
+# * The scanner set, install steps and fixture come from the `sandbox-scanner-parity`
+#   job of ash-unified-ci.yml, which already runs every scanner over
+#   scripts/verify_sandbox_scanner_parity.py's fixture. This job runs only that
+#   script's offline pair (no `--online`), so the sandbox-parity comparison is
+#   reused as written and only the scanner list and the network posture differ.
+# * The no-network posture is the one ash-package.yml uses for `ash
+#   get-genai-guide`: every proxy variable points at a closed local port. That is
+#   not a network namespace; it makes a scanner that honors proxy settings fail
+#   fast, and `--offline` is ASH's own switch. A scanner that opens a socket
+#   directly is not caught by this job, which is a stated limit.
+#
+# WHY IT CANNOT BLOCK
+#
+# The job carries `continue-on-error: true` and this workflow is not listed in
+# ash-unified-ci.yml's required-checks `needs`. It reports; it never gates a merge.
+# Scanners are installed with the network ON (the install step), and only the scan
+# step runs with the proxies closed.
+#
+# NOT COVERED: the scanners whose offline outcome is degraded or not-run (grype,
+# trivy, semgrep, opengrep, detect-secrets, checkov, guarddog, npm-audit, snyk) and
+# the community scanners that need extra module loading (betterleaks, hadolint,
+# ferret-scan); syft is left to the real-scanner offline tests in ash-unified-ci.yml.
+
+on:
+  pull_request:
+    branches:
+      - "**"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/') }}
+
+jobs:
+  offline-capable-scanners:
+    name: offline-capable scanners complete with no network
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Non-blocking by design; see the header.
+    continue-on-error: true
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Nothing in this job uses git credentials after checkout.
+          persist-credentials: false
+      - uses: ./.github/actions/setup-ash
+        with:
+          python-version: "3.12"
+          install-ash: "false"
+      - name: Set up Ruby for cfn-nag
+        uses: ruby/setup-ruby@b3aaceaef7e0ee231b499e7b5f49c03fc1d32199 # v1.338.0
+        with:
+          ruby-version: "3.3"
+      - name: Install ASH with the cdk extra, and every scanner
+        run: |
+          pip install ".[cdk]"
+          ash dependencies install
+      # Offline pair only, with every proxy at a closed port. --require makes a
+      # scanner that is MISSING, ERROR or SKIPPED unsandboxed a failure, so
+      # "completed" means it ran, not that it was absent. --sandbox bwrap needs
+      # user namespaces, as in the sandbox jobs.
+      - name: Install bubblewrap
+        uses: ./.github/actions/apt-retry
+        with:
+          packages: bubblewrap
+      - name: Check bubblewrap can create namespaces
+        run: |
+          if ! bwrap --unshare-all --ro-bind / / --proc /proc --dev /dev true; then
+            echo "::notice::bwrap refused by the AppArmor userns restriction; lifting it for this runner"
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+            bwrap --unshare-all --ro-bind / / --proc /proc --dev /dev true
+          fi
+      - name: Scan offline with no network
+        env:
+          TMPDIR: ${{ runner.temp }}
+          PARITY_REPORT: ${{ runner.temp }}/offline-scanners.json
+          HTTP_PROXY: http://127.0.0.1:9
+          HTTPS_PROXY: http://127.0.0.1:9
+          NO_PROXY: ""
+        run: |
+          python scripts/verify_sandbox_scanner_parity.py \
+            --sandbox bwrap --ash ash \
+            --require bandit,cdk-nag,cfn-nag,cfn-lint,cfn-guard,actionlint,gitleaks,zizmor \
+            --report "$PARITY_REPORT"
+      - name: Collect the report and scan output
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: offline-capable-scanners
+          path: |
+            ${{ runner.temp }}/offline-scanners.json
+            ${{ runner.temp }}/ash-sandbox-parity-*
+          retention-days: 7
+          if-no-files-found: warn

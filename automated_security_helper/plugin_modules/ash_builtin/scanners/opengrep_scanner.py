@@ -479,7 +479,10 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
                 tier=opsf.Tier.BUILTIN_DEFAULT,
                 source=opsf.ProvenanceSource.PINNED_RELEASE_BINARY,
                 selection_surfaces=("options.config",),
-                upstream_license=opsf.LICENSE_NOT_READ,
+                upstream_license=(
+                    "LGPL-2.1-only (source: utils/tool_downloads.py "
+                    "THIRD_PARTY_LICENSES['opengrep'], pinned commit 526deaf)"
+                ),
             ),
             prerequisites=opsf.PrerequisitesFacet(
                 kinds=(opsf.Prerequisite.GIT_CHECKOUT,),

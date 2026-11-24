@@ -891,10 +891,15 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
                     "--skip-download; utils/content_databases.py "
                     "SCANNERS_WITHOUT_CONTENT_DATABASE['checkov']"
                 ),
-                unconfirmed=(
-                    "whether findings differ between a sandboxed and an unsandboxed "
-                    "online run; one differential sample run settles it (design E5)"
-                ),
+                #: Design E5, measured 2026-11-24 on a desk lane: checkov 3.4.7 (the
+                #: pinned version) on one two-resource Terraform fixture, env -i, no
+                #: platform API key, the desk online. With --skip-download and without
+                #: it, both runs reported the same 10 failed checks (same check ids and
+                #: resources, empty set difference both ways), so the sandbox/online
+                #: difference named in sandbox_tension did not show for this fixture
+                #: and configuration. Not measured: why (the fetch path was not
+                #: traced), a run with a platform API key, other frameworks.
+                unconfirmed=None,
             ),
             output=opsf.OutputFacet(
                 native_formats=(opsf.OutputFormat.SARIF,),
@@ -972,7 +977,10 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
                 tier=opsf.Tier.BUILTIN_DEFAULT,
                 source=opsf.ProvenanceSource.PYPI_VIA_UV,
                 selection_surfaces=("options.frameworks", "options.skip_frameworks"),
-                upstream_license=opsf.LICENSE_NOT_READ,
+                upstream_license=(
+                    "Apache-2.0 (source: utils/tool_downloads.py "
+                    "THIRD_PARTY_LICENSES['checkov'], pinned commit 2f107f8)"
+                ),
             ),
             prerequisites=opsf.PrerequisitesFacet(
                 kinds=(opsf.Prerequisite.NONE,),

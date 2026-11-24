@@ -1256,7 +1256,11 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
                 tier=opsf.Tier.COMMUNITY_OPTIN,
                 source=opsf.ProvenanceSource.PYPI_PINNED_DEPENDENCY,
                 selection_surfaces=("ash_ferret_plugins in ash_plugin_modules",),
-                upstream_license=opsf.LICENSE_NOT_READ,
+                upstream_license=(
+                    "Apache-2.0 (source: the ferret-scan row of the 2026-11-24 "
+                    "scanner license check, a live GitHub license read; not pinned to the version the plugin "
+                    "installs and not in THIRD_PARTY_LICENSES)"
+                ),
             ),
             prerequisites=opsf.PrerequisitesFacet(
                 kinds=(opsf.Prerequisite.NONE,),

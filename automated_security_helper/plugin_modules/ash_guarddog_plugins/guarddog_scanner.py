@@ -993,7 +993,10 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
                     "ash_guarddog_plugins in ash_plugin_modules",
                     "options.verify (opt-in)",
                 ),
-                upstream_license=opsf.LICENSE_NOT_READ,
+                upstream_license=(
+                    "Apache-2.0 (source: utils/tool_downloads.py "
+                    "THIRD_PARTY_LICENSES['guarddog'], pinned commit 3da1726)"
+                ),
             ),
             prerequisites=opsf.PrerequisitesFacet(
                 kinds=(opsf.Prerequisite.MANIFEST,),

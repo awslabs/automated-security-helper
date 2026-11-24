@@ -510,7 +510,10 @@ class BetterleaksScanner(ScannerPluginBase[BetterleaksScannerConfig]):
                     "options.honor_tree_ignore_files",
                     "options.honor_inline_ignores",
                 ),
-                upstream_license=opsf.LICENSE_NOT_READ,
+                upstream_license=(
+                    "MIT (source: utils/tool_downloads.py "
+                    "THIRD_PARTY_LICENSES['betterleaks'], pinned commit 39d5bdc)"
+                ),
             ),
             prerequisites=opsf.PrerequisitesFacet(
                 kinds=(opsf.Prerequisite.NONE,),
