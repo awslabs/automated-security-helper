@@ -162,6 +162,11 @@ from typing import (
 from pydantic import Field, PrivateAttr, model_validator
 
 from automated_security_helper.base.options import ScannerOptionsBase
+from automated_security_helper.base.scanner_facets import (
+    FacetDecl,
+    FacetState,
+    ScannerFacets,
+)
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
@@ -535,6 +540,101 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
 
     # gitleaks' rules are compiled into the binary and it makes no network calls.
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
+
+    #: The facets register row (base/scanner_facets.py). Declaration only: no
+    #: behavior changes. Native fields name gitleaks' own SARIF (fixture
+    #: tests/test_data/scanners/gitleaks/gitleaks-8.30.1.sarif).
+    facets: ClassVar[ScannerFacets] = ScannerFacets(
+        rule_id=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result "ruleId" (e.g. github-pat)',
+        ),
+        severity=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="(no native severity) constant level error plus "
+            'properties "issue_severity" CRITICAL, both set by _post_process_sarif',
+        ),
+        file_path=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="locations[].physicalLocation.artifactLocation.uri",
+        ),
+        line_range=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="region.startLine / region.endLine",
+        ),
+        column=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="region.startColumn / region.endColumn",
+        ),
+        message=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result "message.text"',
+        ),
+        resource_id=FacetDecl(
+            state=FacetState.NA,
+            reason="secret findings name a file location, not a deployable "
+            "resource; the SARIF carries a rule id and a region only",
+        ),
+        resource_type=FacetDecl(
+            state=FacetState.NA,
+            reason="secret findings name a file location, not a deployable resource",
+        ),
+        package_name=FacetDecl(
+            state=FacetState.NA,
+            reason="secret findings carry no package",
+        ),
+        package_version=FacetDecl(
+            state=FacetState.NA,
+            reason="secret findings carry no package",
+        ),
+        package_path=FacetDecl(
+            state=FacetState.NA,
+            reason="secret findings carry no package",
+        ),
+        taxonomy_cve=FacetDecl(
+            state=FacetState.NA,
+            reason="secret findings carry no CVE taxonomy",
+        ),
+        taxonomy_cwe=FacetDecl(
+            state=FacetState.NA,
+            reason="gitleaks rules carry no CWE taxonomy in the SARIF",
+        ),
+        fingerprints=FacetDecl(
+            state=FacetState.DROPPED,
+            native_field='result "partialFingerprints" (commitSha, author, '
+            "email, date, commitMessage)",
+            reason="dir mode emits empty-string git metadata, which "
+            "_post_process_sarif drops because an empty fingerprint is "
+            "identical across every result; git-mode values pass through",
+        ),
+        fix_available=FacetDecl(
+            state=FacetState.NA,
+            reason="secret findings carry no fix state",
+        ),
+        remediation_text=FacetDecl(
+            state=FacetState.NA,
+            reason="the SARIF rules carry id and shortDescription only",
+        ),
+        snippet=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="region.snippet.text, forced to REDACTED by "
+            "--redact=100 and again by _post_process_sarif",
+        ),
+        references=FacetDecl(
+            state=FacetState.NA,
+            reason="the SARIF rules carry id and shortDescription only; no "
+            "reference URLs",
+        ),
+        tags=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result properties "tags" (empty natively); the '
+            "adapter appends secret and security",
+        ),
+        extras=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result properties "issue_severity" written by the adapter',
+        ),
+    )
     success_exit_codes: ClassVar[Set[int]] = {0, LEAKS_EXIT_CODE}
     # The strict default: no network, and no variables or paths beyond the
     # baseline. GITLEAKS_CONFIG and GITLEAKS_CONFIG_TOML are not passed into a

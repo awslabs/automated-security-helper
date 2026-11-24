@@ -57,6 +57,11 @@ from automated_security_helper.base.plugin_base import (
     pep440_requirement,
 )
 from automated_security_helper.utils.uv_tool_runner import checked_requirement
+from automated_security_helper.base.scanner_facets import (
+    FacetDecl,
+    FacetState,
+    ScannerFacets,
+)
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.models.core import (
     EMPTY_SCOPE_RULE,
@@ -1084,6 +1089,103 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
     python_only: ClassVar[bool | None] = False
 
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
+
+    #: The facets register row (base/scanner_facets.py). Declaration only: no
+    #: behavior changes. Native fields name ferret-scan's own SARIF. No tool
+    #: SARIF fixture is committed (tests/test_data/scanners/ferret-scan holds
+    #: only the inputs), so the cell the survey could not read is declared
+    #: n/a with the run that would settle it.
+    facets: ClassVar[ScannerFacets] = ScannerFacets(
+        rule_id=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result "ruleId"',
+        ),
+        severity=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result "level" (the tool\'s own rating)',
+        ),
+        file_path=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="locations[].physicalLocation.artifactLocation.uri "
+            "(uriBaseId resolved by the adapter)",
+        ),
+        line_range=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="region.startLine / region.endLine",
+        ),
+        column=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="region.startColumn / region.endColumn",
+        ),
+        message=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result "message.text" (matched values masked by the '
+            "shared secret-masking pass downstream)",
+        ),
+        resource_id=FacetDecl(
+            state=FacetState.NA,
+            reason="sensitive-data findings name a file location and a matched "
+            "value, not a deployable resource; the matched value is masked "
+            "downstream and is never a resource id",
+        ),
+        resource_type=FacetDecl(
+            state=FacetState.NA,
+            reason="sensitive-data findings name a file location, not a "
+            "deployable resource",
+        ),
+        package_name=FacetDecl(
+            state=FacetState.NA,
+            reason="sensitive-data findings carry no package",
+        ),
+        package_version=FacetDecl(
+            state=FacetState.NA,
+            reason="sensitive-data findings carry no package",
+        ),
+        package_path=FacetDecl(
+            state=FacetState.NA,
+            reason="sensitive-data findings carry no package",
+        ),
+        taxonomy_cve=FacetDecl(
+            state=FacetState.NA,
+            reason="sensitive-data findings carry no CVE taxonomy",
+        ),
+        taxonomy_cwe=FacetDecl(
+            state=FacetState.NA,
+            reason="ferret-scan results carry no CWE taxonomy",
+        ),
+        fingerprints=FacetDecl(
+            state=FacetState.NA,
+            reason="UNCONFIRMED: no ferret-scan SARIF fixture is committed; "
+            "one `ferret-scan --format sarif` run over a sample with a "
+            "finding settles whether partialFingerprints is emitted",
+        ),
+        fix_available=FacetDecl(
+            state=FacetState.NA,
+            reason="sensitive-data findings carry no fix state",
+        ),
+        remediation_text=FacetDecl(
+            state=FacetState.NA,
+            reason="ferret-scan results carry no remediation text",
+        ),
+        snippet=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="region.snippet.text (matched values masked by the "
+            "shared secret-masking pass downstream)",
+        ),
+        references=FacetDecl(
+            state=FacetState.NA,
+            reason="ferret-scan results carry no reference URLs",
+        ),
+        tags=FacetDecl(
+            state=FacetState.NA,
+            reason="ferret-scan results carry no tags; the adapter attaches "
+            "scanner details, not tags",
+        ),
+        extras=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result properties "confidenceLevel" and "validator"',
+        ),
+    )
 
     # The absolute target of the scan in progress, set by scan() and read by
     # _subprocess_cwd.
