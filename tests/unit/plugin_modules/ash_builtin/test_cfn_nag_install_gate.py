@@ -310,9 +310,7 @@ def test_an_old_ruby_declares_no_install_command(context):
     )
 
     with patch.object(cfn_nag_scanner, "_ruby_is_too_old", return_value=True):
-        assert (
-            _commands(context, gem="/usr/bin/gem", compiler="/usr/bin/cc") == []
-        )
+        assert _commands(context, gem="/usr/bin/gem", compiler="/usr/bin/cc") == []
 
 
 def test_the_gemfile_carries_no_ruby_directive():
