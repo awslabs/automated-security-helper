@@ -139,6 +139,7 @@ from automated_security_helper.utils.config_trust import (
 )
 from automated_security_helper.utils.error_text import text_without_values
 from automated_security_helper.utils.output_excerpt import tool_output_excerpt
+from automated_security_helper.utils.package_identity import ASH_RESOURCE_ID_KEY
 from automated_security_helper.utils.rules_bundles import (
     RulesBundleUnavailable,
     create_rules_bundle_install_command,
@@ -376,8 +377,12 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
     #: ruleId, level, message, locations; the driver has no rules array). The
     #: logical resource id exists only inside the message prose
     #: ("Value traversed to [Path=/Resources/<LogicalId>/..."), so
-    #: resource_id is DROPPED with the derivation named; attaching it is the
-    #: later M3b unit and an owner decision, not part of this declaration.
+    #: resource_id is MAPPED-derived: ``_derived_resource_id`` parses the first
+    #: ``Value traversed to [Path=/Resources/<LogicalId>/`` segment of the
+    #: message prose (the one attach in the adapter that reads prose, owner
+    #: decision D7) and attaches nothing when there is no match or the message
+    #: carries a second, different logical id. ``_MESSAGE_PATH_SHAPE`` is the
+    #: shape pinned by the ROT-GUARD test over the committed fixtures.
     facets: ClassVar[ScannerFacets] = ScannerFacets(
         rule_id=FacetDecl(
             state=FacetState.MAPPED,
@@ -408,12 +413,12 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
             native_field="result message.text",
         ),
         resource_id=FacetDecl(
-            state=FacetState.DROPPED,
-            native_field='result message.text "Path=/Resources/<LogicalId>/" segment',
-            reason="recoverable only by parsing message prose (a derivation, "
-            "not a field copy, and a message-format change would silently "
-            "stop it); attaching it is a later unit gated on an owner "
-            "decision",
+            state=FacetState.MAPPED,
+            native_field='DERIVED: result message.text "Value traversed to '
+            '[Path=/Resources/<LogicalId>/" segment, parsed by '
+            "_derived_resource_id (first match only; no match or a second, "
+            "different logical id attaches nothing)",
+            example="LegacyFunction",
         ),
         resource_type=FacetDecl(
             state=FacetState.NA,
@@ -942,6 +947,28 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
             ],
         )
 
+    #: The message shape the derived resource id is read from, as cfn-guard
+    #: 3.2.1 writes it: ``... Value traversed to [Path=/Resources/<LogicalId>/
+    #: Properties[L:13,C:6] Value={...}]``. A CloudFormation logical id is
+    #: alphanumeric. The ``Value=`` dump after the path is the template's own
+    #: text, so only the first match counts and any later match naming a
+    #: different id makes the message ambiguous.
+    _MESSAGE_PATH_SHAPE: ClassVar["re.Pattern[str]"] = re.compile(
+        r"Value traversed to \[Path=/Resources/([A-Za-z0-9]+)[/\[]"
+    )
+
+    @classmethod
+    def _derived_resource_id(cls, result: Result) -> Optional[str]:
+        """The logical id the message's ``Path=`` names, or ``None`` (fail closed)."""
+        message = result.message
+        text = getattr(getattr(message, "root", None), "text", None)
+        if not isinstance(text, str):
+            return None
+        ids = {m.group(1) for m in cls._MESSAGE_PATH_SHAPE.finditer(text)}
+        if len(ids) != 1:
+            return None
+        return next(iter(ids))
+
     @staticmethod
     def normalize_results(report: SarifReport, uri: str) -> List[Result]:
         """One template's results, located at ``uri``, severity-mapped, each once.
@@ -984,6 +1011,9 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
                 if result.properties is None:
                     result.properties = PropertyBag()
                 setattr(result.properties, "issue_severity", VIOLATION_SEVERITY)  # noqa: B010
+                resource_id = CfnGuardScanner._derived_resource_id(result)
+                if resource_id is not None:
+                    setattr(result.properties, ASH_RESOURCE_ID_KEY, resource_id)  # noqa: B010
                 identity = result.model_dump_json()
                 if identity in seen:
                     continue

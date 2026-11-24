@@ -28,6 +28,7 @@ import collections
 import hashlib
 import json
 import os
+import re
 import shutil
 from dataclasses import replace
 from pathlib import Path
@@ -196,6 +197,124 @@ def _scanner(repo: Path, *, operator: bool = True, **options) -> CfnGuardScanner
             enabled=True, options=CfnGuardScannerConfigOptions(**options)
         ),
     )
+
+
+def _plain_result(text: str):
+    return SarifReport.model_validate(
+        {
+            "version": "2.1.0",
+            "runs": [
+                {
+                    "tool": {"driver": {"name": "cfn-guard"}},
+                    "results": [
+                        {
+                            "ruleId": "R",
+                            "level": "error",
+                            "message": {"text": text},
+                            "locations": [
+                                {
+                                    "physicalLocation": {
+                                        "artifactLocation": {"uri": "srv/t.yaml"},
+                                        "region": {"startLine": 1, "startColumn": 1},
+                                    }
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+
+
+def _attached(text: str):
+    (result,) = CfnGuardScanner.normalize_results(_plain_result(text), "t.yaml")
+    return getattr(result.properties, "ash_resource_id", None)
+
+
+class TestDerivedResourceId:
+    """M3b: the logical id parsed from ``Path=/Resources/<LogicalId>/`` in prose.
+
+    The one attach that reads prose, so the first test is the ROT GUARD: it
+    pins the exact message shape cfn-guard 3.2.1 wrote into the committed
+    capture, and goes red the day the format drifts (instead of attachment
+    silently stopping).
+    """
+
+    #: Counted from the raw capture with a separate ``json.load`` and a pattern
+    #: written independently of the scanner's.
+    EXPECTED_IDS = collections.Counter({"LegacyFunction": 2, "OpenBucket": 22})
+
+    def test_rot_guard_every_captured_message_has_the_pinned_shape(self):
+        raw = json.loads(CAPTURED_INSECURE.read_text())["runs"][0]["results"]
+        assert len(raw) == 24  # the denominator
+        shape = re.compile(
+            r"^Check was not compliant as property \[[^\]]+\].*? "
+            r"Value traversed to \[Path=/Resources/([A-Za-z0-9]+)/Properties"
+            r"\[L:\d+,C:\d+\] Value=\{.*\}\]\.\s",
+            re.DOTALL,
+        )
+        ids = collections.Counter()
+        for entry in raw:
+            match = shape.match(entry["message"]["text"])
+            assert match, (
+                "cfn-guard's message format drifted from the shape the derived "
+                "resource id reads; re-read the tool output and re-declare "
+                f"the cell: {entry['message']['text'][:200]!r}"
+            )
+            ids[match.group(1)] += 1
+        assert ids == self.EXPECTED_IDS
+
+    def test_every_captured_finding_gets_the_id_its_message_names(self):
+        results = CfnGuardScanner.normalize_results(
+            _load(CAPTURED_INSECURE), "templates/insecure.yaml"
+        )
+        assert len(results) == 24
+        attached = collections.Counter(
+            r.properties.ash_resource_id for r in results
+        )
+        assert attached == self.EXPECTED_IDS
+
+    def test_the_overlapping_rule_sets_attach_on_every_distinct_result(self):
+        results = CfnGuardScanner.normalize_results(
+            _load(CAPTURED_OVERLAPPING_SETS), "templates/insecure.yaml"
+        )
+        assert len(results) == 29
+        assert {r.properties.ash_resource_id for r in results} <= {
+            "LegacyFunction",
+            "OpenBucket",
+        }
+        assert all(r.properties.ash_resource_id for r in results)
+
+    def test_no_match_attaches_nothing(self):
+        assert _attached("Check was not compliant. No path in this one.") is None
+        # drift: a differently spelled prefix must not attach
+        assert _attached("Value traversed to [Location=/Resources/Foo/Properties]") is None
+        assert _attached("Value traversed to [Path=/Parameters/Foo/Default]") is None
+
+    def test_a_non_alphanumeric_id_attaches_nothing(self):
+        assert _attached("Value traversed to [Path=/Resources/Foo-Bar/Properties]") is None
+        assert _attached("Value traversed to [Path=/Resources//Properties]") is None
+
+    def test_an_ambiguous_message_attaches_nothing(self):
+        text = (
+            "Value traversed to [Path=/Resources/First/Properties[L:1,C:1] "
+            'Value={"x":"Value traversed to [Path=/Resources/Second/Properties]"}].'
+        )
+        assert _attached(text) is None
+
+    def test_a_repeated_identical_id_still_attaches(self):
+        text = (
+            "Value traversed to [Path=/Resources/First/Properties[L:1,C:1] "
+            'Value={"x":"Value traversed to [Path=/Resources/First/Properties]"}].'
+        )
+        assert _attached(text) == "First"
+
+    def test_a_single_match_attaches_under_the_generic_key(self):
+        assert (
+            _attached("Value traversed to [Path=/Resources/MyBucket/Properties[L:9,C:6]]")
+            == "MyBucket"
+        )
 
 
 class TestNormalization:
