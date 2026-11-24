@@ -104,6 +104,11 @@ from automated_security_helper.config.path_trust import (
     private_cwd_outside_scanned_tree,
 )
 from automated_security_helper.config.tool_config_trust import empty_tool_config
+from automated_security_helper.base.scanner_facets import (
+    FacetDecl,
+    FacetState,
+    ScannerFacets,
+)
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
@@ -606,6 +611,116 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
     # templates and ASH's empty config, both mounted. Its resource specs ship in the
     # package. An operator's config_file outside the tree needs extra_read_paths.
     sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements()
+
+    #: The facets register row (base/scanner_facets.py), declaration only. The
+    #: native fields are those of the SARIF format ASH consumes (committed
+    #: fixture tests/test_data/scanners/cfn_lint_guard/captured/
+    #: cfn-lint-1.57.1-insecure.sarif: result keys exactly ruleId, message,
+    #: locations; driver rules carry id, shortDescription, fullDescription,
+    #: helpUri). The JSON format names the resource (M0 item c, fixture
+    #: cfn-lint-1.61.0-m0-bad-property.json) but ASH never requests it, so
+    #: resource_id is n/a here with the locator named.
+    facets: ClassVar[ScannerFacets] = ScannerFacets(
+        rule_id=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="result ruleId (e.g. W2001)",
+        ),
+        severity=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="result ruleId letter (E/W/I), mapped by "
+            "SEVERITY_BY_RULE_LETTER; the SARIF result carries no level",
+        ),
+        file_path=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="result locations[].physicalLocation."
+            "artifactLocation.uri",
+        ),
+        line_range=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="result locations[].physicalLocation.region "
+            "startLine/endLine",
+        ),
+        column=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="result locations[].physicalLocation.region "
+            "startColumn/endColumn",
+        ),
+        message=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="result message.text",
+        ),
+        resource_id=FacetDecl(
+            state=FacetState.NA,
+            reason="locator-only in the SARIF format ASH consumes: the "
+            "location is a template file and region (artifactLocation.uri, "
+            "region startLine/startColumn) and the resource is named only in "
+            "message prose; the --format json Location.Path does name it "
+            "(M0 item c) but ASH does not request that format, and a "
+            "locator never enters the resource key",
+        ),
+        resource_type=FacetDecl(
+            state=FacetState.NA,
+            reason="no resource is named in the SARIF format ASH consumes, "
+            "so no type is carried either",
+        ),
+        package_name=FacetDecl(
+            state=FacetState.NA,
+            reason="findings are CloudFormation template checks; no package "
+            "exists in cfn-lint output",
+        ),
+        package_version=FacetDecl(
+            state=FacetState.NA,
+            reason="findings are CloudFormation template checks; no package "
+            "exists in cfn-lint output",
+        ),
+        package_path=FacetDecl(
+            state=FacetState.NA,
+            reason="findings are CloudFormation template checks; no package "
+            "exists in cfn-lint output",
+        ),
+        taxonomy_cve=FacetDecl(
+            state=FacetState.NA,
+            reason="cfn-lint publishes its own rule ids; no CVE taxonomy in "
+            "the results",
+        ),
+        taxonomy_cwe=FacetDecl(
+            state=FacetState.NA,
+            reason="cfn-lint publishes its own rule ids; no CWE taxonomy in "
+            "the results",
+        ),
+        fingerprints=FacetDecl(
+            state=FacetState.NA,
+            reason="the SARIF results carry no fingerprints (result keys "
+            "are exactly ruleId, message, locations)",
+        ),
+        fix_available=FacetDecl(
+            state=FacetState.NA,
+            reason="cfn-lint results carry no fix state or fixed version",
+        ),
+        remediation_text=FacetDecl(
+            state=FacetState.NA,
+            reason="rule descriptions state what a rule checks, not a "
+            "remediation; no remediation field exists",
+        ),
+        snippet=FacetDecl(
+            state=FacetState.NA,
+            reason="the SARIF regions carry line and column only, no "
+            "snippet",
+        ),
+        references=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="driver rules[].helpUri",
+        ),
+        tags=FacetDecl(
+            state=FacetState.NA,
+            reason="the adapter adds no tags and the SARIF rules carry none",
+        ),
+        extras=FacetDecl(
+            state=FacetState.NA,
+            reason="the native results carry no property bag; the only "
+            "property written is the ASH-computed issue_severity",
+        ),
+    )
 
     # Options already refused with a warning; each is read on every invocation and
     # warned about once per scanner.
