@@ -3809,7 +3809,8 @@ scanner did not run, and the output says only <code>Passed</code>.</p>
 <p>The selection precommit mode runs is resolved in this order, later entries winning:</p>
 <ol>
 <li>The mode default: the five scanners above.</li>
-<li>The ASH config file: <code>precommit.only_scanners</code> replaces the default set;
+<li>The operator's <code>default_scanners</code>, in a trusted config: <code>only</code> replaces the default set and <code>add</code> adds to it (<a href="../configure/#default-scanners">Choose which scanners run by default</a>). Every mode reads it, not only precommit.</li>
+<li>The ASH config file: <code>precommit.only_scanners</code> replaces the set so far;
    <code>precommit.add_scanners</code> adds to it. Setting both keys is refused.</li>
 <li>The command line: <code>--only-scanners</code> replaces everything above, mode default and config
    keys alike; <code>--add-scanners</code>, or the deprecated <code>--scanners</code>, adds to whatever stands.
