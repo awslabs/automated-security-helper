@@ -556,6 +556,9 @@
         "global_settings": {
           "$ref": "#/$defs/AshConfigGlobalSettingsSection",
           "default": {
+            "deduplication": {
+              "annotate": false
+            },
             "ignore_paths": [],
             "mcp": {
               "runtime_overrides": {
@@ -1200,6 +1203,13 @@
     "AshConfigGlobalSettingsSection": {
       "additionalProperties": false,
       "properties": {
+        "deduplication": {
+          "$ref": "#/$defs/AshDeduplicationConfig",
+          "default": {
+            "annotate": false
+          },
+          "description": "Cross-scanner duplicate annotation in the flat reports (opt-in; off by default)."
+        },
         "ignore_paths": {
           "default": [],
           "description": "Global list of IgnorePaths. Each path requires a reason for ignoring, e.g. 'Folder contains test data only and is not committed'.",
@@ -1369,6 +1379,29 @@
         }
       },
       "title": "AshConfigGlobalSettingsSection",
+      "type": "object"
+    },
+    "AshDeduplicationConfig": {
+      "additionalProperties": false,
+      "description": "Cross-scanner duplicate annotation (opt-in).\n\nFindings that two scanners report for one defect are grouped into a\nduplicate cluster (``utils/finding_clusters``). This section only chooses\nwhether the flat reports say so. Finding ids, SARIF results, metrics,\nsuppressions and baselines never change either way.",
+      "properties": {
+        "annotate": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
+          "default": false,
+          "description": "When true, the CSV and flat-JSON reports gain three columns that name each finding's duplicate cluster: `cluster_id`, `duplicate_of` (the primary finding's id, on every non-primary member) and `duplicate_sources` (on the primary: the other members' scanner, rule, id and severity). Rows and counts are unchanged. Off by default because the columns change the CSV header. CLI: `--annotate-duplicates` on `ash scan` and `ash report`.",
+          "title": "Annotate"
+        }
+      },
+      "title": "AshDeduplicationConfig",
       "type": "object"
     },
     "AshMcpConfig": {

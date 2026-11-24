@@ -4,6 +4,7 @@
   "log_level": "INFO",
   "config": null,
   "config_overrides": null,
+  "annotate_duplicates": false,
   "verbose": false,
   "debug": false,
   "color": true

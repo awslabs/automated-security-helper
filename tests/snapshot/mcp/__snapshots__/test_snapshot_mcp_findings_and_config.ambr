@@ -675,6 +675,9 @@
       'fail_on_incomplete_scanners': True,
       'fail_on_unknown_keys': False,
       'global_settings': dict({
+        'deduplication': dict({
+          'annotate': False,
+        }),
         'ignore_paths': list([
         ]),
         'mcp': dict({
@@ -1315,6 +1318,9 @@
       'fail_on_incomplete_scanners': True,
       'fail_on_unknown_keys': False,
       'global_settings': dict({
+        'deduplication': dict({
+          'annotate': False,
+        }),
         'ignore_paths': list([
         ]),
         'mcp': dict({

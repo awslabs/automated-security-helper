@@ -119,7 +119,12 @@ class TestTheColumns:
         assert one["cluster_id"] == two["cluster_id"] is not None
         assert one["duplicate_of"] is None
         assert one["duplicate_sources"] == [
-            {"scanner": "trivy", "rule_id": "CVE-2024-0001", "id": "b", "severity": "HIGH"}
+            {
+                "scanner": "trivy",
+                "rule_id": "CVE-2024-0001",
+                "id": "b",
+                "severity": "HIGH",
+            }
         ]
         assert two["duplicate_of"] == "a"
         assert two["duplicate_sources"] is None

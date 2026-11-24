@@ -283,7 +283,11 @@ def assign_clusters(rows: Sequence[FlatVulnerability]) -> List[ClusterAssignment
 
 #: The flat-report columns the annotation adds, in this order, after every other
 #: column. Present only when ``global_settings.deduplication.annotate`` is on.
-ANNOTATION_COLUMNS: Tuple[str, ...] = ("cluster_id", "duplicate_of", "duplicate_sources")
+ANNOTATION_COLUMNS: Tuple[str, ...] = (
+    "cluster_id",
+    "duplicate_of",
+    "duplicate_sources",
+)
 
 
 def annotation_values(assignment: ClusterAssignment) -> Dict[str, Any]:

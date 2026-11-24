@@ -159,9 +159,7 @@ def test_the_header_only_form_follows(test_plugin_context):
 
 
 def test_the_default_flat_json_carries_no_annotation_key(test_plugin_context):
-    data = json.loads(
-        FlatJSONReporter(context=test_plugin_context).report(_model())
-    )
+    data = json.loads(FlatJSONReporter(context=test_plugin_context).report(_model()))
     assert all(not set(ANNOTATION_COLUMNS) & set(f) for f in data["findings"])
 
 
@@ -171,9 +169,7 @@ def test_flat_json_annotates_only_clustered_findings(test_plugin_context):
         FlatJSONReporter(context=test_plugin_context).report(_model(annotate=True))
     )
     assert [f["id"] for f in on["findings"]] == [f["id"] for f in off["findings"]]
-    by_scanner = {
-        f["scanner"]: f for f in on["findings"] if f["rule_id"] == CVE
-    }
+    by_scanner = {f["scanner"]: f for f in on["findings"] if f["rule_id"] == CVE}
     grype, trivy = by_scanner["grype"], by_scanner["trivy"]
     assert grype["cluster_id"] == trivy["cluster_id"]
     assert "duplicate_of" not in grype
@@ -237,8 +233,15 @@ def test_ash_report_honors_the_recorded_setting_and_the_override(tmp_path):
     assert tuple(header[-3:]) == ANNOTATION_COLUMNS
 
 
-def test_the_scan_and_report_help_name_the_flag():
-    for command in ("scan", "report"):
-        result = CliRunner().invoke(app, [command, "--help"])
-        assert result.exit_code == 0
-        assert "--annotate-duplicates" in result.stdout
+def test_scan_and_report_declare_the_flag_off_by_default():
+    import inspect
+
+    from automated_security_helper.cli.report import report_command
+    from automated_security_helper.cli.scan import run_ash_scan_cli_command
+
+    for command in (run_ash_scan_cli_command, report_command):
+        parameter = inspect.signature(command).parameters["annotate_duplicates"]
+        assert parameter.default is False
+        assert (
+            "--annotate-duplicates" in parameter.annotation.__metadata__[0].param_decls
+        )

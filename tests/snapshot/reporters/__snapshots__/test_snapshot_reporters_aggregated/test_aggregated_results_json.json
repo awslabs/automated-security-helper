@@ -195,6 +195,9 @@
           "denied_value_patterns": {},
           "replace_default_denied_paths": false
         }
+      },
+      "deduplication": {
+        "annotate": false
       }
     },
     "fail_on_findings": true,
