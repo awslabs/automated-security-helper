@@ -644,15 +644,20 @@ class TestTheFold:
         assert folded.names == ["trivy", "x", "bandit"]
 
     def test_the_core_helper_imports_no_config_model(self):
-        import subprocess
+        import subprocess  # nosec B404 - a fresh interpreter is the property under test
         import sys
+
+        from tests.utils.helpers import importing_this_checkout
 
         probe = (
             "import sys; "
             "import automated_security_helper.core.scanner_selection; "
             "sys.exit(int('automated_security_helper.config.ash_config' in sys.modules))"
         )
-        assert subprocess.run([sys.executable, "-c", probe]).returncode == 0
+        completed = subprocess.run(  # nosec B603 - fixed argv, the test's own interpreter
+            [sys.executable, "-I", "-c", importing_this_checkout(probe)]
+        )
+        assert completed.returncode == 0
 
 
 @pytest.fixture
