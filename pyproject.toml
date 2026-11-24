@@ -130,6 +130,7 @@ dev = [
  "pytest>=9.1,<10.0.0",
  "pytest-cov>=7.1,<8.0.0",
  "pytest-mock>=3.16.0,<4.0.0",
+ "hypothesis>=6.100,<7",  # property tests that pin a replacement implementation to its predecessor (tests/unit/models/test_suppression_frame_equivalence.py)
  "mypy>=2.4.0,<3.0.0",
  "types-pyyaml>=6.0.12.20261113",
  "types-psutil>=7.2.2.20261111,<8",  # stubs for the psutil runtime dependency (scanner pool sizing)
