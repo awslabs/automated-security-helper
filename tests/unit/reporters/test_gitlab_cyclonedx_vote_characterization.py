@@ -15,9 +15,11 @@ from __future__ import annotations
 
 import random
 from collections import Counter
+from pathlib import Path
 
 import pytest
 
+from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.plugin_modules.ash_builtin.reporters.gitlab_cyclonedx_reporter import (
     PURL_TYPE_TO_GITLAB,
     SYFT_TYPE_TO_GITLAB,
@@ -86,9 +88,10 @@ def _component(path=None, syft_type=None, purl=None):
 
 def _reporter(**options) -> GitLabCycloneDXReporter:
     return GitLabCycloneDXReporter(
+        context=PluginContext(source_dir=Path("src"), output_dir=Path("out")),
         config=GitLabCycloneDXReporterConfig(
             options=GitLabCycloneDXReporterConfigOptions(**options)
-        )
+        ),
     )
 
 
@@ -214,7 +217,9 @@ def test_random_inventories_match_the_counter_oracle(seed):
     ]
     reporter = _reporter()
     for override in (None, "pip", "yarn"):
-        options = GitLabCycloneDXReporterConfigOptions(package_manager_override=override)
+        options = GitLabCycloneDXReporterConfigOptions(
+            package_manager_override=override
+        )
         assert reporter._resolve_dominant_type(
             components, options
         ) == _oracle_dominant_type(components, options)
