@@ -225,7 +225,7 @@ Compare two ash_aggregated_results.json files and return a structured diff.
 | `before_path` | string | Path to the baseline ash_aggregated_results.json file. |
 | `after_path` | string | Path to the comparison ash_aggregated_results.json file. |
 
-On failure, `error_type` is `invalid_session_id`, or the class name of an exception.
+On failure, `error_type` is one of `invalid_session_id` and `results_not_comparable`, or the class name of an exception.
 
 ## explain_finding
 
