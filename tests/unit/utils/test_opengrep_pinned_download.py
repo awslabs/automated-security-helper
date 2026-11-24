@@ -57,6 +57,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scan
     OpengrepScannerConfig,
     OpengrepScannerConfigOptions,
     unverified_version_refusal,
+    windows_zip_refusal,
 )
 from automated_security_helper.utils import tool_downloads
 from automated_security_helper.utils.download_utils import (
@@ -152,9 +153,11 @@ class TestEveryDeclaredPlatformIsPinned:
         assert asset.url.startswith(
             "https://github.com/opengrep/opengrep/releases/download/"
         )
-        # opengrep publishes the executable itself, so there is nothing to extract
-        # and the pin covers the file that runs.
-        assert asset.archive is False
+        # opengrep publishes the executable itself on linux and macOS, so there is
+        # nothing to extract and the pin covers the file that runs. From v2.0.0 its
+        # Windows asset is a zip, which is extracted (and has an executable digest).
+        assert asset.archive is (target_platform == "windows")
+        assert filename.endswith(".zip") is (target_platform == "windows")
         expected_name = "opengrep.exe" if target_platform == "windows" else "opengrep"
         assert asset.install_as == expected_name
 
@@ -162,10 +165,30 @@ class TestEveryDeclaredPlatformIsPinned:
         """One version for the default, the pin and the digests."""
         assert OpengrepScannerConfigOptions().version == TOOL_VERSIONS["opengrep"]
 
-    def test_only_manylinux_is_pinned(self):
-        """The scanner hardcodes manylinux; a musllinux pin would be dead weight."""
+    def test_one_linux_build_per_arch_is_pinned_under_its_2x_name(self):
+        """v2.0.0 renamed ``opengrep_manylinux_*`` to ``opengrep_linux_*`` and made
+        it one static build, so neither old name has a pin and a musllinux one would
+        be dead weight."""
         names = set(_ASSET_TABLES["opengrep"].values())
-        assert not any("musllinux" in n for n in names)
+        assert not any("musllinux" in n or "manylinux" in n for n in names)
+        assert {"opengrep_linux_x86", "opengrep_linux_aarch64"} <= names
+
+    def test_the_windows_zip_pins_its_executable_and_every_dll(self):
+        asset = get_tool_asset("opengrep", "windows", "amd64")
+        assert asset.url.endswith("/opengrep_windows_x86.zip")
+        assert asset.member_name == "opengrep.exe"
+        assert re.fullmatch(r"[0-9a-f]{64}", asset.executable_sha256)
+        # The executable's own digest is not the zip's.
+        assert asset.executable_digest != asset.sha256
+        names = [name for name, _ in asset.companion_sha256]
+        assert len(names) == 6 and names == sorted(names)
+        assert all(name.endswith(".dll") for name in names)
+        assert all(re.fullmatch(r"[0-9a-f]{64}", d) for _, d in asset.companion_sha256)
+
+    @pytest.mark.parametrize("target_platform,arch", DECLARED_PLATFORMS)
+    def test_only_the_windows_asset_has_companions(self, target_platform, arch):
+        asset = get_tool_asset("opengrep", target_platform, arch)
+        assert bool(asset.companion_sha256) is (target_platform == "windows")
 
 
 @pytest.mark.unit
@@ -353,6 +376,179 @@ class TestACustomVersionNeedsItsOwnDigest:
         argv = scanner.custom_install_commands["linux"]["amd64"][0].args
         assert "install_pinned_tool" in argv[2]
         assert "0" * 64 not in argv
+
+
+CUSTOM_2X = "v2.1.0"
+
+
+class TestACustomTwoPointOhVersionUsesTheRenamedAssets:
+    """v2.0.0 renamed the Linux assets and zipped the Windows one."""
+
+    def _scanner(self, test_plugin_context, sha256):
+        return OpengrepScanner(
+            context=test_plugin_context,
+            config=OpengrepScannerConfig(
+                options=OpengrepScannerConfigOptions(version=CUSTOM_2X, sha256=sha256)
+            ),
+        )
+
+    @pytest.mark.unit
+    @pytest.mark.parametrize(
+        "arch,asset",
+        [("amd64", "opengrep_linux_x86"), ("arm64", "opengrep_linux_aarch64")],
+    )
+    def test_linux_downloads_the_renamed_asset(self, test_plugin_context, arch, asset):
+        scanner = self._scanner(test_plugin_context, {f"linux/{arch}": "a" * 64})
+        argv = scanner.custom_install_commands["linux"][arch][0].args
+        assert "install_binary_from_url" in argv[2]
+        assert argv[3].endswith(f"/{CUSTOM_2X}/{asset}")
+
+    @pytest.mark.unit
+    def test_a_missing_linux_digest_names_the_renamed_asset(self, test_plugin_context):
+        scanner = self._scanner(test_plugin_context, {})
+        message = scanner.custom_install_commands["linux"]["amd64"][0].args[3]
+        assert message == unverified_version_refusal(
+            CUSTOM_2X, "linux", "amd64", "opengrep_linux_x86"
+        )
+
+    @pytest.mark.unit
+    @pytest.mark.parametrize("sha256", [{}, {"windows/amd64": "a" * 64}])
+    def test_windows_is_refused_with_or_without_a_digest(
+        self, test_plugin_context, sha256
+    ):
+        """A configured version is fetched as one file, and the asset is a zip."""
+        scanner = self._scanner(test_plugin_context, sha256)
+        argv = scanner.custom_install_commands["windows"]["amd64"][0].args
+        assert argv[2] == "import sys; sys.exit(sys.argv[1])"
+        assert argv[3] == windows_zip_refusal(CUSTOM_2X, "opengrep_windows_x86.zip")
+        assert "opengrep_windows_x86.zip" in argv[3]
+        assert "install_binary_from_url" not in " ".join(argv)
+
+    @pytest.mark.unit
+    def test_a_one_point_x_windows_version_still_downloads_the_exe(
+        self, test_plugin_context
+    ):
+        scanner = _custom_scanner(test_plugin_context, {"windows/amd64": "a" * 64})
+        argv = scanner.custom_install_commands["windows"]["amd64"][0].args
+        assert "install_binary_from_url" in argv[2]
+        assert argv[3].endswith(f"/{CUSTOM}/opengrep_windows_x86.exe")
+
+
+def _windows_zip(extra_member: str | None = None) -> tuple[bytes, dict]:
+    """A stand-in for the release zip: ``opengrep.exe`` plus six DLL-named files."""
+    import io
+    import zipfile
+
+    members = {"opengrep.exe": b"MZ-opengrep-exe-fixture"}
+    for name, _ in get_tool_asset("opengrep", "windows", "amd64").companion_sha256:
+        members[name] = b"MZ-dll-fixture:" + name.encode()
+    if extra_member:
+        members[extra_member] = b"unpinned"
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        for name, payload in members.items():
+            archive.writestr(name, payload)
+    return buffer.getvalue(), members
+
+
+def _pin_the_zip(archive: bytes, members: dict, *, wrong_dll: str | None = None):
+    """Pin the fixture zip, its executable and its DLLs in place of the release's."""
+    filename = _ASSET_TABLES["opengrep"][("windows", "amd64")]
+    companions = {
+        name: hashlib.sha256(payload).hexdigest()
+        for name, payload in members.items()
+        if name != "opengrep.exe"
+    }
+    if wrong_dll:
+        companions[wrong_dll] = "0" * 64
+    return (
+        patch.object(
+            tool_downloads,
+            "_DIGESTS",
+            {**_DIGESTS, filename: hashlib.sha256(archive).hexdigest()},
+        ),
+        patch.object(
+            tool_downloads,
+            "_EXECUTABLE_DIGESTS",
+            {
+                **tool_downloads._EXECUTABLE_DIGESTS,
+                filename: hashlib.sha256(members["opengrep.exe"]).hexdigest(),
+            },
+        ),
+        patch.object(tool_downloads, "_COMPANION_DIGESTS", {filename: companions}),
+    )
+
+
+# integration although urlopen is patched: a finished install ends, on macOS, by
+# unquarantining the file with a child xattr process, a path these tests take there.
+@pytest.mark.integration
+class TestTheWindowsZipInstallsTheExecutableAndItsDlls:
+    def test_every_member_lands_beside_the_executable(self, tmp_path):
+        archive, members = _windows_zip()
+        bin_dir = tmp_path / "bin"
+        pins = _pin_the_zip(archive, members)
+        with pins[0], pins[1], pins[2], _serve(archive):
+            installed = install_pinned_tool("opengrep", "windows", "amd64", bin_dir)
+        assert installed == bin_dir / "opengrep.exe"
+        assert sorted(p.name for p in bin_dir.iterdir()) == sorted(members)
+        for name, payload in members.items():
+            assert (bin_dir / name).read_bytes() == payload
+        receipt = read_receipt(bin_dir, "opengrep.exe")
+        assert (
+            receipt["installed_sha256"]
+            == hashlib.sha256(members["opengrep.exe"]).hexdigest()
+        )
+        assert receipt["version"] == TOOL_VERSIONS["opengrep"]
+
+    def test_a_member_the_pin_does_not_name_is_not_installed(self, tmp_path):
+        archive, members = _windows_zip(extra_member="evil.dll")
+        bin_dir = tmp_path / "bin"
+        pinned = {k: v for k, v in members.items() if k != "evil.dll"}
+        pins = _pin_the_zip(archive, pinned)
+        with pins[0], pins[1], pins[2], _serve(archive):
+            install_pinned_tool("opengrep", "windows", "amd64", bin_dir)
+        assert not (bin_dir / "evil.dll").exists()
+
+    def test_a_dll_that_does_not_match_its_pin_stops_the_install(self, tmp_path):
+        archive, members = _windows_zip()
+        bin_dir = tmp_path / "bin"
+        pins = _pin_the_zip(archive, members, wrong_dll="libzstd-1.dll")
+        with (
+            pins[0],
+            pins[1],
+            pins[2],
+            _serve(archive),
+            pytest.raises(
+                ToolDownloadIntegrityError, match="does not match its pinned"
+            ),
+        ):
+            install_pinned_tool("opengrep", "windows", "amd64", bin_dir)
+        assert not (bin_dir / "opengrep.exe").exists()
+        assert not (bin_dir / "libzstd-1.dll").exists()
+        assert read_receipt(bin_dir, "opengrep.exe") is None
+
+    def test_a_zip_missing_a_pinned_dll_stops_the_install(self, tmp_path):
+        archive, members = _windows_zip()
+        short = {k: v for k, v in members.items() if k != "libgmp-10.dll"}
+        import io
+        import zipfile
+
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as zf:
+            for name, payload in short.items():
+                zf.writestr(name, payload)
+        archive = buffer.getvalue()
+        bin_dir = tmp_path / "bin"
+        pins = _pin_the_zip(archive, members)
+        with (
+            pins[0],
+            pins[1],
+            pins[2],
+            _serve(archive),
+            pytest.raises(ToolDownloadIntegrityError, match="no member named"),
+        ):
+            install_pinned_tool("opengrep", "windows", "amd64", bin_dir)
+        assert not (bin_dir / "opengrep.exe").exists()
 
 
 class TestTheDigestCheckCanFail:

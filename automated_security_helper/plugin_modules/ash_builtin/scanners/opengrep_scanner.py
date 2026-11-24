@@ -12,6 +12,7 @@ lives in :mod:`_grep_scanner_base`. This module only customises:
 from __future__ import annotations
 
 import logging
+import os
 import platform
 import sys
 from pathlib import Path
@@ -181,6 +182,81 @@ def _refuse_unverified_install_command(
     )
 
 
+def windows_zip_refusal(version: str, asset: str) -> str:
+    """The message a custom opengrep 2.x version on Windows is refused with."""
+    pinned = TOOL_VERSIONS["opengrep"]
+    return (
+        f"Refusing to install opengrep {version} on windows/amd64: from 2.0.0 the "
+        f"Windows release asset is a zip ({asset}) holding opengrep.exe and the DLLs "
+        f"it loads, and a configured version is downloaded as a single file. Drop "
+        f"scanners.opengrep.options.version to use the pinned {pinned}, whose zip ASH "
+        f"extracts and verifies member by member, or install opengrep {version} "
+        f"yourself and put it on PATH."
+    )
+
+
+def _refuse_windows_zip_install_command(version: str, url: str) -> CustomCommand:
+    """An install command that prints ``windows_zip_refusal`` and exits 1."""
+    return CustomCommand(
+        args=[
+            sys.executable,
+            "-c",
+            "import sys; sys.exit(sys.argv[1])",
+            windows_zip_refusal(version, url.rsplit("/", 1)[-1]),
+        ],
+        shell=False,
+    )
+
+
+#: What opengrep 2.0.0 writes to stderr, in this order, when a ruleset named by a
+#: registry reference (``p/ci``) cannot be downloaded, before it exits 2.
+_REGISTRY_FETCH_MARKER = "trying to download from"
+_REGISTRY_FETCH_FATAL = "Error: fatal error"
+_STDERR_TAIL_BYTES = 256 * 1024
+
+
+def _is_registry_reference(value: str) -> bool:
+    """Whether an opengrep ``--config`` value names a ruleset to download.
+
+    A URL is fetched whatever it ends in. Otherwise a path that exists, or a rules
+    file name, is local; ``p/ci`` and ``r/...`` registry references and ``auto``
+    are fetched.
+    """
+    if value.startswith(("http://", "https://")):
+        return True
+    if os.path.exists(value) or value.lower().endswith((".yml", ".yaml", ".json")):
+        return False
+    return value == "auto" or value.startswith(("p/", "r/", "http://", "https://"))
+
+
+def without_registry_configs(command: List[str]) -> List[str]:
+    """``command`` with every ``--config`` that names a registry ruleset removed."""
+    kept: List[str] = []
+    index = 0
+    while index < len(command):
+        argument = command[index]
+        if argument == "--config" and index + 1 < len(command):
+            if _is_registry_reference(command[index + 1]):
+                index += 2
+                continue
+        elif argument.startswith("--config=") and _is_registry_reference(
+            argument.split("=", 1)[1]
+        ):
+            index += 1
+            continue
+        kept.append(argument)
+        index += 1
+    return kept
+
+
+def _has_local_config(command: List[str]) -> bool:
+    """Whether ``command`` still names at least one ruleset after the removal."""
+    return any(
+        argument == "--config" or argument.startswith("--config=")
+        for argument in command
+    )
+
+
 def _release_number(version: str) -> str:
     """``version`` without the one leading ``v`` a release tag may carry."""
     return version.removeprefix("v")
@@ -255,6 +331,11 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
         # {CACHE_DIR}/opengrep/<version>, which is $XDG_CACHE_HOME when set, and
         # runs opengrep.bin from there.
         unpack_dir_env="XDG_CACHE_HOME",
+        # From 2.0.0 ("Remove python") opengrep downloads rulesets itself, through
+        # OCaml's ca-certs like semgrep-core, which on macOS runs /usr/bin/security
+        # against the system keychains. Without the exported roots a sandboxed run
+        # ends "Error: fatal error" on the p/ci download.
+        system_trust_roots=True,
         # The offline rule cache ASH checked before the scan and passes as --config.
         read_path_env=("OPENGREP_RULES_CACHE_DIR",),
     )
@@ -286,6 +367,9 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
     _metrics_decision_pending: bool = PrivateAttr(default=False)
     # The answer, once asked, so the arguments rebuilt with it do not ask again.
     _metrics_flag: bool | None = PrivateAttr(default=None)
+    # The directory this scan was pointed at, set by _resolve_scan_arguments for
+    # extra_subprocess_env.
+    _scan_target_path: Path | None = PrivateAttr(default=None)
 
     @model_validator(mode="after")
     def setup_custom_install_commands(self) -> "OpengrepScanner":
@@ -317,7 +401,8 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
             return self
 
         digests = self.config.options.sha256
-        # TODO: detect manylinux vs musllinux
+        # TODO: detect manylinux vs musllinux. Only matters for a 1.x version: from
+        # 2.0.0 the Linux build is one static executable (get_opengrep_url).
         for target_platform, arch in (
             ("linux", "amd64"),
             ("linux", "arm64"),
@@ -329,7 +414,14 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
                 target_platform, arch, version=version, linux_type="manylinux"
             )
             digest = digests.get(f"{target_platform}/{arch}")
-            if digest is None:
+            if url.endswith(".zip"):
+                # From 2.0.0 the Windows asset is a zip of opengrep.exe and its DLLs.
+                # The URL download installs the file it fetches as the executable, so
+                # a zip would land at opengrep.exe unextracted. Only the pinned
+                # version has the archive handling (tool_downloads.py), so this
+                # refuses whether or not a digest was configured.
+                command = _refuse_windows_zip_install_command(version, url)
+            elif digest is None:
                 command = _refuse_unverified_install_command(
                     version, target_platform, arch, url.rsplit("/", 1)[-1]
                 )
@@ -398,7 +490,73 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
                 self._process_config_options()
                 if self.dependency_unavailable_reason:
                     raise ScannerError(self.dependency_unavailable_reason)
+        self._scan_target_path = target
         return super()._resolve_scan_arguments(target, results_file)
+
+    def _run_subprocess(self, command: List[str], *args, **kwargs):
+        """Run opengrep; when it cannot download a ruleset, run it on the local ones.
+
+        opengrep 2.0.0 exits 2 ("Error: fatal error") when a ruleset named by a
+        registry reference such as ``p/ci`` cannot be fetched, which is what a run
+        without network (a sandbox, an air-gapped host) meets. The rules ASH ships
+        and any cached rules are named by local ``--config`` values and need no
+        network, so the run is repeated once without the registry references, with
+        one warning. With no local ruleset left, or any other failure, the first
+        run's result stands.
+        """
+        response = super()._run_subprocess(command, *args, **kwargs)
+        if not self._registry_fetch_failed(response, kwargs.get("results_dir")):
+            return response
+        fallback = without_registry_configs(command)
+        if fallback == command or not _has_local_config(fallback):
+            return response
+        ASH_LOGGER.warning(
+            "opengrep could not download a ruleset from the registry (no network?); "
+            "scanning with the local rulesets only: ASH's bundled rules and any "
+            "rule cache."
+        )
+        # In place, so the invocation record shows the command that ran.
+        command[:] = fallback
+        return super()._run_subprocess(command, *args, **kwargs)
+
+    @staticmethod
+    def _registry_fetch_failed(response, results_dir) -> bool:
+        """Whether this run ended on opengrep's failed-ruleset-download exit."""
+        if not isinstance(response, dict) or response.get("returncode") != 2:
+            return False
+        if results_dir is None:
+            return False
+        log = Path(results_dir) / "OpengrepScanner.stderr.log"
+        try:
+            with open(log, "rb") as handle:
+                handle.seek(0, os.SEEK_END)
+                handle.seek(max(0, handle.tell() - _STDERR_TAIL_BYTES))
+                text = handle.read().decode("utf-8", errors="replace")
+        except OSError:
+            return False
+        return _REGISTRY_FETCH_MARKER in text and _REGISTRY_FETCH_FATAL in text
+
+    def extra_subprocess_env(self) -> dict | None:
+        """Git's ``safe.directory`` for the one directory this scan reads.
+
+        opengrep 2.0.0 lists files with ``git ls-files`` itself and exits 2 when git
+        refuses the directory ("Could not get files from git ls-files"), which it
+        does for a mount another user owns (the container scans). 1.33.1 tolerated
+        that. The entry reaches only this child, through ``GIT_CONFIG_*``, and names
+        the real path of the scanned directory, never ``*``; ASH's own git calls
+        and every other process keep the ownership check.
+        """
+        target = self._scan_target_path
+        if target is None:
+            return None
+        # Entries the caller already set keep their places; this one goes after them.
+        existing = snapshot_environ().get("GIT_CONFIG_COUNT", "0")
+        index = int(existing) if existing.isdigit() else 0
+        return {
+            "GIT_CONFIG_COUNT": str(index + 1),
+            f"GIT_CONFIG_KEY_{index}": "safe.directory",
+            f"GIT_CONFIG_VALUE_{index}": os.path.realpath(target),
+        }
 
     # ---------------------------------------------------------------
     # Dependency resolution
