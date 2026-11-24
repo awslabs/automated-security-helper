@@ -331,6 +331,11 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
         # {CACHE_DIR}/opengrep/<version>, which is $XDG_CACHE_HOME when set, and
         # runs opengrep.bin from there.
         unpack_dir_env="XDG_CACHE_HOME",
+        # From 2.0.0 ("Remove python") opengrep downloads rulesets itself, through
+        # OCaml's ca-certs like semgrep-core, which on macOS runs /usr/bin/security
+        # against the system keychains. Without the exported roots a sandboxed run
+        # ends "Error: fatal error" on the p/ci download.
+        system_trust_roots=True,
         # The offline rule cache ASH checked before the scan and passes as --config.
         read_path_env=("OPENGREP_RULES_CACHE_DIR",),
     )
