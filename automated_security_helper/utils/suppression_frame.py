@@ -34,7 +34,17 @@ What is a frame expression and what is not, and why:
 from __future__ import annotations
 
 import fnmatch
-from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Sequence, Set, Tuple
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+)
 
 import polars as pl
 
@@ -364,7 +374,58 @@ def matches(
     )
 
 
+def _first_true(flags: Sequence[bool]) -> Optional[int]:
+    """The index of the first True of ``flags``, decided by a frame."""
+    frame = pl.DataFrame({"hit": list(flags)}, schema={"hit": pl.Boolean})
+    first = frame.with_row_index("i").filter(pl.col("hit"))["i"].head(1).to_list()
+    return first[0] if first else None
+
+
+def first_ignore_path(
+    path: Optional[str],
+    ignore_paths: Sequence[Any],
+    matches: Callable[[Optional[str], str], bool],
+) -> Optional[int]:
+    """The index of the first ignore path ``path`` is under, or None.
+
+    ``matches`` is the string predicate (``ignore_path_matches``): glob and path
+    semantics that stay Python, as for a suppression, and it is asked in list
+    order only up to the entry that holds, so an entry after the match is never
+    read. The frame carries the booleans it returned and picks the first.
+    """
+    flags: List[bool] = []
+    for ignore_path in ignore_paths:
+        held = bool(matches(path, ignore_path.path))
+        flags.append(held)
+        if held:
+            break
+    return _first_true(flags)
+
+
+def ignore_verdict(
+    client_flags: Sequence[bool], located: int
+) -> Tuple[bool, Optional[int]]:
+    """``(drop the result, index of the client-supplied match to mark it by)``.
+
+    ``located`` is how many of a result's locations name a file;
+    ``client_flags`` holds one entry per location an ignore path matched, in
+    location order, True for a client-supplied path. A result is dropped when
+    every located location is under an ignore path and none of those paths is
+    the client's; when every one is under an ignore path and some is the
+    client's, the result is kept and marked by the LAST such path; otherwise
+    (some location is outside every ignore path) it is left as it is.
+    """
+    frame = pl.DataFrame({"client": list(client_flags)}, schema={"client": pl.Boolean})
+    under = frame.height
+    all_under = located > 0 and under == located
+    clients = frame.with_row_index("i").filter(pl.col("client"))["i"].to_list()
+    drop = all_under and not clients
+    return drop, (clients[-1] if (all_under and clients) else None)
+
+
 __all__: List[str] = [
+    "first_ignore_path",
+    "ignore_verdict",
     "first_match",
     "line_range_overlaps",
     "matches",

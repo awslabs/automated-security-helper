@@ -1,5 +1,22 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+
+"""The JUnit XML reporter.
+
+The per-result projection is a frame (``_junitxml_frame``): each result's outcome
+(suppressed, not evaluated, policy-skipped, below the threshold, an error of some
+type, or passing) is a ``when/then`` chain over its yes/no columns, and the
+grouping of cases into suites is a group-by in first-seen order.
+
+What stays row-wise Python here is what reads one result's own object graph or
+the recorded configuration, which is lookup against the model rather than algebra
+over rows: the scanner and project of a result, its message, rule and metadata
+text, the suppressions in effect, the severity gate (a threshold resolved from five
+sources and a shared ladder that logs for an unrecognised one, run once for each
+result no earlier flag settled), and the construction and serialization of the
+``junitparser`` elements.
+"""
+
 import re
 from typing import Annotated, Any, Literal, TYPE_CHECKING
 
@@ -19,6 +36,10 @@ from automated_security_helper.core.scanner_statistics_calculator import (
 )
 from automated_security_helper.models.flat_vulnerability import (
     extract_workspace_project,
+)
+from automated_security_helper.plugin_modules.ash_builtin.reporters._junitxml_frame import (
+    cases_frame,
+    suite_members,
 )
 from automated_security_helper.plugin_modules.ash_builtin.reporters.workspace_section import (
     workspace_policy_gates,
@@ -327,7 +348,23 @@ class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
 
         report = JUnitXml(name="ASH Scan Report")
 
-        test_suite_dict = {}
+        # One entry per result, in the order the results came. The decisions go
+        # to the frame (see _junitxml_frame); the text of each case stays here,
+        # read back by position.
+        suite_names: list[str] = []
+        names: list[str] = []
+        classnames: list[str | None] = []
+        skip_messages: list[str | None] = []
+        error_messages: list[str] = []
+        system_outs: list[str | None] = []
+        in_effect_flags: list[bool] = []
+        not_applicable_flags: list[bool] = []
+        policy_skip_flags: list[bool] = []
+        actionable_flags: list[bool | None] = []
+        kind_asserts: list[bool] = []
+        kind_fail: list[bool] = []
+        level_reports: list[bool] = []
+        level_types: list[str | None] = []
 
         # Read once: the global threshold is a property of the scan, not of a
         # finding. A scanner's own threshold is resolved per scanner below and
@@ -361,10 +398,9 @@ class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
                     if rule_id and message_text
                     else message_text or rule_id or ""
                 )
-                test_case = TestCase(
-                    name=test_name,
-                    classname=rule_id,
-                )
+                names.append(test_name)
+                classnames.append(rule_id)
+                error_messages.append(message_text)
                 # A result can carry no properties at all (an imported SARIF, a
                 # producer that writes none). Every read below goes through
                 # getattr so that result still gets its test case instead of
@@ -409,22 +445,26 @@ class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
                 # code, the per-scanner counts and the workspace verdict grade
                 # it. Only the suppressions in effect are rendered as the skip.
                 in_effect = suppressions_in_effect(result.suppressions)
+                #
+                # The case's outcome is decided on the frame below; what is
+                # decided here is each flag that cascade reads, in the order it
+                # reads them, and the gate's verdict only for a result no earlier
+                # flag settled.
+                skip_message: str | None = None
+                is_not_applicable = False
+                is_policy_skip = False
+                actionable: bool | None = None
                 if in_effect:
                     # One <skipped> for the case, however many suppressions
                     # accepted it: JUnit counts each child as a skip, so one
                     # test was counted as two. The justifications are joined.
-                    test_case.result = [
-                        Skipped(
-                            message=_xml_text(
-                                "; ".join(
-                                    suppression.justification
-                                    for suppression in in_effect
-                                    if suppression.justification
-                                )
-                            ),
-                            type_="suppression",
+                    skip_message = _xml_text(
+                        "; ".join(
+                            suppression.justification
+                            for suppression in in_effect
+                            if suppression.justification
                         )
-                    ]
+                    )
                 elif result.kind == "notApplicable":
                     # SARIF 2.1.0 3.27.9: "the rule specified by ruleId was not
                     # evaluated". cdk-nag writes this for a rule that raised
@@ -441,12 +481,7 @@ class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
                     # producer writing `warning` or `error` on such a result
                     # would have had it reported as an error. Neither says what
                     # happened, which is that the rule was never run.
-                    test_case.result = [
-                        Skipped(
-                            message="Rule was not evaluated for this target",
-                            type_="not-evaluated",
-                        )
-                    ]
+                    is_not_applicable = True
                 elif (
                     project
                     and is_policy_origin(props)
@@ -467,15 +502,7 @@ class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
                     # written before the field existed, whose verdict applied the
                     # gate) and a project the workspace block does not list fall
                     # to the threshold grading below, the fail-closed side.
-                    test_case.result = [
-                        Skipped(
-                            message=(
-                                "Finding is from a workspace-policy scanner that "
-                                "does not gate this project"
-                            ),
-                            type_=POLICY_NOT_GATING_SKIP_TYPE,
-                        )
-                    ]
+                    is_policy_skip = True
                 else:
                     # Determine if finding is actionable based on severity threshold
                     is_actionable = True
@@ -614,68 +641,47 @@ class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
                                 result.level, threshold
                             )
 
-                    # Only mark as error if it's actionable
-                    if is_actionable:
-                        # The `type` follows the level, so a LOW (`note`)
-                        # finding is not ranked above a MEDIUM (`warning`) one.
-                        # It used to follow the kind first: the default kind
-                        # `fail` typed every finding "error".
-                        #
-                        # A kind that asserts a finding (`fail`, `open`,
-                        # `review`) always yields an <error>: the level's own
-                        # type when it names one, else `error` for `fail` and
-                        # `note` for the others. Before the `note` type existed
-                        # an actionable `open` or `review` finding at `note` or
-                        # `none` fell out with no result element, which renders
-                        # as a PASSING test case: the one direction a security
-                        # report must not fail in.
-                        #
-                        # `pass` and `informational` assert the opposite -- the
-                        # rule ran and found nothing; cdk-nag uses
-                        # `informational` with level `none` for a COMPLIANT
-                        # check (cdk_nag_wrapper._level_and_kind). They keep a
-                        # bare, passing test case unless the producer also
-                        # graded them `error` or `warning`. `notApplicable` (the
-                        # rule was not evaluated) never reaches this cascade:
-                        # it is decided ahead of the gate, above.
-                        #
-                        # `Error` rather than `Failure` because the module
-                        # imports only Error and Skipped; type_ carries the
-                        # distinction.
-                        level_type = _ERROR_TYPE_BY_LEVEL.get(str(result.level))
-                        error_type: str | None
-                        if result.kind in FINDING_KINDS:
-                            error_type = level_type or (
-                                "error" if result.kind == "fail" else "note"
-                            )
-                        elif result.level in ("error", "warning"):
-                            error_type = level_type
-                        else:
-                            error_type = None
-                        if error_type is not None:
-                            test_case.result = [
-                                Error(message=message_text, type_=error_type)
-                            ]
-                    else:
-                        # Mark as skipped if below threshold. Whatever its kind:
-                        # the exit code reads the level against the threshold
-                        # and ignores the kind, so a `pass` or `informational`
-                        # result that is not actionable is a skip here too, and
-                        # the report agrees with the exit code.
-                        test_case.result = [
-                            Skipped(
-                                message="Finding is below configured severity threshold",
-                                type_="threshold",
-                            )
-                        ]
+                    # Only an actionable finding is marked as an error; the
+                    # rest is the frame's cascade (_junitxml_frame).
+                    #
+                    # The `type` follows the level, so a LOW (`note`) finding is
+                    # not ranked above a MEDIUM (`warning`) one. A kind that
+                    # asserts a finding (`fail`, `open`, `review`) always yields
+                    # an <error>: the level's own type when it names one, else
+                    # `error` for `fail` and `note` for the others, so an
+                    # actionable `open` or `review` finding at `note` or `none`
+                    # is never a PASSING test case, the one direction a security
+                    # report must not fail in. `pass` and `informational` assert
+                    # the opposite -- the rule ran and found nothing; cdk-nag
+                    # uses `informational` with level `none` for a COMPLIANT
+                    # check (cdk_nag_wrapper._level_and_kind) -- and keep a bare,
+                    # passing test case unless the producer also graded them
+                    # `error` or `warning`. `notApplicable` never gets here: it
+                    # is decided ahead of the gate, above.
+                    #
+                    # A result that is not actionable is a skip whatever its
+                    # kind: the exit code reads the level against the threshold
+                    # and ignores the kind, so a `pass` or `informational` result
+                    # below it is a skip here too, and the report agrees with the
+                    # exit code.
+                    actionable = is_actionable
+
+                level_types.append(_ERROR_TYPE_BY_LEVEL.get(str(result.level)))
+                kind_asserts.append(result.kind in FINDING_KINDS)
+                kind_fail.append(result.kind == "fail")
+                level_reports.append(result.level in ("error", "warning"))
+                skip_messages.append(skip_message)
+                in_effect_flags.append(bool(in_effect))
+                not_applicable_flags.append(is_not_applicable)
+                policy_skip_flags.append(is_policy_skip)
+                actionable_flags.append(actionable)
 
                 # Add additional metadata in system-out
                 metadata = []
                 if props is not None:
                     for key, value in props.model_dump(by_alias=True).items():
                         metadata.append(f"{key}: {value}")
-                if metadata:
-                    test_case.system_out = _xml_text("\n".join(metadata))
+                system_outs.append(_xml_text("\n".join(metadata)) if metadata else None)
 
                 # In workspace mode the suite is named "<project>/<scanner>".
                 # Project leads so that one project's suites sort together in
@@ -685,12 +691,65 @@ class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
                 suite_name = _xml_text(
                     f"{project}/{actual_scanner}" if project else actual_scanner
                 )
-                if suite_name not in test_suite_dict:
-                    test_suite_dict[suite_name] = TestSuite(name=suite_name)
-                test_suite_dict[suite_name].add_testcase(test_case)
+                suite_names.append(suite_name)
 
-        for suite_name, test_suite in test_suite_dict.items():
-            del suite_name  # keyed for grouping; the name is already on the suite
+        # The outcome of every case and the suite each belongs to, from the
+        # frame; the elements are then built from it, a suite at a time in the
+        # order its first case appeared.
+        frame = cases_frame(
+            suite_names,
+            in_effect_flags,
+            not_applicable_flags,
+            policy_skip_flags,
+            actionable_flags,
+            kind_asserts,
+            kind_fail,
+            level_reports,
+            level_types,
+        )
+        outcomes = frame["outcome"].to_list()
+        error_types = frame["error_type"].to_list()
+        for suite_name, members in suite_members(frame):
+            test_suite = TestSuite(name=suite_name)
+            for i in members:
+                test_case = TestCase(name=names[i], classname=classnames[i])
+                outcome = outcomes[i]
+                if outcome == "suppression":
+                    test_case.result = [
+                        Skipped(message=skip_messages[i], type_="suppression")
+                    ]
+                elif outcome == "not-evaluated":
+                    test_case.result = [
+                        Skipped(
+                            message="Rule was not evaluated for this target",
+                            type_="not-evaluated",
+                        )
+                    ]
+                elif outcome == "policy-not-gating":
+                    test_case.result = [
+                        Skipped(
+                            message=(
+                                "Finding is from a workspace-policy scanner that "
+                                "does not gate this project"
+                            ),
+                            type_=POLICY_NOT_GATING_SKIP_TYPE,
+                        )
+                    ]
+                elif outcome == "threshold":
+                    test_case.result = [
+                        Skipped(
+                            message="Finding is below configured severity threshold",
+                            type_="threshold",
+                        )
+                    ]
+                elif outcome == "error":
+                    test_case.result = [
+                        Error(message=error_messages[i], type_=error_types[i])
+                    ]
+                case_out = system_outs[i]
+                if case_out is not None:
+                    test_case.system_out = case_out
+                test_suite.add_testcase(test_case)
             report.add_testsuite(test_suite)
 
         # One suite per skipped project, added after the finding suites and
@@ -699,7 +758,7 @@ class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
         # results and may have no SARIF at all, and that is exactly the artefact
         # where losing the skip means the file says nothing whatever.
         #
-        # Built separately rather than inserted into test_suite_dict, so a project
+        # Built separately rather than grouped with the finding suites, so a project
         # name can never collide with a grouping key and silently replace a
         # scanner's suite. It cannot today -- every workspace-mode finding suite
         # carries a "<project>/<scanner>" name with a separator in it, and a bare

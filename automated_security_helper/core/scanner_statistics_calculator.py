@@ -30,7 +30,9 @@ Example usage:
 from typing import Dict, Any, Optional, Tuple
 
 from automated_security_helper.core.constants import ASH_DEFAULT_SEVERITY_LEVEL
+from automated_security_helper.core import status_order
 from automated_security_helper.core.enums import ScannerStatus
+from automated_security_helper.core.status_order import grade as grade_status
 from automated_security_helper.models.asharp_model import (
     AshAggregatedResults,
     ScannerSeverityCount,
@@ -509,6 +511,11 @@ class ScannerStatisticsCalculator:
             - none -> info
             - (default) -> info
         """
+        from automated_security_helper.utils.count_frame import (
+            SUPPRESSED,
+            severity_frame,
+            tally_severities,
+        )
         from automated_security_helper.utils.sarif_utils import (
             _resolve_result_severity,
             is_result_suppressed,
@@ -516,6 +523,9 @@ class ScannerStatisticsCalculator:
 
         counts = ScannerSeverityCount()
 
+        # The walk, the scanner match and the two per-result readings are the SARIF
+        # tree's and stay here; the counting is utils.count_frame's group-by.
+        kinds = []
         if asharp_model.sarif:
             for result in asharp_model.sarif.get_all_results():
                 result_scanner = (
@@ -530,10 +540,12 @@ class ScannerStatisticsCalculator:
                 # rejected or underReview (SARIF 3.35.4) hides nothing, so its
                 # finding is counted under its severity, as the exit code, the
                 # flat finding and the workspace verdict count it.
-                if is_result_suppressed(result):
-                    counts.increment("suppressed")
-                else:
-                    counts.increment(_resolve_result_severity(result))
+                kinds.append(
+                    SUPPRESSED
+                    if is_result_suppressed(result)
+                    else _resolve_result_severity(result)
+                )
+        tally_severities(severity_frame(kinds), counts)
 
         # A scanner that returned a dict (``severity_counts`` or a ``findings``
         # list) instead of SARIF has findings the merged SARIF never holds: the
@@ -2071,18 +2083,21 @@ class ScannerStatisticsCalculator:
             # (a recorded SKIPPED stays SKIPPED there). Read with .get: a stats
             # row from an older writer may carry neither flag, and absence is
             # "no claim".
-            if stats.get("error", False) or counters_unusable(
-                *target_counts(asharp_model, scanner_name)
-            ):
+            # The order is core.status_order's, shared with unified_metrics; the
+            # counters are read only when the error flag has not decided.
+            graded = grade_status(
+                stats,
+                lambda: counters_unusable(*target_counts(asharp_model, scanner_name)),
+                default_flags=True,
+            )
+            if graded == status_order.ERROR:
                 error_count += 1
-            elif stats["actionable"] > 0:
+            elif graded == status_order.FAILED:
                 failed_count += 1
-            elif stats["excluded"]:
+            elif graded == status_order.SKIPPED:
                 skipped_count += 1
-            elif stats["dependencies_missing"]:
+            elif graded == status_order.MISSING:
                 missing_count += 1
-            elif stats.get("evaluated_nothing", False):
-                skipped_count += 1
             else:
                 passed_count += 1
 

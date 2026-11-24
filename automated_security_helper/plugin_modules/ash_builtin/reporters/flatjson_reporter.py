@@ -14,6 +14,7 @@ from automated_security_helper.base.reporter_plugin import (
     ReporterPluginConfigBase,
     ReporterWorkspaceBehaviour,
 )
+from automated_security_helper.models.flat_frame import flat_frame
 from automated_security_helper.models.workspace import is_workspace_scan
 from automated_security_helper.utils.content_db_staleness import (
     content_db_records,
@@ -70,6 +71,19 @@ class FlatJSONReporter(ReporterPluginBase[FlatJSONReporterConfig]):
     ``result.properties.workspace_project``, which the aggregator sets on every
     result, and ``model_dump(exclude_none=True)`` omits it for a single-directory
     scan. So this output is unchanged outside workspace mode.
+
+    What is frame work and what is not. The report has no count, group-by, join
+    or ranking of its own over the findings: the counts (scanner metrics, top
+    hotspots) are the content emitter's, already on frames, and the findings array
+    is one JSON object per finding. Each object is that finding's own pydantic
+    dump, and which keys it carries differs from finding to finding (a field
+    nothing set, or set to ``None``, is left out), so the array has no single
+    column schema and a frame cannot hold it; building the objects is row-wise
+    serialization of nested models, not algebra over rows. The one value every
+    finding carries regardless of what it set, ``is_suppressed``, is read from
+    the flat frame's column of that name. The two content-database lists are a
+    handful of records each, built from the model's own records, and stay as
+    they are.
     """
 
     workspace_behaviour = ReporterWorkspaceBehaviour.MERGED
@@ -158,7 +172,14 @@ class FlatJSONReporter(ReporterPluginBase[FlatJSONReporterConfig]):
         # workspace one; exclude_none drops it otherwise, so single-directory
         # output is unchanged.
         flat_vulns = model.to_flat_vulnerabilities()
-        report_data["findings"] = [self._finding_dict(vuln) for vuln in flat_vulns]
+        # The suppressed flag of every finding is one column of the run's flat
+        # frame (models/flat_frame.py, row i = flat_vulns[i]); the rest of each
+        # finding stays a row-wise dump (see the class docstring).
+        suppressed = flat_frame(flat_vulns)["is_suppressed"].to_list()
+        report_data["findings"] = [
+            self._finding_dict(vuln, flag)
+            for vuln, flag in zip(flat_vulns, suppressed, strict=True)
+        ]
 
         # The per-project verdicts, so a consumer can group and judge without
         # re-deriving anything. Re-deriving would mean applying one threshold to
@@ -172,7 +193,7 @@ class FlatJSONReporter(ReporterPluginBase[FlatJSONReporterConfig]):
         return json.dumps(report_data, indent=2, default=str)
 
     @staticmethod
-    def _finding_dict(vuln: Any) -> Dict[str, Any]:
+    def _finding_dict(vuln: Any, is_suppressed: bool) -> Dict[str, Any]:
         """One finding as the JSON object this report carries.
 
         ``exclude_unset`` keeps a single-directory finding free of fields nothing
@@ -181,8 +202,9 @@ class FlatJSONReporter(ReporterPluginBase[FlatJSONReporterConfig]):
         findings built from SARIF results set it on every one. A consumer that
         filtered on the key read those findings as neither suppressed nor open.
         The field is the one value every finding has an answer for, so it is
-        written for every finding, with its default where nothing set it.
+        written for every finding, with *is_suppressed* (the flat frame's value
+        for it) where nothing set it.
         """
         data = vuln.model_dump(exclude_none=True, exclude_unset=True, mode="json")
-        data.setdefault("is_suppressed", bool(getattr(vuln, "is_suppressed", False)))
+        data.setdefault("is_suppressed", is_suppressed)
         return data
