@@ -908,6 +908,16 @@ def test_a_workspace_scan_is_refused(flag, pwsh, recording_docker, tmp_path):
 def _self_recording_runner(directory: Path, log: Path) -> Path:
     """A ``docker`` that appends its own path and its first argument to *log*."""
     directory.mkdir(parents=True)
+    if os.name == "nt":
+        # Get-Command resolves applications through PATHEXT, so the Windows
+        # stand-in is a .cmd, as in test_powershell_wrapper_matches_ash's
+        # _guard_dir.
+        runner = directory / "docker.cmd"
+        runner.write_text(
+            f'@>> "{log}" echo %~f0 %1\r\n@exit /b 0\r\n',
+            encoding="utf-8",
+        )
+        return runner
     runner = directory / "docker"
     runner.write_text(
         f"#!/bin/sh\nprintf '%s %s\\n' \"$0\" \"$1\" >> '{log}'\nexit 0\n",
