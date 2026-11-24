@@ -6320,26 +6320,23 @@ def _operator_documents_may_select(opts: ScanOptions, selected_document: Any) ->
     if any(_is_selection_override(o) for o in opts.config_overrides or []):
         return True
     try:
-        documents = [default_config_document_for_tree(Path(opts.source_dir))]
+        default_document = default_config_document_for_tree(Path(opts.source_dir))
         if selected_document is _NOT_LOADED:
             selected = _selected_config_path(opts)
             selected_document = (
                 _parse_and_confine_config(selected, opts) if selected else None
             )
-        if selected_document is not None:
-            documents.append(selected_document.data)
+        for document in (default_document, selected_document):
+            if document is None:
+                continue
+            section = document.data.get(SCANNER_SELECTION_FIELD)
+            if section is not None and (
+                not isinstance(section, dict)
+                or any(section.get(key) for key in SCANNER_SELECTION_KEYS)
+            ):
+                return True
     except Exception:
         return True
-    for document in documents:
-        if not isinstance(document, dict):
-            continue
-        section = document.get(SCANNER_SELECTION_FIELD)
-        if section is None:
-            continue
-        if not isinstance(section, dict) or any(
-            section.get(key) for key in SCANNER_SELECTION_KEYS
-        ):
-            return True
     return False
 
 

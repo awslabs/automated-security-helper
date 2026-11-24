@@ -411,6 +411,33 @@ def test_a_selection_left_unresolved_for_an_image_that_may_differ_is_refused(
     assert "scanner_selection" in _words(result.output)
 
 
+@pytest.mark.parametrize("inherited", [False, True], ids=["direct", "inherited"])
+def test_unresolved_operator_selection_is_not_lost_beside_a_checkout_config(
+    container, tmp_path, monkeypatch, inherited
+):
+    selection = "scanner_selection:\n  only_scanners: [bandit]\n"
+    if inherited:
+        (tmp_path / "base.yaml").write_text(selection, encoding="utf-8")
+        selection = "extends: base.yaml\n"
+    operator = tmp_path / "operator.yaml"
+    operator.write_text(_LATER_SCHEMA + selection, encoding="utf-8")
+    monkeypatch.setenv("ASH_CONFIG", str(operator))
+    checkout, config = _checkout_with_config(tmp_path, _CHECKOUT_BODIES["no-section"])
+
+    result = _scan(
+        "--source-dir",
+        str(checkout),
+        "--output-dir",
+        str(tmp_path / "out"),
+        "--config",
+        str(config),
+    )
+
+    assert container["runs"] == []
+    assert result.exit_code == 3, result.output
+    assert "scanner_selection" in _words(result.output)
+
+
 def test_without_a_selection_an_image_that_may_differ_still_judges_its_schema(
     container, tmp_path, monkeypatch
 ):
