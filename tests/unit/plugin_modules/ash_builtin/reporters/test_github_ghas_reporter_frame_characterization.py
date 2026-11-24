@@ -113,9 +113,9 @@ class TestRankingAndScoringAgainstTheLoopsTheyWere:
         rng = random.Random(1000 + seed)
         graded = _graded(rng, rng.randint(0, 60))
 
-        assert github_ghas_reporter._rule_severities(
+        assert github_ghas_reporter._rule_severities(graded) == _oracle_rule_severities(
             graded
-        ) == _oracle_rule_severities(graded)
+        )
 
 
 class TestTheEmptyAndTheTied:
@@ -135,6 +135,63 @@ class TestTheEmptyAndTheTied:
     def test_a_result_with_no_rule_scores_no_rule(self):
         graded = [("CRITICAL", {}), ("LOW", {"ruleId": ""}), ("LOW", {"ruleId": "R"})]
         assert github_ghas_reporter._rule_severities(graded) == {"R": "LOW"}
+
+
+def _oracle_unlocated(slim_results: List[Dict[str, Any]]) -> Tuple[int, List[str]]:
+    names = sorted(
+        {
+            str(result.get("ruleId") or "<no rule>")
+            for result in slim_results
+            if "locations" not in result
+        }
+    )
+    return sum(1 for r in slim_results if "locations" not in r), names
+
+
+def _oracle_named_first(slim_rules, slim_results, cap):
+    referenced = {result.get("ruleId") for result in slim_results}
+    named = [rule for rule in slim_rules if rule["id"] in referenced]
+    unnamed = [rule for rule in slim_rules if rule["id"] not in referenced]
+    return (named + unnamed)[:cap], len(named)
+
+
+@pytest.mark.parametrize("seed", range(40))
+class TestLocationsAndRulePartitionAgainstTheLoopsTheyWere:
+    def test_the_unlocated_rules_and_their_count(self, seed):
+        rng = random.Random(2000 + seed)
+        slim_results = []
+        for _ in range(rng.randint(0, 40)):
+            slim: Dict[str, Any] = {}
+            rule_id = rng.choice(_RULE_IDS + (None,))
+            if rule_id is not None:
+                slim["ruleId"] = rule_id
+            if rng.random() < 0.5:
+                slim["locations"] = [{}]
+            slim_results.append(slim)
+
+        assert github_ghas_reporter._unlocated(slim_results) == _oracle_unlocated(
+            slim_results
+        )
+
+    def test_the_named_rules_go_first_and_the_cap_cuts_the_rest(self, seed):
+        rng = random.Random(3000 + seed)
+        ids = list(_RULE_IDS)
+        rng.shuffle(ids)
+        slim_rules = [{"id": rule_id, "n": n} for n, rule_id in enumerate(ids)]
+        slim_results = [
+            {"ruleId": rng.choice(_RULE_IDS + (None,))}
+            for _ in range(rng.randint(0, 12))
+        ]
+        cap = rng.randint(0, len(ids) + 2)
+
+        order, named_count = github_ghas_reporter._named_first(
+            [rule["id"] for rule in slim_rules],
+            (result.get("ruleId") for result in slim_results),
+        )
+
+        assert ([slim_rules[i] for i in order][:cap], named_count) == (
+            _oracle_named_first(slim_rules, slim_results, cap)
+        )
 
 
 def _result(rule_id: str, severity: str, *, located: bool = True) -> Result:
