@@ -228,8 +228,10 @@ def test_a_client_supplied_match_records_the_last_matching_entry(tmp_path):
     report = apply_suppressions_to_sarif(_report([result]), context)
     kept = report.runs[0].results[0]
     assert [s.justification for s in kept.suppressions] == [
-        "(ASH, client-supplied config) Ignoring finding under ignore path "
-        "'gen/' with reason: reason for gen/"
+        (
+            "(ASH, client-supplied config) Ignoring finding under ignore path "
+            "'gen/' with reason: reason for gen/"
+        )
     ]
 
 
@@ -324,7 +326,9 @@ def test_the_decision_for_a_result_is_the_oracles(
             as_written = sarif_utils._second_match_spelling(
                 uri,
                 decoded,
-                sarif_utils._normalize_sarif_uri(uri, *_prefixes(context), decode=False),
+                sarif_utils._normalize_sarif_uri(
+                    uri, *_prefixes(context), decode=False
+                ),
                 _prefixes(context)[0],
             )
             if as_written is not None:
@@ -337,8 +341,10 @@ def test_the_decision_for_a_result_is_the_oracles(
     elif verdict[0] == "client":
         assert len(kept) == 1
         assert [s.justification for s in kept[0].suppressions] == [
-            "(ASH, client-supplied config) Ignoring finding under "
-            f"ignore path '{verdict[1].path}' with reason: {verdict[1].reason}"
+            (
+                "(ASH, client-supplied config) Ignoring finding under "
+                f"ignore path '{verdict[1].path}' with reason: {verdict[1].reason}"
+            )
         ]
     else:
         assert len(kept) == 1
@@ -353,3 +359,33 @@ def _prefixes(context: PluginContext):
         exclusion.source_dir_prefix_no_drive,
         exclusion.source_dir_basename,
     )
+
+
+# ---------------------------------------------------------------------------
+# the frame functions against the oracle, directly
+# ---------------------------------------------------------------------------
+
+
+@settings(max_examples=500, deadline=None)
+@given(
+    entries=st.lists(_entry_pairs := st.tuples(_PATTERNS, st.booleans()), max_size=6),
+    extra_unlocated=st.integers(min_value=0, max_value=3),
+    mask=st.lists(st.booleans(), max_size=6),
+)
+def test_ignore_verdict_is_the_oracles(entries, extra_unlocated, mask):
+    from automated_security_helper.utils.suppression_frame import ignore_verdict
+
+    matched = [_entry(p, c) for p, c in entries]
+    per_location = [
+        m if mask[i % len(mask)] else None for i, m in enumerate(matched) if mask
+    ] + [None] * extra_unlocated
+    expected = ORACLE.verdict(per_location)
+    under = [m for m in per_location if m is not None]
+    flags = [m.client_supplied is True for m in under]
+    drop, at = ignore_verdict(flags, len(per_location))
+    if expected[0] == "drop":
+        assert drop and at is None
+    elif expected[0] == "client":
+        assert not drop and under[at] is expected[1]
+    else:
+        assert not drop and at is None
