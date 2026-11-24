@@ -376,3 +376,108 @@ def test_input_order_changes_no_cluster_id_primary_or_source_order():
 
 def test_an_empty_list_has_no_clusters():
     assert cluster_findings([]) == [] and assign_clusters([]) == []
+
+
+# --- distinct copies, unknown locations, rules, advisories ------------------
+
+
+def lock(fid, scanner, version, **over):
+    return pkg(
+        fid,
+        scanner,
+        package_version=version,
+        package_path=None,
+        file_path="yarn.lock",
+        **over,
+    )
+
+
+def test_two_copies_from_one_scanner_in_one_lockfile_are_two_findings():
+    rows = [lock("a", "trivy", "1.2.3"), lock("b", "trivy", "2.0.1")]
+    assert cluster_findings(rows) == []
+
+
+def test_copies_pair_by_version_across_scanners_when_a_scanner_has_two():
+    rows = [
+        lock("t1", "trivy", "1.2.3"),
+        lock("t2", "trivy", "2.0.1"),
+        lock("g2", "grype", "2.0.1"),
+    ]
+    assert list(shape(rows)) == [frozenset({"t2", "g2"})]
+
+
+def test_two_same_version_rows_of_one_scanner_cluster_with_nothing():
+    rows = [
+        lock("t1", "trivy", "1.0.0"),
+        lock("t2", "trivy", "1.0.0"),
+        lock("g", "grype", "1.0.0"),
+    ]
+    assert cluster_findings(rows) == []
+
+
+def test_a_versionless_row_in_a_multi_copy_group_clusters_with_nothing():
+    rows = [
+        lock("t1", "trivy", "1.0.0"),
+        lock("t2", "trivy", None),
+        lock("g", "grype", None),
+    ]
+    assert cluster_findings(rows) == []
+
+
+def test_rows_with_no_location_at_all_do_not_match_each_other():
+    rows = [
+        pkg("g", "grype", package_path=None, file_path=None),
+        pkg("t", "trivy", package_path=None, file_path=" "),
+    ]
+    assert cluster_findings(rows) == []
+
+
+def test_rows_pinned_only_to_an_sbom_do_not_match_each_other():
+    rows = [
+        pkg("a", "grype", package_path=None, file_path="out/sbom.cdx.json"),
+        pkg("b", "trivy", package_path=None, file_path="out/sbom.cdx.json"),
+    ]
+    assert cluster_findings(rows) == []
+
+
+def test_cross_ecosystem_same_name_rows_in_one_scanner_stay_apart():
+    sbom = {"package_path": None, "file_path": "out/sbom.spdx.json"}
+    rows = [
+        pkg("apk", "trivy", package_version="3.21", **sbom),
+        pkg("pip", "trivy", package_version="4.21", **sbom),
+    ]
+    assert cluster_findings(rows) == []
+
+
+def test_different_cdk_nag_rules_on_one_construct_are_not_one_finding():
+    rows = [
+        iac("a", "cdk-nag", cwe_id=None, rule_id="AwsSolutions-IAM4"),
+        iac("b", "cdk-nag", cwe_id=None, rule_id="AwsSolutions-IAM5"),
+    ]
+    assert cluster_findings(rows) == []
+
+
+def test_one_rule_on_one_construct_without_a_cwe_still_clusters():
+    rows = [
+        iac("a", "cdk-nag", cwe_id=None, rule_id="AwsSolutions-IAM4"),
+        iac("b", "cdk-nag2", cwe_id=None, rule_id="AwsSolutions-IAM4"),
+    ]
+    (cluster,) = cluster_findings(rows)
+    assert cluster.finding_class == CLASS_IAC and not cluster.foldable
+
+
+def test_an_iac_row_with_neither_cwe_nor_rule_has_no_key():
+    rows = [
+        iac("a", "x", cwe_id=None, rule_id=None),
+        iac("b", "y", cwe_id=None, rule_id=None),
+    ]
+    assert cluster_findings(rows) == []
+
+
+def test_a_non_cve_advisory_package_row_never_location_clusters():
+    spot = {"file_path": "package-lock.json", "line_start": 1, "cwe_id": "CWE-1321"}
+    rows = [
+        pkg("a", "npm-audit", cve_id=None, rule_id="GHSA-aaaa-bbbb-cccc", **spot),
+        pkg("b", "npm-audit", cve_id=None, rule_id="GHSA-dddd-eeee-ffff", **spot),
+    ]
+    assert cluster_findings(rows) == []

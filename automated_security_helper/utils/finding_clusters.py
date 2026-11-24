@@ -18,20 +18,35 @@ the first class whose required columns it carries:
 ``package``
     A CVE and a package: ``cve_id`` and ``package_name`` are both present.
     Members share the upper-cased CVE, the package name and the package's
-    install path (the finding's file when it has no package path).
-    ``package_version`` is deliberately not part of the key.
+    install path (the finding's file when it has no package path). A row with
+    no location at all, or whose only location is an SBOM (which spans every
+    ecosystem and carries no install path), has no package key: an unknown
+    location never equals another unknown location.
+    ``package_version`` is deliberately not part of the key, so two scanners
+    that spell one copy's version differently still fold. The producer's unit
+    is (advisory, package copy), though, so a key group is then split into
+    copies: when a scanner reports two or more rows under one key those rows
+    are distinct copies (or ones this module cannot tell apart), and the group
+    clusters by installed version instead; a version that more than one row of
+    one scanner shares, or a row with no version in such a group, clusters with
+    nothing. Fail closed: a missed duplicate is shown twice, a wrong fold hides
+    a finding.
 
 ``iac``
     ``resource_id`` is present. Members share the resource id, the resource
-    type (or both lack one), the file and the set of CWEs (empty when none).
-    Exact equality only. Annotate-only: ``foldable`` is False until a measured
+    type (or both lack one), the file and the set of CWEs. A row with no CWE
+    is keyed by its rule id instead (a row with neither has no IaC key), so
+    two different rules on one construct are never one finding. Exact equality
+    only. Annotate-only: ``foldable`` is False until a measured
     cross-scanner collision shows the resource-id vocabulary is shared.
 
 ``location``
     ``file_path``, ``line_start`` and a CWE are all present. Members share the
     file, have overlapping line ranges (ends inclusive; a missing end is the
     start) and share at least one CWE. Both sides must carry a CWE: no CWE, no
-    cluster. Overlap is not transitive, so a cluster is a connected component
+    cluster. A row that names a package is a dependency finding and never
+    joins this class (an advisory that is not a CVE has no package key, and
+    the location class knows neither the advisory nor the package). Overlap is not transitive, so a cluster is a connected component
     of the overlap relation; a chain A-B-C joins A and C even when they do not
     overlap one another. That is order independent, which a sweep is not.
 
@@ -121,29 +136,75 @@ def _severity_rank(severity: Any) -> int:
     return SEVERITIES.index(name) if name in SEVERITIES else -1
 
 
+_SBOM_NAME = re.compile(
+    r"(^|[._-])(bom|sbom|cyclonedx|cdx|spdx)([._-]|$)|\.(spdx|cdx)\b", re.IGNORECASE
+)
+
+
+def _is_sbom(path: str) -> bool:
+    return bool(_SBOM_NAME.search(path.rsplit("/", 1)[-1]))
+
+
 def _package_key(row: FlatVulnerability) -> Optional[Tuple[Any, ...]]:
     cve = _text(row.cve_id)
     package = _text(row.package_name)
     if cve is None or package is None:
         return None
-    where = relative_path(_text(row.package_path) or _text(row.file_path))
+    install_path = _text(row.package_path)
+    where = relative_path(install_path or _text(row.file_path))
+    if where is None:
+        return None
+    if install_path is None and _is_sbom(where):
+        return None
     return (CLASS_PACKAGE, cve.upper(), package, where)
+
+
+def _package_copies(
+    rows: Sequence[FlatVulnerability], members: List[int]
+) -> List[List[int]]:
+    """Split one package key group into clusters of one copy each."""
+    per_scanner: Dict[str, int] = {}
+    for i in members:
+        scanner = rows[i].scanner or ""
+        per_scanner[scanner] = per_scanner.get(scanner, 0) + 1
+    if max(per_scanner.values()) == 1:
+        return [members]
+    by_version: Dict[str, List[int]] = {}
+    for i in members:
+        version = _text(rows[i].package_version)
+        if version is not None:
+            by_version.setdefault(version, []).append(i)
+    lanes: List[List[int]] = []
+    for lane in by_version.values():
+        scanners = [rows[i].scanner or "" for i in lane]
+        if len(set(scanners)) == len(scanners):
+            lanes.append(lane)
+    return lanes
 
 
 def _iac_key(row: FlatVulnerability) -> Optional[Tuple[Any, ...]]:
     resource = _text(row.resource_id)
     if resource is None:
         return None
+    cwes = tuple(sorted(_cwes(row.cwe_id)))
+    rule = None
+    if not cwes:
+        rule = _text(row.rule_id)
+        if rule is None:
+            return None
     return (
         CLASS_IAC,
         resource,
         _text(row.resource_type),
         relative_path(_text(row.file_path)),
-        tuple(sorted(_cwes(row.cwe_id))),
+        cwes,
+        rule,
     )
 
 
 def _span(row: FlatVulnerability) -> Optional[Tuple[str, int, int, frozenset[str]]]:
+    if _text(row.package_name) is not None:
+        return None
     path = relative_path(_text(row.file_path))
     cwes = _cwes(row.cwe_id)
     start = row.line_start
@@ -250,12 +311,18 @@ def cluster_findings(rows: Sequence[FlatVulnerability]) -> List[FindingCluster]:
         if key is not None:
             grouped.setdefault(key, []).append(index)
             continue
+        if _text(row.package_name) is not None:
+            continue
         span = _span(row)
         if span is not None:
             unclaimed[index] = span
     for key, members in grouped.items():
-        if len(members) > 1:
-            clusters.append(_build(rows, key[0], members))
+        if len(members) < 2:
+            continue
+        copies = _package_copies(rows, members) if key[0] == CLASS_PACKAGE else [members]
+        for copy in copies:
+            if len(copy) > 1:
+                clusters.append(_build(rows, key[0], copy))
     for members in _location_groups(unclaimed):
         if len(members) > 1:
             clusters.append(_build(rows, CLASS_LOCATION, members))
