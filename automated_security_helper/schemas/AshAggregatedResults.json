@@ -1711,6 +1711,10 @@
         "global_settings": {
           "$ref": "#/$defs/AshConfigGlobalSettingsSection",
           "default": {
+            "deduplication": {
+              "annotate": false,
+              "fold": false
+            },
             "ignore_paths": [],
             "mcp": {
               "runtime_overrides": {
@@ -2370,6 +2374,14 @@
     "AshConfigGlobalSettingsSection": {
       "additionalProperties": false,
       "properties": {
+        "deduplication": {
+          "$ref": "#/$defs/AshDeduplicationConfig",
+          "default": {
+            "annotate": false,
+            "fold": false
+          },
+          "description": "Cross-scanner duplicate annotation in the flat reports (opt-in; off by default)."
+        },
         "ignore_paths": {
           "default": [],
           "description": "Global list of IgnorePaths. Each path requires a reason for ignoring, e.g. 'Folder contains test data only and is not committed'.",
@@ -2539,6 +2551,26 @@
         }
       },
       "title": "AshConfigGlobalSettingsSection",
+      "type": "object"
+    },
+    "AshDeduplicationConfig": {
+      "additionalProperties": false,
+      "description": "Cross-scanner duplicate annotation (opt-in).\n\nFindings that two scanners report for one defect are grouped into a\nduplicate cluster (``utils/finding_clusters``). This section only chooses\nwhether the flat reports say so. Finding ids, SARIF results, metrics,\nsuppressions and baselines never change either way.",
+      "properties": {
+        "annotate": {
+          "default": false,
+          "description": "When true, the CSV and flat-JSON reports gain three columns that name each finding's duplicate cluster: `cluster_id`, `duplicate_of` (the primary finding's id, on every non-primary member) and `duplicate_sources` (on the primary: the other members' scanner, rule, id and severity). Rows and counts are unchanged. Off by default because the columns change the CSV header. CLI: `--annotate-duplicates` on `ash scan` and `ash report`.",
+          "title": "Annotate",
+          "type": "boolean"
+        },
+        "fold": {
+          "default": false,
+          "description": "When true, the HTML, Markdown and text reports show one row per duplicate cluster (the primary finding, with a note naming the other scanners that reported it) in their findings tables, detailed findings, finding cards and hotspots, and add deduplicated counts beside, never in place of, the per-scanner counts. Only clusters of the same CVE and package, or the same line and CWE, fold; IaC resource clusters are annotated only. Finding ids, SARIF, per-scanner metrics, suppressions, baselines, the CSV, flat-JSON and JUnit reports and the exit code are unchanged. Off by default because it changes row counts. CLI: `--fold-duplicates` on `ash scan` and `ash report`.",
+          "title": "Fold",
+          "type": "boolean"
+        }
+      },
+      "title": "AshDeduplicationConfig",
       "type": "object"
     },
     "AshMcpConfig": {

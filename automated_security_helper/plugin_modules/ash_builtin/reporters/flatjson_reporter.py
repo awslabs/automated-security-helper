@@ -21,6 +21,11 @@ from automated_security_helper.utils.content_db_staleness import (
     stale_content_databases,
 )
 from automated_security_helper.utils.converter_refusals import converter_refusals
+from automated_security_helper.utils.finding_clusters import (
+    annotate_enabled,
+    annotation_values,
+    assign_clusters_by_project,
+)
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 from automated_security_helper.plugin_modules.ash_builtin.reporters.report_content_emitter import (
     ReportContentEmitter,
@@ -180,6 +185,24 @@ class FlatJSONReporter(ReporterPluginBase[FlatJSONReporterConfig]):
             self._finding_dict(vuln, flag)
             for vuln, flag in zip(flat_vulns, suppressed, strict=True)
         ]
+
+        # Opt-in duplicate annotation: a finding in a cluster gains its
+        # cluster_id, and a primary or a non-primary member the other columns
+        # that apply to it. A finding in no cluster, and every finding with the
+        # option off, is exactly as it was (the report omits what is None).
+        if annotate_enabled(model):
+            for finding, assigned in zip(
+                report_data["findings"],
+                assign_clusters_by_project(flat_vulns),
+                strict=True,
+            ):
+                finding.update(
+                    {
+                        key: value
+                        for key, value in annotation_values(assigned).items()
+                        if value is not None
+                    }
+                )
 
         # The per-project verdicts, so a consumer can group and judge without
         # re-deriving anything. Re-deriving would mean applying one threshold to
