@@ -619,7 +619,8 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
     #: locations; driver rules carry id, shortDescription, fullDescription,
     #: helpUri). The JSON format names the resource (M0 item c, fixture
     #: cfn-lint-1.61.0-m0-bad-property.json) but ASH never requests it, so
-    #: resource_id is n/a here with the locator named.
+    #: resource_id is MAPPABLE-BUT-DROPPED: the same state cfn-nag and trivy
+    #: carry for the same fact pattern.
     facets: ClassVar[ScannerFacets] = ScannerFacets(
         rule_id=FacetDecl(
             state=FacetState.MAPPED,
@@ -648,13 +649,15 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
             native_field="result message.text",
         ),
         resource_id=FacetDecl(
-            state=FacetState.NA,
-            reason="locator-only in the SARIF format ASH consumes: the "
-            "location is a template file and region (artifactLocation.uri, "
-            "region startLine/startColumn) and the resource is named only in "
-            "message prose; the --format json Location.Path does name it "
-            "(M0 item c) but ASH does not request that format, and a "
-            "locator never enters the resource key",
+            state=FacetState.DROPPED,
+            native_field='finding "Location.Path" (the --format json output '
+            'format; Path[1] is the logical id, e.g. ["Resources", '
+            '"M0FixtureBucket", ...])',
+            reason="the SARIF format ASH requests carries the location only "
+            "(artifactLocation.uri, region) and names the resource in "
+            "message prose, so no id is written; the --format json output "
+            "names it (M0 item c, fixture cfn-lint-1.61.0-m0-bad-property"
+            ".json), the same dropped shape as cfn-nag and trivy",
         ),
         resource_type=FacetDecl(
             state=FacetState.NA,
