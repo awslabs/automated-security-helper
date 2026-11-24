@@ -4565,7 +4565,7 @@ SOFTWARE.
 <td><a id="scanners.checkov.options.additional_formats"></a><code>additional_formats</code></td>
 <td>list of one of <code>cli</code>, <code>csv</code>, <code>cyclonedx</code>, <code>cyclonedx_json</code>, <code>json</code>, <code>junitxml</code>, <code>github_failed_only</code>, <code>gitlab_sast</code>, <code>sarif</code>, <code>spdx</code></td>
 <td><code>["cyclonedx_json"]</code></td>
-<td>List of additional formats to output. Defaults to including CycloneDX JSON</td>
+<td>List of additional formats to output. Defaults to including CycloneDX JSON. checkov's JSON report is written whatever this lists: ASH reads the resource of each finding from it.</td>
 </tr>
 <tr>
 <td><a id="scanners.checkov.options.frameworks"></a><code>frameworks</code></td>

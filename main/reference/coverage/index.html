@@ -3687,6 +3687,16 @@ shows how to turn them on and off.</p>
 <td>trivy-repo</td>
 </tr>
 <tr>
+<td>Terraform plans as JSON (<code>terraform show -json</code>)</td>
+<td>checkov</td>
+<td></td>
+</tr>
+<tr>
+<td>Terragrunt units (<code>terragrunt.hcl</code>)</td>
+<td>detect-secrets, gitleaks (secrets only; see below)</td>
+<td></td>
+</tr>
+<tr>
 <td>Kubernetes manifests and the other formats checkov supports</td>
 <td>checkov</td>
 <td>trivy-repo</td>
@@ -3734,6 +3744,13 @@ from Python notebooks out by default.</p>
 <p>For a CDK app, synthesize before you scan, so that <code>cdk.out</code> holds the templates. ASH
 keeps the synthesized templates in the scan set when your root <code>.gitignore</code> excludes
 <code>cdk.out</code>; see <a href="#what-decides-the-files">What decides the files</a>.</p>
+<p>For Terragrunt, scan a plan. No scanner evaluates the <code>inputs</code> of a <code>terragrunt.hcl</code>,
+and checkov evaluates a Terraform module without the values a unit passes to it, so a
+scan of the units alone can report their secrets and none of their misconfiguration.
+A plan has the values resolved: write it as JSON with <code>terraform show -json</code> and keep
+the file in the scanned directory. checkov reports each finding on the plan file, and
+the finding's <code>resource_id</code> names the resource it is about, such as
+<code>module.db.aws_db_instance.this</code>, which is what tells two findings of one rule apart.</p>
 <h2 id="by-scanner">By scanner<a class="headerlink" href="#by-scanner" title="Permanent link">&para;</a></h2>
 <p>"Whole directory" means the tool walks the source directory itself and applies its own
 rules for which files to read. "Selected files" means ASH picks the files and passes
