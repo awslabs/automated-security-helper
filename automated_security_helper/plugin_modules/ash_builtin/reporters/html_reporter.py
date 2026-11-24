@@ -27,6 +27,7 @@ from automated_security_helper.plugins.decorators import ash_reporter_plugin
 from automated_security_helper.plugin_modules.ash_builtin.reporters.report_content_emitter import (
     ReportContentEmitter,
     coverage_shortfall_text,
+    deduplicated_summary_text,
 )
 from automated_security_helper.core.unified_metrics import format_duration
 from automated_security_helper.utils.sarif_utils import (
@@ -224,7 +225,10 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
         # printed. The filter's values are the same shown names the cards'
         # data-scanner attributes hold, so the filter still matches.
         scanners = sorted(
-            {_scanner_label(finding.scanner) for finding in emitter.flat_vulns}
+            {
+                _scanner_label(finding.scanner)
+                for finding in emitter.fold_findings(emitter.flat_vulns)[0]
+            }
         )
         scanner_options = "".join(
             f'<option value="{html.escape(scanner, quote=True)}">{html.escape(scanner)}</option>'
@@ -262,10 +266,11 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
             "skipped": summary["skipped"],
             "unavailable": summary["unavailable_count"],
             "severity_counts": counts,
-            "coverage_notices": self._format_coverage_notices(summary),
+            "coverage_notices": self._format_deduplicated_notice(summary)
+            + self._format_coverage_notices(summary),
             "workspace_nav": '<a href="#projects">Projects</a>' if workspace else "",
             "workspace_section": workspace,
-            "finding_count": len(emitter.flat_vulns),
+            "finding_count": self._shown_finding_count(emitter),
             "scanner_options": scanner_options,
             "finding_cards": self._format_finding_cards(emitter),
             "scanner_results_table": self._format_scanner_results_table(
@@ -280,6 +285,22 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
         return Template(
             assets.joinpath("ash-report.html").read_text(encoding="utf-8")
         ).substitute(data)
+
+    @staticmethod
+    def _shown_finding_count(emitter: ReportContentEmitter) -> int:
+        """How many finding cards the report holds: one per cluster when folded."""
+        return len(emitter.fold_findings(emitter.flat_vulns)[0])
+
+    @staticmethod
+    def _format_deduplicated_notice(summary: Dict[str, Any]) -> str:
+        """The notice that gives the fold's counts; empty when the fold is off."""
+        text = deduplicated_summary_text(summary)
+        if not text:
+            return ""
+        return (
+            '<div class="notice"><h3>Duplicates folded</h3>'
+            f"<p>{html.escape(text)}</p></div>"
+        )
 
     @staticmethod
     def _format_policy_not_gating_tile(count: int) -> str:
@@ -420,8 +441,11 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
     @staticmethod
     def _format_finding_cards(emitter: ReportContentEmitter) -> str:
         order = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "INFO": 4}
+        # With the fold on, one card per duplicate cluster, the others named in
+        # its note; off, every finding has its card.
+        shown, notes = emitter.fold_findings(emitter.flat_vulns)
         findings = sorted(
-            emitter.flat_vulns,
+            shown,
             key=lambda finding: (
                 finding.is_suppressed,
                 order.get(finding.severity.upper(), 5),
@@ -470,6 +494,12 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
                 )
                 if value is not None
             )
+            if notes.get(id(finding)):
+                # The scanner names and rules come from the scan: one shown line.
+                context += (
+                    "<p><strong>Duplicates:</strong> "
+                    f"{html.escape(str(shown_on_one_line(notes[id(finding)])))}</p>"
+                )
             snippet = ""
             if finding.code_snippet:
                 # Shown, not obeyed: the snippet keeps its lines, and its
