@@ -16,6 +16,7 @@ from typing import (
     Optional,
     Sequence,
     Tuple,
+    get_args,
 )
 from urllib.parse import quote, unquote
 
@@ -57,6 +58,10 @@ from automated_security_helper.utils.link_exclusions import (
 )
 from automated_security_helper.utils.error_text import text_without_values
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
+from automated_security_helper.plugin_modules.ash_builtin.scanners.checkov_vcs_frameworks import (
+    vcs_conf_dir_env_vars,
+    vcs_configuration_frameworks,
+)
 from automated_security_helper.utils.package_identity import ASH_RESOURCE_ID_KEY
 from automated_security_helper.utils.process_env import snapshot_environ
 from automated_security_helper.utils.sandbox.fs_guard import open_for_atomic_write
@@ -111,21 +116,22 @@ CheckFrameworks = Literal[
 # CheckovScanner._output_dir_skip_patterns.
 _CHECKOV_UNSAFE_SKIP_PATH_CHARS = frozenset("()")
 
-# checkov's GitHub, GitLab and Bitbucket configuration frameworks fetch the
-# repository host's settings through its API and write them to a directory below
-# checkov's working directory, which these variables name. ASH runs checkov from
-# the filesystem root (CheckovScanner._subprocess_cwd), which a user that is not
-# root cannot write to, so the scan stopped with a PermissionError
-# (``/gitlab_conf``) and checkov exited 2. Writing into the scanned tree is what
-# moving the working directory avoided. Each directory goes under the scanner's
-# results directory instead, unless the operator named one. checkov joins the
-# value to its working directory with ``os.path.join``, so an absolute path is
-# used as it is.
-_CHECKOV_VCS_CONF_DIR_ENV = {
-    "CKV_GITHUB_CONF_DIR_NAME": "github_conf",
-    "CKV_GITLAB_CONF_DIR_NAME": "gitlab_conf",
-    "CKV_BITBUCKET_CONF_DIR_NAME": "bitbucket_conf",
-}
+# checkov's VCS configuration frameworks fetch the repository host's settings
+# through its API and write them to a directory below checkov's working
+# directory, which these variables name. ASH runs checkov from the filesystem
+# root (CheckovScanner._subprocess_cwd), which a user that is not root cannot
+# write to, so the scan stopped with a PermissionError (``/gitlab_conf``) and
+# checkov exited 2. Writing into the scanned tree is what moving the working
+# directory avoided. Each directory goes under the scanner's results directory
+# instead, unless the operator named one. checkov joins the value to its
+# working directory with ``os.path.join``, so an absolute path is used as it
+# is. Rather than hardcoding the vendors, the variables and their default
+# directory names are derived from the frameworks mirrored in
+# ``CheckFrameworks`` by checkov's own naming rule (checkov_vcs_frameworks has
+# the rule, its measurements and its drift gates).
+_CHECKOV_VCS_CONF_DIR_ENV = dict(
+    vcs_conf_dir_env_vars(vcs_configuration_frameworks(get_args(CheckFrameworks)))
+)
 
 
 def _known_ignore_skip_pattern(entry: str) -> str:
