@@ -1,0 +1,202 @@
+{
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "Bandit",
+          "organization": "PyCQA",
+          "rules": [
+            {
+              "id": "B404",
+              "name": "blacklist",
+              "properties": {
+                "tags": [
+                  "security",
+                  "external/cwe/cwe-78"
+                ],
+                "precision": "high"
+              },
+              "helpUri": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_imports.html#b404-import-subprocess"
+            },
+            {
+              "id": "B602",
+              "name": "subprocess_popen_with_shell_equals_true",
+              "properties": {
+                "tags": [
+                  "security",
+                  "external/cwe/cwe-78"
+                ],
+                "precision": "high"
+              },
+              "helpUri": "https://bandit.readthedocs.io/en/1.9.4/plugins/b602_subprocess_popen_with_shell_equals_true.html"
+            },
+            {
+              "id": "B307",
+              "name": "blacklist",
+              "properties": {
+                "tags": [
+                  "security",
+                  "external/cwe/cwe-78"
+                ],
+                "precision": "high"
+              },
+              "helpUri": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b307-eval"
+            }
+          ],
+          "version": "1.9.4",
+          "semanticVersion": "1.9.4"
+        }
+      },
+      "invocations": [
+        {
+          "executionSuccessful": true,
+          "endTimeUtc": "2026-11-24T17:16:06Z"
+        }
+      ],
+      "properties": {
+        "metrics": {
+          "_totals": {
+            "loc": 5,
+            "nosec": 0,
+            "skipped_tests": 0,
+            "SEVERITY.UNDEFINED": 0,
+            "CONFIDENCE.UNDEFINED": 0,
+            "SEVERITY.LOW": 1,
+            "CONFIDENCE.LOW": 0,
+            "SEVERITY.MEDIUM": 1,
+            "CONFIDENCE.MEDIUM": 0,
+            "SEVERITY.HIGH": 1,
+            "CONFIDENCE.HIGH": 3
+          },
+          "./m0_flagged.py": {
+            "loc": 5,
+            "nosec": 0,
+            "skipped_tests": 0,
+            "SEVERITY.UNDEFINED": 0,
+            "SEVERITY.LOW": 1,
+            "SEVERITY.MEDIUM": 1,
+            "SEVERITY.HIGH": 1,
+            "CONFIDENCE.UNDEFINED": 0,
+            "CONFIDENCE.LOW": 0,
+            "CONFIDENCE.MEDIUM": 0,
+            "CONFIDENCE.HIGH": 3
+          }
+        }
+      },
+      "results": [
+        {
+          "message": {
+            "text": "Consider possible security implications associated with the subprocess module."
+          },
+          "level": "note",
+          "locations": [
+            {
+              "physicalLocation": {
+                "region": {
+                  "snippet": {
+                    "text": "import subprocess\n"
+                  },
+                  "endColumn": 18,
+                  "endLine": 5,
+                  "startColumn": 1,
+                  "startLine": 5
+                },
+                "artifactLocation": {
+                  "uri": "m0_flagged.py"
+                },
+                "contextRegion": {
+                  "snippet": {
+                    "text": "# appear as structured SARIF fields.\nimport subprocess\n\n"
+                  },
+                  "endLine": 6,
+                  "startLine": 4
+                }
+              }
+            }
+          ],
+          "properties": {
+            "issue_confidence": "HIGH",
+            "issue_severity": "LOW"
+          },
+          "ruleId": "B404",
+          "ruleIndex": 0
+        },
+        {
+          "message": {
+            "text": "subprocess call with shell=True identified, security issue."
+          },
+          "level": "error",
+          "locations": [
+            {
+              "physicalLocation": {
+                "region": {
+                  "snippet": {
+                    "text": "    return subprocess.call(cmd, shell=True)\n"
+                  },
+                  "endColumn": 44,
+                  "endLine": 9,
+                  "startColumn": 12,
+                  "startLine": 9
+                },
+                "artifactLocation": {
+                  "uri": "m0_flagged.py"
+                },
+                "contextRegion": {
+                  "snippet": {
+                    "text": "def run(cmd: str) -> int:\n    return subprocess.call(cmd, shell=True)\n\n"
+                  },
+                  "endLine": 10,
+                  "startLine": 8
+                }
+              }
+            }
+          ],
+          "properties": {
+            "issue_confidence": "HIGH",
+            "issue_severity": "HIGH"
+          },
+          "ruleId": "B602",
+          "ruleIndex": 1
+        },
+        {
+          "message": {
+            "text": "Use of possibly insecure function - consider using safer ast.literal_eval."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "region": {
+                  "snippet": {
+                    "text": "    return eval(expr)\n"
+                  },
+                  "endColumn": 22,
+                  "endLine": 13,
+                  "startColumn": 12,
+                  "startLine": 13
+                },
+                "artifactLocation": {
+                  "uri": "m0_flagged.py"
+                },
+                "contextRegion": {
+                  "snippet": {
+                    "text": "def compute(expr: str):\n    return eval(expr)\n"
+                  },
+                  "endLine": 13,
+                  "startLine": 12
+                }
+              }
+            }
+          ],
+          "properties": {
+            "issue_confidence": "HIGH",
+            "issue_severity": "MEDIUM"
+          },
+          "ruleId": "B307",
+          "ruleIndex": 2
+        }
+      ]
+    }
+  ],
+  "version": "2.1.0",
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json"
+}

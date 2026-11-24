@@ -28,6 +28,11 @@ from automated_security_helper.config.path_trust import (
     honored_path,
     resolved_path,
 )
+from automated_security_helper.base.scanner_facets import (
+    FacetDecl,
+    FacetState,
+    ScannerFacets,
+)
 from automated_security_helper.base.options import (
     ScannerOptionsBase,
     tool_version_constraint,
@@ -52,6 +57,7 @@ from automated_security_helper.utils.link_exclusions import (
 )
 from automated_security_helper.utils.error_text import text_without_values
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
+from automated_security_helper.utils.package_identity import ASH_RESOURCE_ID_KEY
 from automated_security_helper.utils.process_env import snapshot_environ
 from automated_security_helper.utils.sandbox.fs_guard import open_for_atomic_write
 from automated_security_helper.utils.scanned_tree import REASON_LINK_LEAVES_TREE
@@ -408,6 +414,197 @@ def rewrite_checkov_paths(
                     record["repo_file_path"] = _source_relative_path(written, base)
 
 
+#: The checkov frameworks whose records name the infrastructure resource a check
+#: was run on. Every checkov record has a ``resource`` field, and what it holds
+#: depends on the runner, so a framework is listed here only after its records
+#: were read (checkov 3.4.10):
+#:
+#: - terraform ``aws_db_instance.this``, terraform_plan
+#:   ``module.db.aws_db_instance.this``, terraform_json ``aws_s3_bucket.data``
+#: - cloudformation ``AWS::S3::Bucket.Bucket``
+#: - kubernetes ``Deployment.shop.web``
+#: - arm ``Microsoft.Storage/storageAccounts.stdemo``, bicep
+#:   ``Microsoft.Storage/storageAccounts.st``
+_RESOURCE_FRAMEWORKS = frozenset(
+    {
+        "terraform",
+        "terraform_plan",
+        "terraform_json",
+        "cloudformation",
+        "kubernetes",
+        "arm",
+        "bicep",
+    }
+)
+
+#: The checkov frameworks whose results carry no resource, and why. Together
+#: with :data:`_RESOURCE_FRAMEWORKS` this names every runner checkov ships
+#: (``checkov.main.DEFAULT_RUNNERS``); a test fails when checkov adds a runner
+#: that is in neither, so a new framework is classified by reading its records
+#: rather than taking whatever its ``resource`` field holds.
+_NO_RESOURCE_FRAMEWORKS = {
+    "secrets": "a hash of the secret (a SHA-1, or commit:hash), which must not "  # pragma: allowlist secret
+    "become a resource id",
+    "dockerfile": "the Dockerfile path, or the path and instruction "
+    "(/Dockerfile.RUN): a file locator",
+    "serverless": "a function or item name, or the literal 'complete'",
+    "sast": "no resource: a source-code finding",
+    "cdk": "no resource: a source-code finding",
+    "sca_package": "a package locator, not an infrastructure resource",
+    "sca_image": "an image locator, not an infrastructure resource",
+    "github_actions": "a locator inside the workflow file (jobs(build).steps[2]): "
+    "meaningful but a file position, not infrastructure",
+    "gitlab_ci": "a locator inside the pipeline file: a file position",
+    "circleci_pipelines": "a locator inside the pipeline file: a file position",
+    "azure_pipelines": "a locator inside the pipeline file: a file position",
+    "bitbucket_pipelines": "a locator inside the pipeline file: a file position",
+    "argo_workflows": "a locator inside the workflow file: a file position",
+    "ansible": "a locator inside the playbook: a file position",
+    "openapi": "a locator inside the spec: a file position",
+    "json": "a locator inside a custom-check JSON file: a file position",
+    "yaml": "a locator inside a custom-check YAML file: a file position",
+    "github_configuration": "a repository setting of a hosted service",
+    "gitlab_configuration": "a repository setting of a hosted service",
+    "bitbucket_configuration": "a repository setting of a hosted service",
+    "helm": "not yet read: the runner needs the helm binary, which no sample "
+    "run had; classify it by reading a record",
+    "kustomize": "not yet read: the runner needs the kustomize binary, which no "
+    "sample run had (its ids are prefixed, base:Deployment...); classify it by "
+    "reading a record",
+}
+
+#: What identifies a checkov record in both of its reports: the rule, the file
+#: as the SARIF URI spells it, and the line range.
+_RecordKey = Tuple[str, str, int, int]
+
+
+def _record_key(record: Any) -> Optional[_RecordKey]:
+    """The key of a JSON report record, built as checkov builds its SARIF result.
+
+    ``checkov.common.output.sarif`` (checkov 3.4.6) writes one result per failed
+    or skipped record: ``ruleId`` is the ``check_id``, the URI is the quoted
+    ``repo_file_path`` without its leading ``/``, and each line is the record's,
+    or 1 when the record has 0 (a terraform plan has no lines). None for a
+    record that does not have those fields in that shape.
+    """
+    if not isinstance(record, dict):
+        return None
+    check_id = record.get("check_id")
+    repo_file_path = record.get("repo_file_path")
+    lines = record.get("file_line_range")
+    if not (isinstance(check_id, str) and isinstance(repo_file_path, str)):
+        return None
+    if not (isinstance(lines, list) and len(lines) == 2):
+        return None
+    try:
+        start, end = (int(line) or 1 for line in lines)
+    except (TypeError, ValueError):
+        return None
+    return check_id, quote(repo_file_path.lstrip("/")), start, end
+
+
+def _result_key(result: Any) -> Optional[_RecordKey]:
+    """The key of a SARIF result as checkov wrote it, or None without a location."""
+    if not isinstance(result, dict):
+        return None
+    locations = result.get("locations")
+    location = locations[0] if isinstance(locations, list) and locations else None
+    physical = location.get("physicalLocation") if isinstance(location, dict) else None
+    if not isinstance(physical, dict):
+        return None
+    artifact, region = physical.get("artifactLocation"), physical.get("region")
+    if not (isinstance(artifact, dict) and isinstance(region, dict)):
+        return None
+    rule_id, uri = result.get("ruleId"), artifact.get("uri")
+    start, end = region.get("startLine"), region.get("endLine")
+    if not (isinstance(rule_id, str) and isinstance(uri, str)):
+        return None
+    if type(start) is not int or type(end) is not int:
+        return None
+    return rule_id, uri, start, end
+
+
+def checkov_resources(json_report: Any) -> dict[_RecordKey, List[Optional[str]]]:
+    """The resource of every record in checkov's JSON report, by record key.
+
+    Each key holds one entry per record, in the order checkov's SARIF report
+    lists the records' results: report by report, the failed records and then
+    the skipped ones. An entry is the record's ``resource`` when its framework
+    is one of :data:`_RESOURCE_FRAMEWORKS` and None otherwise, so a key's entries
+    still count every record that has it.
+
+    Read before :func:`rewrite_checkov_paths` changes the report's paths: the
+    keys are checkov's own spelling, which is what its SARIF URIs hold.
+    """
+    found: dict[_RecordKey, List[Optional[str]]] = {}
+    reports = json_report if isinstance(json_report, list) else [json_report]
+    for report in reports:
+        if not isinstance(report, dict):
+            continue
+        results = report.get("results")
+        if not isinstance(results, dict):
+            continue
+        named = report.get("check_type") in _RESOURCE_FRAMEWORKS
+        for kind in ("failed_checks", "skipped_checks"):
+            records = results.get(kind)
+            for record in records if isinstance(records, list) else []:
+                key = _record_key(record)
+                if key is None:
+                    continue
+                resource = record.get("resource")
+                found.setdefault(key, []).append(
+                    resource
+                    if named and isinstance(resource, str) and resource
+                    else None
+                )
+    return found
+
+
+def attach_checkov_resources(
+    sarif: Any, resources: dict[_RecordKey, List[Optional[str]]]
+) -> int:
+    """Write each result's resource into its properties; return how many were set.
+
+    checkov's SARIF result says which rule failed and where, and not on which
+    resource: two instances of one module, or two resources of a terraform plan
+    (every plan result is at line 1 of the plan file), give results that differ
+    in nothing. The JSON report names the resource, so it is copied to the
+    result under :data:`ASH_RESOURCE_ID_KEY`, the key a resource-scoped
+    suppression matches and the flat reports read ``resource_id`` from.
+
+    Both reports list a key's records in the same order, so the n-th result
+    with a key takes the n-th resource recorded for it. When the two reports
+    disagree on how many records a key has, none of that key's results is
+    given a resource: a wrong resource would bind a suppression to a finding
+    it was not written for, and a missing one only fails closed.
+
+    Must run on the SARIF as checkov wrote it, before its paths are rewritten.
+    """
+    if not isinstance(sarif, dict) or not resources:
+        return 0
+    by_key: dict[_RecordKey, List[dict[str, Any]]] = {}
+    for run in sarif.get("runs") or []:
+        for result in (run.get("results") or []) if isinstance(run, dict) else []:
+            key = _result_key(result)
+            if key is not None and key in resources:
+                by_key.setdefault(key, []).append(result)
+    attached = 0
+    for key, results in by_key.items():
+        named = resources[key]
+        if len(named) != len(results):
+            continue
+        for result, resource in zip(results, named):
+            if resource is None:
+                continue
+            properties = result.get("properties")
+            if not isinstance(properties, dict):
+                properties = {}
+                result["properties"] = properties
+            properties[ASH_RESOURCE_ID_KEY] = resource
+            attached += 1
+    return attached
+
+
 def _directory_as_one_token(argv: List[str]) -> List[str]:
     """``--directory <path>`` as the single token ``--directory=<path>``.
 
@@ -475,7 +672,11 @@ class CheckovScannerConfigOptions(ScannerOptionsBase):
             ]
         ],
         Field(
-            description="List of additional formats to output. Defaults to including CycloneDX JSON"
+            description=(
+                "List of additional formats to output. Defaults to including "
+                "CycloneDX JSON. checkov's JSON report is written whatever this "
+                "lists: ASH reads the resource of each finding from it."
+            )
         ),
     ] = ["cyclonedx_json"]
     offline: Annotated[
@@ -555,6 +756,128 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
     )
 
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.CACHE_FLAGS
+
+    #: The facets register row (base/scanner_facets.py), declaration only.
+    #: The record read is the committed side report (tests/test_data/scanners/
+    #: checkov/src.test.yaml.json, failed_checks[] keys check_id, file_path,
+    #: file_line_range, check_name, resource, guideline, fixed_definition,
+    #: code_block); no checkov SARIF golden is committed, so the cells that
+    #: live only in the SARIF are n/a with the UNCONFIRMED reason the register
+    #: uses for an unread source. resource_id is MAPPED:
+    #: :func:`attach_checkov_resources` copies each record's ``resource`` from
+    #: the JSON report onto its SARIF result under ``ash_resource_id``, and only
+    #: for the frameworks in :data:`_RESOURCE_FRAMEWORKS` (the per-framework
+    #: allow-list), because the other runners carry non-resources in that field.
+    facets: ClassVar[ScannerFacets] = ScannerFacets(
+        rule_id=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='check "check_id" (e.g. CKV_AWS_55), the SARIF result ruleId',
+        ),
+        severity=FacetDecl(
+            state=FacetState.NA,
+            reason="UNCONFIRMED: the committed side report carries "
+            '"severity": null on every check and no checkov SARIF golden is '
+            "committed; one checkov --output sarif run settles whether a "
+            "level is emitted",
+        ),
+        file_path=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='check "repo_file_path", the SARIF artifact uri '
+            "(rewritten by rewrite_checkov_paths)",
+        ),
+        line_range=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='check "file_line_range", the SARIF region startLine/endLine',
+        ),
+        column=FacetDecl(
+            state=FacetState.NA,
+            reason="UNCONFIRMED: the side report carries a line range only "
+            "and no checkov SARIF golden is committed; one SARIF run settles "
+            "whether a column is emitted",
+        ),
+        message=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='check "check_name"',
+        ),
+        resource_id=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='check "resource" (the results_json.json side report), '
+            "copied onto the SARIF result by attach_checkov_resources for the "
+            "frameworks in _RESOURCE_FRAMEWORKS only",
+            example="AWS::S3::Bucket.S3Bucket3",
+        ),
+        resource_type=FacetDecl(
+            state=FacetState.NA,
+            reason="the side report's resource field is one dotted string "
+            '("AWS::S3::Bucket.S3Bucket3"); no separate type field exists '
+            "and splitting it would be a derivation",
+        ),
+        package_name=FacetDecl(
+            state=FacetState.NA,
+            reason="IaC policy checks over resources; no package exists in "
+            "checkov's policy-check output",
+        ),
+        package_version=FacetDecl(
+            state=FacetState.NA,
+            reason="IaC policy checks over resources; no package exists in "
+            "checkov's policy-check output",
+        ),
+        package_path=FacetDecl(
+            state=FacetState.NA,
+            reason="IaC policy checks over resources; no package exists in "
+            "checkov's policy-check output",
+        ),
+        taxonomy_cve=FacetDecl(
+            state=FacetState.NA,
+            reason="checkov publishes its own check ids; no CVE taxonomy in "
+            "the policy-check results",
+        ),
+        taxonomy_cwe=FacetDecl(
+            state=FacetState.NA,
+            reason="checkov publishes its own check ids; no CWE taxonomy in "
+            "the policy-check results",
+        ),
+        fingerprints=FacetDecl(
+            state=FacetState.NA,
+            reason="UNCONFIRMED: the side report carries no fingerprint and "
+            "no checkov SARIF golden is committed; one SARIF run settles it",
+        ),
+        fix_available=FacetDecl(
+            state=FacetState.NA,
+            reason="UNCONFIRMED: the side report has a fixed_definition key "
+            "but it is null on every committed check, so whether a fixable "
+            "check populates it is open; one run over a fixable check "
+            "settles it",
+        ),
+        remediation_text=FacetDecl(
+            state=FacetState.NA,
+            reason="check_name states the finding, not a remediation; no "
+            "remediation text field exists in the side report",
+        ),
+        snippet=FacetDecl(
+            state=FacetState.DROPPED,
+            native_field='check "code_block" ([line number, text] pairs)',
+            reason="the side report carries the resource's source lines; the "
+            "adapter never reads them",
+        ),
+        references=FacetDecl(
+            state=FacetState.DROPPED,
+            native_field='check "guideline" (a policy documentation URL)',
+            reason="the side report carries a guideline URL per check; the "
+            "adapter never reads it",
+        ),
+        tags=FacetDecl(
+            state=FacetState.NA,
+            reason="the adapter adds no tags and the side report's "
+            '"entity_tags" is null in the committed record',
+        ),
+        extras=FacetDecl(
+            state=FacetState.NA,
+            reason="UNCONFIRMED: no checkov SARIF golden is committed, so "
+            "whether results carry a property bag is open; one SARIF run "
+            "settles it",
+        ),
+    )
 
     #: --mode precommit --staged: checkov is handed each staged file as
     #: ``--file <path>`` -- and, for Terraform, the staged file's SAME-DIRECTORY
@@ -980,7 +1303,9 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         # is read at the moment it is asked (_scanner_offline), and this runs at
         # construction, so a scanner built before --offline took effect ran online.
 
-        for item in self.config.options.additional_formats:
+        # The JSON report is always asked for: it is the only checkov report that
+        # names the resource of each record (attach_checkov_resources).
+        for item in dict.fromkeys([*self.config.options.additional_formats, "json"]):
             self.args.extra_args.append(ToolExtraArg(key="--output", value=item))
         frameworks = list(self.config.options.frameworks)
         file_frameworks = file_values.get("framework")
@@ -1371,8 +1696,9 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
     def _read_results_file(self, results_file: Path) -> Optional[dict[str, Any]]:
         """Read checkov's SARIF with its paths made relative to the source directory.
 
-        The JSON report, written when ``additional_formats`` asks for it, is
-        rewritten the same way so it matches. CycloneDX carries no such path.
+        The JSON report is rewritten the same way so it matches. CycloneDX
+        carries no such path. Each result is first given the resource the JSON
+        report names for it (:func:`attach_checkov_resources`).
         """
         target = self._scanned_target()
         # The directory checkov ran in (_subprocess_cwd): the root, unless that
@@ -1386,10 +1712,13 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         source_dir = os.path.abspath(self.context.source_dir)
         scanned_dirs = [target.as_posix(), Path(source_dir).as_posix()]
         json_report = Path(results_file).parent / "results_json.json"
+        resources: dict[_RecordKey, List[Optional[str]]] = {}
         if json_report.is_file():
             try:
                 with open(json_report, encoding="utf-8") as handle:
                     document = json.load(handle)
+                # Before the paths are rewritten: the keys are checkov's spelling.
+                resources = checkov_resources(document)
                 rewrite_checkov_paths(
                     document,
                     ran_in=ran_in,
@@ -1415,6 +1744,7 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
                 )
         raw = super()._read_results_file(results_file)
         if raw is not None:
+            attach_checkov_resources(raw, resources)
             rewrite_checkov_paths(
                 raw,
                 ran_in=ran_in,

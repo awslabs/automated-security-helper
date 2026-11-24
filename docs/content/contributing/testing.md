@@ -130,8 +130,16 @@ Other tests need something on the host, and run in their own CI jobs:
   in `tests/snapshot/container/runtime/`. They are deselected, not skipped, unless you
   pass `pytest --run-container-snapshots` or `pytest --run-nix-snapshots`; the scan
   jobs that have the runtime pass them. To update them, build the image (or install
-  Nix) and run the module with its flag plus `pytest -n 0 --snapshot-update`; each
-  module's docstring lists the environment variables it reads.
+  Nix) and run the module with its flag plus `pytest -n 0 --run-integration
+  --snapshot-update` (these modules carry the integration or e2e tier marker, and
+  without `pytest --run-integration` every test is skipped); each module's docstring lists
+  the environment variables it reads.
+- `tests/snapshot/wrappers/` runs the PowerShell wrapper (`utils/ash_helpers.ps1`)
+  end to end under `pwsh` against recording stand-ins for the container runners. It
+  needs no runtime, so it is not deselected: it runs in the normal test tiers on every
+  OS, Windows included. There is one snapshot per test, shared by every OS. To update
+  them, run `pytest tests/snapshot/wrappers -n 0 --run-integration --snapshot-update`
+  on any host with `pwsh` 7.
 
 ## Snapshot tests
 

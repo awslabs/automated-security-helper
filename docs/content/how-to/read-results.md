@@ -213,6 +213,11 @@ that left the scanner out, or what it had nothing to scan, as in
 exit code, the highest over its targets, the start-failure code 127 for a tool that
 could not start as asked, or `null` when no tool ran.
 
+The HTML, Markdown and text reports list the same reasons under their scanner table, as
+"Scanners that did not run", with the scanners that share a reason on one line. The
+compact Markdown report lists them for `MISSING`
+scanners only, since it leaves `SKIPPED` rows out of the table.
+
 To read the results from a script:
 
 ```python

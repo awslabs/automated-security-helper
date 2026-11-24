@@ -23,6 +23,11 @@ from pydantic import Field, PrivateAttr, model_validator
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.base.options import ScannerOptionsBase, release_tag
 from automated_security_helper.base.plugin_base import CustomCommand
+from automated_security_helper.base.scanner_facets import (
+    FacetDecl,
+    FacetState,
+    ScannerFacets,
+)
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.core.enums import ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
@@ -289,6 +294,100 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
         system_trust_roots=True,
         # The offline rule cache ASH checked before the scan and passes as --config.
         read_path_env=("OPENGREP_RULES_CACHE_DIR",),
+    )
+
+    #: The facets register row (base/scanner_facets.py). Declaration only, zero
+    #: behavior change: opengrep's own SARIF is validated and passed through
+    #: without result edits, so every native field below is a field of that
+    #: SARIF. Pure code SAST: the only resource-shaped values in its output are
+    #: file paths, which are locators, never resource ids. Fingerprints are
+    #: settled by the M0 capture (tests/test_data/scanners/opengrep/captured/
+    #: opengrep-2.0.0-m0.sarif): the fork emits a real matchBasedId/v1, not the
+    #: semgrep OSS login placeholder.
+    facets: ClassVar[ScannerFacets] = ScannerFacets(
+        rule_id=FacetDecl(state=FacetState.MAPPED, native_field="results[].ruleId"),
+        severity=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="results[].level",
+        ),
+        file_path=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="results[].locations[].physicalLocation.artifactLocation.uri",
+        ),
+        line_range=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="results[].locations[].physicalLocation.region."
+            "startLine/endLine",
+        ),
+        column=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="results[].locations[].physicalLocation.region."
+            "startColumn/endColumn",
+        ),
+        message=FacetDecl(
+            state=FacetState.MAPPED, native_field="results[].message.text"
+        ),
+        resource_id=FacetDecl(
+            state=FacetState.NA,
+            reason="pure code SAST; the only locators in its output are file "
+            "paths, which are never resource ids",
+        ),
+        resource_type=FacetDecl(
+            state=FacetState.NA,
+            reason="pure code SAST; no deployable resource exists in the output",
+        ),
+        package_name=FacetDecl(
+            state=FacetState.NA,
+            reason="code findings name a file and a rule, not a package",
+        ),
+        package_version=FacetDecl(
+            state=FacetState.NA,
+            reason="code findings name a file and a rule, not a package",
+        ),
+        package_path=FacetDecl(
+            state=FacetState.NA,
+            reason="code findings name a file and a rule, not a package",
+        ),
+        taxonomy_cve=FacetDecl(
+            state=FacetState.NA,
+            reason="code rules carry no CVE ids",
+        ),
+        taxonomy_cwe=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="tool.driver.rules[].properties.tags (CWE entries)",
+        ),
+        fingerprints=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='results[].fingerprints."matchBasedId/v1"',
+        ),
+        fix_available=FacetDecl(
+            state=FacetState.DROPPED,
+            native_field="results[].fixes",
+            reason="SARIF fixes survive the report model and die at the flat "
+            "reader, which reads only fix_available",
+        ),
+        remediation_text=FacetDecl(
+            state=FacetState.NA,
+            reason="rule help describes the rule, not a remediation; fixes are "
+            "recorded under fix_available",
+        ),
+        snippet=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="results[].locations[].physicalLocation.region.snippet.text",
+        ),
+        references=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="tool.driver.rules[].help.markdown",
+        ),
+        tags=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="tool.driver.rules[].properties.tags",
+        ),
+        extras=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="results[].properties (SARIF property bag, passed "
+            "through unmodified)",
+        ),
     )
 
     def model_post_init(self, context):

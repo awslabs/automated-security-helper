@@ -54,6 +54,11 @@ from automated_security_helper.config.secret_verification_trust import (
 )
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.uv_tool_mixin import guarded_values_read
+from automated_security_helper.base.scanner_facets import (
+    FacetDecl,
+    FacetState,
+    ScannerFacets,
+)
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
@@ -351,6 +356,103 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
     resolves_tool_off_path: ClassVar[bool] = True
 
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
+
+    #: The facets register row (base/scanner_facets.py). Declaration only: no
+    #: behavior changes. detect-secrets has no JSON output to map -- the
+    #: adapter rebuilds PotentialSecret objects from the in-process worker and
+    #: builds the SARIF Result itself -- so the native fields below name those
+    #: objects' attributes. ``secret_hash`` is deliberately never mapped: it is
+    #: sensitive baseline-join state and must not enter a report.
+    facets: ClassVar[ScannerFacets] = ScannerFacets(
+        rule_id=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="PotentialSecret.type (written as ruleId SECRET-<TYPE>)",
+        ),
+        severity=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="(no native severity) constant Level.error set by the "
+            "adapter on every result",
+        ),
+        file_path=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="PotentialSecret.filename (the worker's file key)",
+        ),
+        line_range=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="PotentialSecret.line_number",
+        ),
+        column=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="the secret's start column computed by the worker "
+            "from the scanned file (_secret_columns)",
+        ),
+        message=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="synthesized by the adapter from PotentialSecret.type, "
+            "filename and line_number; value-free",
+        ),
+        resource_id=FacetDecl(
+            state=FacetState.NA,
+            reason="secret findings name a file location, not a deployable "
+            "resource; the secret hash is baseline-join state and is never "
+            "a resource id",
+        ),
+        resource_type=FacetDecl(
+            state=FacetState.NA,
+            reason="secret findings name a file location, not a deployable resource",
+        ),
+        package_name=FacetDecl(
+            state=FacetState.NA,
+            reason="secret findings carry no package",
+        ),
+        package_version=FacetDecl(
+            state=FacetState.NA,
+            reason="secret findings carry no package",
+        ),
+        package_path=FacetDecl(
+            state=FacetState.NA,
+            reason="secret findings carry no package",
+        ),
+        taxonomy_cve=FacetDecl(
+            state=FacetState.NA,
+            reason="secret findings carry no CVE taxonomy",
+        ),
+        taxonomy_cwe=FacetDecl(
+            state=FacetState.NA,
+            reason="detect-secrets plugin types carry no CWE taxonomy",
+        ),
+        fingerprints=FacetDecl(
+            state=FacetState.NA,
+            reason="deliberate policy, not a gap: PotentialSecret.secret_hash "
+            "is sensitive baseline-join state and never enters the SARIF",
+        ),
+        fix_available=FacetDecl(
+            state=FacetState.NA,
+            reason="secret findings carry no fix state",
+        ),
+        remediation_text=FacetDecl(
+            state=FacetState.NA,
+            reason="PotentialSecret carries no remediation text",
+        ),
+        snippet=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="placeholder 'Secret of type <type> detected' written "
+            "to Region.snippet; the secret value never enters the report",
+        ),
+        references=FacetDecl(
+            state=FacetState.NA,
+            reason="PotentialSecret carries no reference URLs",
+        ),
+        tags=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="adapter-written PropertyBag tags (detect-secrets, "
+            "secret, security, tool_name, tool_type)",
+        ),
+        extras=FacetDecl(
+            state=FacetState.NA,
+            reason="the result property bag carries the tags only",
+        ),
+    )
 
     # The baseline as parsed when the scanner was configured, read once from its
     # checked path. The scan uses this copy and never reopens the file, so a path

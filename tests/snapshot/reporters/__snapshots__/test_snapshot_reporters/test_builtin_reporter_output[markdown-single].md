@@ -42,6 +42,11 @@ Project: ASH · Scan executed: 2026-01-15T12:00:00+00:00
 
 </details>
 
+Scanners that did not run:
+
+- cdk-nag (SKIPPED): left out of this run
+- npm-audit (MISSING): its dependencies were not available; no reason was recorded, and ash.log has the scanner's own message
+
 ### Incomplete coverage
 
 Targets left unevaluated:
