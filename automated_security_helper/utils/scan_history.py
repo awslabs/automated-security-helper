@@ -151,17 +151,13 @@ def _coverage(results: "AshAggregatedResults") -> dict[str, Any]:
     }
 
 
-def build_run_record(results: "AshAggregatedResults") -> dict[str, Any] | None:
-    """The run record for *results*, or None when this scan is not recorded.
+def run_record_body(results: "AshAggregatedResults") -> dict[str, Any]:
+    """The run record's content for *results*, with no check that it is recordable.
 
-    See the module docstring for which scans are left out.
+    :func:`build_run_record` adds the checks the history needs (a usable ``report_id``,
+    a comparable scan); ``ash trend`` over explicit files reads the same content from
+    a results file without them.
     """
-    if record_file_name(results.metadata.report_id) is None:
-        return None
-    try:
-        check_comparable(results)
-    except ComparabilityRefusal:
-        return None
     metadata = results.metadata
     return {
         "record_version": RECORD_VERSION,
@@ -173,6 +169,20 @@ def build_run_record(results: "AshAggregatedResults") -> dict[str, Any] | None:
         "coverage": _coverage(results),
         "findings": [_finding_row(f) for f in results.to_flat_vulnerabilities()],
     }
+
+
+def build_run_record(results: "AshAggregatedResults") -> dict[str, Any] | None:
+    """The run record for *results*, or None when this scan is not recorded.
+
+    See the module docstring for which scans are left out.
+    """
+    if record_file_name(results.metadata.report_id) is None:
+        return None
+    try:
+        check_comparable(results)
+    except ComparabilityRefusal:
+        return None
+    return run_record_body(results)
 
 
 def history_dir(output_dir: str | os.PathLike[str]) -> Path:

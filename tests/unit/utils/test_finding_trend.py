@@ -1,0 +1,330 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+import json
+import random
+
+import pytest
+
+from automated_security_helper.utils import finding_trend, scan_history
+from automated_security_helper.utils.finding_diff import coverage_warnings
+from automated_security_helper.utils.finding_trend import (
+    TrendRefusal,
+    build_trend,
+    coverage_warnings_from_records,
+    run_from_results,
+    runs_from_history,
+)
+from automated_security_helper.utils.scan_results_file import parse_full_scan_results
+
+pytestmark = pytest.mark.unit
+
+
+def report_id(second, token="0123456789ab"):
+    return f"ASH-202601010000{second:02d}-{token}"
+
+
+def finding(rule, *, severity="HIGH", line=10, path="src/app.py", suppressed=False):
+    result = {
+        "ruleId": rule,
+        "message": {"text": f"message for {rule}"},
+        "properties": {"issue_severity": severity},
+        "locations": [
+            {
+                "physicalLocation": {
+                    "artifactLocation": {"uri": path},
+                    "region": {"startLine": line},
+                }
+            }
+        ],
+    }
+    if suppressed:
+        result["suppressions"] = [{"kind": "inSource"}]
+    return result
+
+
+def results(*findings, second=1, scanners=("bandit",), expected=None, **metadata):
+    meta = {
+        "report_id": report_id(second),
+        "project_name": "project",
+        "changed_files_only": False,
+        "expected_scanners": list(expected if expected is not None else scanners),
+    }
+    meta.update(metadata)
+    payload = {
+        "metadata": meta,
+        "scanner_results": {name: {"status": "PASSED"} for name in scanners},
+        "sarif": {
+            "version": "2.1.0",
+            "runs": [
+                {"tool": {"driver": {"name": "bandit"}}, "results": list(findings)}
+            ],
+        },
+    }
+    return parse_full_scan_results(json.dumps(payload).encode("utf-8"))
+
+
+def series(*runs):
+    return build_trend(
+        [run_from_results(run, f"run{i}.json") for i, run in enumerate(runs)]
+    )
+
+
+def counts(trend, run):
+    return {
+        (row["scanner"], row["severity"], row["status"]): row["count"]
+        for row in trend.series
+        if row["run"] == run
+    }
+
+
+def test_a_triple_counts_new_fixed_and_carried_at_each_boundary():
+    trend = series(
+        results(finding("B101"), finding("B102", severity="LOW", line=20), second=1),
+        results(finding("B102", severity="LOW", line=20), finding("B103"), second=2),
+        results(
+            finding("B102", severity="LOW", line=20),
+            finding("B103"),
+            finding("B104", line=40),
+            second=3,
+        ),
+    )
+    assert counts(trend, 1) == {
+        ("bandit", "LOW", "carried"): 1,
+        ("bandit", "HIGH", "new"): 1,
+        ("bandit", "HIGH", "fixed"): 1,
+    }
+    assert counts(trend, 2) == {
+        ("bandit", "LOW", "carried"): 1,
+        ("bandit", "HIGH", "carried"): 1,
+        ("bandit", "HIGH", "new"): 1,
+    }
+    assert [r["findings"] for r in trend.runs] == [2, 2, 3]
+    assert [s["rule_id"] for s in trend.streaks] == ["B102", "B103"]
+    assert [s["streak_runs"] for s in trend.streaks] == [3, 2]
+    assert trend.streaks[0]["left_censored"] is True
+    assert trend.streaks[1]["left_censored"] is False
+    assert trend.streaks[1]["open_since_run"] == 1
+
+
+def test_a_finding_that_moves_lines_mid_series_is_one_streak():
+    trend = series(
+        results(finding("B101", line=10), second=1),
+        results(finding("B101", line=15), second=2),
+        results(finding("B101", line=30), second=3),
+    )
+    assert counts(trend, 1) == {("bandit", "HIGH", "carried"): 1}
+    assert counts(trend, 2) == {("bandit", "HIGH", "carried"): 1}
+    assert len(trend.streaks) == 1
+    assert trend.streaks[0]["streak_runs"] == 3
+    assert trend.streaks[0]["line_start"] == 30
+
+
+def test_a_finding_fixed_and_back_starts_a_new_streak():
+    trend = series(
+        results(finding("B101"), second=1),
+        results(second=2),
+        results(finding("B101"), second=3),
+    )
+    assert counts(trend, 1) == {("bandit", "HIGH", "fixed"): 1}
+    assert counts(trend, 2) == {("bandit", "HIGH", "new"): 1}
+    assert trend.streaks == []
+
+
+def test_severity_and_suppression_changes_are_listed_at_their_boundary():
+    trend = series(
+        results(finding("B101"), finding("B102", line=20), second=1),
+        results(
+            finding("B101", severity="LOW"),
+            finding("B102", line=20, suppressed=True),
+            second=2,
+        ),
+    )
+    kinds = {(c["kind"], c["rule_id"]): (c["from"], c["to"]) for c in trend.changes}
+    assert kinds[("severity", "B101")][0] != kinds[("severity", "B101")][1]
+    assert kinds[("suppression", "B102")] == (False, True)
+    assert {c["run"] for c in trend.changes} == {1}
+
+
+def test_a_scanner_leaving_mid_series_labels_its_boundary():
+    trend = series(
+        results(
+            finding("B101"),
+            finding("B102", line=20),
+            second=1,
+            scanners=("bandit", "semgrep"),
+        ),
+        results(second=2, scanners=("bandit",)),
+    )
+    boundary = trend.boundaries[0]
+    assert counts(trend, 1) == {("bandit", "HIGH", "fixed"): 2}
+    assert boundary["like_for_like"] is False
+    assert boundary["scanners_removed"] == ["semgrep"]
+    assert boundary["scanners_added"] == []
+    assert "Scanner coverage differs between scans." in boundary["coverage_warnings"]
+
+
+def test_a_like_for_like_boundary_has_no_warnings():
+    trend = series(results(finding("B101"), second=1), results(second=2))
+    assert trend.boundaries[0]["like_for_like"] is True
+    assert trend.boundaries[0]["coverage_warnings"] == []
+
+
+@pytest.mark.parametrize(
+    "earlier,later",
+    [
+        (dict(), dict()),
+        (dict(scanners=("bandit", "semgrep")), dict()),
+        (dict(expected=("bandit", "semgrep")), dict()),
+        (dict(), dict(expected=("bandit", "semgrep"))),
+        (dict(inputs_not_scanned=["a.txt"]), dict()),
+        (dict(), dict(inputs_not_scanned=["a.txt"])),
+        (dict(expected=()), dict()),
+        (dict(scanners=()), dict(scanners=())),
+    ],
+)
+def test_record_coverage_warnings_equal_the_diffs(earlier, later):
+    a = results(finding("B101"), second=1, **earlier)
+    b = results(finding("B101"), second=2, **later)
+    from_records = coverage_warnings_from_records(
+        scan_history.run_record_body(a), scan_history.run_record_body(b)
+    )
+    assert from_records == coverage_warnings(a, b)
+
+
+def test_the_order_of_a_runs_findings_does_not_change_the_trend():
+    rules = [("B101", 10), ("B102", 20), ("B103", 30), ("B104", 40)]
+    first = [finding(r, line=line) for r, line in rules]
+    later = [finding(r, line=line + 1) for r, line in rules[1:]] + [
+        finding("B105", line=50)
+    ]
+    expected = series(results(*first, second=1), results(*later, second=2)).to_dict()
+    for seed in range(5):
+        shuffled_first, shuffled_later = first[:], later[:]
+        random.Random(seed).shuffle(shuffled_first)
+        random.Random(seed + 1).shuffle(shuffled_later)
+        got = series(
+            results(*shuffled_first, second=1), results(*shuffled_later, second=2)
+        ).to_dict()
+        assert got["series"] == expected["series"]
+        assert got["streaks"] == expected["streaks"]
+        assert got["boundaries"] == expected["boundaries"]
+
+
+def test_the_json_form_is_versioned_and_serializable():
+    trend = series(results(finding("B101"), second=1), results(finding("B101"), second=2))
+    data = trend.to_dict()
+    assert data["trend_version"] == finding_trend.TREND_VERSION == 1
+    assert set(data) == {
+        "trend_version",
+        "runs",
+        "boundaries",
+        "series",
+        "streaks",
+        "changes",
+    }
+    json.dumps(data)
+
+
+def test_a_path_with_a_lone_surrogate_survives_the_series():
+    odd = "src/\udcffname.py"
+    trend = series(
+        results(finding("B101", path=odd), second=1),
+        results(finding("B101", path=odd, line=12), second=2),
+    )
+    assert trend.streaks[0]["file_path"] == odd
+    assert counts(trend, 1) == {("bandit", "HIGH", "carried"): 1}
+
+
+def test_history_and_files_give_the_same_trend(tmp_path):
+    runs = [
+        results(finding("B101"), finding("B102", line=20), second=1),
+        results(finding("B102", line=20), second=2),
+        results(finding("B102", line=21), finding("B103", line=3), second=3),
+    ]
+    for run in runs:
+        scan_history.write_run_record(run, tmp_path)
+    from_history = build_trend(runs_from_history(tmp_path)).to_dict()
+    from_files = series(*runs).to_dict()
+    for key in ("series", "streaks", "boundaries", "changes"):
+        if key == "boundaries":
+            strip = lambda b: [  # noqa: E731
+                {k: v for k, v in row.items() if not k.endswith("_label")} for row in b
+            ]
+            assert strip(from_history[key]) == strip(from_files[key])
+        elif key == "streaks":
+            strip = lambda s: [  # noqa: E731
+                {k: v for k, v in row.items() if k != "open_since"} for row in s
+            ]
+            assert strip(from_history[key]) == strip(from_files[key])
+        else:
+            assert from_history[key] == from_files[key]
+    assert [r["report_id"] for r in from_history["runs"]] == [
+        report_id(1),
+        report_id(2),
+        report_id(3),
+    ]
+
+
+def test_a_corrupt_history_record_is_skipped_not_fatal(tmp_path):
+    for second in (1, 2):
+        scan_history.write_run_record(results(finding("B101"), second=second), tmp_path)
+    (tmp_path / "history" / f"{report_id(3)}.json").write_text("not json")
+    assert len(runs_from_history(tmp_path)) == 2
+    assert len(build_trend(runs_from_history(tmp_path)).boundaries) == 1
+
+
+def test_one_run_is_not_a_trend():
+    with pytest.raises(TrendRefusal, match="at least two"):
+        series(results(finding("B101")))
+
+
+def test_history_and_files_do_not_mix(tmp_path):
+    a = results(finding("B101"), second=1)
+    b = results(finding("B101"), second=2)
+    scan_history.write_run_record(b, tmp_path)
+    with pytest.raises(TrendRefusal, match="do not mix"):
+        build_trend([run_from_results(a, "a.json"), *runs_from_history(tmp_path)])
+
+
+def test_the_same_run_twice_is_refused():
+    run = results(finding("B101"))
+    with pytest.raises(TrendRefusal, match="the same run"):
+        series(run, run)
+
+
+def test_different_projects_are_refused_naming_the_file():
+    with pytest.raises(TrendRefusal, match=r"run1\.json: .*different projects"):
+        series(
+            results(finding("B101"), second=1),
+            results(finding("B101"), second=2, project_name="other"),
+        )
+
+
+def test_a_baseline_filtered_run_is_refused_naming_the_file():
+    run = results(finding("B101"), second=2)
+    run.baseline_filtered = True
+    with pytest.raises(TrendRefusal, match=r"run1\.json: .*--baseline"):
+        series(results(finding("B101"), second=1), run)
+
+
+def test_an_unmerged_shard_is_refused():
+    run = results(
+        finding("B101"), second=1, shard={"index": 1, "count": 2, "mode": "scanner"}
+    )
+    with pytest.raises(TrendRefusal, match="ash merge"):
+        run_from_results(run, "shard.json")
+
+
+def test_a_run_with_duplicate_finding_ids_is_refused():
+    run = results(finding("B101"), second=1)
+    record = scan_history.run_record_body(run)
+    record["findings"].append(dict(record["findings"][0]))
+    ok = scan_history.run_record_body(results(finding("B101"), second=2))
+    with pytest.raises(TrendRefusal, match="duplicate finding IDs"):
+        build_trend(
+            [
+                finding_trend.run_from_record(record, "a"),
+                finding_trend.run_from_record(ok, "b"),
+            ]
+        )

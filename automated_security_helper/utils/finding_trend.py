@@ -1,0 +1,480 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""New, fixed and carried findings over a series of runs: the core of ``ash trend``.
+
+``ash diff`` compares two results files. This module chains that comparison over
+N runs and keeps the time axis: for each boundary between two consecutive runs,
+per scanner and severity, how many findings are new, fixed and carried, which
+findings have been carried longest, where severity or suppression changed, and
+which boundaries are not like for like.
+
+What it reuses, and does not redo
+---------------------------------
+Pairing a finding with the same finding in the next run is
+:func:`~automated_security_helper.utils.finding_diff.match_findings`, called as is
+on each consecutive pair. It is the part that took care (ids that agree, findings
+that moved lines, the ambiguity rules for suppressions), and a second matcher would
+drift from ``ash diff``. A run record's rows (``utils.scan_history``) carry the
+identity ingredients that matcher reads, and :class:`_Row` presents them under the
+names it reads them by. Comparability is
+:func:`~automated_security_helper.utils.finding_diff.check_comparable` and
+:func:`~automated_security_helper.utils.finding_diff.check_same_project`, so a
+series refuses what a diff refuses.
+
+Statuses at a boundary
+----------------------
+For the boundary *into* run ``k`` (k >= 1), comparing run ``k-1`` with run ``k``:
+
+* ``new``: in run ``k`` and not paired with a finding of run ``k-1``;
+* ``carried``: in run ``k`` and paired (exactly, or moved to other lines);
+* ``fixed``: in run ``k-1`` and paired with nothing in run ``k``.
+
+A finding that goes away and comes back is ``fixed`` and then ``new`` again: its
+streak starts over. Run 0 has no boundary; its findings are counted in the run's
+own totals, and a streak that begins there is marked ``left_censored``, since the
+finding may have been open before the series starts.
+
+Coverage honesty
+----------------
+A boundary carries the same coverage warnings ``ash diff`` prints
+(:func:`coverage_warnings_from_records` mirrors
+:func:`~automated_security_helper.utils.finding_diff.coverage_warnings` over the
+markers a run record keeps; a test holds the two equal) and the scanners that
+entered or left the expected set. A step in which a scanner disappeared and twenty
+findings are "fixed" is labeled ``like_for_like: false`` with the reason, never
+presented as progress.
+
+Engine
+------
+The counts and streak lengths are frame operations (the series is one long frame
+grouped by run, scanner, severity and status; a streak is a group over its track).
+Text goes through :func:`~automated_security_helper.utils.frame_text.wire`, as in
+the matcher, so a path or scanner name holding a lone surrogate survives.
+"""
+
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass, field
+from types import SimpleNamespace
+from typing import TYPE_CHECKING, Any, Sequence
+
+import polars as pl
+
+from automated_security_helper.utils.finding_diff import (
+    ComparabilityRefusal,
+    check_comparable,
+    check_same_project,
+    match_findings,
+)
+from automated_security_helper.utils.frame_text import unwire, wire
+from automated_security_helper.utils.scan_history import (
+    read_history,
+    run_record_body,
+)
+
+if TYPE_CHECKING:
+    from automated_security_helper.models.asharp_model import AshAggregatedResults
+
+#: Written into the trend's JSON; a consumer reads it before anything else.
+TREND_VERSION = 1
+
+STATUSES = ("new", "carried", "fixed")
+
+_SERIES_SCHEMA = {
+    "run": pl.Int64,
+    "scanner": pl.String,
+    "severity": pl.String,
+    "status": pl.String,
+    "track": pl.Int64,
+}
+
+
+class TrendRefusal(ComparabilityRefusal):
+    """The runs cannot be put in a series; the text says why."""
+
+
+@dataclass(frozen=True)
+class TrendRun:
+    """One run of a series: where it came from and its run record."""
+
+    label: str
+    source: str  # "file" for an explicit results file, "history" for a record
+    record: dict[str, Any]
+
+    @property
+    def report_id(self) -> str | None:
+        value = self.record.get("report_id")
+        return value if isinstance(value, str) else None
+
+
+def run_from_results(results: "AshAggregatedResults", label: str) -> TrendRun:
+    """A series point from one results file; refuses a scan no comparison can use.
+
+    The refusal names *label* (the file), as the diff CLI's does.
+    """
+    try:
+        check_comparable(results)
+    except ComparabilityRefusal as exc:
+        raise TrendRefusal(f"{label}: {exc}") from exc
+    return TrendRun(label, "file", run_record_body(results))
+
+
+def run_from_record(record: dict[str, Any], label: str) -> TrendRun:
+    """A series point from a run record the history holds."""
+    return TrendRun(label, "history", record)
+
+
+def runs_from_history(output_dir: Any) -> list[TrendRun]:
+    """Every readable record of ``<output_dir>/history``, oldest first."""
+    return [
+        run_from_record(record, str(record["report_id"]))
+        for record in read_history(output_dir)
+    ]
+
+
+class _Row:
+    """A record's finding row, with the attributes ``match_findings`` reads.
+
+    It is the stored row under the names of ``FlatVulnerability``: ``fallback_key``
+    takes ``canonical(identity_base)`` itself, so the stored canonical string is
+    parsed back to the mapping it came from (``canonical`` of that mapping is the
+    string again).
+    """
+
+    __slots__ = (
+        "index",
+        "id",
+        "scanner",
+        "rule_id",
+        "severity",
+        "is_suppressed",
+        "file_path",
+        "line_start",
+        "line_end",
+        "identity",
+        "has_fingerprint_identity",
+        "identity_base",
+        "identity_message",
+        "source_report",
+    )
+
+    def __init__(self, index: int, row: dict[str, Any]) -> None:
+        self.index = index
+        self.id = row.get("id")
+        self.scanner = row.get("scanner")
+        self.rule_id = row.get("rule_id")
+        self.severity = row.get("severity")
+        self.is_suppressed = bool(row.get("is_suppressed"))
+        self.file_path = row.get("file_path")
+        self.line_start = row.get("line_start")
+        self.line_end = row.get("line_end")
+        self.identity = object() if row.get("has_identity") else None
+        self.has_fingerprint_identity = bool(row.get("has_fingerprint_identity"))
+        base = row.get("identity_base")
+        self.identity_base = json.loads(base) if isinstance(base, str) else None
+        self.identity_message = row.get("identity_message")
+        self.source_report = row.get("source_report")
+
+
+def _rows(run: TrendRun) -> list[_Row]:
+    rows = [_Row(i, row) for i, row in enumerate(run.record["findings"])]
+    if len({row.id for row in rows}) != len(rows):
+        raise TrendRefusal(f"{run.label}: run contains duplicate finding IDs")
+    return rows
+
+
+def _severity(value: str | None) -> str:
+    return (value or "").upper() or "UNKNOWN"
+
+
+def coverage_warnings_from_records(
+    earlier: dict[str, Any],
+    later: dict[str, Any],
+    labels: tuple[str, str] = ("Baseline", "Current"),
+) -> list[str]:
+    """``finding_diff.coverage_warnings`` over two run records' coverage markers."""
+    a, b = earlier["coverage"], later["coverage"]
+    warnings = []
+    if set(a["expected_scanners"]) != set(b["expected_scanners"]) or set(
+        a["evaluated_scanners"]
+    ) != set(b["evaluated_scanners"]):
+        warnings.append("Scanner coverage differs between scans.")
+    if a["ignore_file_exclusions"] != b["ignore_file_exclusions"]:
+        warnings.append("Recorded ignore-file exclusions differ between scans.")
+    for label, coverage in zip(labels, (a, b)):
+        missing = set(coverage["expected_scanners"]) - set(
+            coverage["evaluated_scanners"]
+        )
+        if missing or coverage["incomplete"]:
+            warnings.append(f"{label} scan has incomplete scanner coverage.")
+        elif not coverage["expected_scanners"] or not coverage["scanner_results_recorded"]:
+            warnings.append(
+                f"{label} scan does not record enough scanner coverage to establish comparability."
+            )
+        if coverage["inputs_not_scanned"]:
+            warnings.append(f"{label} scan records inputs that were not scanned.")
+    return warnings
+
+
+def _check_series(runs: Sequence[TrendRun]) -> None:
+    if len(runs) < 2:
+        raise TrendRefusal("a trend needs at least two runs")
+    if len({run.source for run in runs}) > 1:
+        raise TrendRefusal(
+            "do not mix recorded history with explicit results files in one trend"
+        )
+    seen: dict[str, str] = {}
+    for run in runs:
+        rid = run.report_id
+        if rid is None:
+            continue
+        if rid in seen:
+            raise TrendRefusal(
+                f"{run.label}: the same run as {seen[rid]} (report id {rid})"
+            )
+        seen[rid] = run.label
+    first = runs[0]
+    for run in runs[1:]:
+        try:
+            check_same_project(_project_view(first), _project_view(run))
+        except ComparabilityRefusal as exc:
+            raise TrendRefusal(f"{run.label}: {exc}") from exc
+
+
+def _project_view(run: TrendRun) -> Any:
+    """What ``check_same_project`` reads, from a record."""
+    return SimpleNamespace(
+        metadata=SimpleNamespace(
+            project_name=run.record.get("project_name"),
+            workspace_project=run.record.get("workspace_project"),
+        )
+    )
+
+
+@dataclass
+class Trend:
+    """The result of :func:`build_trend`; :meth:`to_dict` is its JSON form."""
+
+    runs: list[dict[str, Any]]
+    boundaries: list[dict[str, Any]]
+    series: list[dict[str, Any]]
+    streaks: list[dict[str, Any]]
+    changes: list[dict[str, Any]] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "trend_version": TREND_VERSION,
+            "runs": self.runs,
+            "boundaries": self.boundaries,
+            "series": self.series,
+            "streaks": self.streaks,
+            "changes": self.changes,
+        }
+
+
+def build_trend(runs: Sequence[TrendRun]) -> Trend:
+    """The trend over *runs*, oldest first, in the order given.
+
+    Raises :class:`TrendRefusal` for fewer than two runs, a run listed twice,
+    runs of different projects, a mix of history and files, or a run holding
+    duplicate finding ids.
+    """
+    runs = list(runs)
+    _check_series(runs)
+    rows = [_rows(run) for run in runs]
+
+    # Track: one number per finding lineage. A finding paired into the next run
+    # keeps its track (so a finding that moved lines is one streak); a new finding
+    # starts one.
+    track_of: list[dict[int, int]] = [{} for _ in runs]
+    next_track = 0
+    for row in rows[0]:
+        track_of[0][row.index] = next_track
+        next_track += 1
+
+    boundaries: list[dict[str, Any]] = []
+    changes: list[dict[str, Any]] = []
+    series_rows: list[tuple[int, str | None, str, str, int]] = []
+    for k in range(1, len(runs)):
+        match = match_findings(rows[k - 1], rows[k])
+        paired = match.exact + match.moved
+        for before, after in paired:
+            track_of[k][after.index] = track_of[k - 1][before.index]
+            series_rows.append(
+                (
+                    k,
+                    wire(after.scanner),
+                    _severity(after.severity),
+                    "carried",
+                    track_of[k][after.index],
+                )
+            )
+            if _severity(before.severity) != _severity(after.severity):
+                changes.append(
+                    _change(k, "severity", before, after, before.severity, after.severity)
+                )
+            if before.is_suppressed != after.is_suppressed:
+                changes.append(
+                    _change(
+                        k,
+                        "suppression",
+                        before,
+                        after,
+                        before.is_suppressed,
+                        after.is_suppressed,
+                    )
+                )
+        for after in match.new:
+            track_of[k][after.index] = next_track
+            series_rows.append(
+                (
+                    k,
+                    wire(after.scanner),
+                    _severity(after.severity),
+                    "new",
+                    next_track,
+                )
+            )
+            next_track += 1
+        for before in match.absent:
+            series_rows.append(
+                (
+                    k,
+                    wire(before.scanner),
+                    _severity(before.severity),
+                    "fixed",
+                    track_of[k - 1][before.index],
+                )
+            )
+        boundaries.append(_boundary(k, runs[k - 1], runs[k]))
+
+    series = _series(series_rows)
+    streaks = _streaks(runs, rows, track_of)
+    return Trend(
+        runs=[_run_entry(run, run_rows) for run, run_rows in zip(runs, rows)],
+        boundaries=boundaries,
+        series=series,
+        streaks=streaks,
+        changes=changes,
+    )
+
+
+def _change(
+    k: int, kind: str, before: _Row, after: _Row, old: Any, new: Any
+) -> dict[str, Any]:
+    return {
+        "run": k,
+        "kind": kind,
+        "finding_id": after.id,
+        "scanner": after.scanner,
+        "rule_id": after.rule_id,
+        "file_path": after.file_path,
+        "from": old,
+        "to": new,
+    }
+
+
+def _run_entry(run: TrendRun, rows: list[_Row]) -> dict[str, Any]:
+    record = run.record
+    return {
+        "label": run.label,
+        "report_id": run.report_id,
+        "generated_at": record.get("generated_at"),
+        "tool_version": record.get("tool_version"),
+        "findings": len(rows),
+    }
+
+
+def _boundary(k: int, earlier: TrendRun, later: TrendRun) -> dict[str, Any]:
+    warnings = coverage_warnings_from_records(
+        earlier.record, later.record, ("Earlier", "Later")
+    )
+    before = set(earlier.record["coverage"]["expected_scanners"])
+    after = set(later.record["coverage"]["expected_scanners"])
+    return {
+        "run": k,
+        "from_label": earlier.label,
+        "to_label": later.label,
+        "like_for_like": not warnings,
+        "coverage_warnings": warnings,
+        "scanners_added": sorted(after - before),
+        "scanners_removed": sorted(before - after),
+    }
+
+
+def _series(rows: list[tuple[int, str | None, str, str, int]]) -> list[dict[str, Any]]:
+    frame = pl.DataFrame(
+        rows,
+        schema=_SERIES_SCHEMA,
+        orient="row",
+    )
+    counted = (
+        frame.group_by(["run", "scanner", "severity", "status"])
+        .agg(pl.len().alias("count"))
+        .sort(["run", "scanner", "severity", "status"])
+    )
+    return [
+        {
+            "run": run,
+            "scanner": unwire(scanner) if scanner is not None else None,
+            "severity": severity,
+            "status": status,
+            "count": count,
+        }
+        for run, scanner, severity, status, count in counted.iter_rows()
+    ]
+
+
+def _streaks(
+    runs: list[TrendRun], rows: list[list[_Row]], track_of: list[dict[int, int]]
+) -> list[dict[str, Any]]:
+    """Findings open in the last run that were open before it, longest first."""
+    presence = pl.DataFrame(
+        [(k, track) for k, tracks in enumerate(track_of) for track in tracks.values()],
+        schema={"run": pl.Int64, "track": pl.Int64},
+        orient="row",
+    )
+    spans = presence.group_by("track").agg(
+        pl.len().alias("runs"),
+        pl.col("run").min().alias("first"),
+        pl.col("run").max().alias("last"),
+    )
+    last = len(runs) - 1
+    open_now = spans.filter((pl.col("last") == last) & (pl.col("runs") > 1))
+    by_track = {
+        track: (n, first) for track, n, first, _ in open_now.iter_rows()
+    }
+    out = []
+    for row in rows[last]:
+        found = by_track.get(track_of[last][row.index])
+        if found is None:
+            continue
+        length, first = found
+        out.append(
+            {
+                "finding_id": row.id,
+                "scanner": row.scanner,
+                "rule_id": row.rule_id,
+                "severity": _severity(row.severity),
+                "file_path": row.file_path,
+                "line_start": row.line_start,
+                "is_suppressed": row.is_suppressed,
+                "streak_runs": length,
+                "open_since_run": first,
+                "open_since": runs[first].label,
+                "left_censored": first == 0,
+            }
+        )
+    out.sort(
+        key=lambda s: (
+            -s["streak_runs"],
+            s["scanner"] or "",
+            s["rule_id"] or "",
+            s["file_path"] or "",
+            s["line_start"] if s["line_start"] is not None else -1,
+            s["finding_id"] or "",
+        )
+    )
+    return out
