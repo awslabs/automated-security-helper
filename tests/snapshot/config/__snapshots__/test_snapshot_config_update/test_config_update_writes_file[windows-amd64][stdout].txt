@@ -25,8 +25,8 @@ global_settings:
       - /sandbox/**
       - /ash_plugin_modules
       - /ash_plugin_modules/**
-      - /scanner_selection
-      - /scanner_selection/**
+      - /default_scanners
+      - /default_scanners/**
       - /scanners/detect-secrets/options/scan_settings/filters_used
       - /scanners/detect-secrets/options/scan_settings/filters_used/**
       - /scanners/detect-secrets/options/scan_settings/plugins_used
@@ -441,9 +441,9 @@ workspace:
 precommit:
   only_scanners: []
   add_scanners: []
-scanner_selection:
-  only_scanners: []
-  add_scanners: []
+default_scanners:
+  only: []
+  add: []
 
 Successfully updated config file: <TMP>/demo-project/ash.yaml
 [exit code: 0]

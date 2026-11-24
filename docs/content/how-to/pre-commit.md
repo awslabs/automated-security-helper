@@ -143,7 +143,7 @@ scanner did not run, and the output says only `Passed`.
 The selection precommit mode runs is resolved in this order, later entries winning:
 
 1. The mode default: the five scanners above.
-2. The operator's `scanner_selection`, in a trusted config: `only_scanners` replaces the default set and `add_scanners` adds to it ([Choose which scanners run by default](configure.md#scanner-selection)).
+2. The operator's `default_scanners`, in a trusted config: `only` replaces the default set and `add` adds to it ([Choose which scanners run by default](configure.md#default-scanners)). Every mode reads it, not only precommit.
 3. The ASH config file: `precommit.only_scanners` replaces the set so far;
    `precommit.add_scanners` adds to it. Setting both keys is refused.
 4. The command line: `--only-scanners` replaces everything above, mode default and config

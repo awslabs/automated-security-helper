@@ -48,8 +48,8 @@
 
 ### Features
 
-- **`scanner_selection` sets the default scanners in a trusted config.** `only_scanners`
-  replaces a mode's default selection and `add_scanners` extends a fixed one such as
+- **`default_scanners` sets the default scanners in a trusted config.** `only`
+  replaces a mode's default selection in every mode and `add` extends a fixed one such as
   precommit's; a repository config, an MCP client or a patch cannot set it. The command
   line still wins (`--only-scanners` replaces, `--add-scanners` adds, `--exclude-scanners`
   applies last), workspace projects share one selection plus the scanners the workspace

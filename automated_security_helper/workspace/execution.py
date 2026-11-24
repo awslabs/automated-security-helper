@@ -923,14 +923,14 @@ def workspace_reporter_classes(
         return _reporter_classes_of_run(plan, settings)
 
 
-def workspace_scanner_selection(
+def workspace_default_scanners(
     plan: WorkspacePlan, settings: ProjectScanSettings
 ) -> Tuple[Tuple[str, ...], Tuple[str, ...]]:
     active = plan.active_projects
     if not active:
         return (), ()
-    selection = _project_config_with_policy(active[0], settings).scanner_selection
-    return tuple(selection.only_scanners), tuple(selection.add_scanners)
+    selection = _project_config_with_policy(active[0], settings).default_scanners
+    return tuple(selection.only), tuple(selection.add)
 
 
 def settled_scanner_selection(
@@ -939,7 +939,7 @@ def settled_scanner_selection(
     layers = settings.selection_layers
     if layers is None:
         return settings
-    only, add = workspace_scanner_selection(plan, settings)
+    only, add = workspace_default_scanners(plan, settings)
     if settings.required_scanner_selection is not None:
         refuse_unmet_selection_marker(settings.required_scanner_selection, only, add)
     folded = replace(layers, workspace_required=tuple(plan.required_scanners)).fold(

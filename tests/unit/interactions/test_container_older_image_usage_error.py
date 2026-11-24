@@ -194,9 +194,7 @@ def _scan_with(tmp_path, config, *args):
 def test_a_config_only_selection_an_older_image_cannot_enforce_is_refused(
     container, tmp_path
 ):
-    config = _operator_config(
-        tmp_path, "scanner_selection:\n  only_scanners: [bandit]\n"
-    )
+    config = _operator_config(tmp_path, "default_scanners:\n  only: [bandit]\n")
 
     result = _scan_with(tmp_path, config)
 
@@ -211,9 +209,7 @@ def test_a_config_only_selection_an_older_image_cannot_enforce_is_refused(
 def test_a_replacement_flag_reaches_the_inner_scan_as_a_replacement(
     container, tmp_path
 ):
-    config = _operator_config(
-        tmp_path, "scanner_selection:\n  only_scanners: [bandit]\n"
-    )
+    config = _operator_config(tmp_path, "default_scanners:\n  only: [bandit]\n")
 
     _scan_with(tmp_path, config, "--only-scanners", "trivy")
 
@@ -224,9 +220,7 @@ def test_a_replacement_flag_reaches_the_inner_scan_as_a_replacement(
 
 
 def test_an_additive_flag_reaches_the_inner_scan_as_an_addition(container, tmp_path):
-    config = _operator_config(
-        tmp_path, "scanner_selection:\n  only_scanners: [bandit]\n"
-    )
+    config = _operator_config(tmp_path, "default_scanners:\n  only: [bandit]\n")
 
     _scan_with(tmp_path, config, "--add-scanners", "trivy")
 
@@ -239,9 +233,7 @@ def test_an_additive_flag_reaches_the_inner_scan_as_an_addition(container, tmp_p
 def test_a_legacy_scanners_flag_stays_the_legacy_flag_when_the_section_matters(
     container, tmp_path
 ):
-    config = _operator_config(
-        tmp_path, "scanner_selection:\n  only_scanners: [bandit]\n"
-    )
+    config = _operator_config(tmp_path, "default_scanners:\n  only: [bandit]\n")
 
     _scan_with(tmp_path, config, "--scanners", "trivy")
 
@@ -252,7 +244,7 @@ def test_a_legacy_scanners_flag_stays_the_legacy_flag_when_the_section_matters(
 
 def test_the_marker_is_bound_to_the_normalized_lists(container, tmp_path):
     config = _operator_config(
-        tmp_path, "scanner_selection:\n  add_scanners: [' Trivy ', TRIVY, checkov]\n"
+        tmp_path, "default_scanners:\n  add: [' Trivy ', TRIVY, checkov]\n"
     )
 
     _scan_with(tmp_path, config)
@@ -264,7 +256,7 @@ def test_the_marker_is_bound_to_the_normalized_lists(container, tmp_path):
     }
 
 
-@pytest.mark.parametrize("body", ["project_name: p\n", "scanner_selection: {}\n"])
+@pytest.mark.parametrize("body", ["project_name: p\n", "default_scanners: {}\n"])
 def test_without_a_selection_the_forwarding_and_the_check_are_unchanged(
     container, tmp_path, body
 ):
@@ -297,7 +289,7 @@ def _checkout_with_config(tmp_path, body):
 
 _CHECKOUT_BODIES = {
     "no-section": "project_name: repo\n",
-    "asks-for-trivy": "scanner_selection:\n  only_scanners: [trivy]\n",
+    "asks-for-trivy": "default_scanners:\n  only: [trivy]\n",
 }
 
 
@@ -307,7 +299,7 @@ def test_ash_config_s_selection_under_a_named_checkout_config_is_required(
 ):
     monkeypatch.setenv(
         "ASH_CONFIG",
-        _operator_config(tmp_path, "scanner_selection:\n  only_scanners: [bandit]\n"),
+        _operator_config(tmp_path, "default_scanners:\n  only: [bandit]\n"),
     )
     checkout, config = _checkout_with_config(tmp_path, _CHECKOUT_BODIES[body])
 
@@ -336,7 +328,7 @@ def test_ash_config_s_selection_beside_a_discovered_checkout_config_is_required(
 
     monkeypatch.setenv(
         "ASH_CONFIG",
-        _operator_config(tmp_path, "scanner_selection:\n  only_scanners: [bandit]\n"),
+        _operator_config(tmp_path, "default_scanners:\n  only: [bandit]\n"),
     )
     checkout, _ = _checkout_with_config(tmp_path, _CHECKOUT_BODIES[body])
 
@@ -368,9 +360,7 @@ def test_a_selection_that_cannot_be_resolved_starts_no_container(
         raise error
 
     monkeypatch.setattr(orchestrator, "resolve_scan_config", fail)
-    config = _operator_config(
-        tmp_path, "scanner_selection:\n  only_scanners: [bandit]\n"
-    )
+    config = _operator_config(tmp_path, "default_scanners:\n  only: [bandit]\n")
     out = tmp_path / "out"
     out.mkdir()
     stale = out / "stale-marker.txt"
@@ -380,7 +370,7 @@ def test_a_selection_that_cannot_be_resolved_starts_no_container(
 
     assert container["runs"] == []
     assert result.exit_code == 3, result.output
-    assert "scanner_selection" in _words(result.output)
+    assert "default_scanners" in _words(result.output)
     assert "Results file not found" not in _words(result.output)
     assert stale.read_text(encoding="utf-8") == "previous run\n"
 
@@ -391,10 +381,10 @@ _LATER_SCHEMA = "global_settings:\n  zz_option_a_later_schema_declares: true\n"
 @pytest.mark.parametrize(
     ("body", "overrides"),
     [
-        (_LATER_SCHEMA + "scanner_selection:\n  only_scanners: [bandit]\n", []),
+        (_LATER_SCHEMA + "default_scanners:\n  only: [bandit]\n", []),
         (
             _LATER_SCHEMA,
-            ["--config-overrides", 'scanner_selection.only_scanners=["bandit"]'],
+            ["--config-overrides", 'default_scanners.only=["bandit"]'],
         ),
     ],
     ids=["in-ash-config", "in-an-override"],
@@ -408,14 +398,14 @@ def test_a_selection_left_unresolved_for_an_image_that_may_differ_is_refused(
 
     assert container["runs"] == []
     assert result.exit_code == 3, result.output
-    assert "scanner_selection" in _words(result.output)
+    assert "default_scanners" in _words(result.output)
 
 
 @pytest.mark.parametrize("inherited", [False, True], ids=["direct", "inherited"])
 def test_unresolved_operator_selection_is_not_lost_beside_a_checkout_config(
     container, tmp_path, monkeypatch, inherited
 ):
-    selection = "scanner_selection:\n  only_scanners: [bandit]\n"
+    selection = "default_scanners:\n  only: [bandit]\n"
     if inherited:
         (tmp_path / "base.yaml").write_text(selection, encoding="utf-8")
         selection = "extends: base.yaml\n"
@@ -435,7 +425,7 @@ def test_unresolved_operator_selection_is_not_lost_beside_a_checkout_config(
 
     assert container["runs"] == []
     assert result.exit_code == 3, result.output
-    assert "scanner_selection" in _words(result.output)
+    assert "default_scanners" in _words(result.output)
 
 
 def test_without_a_selection_an_image_that_may_differ_still_judges_its_schema(

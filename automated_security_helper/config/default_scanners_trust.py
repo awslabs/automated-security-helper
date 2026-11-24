@@ -7,8 +7,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, List, Optional, Sequence, Tuple
 
 from automated_security_helper.config.operator_only_options import (
-    SCANNER_SELECTION_FIELD,
-    SCANNER_SELECTION_KEYS,
+    DEFAULT_SCANNERS_FIELD,
+    DEFAULT_SCANNERS_KEYS,
     RepositorySettings,
 )
 from automated_security_helper.config.recorded_config import _sets
@@ -24,10 +24,10 @@ if TYPE_CHECKING:
 
 def _is_selection_override(override: str) -> bool:
     key = override.partition("=")[0].removesuffix("+").strip().split(".")[0]
-    return key.replace("-", "_") == SCANNER_SELECTION_FIELD
+    return key.replace("-", "_") == DEFAULT_SCANNERS_FIELD
 
 
-def confine_scanner_selection(
+def confine_default_scanners(
     config: "AshConfig",
     trusted_config: "AshConfig",
     config_overrides: Optional[Sequence[str]],
@@ -44,32 +44,32 @@ def confine_scanner_selection(
     if replayed:
         trusted_config = apply_config_overrides(trusted_config, replayed)
 
-    wanted = trusted_config.scanner_selection
+    wanted = trusted_config.default_scanners
     written = dict(repository.selection_written) if repository is not None else {}
     named: List[str] = []
-    for key in SCANNER_SELECTION_KEYS:
-        held = getattr(config.scanner_selection, key)
+    for key in DEFAULT_SCANNERS_KEYS:
+        held = getattr(config.default_scanners, key)
         trusted = getattr(wanted, key)
-        if (held != trusted and _sets(config, [SCANNER_SELECTION_FIELD, key])) or (
+        if (held != trusted and _sets(config, [DEFAULT_SCANNERS_FIELD, key])) or (
             key in written and _differs_from(written[key], trusted)
         ):
-            named.append(f"{SCANNER_SELECTION_FIELD}.{key}")
-    if SCANNER_SELECTION_FIELD in written:
-        named.append(SCANNER_SELECTION_FIELD)
-    if config.scanner_selection != wanted:
-        config.scanner_selection = wanted.model_copy(deep=True)
+            named.append(f"{DEFAULT_SCANNERS_FIELD}.{key}")
+    if DEFAULT_SCANNERS_FIELD in written:
+        named.append(DEFAULT_SCANNERS_FIELD)
+    if config.default_scanners != wanted:
+        config.default_scanners = wanted.model_copy(deep=True)
     if not named:
         return
     paths = ", ".join(named)
     files = ", ".join(describe_config_path(path) for path in in_tree)
     ASH_LOGGER.warning(
-        f"Ignoring {paths} from {files}: the default scanner selection is the "
+        f"Ignoring {paths} from {files}: the default scanners are the "
         f"operator's choice, and {source.reason}. The operator's selection, or "
         f"none, applies instead. {source.remedy}"
     )
 
 
-def ignored_scanner_selection(
+def ignored_default_scanners(
     trusted_config: "AshConfig",
     config_overrides: Optional[Sequence[str]],
     repository: RepositorySettings,
@@ -79,22 +79,22 @@ def ignored_scanner_selection(
     )
 
     replayed = [o for o in config_overrides or [] if _is_selection_override(o)]
-    wanted = trusted_config.scanner_selection
+    wanted = trusted_config.default_scanners
     if replayed:
         try:
-            wanted = apply_config_overrides(trusted_config, replayed).scanner_selection
+            wanted = apply_config_overrides(trusted_config, replayed).default_scanners
         except Exception:
             pass
     written = repository.selection_written
     ignored = [
-        f"{SCANNER_SELECTION_FIELD}.{key}"
-        for key in SCANNER_SELECTION_KEYS
+        f"{DEFAULT_SCANNERS_FIELD}.{key}"
+        for key in DEFAULT_SCANNERS_KEYS
         if key in written and _differs_from(written[key], getattr(wanted, key))
     ]
-    if SCANNER_SELECTION_FIELD in written:
-        ignored.append(SCANNER_SELECTION_FIELD)
+    if DEFAULT_SCANNERS_FIELD in written:
+        ignored.append(DEFAULT_SCANNERS_FIELD)
     unknown = [
-        f"{SCANNER_SELECTION_FIELD}.{key}"
+        f"{DEFAULT_SCANNERS_FIELD}.{key}"
         for key in dict.fromkeys(repository.selection_unknown)
     ]
     return ignored, unknown

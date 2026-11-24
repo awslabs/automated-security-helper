@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""What the docs say the operator's ``scanner_selection`` does, held to the code.
+"""What the docs say the operator's ``default_scanners`` does, held to the code.
 
 The trusted-config example on how-to/configure.md is read back from the page and
 resolved as an operator config, so the effective selection is what the page says.
@@ -33,7 +33,7 @@ pytestmark = [pytest.mark.unit, pytest.mark.live_tool_probes]
 
 CONFIGURE = "how-to/configure.md"
 PRE_COMMIT = "how-to/pre-commit.md"
-SECTION = "## Choose which scanners run by default {#scanner-selection}"
+SECTION = "## Choose which scanners run by default {#default-scanners}"
 
 
 def _example() -> str:
@@ -94,8 +94,8 @@ def test_the_example_is_an_operator_selection_of_two_scanners(operator: Path) ->
 
     config = resolve_config(config_path=operator, source_dir=source)
 
-    assert list(config.scanner_selection.only_scanners) == ["bandit", "trivy"]
-    assert list(config.scanner_selection.add_scanners) == []
+    assert list(config.default_scanners.only) == ["bandit", "trivy"]
+    assert list(config.default_scanners.add) == []
 
 
 def test_the_config_alone_selects_what_the_page_says(
@@ -129,6 +129,29 @@ def test_without_the_section_a_scan_selects_as_before(tmp_path: Path) -> None:
     )
 
 
+def test_only_replaces_the_default_in_precommit_and_in_local_mode(
+    tmp_path: Path, operator: Path
+) -> None:
+    assert _allowlist(tmp_path, operator, mode=RunMode.precommit) == [
+        "bandit",
+        "trivy",
+    ]
+    assert _allowlist(tmp_path, operator, mode=RunMode.local) == ["bandit", "trivy"]
+
+
+def test_add_extends_a_fixed_default_and_does_nothing_to_an_unbounded_one(
+    tmp_path: Path,
+) -> None:
+    config = tmp_path / "add.yaml"
+    config.write_text("default_scanners:\n  add: [grype]\n", encoding="utf-8")
+
+    assert _allowlist(tmp_path, config, mode=RunMode.precommit) == [
+        *PRECOMMIT_MODE_SCANNERS,
+        "grype",
+    ]
+    assert _allowlist(tmp_path, config, mode=RunMode.local) == []
+
+
 def test_a_selection_does_not_enable_a_disabled_scanner(
     tmp_path: Path, operator: Path
 ) -> None:
@@ -141,7 +164,7 @@ def test_a_selection_does_not_enable_a_disabled_scanner(
 
     resolved = resolve_config(config_path=config, source_dir=source)
 
-    assert list(resolved.scanner_selection.only_scanners) == ["bandit", "trivy"]
+    assert list(resolved.default_scanners.only) == ["bandit", "trivy"]
     assert resolved.scanners.trivy.enabled is False
 
 
@@ -150,37 +173,39 @@ def test_a_repository_config_cannot_set_it(tmp_path: Path, operator: Path) -> No
     mark_git_checkout(repo)
     (repo / ".ash").mkdir()
     (repo / ".ash" / ".ash.yaml").write_text(
-        "scanner_selection:\n  only_scanners: [checkov]\n", encoding="utf-8"
+        "default_scanners:\n  only: [checkov]\n", encoding="utf-8"
     )
 
     config = resolve_config(source_dir=repo)
 
-    assert list(config.scanner_selection.only_scanners) == []
+    assert list(config.default_scanners.only) == []
 
 
 def test_both_lists_at_once_are_refused() -> None:
     from pydantic import ValidationError
 
-    from automated_security_helper.config.ash_config import ScannerSelectionConfig
+    from automated_security_helper.config.ash_config import DefaultScannersConfig
 
     with pytest.raises(ValidationError):
-        ScannerSelectionConfig(only_scanners=["a"], add_scanners=["b"])
+        DefaultScannersConfig(only=["a"], add=["b"])
 
 
 @pytest.mark.parametrize(
     "sentence",
     [
-        "`only_scanners` replaces the mode's default selection in every mode.",
+        "`only` replaces the mode's default selection, and it does so in every mode",
+        "in a mode that runs every scanner unrestricted, `add` has no effect.",
+        "The `precommit` section is a different, narrower setting: only `--mode precommit` reads it.",
         "Naming both is refused with exit 3.",
-        "A `scanner_selection` in a config inside the scanned tree, or from an MCP client, is ignored with a warning",
+        "A `default_scanners` in a config inside the scanned tree, or from an MCP client, is ignored with a warning",
         "Selecting a scanner does not enable it or install its tool",
         "`--only-scanners` replaces it; `--add-scanners` and the deprecated `--scanners` add to it; `--exclude-scanners` applies last",
-        "Without a `scanner_selection`, nothing changes.",
+        "Without a `default_scanners`, nothing changes.",
         "every project runs the same selection, plus every scanner the workspace policy requires",
         "A nonempty `scanners` argument of the MCP workspace tool limits every project to those scanners and does not add to the default.",
         "Container mode needs an image built from this ASH release",
         "A trusted config that `extends` a file inside a checkout keeps the selection its own files write, and ignores the one that file writes.",
-        "`ash config lint` warns about a `scanner_selection` in a config inside the scanned tree, a key that is not `only_scanners` or `add_scanners` included, and still exits 0.",
+        "`ash config lint` warns about a `default_scanners` in a config inside the scanned tree, a key that is not `only` or `add` included, and still exits 0.",
         "A selection the host cannot resolve also ends the run with exit 3, before the container starts",
     ],
 )
@@ -191,14 +216,14 @@ def test_the_configure_page_says(sentence: str) -> None:
 def test_the_precommit_page_places_the_operator_selection_in_the_order() -> None:
     assert_on_page(
         PRE_COMMIT,
-        "The operator's `scanner_selection`, in a trusted config: `only_scanners` replaces the default set and `add_scanners` adds to it",
+        "The operator's `default_scanners`, in a trusted config: `only` replaces the default set and `add` adds to it",
     )
 
 
 def test_the_section_is_linked_from_the_precommit_page() -> None:
     text = (CONTENT / PRE_COMMIT).read_text(encoding="utf-8")
 
-    assert "(configure.md#scanner-selection)" in text
+    assert "(configure.md#default-scanners)" in text
 
 
 def test_the_example_block_is_a_checked_config_example() -> None:
@@ -206,4 +231,4 @@ def test_the_example_block_is_a_checked_config_example() -> None:
     start = text.index(SECTION)
 
     assert "<!-- doctest: config kind=ash -->" in text[start : start + 2000]
-    assert yaml.safe_load(_example())["scanner_selection"]["only_scanners"]
+    assert yaml.safe_load(_example())["default_scanners"]["only"]

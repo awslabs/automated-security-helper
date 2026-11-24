@@ -69,26 +69,26 @@ _SELECTION_NAMES: Dict[str, SelectionNames] = {
         drop_one="Drop one of the two.",
     ),
     "cli+config": SelectionNames(
-        allowlist="--scanners and scanner_selection in the ASH config",
+        allowlist="--scanners and default_scanners in the ASH config",
         exclusion="--exclude-scanners",
         drop_one=(
-            "Drop the exclusion, or change the flags or scanner_selection in the "
+            "Drop the exclusion, or change the flags or default_scanners in the "
             "operator's ASH config."
         ),
     ),
     "mcp-config": SelectionNames(
-        allowlist="scanner_selection in the ASH config",
+        allowlist="default_scanners in the ASH config",
         exclusion="the excluded_scanners parameter",
         drop_one=(
-            "Drop the exclusion, or change scanner_selection in the operator's "
+            "Drop the exclusion, or change default_scanners in the operator's "
             "ASH config."
         ),
     ),
     "config": SelectionNames(
-        allowlist="scanner_selection in the ASH config",
+        allowlist="default_scanners in the ASH config",
         exclusion="--exclude-scanners",
         drop_one=(
-            "Drop the exclusion, or change scanner_selection in the operator's "
+            "Drop the exclusion, or change default_scanners in the operator's "
             "ASH config."
         ),
     ),
@@ -395,14 +395,14 @@ def refuse_unmet_selection_marker(
         ok = False
     if not ok:
         raise ASHConfigValidationError(
-            "The scanner_selection check this scan was asked to make is not "
+            "The default_scanners check this scan was asked to make is not "
             "readable, so no scanner was started."
         )
     if json.loads(selection_marker(wanted["only"], wanted["add"])) != json.loads(
         selection_marker(only, add)
     ):
         raise ASHConfigValidationError(
-            "The scanner_selection this scan settled differs from the one the "
+            "The default_scanners this scan settled differs from the one the "
             "host read from the operator's config, so no scanner was started. "
             "The operator's config may not be mounted in the container, or the "
             "image reads it differently."

@@ -105,8 +105,8 @@ from automated_security_helper.config.restrictions_kept import keep_restrictions
 from automated_security_helper.config.secret_verification_trust import (
     confine_detect_secrets_settings,
 )
-from automated_security_helper.config.scanner_selection_trust import (
-    confine_scanner_selection,
+from automated_security_helper.config.default_scanners_trust import (
+    confine_default_scanners,
 )
 from automated_security_helper.config.staleness_trust import (
     confine_content_db_staleness,
@@ -2965,7 +2965,7 @@ def resolve_config(
             )
         )
     selection_chains.append((view_chain, in_tree, reads, environment_paths, view_roots))
-    confine_scanner_selection(
+    confine_default_scanners(
         config,
         _with_operator_chain_selection(trusted, selection_chains),
         tier_two_overrides,
@@ -4139,10 +4139,10 @@ def _operator_chain_selection_writes(
 ) -> Optional[Dict[str, Any]]:
     from automated_security_helper.config.config_sources import PATCH_KEY, deep_merge
     from automated_security_helper.config.operator_only_options import (
-        SCANNER_SELECTION_FIELD,
+        DEFAULT_SCANNERS_FIELD,
     )
 
-    pointer = f"/{SCANNER_SELECTION_FIELD}"
+    pointer = f"/{DEFAULT_SCANNERS_FIELD}"
     merged: Any = None
     for file in _operator_chain_occurrences(
         chain, repository_files, reads, environment_paths, warn=False, roots=roots
@@ -4150,10 +4150,10 @@ def _operator_chain_selection_writes(
         own = reads.get(Path(file).resolve())
         if not isinstance(own, dict):
             continue
-        if SCANNER_SELECTION_FIELD in own:
+        if DEFAULT_SCANNERS_FIELD in own:
             merged = deep_merge(
                 {} if merged is None else merged,
-                copy.deepcopy(own[SCANNER_SELECTION_FIELD]),
+                copy.deepcopy(own[DEFAULT_SCANNERS_FIELD]),
             )
         ops = own.get(PATCH_KEY)
         if not any(
@@ -4168,7 +4168,7 @@ def _operator_chain_selection_writes(
             ops,
             lambda key: key,
             lambda value: value,
-            section=SCANNER_SELECTION_FIELD,
+            section=DEFAULT_SCANNERS_FIELD,
         )
     if merged is None:
         return None
@@ -4178,7 +4178,7 @@ def _operator_chain_selection_writes(
 def _with_operator_chain_selection(
     trusted: AshConfig, chains: Sequence[_SelectionChain]
 ) -> AshConfig:
-    from automated_security_helper.config.ash_config import ScannerSelectionConfig
+    from automated_security_helper.config.ash_config import DefaultScannersConfig
 
     selection: Optional[Dict[str, Any]] = None
     for chain in chains:
@@ -4189,10 +4189,10 @@ def _with_operator_chain_selection(
         return trusted
     operator = trusted.model_copy(deep=True)
     try:
-        operator.scanner_selection = ScannerSelectionConfig.model_validate(selection)
+        operator.default_scanners = DefaultScannersConfig.model_validate(selection)
     except ValidationError as exc:
         raise ASHConfigValidationError(
-            f"The operator's scanner_selection does not load: {error_text(exc)}"
+            f"The operator's default_scanners does not load: {error_text(exc)}"
         ) from None
     return operator
 

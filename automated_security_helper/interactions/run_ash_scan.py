@@ -5163,7 +5163,7 @@ def _resolved_precommit_config(opts: ScanOptions):
 
 
 def _selection_layers(opts: ScanOptions, logger) -> SelectionLayers:
-    """The selection layers except the operator's ``scanner_selection``, which
+    """The selection layers except the operator's ``default_scanners``, which
     the orchestrator folds in from its settled config."""
     additive = list(opts.scanners or []) + list(opts.add_scanners or [])
     if opts.only_scanners is not None:
@@ -5202,10 +5202,10 @@ def _operator_documents_may_select(opts: ScanOptions, selected_document: Any) ->
         default_config_document_for_tree,
     )
     from automated_security_helper.config.operator_only_options import (
-        SCANNER_SELECTION_FIELD,
-        SCANNER_SELECTION_KEYS,
+        DEFAULT_SCANNERS_FIELD,
+        DEFAULT_SCANNERS_KEYS,
     )
-    from automated_security_helper.config.scanner_selection_trust import (
+    from automated_security_helper.config.default_scanners_trust import (
         _is_selection_override,
     )
 
@@ -5221,10 +5221,10 @@ def _operator_documents_may_select(opts: ScanOptions, selected_document: Any) ->
         for document in (default_document, selected_document):
             if document is None:
                 continue
-            section = document.data.get(SCANNER_SELECTION_FIELD)
+            section = document.data.get(DEFAULT_SCANNERS_FIELD)
             if section is not None and (
                 not isinstance(section, dict)
-                or any(section.get(key) for key in SCANNER_SELECTION_KEYS)
+                or any(section.get(key) for key in DEFAULT_SCANNERS_KEYS)
             ):
                 return True
     except Exception:
@@ -5246,19 +5246,19 @@ def _container_selection(
     try:
         if opts.workspace_plan is not None:
             from automated_security_helper.workspace.execution import (
-                workspace_scanner_selection,
+                workspace_default_scanners,
             )
 
-            settled = workspace_scanner_selection(
+            settled = workspace_default_scanners(
                 opts.workspace_plan, build_project_scan_settings(opts)
             )
             only, add = list(settled[0]), list(settled[1])
         else:
-            section = _config_as_the_scan_resolves_it(opts).scanner_selection
-            only, add = list(section.only_scanners), list(section.add_scanners)
+            section = _config_as_the_scan_resolves_it(opts).default_scanners
+            only, add = list(section.only), list(section.add)
     except Exception as exc:
         refusal = ASHConfigValidationError(
-            "The scanner_selection the scan would use could not be resolved on "
+            "The default_scanners the scan would use could not be resolved on "
             f"the host, so no container was started: {error_text(exc)}"
         )
         try:
@@ -5594,12 +5594,12 @@ def _run_local_mode(
         )
         if opts.required_scanner_selection is not None:
             settled = getattr(
-                getattr(orchestrator, "config", None), "scanner_selection", None
+                getattr(orchestrator, "config", None), "default_scanners", None
             )
             refuse_unmet_selection_marker(
                 opts.required_scanner_selection,
-                getattr(settled, "only_scanners", ()),
-                getattr(settled, "add_scanners", ()),
+                getattr(settled, "only", ()),
+                getattr(settled, "add", ()),
             )
         if opts.baseline_data is not None:
             orchestrator.restrict_to_baseline(opts.baseline_data)

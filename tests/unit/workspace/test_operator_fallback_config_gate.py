@@ -110,7 +110,7 @@ def test_a_project_without_a_config_resolves_under_the_operators_file(layout) ->
 def test_the_operators_selection_settles_for_the_preflight(layout) -> None:
     operator = layout["operator"]
     operator.write_text(
-        "project_name: operator\nscanner_selection:\n  only_scanners: [bandit]\n",
+        "project_name: operator\ndefault_scanners:\n  only: [bandit]\n",
         encoding="utf-8",
     )
     plan = _plan(layout, operator, operator)
@@ -125,7 +125,7 @@ def test_the_operators_selection_settles_for_the_preflight(layout) -> None:
 def test_an_explicit_mcp_selection_stays_a_limit(layout) -> None:
     operator = layout["operator"]
     operator.write_text(
-        "project_name: operator\nscanner_selection:\n  only_scanners: [bandit]\n",
+        "project_name: operator\ndefault_scanners:\n  only: [bandit]\n",
         encoding="utf-8",
     )
     plan = _plan(layout, operator, operator)

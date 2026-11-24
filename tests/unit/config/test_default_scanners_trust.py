@@ -3,11 +3,11 @@
 
 """The default scanner selection is the operator's, never the scanned repository's.
 
-``scanner_selection.only_scanners`` and ``scanner_selection.add_scanners`` are
+``default_scanners.only`` and ``default_scanners.add`` are
 read from the defaults, a config file outside every checkout, or
 ``--config-overrides``. A file inside the scanned tree, an ``extends`` link in a
 checkout, or a client's patched session copy cannot replace or erase them
-(``config/scanner_selection_trust.py``), and a client patch to the section is
+(``config/default_scanners_trust.py``), and a client patch to the section is
 refused whatever the profile allows.
 """
 
@@ -24,7 +24,7 @@ from pydantic import ValidationError
 from automated_security_helper.config.ash_config import (
     ALWAYS_DENIED_PATHS,
     AshConfig,
-    ScannerSelectionConfig,
+    DefaultScannersConfig,
 )
 from automated_security_helper.config.config_validator import ConfigValidator
 from automated_security_helper.config.resolve_config import resolve_config
@@ -80,7 +80,7 @@ def _write(path: Path, document: Dict[str, Any]) -> Path:
 
 
 def _selecting(*names: str) -> Dict[str, Any]:
-    return {"scanner_selection": {"only_scanners": list(names)}}
+    return {"default_scanners": {"only": list(names)}}
 
 
 def _repo(tmp_path: Path, document: Dict[str, Any]) -> Path:
@@ -95,11 +95,11 @@ def _operator(tmp_path: Path, document: Dict[str, Any]) -> Path:
 
 
 def _only(config: AshConfig) -> List[str]:
-    return list(config.scanner_selection.only_scanners)
+    return list(config.default_scanners.only)
 
 
 def _add(config: AshConfig) -> List[str]:
-    return list(config.scanner_selection.add_scanners)
+    return list(config.default_scanners.add)
 
 
 class TestModel:
@@ -110,25 +110,23 @@ class TestModel:
         assert _add(config) == []
 
     def test_each_list_alone_is_accepted(self) -> None:
-        assert ScannerSelectionConfig(only_scanners=["bandit"]).only_scanners == [
-            "bandit"
-        ]
-        assert ScannerSelectionConfig(add_scanners=["trivy"]).add_scanners == ["trivy"]
+        assert DefaultScannersConfig(only=["bandit"]).only == ["bandit"]
+        assert DefaultScannersConfig(add=["trivy"]).add == ["trivy"]
 
     def test_both_lists_at_once_are_refused(self) -> None:
         with pytest.raises(ValidationError, match="cannot be set together"):
-            ScannerSelectionConfig(only_scanners=["bandit"], add_scanners=["trivy"])
+            DefaultScannersConfig(only=["bandit"], add=["trivy"])
 
     def test_an_unknown_key_is_refused(self) -> None:
         with pytest.raises(ValidationError):
-            ScannerSelectionConfig(only_scanner=["bandit"])  # type: ignore[call-arg]
+            DefaultScannersConfig(only_scanner=["bandit"])  # type: ignore[call-arg]
 
     def test_the_section_is_a_known_top_level_key(self) -> None:
-        assert "scanner_selection" in ConfigValidator.VALID_TOP_LEVEL_FIELDS
+        assert "default_scanners" in ConfigValidator.VALID_TOP_LEVEL_FIELDS
 
     def test_a_client_may_not_patch_the_section_or_its_children(self) -> None:
-        assert "/scanner_selection" in ALWAYS_DENIED_PATHS
-        assert "/scanner_selection/**" in ALWAYS_DENIED_PATHS
+        assert "/default_scanners" in ALWAYS_DENIED_PATHS
+        assert "/default_scanners/**" in ALWAYS_DENIED_PATHS
 
 
 class TestResolution:
@@ -151,7 +149,7 @@ class TestResolution:
         repo = _repo(tmp_path, {})
         operator = _operator(
             tmp_path,
-            {"scanner_selection": {"only_scanners": ["bandit"], "add_scanners": ["x"]}},
+            {"default_scanners": {"only": ["bandit"], "add": ["x"]}},
         )
 
         with pytest.raises(ASHConfigValidationError):
@@ -162,7 +160,7 @@ class TestResolution:
 
         config = resolve_config(
             source_dir=repo,
-            config_overrides=['scanner_selection.only_scanners=["bandit"]'],
+            config_overrides=['default_scanners.only=["bandit"]'],
         )
 
         assert _only(config) == ["bandit"]
@@ -175,16 +173,14 @@ class TestResolution:
 
         config = resolve_config(
             source_dir=repo,
-            config_overrides=['scanner_selection.only_scanners=["checkov"]'],
+            config_overrides=['default_scanners.only=["checkov"]'],
         )
 
         assert _only(config) == ["checkov"]
 
     def test_an_operator_add_list_resolves(self, tmp_path: Path) -> None:
         repo = _repo(tmp_path, {})
-        operator = _operator(
-            tmp_path, {"scanner_selection": {"add_scanners": ["trivy"]}}
-        )
+        operator = _operator(tmp_path, {"default_scanners": {"add": ["trivy"]}})
 
         config = resolve_config(config_path=operator, source_dir=repo)
 
@@ -207,7 +203,7 @@ class TestARepositoryCannotChangeTheOperatorsSelection:
         config = resolve_config(source_dir=repo)
 
         assert _only(config) == ["bandit"]
-        assert _warnings_naming(ash_log, "scanner_selection")
+        assert _warnings_naming(ash_log, "default_scanners")
 
     def test_a_named_checkout_file_cannot_replace_it(
         self, tmp_path: Path, operator_base: Path, ash_log
@@ -219,19 +215,19 @@ class TestARepositoryCannotChangeTheOperatorsSelection:
         )
 
         assert _only(config) == ["bandit"]
-        assert _warnings_naming(ash_log, "scanner_selection")
+        assert _warnings_naming(ash_log, "default_scanners")
 
     def test_a_checkout_file_cannot_erase_it(
         self, tmp_path: Path, operator_base: Path
     ) -> None:
-        repo = _repo(tmp_path, {"scanner_selection": {}})
+        repo = _repo(tmp_path, {"default_scanners": {}})
 
         assert _only(resolve_config(source_dir=repo)) == ["bandit"]
 
     def test_a_checkout_file_cannot_swap_it_for_an_add_list(
         self, tmp_path: Path, operator_base: Path
     ) -> None:
-        repo = _repo(tmp_path, {"scanner_selection": {"add_scanners": ["trivy"]}})
+        repo = _repo(tmp_path, {"default_scanners": {"add": ["trivy"]}})
 
         config = resolve_config(source_dir=repo)
 
@@ -246,7 +242,7 @@ class TestARepositoryCannotChangeTheOperatorsSelection:
         config = resolve_config(source_dir=repo)
 
         assert _only(config) == ["bandit"]
-        assert not _warnings_naming(ash_log, "scanner_selection")
+        assert not _warnings_naming(ash_log, "default_scanners")
 
     def test_an_untrusted_extends_link_cannot_replace_it(
         self, tmp_path: Path, operator_base: Path
@@ -281,7 +277,7 @@ class TestARepositoryCannotChangeTheOperatorsSelection:
 
         config = resolve_config(
             source_dir=repo,
-            config_overrides=['scanner_selection.only_scanners=["checkov"]'],
+            config_overrides=['default_scanners.only=["checkov"]'],
         )
 
         assert _only(config) == ["checkov"]
@@ -294,7 +290,7 @@ class TestARepositoryCannotChangeTheOperatorsSelection:
         config = resolve_config(source_dir=repo)
 
         assert _only(config) == []
-        assert _warnings_naming(ash_log, "scanner_selection")
+        assert _warnings_naming(ash_log, "default_scanners")
 
 
 class TestTheWarningNamesOnlyWhatARepositoryWrote:
@@ -312,7 +308,7 @@ class TestTheWarningNamesOnlyWhatARepositoryWrote:
         config = resolve_config(source_dir=repo)
 
         assert _only(config) == ["bandit"]
-        assert not _warnings_naming(ash_log, "scanner_selection")
+        assert not _warnings_naming(ash_log, "default_scanners")
 
     def test_a_named_checkout_file_without_the_section_draws_no_warning(
         self, tmp_path: Path, operator_base: Path, ash_log
@@ -324,7 +320,7 @@ class TestTheWarningNamesOnlyWhatARepositoryWrote:
         )
 
         assert _only(config) == ["bandit"]
-        assert not _warnings_naming(ash_log, "scanner_selection")
+        assert not _warnings_naming(ash_log, "default_scanners")
 
     def test_the_warning_names_the_one_key_the_file_wrote_once(
         self, tmp_path: Path, operator_base: Path, ash_log
@@ -333,22 +329,22 @@ class TestTheWarningNamesOnlyWhatARepositoryWrote:
 
         resolve_config(source_dir=repo)
 
-        said = _warnings_naming(ash_log, "scanner_selection")
+        said = _warnings_naming(ash_log, "default_scanners")
         assert len(said) == 1
-        assert said[0].count("scanner_selection.only_scanners") == 1
-        assert "add_scanners" not in said[0]
+        assert said[0].count("default_scanners.only") == 1
+        assert "default_scanners.add" not in said[0]
 
     def test_a_file_that_wrote_an_add_list_is_named_by_that_key_only(
         self, tmp_path: Path, operator_base: Path, ash_log
     ) -> None:
-        repo = _repo(tmp_path, {"scanner_selection": {"add_scanners": ["trivy"]}})
+        repo = _repo(tmp_path, {"default_scanners": {"add": ["trivy"]}})
 
         resolve_config(source_dir=repo)
 
-        said = _warnings_naming(ash_log, "scanner_selection")
+        said = _warnings_naming(ash_log, "default_scanners")
         assert len(said) == 1
-        assert said[0].count("scanner_selection.add_scanners") == 1
-        assert "only_scanners" not in said[0]
+        assert said[0].count("default_scanners.add") == 1
+        assert "default_scanners.only" not in said[0]
 
     def test_an_extends_chain_naming_the_key_in_two_files_names_it_once(
         self, tmp_path: Path, operator_base: Path, ash_log
@@ -362,18 +358,18 @@ class TestTheWarningNamesOnlyWhatARepositoryWrote:
 
         resolve_config(source_dir=repo)
 
-        said = _warnings_naming(ash_log, "scanner_selection")
+        said = _warnings_naming(ash_log, "default_scanners")
         assert len(said) == 1
-        assert said[0].count("scanner_selection.only_scanners") == 1
+        assert said[0].count("default_scanners.only") == 1
 
 
 class TestAnOperatorOverrideIsNotBlockedByAnIgnoredFile:
     def test_an_only_override_over_a_checkout_add_list(self, tmp_path: Path) -> None:
-        repo = _repo(tmp_path, {"scanner_selection": {"add_scanners": ["trivy"]}})
+        repo = _repo(tmp_path, {"default_scanners": {"add": ["trivy"]}})
 
         config = resolve_config(
             source_dir=repo,
-            config_overrides=['scanner_selection.only_scanners=["bandit"]'],
+            config_overrides=['default_scanners.only=["bandit"]'],
         )
 
         assert _only(config) == ["bandit"]
@@ -384,7 +380,7 @@ class TestAnOperatorOverrideIsNotBlockedByAnIgnoredFile:
 
         config = resolve_config(
             source_dir=repo,
-            config_overrides=['scanner_selection.add_scanners=["checkov"]'],
+            config_overrides=['default_scanners.add=["checkov"]'],
         )
 
         assert _add(config) == ["checkov"]
@@ -395,7 +391,7 @@ class TestAnOperatorOverrideIsNotBlockedByAnIgnoredFile:
     ) -> None:
         repo = _repo(
             tmp_path,
-            {"scanner_selection": {"only_scanners": ["a"], "add_scanners": ["b"]}},
+            {"default_scanners": {"only": ["a"], "add": ["b"]}},
         )
 
         config = resolve_config(source_dir=repo)
@@ -413,7 +409,7 @@ class TestAnOperatorOverrideIsNotBlockedByAnIgnoredFile:
             resolve_config(
                 config_path=operator,
                 source_dir=repo,
-                config_overrides=['scanner_selection.add_scanners=["checkov"]'],
+                config_overrides=['default_scanners.add=["checkov"]'],
             )
 
     def test_the_override_still_conflicts_with_the_operators_ash_config(
@@ -425,7 +421,7 @@ class TestAnOperatorOverrideIsNotBlockedByAnIgnoredFile:
         with pytest.raises(ASHConfigValidationError, match="cannot be set together"):
             resolve_config(
                 source_dir=repo,
-                config_overrides=['scanner_selection.add_scanners=["checkov"]'],
+                config_overrides=['default_scanners.add=["checkov"]'],
             )
 
 
@@ -484,7 +480,7 @@ class TestAnOperatorFileExtendingACheckoutFileKeepsItsSelection:
 
         assert _only(config) == ["bandit"]
         assert _add(config) == []
-        said = _warnings_naming(ash_log, "scanner_selection")
+        said = _warnings_naming(ash_log, "default_scanners")
         if checkout == "checkout-asking-for-trivy":
             assert len(said) == 1
             assert "base.yaml" in said[0]
@@ -499,7 +495,7 @@ class TestAnOperatorFileExtendingACheckoutFileKeepsItsSelection:
         repo, operator = _mixed(
             tmp_path,
             _selecting("trivy"),
-            {"scanner_selection": {"add_scanners": ["checkov"]}},
+            {"default_scanners": {"add": ["checkov"]}},
         )
 
         config = _resolved_by(source, operator, repo, monkeypatch)
@@ -538,7 +534,7 @@ class TestAnOperatorFileExtendingACheckoutFileKeepsItsSelection:
                 "patch": [
                     {
                         "op": "add",
-                        "path": "/scanner_selection/only_scanners/-",
+                        "path": "/default_scanners/only/-",
                         "value": "bandit",
                     }
                 ]
@@ -559,7 +555,7 @@ class TestAnOperatorFileExtendingACheckoutFileKeepsItsSelection:
         config = resolve_config(
             config_path=operator,
             source_dir=repo,
-            config_overrides=['scanner_selection.only_scanners=["checkov"]'],
+            config_overrides=['default_scanners.only=["checkov"]'],
         )
 
         assert _only(config) == ["checkov"]
@@ -578,7 +574,7 @@ class TestAnOperatorFileExtendingACheckoutFileKeepsItsSelection:
 
         assert _only(config) == []
         assert _add(config) == []
-        assert len(_warnings_naming(ash_log, "scanner_selection")) == 1
+        assert len(_warnings_naming(ash_log, "default_scanners")) == 1
 
     def test_ash_config_s_list_stands_beside_a_discovered_checkout_config(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ash_log
@@ -592,7 +588,7 @@ class TestAnOperatorFileExtendingACheckoutFileKeepsItsSelection:
         config = resolve_config(source_dir=repo)
 
         assert _only(config) == ["bandit"]
-        assert _warnings_naming(ash_log, "scanner_selection") == []
+        assert _warnings_naming(ash_log, "default_scanners") == []
 
     def test_ash_config_s_list_stands_under_a_named_checkout_config_asking_for_trivy(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ash_log
@@ -606,7 +602,7 @@ class TestAnOperatorFileExtendingACheckoutFileKeepsItsSelection:
         config = resolve_config(config_path=named, source_dir=repo)
 
         assert _only(config) == ["bandit"]
-        assert len(_warnings_naming(ash_log, "scanner_selection")) == 1
+        assert len(_warnings_naming(ash_log, "default_scanners")) == 1
 
     def test_a_named_operator_file_over_a_mixed_ash_config_replaces_its_list(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -616,7 +612,7 @@ class TestAnOperatorFileExtendingACheckoutFileKeepsItsSelection:
         )
         named = _write(
             tmp_path / "named" / "ash.yaml",
-            {"scanner_selection": {"add_scanners": ["checkov"]}},
+            {"default_scanners": {"add": ["checkov"]}},
         )
         monkeypatch.setenv("ASH_CONFIG", str(operator))
 
@@ -644,8 +640,8 @@ class TestAClientPatchIsRefused:
                         "runtime_overrides": {
                             "enabled": True,
                             "allowed_paths": [
-                                "/scanner_selection",
-                                "/scanner_selection/**",
+                                "/default_scanners",
+                                "/default_scanners/**",
                             ],
                             "denied_paths": [],
                         }
@@ -667,16 +663,16 @@ class TestAClientPatchIsRefused:
         [
             {
                 "op": "replace",
-                "path": "/scanner_selection/only_scanners",
+                "path": "/default_scanners/only",
                 "value": ["trivy"],
             },
             {
                 "op": "add",
-                "path": "/scanner_selection/add_scanners",
+                "path": "/default_scanners/add",
                 "value": ["trivy"],
             },
-            {"op": "remove", "path": "/scanner_selection/only_scanners"},
-            {"op": "replace", "path": "/scanner_selection", "value": {}},
+            {"op": "remove", "path": "/default_scanners/only"},
+            {"op": "replace", "path": "/default_scanners", "value": {}},
         ],
     )
     def test_a_patch_is_refused_even_when_the_profile_allows_the_path(
@@ -687,7 +683,7 @@ class TestAClientPatchIsRefused:
         result = mcp_select_profile("op", patch_ops=[op], session_id="session-a")
 
         assert result["success"] is False
-        assert "scanner_selection" in str(result.get("error"))
+        assert "default_scanners" in str(result.get("error"))
 
     def test_the_operators_selection_still_reads_through_the_session(
         self, session
@@ -713,7 +709,7 @@ class TestAClientPatchIsRefused:
         operator = Path(session.resolve_session_trusted_config_path("session-a") or "")
         client = operator.parent.parent / "client-config" / "ash.yaml"
         document = yaml.safe_load(operator.read_text(encoding="utf-8"))
-        document["scanner_selection"] = {"only_scanners": ["trivy"]}
+        document["default_scanners"] = {"only": ["trivy"]}
         _write(client, document)
 
         with pytest.raises(ASHConfigFieldDeniedError):
@@ -737,39 +733,39 @@ class TestTheLinterAgreesWithTheScan:
         "section",
         [
             {"only_scanner": ["bandit"]},
-            {"only_scanners": ["a"], "add_scanners": ["b"]},
+            {"only": ["a"], "add": ["b"]},
         ],
         ids=["unknown-subkey", "both-lists"],
     )
     def test_an_operator_file_with_a_bad_section_is_reported_as_blocking(
         self, tmp_path: Path, section: Dict[str, Any]
     ) -> None:
-        operator = _operator(tmp_path, {"scanner_selection": section})
+        operator = _operator(tmp_path, {"default_scanners": section})
         source = tmp_path / "src"
         source.mkdir()
 
         result = self._lint("--config", str(operator), "--source-dir", str(source))
 
-        assert "scanner_selection" in result.output
+        assert "default_scanners" in result.output
         assert "blocks the scan" in result.output
 
     @pytest.mark.parametrize(
         "section",
         [
             {"only_scanner": ["bandit"]},
-            {"only_scanners": ["a"], "add_scanners": ["b"]},
+            {"only": ["a"], "add": ["b"]},
         ],
         ids=["unknown-subkey", "both-lists"],
     )
     def test_a_repository_file_with_a_bad_section_is_ignored_not_a_veto(
         self, tmp_path: Path, section: Dict[str, Any]
     ) -> None:
-        repo = _repo(tmp_path, {"scanner_selection": section})
+        repo = _repo(tmp_path, {"default_scanners": section})
 
         scanned = resolve_config(source_dir=repo)
         result = self._lint("--source-dir", str(repo))
 
-        assert list(scanned.scanner_selection.only_scanners) == []
+        assert list(scanned.default_scanners.only) == []
         assert "blocks the scan" not in result.output, result.output
 
     @staticmethod
@@ -780,7 +776,7 @@ class TestTheLinterAgreesWithTheScan:
         self, tmp_path: Path
     ) -> None:
         repo = _repo(
-            tmp_path, {"scanner_selection": {"only_scanner": ["zz-secret-value"]}}
+            tmp_path, {"default_scanners": {"only_scanner": ["zz-secret-value"]}}
         )
 
         result = self._lint("--source-dir", str(repo))
@@ -788,8 +784,8 @@ class TestTheLinterAgreesWithTheScan:
 
         assert result.exit_code == 0, result.output
         assert "blocks the scan" not in said
-        assert "scanner_selection.only_scanner is not a scanner_selection key" in said
-        assert "a scan ignores the scanner_selection section" in said
+        assert "default_scanners.only_scanner is not a default_scanners key" in said
+        assert "a scan ignores the default_scanners section" in said
         assert "zz-secret-value" not in said
 
     def test_a_repository_list_a_scan_ignores_is_a_warning(
@@ -802,7 +798,7 @@ class TestTheLinterAgreesWithTheScan:
 
         assert result.exit_code == 0, result.output
         assert (
-            "scanner_selection.only_scanners is set in a config file inside the "
+            "default_scanners.only is set in a config file inside the "
             "scanned tree, and a scan ignores that value"
         ) in said
         assert "trivy" not in said
@@ -816,7 +812,7 @@ class TestTheLinterAgreesWithTheScan:
         result = self._lint("--source-dir", str(repo))
 
         assert result.exit_code == 0, result.output
-        assert "scanner_selection" not in result.output
+        assert "default_scanners" not in result.output
 
     def test_a_repository_file_without_the_section_is_quiet(
         self, tmp_path: Path
@@ -826,7 +822,7 @@ class TestTheLinterAgreesWithTheScan:
         result = self._lint("--source-dir", str(repo))
 
         assert result.exit_code == 0, result.output
-        assert "scanner_selection" not in result.output
+        assert "default_scanners" not in result.output
 
 
 class TestTheReferenceQualifiesUnknownKeys:
@@ -840,8 +836,8 @@ class TestTheReferenceQualifiesUnknownKeys:
             / "reference"
             / "configuration.md"
         ).read_text(encoding="utf-8")
-        section = text[text.index('<a id="section-scanner_selection">') :]
-        section = section[: section.index("<!-- doctest: options of=scanner_selection")]
+        section = text[text.index('<a id="section-default_scanners">') :]
+        section = section[: section.index("<!-- doctest: options of=default_scanners")]
         said = " ".join(section.split())
 
         assert (

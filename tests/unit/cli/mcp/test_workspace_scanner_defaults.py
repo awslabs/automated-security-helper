@@ -75,9 +75,7 @@ def workspace(tmp_path: Path):
     )
     operator = tmp_path / "operator" / "ash.yaml"
     operator.parent.mkdir()
-    operator.write_text(
-        "scanner_selection:\n  only_scanners: [bandit]\n", encoding="utf-8"
-    )
+    operator.write_text("default_scanners:\n  only: [bandit]\n", encoding="utf-8")
     plan = resolve_workspace(root / "dev.code-workspace", default_config=str(operator))
     return plan, str(operator)
 
@@ -171,7 +169,7 @@ def test_a_cancelled_config_selection_names_the_mcp_parameters(workspace):
         refuse_unresolvable_scanner_selection(plan, settings)
 
     text = str(refusal.value)
-    assert "scanner_selection in the ASH config" in text
+    assert "default_scanners in the ASH config" in text
     assert "the excluded_scanners parameter" in text
     assert "--exclude-scanners" not in text
 

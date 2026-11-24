@@ -937,8 +937,8 @@ def test_a_config_only_selection_sends_no_selection_flag_across_the_nix_boundary
 
 
 def test_the_config_overrides_that_select_cross_the_nix_boundary(launched, tmp_path):
-    _run(tmp_path, config_overrides=["scanner_selection.only_scanners=[bandit]"])
+    _run(tmp_path, config_overrides=["default_scanners.only=[bandit]"])
 
     assert _after_flag(launched["argv"], "--config-overrides") == [
-        "scanner_selection.only_scanners=[bandit]"
+        "default_scanners.only=[bandit]"
     ]

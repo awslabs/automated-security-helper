@@ -1510,7 +1510,7 @@ def run_ash_scan_cli_command(
         typer.Option(
             "--require-scanner-selection",
             hidden=True,
-            help='Refuse to scan unless the scanner_selection this scan settles equals this JSON document ({"only": [...], "add": [...]}, names lower-cased). Container mode passes it, with the lists it read on the host, when the selection comes from the operator\'s config, so an image built from an ASH that does not know it rejects the command and an image that lost the mounted config refuses before any scanner runs.',
+            help='Refuse to scan unless the default_scanners this scan settles equals this JSON document ({"only": [...], "add": [...]}, names lower-cased). Container mode passes it, with the lists it read on the host, when the selection comes from the operator\'s config, so an image built from an ASH that does not know it rejects the command and an image that lost the mounted config refuses before any scanner runs.',
         ),
     ] = None,
     ash_config_from_host: Annotated[

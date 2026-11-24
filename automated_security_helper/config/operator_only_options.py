@@ -124,8 +124,8 @@ if TYPE_CHECKING:
         EnvironmentReference,
     )
 
-SCANNER_SELECTION_FIELD = "scanner_selection"
-SCANNER_SELECTION_KEYS = ("only_scanners", "add_scanners")
+DEFAULT_SCANNERS_FIELD = "default_scanners"
+DEFAULT_SCANNERS_KEYS = ("only", "add")
 
 #: Reporter section name -> the options in it only the operator may set.
 OPERATOR_ONLY_OPTIONS: Dict[str, Tuple[str, ...]] = {
@@ -401,7 +401,7 @@ class RepositorySettings:
     document the file resolved to without any option in OPERATOR_ONLY_OPTIONS
     or OPERATOR_ONLY_SCANNER_OPTIONS, under any section spelling the
     configuration reads as that plugin's, and without the top-level
-    ``scanner_selection`` section, and records what it left out. The
+    ``default_scanners`` section, and records what it left out. The
     document a file resolved to holds what its own bases set and what its
     ``patch`` wrote, so those are left out too. Every value is left out, one
     the option's model would refuse included, so what the repository writes for
@@ -498,7 +498,7 @@ class RepositorySettings:
         *data* itself when it has none."""
         if not isinstance(data, dict):
             return data
-        data = self._without_scanner_selection(data)
+        data = self._without_default_scanners(data)
         places = [
             (kind, plugin, key, option)
             for kind, listed, sections_of in _CONFINED_KINDS
@@ -528,21 +528,21 @@ class RepositorySettings:
             self.found.append((kind, plugin, key, option, value))
         return stripped
 
-    def _without_scanner_selection(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        if SCANNER_SELECTION_FIELD not in data:
+    def _without_default_scanners(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        if DEFAULT_SCANNERS_FIELD not in data:
             return data
-        section = data[SCANNER_SELECTION_FIELD]
+        section = data[DEFAULT_SCANNERS_FIELD]
         if isinstance(section, dict):
-            for name in SCANNER_SELECTION_KEYS:
+            for name in DEFAULT_SCANNERS_KEYS:
                 if name in section:
                     self.selection_written[name] = section[name]
             for name in section:
-                if name not in SCANNER_SELECTION_KEYS:
+                if name not in DEFAULT_SCANNERS_KEYS:
                     self.selection_unknown.append(str(name))
         elif section is not None:
-            self.selection_written[SCANNER_SELECTION_FIELD] = section
+            self.selection_written[DEFAULT_SCANNERS_FIELD] = section
         return {
-            key: value for key, value in data.items() if key != SCANNER_SELECTION_FIELD
+            key: value for key, value in data.items() if key != DEFAULT_SCANNERS_FIELD
         }
 
     def written(self, kind: str) -> Dict[Tuple[str, str, str], Any]:

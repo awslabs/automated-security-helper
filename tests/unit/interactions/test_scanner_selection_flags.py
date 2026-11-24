@@ -18,7 +18,7 @@ The precedence under test, lowest to highest
 implemented):
 
 1. mode default (``PRECOMMIT_MODE_SCANNERS`` in precommit mode, empty elsewhere)
-2. the operator's ``scanner_selection`` (every mode), folded by the orchestrator
+2. the operator's ``default_scanners`` (every mode), folded by the orchestrator
    against its settled config
 3. config: ``precommit.only_scanners`` replaces the lower layers,
    ``precommit.add_scanners`` adds (both at once is refused by the model)
@@ -545,7 +545,7 @@ class TestCliConflictsAndDeprecation:
 
 
 # --------------------------------------------------------------------------- #
-# The operator's scanner_selection, folded against the orchestrator's config
+# The operator's default_scanners, folded against the orchestrator's config
 # --------------------------------------------------------------------------- #
 
 
@@ -706,23 +706,17 @@ def _engine_allowlist(*args: Any, **kwargs: Any) -> List[str]:
 
 class TestTheOperatorSelectionReachesTheEngine:
     def test_local_only_selects_exactly_those_scanners(self, tmp_path, operator_home):
-        config = _operator_config(
-            tmp_path, "scanner_selection:\n  only_scanners: [bandit]\n"
-        )
+        config = _operator_config(tmp_path, "default_scanners:\n  only: [bandit]\n")
 
         assert _engine_allowlist(tmp_path, operator_home, config) == ["bandit"]
 
     def test_local_add_alone_stays_unrestricted(self, tmp_path, operator_home):
-        config = _operator_config(
-            tmp_path, "scanner_selection:\n  add_scanners: [trivy]\n"
-        )
+        config = _operator_config(tmp_path, "default_scanners:\n  add: [trivy]\n")
 
         assert _engine_allowlist(tmp_path, operator_home, config) == []
 
     def test_precommit_defaults_take_the_global_add(self, tmp_path, operator_home):
-        config = _operator_config(
-            tmp_path, "scanner_selection:\n  add_scanners: [grype]\n"
-        )
+        config = _operator_config(tmp_path, "default_scanners:\n  add: [grype]\n")
 
         selected = _engine_allowlist(
             tmp_path, operator_home, config, mode=RunMode.precommit
@@ -735,7 +729,7 @@ class TestTheOperatorSelectionReachesTheEngine:
     ):
         config = _operator_config(
             tmp_path,
-            "scanner_selection:\n  add_scanners: [grype]\n"
+            "default_scanners:\n  add: [grype]\n"
             "precommit:\n  only_scanners: [checkov]\n",
         )
 
@@ -748,7 +742,7 @@ class TestTheOperatorSelectionReachesTheEngine:
     def test_the_cli_only_flag_replaces_both(self, tmp_path, operator_home):
         config = _operator_config(
             tmp_path,
-            "scanner_selection:\n  only_scanners: [bandit]\n"
+            "default_scanners:\n  only: [bandit]\n"
             "precommit:\n  add_scanners: [grype]\n",
         )
 
@@ -766,9 +760,7 @@ class TestTheOperatorSelectionReachesTheEngine:
     def test_the_additive_cli_flags_extend_the_configured_base(
         self, tmp_path, operator_home, flag
     ):
-        config = _operator_config(
-            tmp_path, "scanner_selection:\n  only_scanners: [bandit]\n"
-        )
+        config = _operator_config(tmp_path, "default_scanners:\n  only: [bandit]\n")
 
         selected = _engine_allowlist(
             tmp_path, operator_home, config, **{flag: ["checkov"]}
@@ -781,7 +773,7 @@ class TestTheOperatorSelectionReachesTheEngine:
             tmp_path,
             operator_home,
             None,
-            config_overrides=["scanner_selection.only_scanners=[bandit]"],
+            config_overrides=["default_scanners.only=[bandit]"],
         )
 
         assert selected == ["bandit"]
@@ -791,15 +783,13 @@ class TestTheOperatorSelectionReachesTheEngine:
     ):
         from automated_security_helper.core.exceptions import ScannerSelectionError
 
-        config = _operator_config(
-            tmp_path, "scanner_selection:\n  only_scanners: [bandit]\n"
-        )
+        config = _operator_config(tmp_path, "default_scanners:\n  only: [bandit]\n")
 
         with pytest.raises(ScannerSelectionError) as refusal:
             _engine_allowlist(tmp_path, operator_home, config, excluded=["bandit"])
 
         text = str(refusal.value)
-        assert "scanner_selection in the ASH config" in text
+        assert "default_scanners in the ASH config" in text
         assert "--exclude-scanners" in text
         assert "--scanners" not in text.replace("--exclude-scanners", "")
 
@@ -809,7 +799,7 @@ class TestTheOperatorSelectionReachesTheEngine:
         from automated_security_helper.core.exceptions import ScannerSelectionError
 
         config = _operator_config(
-            tmp_path, "scanner_selection:\n  only_scanners: [no-such-scanner]\n"
+            tmp_path, "default_scanners:\n  only: [no-such-scanner]\n"
         )
 
         with pytest.raises(ScannerSelectionError) as refusal:
@@ -818,16 +808,14 @@ class TestTheOperatorSelectionReachesTheEngine:
         assert "None of the requested scanners exist: no-such-scanner" in str(
             refusal.value
         )
-        assert "scanner_selection in the ASH config" in str(refusal.value)
+        assert "default_scanners in the ASH config" in str(refusal.value)
 
     def test_a_flag_cancelled_by_exclusions_keeps_the_flag_wording(
         self, tmp_path, operator_home
     ):
         from automated_security_helper.core.exceptions import ScannerSelectionError
 
-        config = _operator_config(
-            tmp_path, "scanner_selection:\n  only_scanners: [bandit]\n"
-        )
+        config = _operator_config(tmp_path, "default_scanners:\n  only: [bandit]\n")
 
         with pytest.raises(ScannerSelectionError) as refusal:
             _engine_allowlist(
@@ -845,7 +833,7 @@ class TestTheOperatorSelectionReachesTheEngine:
     ):
         config = _operator_config(
             tmp_path,
-            "scanner_selection:\n  only_scanners: [bandit]\n"
+            "default_scanners:\n  only: [bandit]\n"
             "scanners:\n  bandit:\n    enabled: false\n",
         )
 
@@ -913,9 +901,7 @@ class TestWithoutTheNewSection:
     ):
         from automated_security_helper.core.orchestrator import ASHScanOrchestrator
 
-        config = _operator_config(
-            tmp_path, "scanner_selection:\n  only_scanners: [checkov]\n"
-        )
+        config = _operator_config(tmp_path, "default_scanners:\n  only: [checkov]\n")
         output = tmp_path / "out"
 
         orchestrator = ASHScanOrchestrator.create(
@@ -988,9 +974,7 @@ class TestAMixedSelectionIsNotAttributedToTheFlagsAlone:
     def test_the_refusal_names_the_flags_and_the_config(self, tmp_path, operator_home):
         from automated_security_helper.core.exceptions import ScannerSelectionError
 
-        config = _operator_config(
-            tmp_path, "scanner_selection:\n  only_scanners: [bandit]\n"
-        )
+        config = _operator_config(tmp_path, "default_scanners:\n  only: [bandit]\n")
 
         with pytest.raises(ScannerSelectionError) as refusal:
             _engine_allowlist(
@@ -1003,7 +987,7 @@ class TestAMixedSelectionIsNotAttributedToTheFlagsAlone:
 
         text = str(refusal.value)
         assert "--scanners" in text
-        assert "scanner_selection in the ASH config" in text
+        assert "default_scanners in the ASH config" in text
         assert "bandit" in text and "checkov" in text
 
     def test_flags_alone_keep_the_flag_wording(self, tmp_path, operator_home):
@@ -1020,7 +1004,7 @@ class TestAMixedSelectionIsNotAttributedToTheFlagsAlone:
                 excluded=["checkov"],
             )
 
-        assert "scanner_selection" not in str(refusal.value)
+        assert "default_scanners" not in str(refusal.value)
         assert "named by --scanners" in str(refusal.value)
 
 
@@ -1051,9 +1035,7 @@ class TestTheInnerScanChecksTheMarkerBeforeAnyScanner:
     def test_a_matching_section_runs_the_scan(
         self, tmp_path, operator_home, logger, executed
     ):
-        config = _operator_config(
-            tmp_path, "scanner_selection:\n  only_scanners: [bandit]\n"
-        )
+        config = _operator_config(tmp_path, "default_scanners:\n  only: [bandit]\n")
 
         self._run(
             tmp_path,
@@ -1069,9 +1051,9 @@ class TestTheInnerScanChecksTheMarkerBeforeAnyScanner:
         "body",
         [
             "project_name: t\n",
-            "scanner_selection:\n  only_scanners: [checkov]\n",
-            "scanner_selection:\n  add_scanners: [bandit]\n",
-            "scanner_selection:\n  only_scanners: [bandit, checkov]\n",
+            "default_scanners:\n  only: [checkov]\n",
+            "default_scanners:\n  add: [bandit]\n",
+            "default_scanners:\n  only: [bandit, checkov]\n",
         ],
     )
     def test_a_different_or_missing_section_refuses_before_any_scanner(
@@ -1103,9 +1085,7 @@ class TestTheInnerScanChecksTheMarkerBeforeAnyScanner:
             ScanRefusedExit,
         )
 
-        config = _operator_config(
-            tmp_path, "scanner_selection:\n  only_scanners: [bandit]\n"
-        )
+        config = _operator_config(tmp_path, "default_scanners:\n  only: [bandit]\n")
 
         with pytest.raises(ScanRefusedExit) as refusal:
             self._run(tmp_path, operator_home, config, marker, logger)
@@ -1116,9 +1096,7 @@ class TestTheInnerScanChecksTheMarkerBeforeAnyScanner:
     def test_a_replacement_flag_still_applies_after_the_marker_matched(
         self, tmp_path, operator_home, logger, executed
     ):
-        config = _operator_config(
-            tmp_path, "scanner_selection:\n  only_scanners: [bandit]\n"
-        )
+        config = _operator_config(tmp_path, "default_scanners:\n  only: [bandit]\n")
         opts = _opts(
             operator_home,
             tmp_path / "out",
@@ -1171,7 +1149,7 @@ class TestTheHiddenMarkerOnTheCommandLine:
         )
 
         assert result.exit_code == 3, result.output
-        assert "scanner_selection" in " ".join(result.output.split())
+        assert "default_scanners" in " ".join(result.output.split())
 
     def test_the_option_is_not_in_the_help(self, clean_cli_env):
         from automated_security_helper.cli.main import app
@@ -1234,7 +1212,7 @@ class TestTheHostMarkerIsTheSelectionTheInnerScanUses:
 
     @pytest.mark.parametrize(
         "body",
-        ["project_name: repo\n", "scanner_selection:\n  only_scanners: [trivy]\n"],
+        ["project_name: repo\n", "default_scanners:\n  only: [trivy]\n"],
         ids=["no-section", "asks-for-trivy"],
     )
     def test_ash_config_under_a_named_checkout_config(
@@ -1242,9 +1220,7 @@ class TestTheHostMarkerIsTheSelectionTheInnerScanUses:
     ):
         operator = tmp_path / "operator" / "ash.yaml"
         operator.parent.mkdir()
-        operator.write_text(
-            "scanner_selection:\n  only_scanners: [bandit]\n", encoding="utf-8"
-        )
+        operator.write_text("default_scanners:\n  only: [bandit]\n", encoding="utf-8")
         monkeypatch.setenv("ASH_CONFIG", str(operator))
         checkout = self._checkout(tmp_path, body)
 
@@ -1259,13 +1235,11 @@ class TestTheHostMarkerIsTheSelectionTheInnerScanUses:
         self, tmp_path, monkeypatch, logger, executed
     ):
         monkeypatch.delenv("ASH_CONFIG", raising=False)
-        checkout = self._checkout(
-            tmp_path, "scanner_selection:\n  only_scanners: [trivy]\n"
-        )
+        checkout = self._checkout(tmp_path, "default_scanners:\n  only: [trivy]\n")
         operator = tmp_path / "operator.yaml"
         operator.write_text(
             f"extends: [{(checkout / 'ci' / 'base.yaml').as_posix()}]\n"
-            "scanner_selection:\n  only_scanners: [bandit]\n",
+            "default_scanners:\n  only: [bandit]\n",
             encoding="utf-8",
         )
 

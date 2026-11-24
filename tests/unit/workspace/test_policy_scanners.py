@@ -1117,7 +1117,7 @@ def _run_built(tmp_path, plan, settings):
     )
 
 
-SELECT_BANDIT = "scanner_selection:\n  only_scanners: [bandit]\n"
+SELECT_BANDIT = "default_scanners:\n  only: [bandit]\n"
 
 
 def test_the_default_and_every_required_scanner_reach_each_project(tmp_path):
@@ -1140,10 +1140,10 @@ def test_a_project_config_cannot_remove_or_replace_the_default(tmp_path):
     _project(
         tmp_path,
         "api",
-        "scanner_selection:\n  only_scanners: [checkov]\n"
+        "default_scanners:\n  only: [checkov]\n"
         "scanners:\n  trivy:\n    enabled: false\n",
     )
-    _project(tmp_path, "web", "scanner_selection:\n  add_scanners: [semgrep]\n")
+    _project(tmp_path, "web", "default_scanners:\n  add: [semgrep]\n")
     _policy(tmp_path, "workspace:\n  additional_scanners:\n    - trivy\n")
     config = _operator_config(tmp_path, SELECT_BANDIT)
     plan = resolve_workspace(
@@ -1223,7 +1223,7 @@ def test_an_exclusion_of_the_whole_selection_is_refused_in_config_words(tmp_path
     )
 
     with pytest.raises(
-        ScannerSelectionError, match="scanner_selection in the ASH config"
+        ScannerSelectionError, match="default_scanners in the ASH config"
     ):
         _run_built(
             tmp_path,
@@ -1278,9 +1278,7 @@ def test_a_config_that_does_not_load_refuses_before_any_project_starts(tmp_path)
     from automated_security_helper.core.exceptions import ASHConfigValidationError
 
     _two_projects(tmp_path)
-    config = _operator_config(
-        tmp_path, "scanner_selection:\n  only_scanners: [a]\n  add_scanners: [b]\n"
-    )
+    config = _operator_config(tmp_path, "default_scanners:\n  only: [a]\n  add: [b]\n")
 
     with pytest.raises(ASHConfigValidationError):
         plan = resolve_workspace(
@@ -1328,7 +1326,7 @@ def test_the_cli_dry_run_refuses_a_cancelled_config_selection_as_the_run_does(
     result = _dry_run_cli(tmp_path, monkeypatch, "--exclude-scanners", "bandit,trivy")
 
     assert result.exit_code != 0, result.output
-    assert "scanner_selection in the ASH config" in " ".join(result.output.split())
+    assert "default_scanners in the ASH config" in " ".join(result.output.split())
 
 
 def test_the_cli_dry_run_accepts_the_selection_the_run_accepts(tmp_path, monkeypatch):
@@ -1346,7 +1344,7 @@ def test_a_workspace_scan_checks_the_container_marker_before_any_project(tmp_pat
         _workspace(tmp_path, ["api", "web"]), default_config=config
     )
 
-    with pytest.raises(ASHConfigValidationError, match="scanner_selection"):
+    with pytest.raises(ASHConfigValidationError, match="default_scanners"):
         _run_built(
             tmp_path,
             plan,

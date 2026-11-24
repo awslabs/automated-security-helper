@@ -388,7 +388,7 @@ class ASHScanOrchestrator(BaseModel):
             description=(
                 "The selection layers known before the config is settled. When "
                 "set, the allowlist is folded with the settled config's "
-                "scanner_selection and enabled_scanners is not read."
+                "default_scanners and enabled_scanners is not read."
             ),
         ),
     ] = None
@@ -921,8 +921,8 @@ class ASHScanOrchestrator(BaseModel):
         selection_origin = self.selection_origin
         if self.selection_layers is not None:
             folded = self.selection_layers.fold(
-                config.scanner_selection.only_scanners,
-                config.scanner_selection.add_scanners,
+                config.default_scanners.only,
+                config.default_scanners.add,
             )
             enabled_scanners = folded.names
             if folded.origin == "operator":
