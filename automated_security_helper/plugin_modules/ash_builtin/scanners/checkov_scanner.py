@@ -421,7 +421,7 @@ _RESOURCE_FRAMEWORKS = frozenset(
 #: that is in neither, so a new framework is classified by reading its records
 #: rather than taking whatever its ``resource`` field holds.
 _NO_RESOURCE_FRAMEWORKS = {
-    "secrets": "a hash of the secret (a SHA-1, or commit:hash), which must not "
+    "secrets": "a hash of the secret (a SHA-1, or commit:hash), which must not "  # pragma: allowlist secret
     "become a resource id",
     "dockerfile": "the Dockerfile path, or the path and instruction "
     "(/Dockerfile.RUN): a file locator",
