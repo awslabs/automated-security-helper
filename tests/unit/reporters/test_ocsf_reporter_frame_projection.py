@@ -55,9 +55,7 @@ pytestmark = pytest.mark.unit
 AshAggregatedResults.model_rebuild()
 
 
-def _oracle(
-    results: List[Any], shared_ids: List[Optional[str]]
-) -> List[Optional[str]]:
+def _oracle(results: List[Any], shared_ids: List[Optional[str]]) -> List[Optional[str]]:
     """The identity pass as it was written before it ran on a frame, verbatim."""
     seen: Dict[str, int] = {}
     identities: List[Optional[str]] = []
@@ -241,7 +239,9 @@ class TestTheRunsTalliesAreStatedAsTheyWere:
             _result(rule="BAD", uri="a.py", line=3),
             _result(rule="DEG", uri="a.py", line=4),
         ]
-        lines = self._lines(reporter, monkeypatch, results, fail={"BAD"}, degrade={"DEG"})
+        lines = self._lines(
+            reporter, monkeypatch, results, fail={"BAD"}, degrade={"DEG"}
+        )
         assert (
             "OCSF report processing complete: 3/5 findings created whole, "
             "1 degraded, 1 failed (60.0% success rate)"
