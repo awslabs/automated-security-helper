@@ -109,6 +109,23 @@ CheckFrameworks = Literal[
     "3d_policy",
 ]
 
+# Checkov's "all" framework set includes VCS server-configuration frameworks
+# that audit remote platform settings via API tokens (such as
+# CI_SERVER_URL/CI_JOB_TOKEN in GitLab CI) and write fetched config caches under
+# cwd rather than scanning repository files. They are skipped unless explicitly
+# requested (_process_config_options), and their remote fetches are disabled
+# for offline scans (_execute_scan). Rather than hardcoding the vendor list,
+# the set and its environment variables are derived from the frameworks
+# mirrored in ``CheckFrameworks`` by checkov's own naming rule
+# (checkov_vcs_frameworks has the rule, its measurements and its drift gates).
+_VCS_CONFIGURATION_FRAMEWORKS: Tuple[str, ...] = (
+    checkov_vcs_frameworks.vcs_configuration_frameworks(get_args(CheckFrameworks))
+)
+
+_VCS_CONFIG_FETCH_ENV_VARS: Tuple[str, ...] = (
+    checkov_vcs_frameworks.vcs_config_fetch_env_vars(_VCS_CONFIGURATION_FRAMEWORKS)
+)
+
 
 # Characters an output directory's path cannot hold for ASH to pass it to checkov
 # as --skip-path, escaped or not: they can break the regex checkov's terraform
@@ -130,9 +147,7 @@ _CHECKOV_UNSAFE_SKIP_PATH_CHARS = frozenset("()")
 # ``CheckFrameworks`` by checkov's own naming rule (checkov_vcs_frameworks has
 # the rule, its measurements and its drift gates).
 _CHECKOV_VCS_CONF_DIR_ENV = dict(
-    checkov_vcs_frameworks.vcs_conf_dir_env_vars(
-        checkov_vcs_frameworks.vcs_configuration_frameworks(get_args(CheckFrameworks))
-    )
+    checkov_vcs_frameworks.vcs_conf_dir_env_vars(_VCS_CONFIGURATION_FRAMEWORKS)
 )
 
 
@@ -1457,7 +1472,16 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
             frameworks = list(file_frameworks)
         for item in frameworks:
             self.args.extra_args.append(ToolExtraArg(key="--framework", value=item))
-        for item in self.config.options.skip_frameworks:
+        skip_frameworks = list(self.config.options.skip_frameworks)
+        if "all" in frameworks:
+            # Checkov's "all" includes VCS server-configuration frameworks that
+            # audit remote server settings over the network rather than files in
+            # the scanned tree. Skip them unless explicitly requested via
+            # frameworks (or an external checkov config file's framework key).
+            for vcs_framework in _VCS_CONFIGURATION_FRAMEWORKS:
+                if vcs_framework not in skip_frameworks:
+                    skip_frameworks.append(vcs_framework)
+        for item in skip_frameworks:
             self.args.extra_args.append(
                 ToolExtraArg(key="--skip-framework", value=item)
             )
@@ -1603,7 +1627,8 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
                 "checkov's terraform scan, so checkov would read the file it points at."
             )
         skips.extend(links)
-        if self._scanner_offline():
+        offline = self._scanner_offline()
+        if offline:
             # Decided here, per scan, for the reason _process_config_options gives.
             skips_offline = [ToolExtraArg(key="--skip-download", value="")]
             ASH_LOGGER.info(
@@ -1667,11 +1692,14 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
             )
         finally:
             self.args.extra_args = original_extra_args
-        return (
-            _directory_as_one_token(final_args),
-            results_file,
-            self._vcs_conf_environment(target_results_dir),
-        )
+        subprocess_env = self._vcs_conf_environment(target_results_dir)
+        if offline:
+            # The VCS configuration frameworks fetch remote platform settings
+            # over the network; an offline scan turns those fetches off even
+            # when the operator enabled such a framework explicitly.
+            for fetch_var in _VCS_CONFIG_FETCH_ENV_VARS:
+                subprocess_env[fetch_var] = "False"
+        return _directory_as_one_token(final_args), results_file, subprocess_env
 
     def _vcs_conf_environment(self, results_dir: Path) -> dict[str, str]:
         """The environment checkov runs with: the host's, with a conf directory
