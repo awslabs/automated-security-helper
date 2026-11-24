@@ -3619,7 +3619,7 @@ option is in the <a href="../reference/cli/">CLI reference</a>.</p>
 </tr>
 <tr>
 <td><code>utils/</code></td>
-<td><code>ash_helpers.sh</code>, which you source from a shell profile to get an <code>invoke-ash</code> command that runs this checkout's <code>./ash</code> from any directory; <code>ash_helpers.ps1</code>, which defines <code>Invoke-ASH</code>, the container wrapper for PowerShell; and older per-scanner scripts that ASH does not run</td>
+<td><code>ash_helpers.sh</code>, which you source from a shell profile to get an <code>invoke-ash</code> command that runs this checkout's <code>./ash</code> from any directory; <code>ash_helpers.ps1</code>, which defines <code>Invoke-ASH</code>, the container wrapper for PowerShell. The subcommand and option tables in <code>./ash</code> and <code>ash_helpers.ps1</code> sit between <code>BEGIN generated</code> and <code>END generated</code> comments and are generated from the CLI by <code>scripts/generate_wrapper_tables.py</code>; run it after you change a command or option, and CI fails if they are stale</td>
 </tr>
 </tbody>
 </table>

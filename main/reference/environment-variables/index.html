@@ -3488,7 +3488,7 @@ SOFTWARE.
 
 <h1 id="environment-variables">Environment variables<a class="headerlink" href="#environment-variables" title="Permanent link">&para;</a></h1>
 <p>This page is generated from the code that reads each variable by <code>scripts/generate_env_var_reference.py</code>. Edits made to this file by hand are overwritten the next time it is generated.</p>
-<p>ASH reads 173 environment variables: 63 of its own (<code>ASH_</code> prefix) and 110 set by other tools or the platform. The tables list every place each one is read. A variable that sets a CLI option links to that option; the option on the command line takes precedence over the variable.</p>
+<p>ASH reads 172 environment variables: 62 of its own (<code>ASH_</code> prefix) and 110 set by other tools or the platform. The tables list every place each one is read. A variable that sets a CLI option links to that option; the option on the command line takes precedence over the variable.</p>
 <p>Columns:</p>
 <ul>
 <li>Default: the value the code uses when the variable is unset, as written in the code, at each read that supplies one. Where none does, or the only one is an empty string, it is the default of the CLI option the variable sets, or of the configuration key it is the default of. Blank means none of these supplies one (the code checks whether the variable is set, or treats unset as empty).</li>
@@ -3615,9 +3615,9 @@ SOFTWARE.
 </tr>
 <tr>
 <td><code>ASH_DEBUG</code></td>
-<td><code>""</code><br><code>NO</code></td>
+<td>off</td>
 <td></td>
-<td><code>automated_security_helper/cli/scan.py</code> (<code>run_ash_scan_cli_command</code>)<br><code>automated_security_helper/core/execution_engine.py</code> (<code>ScanExecutionEngine.__init__</code>)<br><code>automated_security_helper/interactions/run_ash_scan.py</code> (<code>_env_flag</code>)<br><code>utils/common.sh</code> (<code>debug_echo</code>, <code>debug_show_tree</code>)</td>
+<td><code>automated_security_helper/cli/scan.py</code> (<code>run_ash_scan_cli_command</code>)<br><code>automated_security_helper/core/execution_engine.py</code> (<code>ScanExecutionEngine.__init__</code>)<br><code>automated_security_helper/interactions/run_ash_scan.py</code> (<code>_env_flag</code>)</td>
 <td>Sets <a href="../cli/#scan--debug"><code>ash scan --debug</code></a>. Enable debug logging. Any log flag on the command line overrides ASH_DEBUG.</td>
 </tr>
 <tr>
@@ -3808,13 +3808,6 @@ SOFTWARE.
 <td></td>
 <td><code>automated_security_helper/cli/merge.py</code> (<code>merge_command</code>)<br><code>automated_security_helper/cli/report.py</code> (<code>report_command</code>)<br><code>automated_security_helper/cli/scan.py</code> (<code>run_ash_scan_cli_command</code>)</td>
 <td>Sets <a href="../cli/#merge--output-dir"><code>ash merge --output-dir</code></a>. Directory to write the merged results and reports to.<br>Sets <a href="../cli/#report--output-dir"><code>ash report --output-dir</code></a>. The directory to output results to<br>Sets <a href="../cli/#scan--output-dir"><code>ash scan --output-dir</code></a>. The directory to output results to</td>
-</tr>
-<tr>
-<td><code>ASH_OUTPUT_FORMAT</code></td>
-<td><code>text</code></td>
-<td></td>
-<td><code>utils/grype-docker-execute.sh</code> (top level)<br><code>utils/js-docker-execute.sh</code> (top level)<br><code>utils/yaml-docker-execute.sh</code> (top level)</td>
-<td>Purpose not documented in code.</td>
 </tr>
 <tr>
 <td><code>ASH_PINS_DIR</code></td>
@@ -4170,8 +4163,8 @@ SOFTWARE.
 <td><code>GITHUB_ACTIONS</code></td>
 <td></td>
 <td></td>
-<td><code>automated_security_helper/utils/command_safe_stream.py</code> (<code>_under_a_command_reading_runner</code>)<br><code>automated_security_helper/utils/console.py</code> (<code>typer_console</code>)<br><code>automated_security_helper/utils/log.py</code> (<code>_on_a_ci_runner</code>)</td>
-<td>The variable each runner that reads workflow commands from a job's output sets in every job: GitHub Actions, Azure Pipelines, TeamCity. Container mode and ./ash pass each one that is set into the container, so the scan there checks a terminal's lines too. (<code>automated_security_helper/utils/command_safe_stream.py</code>)</td>
+<td><code>automated_security_helper/utils/command_safe_stream.py</code> (<code>_under_a_command_reading_runner</code>)<br><code>automated_security_helper/utils/console.py</code> (<code>typer_console</code>)<br><code>automated_security_helper/utils/log.py</code> (<code>_on_a_ci_runner</code>)<br><code>utils/ash_helpers.ps1</code> (<code>Invoke-ASH</code>)</td>
+<td>The variable each runner that reads workflow commands from a job's output sets in every job: GitHub Actions, Azure Pipelines, TeamCity. Container mode, ./ash and Invoke-ASH pass each one that is set into the container, so the scan there checks a terminal's lines too. (<code>automated_security_helper/utils/command_safe_stream.py</code>)</td>
 </tr>
 <tr>
 <td><code>GITLAB_CI</code></td>
@@ -4233,7 +4226,7 @@ SOFTWARE.
 <td><code>GRYPE_DB_CACHE_DIR</code></td>
 <td></td>
 <td><code>/deps/.grype</code> (core)</td>
-<td><code>automated_security_helper/utils/offline_mode_validator.py</code> (<code>_cache_directory</code>)<br><code>utils/grype-docker-execute.sh</code> (top level)</td>
+<td><code>automated_security_helper/utils/offline_mode_validator.py</code> (<code>_cache_directory</code>)</td>
 <td>Purpose not documented in code.</td>
 </tr>
 <tr>
@@ -4324,7 +4317,7 @@ SOFTWARE.
 <td><code>PWD</code></td>
 <td><code>""</code></td>
 <td></td>
-<td><code>ash</code> (<code>carry_config_file</code>)<br><code>automated_security_helper/config/sandbox_grants.py</code> (<code>_logical_paths</code>)<br><code>automated_security_helper/interactions/run_ash_container.py</code> (<code>_name_from_the_logical_directory</code>)<br><code>utils/yaml-docker-execute.sh</code> (top level)</td>
+<td><code>ash</code> (<code>carry_config_file</code>)<br><code>automated_security_helper/config/sandbox_grants.py</code> (<code>_logical_paths</code>)<br><code>automated_security_helper/interactions/run_ash_container.py</code> (<code>_name_from_the_logical_directory</code>)</td>
 <td>ASH builds an absolute scan root from the physical working directory, so a root whose text starts with it is rejoined to <code>$PWD</code> from the rest of its text, <code>..</code> and symlinks included. (<code>automated_security_helper/config/sandbox_grants.py</code>, <code>_logical_paths</code>)</td>
 </tr>
 <tr>
@@ -4422,7 +4415,7 @@ SOFTWARE.
 <td><code>SEMGREP_RULES_CACHE_DIR</code></td>
 <td><code>""</code></td>
 <td><code>/deps/.semgrep</code> (core)</td>
-<td><code>automated_security_helper/plugin_modules/ash_builtin/scanners/_grep_scanner_base.py</code> (<code>GrepScannerBase._configure_offline_mode</code>, <code>GrepScannerBase.content_database_probe_context</code>)<br><code>utils/grype-docker-execute.sh</code> (top level)</td>
+<td><code>automated_security_helper/plugin_modules/ash_builtin/scanners/_grep_scanner_base.py</code> (<code>GrepScannerBase._configure_offline_mode</code>, <code>GrepScannerBase.content_database_probe_context</code>)</td>
 <td>Env var pointing at the offline rule cache (e.g. SEMGREP_RULES_CACHE_DIR). (<code>automated_security_helper/plugin_modules/ash_builtin/scanners/_grep_scanner_base.py</code>, <code>GrepScannerBase.cache_dir_env_var</code>)</td>
 </tr>
 <tr>
@@ -4471,8 +4464,8 @@ SOFTWARE.
 <td><code>TEAMCITY_VERSION</code></td>
 <td></td>
 <td></td>
-<td><code>automated_security_helper/utils/command_safe_stream.py</code> (<code>_under_a_command_reading_runner</code>)<br><code>automated_security_helper/utils/log.py</code> (<code>_on_a_ci_runner</code>)</td>
-<td>The variable each runner that reads workflow commands from a job's output sets in every job: GitHub Actions, Azure Pipelines, TeamCity. Container mode and ./ash pass each one that is set into the container, so the scan there checks a terminal's lines too. (<code>automated_security_helper/utils/command_safe_stream.py</code>)</td>
+<td><code>automated_security_helper/utils/command_safe_stream.py</code> (<code>_under_a_command_reading_runner</code>)<br><code>automated_security_helper/utils/log.py</code> (<code>_on_a_ci_runner</code>)<br><code>utils/ash_helpers.ps1</code> (<code>Invoke-ASH</code>)</td>
+<td>The variable each runner that reads workflow commands from a job's output sets in every job: GitHub Actions, Azure Pipelines, TeamCity. Container mode, ./ash and Invoke-ASH pass each one that is set into the container, so the scan there checks a terminal's lines too. (<code>automated_security_helper/utils/command_safe_stream.py</code>)</td>
 </tr>
 <tr>
 <td><code>TEMP</code></td>
@@ -4492,8 +4485,8 @@ SOFTWARE.
 <td><code>TF_BUILD</code></td>
 <td></td>
 <td></td>
-<td><code>automated_security_helper/utils/command_safe_stream.py</code> (<code>_under_a_command_reading_runner</code>)<br><code>automated_security_helper/utils/log.py</code> (<code>_on_a_ci_runner</code>)</td>
-<td>The variable each runner that reads workflow commands from a job's output sets in every job: GitHub Actions, Azure Pipelines, TeamCity. Container mode and ./ash pass each one that is set into the container, so the scan there checks a terminal's lines too. (<code>automated_security_helper/utils/command_safe_stream.py</code>)</td>
+<td><code>automated_security_helper/utils/command_safe_stream.py</code> (<code>_under_a_command_reading_runner</code>)<br><code>automated_security_helper/utils/log.py</code> (<code>_on_a_ci_runner</code>)<br><code>utils/ash_helpers.ps1</code> (<code>Invoke-ASH</code>)</td>
+<td>The variable each runner that reads workflow commands from a job's output sets in every job: GitHub Actions, Azure Pipelines, TeamCity. Container mode, ./ash and Invoke-ASH pass each one that is set into the container, so the scan there checks a terminal's lines too. (<code>automated_security_helper/utils/command_safe_stream.py</code>)</td>
 </tr>
 <tr>
 <td><code>TMP</code></td>
