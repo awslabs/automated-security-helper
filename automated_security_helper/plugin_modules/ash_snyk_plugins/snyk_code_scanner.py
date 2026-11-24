@@ -16,6 +16,11 @@ from pydantic import Field, PrivateAttr
 
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.base.options import ScannerOptionsBase
+from automated_security_helper.base.scanner_facets import (
+    FacetDecl,
+    FacetState,
+    ScannerFacets,
+)
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.config.confinement_remedy import SET_BY_THE_OPERATOR
 from automated_security_helper.models.core import ToolArgs
@@ -310,6 +315,113 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
     )
 
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.SKIP_OFFLINE
+
+    #: The facets register row (base/scanner_facets.py). Declaration only: no
+    #: behavior changes. snyk code is a pure SARIF pass-through. UNCONFIRMED
+    #: for the whole row: no snyk SARIF fixture from a real tool run is
+    #: committed (the tests' in-test double generates the shape), so the
+    #: native fields below are the survey's reading of that shape; a
+    #: `snyk code test --sarif` run over a sample with a finding settles them.
+    facets: ClassVar[ScannerFacets] = ScannerFacets(
+        rule_id=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result "ruleId"',
+        ),
+        severity=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result "level"; rules carry no security-severity, so '
+            "a bare error reads as CRITICAL (degraded)",
+        ),
+        file_path=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="locations[].physicalLocation.artifactLocation.uri "
+            "(%SRCROOT% base)",
+        ),
+        line_range=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="region.startLine / region.endLine",
+        ),
+        column=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="region.startColumn / region.endColumn",
+        ),
+        message=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result "message.text"',
+        ),
+        resource_id=FacetDecl(
+            state=FacetState.NA,
+            reason="pure SAST: findings are source locators, not deployable "
+            "resources; the result carries a uri and a region only",
+        ),
+        resource_type=FacetDecl(
+            state=FacetState.NA,
+            reason="pure SAST: findings are source locators, not deployable resources",
+        ),
+        package_name=FacetDecl(
+            state=FacetState.NA,
+            reason="snyk code findings are source defects and carry no package",
+        ),
+        package_version=FacetDecl(
+            state=FacetState.NA,
+            reason="snyk code findings are source defects and carry no package",
+        ),
+        package_path=FacetDecl(
+            state=FacetState.NA,
+            reason="snyk code findings are source defects and carry no package",
+        ),
+        taxonomy_cve=FacetDecl(
+            state=FacetState.NA,
+            reason="snyk code rules are source-defect classes, not CVEs",
+        ),
+        taxonomy_cwe=FacetDecl(
+            state=FacetState.DROPPED,
+            native_field='rule properties "cwe" (e.g. ["CWE-798"])',
+            reason="the shared flat reader reads tags only "
+            "(utils/taxonomy_ids.py) and snyk's tags are language and "
+            "category words, so the flat CWE is None; UNCONFIRMED against a "
+            "real tool run",
+        ),
+        fingerprints=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result "fingerprints" {"0", "1"}',
+        ),
+        fix_available=FacetDecl(
+            state=FacetState.DROPPED,
+            native_field='rule properties "isAutofixable"',
+            reason="no flat fix_available write exists for snyk; weak signal "
+            "(autofix availability, not a fixed version); UNCONFIRMED "
+            "against a real tool run",
+        ),
+        remediation_text=FacetDecl(
+            state=FacetState.NA,
+            reason="UNCONFIRMED: the survey classified rule help.markdown "
+            "under references only; a `snyk code test --sarif` run settles "
+            "whether remediation text is separate",
+        ),
+        snippet=FacetDecl(
+            state=FacetState.NA,
+            reason="the survey read no snippet in the native regions; "
+            "UNCONFIRMED against a real tool run",
+        ),
+        references=FacetDecl(
+            state=FacetState.DROPPED,
+            native_field='rule "help.markdown" and properties "exampleCommitFixes"',
+            reason="the rule help survives the SARIF model and dies at the "
+            "flat reader; UNCONFIRMED against a real tool run",
+        ),
+        tags=FacetDecl(
+            state=FacetState.NA,
+            reason="UNCONFIRMED: the survey records ASH-added tags, but no tag "
+            "write exists in this adapter at this checkout; a "
+            "`snyk code test --sarif` run through the pipeline settles it",
+        ),
+        extras=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="result and rule properties bags, passed through the "
+            "SARIF model untouched",
+        ),
+    )
 
     # src/cli/exit-codes.ts: 0 no issues, 1 issues found, 2 an error, 3 no supported
     # project detected.

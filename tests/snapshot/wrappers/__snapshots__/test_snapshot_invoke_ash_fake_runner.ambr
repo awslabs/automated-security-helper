@@ -1,0 +1,87 @@
+# serializer version: 1
+# name: test_a_failed_build_exits_with_the_builds_code
+  dict({
+    'error_message': 'Failed to build image automated-security-helper:ci (exit 1). See the build output above for the failing step.',
+    'exit_code': 1,
+    'runner_commands': list([
+      'build',
+    ]),
+  })
+# ---
+# name: test_invoke_ash_default_runner_discovery
+  dict({
+    'chosen_runner': 'finch',
+    'exit_code': 0,
+  })
+# ---
+# name: test_invoke_ash_scan_command_assembly_is_the_same_on_every_os
+  dict({
+    'announced_the_run': True,
+    'build_argv': list([
+      'docker',
+      'build',
+      '--build-arg',
+      'UID=1500',
+      '--build-arg',
+      'GID=1500',
+      '--tag',
+      'automated-security-helper:ci',
+      '--target',
+      'ci',
+      '--file',
+      '<REPO>/Dockerfile',
+      '--build-arg',
+      'OFFLINE=NO',
+      '--build-arg',
+      'OFFLINE_SEMGREP_RULESETS=p/ci',
+      '--build-arg',
+      'BUILD_DATE_EPOCH=<epoch>',
+      '<REPO>',
+    ]),
+    'exit_code': 0,
+    'run_argv': list([
+      'docker',
+      'run',
+      '--rm',
+      '-e',
+      'ASH_ACTUAL_SOURCE_DIR=<TMP>/src',
+      '-e',
+      'ASH_ACTUAL_OUTPUT_DIR=<TMP>/out',
+      '-e',
+      'ASH_DEBUG=NO',
+      '-e',
+      'ASH_SOURCE_DIR=/src',
+      '-e',
+      'ASH_OUTPUT_DIR=/out',
+      '--mount',
+      'type=bind,source=<TMP>/src,destination=/src,readonly',
+      '--mount',
+      'type=bind,source=<TMP>/out,destination=/out',
+      '-e',
+      'COLUMNS=<size>',
+      '-e',
+      'LINES=<size>',
+      'automated-security-helper:ci',
+      'ash',
+      '--sandbox',
+      'off',
+      '--scanners',
+      'bandit',
+    ]),
+    'run_env': dict({
+      'ASH_ACTUAL_OUTPUT_DIR': '<TMP>/out',
+      'ASH_ACTUAL_SOURCE_DIR': '<TMP>/src',
+      'ASH_DEBUG': 'NO',
+      'ASH_OUTPUT_DIR': '/out',
+      'ASH_SOURCE_DIR': '/src',
+      'COLUMNS': '<size>',
+      'LINES': '<size>',
+    }),
+  })
+# ---
+# name: test_invoke_ash_without_a_runner
+  dict({
+    'error_message': "Unable to resolve an OCI_RUNNER: 'no-such-oci-runner' was not found. Install one, or name it with -OCIRunner or OCI_RUNNER.",
+    'exit_code': 1,
+  })
+# ---

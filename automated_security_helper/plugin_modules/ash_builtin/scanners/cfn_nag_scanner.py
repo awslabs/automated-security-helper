@@ -16,6 +16,11 @@ from automated_security_helper.base.plugin_base import (
     CustomCommand,
     install_story_is_declared,
 )
+from automated_security_helper.base.scanner_facets import (
+    FacetDecl,
+    FacetState,
+    ScannerFacets,
+)
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
@@ -366,6 +371,120 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
     )
 
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
+
+    #: The facets register row (base/scanner_facets.py). Declaration only: this
+    #: adapter writes no ``ash_resource_id`` today. The native-field names below
+    #: are the tool's JSON violation keys (committed fixture
+    #: tests/test_data/scanners/cfn_nag/src.test.yaml.json); ASH validates the
+    #: tool's SARIF rendering of the same violations, and no cfn-nag SARIF
+    #: golden is committed -- the M0 sample run FATALed on cfn-nag 0.8.10 under
+    #: Ruby 3.4 (tests/test_data/scanners/M0-FINDINGS.md, item b), so every cell
+    #: that only a real SARIF read could settle is n/a with an UNCONFIRMED
+    #: reason, never a guess.
+    facets: ClassVar[ScannerFacets] = ScannerFacets(
+        rule_id=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='violation "id" (e.g. W51), the SARIF ruleId',
+        ),
+        severity=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='violation "type" (WARN or FAIL), rendered by the '
+            "tool as the SARIF result level",
+        ),
+        file_path=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='file result "filename", the SARIF artifact uri '
+            "(restored from the staged copy by _restore_cfn_nag_uris)",
+        ),
+        line_range=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='violation "line_numbers", the SARIF region startLine',
+        ),
+        column=FacetDecl(
+            state=FacetState.NA,
+            reason="UNCONFIRMED: the tool's JSON carries line_numbers only and "
+            "no cfn-nag SARIF golden is committed; one cfn_nag_scan "
+            "--output-format sarif run settles whether a column is emitted",
+        ),
+        message=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='violation "message"',
+        ),
+        resource_id=FacetDecl(
+            state=FacetState.DROPPED,
+            native_field='violation "logical_resource_ids" (the JSON output format)',
+            reason="UNCONFIRMED: no SARIF run is committed, so whether the id "
+            "is a structured SARIF field or only one result per id is open "
+            "(M0 item b FATALed); the unit that attaches it (M3a) picks its "
+            "route after one cfn_nag_scan --output-format sarif run",
+        ),
+        resource_type=FacetDecl(
+            state=FacetState.NA,
+            reason='the JSON "element_types" holds the element class '
+            '("resource"), not the CloudFormation Type; the Type would need '
+            "a template read the adapter does not make",
+        ),
+        package_name=FacetDecl(
+            state=FacetState.NA,
+            reason="findings are CloudFormation template resources; no "
+            "package exists in cfn_nag output",
+        ),
+        package_version=FacetDecl(
+            state=FacetState.NA,
+            reason="findings are CloudFormation template resources; no "
+            "package exists in cfn_nag output",
+        ),
+        package_path=FacetDecl(
+            state=FacetState.NA,
+            reason="findings are CloudFormation template resources; no "
+            "package exists in cfn_nag output",
+        ),
+        taxonomy_cve=FacetDecl(
+            state=FacetState.NA,
+            reason="cfn_nag publishes its own rule ids; no CVE taxonomy in "
+            "the violations",
+        ),
+        taxonomy_cwe=FacetDecl(
+            state=FacetState.NA,
+            reason="cfn_nag publishes its own rule ids; no CWE taxonomy in "
+            "the violations",
+        ),
+        fingerprints=FacetDecl(
+            state=FacetState.NA,
+            reason="UNCONFIRMED: the tool's JSON carries no fingerprint and "
+            "no cfn-nag SARIF golden is committed; one SARIF run settles it",
+        ),
+        fix_available=FacetDecl(
+            state=FacetState.NA,
+            reason="cfn_nag violations carry no fix state or fixed version",
+        ),
+        remediation_text=FacetDecl(
+            state=FacetState.NA,
+            reason='violation "message" states the finding, not a '
+            "remediation; no remediation field exists",
+        ),
+        snippet=FacetDecl(
+            state=FacetState.NA,
+            reason="UNCONFIRMED: the tool's JSON carries no source excerpt "
+            "and no cfn-nag SARIF golden is committed; one SARIF run settles "
+            "whether a region snippet is emitted",
+        ),
+        references=FacetDecl(
+            state=FacetState.NA,
+            reason="UNCONFIRMED: the tool's JSON carries no URL and no "
+            "cfn-nag SARIF golden is committed; one SARIF run settles "
+            "whether the rule driver carries a helpUri",
+        ),
+        tags=FacetDecl(
+            state=FacetState.NA,
+            reason="the adapter adds no tags and the tool's JSON carries none",
+        ),
+        extras=FacetDecl(
+            state=FacetState.NA,
+            reason="the adapter writes no result property bag (its only "
+            "PropertyBag is on the Invocation)",
+        ),
+    )
 
     def model_post_init(self, context):
         if self.config is None:

@@ -144,6 +144,11 @@ from pydantic import AnyUrl, Field, model_validator
 
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.plugin_context import PluginContext
+from automated_security_helper.base.scanner_facets import (
+    FacetDecl,
+    FacetState,
+    ScannerFacets,
+)
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
@@ -275,6 +280,101 @@ class HadolintScanner(ScannerPluginBase[HadolintScannerConfig]):
     """Lints Dockerfiles with hadolint."""
 
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
+
+    #: The facets register row (base/scanner_facets.py). Declaration only: no
+    #: behavior changes. Native fields name hadolint's own SARIF and JSON
+    #: (fixtures tests/test_data/scanners/hadolint/captured/positive.sarif and
+    #: positive.json).
+    facets: ClassVar[ScannerFacets] = ScannerFacets(
+        rule_id=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result "ruleId" (DLxxxx / SCxxxx)',
+        ),
+        severity=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result "level", refined through two lookup tables '
+            "and a second --format json pass",
+        ),
+        file_path=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="locations[].physicalLocation.artifactLocation.uri",
+        ),
+        line_range=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="region.startLine / region.endLine",
+        ),
+        column=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="region.startColumn / region.endColumn",
+        ),
+        message=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result "message.text"',
+        ),
+        resource_id=FacetDecl(
+            state=FacetState.NA,
+            reason="Dockerfile findings are locators; even the base image "
+            "named by a DL3007 finding lives only in message text "
+            "(captured/positive.sarif), and an image locator is not a "
+            "resource id",
+        ),
+        resource_type=FacetDecl(
+            state=FacetState.NA,
+            reason="Dockerfile findings are locators, not deployable resources",
+        ),
+        package_name=FacetDecl(
+            state=FacetState.NA,
+            reason="Dockerfile lint findings carry no package",
+        ),
+        package_version=FacetDecl(
+            state=FacetState.NA,
+            reason="Dockerfile lint findings carry no package",
+        ),
+        package_path=FacetDecl(
+            state=FacetState.NA,
+            reason="Dockerfile lint findings carry no package",
+        ),
+        taxonomy_cve=FacetDecl(
+            state=FacetState.NA,
+            reason="Dockerfile lint rules carry no CVE taxonomy",
+        ),
+        taxonomy_cwe=FacetDecl(
+            state=FacetState.NA,
+            reason="Dockerfile lint rules carry no CWE taxonomy",
+        ),
+        fingerprints=FacetDecl(
+            state=FacetState.NA,
+            reason="the native SARIF result carries ruleId, level, message and "
+            "region only",
+        ),
+        fix_available=FacetDecl(
+            state=FacetState.NA,
+            reason="Dockerfile lint findings carry no fix state",
+        ),
+        remediation_text=FacetDecl(
+            state=FacetState.NA,
+            reason="the rule's advice is the message text itself; no separate "
+            "remediation field exists",
+        ),
+        snippet=FacetDecl(
+            state=FacetState.NA,
+            reason="the native SARIF region carries no snippet",
+        ),
+        references=FacetDecl(
+            state=FacetState.NA,
+            reason="the native SARIF driver has no rules array, so no help "
+            "URIs (captured/positive.sarif)",
+        ),
+        tags=FacetDecl(
+            state=FacetState.NA,
+            reason="the native SARIF has no rules array and results carry no tags",
+        ),
+        extras=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result properties "issue_severity" and '
+            '"hadolint_level" written by the adapter',
+        ),
+    )
     # With --no-fail, 0 is the only status hadolint gives a run that completed.
     success_exit_codes: ClassVar[Set[int]] = {0}
     # The strict default: no network, and no variables or paths beyond the baseline.

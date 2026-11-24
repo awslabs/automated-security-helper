@@ -364,6 +364,23 @@ class TextReporter(ReporterPluginBase[TextReporterConfig]):
                 ]
             )
 
+            # Why each SKIPPED or MISSING scanner did not run, one line per
+            # reason. The names and the reason come from the results file: each
+            # entry is one shown line.
+            not_run = emitter.get_scanners_not_run()
+            if not_run:
+                text_parts.append("Scanners that did not run:")
+                text_parts.extend(
+                    str(
+                        shown_on_one_line(
+                            f"- {', '.join(entry['scanners'])} ({entry['status']}): "
+                            f"{entry['reason']}"
+                        )
+                    )
+                    for entry in not_run
+                )
+                text_parts.append("")
+
             text_parts.extend(coverage_parts)
 
             # Add top hotspots (files with most findings)

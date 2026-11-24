@@ -1,0 +1,1301 @@
+{
+ "version": "2.1.0",
+ "runs": [
+  {
+   "tool": {
+    "driver": {
+     "name": "Checkov",
+     "version": "3.4.6"
+    }
+   },
+   "results": [
+    {
+     "ruleId": "CKV_AWS_161",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/modules/db/main.tf"
+        },
+        "region": {
+         "startLine": 9,
+         "endLine": 16
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV_AWS_293",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/modules/db/main.tf"
+        },
+        "region": {
+         "startLine": 9,
+         "endLine": 16
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV_AWS_353",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/modules/db/main.tf"
+        },
+        "region": {
+         "startLine": 9,
+         "endLine": 16
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV_AWS_157",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/modules/db/main.tf"
+        },
+        "region": {
+         "startLine": 9,
+         "endLine": 16
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV_AWS_129",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/modules/db/main.tf"
+        },
+        "region": {
+         "startLine": 9,
+         "endLine": 16
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV_AWS_226",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/modules/db/main.tf"
+        },
+        "region": {
+         "startLine": 9,
+         "endLine": 16
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV_AWS_118",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/modules/db/main.tf"
+        },
+        "region": {
+         "startLine": 9,
+         "endLine": 16
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV_AWS_161",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/tf/main.tf"
+        },
+        "region": {
+         "startLine": 1,
+         "endLine": 7
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV_AWS_293",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/tf/main.tf"
+        },
+        "region": {
+         "startLine": 1,
+         "endLine": 7
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV_AWS_353",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/tf/main.tf"
+        },
+        "region": {
+         "startLine": 1,
+         "endLine": 7
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV_AWS_157",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/tf/main.tf"
+        },
+        "region": {
+         "startLine": 1,
+         "endLine": 7
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV_AWS_129",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/tf/main.tf"
+        },
+        "region": {
+         "startLine": 1,
+         "endLine": 7
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV_AWS_226",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/tf/main.tf"
+        },
+        "region": {
+         "startLine": 1,
+         "endLine": 7
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV_AWS_17",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/tf/main.tf"
+        },
+        "region": {
+         "startLine": 1,
+         "endLine": 7
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV_AWS_118",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/tf/main.tf"
+        },
+        "region": {
+         "startLine": 1,
+         "endLine": 7
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV_AWS_16",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/tf/main.tf"
+        },
+        "region": {
+         "startLine": 1,
+         "endLine": 7
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV_AWS_161",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/tf/main.tf"
+        },
+        "region": {
+         "startLine": 9,
+         "endLine": 16
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV_AWS_293",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/tf/main.tf"
+        },
+        "region": {
+         "startLine": 9,
+         "endLine": 16
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV_AWS_353",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/tf/main.tf"
+        },
+        "region": {
+         "startLine": 9,
+         "endLine": 16
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV_AWS_157",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/tf/main.tf"
+        },
+        "region": {
+         "startLine": 9,
+         "endLine": 16
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV_AWS_129",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/tf/main.tf"
+        },
+        "region": {
+         "startLine": 9,
+         "endLine": 16
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV_AWS_226",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/tf/main.tf"
+        },
+        "region": {
+         "startLine": 9,
+         "endLine": 16
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV_AWS_118",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/tf/main.tf"
+        },
+        "region": {
+         "startLine": 9,
+         "endLine": 16
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV_AWS_16",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/tf/main.tf"
+        },
+        "region": {
+         "startLine": 9,
+         "endLine": 16
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV2_AWS_60",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/modules/db/main.tf"
+        },
+        "region": {
+         "startLine": 9,
+         "endLine": 16
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV2_AWS_60",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/tf/main.tf"
+        },
+        "region": {
+         "startLine": 1,
+         "endLine": 7
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV2_AWS_60",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/tf/main.tf"
+        },
+        "region": {
+         "startLine": 9,
+         "endLine": 16
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV2_AWS_30",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/modules/db/main.tf"
+        },
+        "region": {
+         "startLine": 9,
+         "endLine": 16
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV2_AWS_30",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/tf/main.tf"
+        },
+        "region": {
+         "startLine": 1,
+         "endLine": 7
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV2_AWS_30",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/tf/main.tf"
+        },
+        "region": {
+         "startLine": 9,
+         "endLine": 16
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV_AWS_17",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/tf/main.tf"
+        },
+        "region": {
+         "startLine": 9,
+         "endLine": 16
+        }
+       }
+      }
+     ],
+     "suppressions": [
+      {
+       "kind": "inSource",
+       "justification": "fixture"
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV_AWS_18",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/cfn/template.yaml"
+        },
+        "region": {
+         "startLine": 3,
+         "endLine": 4
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV_AWS_53",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/cfn/template.yaml"
+        },
+        "region": {
+         "startLine": 3,
+         "endLine": 4
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV_AWS_54",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/cfn/template.yaml"
+        },
+        "region": {
+         "startLine": 3,
+         "endLine": 4
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV_AWS_21",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/cfn/template.yaml"
+        },
+        "region": {
+         "startLine": 3,
+         "endLine": 4
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV_AWS_55",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/cfn/template.yaml"
+        },
+        "region": {
+         "startLine": 3,
+         "endLine": 4
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV_AWS_56",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/cfn/template.yaml"
+        },
+        "region": {
+         "startLine": 3,
+         "endLine": 4
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV_AWS_27",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/cfn/template.yaml"
+        },
+        "region": {
+         "startLine": 5,
+         "endLine": 6
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV_K8S_37",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/k8s/deploy.yaml"
+        },
+        "region": {
+         "startLine": 1,
+         "endLine": 16
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV_K8S_31",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/k8s/deploy.yaml"
+        },
+        "region": {
+         "startLine": 1,
+         "endLine": 16
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV_K8S_8",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/k8s/deploy.yaml"
+        },
+        "region": {
+         "startLine": 1,
+         "endLine": 16
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV_K8S_12",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/k8s/deploy.yaml"
+        },
+        "region": {
+         "startLine": 1,
+         "endLine": 16
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV_K8S_20",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/k8s/deploy.yaml"
+        },
+        "region": {
+         "startLine": 1,
+         "endLine": 16
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV_K8S_13",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/k8s/deploy.yaml"
+        },
+        "region": {
+         "startLine": 1,
+         "endLine": 16
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV_K8S_40",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/k8s/deploy.yaml"
+        },
+        "region": {
+         "startLine": 1,
+         "endLine": 16
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV_K8S_10",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/k8s/deploy.yaml"
+        },
+        "region": {
+         "startLine": 1,
+         "endLine": 16
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV_K8S_22",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/k8s/deploy.yaml"
+        },
+        "region": {
+         "startLine": 1,
+         "endLine": 16
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV_K8S_9",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/k8s/deploy.yaml"
+        },
+        "region": {
+         "startLine": 1,
+         "endLine": 16
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV_K8S_28",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/k8s/deploy.yaml"
+        },
+        "region": {
+         "startLine": 1,
+         "endLine": 16
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV_K8S_29",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/k8s/deploy.yaml"
+        },
+        "region": {
+         "startLine": 1,
+         "endLine": 16
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV_K8S_30",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/k8s/deploy.yaml"
+        },
+        "region": {
+         "startLine": 1,
+         "endLine": 16
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV_K8S_14",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/k8s/deploy.yaml"
+        },
+        "region": {
+         "startLine": 1,
+         "endLine": 16
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV_K8S_38",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/k8s/deploy.yaml"
+        },
+        "region": {
+         "startLine": 1,
+         "endLine": 16
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV_K8S_23",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/k8s/deploy.yaml"
+        },
+        "region": {
+         "startLine": 1,
+         "endLine": 16
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV_K8S_43",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/k8s/deploy.yaml"
+        },
+        "region": {
+         "startLine": 1,
+         "endLine": 16
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV_K8S_11",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/k8s/deploy.yaml"
+        },
+        "region": {
+         "startLine": 1,
+         "endLine": 16
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV2_K8S_6",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/k8s/deploy.yaml"
+        },
+        "region": {
+         "startLine": 1,
+         "endLine": 16
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV_AWS_161",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/tfplan.json"
+        },
+        "region": {
+         "startLine": 170,
+         "endLine": 212
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV_AWS_293",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/tfplan.json"
+        },
+        "region": {
+         "startLine": 170,
+         "endLine": 212
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV_AWS_353",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/tfplan.json"
+        },
+        "region": {
+         "startLine": 170,
+         "endLine": 212
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV_AWS_157",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/tfplan.json"
+        },
+        "region": {
+         "startLine": 170,
+         "endLine": 212
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV_AWS_129",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/tfplan.json"
+        },
+        "region": {
+         "startLine": 170,
+         "endLine": 212
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV_AWS_17",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/tfplan.json"
+        },
+        "region": {
+         "startLine": 170,
+         "endLine": 212
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV_AWS_118",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/tfplan.json"
+        },
+        "region": {
+         "startLine": 170,
+         "endLine": 212
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV_AWS_16",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/tfplan.json"
+        },
+        "region": {
+         "startLine": 170,
+         "endLine": 212
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV_AWS_161",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/tfplan.json"
+        },
+        "region": {
+         "startLine": 244,
+         "endLine": 286
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV_AWS_293",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/tfplan.json"
+        },
+        "region": {
+         "startLine": 244,
+         "endLine": 286
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV_AWS_353",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/tfplan.json"
+        },
+        "region": {
+         "startLine": 244,
+         "endLine": 286
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV_AWS_157",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/tfplan.json"
+        },
+        "region": {
+         "startLine": 244,
+         "endLine": 286
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV_AWS_129",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/tfplan.json"
+        },
+        "region": {
+         "startLine": 244,
+         "endLine": 286
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV_AWS_17",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/tfplan.json"
+        },
+        "region": {
+         "startLine": 244,
+         "endLine": 286
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV_AWS_118",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/tfplan.json"
+        },
+        "region": {
+         "startLine": 244,
+         "endLine": 286
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV2_AWS_60",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/tfplan.json"
+        },
+        "region": {
+         "startLine": 170,
+         "endLine": 212
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV2_AWS_60",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/tfplan.json"
+        },
+        "region": {
+         "startLine": 244,
+         "endLine": 286
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV2_AWS_30",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/tfplan.json"
+        },
+        "region": {
+         "startLine": 170,
+         "endLine": 212
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV2_AWS_30",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/tfplan.json"
+        },
+        "region": {
+         "startLine": 244,
+         "endLine": 286
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV_DOCKER_7",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/Dockerfile"
+        },
+        "region": {
+         "startLine": 1,
+         "endLine": 1
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV_DOCKER_5",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/Dockerfile"
+        },
+        "region": {
+         "startLine": 2,
+         "endLine": 2
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV_DOCKER_2",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/Dockerfile"
+        },
+        "region": {
+         "startLine": 1,
+         "endLine": 2
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "CKV_DOCKER_3",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "private/tmp/ash-checkov-fixture/proj/Dockerfile"
+        },
+        "region": {
+         "startLine": 1,
+         "endLine": 2
+        }
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

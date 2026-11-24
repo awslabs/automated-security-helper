@@ -544,6 +544,23 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
                         "</details>\n",
                     ]
                 )
+            # Why each SKIPPED or MISSING scanner did not run. Compact view
+            # leaves the SKIPPED rows out of the table, so it leaves their
+            # reasons out too; a MISSING scanner needs attention in every view.
+            not_run = [
+                entry
+                for entry in emitter.get_scanners_not_run()
+                if not (options.compact and entry["status"] == "SKIPPED")
+            ]
+            if not_run:
+                parts.append("Scanners that did not run:\n")
+                parts.extend(
+                    f"- {_text(shown_on_one_line(', '.join(entry['scanners'])))} "
+                    f"({entry['status']}): "
+                    f"{_text(shown_on_one_line(entry['reason']))}"
+                    for entry in not_run
+                )
+                parts.append("")
 
         parts.append(coverage_markdown(summary))
 

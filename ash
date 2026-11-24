@@ -352,7 +352,9 @@ require_mountable() {
 # detector, the argument loop and the config handling.
 # tests/unit/test_sandbox_refused_by_every_container_entrypoint.py checks both
 # lists against the real commands and options.
+# BEGIN generated: sh-subcommands (scripts/generate_wrapper_tables.py)
 ASH_SUBCOMMANDS="scan build-image report diff merge mcp get-genai-guide config dependencies inspect plugin express"
+# END generated: sh-subcommands
 # The subcommands whose own -o is NOT the container runtime: get-genai-guide's -o is
 # its --output, config's its --output-dir. After one of these, -o is the
 # subcommand's and is forwarded. After scan, whose -o is the CLI's own alias of
@@ -360,11 +362,15 @@ ASH_SUBCOMMANDS="scan build-image report diff merge mcp get-genai-guide config d
 # this script's runner, as it is with no subcommand: `./ash scan -o podman` picks
 # podman. Forwarding -o after every subcommand sent `scan -o podman` into the
 # container while this script picked the first runner on PATH.
+# BEGIN generated: sh-dash-o-subcommands (scripts/generate_wrapper_tables.py)
 ASH_DASH_O_IS_THE_SUBCOMMANDS="get-genai-guide config"
+# END generated: sh-dash-o-subcommands
 # The root ash options that take a value. A value can be a subcommand's name
 # (`--phases report`, `--phases inspect`), so the token after one of these is
 # the option's value, not the subcommand.
-ASH_ROOT_VALUE_OPTIONS="--add-scanners --ash-config-from-host --ash-plugin-modules --ash-revision-to-install --baseline --base-ref --build-target --config --config-file-from-another-checkout --config-file-from-scanned-repository --config-overrides --container-gid --container-uid --custom-build-arg --custom-containerfile --exclude-scanners --format --formats --log-level --min-severity --mode --oci --oci-runner --offline-semgrep-rulesets --only-scanners --output-dir --output-format --output-formats --phases --require-scanner-selection --runner --sandbox --scanners --shard-count --shard-index --source-dir --strategy --workspace --workspace-config -c -f -g -o -u"
+# BEGIN generated: sh-root-value-options (scripts/generate_wrapper_tables.py)
+ASH_ROOT_VALUE_OPTIONS="--add-scanners --ash-config-from-host --ash-plugin-modules --ash-revision-to-install --base-ref --baseline --build-target --config --config-file-from-another-checkout --config-file-from-scanned-repository --config-overrides --container-gid --container-uid --custom-build-arg --custom-containerfile --exclude-scanners --format --formats --log-level --min-severity --mode --oci --oci-runner --offline-semgrep-rulesets --only-scanners --output-dir --output-format --output-formats --phases --require-scanner-selection --runner --sandbox --scanners --shard-count --shard-index --source-dir --strategy --workspace --workspace-config -c -f -g -o -u"
+# END generated: sh-root-value-options
 
 # The first word of ASH_ARG_WORDS that names an ash subcommand, in SUBCOMMAND,
 # with its index in SUBCOMMAND_AT (-1 and "" when none is named), not counting
@@ -1970,8 +1976,10 @@ else
       # taken. The lists must name the subcommands that declare the option;
       # tests/unit/test_ash_bash_entrypoint_subcommand_args.py checks them against
       # the real commands.
+      # BEGIN generated: sh-takes-quiet-and-color (scripts/generate_wrapper_tables.py)
       ASH_TAKES_QUIET="scan build-image mcp"
       ASH_TAKES_COLOR="scan build-image report merge mcp"
+      # END generated: sh-takes-quiet-and-color
       # Container mode never sandboxes the scanners inside the image; the container
       # is the boundary. So the scan is given --sandbox off, as `ash scan --mode
       # container` gives its inner scan sandbox.mode=off (run_ash_scan.py). The scan
@@ -1985,7 +1993,9 @@ else
       # utils/ash_helpers.ps1 has the same lists;
       # tests/unit/test_sandbox_refused_by_every_container_entrypoint.py checks both
       # against the real commands and options.
+      # BEGIN generated: sh-takes-sandbox (scripts/generate_wrapper_tables.py)
       ASH_TAKES_SANDBOX="scan"
+      # END generated: sh-takes-sandbox
       # Run again rather than reused: the config handling above may have replaced
       # the words of a --config value, which moves a subcommand that stood after
       # them, and the splice below needs the index in the words the scan is given.

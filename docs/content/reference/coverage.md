@@ -22,6 +22,8 @@ Community plugins run only when you load their module with `ash_plugin_modules` 
 | CloudFormation templates | cfn-nag, cfn-lint, cfn-guard, cdk-nag, checkov | trivy-repo |
 | AWS CDK apps | cfn-nag, cfn-lint, cfn-guard, cdk-nag, checkov (on the templates `cdk synth` writes to `cdk.out`); bandit, semgrep, opengrep (on the app code; bandit reads only Python) | trivy-repo |
 | Terraform | checkov | trivy-repo |
+| Terraform plans as JSON (`terraform show -json`) | checkov | |
+| Terragrunt units (`terragrunt.hcl`) | detect-secrets, gitleaks (secrets only; see below) | |
 | Kubernetes manifests and the other formats checkov supports | checkov | trivy-repo |
 | Dockerfiles | checkov | hadolint, trivy-repo |
 | GitHub Actions workflows | actionlint, zizmor, checkov | |
@@ -38,6 +40,14 @@ from Python notebooks out by default.
 For a CDK app, synthesize before you scan, so that `cdk.out` holds the templates. ASH
 keeps the synthesized templates in the scan set when your root `.gitignore` excludes
 `cdk.out`; see [What decides the files](#what-decides-the-files).
+
+For Terragrunt, scan a plan. No scanner evaluates the `inputs` of a `terragrunt.hcl`,
+and checkov evaluates a Terraform module without the values a unit passes to it, so a
+scan of the units alone can report their secrets and none of their misconfiguration.
+A plan has the values resolved: write it as JSON with `terraform show -json` and keep
+the file in the scanned directory. checkov reports each finding on the plan file, and
+the finding's `resource_id` names the resource it is about, such as
+`module.db.aws_db_instance.this`, which is what tells two findings of one rule apart.
 
 ## By scanner {#by-scanner}
 

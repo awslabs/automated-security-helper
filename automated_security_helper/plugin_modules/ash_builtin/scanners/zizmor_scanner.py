@@ -134,6 +134,11 @@ from automated_security_helper.base.options import (
     tool_version_constraint,
 )
 from automated_security_helper.base.plugin_context import PluginContext
+from automated_security_helper.base.scanner_facets import (
+    FacetDecl,
+    FacetState,
+    ScannerFacets,
+)
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
@@ -743,6 +748,103 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
     # gets a network only when sandbox.network_scanners lists it (utils/sandbox/
     # policy.py).
     sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements()
+
+    #: The facets register row (base/scanner_facets.py). Declaration only, zero
+    #: behavior change; native fields are those of zizmor's own SARIF (fixture
+    #: tests/test_data/scanners/zizmor/zizmor-1.30.1.sarif). Resource identity
+    #: is a LOCATOR-ONLY N/A (design D1 default, overturnable): zizmor's logical
+    #: locations carry ``properties.symbolic.route`` (``jobs/greet/steps/0``)
+    #: and ``key.Local.verbatim_path``, a position inside one file's document
+    #: and not a name with a lifecycle independent of the file. The route stays
+    #: verbatim in the property bag for anyone who later disagrees.
+    facets: ClassVar[ScannerFacets] = ScannerFacets(
+        rule_id=FacetDecl(state=FacetState.MAPPED, native_field="results[].ruleId"),
+        severity=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='results[].properties."zizmor/severity" and '
+            '"zizmor/confidence" (ASH rewrites them to a severity band)',
+        ),
+        file_path=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="results[].locations[].physicalLocation.artifactLocation.uri",
+        ),
+        line_range=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="results[].locations[].physicalLocation.region."
+            "startLine/endLine",
+        ),
+        column=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="results[].locations[].physicalLocation.region."
+            "startColumn/endColumn",
+        ),
+        message=FacetDecl(
+            state=FacetState.MAPPED, native_field="results[].message.text"
+        ),
+        resource_id=FacetDecl(
+            state=FacetState.NA,
+            reason="locator-only: logicalLocations[].properties.symbolic.route "
+            "(jobs/greet/steps/0) is a position inside one workflow file, not "
+            "a resource; locators never enter the key (design D1)",
+        ),
+        resource_type=FacetDecl(
+            state=FacetState.NA,
+            reason="locator-only: a workflow position has no resource type",
+        ),
+        package_name=FacetDecl(
+            state=FacetState.NA,
+            reason="workflow findings name a file position, not a package",
+        ),
+        package_version=FacetDecl(
+            state=FacetState.NA,
+            reason="workflow findings name a file position, not a package",
+        ),
+        package_path=FacetDecl(
+            state=FacetState.NA,
+            reason="workflow findings name a file position, not a package",
+        ),
+        taxonomy_cve=FacetDecl(
+            state=FacetState.NA,
+            reason="zizmor audits carry no CVE ids",
+        ),
+        taxonomy_cwe=FacetDecl(
+            state=FacetState.NA,
+            reason="zizmor rule tags are the constant [security]; no CWE "
+            "taxonomy in the output",
+        ),
+        fingerprints=FacetDecl(
+            state=FacetState.NA,
+            reason="zizmor SARIF results carry no fingerprints (0 in the "
+            "committed fixture); finding identity keys on scanner/rule/file",
+        ),
+        fix_available=FacetDecl(
+            state=FacetState.NA,
+            reason="zizmor findings carry no fix data in the SARIF",
+        ),
+        remediation_text=FacetDecl(
+            state=FacetState.NA,
+            reason="the rule help describes the audit, not a remediation, "
+            "and the result message is an annotation of the finding",
+        ),
+        snippet=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="results[].locations[].physicalLocation.region.snippet.text",
+        ),
+        references=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="tool.driver.rules[].helpUri",
+        ),
+        tags=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="tool.driver.rules[].properties.tags",
+        ),
+        extras=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='results[].properties ("zizmor/severity", '
+            '"zizmor/confidence", "zizmor/persona"), plus the symbolic '
+            "route in logicalLocations",
+        ),
+    )
 
     @property
     def _options(self) -> ZizmorScannerConfigOptions:

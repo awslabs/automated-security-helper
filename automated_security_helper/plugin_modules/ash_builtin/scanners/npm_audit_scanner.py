@@ -14,6 +14,11 @@ from typing import Annotated, ClassVar, Dict, List, Literal, Any, Sequence, Set
 from pydantic import Field, PrivateAttr, model_validator
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.base.options import ScannerOptionsBase
+from automated_security_helper.base.scanner_facets import (
+    FacetDecl,
+    FacetState,
+    ScannerFacets,
+)
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.models.core import ToolArgs
@@ -437,6 +442,117 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
     # npm, yarn and pnpm audit by asking the registry, so offline there is nothing to
     # run: validate_plugin_dependencies says no, as snyk-code's does.
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.SKIP_OFFLINE
+
+    #: The facets register row (base/scanner_facets.py). Declaration only.
+    #: npm audit reports vulnerable packages. The SARIF location is INVENTED
+    #: by this adapter (``node_modules/<location>/package.json`` at 1:1, built
+    #: from the native ``nodes``), a locator and not a resource, so
+    #: resource_id is n/a and the register's must-not row holds the adapter to
+    #: never writing ``ash_resource_id``. Native fields are quoted from the
+    #: committed native report (tests/test_data/scanners/npmaudit/npm.json).
+    facets: ClassVar[ScannerFacets] = ScannerFacets(
+        rule_id=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='vulnerabilities.<name>.via[]."url" (the GHSA id, '
+            'synthesized as the ruleId); "npm-audit-transitive-<name>" for '
+            "a transitive-only entry",
+        ),
+        severity=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='vulnerabilities.<name>.via[]."severity", else the '
+            'entry\'s "severity"',
+        ),
+        file_path=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='vulnerabilities.<name>."nodes" (the install '
+            "location, synthesized as node_modules/<location>/package.json)",
+        ),
+        line_range=FacetDecl(
+            state=FacetState.NA,
+            reason="npm audit output carries no line; the adapter synthesizes "
+            "1:1, so there is no native line to map",
+        ),
+        column=FacetDecl(
+            state=FacetState.NA,
+            reason="npm audit output carries no column; the adapter "
+            "synthesizes 1:1, so there is no native column to map",
+        ),
+        message=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='vulnerabilities.<name>.via[]."title" composed with '
+            'the package, "range" and "url"',
+        ),
+        resource_id=FacetDecl(
+            state=FacetState.NA,
+            reason="LOCATOR-ONLY (synthesized): the URI node_modules/<loc>/"
+            'package.json is built from the native "nodes", an install '
+            "locator; the findings are packages, not resources",
+        ),
+        resource_type=FacetDecl(
+            state=FacetState.NA,
+            reason="npm audit output names no resource; findings are packages",
+        ),
+        package_name=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='vulnerabilities.<name>."name"',
+        ),
+        package_version=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="installed version read from the lockfile beside the "
+            "manifest (npm audit's own report gives only a vulnerable range)",
+        ),
+        package_path=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='vulnerabilities.<name>."nodes" resolved against the '
+            "lockfile entry for the install path",
+        ),
+        taxonomy_cve=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='vulnerabilities.<name>.via[]."url" (the GHSA '
+            "advisory id carried as the ruleId; npm audit names no CVE field)",
+        ),
+        taxonomy_cwe=FacetDecl(
+            state=FacetState.DROPPED,
+            native_field='vulnerabilities.<name>.via[]."cwe"',
+            reason='written to the result property "cwe" only; the flat '
+            "cwe_id reader reads tags, so the flat column stays empty",
+        ),
+        fingerprints=FacetDecl(
+            state=FacetState.NA,
+            reason="npm audit output carries no fingerprint; finding "
+            "identity keys on scanner, rule and package",
+        ),
+        fix_available=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='vulnerabilities.<name>."fixAvailable"',
+        ),
+        remediation_text=FacetDecl(
+            state=FacetState.NA,
+            reason="UNCONFIRMED: not classified by the survey; the adapter "
+            'writes a composed "recommendation" property, but the flat model '
+            "has no remediation column to read it and npm audit's native "
+            "fixAvailable is a flag or a fix object, not text",
+        ),
+        snippet=FacetDecl(
+            state=FacetState.NA,
+            reason="a package advisory has no source code snippet",
+        ),
+        references=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='vulnerabilities.<name>.via[]."url" (rule helpUri)',
+        ),
+        tags=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="rule properties.tags (ASH-composed: security, "
+            "npm-audit, the severity word)",
+        ),
+        extras=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="result properties bag (vulnerable_versions, "
+            "recommendation, severity, cwe, cvss, package identity) passed "
+            "through to the flat properties",
+        ),
+    )
 
     #: Lockfiles the ignore paths dropped from the last package selection
     #: (``_package_manifests``), so ``_lockfile_beside`` never picks one of them

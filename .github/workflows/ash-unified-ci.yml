@@ -30,17 +30,17 @@ on:
   #
   # WHAT THIS COSTS, AND WHAT WAS REJECTED
   #
-  # Sized off a count rather than a guess: this workflow expands to 455 jobs on a push
-  # to main, 453 on a merge-queue run, where warm-image-layers does not run, and 201 on a
+  # Sized off a count rather than a guess: this workflow expands to 460 jobs on a push
+  # to main, 458 on a merge-queue run, where warm-image-layers does not run, and 206 on a
   # pull request, where the matrices run the pull-request cover (the note on ensure-cache),
   # and ash-iac-drift.yml to 6, so a queued merge that also pushes to main is
-  # ~920 runner jobs instead of ~459. The duplicate result on a queued merge is the
+  # ~930 runner jobs instead of ~464. The duplicate result on a queued merge is the
   # price of covering the bypassed one, and it was accepted deliberately. With
   # install-validation's five cheap install methods each as its own leg -- 4 methods x
   # 25 cells + uvx x 5 OS = 105 legs in place of the 25 bundled cells (uvx ran on 3.12
-  # only), 80 more legs on each of the two runs -- it would be ~1080 against ~539, so
+  # only), 80 more legs on each of the two runs -- it would be ~1090 against ~544, so
   # running them as one leg per combination cuts a large share of what this deliberate
-  # duplication costs. Most of the 455 is the
+  # duplication costs. Most of the 460 is the
   # unit-test and integration-test families, which are 360 legs since the suite was split
   # by tier and the slow pools took eight shards: the unit tier is 180 legs (2 Linux
   # images x 5 Python versions x 6 shards, plus 2 macOS images and 1 Windows image x 5 x
@@ -56,7 +56,7 @@ on:
   # longest pull-request leg near the ~10.5-minute floor the longest scan leg sets. Each
   # integration shard
   # repeats the checkout and dependency install, so the job
-  # count rises faster than the test time does. The 455-job push figure is
+  # count rises faster than the test time does. The 460-job push figure is
   # derived from a census rather than being one -- see the note on the required-checks job for
   # which link in that chain was actually measured, and
   # tests/unit/test_unified_ci_job_counts.py, which recounts both figures from the
@@ -209,6 +209,12 @@ jobs:
           fi
       - name: Verify documentation freshness
         run: uv run python scripts/verify_docs_freshness.py
+      - name: Verify the wrapper tables match the ash CLI
+        # The subcommand and option tables inside ./ash and utils/ash_helpers.ps1 are
+        # generated from the CLI. A change to the CLI that adds a subcommand or an option
+        # fails here until `uv run python scripts/generate_wrapper_tables.py` is run and
+        # its output committed.
+        run: uv run python scripts/generate_wrapper_tables.py --check
 
       # Attached to `lint` rather than given its own job, deliberately. A new job
       # here has to be added to required-checks' `needs` AND have
@@ -1559,7 +1565,7 @@ jobs:
     timeout-minutes: ${{ (matrix.oci-runner == 'podman' || matrix.oci-runner == 'finch') && 45 || 20 }}
     strategy:
       fail-fast: false
-      # 24 runs the whole matrix in one wave. The old cap of 8 cut the matrix into three
+      # 29 runs the whole matrix in one wave (24 until the sh-helper rows added five). The old cap of 8 cut the matrix into three
       # serial waves of 8-10.5 minutes each, and that chain (~28-31 minutes, the last
       # cell queued 19.8 minutes behind the cap) ended run 43449176506 alongside the
       # macOS integration cap; the first-wave queues on every hosted label were seconds,
@@ -1570,7 +1576,7 @@ jobs:
       # under the CI-speed program (this run's wall is the measured gain; concurrent
       # runs share the organization's concurrency limit and queue rather than fail),
       # and the caps are deliberately not lowered here.
-      max-parallel: 24
+      max-parallel: 29
       matrix:
         # WHY THERE IS NO `platform` KEY HERE ANY MORE
         #
@@ -1618,6 +1624,11 @@ jobs:
           - { os: ubuntu-latest, method: bash, config-file: default, oci-runner: finch }
           - { os: ubuntu-latest, method: powershell, config-file: default, oci-runner: finch }
           - { os: ubuntu-latest, method: python-container, config-file: default, oci-runner: finch }
+          # Linux x86 -- the sh helper (". utils/ash_helpers.sh && invoke-ash", the form its
+          # header and tests/unit/test_sandbox_refused_by_every_container_entrypoint.py use)
+          - { os: ubuntu-latest, method: sh-helper, config-file: default, oci-runner: docker }
+          - { os: ubuntu-latest, method: sh-helper, config-file: default, oci-runner: podman }
+          - { os: ubuntu-latest, method: sh-helper, config-file: default, oci-runner: finch }
 
           # Linux ARM -- Docker
           - { os: ubuntu-24.04-arm, method: bash, config-file: default, oci-runner: docker }
@@ -1630,6 +1641,9 @@ jobs:
           - { os: ubuntu-24.04-arm, method: python-container, config-file: default, oci-runner: podman }
           # Linux ARM -- Finch (x86_64 only, skip ARM)
           # - { os: ubuntu-24.04-arm, method: python-container, config-file: default, oci-runner: finch }
+          # Linux ARM -- the sh helper (finch is x86_64 only, as above)
+          - { os: ubuntu-24.04-arm, method: sh-helper, config-file: default, oci-runner: docker }
+          - { os: ubuntu-24.04-arm, method: sh-helper, config-file: default, oci-runner: podman }
 
           # macOS -- python-local only (Docker disabled on hosted macOS)
           - { os: macos-latest, method: python-local, config-file: default }
@@ -1723,10 +1737,21 @@ jobs:
         env:
           ASH_IMAGE_NAME: automated-security-helper:non-root
           OCI_RUNNER: docker
-        run: >-
-          uv run --extra cdk pytest
-          tests/snapshot/container/runtime/test_container_image_permissions.py
-          --run-container-snapshots --no-cov -n 0
+        run: |
+          # Same guard as run-scan-test's snapshot step: the tier gate in
+          # tests/conftest.py skips every item here when a gate flag is missing and
+          # pytest exits 0 on an all-skipped run, so a green step proves nothing
+          # without a count. Fail unless at least one test actually executed.
+          uv run --extra cdk pytest \
+            tests/snapshot/container/runtime/test_container_image_permissions.py \
+            --run-container-snapshots --run-integration --no-cov -n 0 \
+            | tee "${RUNNER_TEMP}/image-permissions-pytest.log"
+          executed="$(awk '/^=+ .* =+$/ { line = $0 } END { n = 0; while (match(line, /[0-9]+ (passed|failed|xpassed|xfailed|error)/)) { n += substr(line, RSTART, RLENGTH) + 0; line = substr(line, RSTART + RLENGTH) }; print n }' "${RUNNER_TEMP}/image-permissions-pytest.log")"
+          if [ "${executed}" -eq 0 ]; then
+            echo "Image-permissions step executed 0 tests: the tier gate skipped everything, so nothing was checked."
+            exit 1
+          fi
+          echo "Image-permissions step executed ${executed} test(s)."
 
   # ---------------------------------------------------------------------------
   # External-target scan: assert on what comes back when ASH scans a directory
@@ -3076,8 +3101,8 @@ jobs:
   # One check name that can actually be required
   # ---------------------------------------------------------------------------
   #
-  # Most jobs above name themselves from their matrix, so this workflow contributes 336 check
-  # runs to a pull request (818 to a merge-queue run, which runs the full matrices) and few of
+  # Most jobs above name themselves from their matrix, so this workflow contributes 341 check
+  # runs to a pull request (823 to a merge-queue run, which runs the full matrices) and few of
   # their names are stable. A ruleset's
   # required_status_checks list holds literal context strings with no wildcard, so requiring
   # `unit-test` and the integration and e2e families means enumerating all 365 of their names -- and then any matrix edit either orphans
@@ -3087,16 +3112,16 @@ jobs:
   # moves with the trigger set, as the 186 below explains.
   #
   # Those two numbers count different populations, which is how the previous pair of them went
-  # stale unnoticed. The 186 was measured on pull request 599, the 818 is derived
+  # stale unnoticed. The 186 was measured on pull request 599, the 823 is derived
   # below, and both are re-derivable:
   #
   #   gh api repos/<owner>/<repo>/actions/runs/<run>/jobs --paginate --jq '.jobs[].name'
   #   gh api repos/<owner>/<repo>/commits/<sha>/check-runs --paginate --jq '.check_runs[].name'
   #
-  # 336 is this workflow's own contribution to a pull request: the 201 jobs that run there,
+  # 341 is this workflow's own contribution to a pull request: the 206 jobs that run there,
   # plus the 135 `PyTest - ...` check runs that mikepenz/action-junit-report publishes from
   # inside the unit, integration and e2e legs -- one per leg. A merge-queue run, which runs
-  # the full matrices, is 818: the 453 jobs that run there plus 365 check runs.
+  # the full matrices, is 823: the 458 jobs that run there plus 365 check runs.
   # warm-image-layers runs only on a push to main and is in neither; whether GitHub still
   # lists it as skipped on a pull request was not checked. The check runs are not jobs and
   # land in a separate check suite, so a job census alone undercounts what this file puts on
@@ -3156,28 +3181,31 @@ jobs:
   # run, and 202 on a pull request, which does not run that leg. Then the unit-coverage job
   # stopped being one leg per OS family (4 on a push, 2 on a pull request) and became one
   # job that combines the coverage of every unit leg (-3, -1): 455 on a push, 453 on a
-  # merge-queue run, and 201 on a pull request.
+  # merge-queue run, and 201 on a pull request. Then scan-validation gained the
+  # sh-helper method's five rows, the bash rows' runner spread through
+  # utils/ash_helpers.sh (+5 on every event): 460 on a push, 458 on a merge-queue run, and
+  # 206 on a pull request.
   # tests/unit/test_unified_ci_job_counts.py recounts the list below from the matrices, so
   # these figures can drift from GitHub's census but not from this file. The 365 `PyTest - ...`
   # runs are derived from the leg count of the unit, integration and e2e jobs by the
   # one-per-leg rule #602 measured at 20 legs, not counted again, and the collapse does not
   # touch them.
   #
-  # Where 455 comes from, per job, on a push to main: lint 1, ensure-cache 6, actionlint 1,
+  # Where 460 comes from, per job, on a push to main: lint 1, ensure-cache 6, actionlint 1,
   # snapshot-trailers 1, unit-test 180, unit-coverage 1,
   # integration-test-linux 60, integration-test-macos 80, integration-test-windows 40,
   # e2e-test-linux 2, e2e-test-macos 2, e2e-test-windows 1, e2e-express 2, warm-image-layers 2,
-  # scan-validation 24, non-root-image-permissions 1, external-target-scan 2, sandbox 2,
+  # scan-validation 29, non-root-image-permissions 1, external-target-scan 2, sandbox 2,
   # sandbox-scanner-parity 2, multi-project-attribution 2, deploy-aws-helpers 1,
   # integration-test 4, docs-examples 1, build-docs 1, converter-integration 2, install-validation 32, homebrew-macos 1,
   # required-checks 1.
   #
-  # Where 201 comes from, per job, on a pull request (the pull-request cover, the note on
+  # Where 206 comes from, per job, on a pull request (the pull-request cover, the note on
   # ensure-cache): lint 1, ensure-cache 2, actionlint 1, snapshot-trailers 1, unit-test 66,
   # unit-coverage 1, integration-test-linux 18, integration-test-macos 24,
   # integration-test-windows 24, e2e-test-linux 1, e2e-test-macos 1, e2e-test-windows 1,
   # e2e-express 2,
-  # scan-validation 24, non-root-image-permissions 1, external-target-scan 2, sandbox 2,
+  # scan-validation 29, non-root-image-permissions 1, external-target-scan 2, sandbox 2,
   # sandbox-scanner-parity 2, multi-project-attribution 2, deploy-aws-helpers 1,
   # integration-test 4, docs-examples 1, build-docs 1, converter-integration 2, install-validation 14,
   # homebrew-macos 1, required-checks 1. warm-image-layers is push-only and absent. The
@@ -3227,7 +3255,7 @@ jobs:
   # job for integration-test, 80 fewer for the install-validation collapse, one more for
   # snapshot-trailers and one more for homebrew-macos, so a comparable CI-plumbing commit would
   # see 139 rather than 186. That 139 predates the tier split and the jobs added after
-  # it; the 818 above is the current merge-queue figure and 336 the pull-request one. That
+  # it; the 823 above is the current merge-queue figure and 341 the pull-request one. That
   # is arithmetic on a measured baseline,
   # not a count anyone has taken, and it is why the 186 keeps its own commit's name.
   #
