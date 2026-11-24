@@ -20,7 +20,6 @@ cases the arithmetic turns on.
 
 from __future__ import annotations
 
-import copy
 import itertools
 import random
 from typing import Any, Callable, Dict, List, Optional
@@ -118,9 +117,7 @@ def _sarif(results: List[Dict[str, Any]]) -> SarifReport:
                 level=item.get("level"),
                 message=Message(text="m"),
                 properties=PropertyBag(**properties),
-                suppressions=[
-                    Suppression(**s) for s in item.get("suppressions", [])
-                ]
+                suppressions=[Suppression(**s) for s in item.get("suppressions", [])]
                 or None,
             )
         )
@@ -517,4 +514,6 @@ def test_the_status_cascade_and_the_summary_buckets_follow_one_order(combo):
     }
     for status, key in buckets.items():
         assert summary[key] == (1 if status == expected else 0), (combo, key)
-    assert counters is not None  # the unusable pair is patched through counters_unusable
+    assert (
+        counters is not None
+    )  # the unusable pair is patched through counters_unusable

@@ -994,18 +994,26 @@ def get_severity_metrics_from_sarif(
     # The aggregate gives a result that states no level its rule's default level
     # (SARIF 3.27.10) before grading it; the same here, so the two agree.
     resolve_missing_levels(sarif_report)
-    counts = ScannerSeverityCount()
-    for result in sarif_report.get_all_results():
-        if is_result_suppressed(result):
-            counts.increment("suppressed")
-        else:
-            # result_severity reads issue_severity first and the level after it,
-            # and a missing level as MISSING_SARIF_LEVEL, as every gate does. A
-            # result with an explicit null level was counted "info" here while the
-            # gate graded it MEDIUM, so the per-scanner row disagreed with the exit
-            # code.
-            counts.increment(_resolve_result_severity(result))
-    return counts
+    # The two readings of a result stay on the tree; the counting is the group-by
+    # the per-scanner statistics share (utils.count_frame).
+    from automated_security_helper.utils.count_frame import (
+        SUPPRESSED,
+        severity_frame,
+        tally_severities,
+    )
+
+    kinds = [
+        SUPPRESSED
+        if is_result_suppressed(result)
+        # result_severity reads issue_severity first and the level after it,
+        # and a missing level as MISSING_SARIF_LEVEL, as every gate does. A
+        # result with an explicit null level was counted "info" here while the
+        # gate graded it MEDIUM, so the per-scanner row disagreed with the exit
+        # code.
+        else _resolve_result_severity(result)
+        for result in sarif_report.get_all_results()
+    ]
+    return tally_severities(severity_frame(kinds))
 
 
 def mask_secrets_in_sarif(sarif_report: SarifReport) -> SarifReport:

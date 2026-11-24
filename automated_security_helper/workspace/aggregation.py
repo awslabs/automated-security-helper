@@ -910,21 +910,31 @@ def actionable_results_by_scanner(
     """
     effective = effective_threshold_resolver(threshold, threshold_for)
 
-    counts: Dict[str, int] = {}
+    # The per-result readings (scanner, suppression, the gate) are the SARIF
+    # result's and stay on the host; the per-scanner count is the group-by the
+    # per-scanner severity counts share (utils.count_frame).
+    from automated_security_helper.utils.count_frame import (
+        actionable_by_name,
+        actionable_frame,
+    )
+
+    rows = []
     for result in results:
         if not isinstance(result, Mapping):
             continue
         scanner = result_scanner_name(result)
         name = scanner or UNATTRIBUTED_SCANNER
-        counts.setdefault(name, 0)
-        if result_is_suppressed(result):
-            continue
-        # An effective threshold of None or empty text fails nothing
-        # (severity_fails_threshold), which is the gate turned off for that
-        # scanner.
-        if result_fails_scanner_threshold(result, effective):
-            counts[name] += 1
-    return counts
+        # A suppressed finding never counts and never asks the gate. An effective
+        # threshold of None or empty text fails nothing (severity_fails_threshold),
+        # which is the gate turned off for that scanner.
+        rows.append(
+            (
+                name,
+                not result_is_suppressed(result)
+                and result_fails_scanner_threshold(result, effective),
+            )
+        )
+    return actionable_by_name(actionable_frame(rows))
 
 
 def count_actionable_results(
