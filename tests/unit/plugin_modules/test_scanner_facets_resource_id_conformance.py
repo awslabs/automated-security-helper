@@ -26,7 +26,10 @@ Scope, said plainly: this covers the ``resource_id`` facet, the one whose
 wrong value does damage downstream. The other facets are shape-validated
 only. The must-NOT row is a static read of plugin-package sources: a write
 made through a module outside plugin_modules (a shared utility) is invisible
-to it, which the planted controls below bound but do not close.
+to it, which the planted controls below bound but do not close. A value that
+arrives in a tool's own passed-through property bag is a different route and is
+closed at the flatten boundary (models/flat_vulnerability.py); the last rows
+of this module pin it.
 """
 
 from __future__ import annotations
@@ -331,3 +334,67 @@ def test_a_dropped_resource_id_is_still_in_its_fixture(name: str) -> None:
         f"{value!r} in {fixture}; the dropped cell's evidence rotted, so "
         "re-read the tool output and re-declare the cell"
     )
+
+
+# --------------------------------------------------------------------------
+# Passthrough: a tool's own property bag cannot attach a resource id.
+# --------------------------------------------------------------------------
+
+_BAG_VALUE = "tool/controlled/path"
+
+
+def _flatten_with_bag_key(scanner_name: str):
+    from automated_security_helper.models.flat_vulnerability import FlatVulnerability
+    from automated_security_helper.schemas.sarif_schema_model import (
+        Message,
+        Message1,
+        PropertyBag,
+        Result,
+    )
+
+    result = Result(
+        ruleId="TOOL-RULE-1",
+        message=Message(root=Message1(text="a finding")),
+        properties=PropertyBag(**{ASH_RESOURCE_ID_KEY: _BAG_VALUE}),
+    )
+    return FlatVulnerability.from_sarif_result(result, scanner_name, "SAST")
+
+
+def _config_name(cls: type) -> str | None:
+    from automated_security_helper.utils.scanner_tool_types import (
+        _class_config_name,
+    )
+
+    return _class_config_name(cls)
+
+
+@pytest.mark.parametrize(
+    "scanner_cls",
+    _classes_in(FacetState.NA) + _classes_in(FacetState.DROPPED),
+    ids=lambda cls: cls.__name__,
+)
+def test_a_tool_bag_resource_id_never_attaches_for_an_na_or_dropped_scanner(
+    scanner_cls: type,
+) -> None:
+    name = _config_name(scanner_cls)
+    assert name, f"{scanner_cls.__name__}: no config name to flatten under"
+    assert _flatten_with_bag_key(name).resource_id is None, (
+        f"{scanner_cls.__name__} declares resource_id "
+        f"{_resource_id_state(scanner_cls).value}, yet a {ASH_RESOURCE_ID_KEY} "
+        "arriving in the tool's own property bag attached to the finding"
+    )
+
+
+@pytest.mark.parametrize(
+    "scanner_cls",
+    _classes_in(FacetState.MAPPED),
+    ids=lambda cls: cls.__name__,
+)
+def test_a_mapped_scanner_keeps_its_resource_id(scanner_cls: type) -> None:
+    name = _config_name(scanner_cls)
+    assert name, f"{scanner_cls.__name__}: no config name to flatten under"
+    assert _flatten_with_bag_key(name).resource_id == _BAG_VALUE
+
+
+def test_an_unknown_scanner_is_left_as_read() -> None:
+    assert _flatten_with_bag_key("no-such-scanner").resource_id == _BAG_VALUE
