@@ -1051,9 +1051,18 @@ def test_a_relative_runner_wrapper_is_refused_and_nothing_runs(
     os.name != "nt",
     reason="a < in a path is invalid only on Windows, where IsPathRooted can throw on it",
 )
-@pytest.mark.parametrize("variable", ["OCI_RUNNER", "OCI_RUNNER_WRAPPER"])
+@pytest.mark.parametrize(
+    ("variable", "value"),
+    [
+        pytest.param("OCI_RUNNER", "bin/<docker", id="OCI_RUNNER"),
+        pytest.param("OCI_RUNNER_WRAPPER", "bin/<docker", id="OCI_RUNNER_WRAPPER"),
+        pytest.param(
+            "OCI_RUNNER_WRAPPER", "C:\\bin\\|docker", id="rooted-windows-invalid-char"
+        ),
+    ],
+)
 def test_a_relative_value_with_an_invalid_path_character_is_refused_not_thrown_on(
-    variable, pwsh, tmp_path
+    variable, value, pwsh, tmp_path
 ):
     """``bin/<docker`` holds a character a Windows path cannot hold. On Windows
     PowerShell 5.1 ``IsPathRooted`` throws for it, which would end in a generic
@@ -1075,7 +1084,7 @@ def test_a_relative_value_with_an_invalid_path_character_is_refused_not_thrown_o
         [runner.parent.as_posix(), Path(pwsh).resolve().parent.as_posix()]
     )
     env.update(scratch_home(tmp_path))
-    env[variable] = "bin/<docker"
+    env[variable] = value
 
     result = subprocess.run(  # nosec B603 - fixed interpreter, script built here
         [pwsh, "-NoProfile", "-NonInteractive", "-Command", script],
