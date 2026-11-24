@@ -30,7 +30,7 @@ class ResourcePolicyStarAccessVerbPolicyRule < BaseRule
       # domain. A policy a resource carries under another name (an S3 BucketPolicy's
       # PolicyDocument, a KMS key's KeyPolicy, an SQS QueuePolicy, an SNS TopicPolicy)
       # is not read here; cfn_nag ships rules of its own for those resources.
-      unless (resource.accessPolicies.nil?) then
+      if AccessPolicyReading.policy_resource?(resource) then
         # cfn_model is passed because PolicyDocumentParser#parse requires it; see the same
         # call in StarResourceAccessPolicyRule.rb for why the one-argument form was wrong
         # and what it cost. Both rules were written against cfn-model 0.4.0's signature.

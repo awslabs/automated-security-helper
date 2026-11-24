@@ -118,6 +118,11 @@
   names several lists each once (`CWE-1357, CWE-353`). A finding whose rule id is
   an advisory id (`GHSA-...`) or whose rule has no CWE tag keeps both empty.
 
+### Fixes
+
+- cfn-nag evaluates templates containing `AWS::EKS::AccessEntry` without passing
+  EKS access policy associations to the OpenSearch and Elasticsearch policy rules.
+
 ## v3.8.0 (2026-11-12)
 
 ### Breaking behavior changes in a minor release
