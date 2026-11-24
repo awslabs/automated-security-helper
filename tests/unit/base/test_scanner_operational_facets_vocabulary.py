@@ -46,15 +46,15 @@ def test_unknown_fields_are_refused() -> None:
 
 
 def _network_kwargs() -> dict:
-    return dict(
-        fetch_kind=opsf.FetchKind.NONE,
-        fetches=(),
-        prefetch=(),
-        offline_outcome=opsf.OfflineOutcome.UNCHANGED,
-        offline_strategy=OfflineStrategy.BUNDLED,
-        sandbox_network=opsf.SandboxNetwork.NONE,
-        source="a source",
-    )
+    return {
+        "fetch_kind": opsf.FetchKind.NONE,
+        "fetches": (),
+        "prefetch": (),
+        "offline_outcome": opsf.OfflineOutcome.UNCHANGED,
+        "offline_strategy": OfflineStrategy.BUNDLED,
+        "sandbox_network": opsf.SandboxNetwork.NONE,
+        "source": "a source",
+    }
 
 
 def _fetching_kwargs() -> dict:
@@ -206,13 +206,13 @@ def test_every_target_kind_is_served_or_unclaimed_by_a_tool_type() -> None:
 
 
 def _runtime(**change) -> opsf.RuntimeFacet:
-    base = dict(
-        kind=opsf.RuntimeKind.IN_PROCESS,
-        external_programs=(),
-        invocations=opsf.Invocations.ONE,
-        python_only=True,
-        use_uv_tool=False,
-    )
+    base = {
+        "kind": opsf.RuntimeKind.IN_PROCESS,
+        "external_programs": (),
+        "invocations": opsf.Invocations.ONE,
+        "python_only": True,
+        "use_uv_tool": False,
+    }
     return opsf.RuntimeFacet(**{**base, **change})
 
 
@@ -254,13 +254,13 @@ def test_severity_degraded_names_the_dropped_field_and_only_degraded_does() -> N
 
 
 def test_silencing_refusals() -> None:
-    layer = dict(
-        layer=opsf.SilencingLayerKind.INLINE_COMMENT,
-        writer=opsf.SilencingWriter.REPOSITORY,
-        honored=opsf.Honored.YES,
-        surface="a surface",
-        cite="a citation",
-    )
+    layer = {
+        "layer": opsf.SilencingLayerKind.INLINE_COMMENT,
+        "writer": opsf.SilencingWriter.REPOSITORY,
+        "honored": opsf.Honored.YES,
+        "surface": "a surface",
+        "cite": "a citation",
+    }
     opsf.SilencingLayer(**layer)
     with pytest.raises(ValidationError):
         opsf.SilencingLayer(**{**layer, "honored": opsf.Honored.UNCONFIRMED})
@@ -279,11 +279,11 @@ def test_exit_codes_are_sorted_unique_and_non_empty() -> None:
 
 
 def test_an_upstream_license_is_not_read_or_cited_never_recalled() -> None:
-    base = dict(
-        tier=opsf.Tier.BUILTIN_DEFAULT,
-        source=opsf.ProvenanceSource.PYPI_VIA_UV,
-        selection_surfaces=(),
-    )
+    base = {
+        "tier": opsf.Tier.BUILTIN_DEFAULT,
+        "source": opsf.ProvenanceSource.PYPI_VIA_UV,
+        "selection_surfaces": (),
+    }
     opsf.ProvenanceFacet(**base, upstream_license=opsf.LICENSE_NOT_READ)
     opsf.ProvenanceFacet(
         **base, upstream_license="Apache-2.0 (source: the pinned upstream LICENSE)"

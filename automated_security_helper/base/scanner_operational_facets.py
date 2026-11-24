@@ -423,10 +423,7 @@ class RuntimeFacet(_Frozen):
             raise ValueError("a uv_python scanner runs through uv (use_uv_tool)")
         if self.use_uv_tool and self.kind is not RuntimeKind.UV_PYTHON:
             raise ValueError("use_uv_tool means the uv_python runtime kind")
-        if (
-            self.invocations is not Invocations.ONE
-            and _blank(self.invocation_note)
-        ):
+        if self.invocations is not Invocations.ONE and _blank(self.invocation_note):
             raise ValueError("per-target and multi-pass invocation need a note")
         return self
 
