@@ -12,7 +12,6 @@ incomplete. The directories are pointed below the scanner's results directory th
 the variables checkov reads, and an operator's own value is left alone.
 """
 
-import os
 from pathlib import Path
 
 import pytest
@@ -25,6 +24,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.checkov_scann
     CheckovScanner,
     CheckovScannerConfig,
 )
+from tests.utils.env_assertions import environ_value
 
 PluginContext.model_rebuild()
 
@@ -89,4 +89,4 @@ def test_the_rest_of_the_environment_reaches_checkov(tmp_path, monkeypatch):
 
     # A dict replaces the child's environment rather than adding to it.
     assert env["ASH_TEST_MARKER_VARIABLE"] == "kept"
-    assert env.get("PATH") == os.environ.get("PATH")
+    assert env.get("PATH") == environ_value("PATH")
