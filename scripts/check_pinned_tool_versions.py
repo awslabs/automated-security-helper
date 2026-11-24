@@ -1148,6 +1148,15 @@ def _release_binary_steps(pins: Any, pin: Pin, latest: str) -> list[str]:
             f"_EXECUTABLE_DIGESTS: {len(executable)} executable digest(s), "
             "hashed from each verified archive's extracted member"
         )
+    companions = getattr(pins, "_COMPANION_DIGESTS", {})
+    carried = [n for n in filenames if n in companions]
+    if carried:
+        steps.append(
+            f"_COMPANION_DIGESTS: {sum(len(companions[n]) for n in carried)} digest(s) "
+            f"of the files {len(carried)} archive(s) carry beside the executable, "
+            "hashed from each verified archive's members; re-read the member listing "
+            "for a file added, renamed or dropped"
+        )
     return steps + _license_steps(pins, tool, latest)
 
 
@@ -1321,6 +1330,7 @@ def _pinned_digests(pins: Any, pin: Pin) -> list[str]:
             value = getattr(pins, table, {}).get(archive)
             if value:
                 values.append(value)
+        values += getattr(pins, "_COMPANION_DIGESTS", {}).get(archive, {}).values()
     entry = pins.THIRD_PARTY_LICENSES.get(pin.tool)
     if entry is not None:
         values.append(entry.commit)
@@ -1411,6 +1421,14 @@ def bump_steps(
             f"{', '.join(PIN_KINDS)} only"
         )
     steps = kind_steps(pins, pin, latest)
+    hold = held_pins(pins).get(pin.tool)
+    if hold is not None:
+        steps.append(
+            f'HELD_PINS["{pin.tool}"] (acknowledged {hold.acknowledged}): the hold '
+            f"was written for a pin below that release; once {pin.tool} is bumped "
+            "to it or past it, delete the entry, and if the hold's reason still "
+            "applies, update its acknowledged version, reason and until"
+        )
     args = _dockerfile_args(pin.tool, dockerfile)
     if args:
         steps.append(f"ARG {_arg_stem(pin.tool)}_VERSION in {', '.join(args)}")
