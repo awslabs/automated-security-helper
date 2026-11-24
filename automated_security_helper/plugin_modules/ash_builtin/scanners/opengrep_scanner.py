@@ -208,55 +208,6 @@ def _refuse_windows_zip_install_command(version: str, url: str) -> CustomCommand
     )
 
 
-#: What opengrep 2.0.0 writes to stderr, in this order, when a ruleset named by a
-#: registry reference (``p/ci``) cannot be downloaded, before it exits 2.
-_REGISTRY_FETCH_MARKER = "trying to download from"
-_REGISTRY_FETCH_FATAL = "Error: fatal error"
-_STDERR_TAIL_BYTES = 256 * 1024
-
-
-def _is_registry_reference(value: str) -> bool:
-    """Whether an opengrep ``--config`` value names a ruleset to download.
-
-    A URL is fetched whatever it ends in. Otherwise a path that exists, or a rules
-    file name, is local; ``p/ci`` and ``r/...`` registry references and ``auto``
-    are fetched.
-    """
-    if value.startswith(("http://", "https://")):
-        return True
-    if os.path.exists(value) or value.lower().endswith((".yml", ".yaml", ".json")):
-        return False
-    return value == "auto" or value.startswith(("p/", "r/", "http://", "https://"))
-
-
-def without_registry_configs(command: List[str]) -> List[str]:
-    """``command`` with every ``--config`` that names a registry ruleset removed."""
-    kept: List[str] = []
-    index = 0
-    while index < len(command):
-        argument = command[index]
-        if argument == "--config" and index + 1 < len(command):
-            if _is_registry_reference(command[index + 1]):
-                index += 2
-                continue
-        elif argument.startswith("--config=") and _is_registry_reference(
-            argument.split("=", 1)[1]
-        ):
-            index += 1
-            continue
-        kept.append(argument)
-        index += 1
-    return kept
-
-
-def _has_local_config(command: List[str]) -> bool:
-    """Whether ``command`` still names at least one ruleset after the removal."""
-    return any(
-        argument == "--config" or argument.startswith("--config=")
-        for argument in command
-    )
-
-
 def _release_number(version: str) -> str:
     """``version`` without the one leading ``v`` a release tag may carry."""
     return version.removeprefix("v")
@@ -492,49 +443,6 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
                     raise ScannerError(self.dependency_unavailable_reason)
         self._scan_target_path = target
         return super()._resolve_scan_arguments(target, results_file)
-
-    def _run_subprocess(self, command: List[str], *args, **kwargs):
-        """Run opengrep; when it cannot download a ruleset, run it on the local ones.
-
-        opengrep 2.0.0 exits 2 ("Error: fatal error") when a ruleset named by a
-        registry reference such as ``p/ci`` cannot be fetched, which is what a run
-        without network (a sandbox, an air-gapped host) meets. The rules ASH ships
-        and any cached rules are named by local ``--config`` values and need no
-        network, so the run is repeated once without the registry references, with
-        one warning. With no local ruleset left, or any other failure, the first
-        run's result stands.
-        """
-        response = super()._run_subprocess(command, *args, **kwargs)
-        if not self._registry_fetch_failed(response, kwargs.get("results_dir")):
-            return response
-        fallback = without_registry_configs(command)
-        if fallback == command or not _has_local_config(fallback):
-            return response
-        ASH_LOGGER.warning(
-            "opengrep could not download a ruleset from the registry (no network?); "
-            "scanning with the local rulesets only: ASH's bundled rules and any "
-            "rule cache."
-        )
-        # In place, so the invocation record shows the command that ran.
-        command[:] = fallback
-        return super()._run_subprocess(command, *args, **kwargs)
-
-    @staticmethod
-    def _registry_fetch_failed(response, results_dir) -> bool:
-        """Whether this run ended on opengrep's failed-ruleset-download exit."""
-        if not isinstance(response, dict) or response.get("returncode") != 2:
-            return False
-        if results_dir is None:
-            return False
-        log = Path(results_dir) / "OpengrepScanner.stderr.log"
-        try:
-            with open(log, "rb") as handle:
-                handle.seek(0, os.SEEK_END)
-                handle.seek(max(0, handle.tell() - _STDERR_TAIL_BYTES))
-                text = handle.read().decode("utf-8", errors="replace")
-        except OSError:
-            return False
-        return _REGISTRY_FETCH_MARKER in text and _REGISTRY_FETCH_FATAL in text
 
     def extra_subprocess_env(self) -> dict | None:
         """Git's ``safe.directory`` for the one directory this scan reads.
