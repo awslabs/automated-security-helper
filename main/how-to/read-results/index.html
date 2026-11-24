@@ -3847,6 +3847,10 @@ that left the scanner out, or what it had nothing to scan, as in
 <code>no CloudFormation template in the scanned files</code>. The row's <code>exit_code</code> is the tool's
 exit code, the highest over its targets, the start-failure code 127 for a tool that
 could not start as asked, or <code>null</code> when no tool ran.</p>
+<p>The HTML, Markdown and text reports list the same reasons under their scanner table, as
+"Scanners that did not run", with the scanners that share a reason on one line. The
+compact Markdown report lists them for <code>MISSING</code>
+scanners only, since it leaves <code>SKIPPED</code> rows out of the table.</p>
 <p>To read the results from a script:</p>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
 </span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
