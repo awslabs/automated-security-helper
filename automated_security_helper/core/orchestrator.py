@@ -42,7 +42,10 @@ from automated_security_helper.config.resolve_config import (
     resolve_config,
 )
 from automated_security_helper.core.enums import ExecutionStrategy
-from automated_security_helper.core.scanner_selection import SelectionOrigin
+from automated_security_helper.core.scanner_selection import (
+    SelectionLayers,
+    SelectionOrigin,
+)
 from automated_security_helper.core.progress import (
     ExecutionPhaseType,
 )
@@ -379,6 +382,16 @@ class ASHScanOrchestrator(BaseModel):
             description="List of scanners to exclude. Takes precedence over enabled_scanners.",
         ),
     ] = []
+    selection_layers: Annotated[
+        Optional[SelectionLayers],
+        Field(
+            description=(
+                "The selection layers known before the config is settled. When "
+                "set, the allowlist is folded with the settled config's "
+                "default_scanners and enabled_scanners is not read."
+            ),
+        ),
+    ] = None
     oci_runner: Annotated[str, Field("docker", description="OCI runner to use")] = (
         "docker"
     )
@@ -904,6 +917,19 @@ class ASHScanOrchestrator(BaseModel):
             self._adopt_this_runs_values(asharp_model, config)
             exec_engine_params = {"asharp_model": asharp_model}
 
+        enabled_scanners = self.enabled_scanners
+        selection_origin = self.selection_origin
+        if self.selection_layers is not None:
+            folded = self.selection_layers.fold(
+                config.default_scanners.only,
+                config.default_scanners.add,
+            )
+            enabled_scanners = folded.names
+            if folded.origin == "operator":
+                selection_origin = "config"
+            elif folded.origin == "cli+operator":
+                selection_origin = "cli+config"
+
         # Under this scan's run id, so the context records its directories on
         # *config* as this run's (config/path_trust.derived_roots_scope) and
         # execute_scan can remove them when the scan ends.
@@ -925,7 +951,7 @@ class ASHScanOrchestrator(BaseModel):
                     staged_files=self.staged_files,
                 ),
                 strategy=self.strategy,
-                enabled_scanners=self.enabled_scanners,
+                enabled_scanners=enabled_scanners,
                 excluded_scanners=self.excluded_scanners,
                 show_progress=self.show_progress,
                 show_summary=self.show_summary,
@@ -951,7 +977,7 @@ class ASHScanOrchestrator(BaseModel):
                 asharp_model=exec_engine_params.get("asharp_model"),
                 shard_index=self.shard_index,
                 shard_count=self.shard_count,
-                selection_origin=self.selection_origin,
+                selection_origin=selection_origin,
                 changed_files=self.changed_files,
             )
 

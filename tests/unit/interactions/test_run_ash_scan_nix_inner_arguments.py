@@ -541,6 +541,9 @@ _NOT_FORWARDED_ON_PURPOSE = {
     ),
     "client_overrides": "who gave the options on this side; the inner scan has its own",
     "selection_origin": "who gave the options on this side; the inner scan has its own",
+    "required_scanner_selection": (
+        "container mode's image compatibility marker; the shell runs this install"
+    ),
     "build": "container only; no shell reads it",
     "run": "container only; no shell reads it",
     "force": "container only; no shell reads it",
@@ -900,3 +903,42 @@ def test_the_seam_is_the_real_preflight_by_default():
     from automated_security_helper.interactions import run_ash_nix
 
     assert ras.nix_preflight is run_ash_nix.nix_executable_for_this_run
+
+
+def test_the_distinct_selection_flags_cross_the_nix_boundary_distinctly(
+    launched, tmp_path
+):
+    _run(tmp_path, only_scanners=["trivy"])
+    only = launched["argv"]
+
+    assert _after_flag(only, "--only-scanners") == ["trivy"]
+    assert _after_flag(only, "--scanners") == []
+    assert _after_flag(only, "--add-scanners") == []
+
+
+def test_an_additive_flag_crosses_the_nix_boundary_as_an_addition(launched, tmp_path):
+    _run(tmp_path, add_scanners=["trivy"], config=str(tmp_path / "ash.yaml"))
+    argv = launched["argv"]
+
+    assert _after_flag(argv, "--add-scanners") == ["trivy"]
+    assert _after_flag(argv, "--only-scanners") == []
+    assert _after_flag(argv, "--scanners") == []
+
+
+def test_a_config_only_selection_sends_no_selection_flag_across_the_nix_boundary(
+    launched, tmp_path
+):
+    _run(tmp_path, config=str(tmp_path / "ash.yaml"))
+    argv = launched["argv"]
+
+    for flag in ("--scanners", "--only-scanners", "--add-scanners"):
+        assert _after_flag(argv, flag) == []
+    assert _after_flag(argv, "--config") == [str(tmp_path / "ash.yaml")]
+
+
+def test_the_config_overrides_that_select_cross_the_nix_boundary(launched, tmp_path):
+    _run(tmp_path, config_overrides=["default_scanners.only=[bandit]"])
+
+    assert _after_flag(launched["argv"], "--config-overrides") == [
+        "default_scanners.only=[bandit]"
+    ]

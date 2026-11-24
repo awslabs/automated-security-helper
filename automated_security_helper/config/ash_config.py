@@ -21,6 +21,7 @@ from pydantic import (
 from typing import (
     Annotated,
     Any,
+    ClassVar,
     Callable,
     List,
     Dict,
@@ -1284,6 +1285,8 @@ ALWAYS_DENIED_PATHS = (
     "/sandbox/**",
     "/ash_plugin_modules",
     "/ash_plugin_modules/**",
+    "/default_scanners",
+    "/default_scanners/**",
     "/scanners/detect-secrets/options/scan_settings/filters_used",
     "/scanners/detect-secrets/options/scan_settings/filters_used/**",
     "/scanners/detect-secrets/options/scan_settings/plugins_used",
@@ -1377,6 +1380,8 @@ class RuntimeOverridesConfig(RedactedSection):
         # Plugin modules are imported into ASH's own process, unsandboxed.
         "/ash_plugin_modules",
         "/ash_plugin_modules/**",
+        "/default_scanners",
+        "/default_scanners/**",
         # detect-secrets settings the trust checks count as the operator's: the
         # verification filter sends each candidate secret to the service that issued
         # it, plugins and filters named by file are imported, and a baseline file can
@@ -2093,14 +2098,16 @@ class PrecommitModeConfig(RedactedSection):
     file, so a repository can state once what its hook runs instead of every
     committer spelling flags in ``.pre-commit-config.yaml``.
 
-    Precedence, lowest to highest (``run_ash_scan._selected_scanners`` applies
-    it): the mode default; then ``only_scanners`` (replaces the default) and
-    ``add_scanners`` (adds to it); then the command line, where
+    Precedence, lowest to highest (``SelectionLayers.fold`` in
+    ``core/scanner_selection.py`` applies it): the mode default; then the
+    operator's ``default_scanners`` section (read in every mode, see
+    ``DefaultScannersConfig``); then this section's ``only_scanners`` (replaces
+    what is below) and ``add_scanners`` (adds to it); then the command line, where
     ``--only-scanners`` replaces everything this section and the mode give, and
     ``--add-scanners`` (or the deprecated ``--scanners``) adds to it.
     ``--exclude-scanners`` applies after all of them: an excluded name wins over
-    any inclusion. Read only by ``--mode precommit``; other modes ignore this
-    section.
+    any inclusion. The ``precommit`` section is read only by ``--mode precommit``;
+    other modes ignore it (``default_scanners`` is not ignored there).
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -2146,6 +2153,67 @@ class PrecommitModeConfig(RedactedSection):
                 "set together: only_scanners already states the whole "
                 "selection. Put every name in only_scanners, or drop it and "
                 "keep add_scanners."
+            )
+        return self
+
+
+class DefaultScannersConfig(RedactedSection):
+    """The operator's default scanners (``default_scanners``).
+
+    ``only`` replaces the mode's default selection in every run mode; a mode
+    with no fixed default (such as local) then runs exactly these scanners.
+    ``add`` extends a mode whose default is a fixed set, which today is
+    precommit's five scanners, and has no effect in a mode whose default is
+    unbounded: it adds to nothing and cannot narrow anything. Empty or omitted
+    changes nothing, and naming a scanner does not install or enable it.
+
+    Read from the defaults, a config file outside every checkout, or
+    ``--config-overrides``; a file inside the scanned tree or a client's patch
+    cannot set it. Precedence, lowest to highest: the mode default, this
+    section, the ``precommit`` keys (read only in precommit mode), the command
+    line.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    unknown_keys_note: ClassVar[str] = (
+        "In a config file inside a git checkout or the scanned tree, or one an "
+        "MCP client delivered, the whole section is ignored instead, an unknown "
+        "key included, and `ash config lint` warns about it."
+    )
+
+    only: Annotated[
+        List[str],
+        Field(
+            description=(
+                "Run exactly these scanners instead of the mode's default "
+                "selection, in every run mode. The command line's "
+                "--only-scanners replaces this list; --add-scanners and the "
+                "deprecated --scanners add to it; --exclude-scanners removes "
+                "names from it. Cannot be set together with add."
+            )
+        ),
+    ] = []
+
+    add: Annotated[
+        List[str],
+        Field(
+            description=(
+                "Scanner names to run in addition to a mode whose default is a "
+                "fixed set, which today is precommit's. Has no effect in a mode "
+                "with an unbounded default, and does not narrow one. Cannot be "
+                "set together with only."
+            )
+        ),
+    ] = []
+
+    @model_validator(mode="after")
+    def _refuse_only_with_add(self) -> "DefaultScannersConfig":
+        if self.only and self.add:
+            raise ValueError(
+                "default_scanners.only and default_scanners.add cannot be set "
+                "together: only already states the whole selection. Put every "
+                "name in only, or drop it and keep add."
             )
         return self
 
@@ -2823,6 +2891,21 @@ class AshConfig(RedactedSection):
             ),
         ),
     ] = PrecommitModeConfig()
+
+    default_scanners: Annotated[
+        DefaultScannersConfig,
+        Field(
+            description=(
+                "The operator's default scanners, read in every run mode: only "
+                "replaces the mode's default selection, add extends a mode whose "
+                "default is a fixed set (today precommit's) and has no effect in "
+                "a mode with an unbounded default; setting both is refused. "
+                "Settable only from the defaults, a config file outside every "
+                "checkout or --config-overrides. The command line and the "
+                "precommit keys take precedence."
+            ),
+        ),
+    ] = DefaultScannersConfig()
 
     # `extends` and `patch` are read by the config loader (config/config_sources.py)
     # and removed before validation, so a loaded config always has both as None.
