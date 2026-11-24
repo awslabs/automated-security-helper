@@ -78,6 +78,7 @@ def test_root_value_options():
         "--output-format",
         "--output-formats",
         "--phases",
+        "--require-scanner-selection",
         "--runner",
         "--sandbox",
         "--scanners",
