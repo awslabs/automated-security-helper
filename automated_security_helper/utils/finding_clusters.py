@@ -279,3 +279,59 @@ def assign_clusters(rows: Sequence[FlatVulnerability]) -> List[ClusterAssignment
                 duplicate_sources=cluster.sources if is_primary else (),
             )
     return assignments
+
+
+#: The flat-report columns the annotation adds, in this order, after every other
+#: column. Present only when ``global_settings.deduplication.annotate`` is on.
+ANNOTATION_COLUMNS: Tuple[str, ...] = ("cluster_id", "duplicate_of", "duplicate_sources")
+
+
+def annotation_values(assignment: ClusterAssignment) -> Dict[str, Any]:
+    """The annotation columns of one row, each None when it does not apply.
+
+    A row in no cluster is all None. A primary has a ``cluster_id`` and its
+    ``duplicate_sources`` (a list of ``scanner`` / ``rule_id`` / ``id`` /
+    ``severity`` dicts); any other member has a ``cluster_id`` and the primary's
+    id as ``duplicate_of``.
+    """
+    return {
+        "cluster_id": assignment.cluster_id,
+        "duplicate_of": assignment.duplicate_of,
+        "duplicate_sources": (
+            [dict(source) for source in assignment.duplicate_sources] or None
+        ),
+    }
+
+
+def annotate_enabled(model: Any) -> bool:
+    """Whether *model*'s config turns the duplicate annotation on.
+
+    Only a literal ``True`` counts, so a model with no recorded configuration, or
+    a stand-in object, leaves every report as it has always been.
+    """
+    settings = getattr(getattr(model, "ash_config", None), "global_settings", None)
+    dedup = getattr(settings, "deduplication", None)
+    return getattr(dedup, "annotate", False) is True
+
+
+def assign_clusters_by_project(
+    rows: Sequence[FlatVulnerability],
+) -> List[ClusterAssignment]:
+    """:func:`assign_clusters`, run once per workspace project.
+
+    Two projects of a workspace can hold the same CVE in the same relative
+    package path; they are two findings, not one, so clusters never span
+    projects. A single-directory scan has one group and is the plain call.
+    """
+    groups: Dict[Optional[str], List[int]] = {}
+    for index, row in enumerate(rows):
+        groups.setdefault(row.workspace_project, []).append(index)
+    if len(groups) <= 1:
+        return assign_clusters(rows)
+    assignments = [ClusterAssignment() for _ in rows]
+    for indexes in groups.values():
+        for index, assigned in zip(
+            indexes, assign_clusters([rows[i] for i in indexes]), strict=True
+        ):
+            assignments[index] = assigned
+    return assignments

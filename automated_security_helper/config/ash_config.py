@@ -1898,6 +1898,33 @@ class AshMcpConfig(RedactedSection):
     ] = RuntimeOverridesConfig()
 
 
+class AshDeduplicationConfig(RedactedSection):
+    """Cross-scanner duplicate annotation (opt-in).
+
+    Findings that two scanners report for one defect are grouped into a
+    duplicate cluster (``utils/finding_clusters``). This section only chooses
+    whether the flat reports say so. Finding ids, SARIF results, metrics,
+    suppressions and baselines never change either way.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    annotate: Annotated[
+        bool,
+        Field(
+            description=(
+                "When true, the CSV and flat-JSON reports gain three columns that "
+                "name each finding's duplicate cluster: `cluster_id`, `duplicate_of` "
+                "(the primary finding's id, on every non-primary member) and "
+                "`duplicate_sources` (on the primary: the other members' scanner, "
+                "rule, id and severity). Rows and counts are unchanged. Off by "
+                "default because the columns change the CSV header. CLI: "
+                "`--annotate-duplicates` on `ash scan` and `ash report`."
+            )
+        ),
+    ] = False
+
+
 class AshConfigGlobalSettingsSection(RedactedSection):
     # validate_default is here because `severity_threshold`'s default is derived
     # from an environment variable, and pydantic does not validate a default no
@@ -1947,6 +1974,13 @@ class AshConfigGlobalSettingsSection(RedactedSection):
             description="MCP-server-specific configuration (runtime override allowlist, etc.)."
         ),
     ] = AshMcpConfig()
+
+    deduplication: Annotated[
+        AshDeduplicationConfig,
+        Field(
+            description="Cross-scanner duplicate annotation in the flat reports (opt-in; off by default)."
+        ),
+    ] = AshDeduplicationConfig()
 
 
 # Distinguishes "caller did not pass cpu_count" from "caller passed None", which

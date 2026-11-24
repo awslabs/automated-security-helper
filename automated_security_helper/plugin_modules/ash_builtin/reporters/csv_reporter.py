@@ -1,4 +1,5 @@
 import csv
+import json
 from collections.abc import Mapping, Sequence
 from io import StringIO
 from typing import Any, Literal, TYPE_CHECKING
@@ -19,6 +20,12 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.workspace_sk
     skipped_projects,
 )
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
+from automated_security_helper.utils.finding_clusters import (
+    ANNOTATION_COLUMNS,
+    annotate_enabled,
+    annotation_values,
+    assign_clusters_by_project,
+)
 from automated_security_helper.utils.frame_text import unwire, wire
 from automated_security_helper.utils.terminal_text import commands_broken
 
@@ -253,14 +260,32 @@ class CsvReporter(ReporterPluginBase[CSVReporterConfig]):
         is_workspace = is_workspace_scan(model)
 
         # Get flattened vulnerabilities
+        flat_items = model.to_flat_vulnerabilities()
         flat_vulns = [
             item.model_dump(
                 exclude_defaults=False,
                 exclude_none=False,
                 exclude_unset=False,
             )
-            for item in model.to_flat_vulnerabilities()
+            for item in flat_items
         ]
+
+        # Opt-in duplicate annotation: three columns after every other column,
+        # on every row (blank where a finding is in no cluster). Off, the header
+        # and every row are byte-identical to what they have always been.
+        annotated = annotate_enabled(model)
+        if annotated:
+            for dump, assigned in zip(
+                flat_vulns, assign_clusters_by_project(flat_items), strict=True
+            ):
+                values = annotation_values(assigned)
+                sources = values["duplicate_sources"]
+                values["duplicate_sources"] = (
+                    None
+                    if sources is None
+                    else json.dumps(sources, sort_keys=True, separators=(",", ":"))
+                )
+                dump.update(values)
 
         # The skipped projects, read before the early return below so that a
         # workspace whose scanned projects all came back clean still discloses
@@ -271,7 +296,7 @@ class CsvReporter(ReporterPluginBase[CSVReporterConfig]):
 
         if not flat_vulns:
             # No findings: the header alone, plus any project rows.
-            fields = self._header(is_workspace)
+            fields = self._header(is_workspace, annotated)
             writer.writerow(fields)
             for entry in skipped:
                 writer.writerow(self._skipped_project_row(fields, entry))
@@ -355,7 +380,7 @@ class CsvReporter(ReporterPluginBase[CSVReporterConfig]):
         return [spreadsheet_safe(values.get(field, "")) for field in fields]
 
     @staticmethod
-    def _header(is_workspace: bool) -> list[str]:
+    def _header(is_workspace: bool, annotated: bool = False) -> list[str]:
         """The header for a scan with no findings at all.
 
         Derived from ``FlatVulnerability``'s own field order rather than written
@@ -369,4 +394,7 @@ class CsvReporter(ReporterPluginBase[CSVReporterConfig]):
             FlatVulnerability,
         )
 
-        return CsvReporter._order(list(FlatVulnerability.model_fields), is_workspace)
+        fields = list(FlatVulnerability.model_fields)
+        if annotated:
+            fields.extend(ANNOTATION_COLUMNS)
+        return CsvReporter._order(fields, is_workspace)

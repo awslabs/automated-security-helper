@@ -1415,6 +1415,14 @@ def run_ash_scan_cli_command(
             help="Produce a shorter markdown report suitable for PR comments. Omits the severity legend, scan metadata, footer, and rows for scanners that were skipped or had zero findings.",
         ),
     ] = False,
+    annotate_duplicates: Annotated[
+        bool,
+        typer.Option(
+            "--annotate-duplicates",
+            rich_help_panel="Reports",
+            help="Add `cluster_id`, `duplicate_of` and `duplicate_sources` columns to the CSV and flat-JSON reports, naming findings that two scanners report for one defect (same CVE and package, same IaC resource, or same line and CWE). Rows, ids, counts, SARIF, suppressions and baselines are unchanged. Adds three columns to the CSV header, so it is off by default. Sets `global_settings.deduplication.annotate`.",
+        ),
+    ] = False,
     changed_files_only: Annotated[
         bool,
         typer.Option(
@@ -1940,6 +1948,10 @@ def run_ash_scan_cli_command(
         config_overrides = []
     if compact_report:
         config_overrides.append("reporters.markdown.options.compact=true")
+    # The same route again, for the same reason; only an explicit flag adds it, so
+    # a run without it leaves the config file's value alone.
+    if annotate_duplicates:
+        config_overrides.append("global_settings.deduplication.annotate=true")
     # The same route as --compact-report, for the same reason and one more: as a config
     # override it reaches every mode unchanged -- local, nix, workspace, and the container,
     # which is handed config_overrides verbatim -- and overrides are applied after the
