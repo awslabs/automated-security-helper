@@ -209,7 +209,10 @@ def coverage_warnings_from_records(
         )
         if missing or coverage["incomplete"]:
             warnings.append(f"{label} scan has incomplete scanner coverage.")
-        elif not coverage["expected_scanners"] or not coverage["scanner_results_recorded"]:
+        elif (
+            not coverage["expected_scanners"]
+            or not coverage["scanner_results_recorded"]
+        ):
             warnings.append(
                 f"{label} scan does not record enough scanner coverage to establish comparability."
             )
@@ -314,7 +317,9 @@ def build_trend(runs: Sequence[TrendRun]) -> Trend:
             )
             if _severity(before.severity) != _severity(after.severity):
                 changes.append(
-                    _change(k, "severity", before, after, before.severity, after.severity)
+                    _change(
+                        k, "severity", before, after, before.severity, after.severity
+                    )
                 )
             if before.is_suppressed != after.is_suppressed:
                 changes.append(
@@ -444,9 +449,7 @@ def _streaks(
     )
     last = len(runs) - 1
     open_now = spans.filter((pl.col("last") == last) & (pl.col("runs") > 1))
-    by_track = {
-        track: (n, first) for track, n, first, _ in open_now.iter_rows()
-    }
+    by_track = {track: (n, first) for track, n, first, _ in open_now.iter_rows()}
     out = []
     for row in rows[last]:
         found = by_track.get(track_of[last][row.index])

@@ -212,7 +212,9 @@ def test_the_order_of_a_runs_findings_does_not_change_the_trend():
 
 
 def test_the_json_form_is_versioned_and_serializable():
-    trend = series(results(finding("B101"), second=1), results(finding("B101"), second=2))
+    trend = series(
+        results(finding("B101"), second=1), results(finding("B101"), second=2)
+    )
     data = trend.to_dict()
     assert data["trend_version"] == finding_trend.TREND_VERSION == 1
     assert set(data) == {
@@ -316,15 +318,17 @@ def test_different_projects_are_refused_naming_the_file():
 
 
 def test_a_baseline_filtered_run_is_refused_naming_the_file():
-    run = results(finding("B101"), second=2, baseline={"source": "x"})
+    # The results reader refuses such a file, so the live model is marked after
+    # loading, as apply_baseline marks it.
+    run = results(finding("B101"), second=2)
+    run.metadata.baseline = {"source": "x"}
     with pytest.raises(TrendRefusal, match=r"run1\.json: .*--baseline"):
         series(results(finding("B101"), second=1), run)
 
 
 def test_an_unmerged_shard_is_refused():
-    run = results(
-        finding("B101"), second=1, shard={"shard_index": 1, "shard_count": 2}
-    )
+    run = results(finding("B101"), second=1)
+    run.metadata.shard = {"shard_index": 1, "shard_count": 2}
     with pytest.raises(TrendRefusal, match="ash merge"):
         run_from_results(run, "shard.json")
 
