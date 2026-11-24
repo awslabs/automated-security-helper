@@ -288,7 +288,9 @@ def test_severity_ties_prefer_a_fingerprinted_identity_then_scanner_then_id():
     assert shape(rows)[frozenset("gt")][1] == "t"
     rows = [pkg("t", "trivy"), pkg("g", "grype")]
     assert shape(rows)[frozenset("gt")][1] == "g"
-    rows = [pkg("b", "grype"), pkg("a", "grype")]
+    # Two rows of one scanner never share a package cluster (they are two
+    # copies), so the id tie-break is pinned in the location class.
+    rows = [code("b", "semgrep"), code("a", "semgrep")]
     assert shape(rows)[frozenset("ab")][1] == "a"
 
 
