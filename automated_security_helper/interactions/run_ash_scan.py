@@ -68,6 +68,8 @@ from automated_security_helper.core.constants import (
 from automated_security_helper.core.scanner_selection import (
     SelectionLayers,
     SelectionOrigin,
+    refuse_unmet_selection_marker,
+    selection_marker,
 )
 from automated_security_helper.core.enums import (
     AshLogLevel,
@@ -118,6 +120,7 @@ from automated_security_helper.interactions.run_ash_container import (
     CONFIG_FILE_FROM_ANOTHER_CHECKOUT_FLAG,
     CONFIG_FILE_FROM_SCANNED_REPOSITORY_FLAG,
     CONFIG_FROM_SCANNED_REPOSITORY_FLAG,
+    REQUIRE_SCANNER_SELECTION_FLAG,
     ContainerInputError,
     OperatorConfigReads,
     _require_mountable_directories,
@@ -290,6 +293,7 @@ class ScanOptions(BaseModel):
     # The --add-scanners names: additive to whatever base the mode and config
     # give, exactly what --scanners does today, under a name that says so.
     add_scanners: Optional[List[str]] = Field(default_factory=list)
+    required_scanner_selection: Optional[str] = None
     # Who gave the two lists above: "mcp" only from the MCP workspace tool, whose
     # SKIPPED rows and selection refusals then name its scanners and
     # excluded_scanners parameters instead of the CLI's flags.
@@ -5525,6 +5529,7 @@ def _run_container_mode(
     # file it did not finish is not read back as a verdict. See
     # utils/inner_run_outcome.py.
     outer_run_id = new_outer_run_id()
+    container_selection = _container_selection(opts)
     container_result = run_ash_container(
         outer_run_id=outer_run_id,
         source_dir=opts.source_dir,
@@ -5557,7 +5562,10 @@ def _run_container_mode(
         # local mode, where the three inclusion flags mean the same thing
         # (_folded_scanner_allowlist), and the inner CLI skips the --scanners
         # deprecation line under ASH_IN_CONTAINER.
-        scanners=_folded_scanner_allowlist(opts),
+        scanners=container_selection.scanners,
+        only_scanners=container_selection.only_scanners,
+        add_scanners=container_selection.add_scanners,
+        require_scanner_selection=container_selection.marker,
         exclude_scanners=opts.excluded_scanners,
         progress=opts.progress,
         output_formats=opts.output_formats,
@@ -5745,6 +5753,7 @@ def _run_container_mode(
                 CONFIG_FILE_FROM_SCANNED_REPOSITORY_FLAG,
                 CONFIG_FILE_FROM_ANOTHER_CHECKOUT_FLAG,
                 ASH_CONFIG_FROM_HOST_FLAG,
+                REQUIRE_SCANNER_SELECTION_FLAG,
             )
             if flag in passed
         ]
@@ -6289,6 +6298,30 @@ def _selection_layers(opts: ScanOptions, logger) -> SelectionLayers:
     )
 
 
+class _ContainerSelection(NamedTuple):
+    scanners: List[str]
+    only_scanners: Optional[List[str]]
+    add_scanners: List[str]
+    marker: Optional[str]
+
+
+def _container_selection(opts: ScanOptions) -> _ContainerSelection:
+    try:
+        section = _host_resolved_config(opts)[0].scanner_selection
+    except Exception:
+        section = None
+    only = list(section.only_scanners) if section is not None else []
+    add = list(section.add_scanners) if section is not None else []
+    if not only and not add:
+        return _ContainerSelection(_folded_scanner_allowlist(opts), None, [], None)
+    return _ContainerSelection(
+        list(opts.scanners or []),
+        None if opts.only_scanners is None else list(opts.only_scanners),
+        list(opts.add_scanners or []),
+        selection_marker(only, add),
+    )
+
+
 def _folded_scanner_allowlist(opts: ScanOptions) -> List[str]:
     """The inclusion flags folded to one allowlist, for the paths with no
     precommit union: workspace mode, and the list container mode forwards.
@@ -6590,6 +6623,15 @@ def _run_local_mode(
                 else {}
             ),
         )
+        if opts.required_scanner_selection is not None:
+            settled = getattr(
+                getattr(orchestrator, "config", None), "scanner_selection", None
+            )
+            refuse_unmet_selection_marker(
+                opts.required_scanner_selection,
+                getattr(settled, "only_scanners", ()),
+                getattr(settled, "add_scanners", ()),
+            )
         if opts.baseline_data is not None:
             orchestrator.restrict_to_baseline(opts.baseline_data)
 
@@ -6980,6 +7022,7 @@ def build_project_scan_settings(opts: ScanOptions) -> "ProjectScanSettings":
         excluded_scanners=tuple(opts.excluded_scanners or []),
         selection_origin=opts.selection_origin,
         selection_layers=workspace_selection_layers(opts),
+        required_scanner_selection=opts.required_scanner_selection,
         output_formats=tuple(
             getattr(fmt, "value", str(fmt)) for fmt in (opts.output_formats or [])
         ),
@@ -8093,6 +8136,7 @@ def run_ash_scan(
     exclude_scanners: List[str] | None = None,
     only_scanners: List[str] | None = None,
     add_scanners: List[str] | None = None,
+    required_scanner_selection: str | None = None,
     progress: bool = True,
     output_formats: List[ExportFormat] | None = None,
     cleanup: bool = False,
@@ -8187,6 +8231,7 @@ def run_ash_scan(
         excluded_scanners=exclude_scanners,
         only_scanners=only_scanners,
         add_scanners=add_scanners,
+        required_scanner_selection=required_scanner_selection,
         progress=progress,
         output_formats=output_formats,
         cleanup=cleanup,

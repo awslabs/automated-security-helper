@@ -25,10 +25,14 @@ that package loads ``config.ash_config``, and ``run_ash_scan`` has to leave it
 unloaded (see tests/unit/models/test_forward_ref_resolves_in_any_import_order.py).
 """
 
+import json
 from dataclasses import dataclass
 from typing import Dict, Iterable, List, Literal, Mapping, Optional, Sequence
 
-from automated_security_helper.core.exceptions import ScannerSelectionError
+from automated_security_helper.core.exceptions import (
+    ASHConfigValidationError,
+    ScannerSelectionError,
+)
 
 #: Who made the scanner selection: the CLI's ``--scanners`` and
 #: ``--exclude-scanners``, or the MCP workspace tool's ``scanners`` and
@@ -361,3 +365,45 @@ def exclusions_matching_no_scanner(
         if key and key not in registered:
             unmatched.setdefault(key, name.strip())
     return list(unmatched.values())
+
+
+def _normalized(names: Iterable[str]) -> List[str]:
+    return list(dict.fromkeys(n.strip().lower() for n in names if n.strip()))
+
+
+def selection_marker(only: Iterable[str], add: Iterable[str]) -> str:
+    return json.dumps(
+        {"only": _normalized(only), "add": _normalized(add)}, sort_keys=True
+    )
+
+
+def refuse_unmet_selection_marker(
+    marker: str, only: Iterable[str], add: Iterable[str]
+) -> None:
+    try:
+        wanted = json.loads(marker)
+        ok = (
+            isinstance(wanted, dict)
+            and set(wanted) == {"only", "add"}
+            and all(
+                isinstance(wanted[key], list)
+                and all(isinstance(n, str) for n in wanted[key])
+                for key in wanted
+            )
+        )
+    except ValueError:
+        ok = False
+    if not ok:
+        raise ASHConfigValidationError(
+            "The scanner_selection check this scan was asked to make is not "
+            "readable, so no scanner was started."
+        )
+    if json.loads(selection_marker(wanted["only"], wanted["add"])) != json.loads(
+        selection_marker(only, add)
+    ):
+        raise ASHConfigValidationError(
+            "The scanner_selection this scan settled differs from the one the "
+            "host read from the operator's config, so no scanner was started. "
+            "The operator's config may not be mounted in the container, or the "
+            "image reads it differently."
+        )

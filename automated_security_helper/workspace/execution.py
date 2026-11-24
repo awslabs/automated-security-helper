@@ -349,6 +349,7 @@ from automated_security_helper.core.previous_results import holds_restored_resul
 from automated_security_helper.core.scanner_selection import (
     SelectionLayers,
     SelectionOrigin,
+    refuse_unmet_selection_marker,
     selection_after_exclusions,
 )
 from automated_security_helper.core.exceptions import (
@@ -490,6 +491,7 @@ class ProjectScanSettings:
     #: parameters; "cli" for the flags.
     selection_origin: SelectionOrigin = "cli"
     selection_layers: Optional[SelectionLayers] = None
+    required_scanner_selection: Optional[str] = None
     output_formats: Tuple[str, ...] = ()
     config_overrides: Tuple[str, ...] = ()
     #: ``config_overrides`` came from an MCP client, not the operator; see
@@ -933,6 +935,8 @@ def settled_scanner_selection(
     if active:
         selection = _project_config_with_policy(active[0], settings).scanner_selection
         only, add = tuple(selection.only_scanners), tuple(selection.add_scanners)
+    if settings.required_scanner_selection is not None:
+        refuse_unmet_selection_marker(settings.required_scanner_selection, only, add)
     folded = replace(layers, workspace_required=tuple(plan.required_scanners)).fold(
         only, add
     )
@@ -946,6 +950,7 @@ def settled_scanner_selection(
         enabled_scanners=tuple(folded.names),
         selection_origin=origin,
         selection_layers=None,
+        required_scanner_selection=None,
     )
 
 

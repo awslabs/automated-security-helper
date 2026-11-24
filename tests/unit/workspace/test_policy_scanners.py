@@ -1335,3 +1335,48 @@ def test_the_cli_dry_run_accepts_the_selection_the_run_accepts(tmp_path, monkeyp
     result = _dry_run_cli(tmp_path, monkeypatch)
 
     assert result.exit_code == 0, result.output
+
+
+def test_a_workspace_scan_checks_the_container_marker_before_any_project(tmp_path):
+    from automated_security_helper.core.exceptions import ASHConfigValidationError
+
+    _two_projects(tmp_path)
+    config = _operator_config(tmp_path, SELECT_BANDIT)
+    plan = resolve_workspace(
+        _workspace(tmp_path, ["api", "web"]), default_config=config
+    )
+
+    with pytest.raises(ASHConfigValidationError, match="scanner_selection"):
+        _run_built(
+            tmp_path,
+            plan,
+            _settings_for(
+                tmp_path,
+                plan,
+                config,
+                required_scanner_selection='{"add": [], "only": ["checkov"]}',
+            ),
+        )
+
+    assert RecordingOrchestrator.built == []
+
+
+def test_a_workspace_scan_whose_marker_matches_runs_the_projects(tmp_path):
+    _two_projects(tmp_path)
+    config = _operator_config(tmp_path, SELECT_BANDIT)
+    plan = resolve_workspace(
+        _workspace(tmp_path, ["api", "web"]), default_config=config
+    )
+
+    _run_built(
+        tmp_path,
+        plan,
+        _settings_for(
+            tmp_path,
+            plan,
+            config,
+            required_scanner_selection='{"add": [], "only": ["bandit"]}',
+        ),
+    )
+
+    assert _kwargs_for("api")["enabled_scanners"] == ["bandit", "trivy"]

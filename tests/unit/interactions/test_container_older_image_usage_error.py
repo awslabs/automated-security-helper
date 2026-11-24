@@ -14,6 +14,7 @@ file not found" with exit 1.
 
 from __future__ import annotations
 
+import json
 import re
 from typing import Any, Dict
 
@@ -162,3 +163,124 @@ def test_success_without_results_is_unchanged(container, tmp_path):
 
     assert result.exit_code == 1, result.output
     assert "Results file not found" in _words(result.output)
+
+
+MARKER = "--require-scanner-selection"
+
+
+def _operator_config(tmp_path, body):
+    path = tmp_path.parent / f"{tmp_path.name}-operator" / "ash.yaml"
+    path.parent.mkdir(exist_ok=True)
+    path.write_text(body, encoding="utf-8")
+    return str(path)
+
+
+def _values(argv, flag):
+    return [argv[i + 1] for i, arg in enumerate(argv[:-1]) if arg == flag]
+
+
+def _scan_with(tmp_path, config, *args):
+    (tmp_path / "src").mkdir(exist_ok=True)
+    return _scan(
+        "--source-dir",
+        "src",
+        "--output-dir",
+        str(tmp_path / "out"),
+        *(["--config", config] if config else []),
+        *args,
+    )
+
+
+def test_a_config_only_selection_an_older_image_cannot_enforce_is_refused(
+    container, tmp_path
+):
+    config = _operator_config(
+        tmp_path, "scanner_selection:\n  only_scanners: [bandit]\n"
+    )
+
+    result = _scan_with(tmp_path, config)
+
+    [run] = container["runs"]
+    assert json.loads(_values(run, MARKER)[0]) == {"add": [], "only": ["bandit"]}
+    assert result.exit_code == 3, result.output
+    assert MARKER in _words(result.output)
+    assert "Rebuild the image from this ASH" in _words(result.output)
+    assert "Results file not found" not in _words(result.output)
+
+
+def test_a_replacement_flag_reaches_the_inner_scan_as_a_replacement(
+    container, tmp_path
+):
+    config = _operator_config(
+        tmp_path, "scanner_selection:\n  only_scanners: [bandit]\n"
+    )
+
+    _scan_with(tmp_path, config, "--only-scanners", "trivy")
+
+    [run] = container["runs"]
+    assert _values(run, "--only-scanners") == ["trivy"]
+    assert _values(run, "--scanners") == []
+    assert _values(run, MARKER)
+
+
+def test_an_additive_flag_reaches_the_inner_scan_as_an_addition(container, tmp_path):
+    config = _operator_config(
+        tmp_path, "scanner_selection:\n  only_scanners: [bandit]\n"
+    )
+
+    _scan_with(tmp_path, config, "--add-scanners", "trivy")
+
+    [run] = container["runs"]
+    assert _values(run, "--add-scanners") == ["trivy"]
+    assert _values(run, "--only-scanners") == []
+    assert _values(run, MARKER)
+
+
+def test_a_legacy_scanners_flag_stays_the_legacy_flag_when_the_section_matters(
+    container, tmp_path
+):
+    config = _operator_config(
+        tmp_path, "scanner_selection:\n  only_scanners: [bandit]\n"
+    )
+
+    _scan_with(tmp_path, config, "--scanners", "trivy")
+
+    [run] = container["runs"]
+    assert _values(run, "--scanners") == ["trivy"]
+    assert _values(run, MARKER)
+
+
+def test_the_marker_is_bound_to_the_normalized_lists(container, tmp_path):
+    config = _operator_config(
+        tmp_path, "scanner_selection:\n  add_scanners: [' Trivy ', TRIVY, checkov]\n"
+    )
+
+    _scan_with(tmp_path, config)
+
+    [run] = container["runs"]
+    assert json.loads(_values(run, MARKER)[0]) == {
+        "add": ["trivy", "checkov"],
+        "only": [],
+    }
+
+
+@pytest.mark.parametrize("body", ["project_name: p\n", "scanner_selection: {}\n"])
+def test_without_a_selection_the_forwarding_and_the_check_are_unchanged(
+    container, tmp_path, body
+):
+    config = _operator_config(tmp_path, body)
+
+    _scan_with(tmp_path, config, "--only-scanners", "trivy")
+
+    [run] = container["runs"]
+    assert _values(run, "--scanners") == ["trivy"]
+    assert _values(run, "--only-scanners") == []
+    assert MARKER not in run
+
+
+def test_with_no_config_at_all_the_forwarding_is_unchanged(container, tmp_path):
+    _scan_with(tmp_path, None, "--add-scanners", "trivy")
+
+    [run] = container["runs"]
+    assert _values(run, "--scanners") == ["trivy"]
+    assert MARKER not in run

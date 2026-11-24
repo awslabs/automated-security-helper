@@ -1505,6 +1505,14 @@ def run_ash_scan_cli_command(
             help="Apply the limits ASH puts on a config file inside a git checkout other than the scanned one to this one file of the extends chain of the --config file or of the file ASH_CONFIG names. The file cannot grant, and still sets what only restricts, as it does on the host: a lowered archive extraction limit, a scanner option that sends no usage data, and a network_scanners list as a limit. Container mode passes it, once per file, for each file of those chains that is in such a checkout, by its path inside the container, where the scan inside cannot see the checkout. Refused for a file that is in neither chain.",
         ),
     ] = None,
+    require_scanner_selection: Annotated[
+        Optional[str],
+        typer.Option(
+            "--require-scanner-selection",
+            hidden=True,
+            help='Refuse to scan unless the scanner_selection this scan settles equals this JSON document ({"only": [...], "add": [...]}, names lower-cased). Container mode passes it, with the lists it read on the host, when the selection comes from the operator\'s config, so an image built from an ASH that does not know it rejects the command and an image that lost the mounted config refuses before any scanner runs.',
+        ),
+    ] = None,
     ash_config_from_host: Annotated[
         Optional[str],
         typer.Option(
@@ -2198,6 +2206,7 @@ def run_ash_scan_cli_command(
                 exclude_scanners=exclude_scanners,
                 only_scanners=only_scanners,
                 add_scanners=add_scanners,
+                required_scanner_selection=require_scanner_selection,
                 progress=cli_final_show_progress,
                 output_formats=parsed_output_formats,
                 cleanup=cleanup,

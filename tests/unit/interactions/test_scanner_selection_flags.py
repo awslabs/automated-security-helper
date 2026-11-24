@@ -1022,3 +1022,160 @@ class TestAMixedSelectionIsNotAttributedToTheFlagsAlone:
 
         assert "scanner_selection" not in str(refusal.value)
         assert "named by --scanners" in str(refusal.value)
+
+
+class TestTheInnerScanChecksTheMarkerBeforeAnyScanner:
+    @pytest.fixture
+    def executed(self, monkeypatch):
+        from automated_security_helper.core.orchestrator import ASHScanOrchestrator
+
+        calls: List[Any] = []
+
+        def fake_execute(self, phases=None):
+            calls.append(self)
+            return AshAggregatedResults()
+
+        monkeypatch.setattr(ASHScanOrchestrator, "execute_scan", fake_execute)
+        return calls
+
+    def _run(self, tmp_path, source, config, marker, logger):
+        opts = _opts(
+            source,
+            tmp_path / "out",
+            mode=RunMode.local,
+            config=config,
+            required_scanner_selection=marker,
+        )
+        return _run_local_mode(opts, logger)
+
+    def test_a_matching_section_runs_the_scan(
+        self, tmp_path, operator_home, logger, executed
+    ):
+        config = _operator_config(
+            tmp_path, "scanner_selection:\n  only_scanners: [bandit]\n"
+        )
+
+        self._run(
+            tmp_path,
+            operator_home,
+            config,
+            '{"add": [], "only": ["bandit"]}',
+            logger,
+        )
+
+        assert len(executed) == 1
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            "project_name: t\n",
+            "scanner_selection:\n  only_scanners: [checkov]\n",
+            "scanner_selection:\n  add_scanners: [bandit]\n",
+            "scanner_selection:\n  only_scanners: [bandit, checkov]\n",
+        ],
+    )
+    def test_a_different_or_missing_section_refuses_before_any_scanner(
+        self, tmp_path, operator_home, logger, executed, body
+    ):
+        from automated_security_helper.interactions.run_ash_scan import (
+            ScanRefusedExit,
+        )
+
+        config = _operator_config(tmp_path, body)
+
+        with pytest.raises(ScanRefusedExit) as refusal:
+            self._run(
+                tmp_path,
+                operator_home,
+                config,
+                '{"add": [], "only": ["bandit"]}',
+                logger,
+            )
+
+        assert refusal.value.code == 3
+        assert executed == []
+
+    @pytest.mark.parametrize("marker", ["not json", "[]", '{"only": "bandit"}'])
+    def test_a_marker_that_cannot_be_read_refuses(
+        self, tmp_path, operator_home, logger, executed, marker
+    ):
+        from automated_security_helper.interactions.run_ash_scan import (
+            ScanRefusedExit,
+        )
+
+        config = _operator_config(
+            tmp_path, "scanner_selection:\n  only_scanners: [bandit]\n"
+        )
+
+        with pytest.raises(ScanRefusedExit) as refusal:
+            self._run(tmp_path, operator_home, config, marker, logger)
+
+        assert refusal.value.code == 3
+        assert executed == []
+
+    def test_a_replacement_flag_still_applies_after_the_marker_matched(
+        self, tmp_path, operator_home, logger, executed
+    ):
+        config = _operator_config(
+            tmp_path, "scanner_selection:\n  only_scanners: [bandit]\n"
+        )
+        opts = _opts(
+            operator_home,
+            tmp_path / "out",
+            mode=RunMode.local,
+            config=config,
+            only_scanners=["checkov"],
+            required_scanner_selection='{"add": [], "only": ["bandit"]}',
+        )
+
+        _run_local_mode(opts, logger)
+
+        engine = executed[0].execution_engine
+        assert list(engine._init_enabled_scanners) == ["checkov"]
+
+    def test_without_a_marker_nothing_is_checked(
+        self, tmp_path, operator_home, logger, executed
+    ):
+        config = _operator_config(tmp_path)
+
+        self._run(tmp_path, operator_home, config, None, logger)
+
+        assert len(executed) == 1
+
+
+class TestTheHiddenMarkerOnTheCommandLine:
+    def _invoke(self, clean_cli_env, tmp_path, config, marker):
+        from automated_security_helper.cli.main import app
+
+        return CliRunner().invoke(
+            app,
+            [
+                "scan",
+                "--no-progress",
+                "--source-dir",
+                str(clean_cli_env),
+                "--output-dir",
+                str(tmp_path / "out"),
+                "--config",
+                config,
+                "--require-scanner-selection",
+                marker,
+            ],
+        )
+
+    def test_a_mismatch_exits_3_and_names_the_selection(self, clean_cli_env, tmp_path):
+        config = _operator_config(tmp_path, "project_name: t\n")
+
+        result = self._invoke(
+            clean_cli_env, tmp_path, config, '{"add": [], "only": ["bandit"]}'
+        )
+
+        assert result.exit_code == 3, result.output
+        assert "scanner_selection" in " ".join(result.output.split())
+
+    def test_the_option_is_not_in_the_help(self, clean_cli_env):
+        from automated_security_helper.cli.main import app
+
+        result = CliRunner().invoke(app, ["scan", "--help"])
+
+        assert "--require-scanner-selection" not in result.output
