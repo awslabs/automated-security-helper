@@ -746,11 +746,11 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
     #: file_line_range, check_name, resource, guideline, fixed_definition,
     #: code_block); no checkov SARIF golden is committed, so the cells that
     #: live only in the SARIF are n/a with the UNCONFIRMED reason the register
-    #: uses for an unread source. resource_id is MAPPABLE-BUT-DROPPED: the
-    #: adapter reads no ``resource`` of the side report and writes no
-    #: ``ash_resource_id``. Frameworks outside terraform, terraform_plan,
-    #: cloudformation and kubernetes carry non-resources in that field, so a
-    #: later attach is a per-framework allow-list, never a copy.
+    #: uses for an unread source. resource_id is MAPPED:
+    #: :func:`attach_checkov_resources` copies each record's ``resource`` from
+    #: the JSON report onto its SARIF result under ``ash_resource_id``, and only
+    #: for the frameworks in :data:`_RESOURCE_FRAMEWORKS` (the per-framework
+    #: allow-list), because the other runners carry non-resources in that field.
     facets: ClassVar[ScannerFacets] = ScannerFacets(
         rule_id=FacetDecl(
             state=FacetState.MAPPED,
@@ -783,12 +783,11 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
             native_field='check "check_name"',
         ),
         resource_id=FacetDecl(
-            state=FacetState.DROPPED,
-            native_field='check "resource" (the results_json.json side report)',
-            reason="the adapter reads the side report only to rewrite its "
-            "paths and attaches no resource to the SARIF result, so no "
-            "ash_resource_id is written; the field names a resource only "
-            "under terraform, terraform_plan, cloudformation and kubernetes",
+            state=FacetState.MAPPED,
+            native_field='check "resource" (the results_json.json side report), '
+            "copied onto the SARIF result by attach_checkov_resources for the "
+            "frameworks in _RESOURCE_FRAMEWORKS only",
+            example="AWS::S3::Bucket.S3Bucket3",
         ),
         resource_type=FacetDecl(
             state=FacetState.NA,

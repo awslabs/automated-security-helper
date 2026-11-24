@@ -203,7 +203,38 @@ _MAPPED_WRITERS: dict[str, tuple[str, str]] = {
         "automated_security_helper.utils.cdk_nag_wrapper",
         "cdk/test.yaml_cdk_nag_results/AwsSolutions-test-yaml-NagReport.csv",
     ),
+    "CheckovScanner": (
+        (
+            "automated_security_helper.plugin_modules.ash_builtin.scanners"
+            ".checkov_scanner"
+        ),
+        "checkov/src.test.yaml.json",
+    ),
 }
+
+
+def _fixture_cells(path: Path) -> set[str]:
+    """The candidate example values a committed fixture carries.
+
+    A ``.json`` fixture's cells are every string value anywhere in the
+    document; any other fixture is read as CSV and its cells are the fields.
+    """
+    if path.suffix == ".json":
+        with open(path, encoding="utf-8") as handle:
+            return set(_string_values(json.load(handle)))
+    with open(path, newline="", encoding="utf-8") as handle:
+        return {cell for row in csv.reader(handle) for cell in row}
+
+
+def _string_values(node: Any) -> Iterator[str]:
+    if isinstance(node, str):
+        yield node
+    elif isinstance(node, dict):
+        for value in node.values():
+            yield from _string_values(value)
+    elif isinstance(node, list):
+        for item in node:
+            yield from _string_values(item)
 
 
 def test_every_mapped_resource_id_has_a_registered_writer() -> None:
@@ -228,8 +259,7 @@ def test_a_mapped_resource_id_is_written_and_its_example_is_in_the_fixture(
     )
     example = vars(cls)[SCANNER_FACETS_ATTR].resource_id.example
     assert example, f"{name}: a mapped resource_id carries its example"
-    with open(_FIXTURES / fixture, newline="", encoding="utf-8") as handle:
-        cells = {cell for row in csv.reader(handle) for cell in row}
+    cells = _fixture_cells(_FIXTURES / fixture)
     assert example in cells, (
         f"{name}: the declared example {example!r} is not a cell of the "
         f"committed fixture {fixture}; an example comes from a real read"
@@ -260,11 +290,6 @@ _DROPPED_FIXTURES: dict[str, tuple[str, str | None, str]] = {
         "cfn_nag/src.test.yaml.json",
         "logical_resource_ids",
         "S3Bucket3",
-    ),
-    "CheckovScanner": (
-        "checkov/src.test.yaml.json",
-        "resource",
-        "AWS::S3::Bucket.S3Bucket3",
     ),
     "TrivyScanner": (
         "trivy/captured/trivy-0.76.2-misconfig-terraform.json",
