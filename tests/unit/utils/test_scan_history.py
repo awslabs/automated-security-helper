@@ -120,7 +120,10 @@ def test_a_lone_surrogate_in_a_row_round_trips(tmp_path, monkeypatch):
 
 
 def test_a_scan_no_comparison_would_accept_is_not_recorded(tmp_path):
-    run = results(finding("B101"), changed_files_only=True)
+    # The CLI's own reader refuses such a file, so the live model is marked
+    # after loading, as a scan marks it before it writes.
+    run = results(finding("B101"))
+    run.metadata.changed_files_only = True
     assert scan_history.build_run_record(run) is None
     assert scan_history.write_run_record(run, tmp_path) is None
     assert not (tmp_path / "history").exists()

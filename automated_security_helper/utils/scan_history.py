@@ -108,7 +108,8 @@ def record_file_name(report_id: str | None) -> str | None:
 def _order_key(name: str) -> tuple[str, str, str]:
     """How record names sort: by start second, then token, then name."""
     match = _RECORD_NAME.match(name)
-    assert match is not None
+    if match is None:  # callers pass names _RECORD_NAME already accepted
+        return ("", "", name)
     return (match["stamp"], match["token"], name)
 
 
