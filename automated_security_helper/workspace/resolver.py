@@ -1670,6 +1670,7 @@ def _apply_workspace_policy(
     remote_client: bool = False,
     permit_base: Optional[Callable[[Path], bool]] = None,
     scanner_twins: Optional[Dict[str, Dict[str, str]]] = None,
+    required_scanners_out: Optional[List[str]] = None,
 ) -> Optional[Path]:
     """Resolve the workspace policy and fold it into every active project.
 
@@ -1840,6 +1841,12 @@ def _apply_workspace_policy(
         ]
         project.policy_scanners = list(resolved.policy_scanners)
         project.policy_scanners_gate = resolved.policy_scanners_gate
+
+    if required_scanners_out is not None and workspace_policy is not None:
+        by_name: Dict[str, str] = {}
+        for name in workspace_policy.additional_scanners:
+            by_name.setdefault(normalise_scanner_name(name), name)
+        required_scanners_out.extend(by_name.values())
 
     return source
 
@@ -2169,6 +2176,7 @@ def resolve_workspace(
     _validate_unresolved_pins(active, unresolved_pins)
     _validate_plugin_modules(definition, active)
     _assign_display_labels(projects)
+    required_scanners: List[str] = []
     policy_source = _apply_workspace_policy(
         definition,
         projects,
@@ -2179,6 +2187,7 @@ def resolve_workspace(
         remote_client=remote_client,
         permit_base=permit_base,
         scanner_twins=scanner_twins,
+        required_scanners_out=required_scanners,
     )
     # A scanner the policy switches on keeps the pin of its off section, and the
     # comparisons above ran before the policy was known: the pairs a project's
@@ -2196,4 +2205,5 @@ def resolve_workspace(
         ),
         projects=projects,
         allow_missing_projects=allow_missing_projects,
+        required_scanners=required_scanners,
     )

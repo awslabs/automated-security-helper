@@ -1072,3 +1072,266 @@ def test_a_real_scan_without_the_policy_does_not_run_the_scanner(
     assert no_tool_starts.started == [], (
         f"the real scan started tools: {no_tool_starts.started}"
     )
+
+
+# ---------------------------------------------------------------------------
+# 6. The operator's default scanner selection across projects
+# ---------------------------------------------------------------------------
+
+
+def _operator_config(tmp_path, selection):
+    path = tmp_path.parent / f"{tmp_path.name}-operator" / "ash.yaml"
+    path.parent.mkdir(exist_ok=True)
+    path.write_text(selection, encoding="utf-8")
+    return str(path)
+
+
+def _two_projects(tmp_path):
+    _project(tmp_path, "api", "scanners:\n  trivy:\n    enabled: false\n")
+    _project(tmp_path, "web", "scanners:\n  trivy:\n    enabled: true\n")
+    _policy(tmp_path, "workspace:\n  additional_scanners:\n    - trivy\n")
+
+
+def _settings_for(tmp_path, plan, config, **options):
+    from automated_security_helper.interactions.run_ash_scan import (
+        ScanOptions,
+        build_project_scan_settings,
+    )
+
+    (tmp_path / "out").mkdir(exist_ok=True)
+    return build_project_scan_settings(
+        ScanOptions(
+            source_dir=tmp_path,
+            output_dir=tmp_path / "out",
+            config=config,
+            workspace_plan=plan,
+            phases=[],
+            **options,
+        )
+    )
+
+
+def _run_built(tmp_path, plan, settings):
+    return execute_workspace(
+        plan, settings, orchestrator_factory=RecordingOrchestrator.create
+    )
+
+
+SELECT_BANDIT = "scanner_selection:\n  only_scanners: [bandit]\n"
+
+
+def test_the_default_and_every_required_scanner_reach_each_project(tmp_path):
+    _two_projects(tmp_path)
+    config = _operator_config(tmp_path, SELECT_BANDIT)
+    plan = resolve_workspace(
+        _workspace(tmp_path, ["api", "web"]), default_config=config
+    )
+
+    _run_built(tmp_path, plan, _settings_for(tmp_path, plan, config))
+
+    for key in ("api", "web"):
+        assert _kwargs_for(key)["enabled_scanners"] == ["bandit", "trivy"], key
+    assert (
+        _scanner_entry(_kwargs_for("api")["resolved_config"], "trivy").enabled is True
+    )
+
+
+def test_a_project_config_cannot_remove_or_replace_the_default(tmp_path):
+    _project(
+        tmp_path,
+        "api",
+        "scanner_selection:\n  only_scanners: [checkov]\n"
+        "scanners:\n  trivy:\n    enabled: false\n",
+    )
+    _project(tmp_path, "web", "scanner_selection:\n  add_scanners: [semgrep]\n")
+    _policy(tmp_path, "workspace:\n  additional_scanners:\n    - trivy\n")
+    config = _operator_config(tmp_path, SELECT_BANDIT)
+    plan = resolve_workspace(
+        _workspace(tmp_path, ["api", "web"]), default_config=config
+    )
+
+    _run_built(tmp_path, plan, _settings_for(tmp_path, plan, config))
+
+    for key in ("api", "web"):
+        assert _kwargs_for(key)["enabled_scanners"] == ["bandit", "trivy"], key
+
+
+def test_the_cli_only_flag_limits_every_project_to_that_scanner(tmp_path):
+    _two_projects(tmp_path)
+    config = _operator_config(tmp_path, SELECT_BANDIT)
+    plan = resolve_workspace(
+        _workspace(tmp_path, ["api", "web"]), default_config=config
+    )
+
+    _run_built(
+        tmp_path,
+        plan,
+        _settings_for(tmp_path, plan, config, only_scanners=["bandit"]),
+    )
+
+    for key in ("api", "web"):
+        assert _kwargs_for(key)["enabled_scanners"] == ["bandit"], key
+
+
+def test_an_additive_flag_extends_the_policy_adjusted_default(tmp_path):
+    _two_projects(tmp_path)
+    config = _operator_config(tmp_path, SELECT_BANDIT)
+    plan = resolve_workspace(
+        _workspace(tmp_path, ["api", "web"]), default_config=config
+    )
+
+    _run_built(
+        tmp_path,
+        plan,
+        _settings_for(tmp_path, plan, config, add_scanners=["checkov"]),
+    )
+
+    for key in ("api", "web"):
+        assert _kwargs_for(key)["enabled_scanners"] == [
+            "checkov",
+            "bandit",
+            "trivy",
+        ], key
+
+
+def test_an_exclusion_wins_over_the_default_and_the_required_names(tmp_path):
+    _two_projects(tmp_path)
+    config = _operator_config(tmp_path, SELECT_BANDIT)
+    plan = resolve_workspace(
+        _workspace(tmp_path, ["api", "web"]), default_config=config
+    )
+
+    _run_built(
+        tmp_path,
+        plan,
+        _settings_for(tmp_path, plan, config, excluded_scanners=["trivy"]),
+    )
+
+    for key in ("api", "web"):
+        kwargs = _kwargs_for(key)
+        assert kwargs["enabled_scanners"] == ["bandit", "trivy"], key
+        assert kwargs["excluded_scanners"] == ["trivy"], key
+
+
+def test_an_exclusion_of_the_whole_selection_is_refused_in_config_words(tmp_path):
+    from automated_security_helper.core.exceptions import ScannerSelectionError
+
+    _two_projects(tmp_path)
+    config = _operator_config(tmp_path, SELECT_BANDIT)
+    plan = resolve_workspace(
+        _workspace(tmp_path, ["api", "web"]), default_config=config
+    )
+
+    with pytest.raises(
+        ScannerSelectionError, match="scanner_selection in the ASH config"
+    ):
+        _run_built(
+            tmp_path,
+            plan,
+            _settings_for(
+                tmp_path, plan, config, excluded_scanners=["bandit", "trivy"]
+            ),
+        )
+
+    assert RecordingOrchestrator.built == []
+
+
+def test_the_dry_run_check_settles_the_selection_the_run_uses(tmp_path):
+    from automated_security_helper.workspace.execution import (
+        settled_scanner_selection,
+    )
+
+    _two_projects(tmp_path)
+    config = _operator_config(tmp_path, SELECT_BANDIT)
+    plan = resolve_workspace(
+        _workspace(tmp_path, ["api", "web"]), default_config=config
+    )
+    settings = _settings_for(tmp_path, plan, config)
+
+    settled = settled_scanner_selection(plan, settings)
+    _run_built(tmp_path, plan, settings)
+
+    assert list(settled.enabled_scanners) == _kwargs_for("api")["enabled_scanners"]
+    assert settled.selection_origin == _kwargs_for("api")["selection_origin"]
+
+
+def test_without_the_section_the_flags_reach_the_projects_unchanged(tmp_path):
+    _two_projects(tmp_path)
+    config = _operator_config(tmp_path, "project_name: operator\n")
+    plan = resolve_workspace(
+        _workspace(tmp_path, ["api", "web"]), default_config=config
+    )
+
+    _run_built(
+        tmp_path,
+        plan,
+        _settings_for(
+            tmp_path, plan, config, scanners=["bandit"], add_scanners=["bandit"]
+        ),
+    )
+
+    for key in ("api", "web"):
+        assert _kwargs_for(key)["enabled_scanners"] == ["bandit", "bandit"], key
+
+
+def test_a_config_that_does_not_load_refuses_before_any_project_starts(tmp_path):
+    from automated_security_helper.core.exceptions import ASHConfigValidationError
+
+    _two_projects(tmp_path)
+    config = _operator_config(
+        tmp_path, "scanner_selection:\n  only_scanners: [a]\n  add_scanners: [b]\n"
+    )
+
+    with pytest.raises(ASHConfigValidationError):
+        plan = resolve_workspace(
+            _workspace(tmp_path, ["api", "web"]), default_config=config
+        )
+        _run_built(tmp_path, plan, _settings_for(tmp_path, plan, config))
+
+    assert RecordingOrchestrator.built == []
+
+
+def _dry_run_cli(tmp_path, monkeypatch, *extra):
+    from typer.testing import CliRunner
+
+    from automated_security_helper.cli.main import app
+
+    root = tmp_path / "ws"
+    root.mkdir()
+    _two_projects(root)
+    _workspace(root, ["api", "web"])
+    config = _operator_config(tmp_path, SELECT_BANDIT)
+    monkeypatch.chdir(root)
+    for name in ("ASH_SOURCE_DIR", "ASH_OUTPUT_DIR", "ASH_MODE", "ASH_SCANNERS"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("COLUMNS", "400")
+    return CliRunner().invoke(
+        app,
+        [
+            "scan",
+            "--no-progress",
+            "--workspace",
+            "dev.code-workspace",
+            "--config",
+            config,
+            "--output-dir",
+            "out",
+            "--dry-run",
+            *extra,
+        ],
+    )
+
+
+def test_the_cli_dry_run_refuses_a_cancelled_config_selection_as_the_run_does(
+    tmp_path, monkeypatch
+):
+    result = _dry_run_cli(tmp_path, monkeypatch, "--exclude-scanners", "bandit,trivy")
+
+    assert result.exit_code != 0, result.output
+    assert "scanner_selection in the ASH config" in " ".join(result.output.split())
+
+
+def test_the_cli_dry_run_accepts_the_selection_the_run_accepts(tmp_path, monkeypatch):
+    result = _dry_run_cli(tmp_path, monkeypatch)
+
+    assert result.exit_code == 0, result.output

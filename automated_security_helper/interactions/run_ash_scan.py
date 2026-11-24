@@ -6304,6 +6304,16 @@ def _folded_scanner_allowlist(opts: ScanOptions) -> List[str]:
     return list(opts.scanners or []) + list(opts.add_scanners or [])
 
 
+def workspace_selection_layers(opts: ScanOptions) -> SelectionLayers:
+    if opts.only_scanners is not None:
+        return SelectionLayers(cli_only=list(opts.only_scanners))
+    if opts.selection_origin == "mcp" and opts.scanners:
+        return SelectionLayers(cli_only=list(opts.scanners))
+    return SelectionLayers(
+        cli_additive=list(opts.scanners or []) + list(opts.add_scanners or [])
+    )
+
+
 def _config_chooses_reports(opts: ScanOptions) -> bool:
     """Whether the resolved configuration makes any report choice of its own.
 
@@ -6969,6 +6979,7 @@ def build_project_scan_settings(opts: ScanOptions) -> "ProjectScanSettings":
         enabled_scanners=tuple(_folded_scanner_allowlist(opts)),
         excluded_scanners=tuple(opts.excluded_scanners or []),
         selection_origin=opts.selection_origin,
+        selection_layers=workspace_selection_layers(opts),
         output_formats=tuple(
             getattr(fmt, "value", str(fmt)) for fmt in (opts.output_formats or [])
         ),

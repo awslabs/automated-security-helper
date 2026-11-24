@@ -313,7 +313,7 @@ import time
 import contextvars
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from contextlib import AbstractContextManager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath
 from threading import Event, Lock
 from typing import (
@@ -347,6 +347,7 @@ from automated_security_helper.core.cancellation import (
 from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
 from automated_security_helper.core.previous_results import holds_restored_results
 from automated_security_helper.core.scanner_selection import (
+    SelectionLayers,
     SelectionOrigin,
     selection_after_exclusions,
 )
@@ -488,6 +489,7 @@ class ProjectScanSettings:
     #: SKIPPED rows and selection refusals name its scanners and excluded_scanners
     #: parameters; "cli" for the flags.
     selection_origin: SelectionOrigin = "cli"
+    selection_layers: Optional[SelectionLayers] = None
     output_formats: Tuple[str, ...] = ()
     config_overrides: Tuple[str, ...] = ()
     #: ``config_overrides`` came from an MCP client, not the operator; see
@@ -919,6 +921,34 @@ def workspace_reporter_classes(
         return _reporter_classes_of_run(plan, settings)
 
 
+def settled_scanner_selection(
+    plan: WorkspacePlan, settings: ProjectScanSettings
+) -> ProjectScanSettings:
+    layers = settings.selection_layers
+    if layers is None:
+        return settings
+    only: Tuple[str, ...] = ()
+    add: Tuple[str, ...] = ()
+    active = plan.active_projects
+    if active:
+        selection = _project_config_with_policy(active[0], settings).scanner_selection
+        only, add = tuple(selection.only_scanners), tuple(selection.add_scanners)
+    folded = replace(layers, workspace_required=tuple(plan.required_scanners)).fold(
+        only, add
+    )
+    origin = settings.selection_origin
+    if folded.origin == "operator":
+        origin = "mcp-config" if origin == "mcp" else "config"
+    elif folded.origin == "cli+operator":
+        origin = "cli+config"
+    return replace(
+        settings,
+        enabled_scanners=tuple(folded.names),
+        selection_origin=origin,
+        selection_layers=None,
+    )
+
+
 def refuse_unresolvable_scanner_selection(
     plan: WorkspacePlan, settings: ProjectScanSettings
 ) -> None:
@@ -974,6 +1004,7 @@ def refuse_unresolvable_scanner_selection(
     from automated_security_helper.plugins import ash_plugin_manager
     from automated_security_helper.plugins.loader import plugins_of
 
+    settings = settled_scanner_selection(plan, settings)
     # Split as the engine splits, so `--scanners bandit,semgrep` is two names here
     # too. Read whole, it was one name no scanner has, and the workspace refused a
     # selection every single scan accepts.
@@ -2967,6 +2998,7 @@ def execute_workspace(
                 )
                 if cls in loaded
             ]
+    settings = settled_scanner_selection(plan, settings)
     refuse_unresolvable_scanner_selection(plan, settings)
 
     reports_requested = _REPORT_PHASE in settings.phases

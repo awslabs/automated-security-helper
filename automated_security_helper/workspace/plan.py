@@ -467,6 +467,17 @@ class WorkspacePlan(BaseModel):
             ),
         ),
     ] = False
+    required_scanners: Annotated[
+        List[str],
+        Field(
+            default_factory=list,
+            description=(
+                "Every scanner the workspace policy requires, whether or not a "
+                "project already runs it. A configured scanner selection keeps "
+                "all of them, so each project runs the same selected set."
+            ),
+        ),
+    ]
     workspace_config_source: Annotated[
         Optional[str],
         Field(

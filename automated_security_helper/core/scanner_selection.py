@@ -33,7 +33,7 @@ from automated_security_helper.core.exceptions import ScannerSelectionError
 #: Who made the scanner selection: the CLI's ``--scanners`` and
 #: ``--exclude-scanners``, or the MCP workspace tool's ``scanners`` and
 #: ``excluded_scanners`` parameters. Only the MCP tool sets "mcp".
-SelectionOrigin = Literal["cli", "mcp", "config", "cli+config"]
+SelectionOrigin = Literal["cli", "mcp", "config", "cli+config", "mcp-config"]
 
 AllowlistOrigin = Literal["mode", "operator", "precommit", "cli", "cli+operator"]
 
@@ -70,6 +70,14 @@ _SELECTION_NAMES: Dict[str, SelectionNames] = {
         drop_one=(
             "Drop the exclusion, or change the flags or scanner_selection in the "
             "operator's ASH config."
+        ),
+    ),
+    "mcp-config": SelectionNames(
+        allowlist="scanner_selection in the ASH config",
+        exclusion="the excluded_scanners parameter",
+        drop_one=(
+            "Drop the exclusion, or change scanner_selection in the operator's "
+            "ASH config."
         ),
     ),
     "config": SelectionNames(

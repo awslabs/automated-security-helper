@@ -88,6 +88,7 @@ from automated_security_helper.utils.output_dir_links import (
     OUTPUT_RESULT_FILES,
     OUTPUT_WORKING_DIRS,
 )
+from automated_security_helper.core.scanner_selection import SelectionLayers
 from automated_security_helper.utils.terminal_text import shown_on_one_line
 
 if TYPE_CHECKING:
@@ -934,6 +935,9 @@ def _exit_with_workspace_dry_run(
     scanners: tuple[str, ...],
     exclude_scanners: tuple[str, ...],
     ash_plugin_modules: tuple[str, ...],
+    selection_layers: SelectionLayers | None = None,
+    config: str | None = None,
+    config_overrides: tuple[str, ...] = (),
 ) -> None:
     """Print *plan* and exit 0, the ``--dry-run`` answer, after the real run's own
     pre-checks.
@@ -969,6 +973,9 @@ def _exit_with_workspace_dry_run(
         enabled_scanners=tuple(scanners),
         excluded_scanners=tuple(exclude_scanners),
         ash_plugin_modules=tuple(ash_plugin_modules),
+        selection_layers=selection_layers,
+        default_config_path=config,
+        config_overrides=tuple(config_overrides),
     )
     try:
         prewarm_plugin_registry(plan, selection)
@@ -2102,6 +2109,14 @@ def run_ash_scan_cli_command(
             ),
             exclude_scanners=tuple(exclude_scanners),
             ash_plugin_modules=tuple(ash_plugin_modules),
+            selection_layers=SelectionLayers(
+                cli_only=None if only_scanners is None else list(only_scanners),
+                cli_additive=[]
+                if only_scanners is not None
+                else [*scanners, *add_scanners],
+            ),
+            config=config,
+            config_overrides=tuple(config_overrides or ()),
         )
 
     # Apply mode presets if specified (precommit_mode is folded into simple
