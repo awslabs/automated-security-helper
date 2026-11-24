@@ -770,8 +770,7 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         ),
         line_range=FacetDecl(
             state=FacetState.MAPPED,
-            native_field='check "file_line_range", the SARIF region '
-            "startLine/endLine",
+            native_field='check "file_line_range", the SARIF region startLine/endLine',
         ),
         column=FacetDecl(
             state=FacetState.NA,

@@ -244,8 +244,7 @@ def test_a_mapped_resource_id_is_written_and_its_example_is_in_the_fixture(
 #: value is read as a substring of the fixture text instead of under a key.
 _DROPPED_FIXTURES: dict[str, tuple[str, str | None, str]] = {
     "CfnGuardScanner": (
-        "cfn_lint_guard/captured/"
-        "cfn-guard-3.2.1-wa-Security-Pillar-insecure.sarif",
+        ("cfn_lint_guard/captured/cfn-guard-3.2.1-wa-Security-Pillar-insecure.sarif"),
         None,
         "Path=/Resources/LegacyFunction",
     ),
@@ -326,7 +325,7 @@ def test_a_dropped_resource_id_is_still_in_its_fixture(name: str) -> None:
         )
         return
     document = json.loads(text)
-    found ={v for hit in _values_under_key(document, key) for v in _flatten(hit)}
+    found = {v for hit in _values_under_key(document, key) for v in _flatten(hit)}
     assert value in found, (
         f"{name}: the declared native field {key!r} no longer carries "
         f"{value!r} in {fixture}; the dropped cell's evidence rotted, so "
