@@ -94,9 +94,9 @@ _LINE_START_ESCAPES = {":": "\\x3a"}
 _LINE_BREAK = re.compile(r"(\r\n|\r|\n)")
 
 #: The variable each runner that reads workflow commands from a job's output sets
-#: in every job: GitHub Actions, Azure Pipelines, TeamCity. Container mode and
-#: ./ash pass each one that is set into the container, so the scan there checks a
-#: terminal's lines too.
+#: in every job: GitHub Actions, Azure Pipelines, TeamCity. Container mode, ./ash
+#: and Invoke-ASH pass each one that is set into the container, so the scan there
+#: checks a terminal's lines too.
 COMMAND_READING_RUNNERS = ("GITHUB_ACTIONS", "TF_BUILD", "TEAMCITY_VERSION")
 
 
