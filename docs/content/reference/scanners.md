@@ -38,7 +38,7 @@ ASH ships 22 scanners. The built-in ones are loaded on every scan. The others ar
 | [`guarddog`](#guarddog) | SCA | yes | community module `ash_guarddog_plugins` | `guarddog` | yes |
 | [`hadolint`](#hadolint) | IAC | yes | community module `ash_hadolint_plugins` | `hadolint` | no |
 | [`snyk-code`](#snyk-code) | SAST | yes | community module `ash_snyk_plugins` | `snyk` | no |
-| [`trivy-repo`](#trivy-repo) | SAST | yes | community module `ash_trivy_plugins` | `trivy` | no |
+| [`trivy-repo`](#trivy-repo) | SCA | yes | community module `ash_trivy_plugins` | `trivy` | no |
 
 Tool type is the scanner's own `ScannerToolType`. `--python-only` keeps a scanner when its `is_python_only()` is true: the scanner class's own `python_only` when it states one; otherwise only when the scanner runs its tool through uv, declares no install commands, and has only pip dependencies. A scanner it does not keep is SKIPPED.
 
@@ -643,7 +643,7 @@ Options, under `scanners.snyk-code.options`. An option not listed here refuses t
 - Class: `automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scanner.TrivyRepoScanner`
 - Provided by: community module `ash_trivy_plugins`, which `ash scan` loads when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_trivy_plugins`
 - Enabled by default: yes
-- Tool type: SAST
+- Tool type: SCA
 - Command: `trivy`
 - Install: pinned, checksum-verified release of `trivy` by `ash dependencies install`, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64
 - Offline strategy: `cache_flags`

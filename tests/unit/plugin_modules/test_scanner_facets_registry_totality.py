@@ -40,6 +40,11 @@ from automated_security_helper.base.scanner_facets import (
     SCANNER_FACETS_ATTR,
     ScannerFacets,
 )
+from automated_security_helper.base.scanner_operational_facets import (
+    OPERATIONAL_FACETS_ATTR,
+    ScannerOperationalFacets,
+)
+from automated_security_helper.core.enums import OfflineStrategy
 from automated_security_helper.plugin_modules import ash_builtin
 
 pytestmark = pytest.mark.unit
@@ -111,3 +116,50 @@ def test_every_registered_scanner_declares_its_facets(scanner_cls: type) -> None
         "ScannerFacets; declare through the register so the vocabulary "
         "totality holds"
     )
+
+
+# ---------------------------------------------------------------------------
+# The operational register (base/scanner_operational_facets.py): one totality
+# test over the same enumeration, so one sweep covers both descriptors.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("scanner_cls", SCANNER_CLASSES, ids=lambda cls: cls.__name__)
+def test_every_registered_scanner_declares_its_operational_facets(
+    scanner_cls: type,
+) -> None:
+    """Fail closed: an undeclared registered scanner is a failure naming it."""
+    declared = vars(scanner_cls).get(OPERATIONAL_FACETS_ATTR)
+    assert declared is not None, (
+        f"{scanner_cls.__module__}.{scanner_cls.__qualname__} is registered "
+        f"with no ScannerOperationalFacets declaration (an "
+        f"{OPERATIONAL_FACETS_ATTR!r} class attribute of its own). Read the "
+        "scanner's adapter and classify every operational dimension "
+        "(base/scanner_operational_facets.py); an unread value is an explicit "
+        "unconfirmed state with its reason, never a default. An inherited "
+        "declaration does not count: a subclass classifies its own behavior."
+    )
+    assert isinstance(declared, ScannerOperationalFacets), (
+        f"{scanner_cls.__qualname__}.{OPERATIONAL_FACETS_ATTR} is "
+        f"{type(declared).__name__}, not ScannerOperationalFacets"
+    )
+
+
+@pytest.mark.parametrize("scanner_cls", SCANNER_CLASSES, ids=lambda cls: cls.__name__)
+def test_no_registered_scanner_rests_on_the_unknown_offline_strategy(
+    scanner_cls: type,
+) -> None:
+    """E7: UNKNOWN is the base default, so a new scanner inherits it silently.
+
+    The enum value is a work item, not a resting state: read what the scanner
+    does offline and declare BUNDLED, CACHE_FLAGS or SKIP_OFFLINE.
+    """
+    assert scanner_cls.offline_strategy is not OfflineStrategy.UNKNOWN, (
+        f"{scanner_cls.__qualname__}.offline_strategy is still the base "
+        "default UNKNOWN; read a record of how it behaves offline and classify it"
+    )
+
+
+def test_the_enumeration_holds_all_twenty_two_shipped_scanners() -> None:
+    """The planted-control count: a shrunken universe fails here, not silently."""
+    assert len(SCANNER_CLASSES) == 22, sorted(c.__name__ for c in SCANNER_CLASSES)

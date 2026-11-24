@@ -144,6 +144,7 @@ from pydantic import AnyUrl, Field, model_validator
 
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.plugin_context import PluginContext
+from automated_security_helper.base import scanner_operational_facets as opsf
 from automated_security_helper.base.scanner_facets import (
     FacetDecl,
     FacetState,
@@ -375,6 +376,88 @@ class HadolintScanner(ScannerPluginBase[HadolintScannerConfig]):
             '"hadolint_level" written by the adapter',
         ),
     )
+
+    #: The operational register row (base/scanner_operational_facets.py),
+    #: checked against the production declarations it mirrors by
+    #: tests/unit/plugin_modules/test_scanner_operational_facets_consistency.py.
+    operational_facets: ClassVar[opsf.ScannerOperationalFacets] = (
+        opsf.ScannerOperationalFacets(
+            scanner_name="hadolint",
+            network=opsf.NetworkFacet(
+                fetch_kind=opsf.FetchKind.NONE,
+                fetches=(),
+                prefetch=(),
+                offline_outcome=opsf.OfflineOutcome.UNCHANGED,
+                offline_strategy=OfflineStrategy.BUNDLED,
+                sandbox_network=opsf.SandboxNetwork.NONE,
+                source="hadolint_scanner.py offline_strategy, sandbox_requirements",
+            ),
+            output=opsf.OutputFacet(
+                native_formats=(opsf.OutputFormat.SARIF,),
+                side_reports=(),
+                non_finding_artifacts=(),
+                note="a second --format json invocation feeds the severity refinement join; it is an invocation, not a side report",
+            ),
+            targets=opsf.TargetsFacet(
+                kinds=(opsf.TargetKind.DOCKERFILES,),
+                tool_type=ScannerToolType.IAC,
+                selection="its own discovery over the scan set: Dockerfile, *.Dockerfile, Dockerfile.* and Containerfile; unparseable files are failed targets, not skipped",
+                covers_note="a community scanner; it declares no covers display string",
+            ),
+            runtime=opsf.RuntimeFacet(
+                kind=opsf.RuntimeKind.PINNED_BINARY,
+                external_programs=(),
+                invocations=opsf.Invocations.MULTI_PASS,
+                invocation_note="a second JSON pass for the severity refinement join; file arguments are chunked under the Windows argv cap",
+                tool_versions_key="hadolint",
+                python_only=False,
+                use_uv_tool=False,
+            ),
+            platforms=opsf.PlatformsFacet(
+                provisionable=opsf.PLATFORMS_NO_WINDOWS_ARM64,
+                note="no windows/arm64 asset (tool_downloads.py docstring)",
+            ),
+            severity=opsf.SeverityFacet(
+                severity_class=opsf.SeverityClass.DERIVED,
+                note="two tables plus a second-pass refinement join",
+            ),
+            silencing=opsf.SilencingFacet(
+                tool_side=(
+                    opsf.SilencingLayer(
+                        layer=opsf.SilencingLayerKind.INLINE_COMMENT,
+                        writer=opsf.SilencingWriter.REPOSITORY,
+                        honored=opsf.Honored.YES,
+                        surface="# hadolint ignore=DLxxxx pragmas, applied inside hadolint before ASH sees the report",
+                        cite="hadolint_scanner.py module header",
+                    ),
+                ),
+            ),
+            identity=opsf.IdentityFacet(
+                fingerprint_class=opsf.FingerprintClass.POSITIONAL_ONLY,
+                note="identity is file and line through the shared floor",
+            ),
+            extensibility=opsf.ExtensibilityFacet(
+                custom_rules=opsf.CustomRules.NONE,
+                env_prefixes=(),
+                options_surface="typed options only; the rules surface was not surveyed beyond them",
+            ),
+            exit_codes=opsf.ExitCodesFacet(
+                success_exit_codes=(0,),
+                semantics="with --no-fail, 0 is the only status a completed run gives; DL1000 unparseable files become target failures",
+            ),
+            provenance=opsf.ProvenanceFacet(
+                tier=opsf.Tier.COMMUNITY_OPTIN,
+                source=opsf.ProvenanceSource.PINNED_RELEASE_BINARY,
+                selection_surfaces=("ash_hadolint_plugins in ash_plugin_modules",),
+                upstream_license=opsf.LICENSE_NOT_READ,
+            ),
+            prerequisites=opsf.PrerequisitesFacet(
+                kinds=(opsf.Prerequisite.NONE,),
+                note="Dockerfiles in the scan set",
+            ),
+        )
+    )
+
     # With --no-fail, 0 is the only status hadolint gives a run that completed.
     success_exit_codes: ClassVar[Set[int]] = {0}
     # The strict default: no network, and no variables or paths beyond the baseline.

@@ -16,6 +16,7 @@ from automated_security_helper.base.plugin_base import (
     CustomCommand,
     install_story_is_declared,
 )
+from automated_security_helper.base import scanner_operational_facets as opsf
 from automated_security_helper.base.scanner_facets import (
     FacetDecl,
     FacetState,
@@ -484,6 +485,101 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
             reason="the adapter writes no result property bag (its only "
             "PropertyBag is on the Invocation)",
         ),
+    )
+
+    #: The operational register row (base/scanner_operational_facets.py),
+    #: checked against the production declarations it mirrors by
+    #: tests/unit/plugin_modules/test_scanner_operational_facets_consistency.py.
+    operational_facets: ClassVar[opsf.ScannerOperationalFacets] = (
+        opsf.ScannerOperationalFacets(
+            scanner_name="cfn-nag",
+            network=opsf.NetworkFacet(
+                fetch_kind=opsf.FetchKind.NONE,
+                fetches=(),
+                prefetch=(),
+                offline_outcome=opsf.OfflineOutcome.UNCHANGED,
+                offline_strategy=OfflineStrategy.BUNDLED,
+                sandbox_network=opsf.SandboxNetwork.NONE,
+                source="cfn_nag_scanner.py offline_strategy, sandbox_requirements",
+            ),
+            output=opsf.OutputFacet(
+                native_formats=(opsf.OutputFormat.SARIF,),
+                side_reports=(),
+                non_finding_artifacts=(),
+            ),
+            targets=opsf.TargetsFacet(
+                kinds=(opsf.TargetKind.IAC_CLOUDFORMATION,),
+                tool_type=ScannerToolType.IAC,
+                selection=(
+                    "its own loop over holds_cloudformation_template, held equal to "
+                    "utils/cfn_template_discovery.py by a test"
+                ),
+            ),
+            runtime=opsf.RuntimeFacet(
+                kind=opsf.RuntimeKind.RUBY_GEM,
+                external_programs=("ruby",),
+                invocations=opsf.Invocations.PER_TARGET,
+                invocation_note="a per-template loop",
+                python_only=False,
+                use_uv_tool=False,
+                build_dependency=(
+                    "A portable (prebuilt, relocatable) Ruby BUILD, not a Ruby version. "
+                    "cfn-nag 0.8.10 installed cleanly on a portable Ruby 3.4.5 and every "
+                    "scan then failed with FATAL NoMethodError: undefined method 'parse' "
+                    "for an instance of Psych::Parser (tests/test_data/scanners/"
+                    "M0-FINDINGS.md (b)). The cause is the portable build, not the "
+                    "interpreter version: source-built interpreters are clean (the "
+                    "finding that assigned this row; not re-measured in this unit). The "
+                    "gem closure itself comes from the committed assets/Gemfile.lock."
+                ),
+            ),
+            platforms=opsf.PlatformsFacet(
+                provisionable=(),
+                note="a Ruby gem closure from assets/Gemfile.lock, not a release binary; there is no asset table",
+            ),
+            severity=opsf.SeverityFacet(
+                severity_class=opsf.SeverityClass.NATIVE,
+                note="the tool's own per-finding severity is mapped",
+            ),
+            silencing=opsf.SilencingFacet(
+                tool_side=(
+                    opsf.SilencingLayer(
+                        layer=opsf.SilencingLayerKind.INLINE_COMMENT,
+                        writer=opsf.SilencingWriter.REPOSITORY,
+                        honored=opsf.Honored.UNCONFIRMED,
+                        surface="template Metadata rule suppressions",
+                        cite="tool feature; cfn_nag_scanner.py reads --print-suppression only",
+                        reason=(
+                            "whether ASH leaves the template's Metadata suppressions on was "
+                            "not read at the adapter; one adapter read settles it"
+                        ),
+                    ),
+                ),
+            ),
+            identity=opsf.IdentityFacet(
+                fingerprint_class=opsf.FingerprintClass.UNCONFIRMED,
+                note="no fixture read classifies cfn-nag's fingerprints (no golden is committed: the tool could not be run to a result); reads as positional-only until one does",
+            ),
+            extensibility=opsf.ExtensibilityFacet(
+                custom_rules=opsf.CustomRules.NONE,
+                env_prefixes=(),
+                options_surface="no rules surface was found at the adapter survey",
+            ),
+            exit_codes=opsf.ExitCodesFacet(
+                success_exit_codes=(0, 1),
+                semantics="the base default {0, 1}; Ruby stderr exception text is sniffed to tell a crash from findings",
+            ),
+            provenance=opsf.ProvenanceFacet(
+                tier=opsf.Tier.BUILTIN_DEFAULT,
+                source=opsf.ProvenanceSource.GEMFILE_LOCK,
+                selection_surfaces=(),
+                upstream_license=opsf.LICENSE_NOT_READ,
+            ),
+            prerequisites=opsf.PrerequisitesFacet(
+                kinds=(opsf.Prerequisite.TEMPLATE,),
+                note="a .json/.yaml/.yml file the template model reads as CloudFormation",
+            ),
+        )
     )
 
     def model_post_init(self, context):

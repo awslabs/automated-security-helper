@@ -10,6 +10,7 @@ from typing import Annotated, Any, ClassVar, List, Literal, Set
 from pydantic import Field, PrivateAttr, ValidationError, model_validator
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.base.options import ScannerOptionsBase
+from automated_security_helper.base import scanner_operational_facets as opsf
 from automated_security_helper.base.scanner_facets import (
     FacetDecl,
     FacetState,
@@ -220,6 +221,84 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
             reason="SBOM scanner: no SARIF property bag; the CycloneDX "
             "document is passed through whole outside the flat path",
         ),
+    )
+
+    #: The operational register row (base/scanner_operational_facets.py),
+    #: checked against the production declarations it mirrors by
+    #: tests/unit/plugin_modules/test_scanner_operational_facets_consistency.py.
+    operational_facets: ClassVar[opsf.ScannerOperationalFacets] = (
+        opsf.ScannerOperationalFacets(
+            scanner_name="syft",
+            network=opsf.NetworkFacet(
+                fetch_kind=opsf.FetchKind.TOOL_UPDATES_ONLY,
+                fetches=(),
+                prefetch=(),
+                offline_outcome=opsf.OfflineOutcome.UNCHANGED,
+                offline_strategy=OfflineStrategy.CACHE_FLAGS,
+                sandbox_network=opsf.SandboxNetwork.NONE,
+                source=(
+                    "syft_scanner.py offline_strategy and sandbox_requirements; "
+                    "utils/content_databases.py SCANNERS_WITHOUT_CONTENT_DATABASE['syft']: "
+                    "it catalogs packages and matches nothing against advisories; the "
+                    "remote license, maven and vcpkg lookups are forced off by "
+                    "OFFLINE_TOOL_ENVIRONMENT"
+                ),
+            ),
+            output=opsf.OutputFacet(
+                native_formats=(opsf.OutputFormat.CYCLONEDX,),
+                side_reports=(),
+                non_finding_artifacts=("CycloneDXReport (the SBOM)",),
+                consumed_by_deviation="no SARIF Result exists; the SBOM is consumed outside the flat findings path",
+            ),
+            targets=opsf.TargetsFacet(
+                kinds=(opsf.TargetKind.PACKAGE_INVENTORY,),
+                tool_type=ScannerToolType.SBOM,
+                selection="the whole directory, cataloged into an SBOM",
+            ),
+            runtime=opsf.RuntimeFacet(
+                kind=opsf.RuntimeKind.PINNED_BINARY,
+                external_programs=(),
+                invocations=opsf.Invocations.ONE,
+                tool_versions_key="syft",
+                python_only=False,
+                use_uv_tool=False,
+            ),
+            platforms=opsf.PlatformsFacet(
+                provisionable=opsf.PLATFORMS_ALL,
+                note="asset table lists all six platform/arch pairs",
+            ),
+            severity=opsf.SeverityFacet(
+                severity_class=opsf.SeverityClass.NOT_APPLICABLE,
+                note="an SBOM has no findings",
+            ),
+            silencing=opsf.SilencingFacet(
+                tool_side=(),
+                none_reason="syft produces an SBOM, not findings; there is nothing to silence",
+            ),
+            identity=opsf.IdentityFacet(
+                fingerprint_class=opsf.FingerprintClass.NOT_APPLICABLE,
+                note="no findings to identify",
+            ),
+            extensibility=opsf.ExtensibilityFacet(
+                custom_rules=opsf.CustomRules.NONE,
+                env_prefixes=("SYFT_",),
+                options_surface="typed options only; no rules surface",
+            ),
+            exit_codes=opsf.ExitCodesFacet(
+                success_exit_codes=(0,),
+                semantics="a completed run exits 0; syft installs no findings-found exit",
+            ),
+            provenance=opsf.ProvenanceFacet(
+                tier=opsf.Tier.BUILTIN_DEFAULT,
+                source=opsf.ProvenanceSource.PINNED_RELEASE_BINARY,
+                selection_surfaces=(),
+                upstream_license=opsf.LICENSE_NOT_READ,
+            ),
+            prerequisites=opsf.PrerequisitesFacet(
+                kinds=(opsf.Prerequisite.NONE,),
+                note="a directory",
+            ),
+        )
     )
 
     # syft exits 0 for a completed run; cmd/syft/main.go runs clio, whose Run exits 1

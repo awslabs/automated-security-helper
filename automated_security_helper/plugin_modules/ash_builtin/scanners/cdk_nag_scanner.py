@@ -22,6 +22,7 @@ from yaml import YAMLError
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.core.constants import ASH_DOCS_URL, ASH_REPO_URL
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
+from automated_security_helper.base import scanner_operational_facets as opsf
 from automated_security_helper.base.scanner_facets import (
     FacetDecl,
     FacetState,
@@ -1231,6 +1232,99 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
             native_field='"cdk_nag_finding" and "cfn_resource" property bags '
             "(the legacy bags extract_resource_identity also reads)",
         ),
+    )
+
+    #: The operational register row (base/scanner_operational_facets.py),
+    #: checked against the production declarations it mirrors by
+    #: tests/unit/plugin_modules/test_scanner_operational_facets_consistency.py.
+    operational_facets: ClassVar[opsf.ScannerOperationalFacets] = (
+        opsf.ScannerOperationalFacets(
+            scanner_name="cdk-nag",
+            network=opsf.NetworkFacet(
+                fetch_kind=opsf.FetchKind.NONE,
+                fetches=(),
+                prefetch=(),
+                offline_outcome=opsf.OfflineOutcome.UNCHANGED,
+                offline_strategy=OfflineStrategy.BUNDLED,
+                sandbox_network=opsf.SandboxNetwork.NONE,
+                source=(
+                    "cdk_nag_scanner.py offline_strategy and sandbox_requirements; the "
+                    "nag packs ship with the pinned Python packages and jsii's shared "
+                    "package cache is disabled under sandbox-exec"
+                ),
+            ),
+            output=opsf.OutputFacet(
+                native_formats=(opsf.OutputFormat.SYNTHESIZED,),
+                side_reports=(),
+                non_finding_artifacts=(),
+                consumed_by_deviation=(
+                    "the report is generated, not parsed: synthesized SARIF plus the "
+                    "legacy property bags the extractor reads"
+                ),
+            ),
+            targets=opsf.TargetsFacet(
+                kinds=(opsf.TargetKind.IAC_CLOUDFORMATION,),
+                tool_type=ScannerToolType.IAC,
+                selection=(
+                    "each CloudFormation template through run_cdk_nag_against_cfn_template "
+                    "(utils/cdk_nag_worker.py); it does not synthesize a CDK application"
+                ),
+            ),
+            runtime=opsf.RuntimeFacet(
+                kind=opsf.RuntimeKind.IN_PROCESS,
+                external_programs=("node",),
+                invocations=opsf.Invocations.PER_TARGET,
+                invocation_note="a jsii child process evaluates each template through the nag packs",
+                python_only=False,
+                use_uv_tool=False,
+            ),
+            platforms=opsf.PlatformsFacet(
+                provisionable=(),
+                note="runs in ASH's own interpreter plus a jsii child that needs node on PATH; ASH installs neither",
+            ),
+            severity=opsf.SeverityFacet(
+                severity_class=opsf.SeverityClass.NATIVE,
+                note="the violation's normalized rule level",
+            ),
+            silencing=opsf.SilencingFacet(
+                tool_side=(
+                    opsf.SilencingLayer(
+                        layer=opsf.SilencingLayerKind.INLINE_COMMENT,
+                        writer=opsf.SilencingWriter.REPOSITORY,
+                        honored=opsf.Honored.UNCONFIRMED,
+                        surface="template Metadata suppressions read by the wrapper",
+                        cite="utils/cdk_nag_wrapper.py was not re-read for this row",
+                        reason=(
+                            "the wrapper reads template Metadata suppressions per the "
+                            "design survey; the honored state was not re-verified here"
+                        ),
+                    ),
+                ),
+            ),
+            identity=opsf.IdentityFacet(
+                fingerprint_class=opsf.FingerprintClass.POSITIONAL_ONLY,
+                note="identity is file and line through the shared floor",
+            ),
+            extensibility=opsf.ExtensibilityFacet(
+                custom_rules=opsf.CustomRules.NONE,
+                env_prefixes=("JSII_",),
+                options_surface="nag pack selection; no operator rules path",
+            ),
+            exit_codes=opsf.ExitCodesFacet(
+                success_exit_codes=(0, 1),
+                semantics="the base default {0, 1}; the evaluation is in-process, so there is no tool exit",
+            ),
+            provenance=opsf.ProvenanceFacet(
+                tier=opsf.Tier.BUILTIN_DEFAULT,
+                source=opsf.ProvenanceSource.PYPI_PINNED_DEPENDENCY,
+                selection_surfaces=("options nag packs",),
+                upstream_license=opsf.LICENSE_NOT_READ,
+            ),
+            prerequisites=opsf.PrerequisitesFacet(
+                kinds=(opsf.Prerequisite.TEMPLATE, opsf.Prerequisite.NODE_RUNTIME),
+                note="a CloudFormation template (not a CDK app) and node on PATH",
+            ),
+        )
     )
 
     def _environment_values(self) -> Tuple[str, ...]:

@@ -134,6 +134,7 @@ from automated_security_helper.base.options import (
     tool_version_constraint,
 )
 from automated_security_helper.base.plugin_context import PluginContext
+from automated_security_helper.base import scanner_operational_facets as opsf
 from automated_security_helper.base.scanner_facets import (
     FacetDecl,
     FacetState,
@@ -844,6 +845,101 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
             '"zizmor/confidence", "zizmor/persona"), plus the symbolic '
             "route in logicalLocations",
         ),
+    )
+
+    #: The operational register row (base/scanner_operational_facets.py),
+    #: checked against the production declarations it mirrors by
+    #: tests/unit/plugin_modules/test_scanner_operational_facets_consistency.py.
+    operational_facets: ClassVar[opsf.ScannerOperationalFacets] = (
+        opsf.ScannerOperationalFacets(
+            scanner_name="zizmor",
+            network=opsf.NetworkFacet(
+                fetch_kind=opsf.FetchKind.NONE,
+                fetches=(),
+                prefetch=(),
+                offline_outcome=opsf.OfflineOutcome.UNCHANGED,
+                offline_strategy=OfflineStrategy.BUNDLED,
+                sandbox_network=opsf.SandboxNetwork.NONE,
+                source=(
+                    "zizmor_scanner.py module header: always --offline unless the "
+                    "operator sets options.online_audits; GitHub tokens are stripped "
+                    "from the environment unless it is on"
+                ),
+                unconfirmed=(
+                    "with options.online_audits true the tool reaches GitHub, yet the "
+                    "sandbox grants it no network; what that combination does under "
+                    "--sandbox was not read"
+                ),
+            ),
+            output=opsf.OutputFacet(
+                native_formats=(opsf.OutputFormat.SARIF,),
+                side_reports=(),
+                non_finding_artifacts=(),
+            ),
+            targets=opsf.TargetsFacet(
+                kinds=(
+                    opsf.TargetKind.GITHUB_ACTIONS_WORKFLOWS,
+                    opsf.TargetKind.COMPOSITE_ACTIONS,
+                ),
+                tool_type=ScannerToolType.SAST,
+                selection="workflow files and composite actions (action.yml and action.yaml anywhere) from the scan set",
+                tool_type_note=(
+                    "actionlint (IAC) and zizmor (SAST) scan the same workflow files; the "
+                    "split is defensible (linting versus security analysis) and changing "
+                    "either moves reporter-side type exclusions, so it is recorded here "
+                    "and changed in neither (design E3)"
+                ),
+            ),
+            runtime=opsf.RuntimeFacet(
+                kind=opsf.RuntimeKind.UV_PYTHON,
+                external_programs=(),
+                invocations=opsf.Invocations.ONE,
+                python_only=True,
+                use_uv_tool=True,
+            ),
+            platforms=opsf.PlatformsFacet(
+                provisionable=(),
+                note="a PyPI package run through uv; platform support is the package's and was not read here",
+            ),
+            severity=opsf.SeverityFacet(
+                severity_class=opsf.SeverityClass.DERIVED,
+                note="a severity-by-confidence rewrite",
+            ),
+            silencing=opsf.SilencingFacet(
+                tool_side=(
+                    opsf.SilencingLayer(
+                        layer=opsf.SilencingLayerKind.IGNORE_FILE,
+                        writer=opsf.SilencingWriter.REPOSITORY,
+                        honored=opsf.Honored.NO,
+                        surface="an in-tree zizmor.yml, which can disable audits so findings are never reported or counted as suppressed",
+                        cite="zizmor_scanner.py module header: ASH passes --no-config unless the operator set options.config_file",
+                    ),
+                ),
+            ),
+            identity=opsf.IdentityFacet(
+                fingerprint_class=opsf.FingerprintClass.POSITIONAL_ONLY,
+                note="identity is file and line through the shared floor",
+            ),
+            extensibility=opsf.ExtensibilityFacet(
+                custom_rules=opsf.CustomRules.OPERATOR_PATHS,
+                env_prefixes=(),
+                options_surface="options.config_file, operator-gated, passed as --config; otherwise --no-config",
+            ),
+            exit_codes=opsf.ExitCodesFacet(
+                success_exit_codes=(0, 3),
+                semantics="exit 3 is the no-inputs code: success with nothing to scan",
+            ),
+            provenance=opsf.ProvenanceFacet(
+                tier=opsf.Tier.BUILTIN_DEFAULT,
+                source=opsf.ProvenanceSource.PYPI_VIA_UV,
+                selection_surfaces=("options.online_audits (off by default)",),
+                upstream_license=opsf.LICENSE_NOT_READ,
+            ),
+            prerequisites=opsf.PrerequisitesFacet(
+                kinds=(opsf.Prerequisite.NONE,),
+                note="workflow files or composite actions in the scan set",
+            ),
+        )
     )
 
     @property

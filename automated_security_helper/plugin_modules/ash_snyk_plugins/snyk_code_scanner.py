@@ -17,6 +17,7 @@ from pydantic import Field, PrivateAttr
 
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.base.options import ScannerOptionsBase
+from automated_security_helper.base import scanner_operational_facets as opsf
 from automated_security_helper.base.scanner_facets import (
     FacetDecl,
     FacetState,
@@ -480,6 +481,102 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
             native_field="result and rule properties bags, passed through the "
             "SARIF model untouched",
         ),
+    )
+
+    #: The operational register row (base/scanner_operational_facets.py),
+    #: checked against the production declarations it mirrors by
+    #: tests/unit/plugin_modules/test_scanner_operational_facets_consistency.py.
+    operational_facets: ClassVar[opsf.ScannerOperationalFacets] = (
+        opsf.ScannerOperationalFacets(
+            scanner_name="snyk-code",
+            network=opsf.NetworkFacet(
+                fetch_kind=opsf.FetchKind.SERVICE_UPLOAD,
+                fetches=(opsf.Fetched.SOURCE_UPLOAD,),
+                prefetch=(),
+                offline_outcome=opsf.OfflineOutcome.NOT_RUN,
+                offline_reason=(
+                    "the scan is the upload, so an offline run is skipped; the skip's "
+                    "validation carries a TODO at the adapter, and the register's "
+                    "offline-agreement row is what asserts the declared outcome"
+                ),
+                offline_strategy=OfflineStrategy.SKIP_OFFLINE,
+                sandbox_network=opsf.SandboxNetwork.ONLINE,
+                source=(
+                    "snyk_code_scanner.py offline_strategy, sandbox_requirements "
+                    "(network plus the token file and SNYK_TOKEN pass-throughs) and the "
+                    "module statement that the Snyk CLI uploads the source to Snyk"
+                ),
+                unconfirmed=(
+                    "the upload surface beyond 'uploads the source to Snyk' (endpoint "
+                    "granularity); one Snyk CLI documentation read settles it"
+                ),
+            ),
+            output=opsf.OutputFacet(
+                native_formats=(opsf.OutputFormat.SARIF,),
+                side_reports=(),
+                non_finding_artifacts=(),
+            ),
+            targets=opsf.TargetsFacet(
+                kinds=(opsf.TargetKind.SOURCE_CODE,),
+                tool_type=ScannerToolType.SAST,
+                selection="a staged copy of the scan set outside the tree (_stage_source); exit 3 means no supported project",
+                covers_note="a community scanner; it declares no covers display string",
+            ),
+            runtime=opsf.RuntimeFacet(
+                kind=opsf.RuntimeKind.USER_INSTALLED_CLI,
+                external_programs=("snyk",),
+                invocations=opsf.Invocations.ONE,
+                python_only=False,
+                use_uv_tool=False,
+            ),
+            platforms=opsf.PlatformsFacet(
+                provisionable=(),
+                note="the user's installed Snyk CLI; absent from TOOL_VERSIONS and the platform matrix is unread",
+            ),
+            severity=opsf.SeverityFacet(
+                severity_class=opsf.SeverityClass.DEGRADED,
+                note="rules carry no security-severity, so the bare level maps (error to CRITICAL)",
+                dropped_native="priorityScore",
+            ),
+            silencing=opsf.SilencingFacet(
+                tool_side=(
+                    opsf.SilencingLayer(
+                        layer=opsf.SilencingLayerKind.IGNORE_FILE,
+                        writer=opsf.SilencingWriter.REPOSITORY,
+                        honored=opsf.Honored.UNCONFIRMED,
+                        surface="a .snyk policy file in the staged source",
+                        cite="tool feature; snyk_code_scanner.py was not read for whether the staged copy carries it",
+                        reason=(
+                            "whether a repository-written policy file silences findings "
+                            "under ASH was not read; one adapter read settles it"
+                        ),
+                    ),
+                ),
+            ),
+            identity=opsf.IdentityFacet(
+                fingerprint_class=opsf.FingerprintClass.STABLE_NATIVE,
+                note="the SARIF fingerprints '0' and '1'",
+            ),
+            extensibility=opsf.ExtensibilityFacet(
+                custom_rules=opsf.CustomRules.NONE,
+                env_prefixes=("SNYK_",),
+                options_surface="typed options only; the rules are the service's",
+            ),
+            exit_codes=opsf.ExitCodesFacet(
+                success_exit_codes=(0, 1),
+                semantics="from the CLI's exit codes: 0 no issues, 1 issues found, 2 an error, 3 no supported project (read through the staged-refusal logic)",
+            ),
+            provenance=opsf.ProvenanceFacet(
+                tier=opsf.Tier.COMMUNITY_OPTIN,
+                source=opsf.ProvenanceSource.USER_INSTALLED,
+                selection_surfaces=("ash_snyk_plugins in ash_plugin_modules",),
+                upstream_license=opsf.LICENSE_NOT_READ,
+            ),
+            prerequisites=opsf.PrerequisitesFacet(
+                kinds=(opsf.Prerequisite.AUTH_TOKEN,),
+                note="an authenticated Snyk CLI: SNYK_TOKEN or the token file, the declared sandbox pass-throughs",
+            ),
+        )
     )
 
     # src/cli/exit-codes.ts: 0 no issues, 1 issues found, 2 an error, 3 no supported

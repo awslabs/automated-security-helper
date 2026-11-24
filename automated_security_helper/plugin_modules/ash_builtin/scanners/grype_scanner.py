@@ -20,6 +20,7 @@ import yaml
 from pydantic import Field, model_validator
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.base.options import ScannerOptionsBase
+from automated_security_helper.base import scanner_operational_facets as opsf
 from automated_security_helper.base.scanner_facets import (
     FacetDecl,
     FacetState,
@@ -376,7 +377,7 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
 
     display_name = "Grype"
     docs_summary = "Vulnerability matching"
-    covers = ("Packages and container images",)
+    covers = ("Packages and dependency files",)
 
     #: grype is a native binary. See ScannerPluginBase.python_only.
     python_only: ClassVar[bool | None] = False
@@ -519,6 +520,110 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
             native_field="SARIF result properties bag (package identity keys "
             "this adapter writes) passed through to the flat properties",
         ),
+    )
+
+    #: The operational register row (base/scanner_operational_facets.py),
+    #: checked against the production declarations it mirrors by
+    #: tests/unit/plugin_modules/test_scanner_operational_facets_consistency.py.
+    operational_facets: ClassVar[opsf.ScannerOperationalFacets] = (
+        opsf.ScannerOperationalFacets(
+            scanner_name="grype",
+            network=opsf.NetworkFacet(
+                fetch_kind=opsf.FetchKind.CONTENT_FETCH,
+                fetches=(opsf.Fetched.VULN_DB,),
+                prefetch=(
+                    opsf.Prefetch.CONTENT_DB_REFRESH,
+                    opsf.Prefetch.CI_CACHE,
+                ),
+                offline_outcome=opsf.OfflineOutcome.DEGRADED,
+                offline_reason=(
+                    "GRYPE_DB_AUTO_UPDATE=false and GRYPE_DB_VALIDATE_AGE=false against a "
+                    "pre-checked local database; the scan-time staleness check holds the "
+                    "database to the declared 120h bound after the scan"
+                ),
+                offline_strategy=OfflineStrategy.CACHE_FLAGS,
+                sandbox_network=opsf.SandboxNetwork.ONLINE,
+                content_database="grype-db",
+                source=(
+                    "grype_scanner.py offline_strategy and sandbox_requirements; "
+                    "utils/content_databases.py grype-db; utils/content_db_refresh.py "
+                    "refreshes it outside the sandbox before an online scan"
+                ),
+            ),
+            output=opsf.OutputFacet(
+                native_formats=(opsf.OutputFormat.SARIF,),
+                side_reports=(),
+                non_finding_artifacts=(),
+            ),
+            targets=opsf.TargetsFacet(
+                kinds=(
+                    opsf.TargetKind.PACKAGE_INVENTORY,
+                    opsf.TargetKind.DEPENDENCY_LOCKFILES,
+                ),
+                tool_type=ScannerToolType.SCA,
+                selection="a dir: scan of the source tree, with a lockfile join for locations",
+                covers_note=(
+                    "covers said 'Packages and container images', but only a dir: scan "
+                    "is wired and no SBOM document or image is consumed; the display "
+                    "string now reads 'Packages and dependency files' and the register "
+                    "declares the wired truth (UNCLAIMED_TARGET_KINDS names the rest)"
+                ),
+            ),
+            runtime=opsf.RuntimeFacet(
+                kind=opsf.RuntimeKind.PINNED_BINARY,
+                external_programs=(),
+                invocations=opsf.Invocations.ONE,
+                tool_versions_key="grype",
+                python_only=False,
+                use_uv_tool=False,
+            ),
+            platforms=opsf.PlatformsFacet(
+                provisionable=opsf.PLATFORMS_NO_WINDOWS_ARM64,
+                note="no windows/arm64 asset (tool_downloads.py docstring)",
+            ),
+            severity=opsf.SeverityFacet(
+                severity_class=opsf.SeverityClass.NATIVE,
+                note="the generic CVSS path; the per-result severity word is a dropped cell in the mapping register",
+            ),
+            silencing=opsf.SilencingFacet(
+                tool_side=(
+                    opsf.SilencingLayer(
+                        layer=opsf.SilencingLayerKind.IGNORE_FILE,
+                        writer=opsf.SilencingWriter.REPOSITORY,
+                        honored=opsf.Honored.UNCONFIRMED,
+                        surface="a grype configuration file with ignore rules in the scanned tree",
+                        cite="tool feature; grype_scanner.py was not read for whether ASH passes a config that stops it",
+                        reason=(
+                            "whether a repository-written grype config can silence "
+                            "findings under ASH was not read; one adapter read settles it"
+                        ),
+                    ),
+                ),
+            ),
+            identity=opsf.IdentityFacet(
+                fingerprint_class=opsf.FingerprintClass.UNCONFIRMED,
+                note="no fixture read classifies grype's fingerprints; reads as positional-only until one does",
+            ),
+            extensibility=opsf.ExtensibilityFacet(
+                custom_rules=opsf.CustomRules.NONE,
+                env_prefixes=("GRYPE_",),
+                options_surface="typed options only; the tool's vulnerability database is not operator-replaceable through ASH",
+            ),
+            exit_codes=opsf.ExitCodesFacet(
+                success_exit_codes=(0, 2),
+                semantics="per the adapter's own comment at the success_exit_codes declaration",
+            ),
+            provenance=opsf.ProvenanceFacet(
+                tier=opsf.Tier.BUILTIN_DEFAULT,
+                source=opsf.ProvenanceSource.PINNED_RELEASE_BINARY,
+                selection_surfaces=(),
+                upstream_license=opsf.LICENSE_NOT_READ,
+            ),
+            prerequisites=opsf.PrerequisitesFacet(
+                kinds=(opsf.Prerequisite.NONE,),
+                note="a directory; no SBOM document input is wired",
+            ),
+        )
     )
 
     check_conf: str = "NOT_PROVIDED"
