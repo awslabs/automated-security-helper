@@ -28,7 +28,7 @@ import hashlib
 import json
 import random
 from collections import defaultdict
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 import pytest
 
@@ -302,7 +302,10 @@ def test_a_fingerprint_kind_whose_pairs_are_all_shared_falls_to_the_next_kind():
         ("partialFingerprints", (("p", "own2"),)),
     )
     keys = identity_keys(
-        [ident(start=1, end=1, fingerprints=both), ident(start=2, end=2, fingerprints=other)]
+        [
+            ident(start=1, end=1, fingerprints=both),
+            ident(start=2, end=2, fingerprints=other),
+        ]
     )
     assert keys[0]["partialFingerprints"] == [["p", "own"]]
     assert "fingerprints" not in keys[0]
@@ -401,9 +404,7 @@ def test_text_a_frame_column_cannot_hold_is_keyed_and_told_apart():
 def test_text_that_is_one_to_one_under_latin_1_stays_two_things():
     # "é" is one character, "Ã©" is its UTF-8 bytes read as Latin-1:
     # a carrier that decoded them alike would merge two files
-    keys = assert_same_as_oracle(
-        [ident(file="é.py"), ident(file="Ã©.py")]
-    )
+    keys = assert_same_as_oracle([ident(file="é.py"), ident(file="Ã©.py")])
     assert "occurrence" not in keys[0] and "occurrence" not in keys[1]
 
 
@@ -424,9 +425,7 @@ def test_the_occurrence_digest_is_pinned():
     assert occurrence_digest(None, None) == _oracle_occurrence(None, None)
     assert occurrence_digest(0, "x") == _oracle_occurrence(0, "x")
     assert occurrence_digest(0, "x") != occurrence_digest(None, "x")
-    assert occurrence_digest(3, "café \udcff") == _oracle_occurrence(
-        3, "café \udcff"
-    )
+    assert occurrence_digest(3, "café \udcff") == _oracle_occurrence(3, "café \udcff")
     assert len(occurrence_digest(1, "m")) == 8
 
 
@@ -522,7 +521,12 @@ def test_the_flat_ids_of_a_run_are_the_oracles_over_its_identities():
     assert [vuln.id for vuln in flat] == want
     assert len({vuln.id for vuln in flat}) == 3
     assert [vuln.identity_base for vuln in flat] == [
-        {k: v for k, v in key.items() if k not in {"startLine", "endLine", "occurrence", "ordinal", *FINGERPRINT_KINDS}}
+        {
+            k: v
+            for k, v in key.items()
+            if k
+            not in {"startLine", "endLine", "occurrence", "ordinal", *FINGERPRINT_KINDS}
+        }
         for key in _oracle_keys(identities)
     ]
 
