@@ -2031,7 +2031,7 @@ function Invoke-ASH {
                         elseif ($OCI_WRAPPER.Count -eq 0) {
                             $ciRunnerMarkerArgs += '-e', $markerName
                         }
-                        elseif ($markerValue -match "[`r`n]") {
+                        elseif ($markerValue -match "`n") {
                             $markerRefusal = "$markerName holds a newline, so it is not passed to the container: with OCI_RUNNER_WRAPPER set, GITHUB_ACTIONS, TF_BUILD and TEAMCITY_VERSION go on the runner's command line with their values. Remove the newline from $markerName, or unset OCI_RUNNER_WRAPPER so the container gets the variable by name."
                             $global:LASTEXITCODE = $refusalExitCode
                             throw $markerRefusal

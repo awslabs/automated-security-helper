@@ -2424,6 +2424,25 @@ def test_a_ci_marker_holding_a_newline_under_a_wrapper_is_refused_before_anythin
     assert calls == [], "the build or the run started before the refusal"
 
 
+@pytest.mark.integration
+def test_a_ci_marker_holding_a_carriage_return_under_a_wrapper_is_passed_as_one_word(
+    tmp_path,
+):
+    # ./ash refuses a newline only (ash: `*$'\n'*`), so a carriage return goes on the
+    # command line with the value, as one word. Invoke-ASH matches ./ash here.
+    result, calls = _invoke(
+        tmp_path,
+        "Invoke-ASH -NoBuild -SourceDir src -OutputDir out",
+        preamble=_WRAPME,
+        OCI_RUNNER_WRAPPER="wrapme",
+        TEAMCITY_VERSION="2023.1\r5",
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    runs = [call for call in calls if call[2:3] == ["run"]]
+    assert len(runs) == 1, calls
+    assert "TEAMCITY_VERSION=2023.1\r5" in _run_environment_words(runs[0]), runs[0]
+
+
 _RECORDING_ID_STUB = (
     'function global:id { Add-Content -LiteralPath $env:ID_LOG -Value "$args"; '
     "if ($args[0] -eq '-u') { '4242' } else { '4343' } }\n"
