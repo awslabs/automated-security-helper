@@ -2444,6 +2444,54 @@ def test_a_ci_marker_holding_a_carriage_return_under_a_wrapper_is_passed_as_one_
     assert "TEAMCITY_VERSION=2023.1\r5" in _run_environment_words(runs[0]), runs[0]
 
 
+@pytest.mark.integration
+@pytest.mark.skipif(
+    os.name == "nt", reason="the stand-in runner is a POSIX shell script"
+)
+@pytest.mark.parametrize(
+    "given", ["OCI_RUNNER", "ASH_OCI_RUNNER", "-OCIRunner"], ids=lambda g: g
+)
+def test_a_relative_runner_from_the_environment_is_refused_and_nothing_runs(
+    tmp_path, given
+):
+    """A relative path in OCI_RUNNER (or the deprecated ASH_OCI_RUNNER) names a file
+    under the working directory, usually the repository being scanned. ./ash and the
+    ash CLI refuse it, and so does Invoke-ASH: exit 3, the variable named, nothing
+    run, and no other runtime looked for. The same path given as -OCIRunner is the
+    caller's own, typed where they stand, and runs: the control that the refusal is
+    about where the value came from."""
+    log = tmp_path / "relative-runner.log"
+    (tmp_path / "bin").mkdir()
+    runner = tmp_path / "bin" / "docker"
+    runner.write_text(
+        f"#!/bin/sh\nprintf '%s\\n' \"$1\" >> '{log}'\nexit 0\n", encoding="utf-8"
+    )
+    runner.chmod(0o755)
+    parameter = " -OCIRunner './bin/docker'" if given == "-OCIRunner" else ""
+    env = {} if given == "-OCIRunner" else {given: "./bin/docker"}
+
+    result, calls = _run_script(
+        tmp_path,
+        f"try {{ Invoke-ASH{parameter} -NoBuild -SourceDir src -OutputDir out }} "
+        "catch { Write-Host $_.Exception.Message; "
+        "exit $(if ($LASTEXITCODE) { $LASTEXITCODE } else { 1 }) }\n"
+        "exit [int]$LASTEXITCODE\n",
+        **env,
+    )
+
+    shown = result.stdout + result.stderr
+    assert calls == [], "a stand-in runner ran"
+    if given == "-OCIRunner":
+        assert result.returncode == 0, shown
+        assert log.read_text(encoding="utf-8").splitlines() == ["run"], shown
+    else:
+        assert result.returncode == 3, shown
+        # The refusal names the variable the value came from, so a caller who set
+        # only the deprecated name is not told to fix one they did not set.
+        assert f"{given} starts with the relative path" in " ".join(shown.split())
+        assert not log.exists(), log.read_text(encoding="utf-8")
+
+
 _RECORDING_ID_STUB = (
     'function global:id { Add-Content -LiteralPath $env:ID_LOG -Value "$args"; '
     "if ($args[0] -eq '-u') { '4242' } else { '4343' } }\n"
