@@ -327,6 +327,23 @@ uv run ruff format .
 uv run ash
 ```
 
+- Regenerate the wrapper tables after you add or change a subcommand or an option of the
+  `ash` CLI:
+
+<!-- doctest: illustrative reason="rewrites ./ash and utils/ash_helpers.ps1 in this repository's own checkout" -->
+```bash
+uv run python scripts/generate_wrapper_tables.py
+```
+
+  `./ash` and `utils/ash_helpers.ps1` run on hosts with no Python, so each carries
+  written-out lists of the CLI's subcommands, the root options that take a value, which
+  subcommands take the options the wrapper adds, and the order OCI runners are looked
+  for. Those lists sit between `BEGIN generated` and `END generated` comments and are
+  computed from the CLI by `automated_security_helper/interactions/wrapper_contract.py`.
+  Do not edit inside the markers. The lint job and a unit test run
+  `scripts/generate_wrapper_tables.py --check`, which fails and prints a diff when a block
+  is stale.
+
 ## Project Dependencies
 
 Dependencies are managed in `pyproject.toml`. Key groups:

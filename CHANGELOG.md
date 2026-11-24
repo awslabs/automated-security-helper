@@ -46,6 +46,33 @@
 
 ## Unreleased
 
+### Maintenance
+
+- Removed the ASH v2 in-container scanner scripts `utils/common.sh`,
+  `utils/git-docker-execute.sh`, `utils/grype-docker-execute.sh`,
+  `utils/js-docker-execute.sh`, and `utils/yaml-docker-execute.sh`. ASH v3 has not run
+  them: their scanners live in `automated_security_helper/plugin_modules/ash_builtin/`.
+  No supported invocation changes; `./ash`, `utils/ash_helpers.sh` (`invoke-ash`) and
+  `utils/ash_helpers.ps1` (`Invoke-ASH`) are unchanged.
+- The subcommand and option tables that `./ash` and `utils/ash_helpers.ps1` carry
+  (subcommand names, the root options that take a value, which subcommands take the
+  options a wrapper adds, the OCI runner order) are now generated from the `ash` CLI by
+  `scripts/generate_wrapper_tables.py` into marked blocks, and the lint job and a unit
+  test fail when a block is stale. The generated text is the text the wrappers already
+  held, so no option, exit code or message changes.
+
+### Fixes
+
+- **`Invoke-ASH` now matches `./ash` and the `ash` CLI on two container-run details.**
+  It passes `GITHUB_ACTIONS`, `TF_BUILD` and `TEAMCITY_VERSION` into the container when
+  set (by name, or with their values when `OCI_RUNNER_WRAPPER` is set; a value that holds
+  a newline is refused with exit 3 before anything is built), so a scan started by
+  `Invoke-ASH` inside GitHub Actions sees the runner's variable as the other two
+  entrypoints do. And a relative path in the `OCI_RUNNER` environment variable (or the
+  deprecated `ASH_OCI_RUNNER`), such as `./bin/docker`, is refused with exit 3 instead of
+  being run from the working directory, which is usually the repository being scanned.
+  The same path given as `-OCIRunner` is used as written, as before.
+
 ### Features
 
 - **`default_scanners` sets the default scanners in a trusted config.** `only`
