@@ -3,7 +3,7 @@ description: "Run ASH scan with a configurable method and validate results"
 
 inputs:
   method:
-    description: "Scan method: python-local, python-container, bash, powershell"
+    description: "Scan method: python-local, python-container, bash, sh-helper, powershell"
     required: true
   os:
     description: "Runner OS label"
@@ -854,8 +854,35 @@ runs:
           ./ash --build-target ci --verbose --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml
         fi
 
+    # The sh helper, sourced the way its header says and the sandbox suite drives it:
+    # `. utils/ash_helpers.sh && invoke-ash ...`. invoke_ash runs "${ASH_ROOT_DIR}/ash",
+    # so this is ./ash through the helper's self-location, scanning for real on the same
+    # runners as the bash rows.
+    - name: Validate ASH using ash_helpers.sh
+      if: inputs.method == 'sh-helper'
+      shell: bash
+      env:
+        ASH_BASE_OCI_LAYOUT: ${{ steps.prepull.outputs.oci-layout }}
+        ASH_BASE_IMAGE_OVERRIDE: ${{ steps.prepull.outputs.base-image-override }}
+        ACTIONS_RUNTIME_TOKEN: ${{ steps.cache-creds.outputs.ACTIONS_RUNTIME_TOKEN }}
+        ACTIONS_CACHE_URL: ${{ steps.cache-creds.outputs.ACTIONS_CACHE_URL }}
+        ACTIONS_RESULTS_URL: ${{ steps.cache-creds.outputs.ACTIONS_RESULTS_URL }}
+        SNYK_TOKEN: ${{ inputs.snyk-token }}
+        ASH_TEST_OS: ${{ inputs.os }}
+        ASH_TEST_PLATFORM: ${{ steps.platform.outputs.platform }}
+        ASH_TEST_CONFIG_FILE: ${{ inputs.config-file }}
+      run: |
+        echo "Testing ASH using utils/ash_helpers.sh (invoke-ash) on ${ASH_TEST_OS} (${ASH_TEST_PLATFORM}) with config: ${ASH_TEST_CONFIG_FILE}"
+        chmod +x ./ash
+        . ./utils/ash_helpers.sh
+        if [ "${ASH_TEST_CONFIG_FILE}" = "community" ]; then
+          invoke-ash --build-target ci --verbose --config .ash/.ash_community_plugins.yaml --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml --config-overrides scanners.ferret-scan.options.use_default_config=false
+        else
+          invoke-ash --build-target ci --verbose --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml
+        fi
+
     - name: Validate No Plugin Errors (Bash)
-      if: inputs.method == 'bash'
+      if: inputs.method == 'bash' || inputs.method == 'sh-helper'
       shell: bash
       env:
         ASH_BASE_OCI_LAYOUT: ${{ steps.prepull.outputs.oci-layout }}

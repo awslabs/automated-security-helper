@@ -626,8 +626,9 @@ class TestTheCommentsMatchTheWorkflow:
             # comment cannot trip it.
             "instead of ~297.",
             # (The figures main carried after the wave change but before the e2e-express
-            # legs merged, push 455 and merge-queue 453, are current again: the unit-coverage
-            # job's collapse from four legs to one took 458 and 456 back to them.)
+            # legs merged, push 455 and merge-queue 453, were current again after the
+            # unit-coverage job's collapse from four legs to one took 458 and 456 back
+            # to them; the sh-helper rows moved them on, see the end of this list.)
             # Before ensure-cache gained the ubuntu-24.04 image (push 457 -> 458,
             # merge-queue 455 -> 456, the merge-queue check figure 820 -> 821).
             "expands to 457 jobs",
@@ -649,6 +650,20 @@ class TestTheCommentsMatchTheWorkflow:
             "the 821 above",
             "(821 to a merge-queue run",
             "Most of the 458 is the",
+            # Before scan-validation gained the sh-helper rows (+5 on every event:
+            # push 455 -> 460, merge-queue 453 -> 458, pull request 201 -> 206). The
+            # history chain keeps "455 on a push" and "201 on a pull request" as its
+            # previous link, so those two phrasings are not listed.
+            "expands to 455 jobs",
+            "455-job",
+            "~920 runner jobs",
+            "instead of ~459.",
+            "contributes 336 check",
+            "336 is this",
+            "is 818:",
+            "the 818 above",
+            "(818 to a merge-queue run",
+            "Most of the 455 is the",
         ):
             assert stale not in COMMENTS
 
