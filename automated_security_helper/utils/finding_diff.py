@@ -294,7 +294,7 @@ def match_findings(
     # more after than before findings and its before findings agree on
     # suppression; they pair off in line order, in order of key.
     def unmatched(side: pl.DataFrame, matched: pl.Series) -> pl.DataFrame:
-        return side.filter(~pl.col("i").is_in(matched) & pl.col("base").is_not_null())
+        return side.filter(~pl.col("i").is_in(matched.implode()) & pl.col("base").is_not_null())
 
     left_old = unmatched(old, exact["i"])
     left_new = unmatched(new, exact["i_a"])
@@ -322,7 +322,7 @@ def match_findings(
 
     def leftover(side: pl.DataFrame, matched: list[pl.Series]) -> pl.Series:
         taken = pl.concat(matched)
-        return side.filter(~pl.col("i").is_in(taken)).sort([pl.col("id"), *_PLACE])["i"]
+        return side.filter(~pl.col("i").is_in(taken.implode())).sort([pl.col("id"), *_PLACE])["i"]
 
     return FindingMatch(
         [(before[i], after[j]) for i, j in exact.select("i", "i_a").iter_rows()],
