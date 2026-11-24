@@ -230,7 +230,9 @@ def write(root: Path = REPO_ROOT, contract=None) -> list[str]:
         text = path.read_text(encoding="utf-8")
         new = render_file(text, file, contract)
         if new != text:
-            # newline="" so the file's own line endings are kept as read.
+            # read_text translated CRLF to LF, so the file is written back with LF
+            # endings; newline="" stops the write adding a second translation on
+            # Windows. The committed files are LF (.gitattributes: eol=lf).
             with path.open("w", encoding="utf-8", newline="") as handle:
                 handle.write(new)
             written.append(file)
