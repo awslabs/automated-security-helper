@@ -255,3 +255,78 @@ def test_the_pinned_version_is_the_one_the_gemfile_declares(context):
         CFN_NAG_GEM_VERSION
         in _commands(context, gem="/usr/bin/gem", compiler="/usr/bin/cc")[0]
     )
+
+
+def _ruby_age_probe(tmp_path: Path, lib_versions: list[str] | None) -> bool:
+    """``_ruby_is_too_old`` against a fake ruby whose lib/ruby holds ``lib_versions``.
+
+    ``None`` leaves out ``lib/ruby`` entirely: a version manager's shim.
+    """
+    from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+        cfn_nag_scanner,
+    )
+
+    prefix = tmp_path / "prefix"
+    (prefix / "bin").mkdir(parents=True)
+    ruby = prefix / "bin" / "ruby"
+    ruby.write_text("#!/bin/sh\n", encoding="utf-8")
+    for name in lib_versions or []:
+        (prefix / "lib" / "ruby" / name).mkdir(parents=True)
+    with patch(GEM_PROBE, return_value=str(ruby)):
+        return cfn_nag_scanner._ruby_is_too_old()
+
+
+@pytest.mark.parametrize(
+    "lib_versions, too_old",
+    [
+        pytest.param(["2.4.0"], True, id="ruby-2.4-is-below-the-gemspec-floor"),
+        pytest.param(["2.4.0", "2.3.0"], True, id="every-version-below-the-floor"),
+        pytest.param(["2.5.0"], False, id="the-floor-itself"),
+        pytest.param(["3.1.0"], False, id="the-container-image-ruby"),
+        pytest.param(["3.3.0", "site_ruby", "gems"], False, id="the-ci-ruby"),
+        pytest.param(["site_ruby", "gems"], False, id="no-version-entry-undecided"),
+        pytest.param(None, False, id="version-manager-shim-undecided"),
+    ],
+)
+def test_the_ruby_age_probe_flags_only_a_measurably_old_ruby(
+    tmp_path, lib_versions, too_old
+):
+    assert _ruby_age_probe(tmp_path, lib_versions) is too_old
+
+
+def test_no_ruby_on_path_is_not_called_old():
+    from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+        cfn_nag_scanner,
+    )
+
+    with patch(GEM_PROBE, return_value=None):
+        assert cfn_nag_scanner._ruby_is_too_old() is False
+
+
+def test_an_old_ruby_declares_no_install_command(context):
+    """gem and a compiler present, ruby below cfn-nag's floor: report, do not fail."""
+    from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+        cfn_nag_scanner,
+    )
+
+    with patch.object(cfn_nag_scanner, "_ruby_is_too_old", return_value=True):
+        assert (
+            _commands(context, gem="/usr/bin/gem", compiler="/usr/bin/cc") == []
+        )
+
+
+def test_the_gemfile_carries_no_ruby_directive():
+    """A `ruby` line cannot gate the local install and would break the others.
+
+    `gem install` never reads the Gemfile; the container image builds cfn-nag from
+    it under Debian's ruby 3.1 and the reusable workflow runs it frozen under
+    setup-ruby 3.3, so a single exact constraint refuses one of them, and any
+    constraint also needs Gemfile.lock regenerated or frozen bundler refuses first.
+    The local floor is `_ruby_is_too_old`.
+    """
+    gemfile = (
+        Path(__file__).parents[4] / "automated_security_helper" / "assets" / "Gemfile"
+    ).read_text(encoding="utf-8")
+    assert not [
+        line for line in gemfile.splitlines() if line.lstrip().startswith("ruby ")
+    ]
