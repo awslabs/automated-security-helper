@@ -3,7 +3,7 @@ description: "Run ASH scan with a configurable method and validate results"
 
 inputs:
   method:
-    description: "Scan method: python-local, python-container, bash, powershell"
+    description: "Scan method: python-local, python-container, bash, sh-helper, powershell"
     required: true
   os:
     description: "Runner OS label"
@@ -854,8 +854,35 @@ runs:
           ./ash --build-target ci --verbose --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml
         fi
 
+    # The sh helper, sourced the way its header says and the sandbox suite drives it:
+    # `. utils/ash_helpers.sh && invoke-ash ...`. invoke_ash runs "${ASH_ROOT_DIR}/ash",
+    # so this is ./ash through the helper's self-location, scanning for real on the same
+    # runners as the bash rows.
+    - name: Validate ASH using ash_helpers.sh
+      if: inputs.method == 'sh-helper'
+      shell: bash
+      env:
+        ASH_BASE_OCI_LAYOUT: ${{ steps.prepull.outputs.oci-layout }}
+        ASH_BASE_IMAGE_OVERRIDE: ${{ steps.prepull.outputs.base-image-override }}
+        ACTIONS_RUNTIME_TOKEN: ${{ steps.cache-creds.outputs.ACTIONS_RUNTIME_TOKEN }}
+        ACTIONS_CACHE_URL: ${{ steps.cache-creds.outputs.ACTIONS_CACHE_URL }}
+        ACTIONS_RESULTS_URL: ${{ steps.cache-creds.outputs.ACTIONS_RESULTS_URL }}
+        SNYK_TOKEN: ${{ inputs.snyk-token }}
+        ASH_TEST_OS: ${{ inputs.os }}
+        ASH_TEST_PLATFORM: ${{ steps.platform.outputs.platform }}
+        ASH_TEST_CONFIG_FILE: ${{ inputs.config-file }}
+      run: |
+        echo "Testing ASH using utils/ash_helpers.sh (invoke-ash) on ${ASH_TEST_OS} (${ASH_TEST_PLATFORM}) with config: ${ASH_TEST_CONFIG_FILE}"
+        chmod +x ./ash
+        . ./utils/ash_helpers.sh
+        if [ "${ASH_TEST_CONFIG_FILE}" = "community" ]; then
+          invoke-ash --build-target ci --verbose --config .ash/.ash_community_plugins.yaml --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml --config-overrides scanners.ferret-scan.options.use_default_config=false
+        else
+          invoke-ash --build-target ci --verbose --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml
+        fi
+
     - name: Validate No Plugin Errors (Bash)
-      if: inputs.method == 'bash'
+      if: inputs.method == 'bash' || inputs.method == 'sh-helper'
       shell: bash
       env:
         ASH_BASE_OCI_LAYOUT: ${{ steps.prepull.outputs.oci-layout }}
@@ -999,7 +1026,9 @@ runs:
     # built is what makes them runnable here, which is why this is a step and not a job.
     #
     # Every container leg compares against the same snapshots, so a runtime whose output or
-    # exit status differs from docker's fails here by name. `--no-cov`: coverage is the
+    # exit status differs from docker's fails here by name. `--run-integration`: these
+    # modules carry the integration or e2e tier marker, and without the flag every test is
+    # skipped, so the step would pass having compared nothing. `--no-cov`: coverage is the
     # unit-test legs' gate. `-n 0`: four containers at once on a podman or finch runner buys
     # nothing and costs memory. OCI_RUNNER and OCI_RUNNER_WRAPPER come from the job env.
     # Last, so a snapshot diff never hides one of the scan's own diagnostics above. Runs
@@ -1012,8 +1041,27 @@ runs:
         ASH_BASE_OCI_LAYOUT: ${{ steps.prepull.outputs.oci-layout }}
         ASH_BASE_IMAGE_OVERRIDE: ${{ steps.prepull.outputs.base-image-override }}
       run: |
+        # The tier gate in tests/conftest.py skips every one of these items when a gate
+        # flag is missing, and pytest exits 0 on an all-skipped run, so before
+        # --run-integration was added this step read green on all 24 legs while executing
+        # nothing (a main-branch leg's log reads "collected 20 items ... 20 skipped").
+        # A zero needs its denominator: tee the run, read pytest's final summary line,
+        # and fail unless at least one test actually executed.
         uv run --extra cdk pytest \
           tests/snapshot/container/runtime/test_snapshot_container_runtime.py \
           tests/snapshot/container/runtime/test_snapshot_container_bash_wrapper.py \
           tests/snapshot/container/runtime/test_container_image_permissions.py \
-          --run-container-snapshots --no-cov -n 0
+          --run-container-snapshots --run-integration --no-cov -n 0 \
+          | tee "${RUNNER_TEMP}/container-runtime-snapshot-pytest.log"
+        # The last "== ... ==" line is the final summary ("3 failed, 15 passed, 2 skipped
+        # in 40.00s"). Executed = passed + failed + xpassed + xfailed + errors; "skipped"
+        # is exactly what must not count, and pytest prints a category only when its
+        # count is nonzero. awk always exits 0, so a log with no summary line reads as
+        # executed=0 and fails on the next line with its own message instead of tripping
+        # `set -e` inside the substitution.
+        executed="$(awk '/^=+ .* =+$/ { line = $0 } END { n = 0; while (match(line, /[0-9]+ (passed|failed|xpassed|xfailed|error)/)) { n += substr(line, RSTART, RLENGTH) + 0; line = substr(line, RSTART + RLENGTH) }; print n }' "${RUNNER_TEMP}/container-runtime-snapshot-pytest.log")"
+        if [ "${executed}" -eq 0 ]; then
+          echo "Snapshot step executed 0 tests: the tier gate skipped everything, so nothing was compared. Check the gate flags on the pytest line above."
+          exit 1
+        fi
+        echo "Snapshot step executed ${executed} test(s)."

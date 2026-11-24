@@ -10,7 +10,7 @@ same snapshots. Locally: build the image, then
 
     ASH_IMAGE_NAME=<tag> OCI_RUNNER=docker \\
         pytest tests/snapshot/container/runtime/test_snapshot_container_runtime.py \\
-        --run-container-snapshots --no-cov -n 0
+        --run-container-snapshots --run-integration --no-cov -n 0
 
 Inputs: ``OCI_RUNNER`` (default ``docker``), ``OCI_RUNNER_WRAPPER`` (``sudo`` for
 finch in CI) and ``ASH_IMAGE_NAME`` (default ``automated-security-helper:ci``, the
@@ -40,7 +40,6 @@ semgrep read advisory and rule data that changes daily.
 from __future__ import annotations
 
 import os
-import re
 import shlex
 import shutil
 import subprocess  # nosec B404 - running the real OCI runner is the point of this module
@@ -49,6 +48,7 @@ from pathlib import Path
 import pytest
 
 from tests.snapshot.support.normalize import REPO_ROOT, pinned_terminal_env
+from tests.snapshot.support.powershell import error_message as _error_message
 from tests.utils.pwsh_env import QUIET_PWSH, inherited_env, scratch_home
 from tests.utils.runner_state import developer_runner_env
 
@@ -107,31 +107,6 @@ def _host_output_after_container(stdout: str) -> str:
 
 def _last_line(text: str) -> str:
     return next((line for line in reversed(text.splitlines()) if line.strip()), "")
-
-
-def _error_message(text: str) -> str:
-    """The message of the error PowerShell printed, without its location or excerpt.
-
-    For an error thrown in a script, PowerShell's ConciseView prints
-    ``<category>: <script>:<line>``, ``Line |``, the source line, and a ``~~~``
-    underline, then the message on ``|`` lines wrapped to the console width. The
-    location and the excerpt change with every edit to the wrapper and the wrapping
-    with the console, so only the message is kept, unwrapped. An error printed without
-    an excerpt is one ``<category>: <message>`` line, kept as it is.
-    """
-    lines = [
-        line
-        for line in re.sub(r"\x1b\[[0-9;]*m", "", text).splitlines()
-        if line.strip()
-    ]
-    for index, line in enumerate(lines):
-        if set(line.replace("|", "").strip()) == {"~"}:
-            return " ".join(
-                rest.split("|", 1)[1].strip()
-                for rest in lines[index + 1 :]
-                if "|" in rest
-            )
-    return lines[0] if lines else ""
 
 
 @pytest.fixture(autouse=True)

@@ -328,6 +328,40 @@ class ReportContentEmitter:
 
         return results
 
+    def get_scanners_not_run(self) -> List[Dict[str, Any]]:
+        """Why the scanners that did not run did not, in scanner-results order.
+
+        The SKIPPED and MISSING rows of :meth:`get_scanner_results` that record
+        a reason, grouped by status and reason: each entry has the ``scanners``
+        that share them, the ``status``, and the ``reason``, which is the
+        ``skipped_reason`` or ``missing_reason`` of their rows in
+        ``ash_aggregated_results.json``. The scanner table shows only the
+        status, so without this list a report says that npm-audit was skipped
+        and leaves "no lockfile beside a package.json" in the log.
+
+        Scanners are grouped because one option often leaves many out: a run
+        with ``--scanners npm-audit`` skips every other scanner for the one
+        reason, which is one line here and not fifteen. A row that records no
+        reason has no entry: the table already says all there is.
+        """
+        groups: Dict[tuple[str, str], Dict[str, Any]] = {}
+        for result in self.get_scanner_results():
+            status = result["status"]
+            if status == "SKIPPED":
+                reason = result["skipped_reason"] or result["missing_reason"]
+            elif status == "MISSING":
+                reason = result["missing_reason"] or result["skipped_reason"]
+            else:
+                continue
+            if not reason:
+                continue
+            group = groups.setdefault(
+                (status, str(reason)),
+                {"scanners": [], "status": status, "reason": str(reason)},
+            )
+            group["scanners"].append(result["scanner_name"])
+        return list(groups.values())
+
     def get_scan_summary(self) -> Dict[str, Any]:
         """Describe the outcome for people without changing the scan's exit policy.
 

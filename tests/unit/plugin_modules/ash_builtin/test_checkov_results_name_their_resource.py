@@ -1,0 +1,674 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""A checkov result says which resource it is about.
+
+checkov's SARIF result names the rule, the file and the lines, and not the
+resource. Two instances of one module, or two resources of a terraform plan
+(every plan result is at line 1 of the plan file), gave results that differ in
+nothing, and a suppression scoped to a resource (``scope.resource_id``) never
+matched a checkov finding, because the finding carried no resource.
+
+checkov's JSON report names the resource of every record. The scanner asks for
+that report on every run and copies each record's resource to its SARIF result
+under ``ash_resource_id``, the resource-identity contract of
+``utils/package_identity.py``.
+"""
+
+import importlib.util
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+from urllib.parse import quote
+
+import pytest
+
+from automated_security_helper.base.plugin_context import PluginContext
+from automated_security_helper.config.ash_config import AshConfig
+from automated_security_helper.plugin_modules.ash_builtin.scanners.checkov_scanner import (
+    CheckovScanner,
+    CheckovScannerConfig,
+    CheckovScannerConfigOptions,
+    _NO_RESOURCE_FRAMEWORKS,
+    _RESOURCE_FRAMEWORKS,
+    attach_checkov_resources,
+    checkov_resources,
+)
+from automated_security_helper.utils.package_identity import (
+    ASH_RESOURCE_ID_KEY,
+    extract_resource_identity,
+)
+
+pytestmark = pytest.mark.unit
+
+PluginContext.model_rebuild()
+
+CAPTURED = (
+    Path(__file__).parents[3] / "test_data" / "scanners" / "checkov" / "resources"
+)
+
+
+def _record(check_id, path, lines, resource):
+    return {
+        "check_id": check_id,
+        "repo_file_path": path,
+        "file_line_range": list(lines),
+        "resource": resource,
+    }
+
+
+def _report(check_type, failed=(), skipped=()):
+    return {
+        "check_type": check_type,
+        "results": {"failed_checks": list(failed), "skipped_checks": list(skipped)},
+    }
+
+
+def _result(rule_id, uri, start, end, **fields):
+    return {
+        "ruleId": rule_id,
+        "locations": [
+            {
+                "physicalLocation": {
+                    "artifactLocation": {"uri": uri},
+                    "region": {"startLine": start, "endLine": end},
+                }
+            }
+        ],
+        **fields,
+    }
+
+
+def _sarif(*results):
+    return {"version": "2.1.0", "runs": [{"results": list(results)}]}
+
+
+def _resource(result):
+    return (result.get("properties") or {}).get(ASH_RESOURCE_ID_KEY)
+
+
+def _attach(sarif, *reports):
+    return attach_checkov_resources(sarif, checkov_resources(list(reports)))
+
+
+class TestAResultTakesTheResourceOfItsRecord:
+    def test_two_resources_in_one_file_are_told_apart_by_their_lines(self):
+        sarif = _sarif(
+            _result("CKV_AWS_17", "tf/main.tf", 1, 7),
+            _result("CKV_AWS_17", "tf/main.tf", 9, 16),
+        )
+
+        attached = _attach(
+            sarif,
+            _report(
+                "terraform",
+                failed=[
+                    _record("CKV_AWS_17", "/tf/main.tf", (1, 7), "aws_db_instance.a"),
+                    _record("CKV_AWS_17", "/tf/main.tf", (9, 16), "aws_db_instance.b"),
+                ],
+            ),
+        )
+
+        assert attached == 2
+        assert [_resource(r) for r in sarif["runs"][0]["results"]] == [
+            "aws_db_instance.a",
+            "aws_db_instance.b",
+        ]
+
+    def test_two_plan_resources_at_the_same_place_are_told_apart_by_their_order(self):
+        # A plan record has no lines: checkov writes 0 in the JSON report and 1
+        # in the SARIF result, for every resource of the plan.
+        sarif = _sarif(
+            _result("CKV_AWS_17", "tfplan.json", 1, 1),
+            _result("CKV_AWS_16", "tfplan.json", 1, 1),
+            _result("CKV_AWS_17", "tfplan.json", 1, 1),
+        )
+
+        _attach(
+            sarif,
+            _report(
+                "terraform_plan",
+                failed=[
+                    _record("CKV_AWS_17", "/tfplan.json", (0, 0), "module.db.x.this"),
+                    _record("CKV_AWS_16", "/tfplan.json", (0, 0), "module.db.x.this"),
+                    _record("CKV_AWS_17", "/tfplan.json", (0, 0), "module.db2.x.this"),
+                ],
+            ),
+        )
+
+        assert [_resource(r) for r in sarif["runs"][0]["results"]] == [
+            "module.db.x.this",
+            "module.db.x.this",
+            "module.db2.x.this",
+        ]
+
+    def test_a_skipped_record_follows_the_failed_ones_as_in_the_sarif_report(self):
+        sarif = _sarif(
+            _result("CKV_X", "main.tf", 1, 1),
+            _result("CKV_X", "main.tf", 1, 1, suppressions=[{"kind": "inSource"}]),
+        )
+
+        _attach(
+            sarif,
+            _report(
+                "terraform",
+                failed=[_record("CKV_X", "/main.tf", (1, 1), "failed.one")],
+                skipped=[_record("CKV_X", "/main.tf", (1, 1), "skipped.one")],
+            ),
+        )
+
+        assert [_resource(r) for r in sarif["runs"][0]["results"]] == [
+            "failed.one",
+            "skipped.one",
+        ]
+
+    def test_the_uri_is_matched_as_checkov_quotes_it(self):
+        sarif = _sarif(_result("CKV_X", quote("my dir/main.tf"), 1, 2))
+
+        _attach(
+            sarif,
+            _report(
+                "terraform", failed=[_record("CKV_X", "/my dir/main.tf", (1, 2), "a.b")]
+            ),
+        )
+
+        assert _resource(sarif["runs"][0]["results"][0]) == "a.b"
+
+    def test_the_results_other_properties_are_kept(self):
+        sarif = _sarif(_result("CKV_X", "main.tf", 1, 2, properties={"tags": ["x"]}))
+
+        _attach(
+            sarif,
+            _report("terraform", failed=[_record("CKV_X", "/main.tf", (1, 2), "a.b")]),
+        )
+
+        assert sarif["runs"][0]["results"][0]["properties"] == {
+            "tags": ["x"],
+            ASH_RESOURCE_ID_KEY: "a.b",
+        }
+
+    def test_the_flat_finding_reads_it_as_its_resource_id(self):
+        sarif = _sarif(_result("CKV_X", "main.tf", 1, 2))
+        _attach(
+            sarif,
+            _report("terraform", failed=[_record("CKV_X", "/main.tf", (1, 2), "a.b")]),
+        )
+
+        resource_id, _ = extract_resource_identity(
+            sarif["runs"][0]["results"][0]["properties"]
+        )
+
+        assert resource_id == "a.b"
+
+
+class TestOnlyFrameworksThatNameAResource:
+    @pytest.mark.parametrize("check_type", sorted(_RESOURCE_FRAMEWORKS))
+    def test_a_resource_framework_gives_its_resource(self, check_type):
+        sarif = _sarif(_result("CKV_X", "file", 3, 4))
+
+        _attach(
+            sarif, _report(check_type, failed=[_record("CKV_X", "/file", (3, 4), "R")])
+        )
+
+        assert _resource(sarif["runs"][0]["results"][0]) == "R"
+
+    @pytest.mark.parametrize(
+        "check_type, written",
+        [
+            # the dockerfile framework writes the path and the instruction
+            ("dockerfile", "/Dockerfile.RUN"),
+            # the secrets framework writes a 40-digit hash of the secret
+            ("secrets", "0f" * 20),
+            ("github_actions", "jobs(build)"),
+            ("serverless", "complete"),
+        ],
+    )
+    def test_another_framework_gives_none(self, check_type, written):
+        sarif = _sarif(_result("CKV_X", "file", 3, 4))
+
+        attached = _attach(
+            sarif,
+            _report(check_type, failed=[_record("CKV_X", "/file", (3, 4), written)]),
+        )
+
+        assert attached == 0
+        assert "properties" not in sarif["runs"][0]["results"][0]
+
+    @pytest.mark.parametrize("check_type", sorted(_NO_RESOURCE_FRAMEWORKS))
+    def test_no_classified_framework_without_a_resource_gives_one(self, check_type):
+        sarif = _sarif(_result("CKV_X", "file", 3, 4))
+
+        attached = _attach(
+            sarif,
+            _report(check_type, failed=[_record("CKV_X", "/file", (3, 4), "R")]),
+        )
+
+        assert attached == 0
+        assert "properties" not in sarif["runs"][0]["results"][0]
+
+    def test_an_unclassified_framework_gives_none(self):
+        # Fail closed: a runner checkov adds later is not trusted until it is
+        # classified (the drift test below says so).
+        sarif = _sarif(_result("CKV_X", "file", 3, 4))
+
+        attached = _attach(
+            sarif,
+            _report("a_new_runner", failed=[_record("CKV_X", "/file", (3, 4), "R")]),
+        )
+
+        assert attached == 0
+
+
+class TestEveryCheckovFrameworkIsClassified:
+    def test_the_two_sets_do_not_overlap(self):
+        assert _RESOURCE_FRAMEWORKS.isdisjoint(_NO_RESOURCE_FRAMEWORKS)
+
+    def test_every_denied_framework_says_why(self):
+        assert all(reason.strip() for reason in _NO_RESOURCE_FRAMEWORKS.values())
+
+    def test_checkovs_runners_are_all_in_one_of_the_sets(self, tmp_path):
+        # Needs checkov in the environment: ASH installs it on first scan, so a
+        # development environment may not have it. It is read in a child with its
+        # own HOME, because importing checkov writes its update-check cache there.
+        if importlib.util.find_spec("checkov") is None:
+            pytest.skip("checkov is not installed")
+        child = subprocess.run(
+            [
+                sys.executable,
+                "-I",
+                "-c",
+                (
+                    "import checkov.main as m, json;"
+                    "print(json.dumps([r.check_type for r in m.DEFAULT_RUNNERS]))"
+                ),
+            ],
+            env={**os.environ, "HOME": str(tmp_path), "XDG_CACHE_HOME": str(tmp_path)},
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=True,
+        )
+        runners = set(json.loads(child.stdout.strip().splitlines()[-1]))
+
+        unclassified = runners - _RESOURCE_FRAMEWORKS - set(_NO_RESOURCE_FRAMEWORKS)
+        gone = (_RESOURCE_FRAMEWORKS | set(_NO_RESOURCE_FRAMEWORKS)) - runners
+
+        assert not unclassified, (
+            f"checkov has runners {sorted(unclassified)} that checkov_scanner.py "
+            "does not classify: read a record of each and add it to "
+            "_RESOURCE_FRAMEWORKS (its resource names an infrastructure "
+            "resource) or _NO_RESOURCE_FRAMEWORKS (with the reason)"
+        )
+        assert not gone, f"classified but no longer a checkov runner: {sorted(gone)}"
+
+
+class TestAKeyTheReportsDisagreeOnGetsNoResource:
+    """A wrong resource would bind a suppression to a finding it was not written
+    for. A missing one only leaves a resource-scoped suppression unmatched."""
+
+    def test_more_results_than_records(self):
+        sarif = _sarif(
+            _result("CKV_X", "tfplan.json", 1, 1),
+            _result("CKV_X", "tfplan.json", 1, 1),
+        )
+
+        attached = _attach(
+            sarif,
+            _report(
+                "terraform_plan",
+                failed=[_record("CKV_X", "/tfplan.json", (0, 0), "a.b")],
+            ),
+        )
+
+        assert attached == 0
+        assert [_resource(r) for r in sarif["runs"][0]["results"]] == [None, None]
+
+    def test_more_records_than_results(self):
+        sarif = _sarif(_result("CKV_X", "tfplan.json", 1, 1))
+
+        attached = _attach(
+            sarif,
+            _report(
+                "terraform_plan",
+                failed=[
+                    _record("CKV_X", "/tfplan.json", (0, 0), "a.b"),
+                    _record("CKV_X", "/tfplan.json", (0, 0), "c.d"),
+                ],
+            ),
+        )
+
+        assert attached == 0
+
+    def test_a_record_of_another_framework_with_the_key_counts(self):
+        # Two frameworks report one rule at one place: the n-th result is still
+        # the n-th record, and only the resource framework's one is named.
+        sarif = _sarif(_result("CKV_X", "file", 1, 1), _result("CKV_X", "file", 1, 1))
+
+        _attach(
+            sarif,
+            _report(
+                "dockerfile", failed=[_record("CKV_X", "/file", (1, 1), "/file.RUN")]
+            ),
+            _report("terraform", failed=[_record("CKV_X", "/file", (1, 1), "a.b")]),
+        )
+
+        assert [_resource(r) for r in sarif["runs"][0]["results"]] == [None, "a.b"]
+
+    def test_the_other_keys_are_still_named(self):
+        sarif = _sarif(
+            _result("CKV_X", "tfplan.json", 1, 1),
+            _result("CKV_X", "tfplan.json", 1, 1),
+            _result("CKV_Y", "main.tf", 5, 9),
+        )
+
+        attached = _attach(
+            sarif,
+            _report(
+                "terraform_plan",
+                failed=[_record("CKV_X", "/tfplan.json", (0, 0), "a.b")],
+            ),
+            _report("terraform", failed=[_record("CKV_Y", "/main.tf", (5, 9), "c.d")]),
+        )
+
+        assert attached == 1
+        assert _resource(sarif["runs"][0]["results"][2]) == "c.d"
+
+
+class TestAReportThatIsNotAsExpectedIsReadForWhatItHolds:
+    @pytest.mark.parametrize(
+        "report",
+        [
+            None,
+            "text",
+            [],
+            {},
+            {"check_type": "terraform"},
+            {"check_type": "terraform", "results": []},
+            {"check_type": "terraform", "results": {"failed_checks": "text"}},
+            {"check_type": "terraform", "results": {"failed_checks": [None, "x", 3]}},
+        ],
+    )
+    def test_a_json_report_of_another_shape_names_nothing(self, report):
+        assert checkov_resources(report) == {}
+
+    @pytest.mark.parametrize(
+        "record",
+        [
+            {"repo_file_path": "/a.tf", "file_line_range": [1, 2], "resource": "r"},
+            {"check_id": "C", "file_line_range": [1, 2], "resource": "r"},
+            {"check_id": "C", "repo_file_path": "/a.tf", "resource": "r"},
+            {"check_id": "C", "repo_file_path": "/a.tf", "file_line_range": [1]},
+            {"check_id": "C", "repo_file_path": "/a.tf", "file_line_range": ["x", 2]},
+            {"check_id": 7, "repo_file_path": "/a.tf", "file_line_range": [1, 2]},
+        ],
+    )
+    def test_a_record_without_a_key_is_left_out(self, record):
+        assert checkov_resources([_report("terraform", failed=[record])]) == {}
+
+    @pytest.mark.parametrize("resource", [None, "", 7, ["a"]])
+    def test_a_record_with_no_resource_text_names_none_and_still_counts(self, resource):
+        found = checkov_resources(
+            [_report("terraform", failed=[_record("C", "/a.tf", (1, 2), resource)])]
+        )
+
+        assert found == {("C", "a.tf", 1, 2): [None]}
+
+    @pytest.mark.parametrize(
+        "sarif",
+        [None, "text", [], {}, {"runs": None}, {"runs": [None, {"results": None}]}],
+    )
+    def test_a_sarif_of_another_shape_is_left_as_it_is(self, sarif):
+        resources = {("C", "a.tf", 1, 2): ["r"]}
+
+        assert attach_checkov_resources(sarif, resources) == 0
+
+    @pytest.mark.parametrize(
+        "result",
+        [
+            None,
+            {"ruleId": "C"},
+            {"ruleId": "C", "locations": []},
+            {"ruleId": "C", "locations": [{}]},
+            {"ruleId": "C", "locations": ["text"]},
+            {"ruleId": "C", "locations": [{"physicalLocation": "text"}]},
+            {
+                "ruleId": "C",
+                "locations": [
+                    {"physicalLocation": {"artifactLocation": "a.tf", "region": {}}}
+                ],
+            },
+            {
+                "ruleId": "C",
+                "locations": [
+                    {
+                        "physicalLocation": {
+                            "artifactLocation": {"uri": "a.tf"},
+                            "region": "1-2",
+                        }
+                    }
+                ],
+            },
+            {
+                "locations": [
+                    {"physicalLocation": {"artifactLocation": {"uri": "a.tf"}}}
+                ]
+            },
+            _result("C", "a.tf", "1", 2),
+            _result("C", "a.tf", True, 2),
+        ],
+    )
+    def test_a_result_without_a_key_is_left_as_it_is(self, result):
+        sarif = {"runs": [{"results": [result]}]}
+        before = json.dumps(sarif)
+
+        assert attach_checkov_resources(sarif, {("C", "a.tf", 1, 2): ["r"]}) == 0
+        assert json.dumps(sarif) == before
+
+    def test_no_json_report_leaves_the_sarif_as_it_is(self):
+        sarif = _sarif(_result("C", "a.tf", 1, 2))
+        before = json.dumps(sarif)
+
+        assert attach_checkov_resources(sarif, {}) == 0
+        assert json.dumps(sarif) == before
+
+
+class TestTheReportsCheckovWrote:
+    """``tests/test_data/scanners/checkov/resources``: what checkov 3.4.6 wrote
+    for a tree with terraform, a plan, cloudformation, kubernetes and a
+    Dockerfile. Its README has the command."""
+
+    @pytest.fixture
+    def named(self):
+        sarif = json.loads((CAPTURED / "results_sarif.sarif").read_text("utf-8"))
+        report = json.loads((CAPTURED / "results_json.json").read_text("utf-8"))
+        attached = attach_checkov_resources(sarif, checkov_resources(report))
+        return sarif["runs"][0]["results"], report, attached
+
+    def test_the_sarif_report_names_no_resource_itself(self):
+        text = (CAPTURED / "results_sarif.sarif").read_text("utf-8")
+
+        assert "aws_db_instance" not in text
+        assert "module.db2" not in text
+
+    def test_every_result_of_a_resource_framework_is_named(self, named):
+        results, report, attached = named
+        expected = sum(
+            len(r["results"]["failed_checks"]) + len(r["results"]["skipped_checks"])
+            for r in report
+            if r["check_type"] != "dockerfile"
+        )
+
+        assert attached == expected == 76
+        assert sum(1 for r in results if _resource(r)) == 76
+
+    def test_the_two_reports_agree_result_by_result(self, named):
+        results, report, _ = named
+        in_order = [
+            None if r["check_type"] == "dockerfile" else record["resource"]
+            for r in report
+            for kind in ("failed_checks", "skipped_checks")
+            for record in r["results"][kind]
+        ]
+
+        assert [_resource(r) for r in results] == in_order
+
+    def test_the_two_instances_of_the_module_in_the_plan_are_told_apart(self, named):
+        results, _, _ = named
+        on_the_plan = {
+            _resource(r)
+            for r in results
+            if r["ruleId"] == "CKV_AWS_17"
+            and r["locations"][0]["physicalLocation"]["artifactLocation"][
+                "uri"
+            ].endswith("tfplan.json")
+        }
+
+        assert on_the_plan == {
+            "module.db.aws_db_instance.this",
+            "module.db2.aws_db_instance.this",
+        }
+
+    def test_the_skipped_result_is_named_too(self, named):
+        results, _, _ = named
+        (skipped,) = [r for r in results if r.get("suppressions")]
+
+        assert _resource(skipped) == "aws_db_instance.b"
+
+    def test_each_framework_names_its_resource_in_its_own_form(self, named):
+        results, _, _ = named
+        resources = {_resource(r) for r in results}
+
+        assert "aws_db_instance.a" in resources
+        assert "AWS::S3::Bucket.Bucket" in resources
+        assert "Deployment.shop.web" in resources
+
+    def test_the_dockerfile_results_are_not_named(self, named):
+        results, _, _ = named
+        on_the_dockerfile = [
+            r
+            for r in results
+            if r["locations"][0]["physicalLocation"]["artifactLocation"][
+                "uri"
+            ].endswith("Dockerfile")
+        ]
+
+        assert len(on_the_dockerfile) == 4
+        assert not any(_resource(r) for r in on_the_dockerfile)
+
+
+def _scanner(source: Path, output: Path, **opts) -> CheckovScanner:
+    context = PluginContext(
+        source_dir=source,
+        output_dir=output,
+        work_dir=output / "converted",
+        config=AshConfig(),
+    )
+    return CheckovScanner(
+        context=context,
+        config=CheckovScannerConfig(options=CheckovScannerConfigOptions(**opts)),
+    )
+
+
+def _output_formats(scanner: CheckovScanner) -> list[str]:
+    return [arg.value for arg in scanner.args.extra_args if arg.key == "--output"]
+
+
+class TestTheScannerAsksForTheJsonReport:
+    def test_on_every_run(self, tmp_path):
+        scanner = _scanner(tmp_path, tmp_path / "out")
+
+        assert _output_formats(scanner) == ["cyclonedx_json", "json"]
+
+    def test_once_when_the_options_ask_for_it_as_well(self, tmp_path):
+        scanner = _scanner(
+            tmp_path, tmp_path / "out", additional_formats=["json", "csv"]
+        )
+
+        assert _output_formats(scanner) == ["json", "csv"]
+
+    def test_when_the_options_ask_for_no_other_format(self, tmp_path):
+        scanner = _scanner(tmp_path, tmp_path / "out", additional_formats=[])
+
+        assert _output_formats(scanner) == ["json"]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX paths")
+class TestTheScannerReadsBothReports:
+    """checkov runs from the filesystem root, so it writes each path as the
+    absolute path without its leading ``/``. The resources are matched on those
+    paths and the paths are then rewritten relative to the source directory."""
+
+    def _reports(self, tmp_path):
+        source = tmp_path / "src"
+        source.mkdir()
+        (source / "tfplan.json").write_text("{}", encoding="utf-8")
+        scanner = _scanner(source, tmp_path / "out")
+        results_dir = Path(scanner.results_dir) / "source"
+        results_dir.mkdir(parents=True, exist_ok=True)
+        written = (source / "tfplan.json").as_posix()
+        results_file = results_dir / "results_sarif.sarif"
+        results_file.write_text(
+            json.dumps(
+                _sarif(
+                    _result("CKV_AWS_17", quote(written.lstrip("/")), 1, 1),
+                    _result("CKV_AWS_17", quote(written.lstrip("/")), 1, 1),
+                )
+            ),
+            encoding="utf-8",
+        )
+        records = [
+            {
+                **_record("CKV_AWS_17", written, (0, 0), resource),
+                "file_abs_path": written,
+            }
+            for resource in ("module.db.x.this", "module.db2.x.this")
+        ]
+        return scanner, results_file, records
+
+    def test_each_result_is_named_and_its_path_is_rewritten(self, tmp_path):
+        scanner, results_file, records = self._reports(tmp_path)
+        (results_file.parent / "results_json.json").write_text(
+            json.dumps([_report("terraform_plan", failed=records)]), encoding="utf-8"
+        )
+        scanner._checkov_cwd = Path("/")
+        scanner._checkov_target = tmp_path / "src"
+
+        raw = scanner._read_results_file(results_file)
+
+        results = raw["runs"][0]["results"]
+        assert [_resource(r) for r in results] == [
+            "module.db.x.this",
+            "module.db2.x.this",
+        ]
+        assert {
+            r["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
+            for r in results
+        } == {"tfplan.json"}
+
+    def test_without_a_json_report_the_results_are_read_as_before(self, tmp_path):
+        scanner, results_file, _ = self._reports(tmp_path)
+        scanner._checkov_cwd = Path("/")
+        scanner._checkov_target = tmp_path / "src"
+
+        raw = scanner._read_results_file(results_file)
+
+        results = raw["runs"][0]["results"]
+        assert [_resource(r) for r in results] == [None, None]
+        assert {
+            r["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
+            for r in results
+        } == {"tfplan.json"}
+
+    def test_a_json_report_that_cannot_be_read_costs_only_the_resources(
+        self, tmp_path, caplog
+    ):
+        scanner, results_file, _ = self._reports(tmp_path)
+        (results_file.parent / "results_json.json").write_text("{", encoding="utf-8")
+        scanner._checkov_cwd = Path("/")
+        scanner._checkov_target = tmp_path / "src"
+
+        raw = scanner._read_results_file(results_file)
+
+        assert [_resource(r) for r in raw["runs"][0]["results"]] == [None, None]

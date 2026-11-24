@@ -271,6 +271,9 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
             "scanner_results_table": self._format_scanner_results_table(
                 emitter.get_scanner_results()
             ),
+            "scanners_not_run": self._format_scanners_not_run(
+                emitter.get_scanners_not_run()
+            ),
             "hotspots_section": self._format_hotspots_section(
                 emitter.get_top_hotspots(10)
             ),
@@ -516,6 +519,25 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
                 f"{context}{suppression}{snippet}</div></details></div></article>"
             )
         return "\n".join(cards)
+
+    @staticmethod
+    def _format_scanners_not_run(not_run: List[Dict[str, Any]]) -> str:
+        """Why each SKIPPED or MISSING scanner did not run, under the table.
+
+        Empty when no such scanner records a reason, so a report without one is
+        the page it always was. The name and the reason come from the results
+        file: each is shown on one line and escaped. Scanners that share a reason
+        share a row.
+        """
+        if not not_run:
+            return ""
+        rows = "".join(
+            f"<li><strong>{html.escape(str(shown_on_one_line(', '.join(entry['scanners']))))}</strong> "
+            f"({html.escape(entry['status'])}): "
+            f"{html.escape(str(shown_on_one_line(entry['reason'])))}</li>"
+            for entry in not_run
+        )
+        return f"<h3>Scanners that did not run</h3><ul>{rows}</ul>"
 
     def _format_scanner_results_table(
         self, scanner_results: List[Dict[str, Any]]

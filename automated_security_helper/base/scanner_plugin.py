@@ -2675,7 +2675,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         if self.scan_could_not_stop is not None:
             return (
                 f"{detail} (no exit code: ASH could not stop {tool}). "
-                f"{tool}' log is not quoted here; see {log_path.as_posix()}"
+                f"{tool}'s log is not quoted here; see {log_path.as_posix()}"
             )
         verdict = (
             "an accepted exit code for this scanner"
@@ -2684,7 +2684,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             f"{sorted(self.success_exit_codes)}"
         )
         return (
-            f"{detail} (exit code {self.exit_code}: {verdict}). {tool}' log is "
+            f"{detail} (exit code {self.exit_code}: {verdict}). {tool}'s log is "
             f"not quoted here; see {log_path.as_posix()}"
         )
 
