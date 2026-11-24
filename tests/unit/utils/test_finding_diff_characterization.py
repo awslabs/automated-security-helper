@@ -64,7 +64,7 @@ pytestmark = pytest.mark.unit
 
 GOLDEN_PATH = Path(__file__).parent / "golden" / "finding_diff_characterization.json"
 
-SECRET_RULE = "generic.secrets.aws-key"
+SECRET_RULE = "generic.secrets.aws-key"  # pragma: allowlist secret
 
 # --------------------------------------------------------------------------- #
 # Building findings
