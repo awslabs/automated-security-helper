@@ -216,8 +216,8 @@ class TestOnlyFrameworksThatNameAResource:
         [
             # the dockerfile framework writes the path and the instruction
             ("dockerfile", "/Dockerfile.RUN"),
-            # the secrets framework writes a hash
-            ("secrets", "25910f981e85ca04baf359199dd0bd4a3ae738b6"),
+            # the secrets framework writes a 40-digit hash of the secret
+            ("secrets", "0f" * 20),
             ("github_actions", "jobs(build)"),
         ],
     )
