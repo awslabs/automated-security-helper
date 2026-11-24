@@ -301,7 +301,10 @@ class TestTopHotspots:
 
     def test_every_finding_below_the_gate_gives_no_hotspots(self):
         emitter = _emitter(
-            [_vuln(severity="LOW", file_path="a.py"), _vuln(severity="INFO", file_path="b.py")]
+            [
+                _vuln(severity="LOW", file_path="a.py"),
+                _vuln(severity="INFO", file_path="b.py"),
+            ]
         )
         assert emitter.get_top_hotspots() == []
 
@@ -319,7 +322,9 @@ class TestTopHotspots:
 
     def test_a_tie_follows_input_order_not_name_order(self):
         reversed_names = ["z.py", "m.py", "a.py"]
-        emitter = _emitter([_vuln(severity="HIGH", file_path=n) for n in reversed_names])
+        emitter = _emitter(
+            [_vuln(severity="HIGH", file_path=n) for n in reversed_names]
+        )
         assert [row["location"] for row in emitter.get_top_hotspots()] == reversed_names
 
     def test_the_default_limit_is_ten(self):
@@ -453,8 +458,20 @@ class TestFindingsOverview:
     def test_every_finding_is_a_row_in_input_order(self):
         emitter = _emitter(
             [
-                _vuln(severity="LOW", scanner="b", rule_id="R2", title="t2", file_path="x.py"),
-                _vuln(severity="HIGH", scanner="a", rule_id="R1", title="t1", file_path="y.py"),
+                _vuln(
+                    severity="LOW",
+                    scanner="b",
+                    rule_id="R2",
+                    title="t2",
+                    file_path="x.py",
+                ),
+                _vuln(
+                    severity="HIGH",
+                    scanner="a",
+                    rule_id="R1",
+                    title="t1",
+                    file_path="y.py",
+                ),
             ]
         )
         assert emitter.get_findings_overview() == [
@@ -571,7 +588,13 @@ class TestDetailedFindings:
     def test_findings_equal_on_every_key_keep_input_order(self):
         emitter = _emitter(
             [
-                _vuln(severity="HIGH", file_path="a.py", line_start=1, rule_id="R", title=t)
+                _vuln(
+                    severity="HIGH",
+                    file_path="a.py",
+                    line_start=1,
+                    rule_id="R",
+                    title=t,
+                )
                 for t in ("third", "first", "second")
             ]
         )
@@ -594,7 +617,8 @@ class TestDetailedFindings:
         assert rows[-1]["location"] == "f19.py"
 
     @pytest.mark.parametrize(
-        ("limit", "expected"), [(0, 0), (1, 1), (4, 4), (7, 7), (99, 7), (-1, 0), (-99, 0)]
+        ("limit", "expected"),
+        [(0, 0), (1, 1), (4, 4), (7, 7), (99, 7), (-1, 0), (-99, 0)],
     )
     def test_the_cap_and_a_negative_cap(self, limit, expected):
         emitter = _emitter(
@@ -721,10 +745,27 @@ class TestPolicyNotGatingFindings:
     def test_left_out_findings_are_sorted_and_capped(self):
         emitter = _emitter(
             [
-                _vuln(severity="LOW", rule_id="L", file_path="a.py", workspace_project="p"),
-                _vuln(severity="CRITICAL", rule_id="C", file_path="b.py", workspace_project="p"),
-                _vuln(severity="HIGH", rule_id="H", file_path="c.py", workspace_project="p"),
-                _vuln(severity="HIGH", rule_id="X", file_path="d.py", workspace_project="q"),
+                _vuln(
+                    severity="LOW", rule_id="L", file_path="a.py", workspace_project="p"
+                ),
+                _vuln(
+                    severity="CRITICAL",
+                    rule_id="C",
+                    file_path="b.py",
+                    workspace_project="p",
+                ),
+                _vuln(
+                    severity="HIGH",
+                    rule_id="H",
+                    file_path="c.py",
+                    workspace_project="p",
+                ),
+                _vuln(
+                    severity="HIGH",
+                    rule_id="X",
+                    file_path="d.py",
+                    workspace_project="q",
+                ),
             ]
         )
         emitter._policy_not_gating = {"p"}
@@ -732,7 +773,9 @@ class TestPolicyNotGatingFindings:
 
         rows = emitter.get_policy_not_gating_findings()
         assert [row["rule_id"] for row in rows] == ["C", "H", "L"]
-        assert [row["rule_id"] for row in emitter.get_policy_not_gating_findings(2)] == [
+        assert [
+            row["rule_id"] for row in emitter.get_policy_not_gating_findings(2)
+        ] == [
             "C",
             "H",
         ]
@@ -779,9 +822,7 @@ class TestPolicyNotGatingFindings:
         self, properties, expected
     ):
         assert (
-            ReportContentEmitter._is_policy_origin_finding(
-                _vuln(properties=properties)
-            )
+            ReportContentEmitter._is_policy_origin_finding(_vuln(properties=properties))
             is expected
         )
 
@@ -802,9 +843,7 @@ class TestExtractCodeSnippet:
 
     def test_the_flat_code_snippet_wins_over_the_raw_data(self):
         assert (
-            self._extract(
-                code_snippet="flat", raw_data=self._raw({"snippet": "raw"})
-            )
+            self._extract(code_snippet="flat", raw_data=self._raw({"snippet": "raw"}))
             == "flat"
         )
 
@@ -838,7 +877,11 @@ class TestExtractCodeSnippet:
         raw = {
             "locations": [
                 {"physicalLocation": {"region": {"snippet": {"text": ""}}}},
-                {"physicalLocation": {"contextRegion": {"snippet": {"text": "second"}}}},
+                {
+                    "physicalLocation": {
+                        "contextRegion": {"snippet": {"text": "second"}}
+                    }
+                },
                 {"physicalLocation": {"region": {"snippet": {"text": "third"}}}},
             ]
         }
@@ -975,8 +1018,13 @@ class TestScannerResults:
             ],
             scanners=("semgrep", "bandit"),
         )
-        names = [row["scanner_name"] for row in ReportContentEmitter(model).get_scanner_results()]
-        assert names == [m.scanner_name for m in ReportContentEmitter(model).scanner_metrics]
+        names = [
+            row["scanner_name"]
+            for row in ReportContentEmitter(model).get_scanner_results()
+        ]
+        assert names == [
+            m.scanner_name for m in ReportContentEmitter(model).scanner_metrics
+        ]
         assert sorted(names) == ["bandit", "semgrep"]
 
 

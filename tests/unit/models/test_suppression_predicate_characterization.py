@@ -91,9 +91,7 @@ def stored(**overrides) -> AshSuppression:
     """An entry as a results file keeps it (the tolerance a stored config gets)."""
     values = {"path": "**", "reason": "r"}
     values.update(overrides)
-    return AshSuppression.model_validate(
-        values, context={TOLERATE_STORED_CONFIG: []}
-    )
+    return AshSuppression.model_validate(values, context={TOLERATE_STORED_CONFIG: []})
 
 
 class RecordingResolver:
@@ -251,7 +249,9 @@ class TestRuleId:
     ):
         entry = supp(rule_id="B999", scope={"resource_type": "T"})
         assert (
-            entry.matches(finding(scanner=fake_engine, rule_id="B602", resource_type="T"))
+            entry.matches(
+                finding(scanner=fake_engine, rule_id="B602", resource_type="T")
+            )
             is False
         )
 
@@ -586,9 +586,24 @@ class TestPackage:
             # package_path reads as a path pattern: case-sensitive, ** aware
             ("package_path", "node_modules/a", "node_modules/a", True),
             ("package_path", "node_modules/a", "Node_modules/a", False),
-            ("package_path", "node_modules/**/brace-expansion", "node_modules/a/node_modules/brace-expansion", True),
-            ("package_path", "node_modules/**/brace-expansion", "node_modules/brace-expansion", True),
-            ("package_path", "node_modules/**/brace-expansion", "lib/brace-expansion", False),
+            (
+                "package_path",
+                "node_modules/**/brace-expansion",
+                "node_modules/a/node_modules/brace-expansion",
+                True,
+            ),
+            (
+                "package_path",
+                "node_modules/**/brace-expansion",
+                "node_modules/brace-expansion",
+                True,
+            ),
+            (
+                "package_path",
+                "node_modules/**/brace-expansion",
+                "lib/brace-expansion",
+                False,
+            ),
             ("package_path", "node_modules/*", "node_modules/a/b", True),
             ("package_path", "pkg\\a", "pkg/a", True),
             ("package_path", "pkg/", "pkg/a", False),
@@ -611,10 +626,10 @@ class TestPackage:
         assert entry.matches(finding(package_name="x", package_version="1")) is True
 
     def test_all_set_fields_must_match(self):
-        entry = supp(
-            package_name="lodash", package_version="4.*", package_path="a/**"
+        entry = supp(package_name="lodash", package_version="4.*", package_path="a/**")
+        good = finding(
+            package_name="lodash", package_version="4.17.21", package_path="a/b"
         )
-        good = finding(package_name="lodash", package_version="4.17.21", package_path="a/b")
         assert entry.matches(good) is True
         for override in (
             {"package_name": "other"},
@@ -782,9 +797,7 @@ class TestScope:
         assert registry._NO_ENGINE_WARNED == {"ghost"}
 
     def test_the_engine_block_is_reached_only_after_the_universal_keys(self):
-        entry = supp(
-            scope={"resource_id": "S/*", "engines": {"ghost": {"k": "v"}}}
-        )
+        entry = supp(scope={"resource_id": "S/*", "engines": {"ghost": {"k": "v"}}})
         warned: set = set()
         assert (
             entry.matches(
@@ -805,8 +818,7 @@ class TestScope:
         entry = supp(scope={"engines": {"ghost": {"k": "v"}}})
         warned: set = set()
         assert (
-            entry.matches(finding(scanner=fake_engine), warned_engines=warned)
-            is False
+            entry.matches(finding(scanner=fake_engine), warned_engines=warned) is False
         )
         assert warned == set()
 
@@ -970,8 +982,9 @@ class TestShouldSuppress:
 
     def test_where_does_not_change_the_answer(self):
         entries = [supp(rule_id="B602")]
-        assert should_suppress_finding(finding(), entries, where="elsewhere")[1] is (
-            entries[0]
+        assert (
+            should_suppress_finding(finding(), entries, where="elsewhere")[1]
+            is (entries[0])
         )
 
     def test_matches_suppression_is_the_method(self):
@@ -981,7 +994,9 @@ class TestShouldSuppress:
         assert matches_suppression(finding(), entry) is False
         warned: set = set()
         ghost = supp(scope={"engines": {"ghost": {"k": "v"}}})
-        assert matches_suppression(finding(scanner="ghost"), ghost, None, warned) is False
+        assert (
+            matches_suppression(finding(scanner="ghost"), ghost, None, warned) is False
+        )
         assert warned == {"ghost"}
 
 
@@ -992,16 +1007,25 @@ class TestUnconvertedInputAndActiveIgnorePaths:
         assert accepting_unconverted_input(
             "a/b.zip", [supp(rule_id=rule.upper(), path="a/*")]
         )
-        assert accepting_unconverted_input("a/b.zip", [supp(rule_id="ash-*", path="a/*")]) is None
+        assert (
+            accepting_unconverted_input("a/b.zip", [supp(rule_id="ash-*", path="a/*")])
+            is None
+        )
         assert accepting_unconverted_input("a/b.zip", [supp(path="a/*")]) is None
         assert accepting_unconverted_input("a/b.zip", None) is None
         assert accepting_unconverted_input("a/b.zip", []) is None
 
     def test_it_reads_the_path_as_matches_path_does(self):
         rule = UNCONVERTED_INPUT_RULE
-        assert accepting_unconverted_input("a/b.zip", [supp(rule_id=rule, path="a/")]) is None
+        assert (
+            accepting_unconverted_input("a/b.zip", [supp(rule_id=rule, path="a/")])
+            is None
+        )
         assert accepting_unconverted_input("a/b.zip", [supp(rule_id=rule, path="**")])
-        assert accepting_unconverted_input("a/b.zip", [supp(rule_id=rule, path="c/*")]) is None
+        assert (
+            accepting_unconverted_input("a/b.zip", [supp(rule_id=rule, path="c/*")])
+            is None
+        )
 
     def test_client_supplied_expired_and_unknown_entries_accept_nothing(self):
         rule = UNCONVERTED_INPUT_RULE
@@ -1010,7 +1034,10 @@ class TestUnconvertedInputAndActiveIgnorePaths:
         unknown = stored(rule_id=rule, path="**", bogus=1)
         live = supp(rule_id=rule, path="**")
         assert accepting_unconverted_input("x.zip", [client, expired, unknown]) is None
-        assert accepting_unconverted_input("x.zip", [client, expired, unknown, live]) is live
+        assert (
+            accepting_unconverted_input("x.zip", [client, expired, unknown, live])
+            is live
+        )
 
     def test_only_the_path_rule_and_state_take_part(self):
         rule = UNCONVERTED_INPUT_RULE

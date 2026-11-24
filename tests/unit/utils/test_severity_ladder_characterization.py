@@ -252,7 +252,10 @@ def test_effective_sarif_level_on_a_real_result_model():
 @pytest.mark.parametrize(
     "component,expected",
     [
-        (SimpleNamespace(name="Grype", fullName="Anchore Grype"), {"grype", "anchore grype"}),
+        (
+            SimpleNamespace(name="Grype", fullName="Anchore Grype"),
+            {"grype", "anchore grype"},
+        ),
         (SimpleNamespace(name="  Trivy  "), {"trivy"}),
         (SimpleNamespace(name="x", fullName="X"), {"x"}),
         (SimpleNamespace(name="", fullName="   "), set()),
@@ -466,9 +469,7 @@ def test_join_rule_reference_component_index_zero_is_the_first_extension():
 
 def test_join_rule_reference_component_index_past_the_end_names_no_rules():
     d = _rule("D")
-    reference = SimpleNamespace(
-        index=0, id="D", toolComponent=SimpleNamespace(index=5)
-    )
+    reference = SimpleNamespace(index=0, id="D", toolComponent=SimpleNamespace(index=5))
     # The named component is empty, so the index misses; the id is then looked up
     # globally and finds the driver's rule.
     assert _join(_result(rule=reference), [[d]]) is d
@@ -533,9 +534,7 @@ def test_join_scoped_lookup_by_scanner_label_beats_global_first_wins():
     ext_rule = _rule("CVE-1", "error")
     components = [[driver_rule], [ext_rule]]
     names = [frozenset({"merged"}), frozenset({"grype"})]
-    result = _result(
-        ruleId="CVE-1", properties=_props(scanner_name="Grype")
-    )
+    result = _result(ruleId="CVE-1", properties=_props(scanner_name="Grype"))
     assert _join(result, components, names) is ext_rule
     # The same id for a scanner that matches no component reads globally.
     other = _result(ruleId="CVE-1", properties=_props(scanner_name="trivy"))
@@ -563,9 +562,7 @@ def test_join_scope_tries_every_prefix_before_any_global_lookup():
     other_exact = _rule("CA1001/sub")
     components = [[other_exact], [own_parent]]
     names = [frozenset({"other"}), frozenset({"mine"})]
-    result = _result(
-        ruleId="CA1001/sub", properties=_props(scanner_name="mine")
-    )
+    result = _result(ruleId="CA1001/sub", properties=_props(scanner_name="mine"))
     # The scanner's own component holds the prefix; the other scanner's exact id
     # does not win over it.
     assert _join(result, components, names) is own_parent
@@ -642,7 +639,9 @@ def test_resolve_missing_levels_stated_level_none_is_kept():
     assert _levels(report) == ["none"]
 
 
-@pytest.mark.parametrize("kind", ["pass", "open", "review", "informational", "notApplicable"])
+@pytest.mark.parametrize(
+    "kind", ["pass", "open", "review", "informational", "notApplicable"]
+)
 def test_resolve_missing_levels_non_fail_kind_is_none(kind):
     report = _run_report(
         [_unlevelled(ruleId="A", kind=kind)], [_sarif_rule("A", "error")]
@@ -701,12 +700,8 @@ def test_resolve_missing_levels_driver_copy_wins_without_scanner_scope():
 def test_resolve_missing_levels_scanner_scope_picks_its_own_extension():
     ext_grype = ToolComponent(name="grype", rules=[_sarif_rule("CVE-1", "error")])
     ext_trivy = ToolComponent(name="trivy", rules=[_sarif_rule("CVE-1")])
-    grype = _unlevelled(
-        ruleId="CVE-1", properties={"scanner_name": "grype"}
-    )
-    trivy = _unlevelled(
-        ruleId="CVE-1", properties={"scanner_name": "trivy"}
-    )
+    grype = _unlevelled(ruleId="CVE-1", properties={"scanner_name": "grype"})
+    trivy = _unlevelled(ruleId="CVE-1", properties={"scanner_name": "trivy"})
     anon = _unlevelled(ruleId="CVE-1")
     report = _run_report(
         [grype, trivy, anon], [], [ext_trivy, ext_grype], driver_name="merged"
@@ -791,7 +786,10 @@ def test_resolve_missing_levels_stand_in_with_no_fields_set_attribute():
 
 
 def test_resolve_missing_levels_large_n_preserves_result_order_and_first_rule_wins():
-    rules = [_sarif_rule(f"R{i}", ("error", "warning", "note", "none")[i % 4]) for i in range(200)]
+    rules = [
+        _sarif_rule(f"R{i}", ("error", "warning", "note", "none")[i % 4])
+        for i in range(200)
+    ]
     rules.append(_sarif_rule("R0", "none"))  # a later duplicate id never wins
     results = [_unlevelled(ruleId=f"R{i % 210}") for i in range(1000)]
     report = _run_report(results, rules)
@@ -799,7 +797,9 @@ def test_resolve_missing_levels_large_n_preserves_result_order_and_first_rule_wi
     expected = []
     for i in range(1000):
         n = i % 210
-        expected.append(("error", "warning", "note", "none")[n % 4] if n < 200 else "warning")
+        expected.append(
+            ("error", "warning", "note", "none")[n % 4] if n < 200 else "warning"
+        )
     assert _levels(report) == expected
     assert [r.ruleId for r in report.runs[0].results] == [
         f"R{i % 210}" for i in range(1000)
@@ -843,7 +843,9 @@ def test_result_severity_dict_golden(result, expected):
 
 
 def test_result_severity_object_forms():
-    obj = SimpleNamespace(level="error", properties=SimpleNamespace(issue_severity="low"))
+    obj = SimpleNamespace(
+        level="error", properties=SimpleNamespace(issue_severity="low")
+    )
     assert result_severity(obj) == "LOW"
     obj = SimpleNamespace(level="note", properties=SimpleNamespace())
     assert result_severity(obj) == "LOW"
@@ -855,7 +857,7 @@ def test_result_severity_object_forms():
 
 
 def test_result_severity_on_real_result_models():
-    base = dict(message=Message(text="x"))
+    base = {"message": Message(text="x")}
     assert result_severity(Result(**base)) == "MEDIUM"
     assert result_severity(Result(level="error", **base)) == "CRITICAL"
     assert result_severity(Result(level="none", **base)) == "INFO"
@@ -969,9 +971,7 @@ def test_gate_off_fails_nothing(threshold):
 )
 def test_off_table_text_threshold_gates_like_critical(threshold, ash_log):
     for severity in _ALL_FAIL:
-        assert severity_fails_threshold(severity, threshold) is (
-            severity == "CRITICAL"
-        )
+        assert severity_fails_threshold(severity, threshold) is (severity == "CRITICAL")
     assert severity_fails_threshold("BOGUS", threshold) is True
     assert len(ash_log) == 1  # once per value, however many findings
 
@@ -979,18 +979,18 @@ def test_off_table_text_threshold_gates_like_critical(threshold, ash_log):
 @pytest.mark.parametrize("threshold", [0, False, [], 5, 1.5, ["HIGH"], {"a": 1}, ()])
 def test_non_text_threshold_gates_like_critical_even_when_falsy(threshold, ash_log):
     for severity in _ALL_FAIL:
-        assert severity_fails_threshold(severity, threshold) is (
-            severity == "CRITICAL"
-        )
+        assert severity_fails_threshold(severity, threshold) is (severity == "CRITICAL")
     assert len(ash_log) == 1
 
 
 def test_off_table_warning_text_for_a_ladder_shaped_word(ash_log):
     severity_fails_threshold("HIGH", "low")
     assert ash_log == [
-        "Severity threshold 'low' is not one of ALL, LOW, MEDIUM, HIGH, CRITICAL "
-        "(case-sensitive); it gates like CRITICAL, so only critical findings fail "
-        "against it"
+        (
+            "Severity threshold 'low' is not one of ALL, LOW, MEDIUM, HIGH, CRITICAL "
+            "(case-sensitive); it gates like CRITICAL, so only critical findings fail "
+            "against it"
+        )
     ]
 
 
@@ -999,15 +999,21 @@ def test_off_table_warning_text_for_free_text_and_non_text(ash_log):
     severity_fails_threshold("HIGH", ["x"])
     severity_fails_threshold("HIGH", 0)
     assert ash_log == [
-        "Severity threshold a 15-character value (not shown: not a ladder-shaped "
-        "word) is not one of ALL, LOW, MEDIUM, HIGH, CRITICAL (case-sensitive); it "
-        "gates like CRITICAL, so only critical findings fail against it",
-        "Severity threshold a value of type list (not shown: not text) is not one "
-        "of ALL, LOW, MEDIUM, HIGH, CRITICAL (case-sensitive); it gates like "
-        "CRITICAL, so only critical findings fail against it",
-        "Severity threshold a value of type int (not shown: not text) is not one "
-        "of ALL, LOW, MEDIUM, HIGH, CRITICAL (case-sensitive); it gates like "
-        "CRITICAL, so only critical findings fail against it",
+        (
+            "Severity threshold a 15-character value (not shown: not a ladder-shaped "
+            "word) is not one of ALL, LOW, MEDIUM, HIGH, CRITICAL (case-sensitive); it "
+            "gates like CRITICAL, so only critical findings fail against it"
+        ),
+        (
+            "Severity threshold a value of type list (not shown: not text) is not one "
+            "of ALL, LOW, MEDIUM, HIGH, CRITICAL (case-sensitive); it gates like "
+            "CRITICAL, so only critical findings fail against it"
+        ),
+        (
+            "Severity threshold a value of type int (not shown: not text) is not one "
+            "of ALL, LOW, MEDIUM, HIGH, CRITICAL (case-sensitive); it gates like "
+            "CRITICAL, so only critical findings fail against it"
+        ),
     ]
 
 
@@ -1124,7 +1130,16 @@ def test_sarif_off_table_threshold_gates_like_critical(ash_log):
 
 @pytest.mark.parametrize(
     "value,off",
-    [(None, True), ("", True), (" ", False), (0, False), (False, False), ([], False), ("ALL", False), ("x", False)],
+    [
+        (None, True),
+        ("", True),
+        (" ", False),
+        (0, False),
+        (False, False),
+        ([], False),
+        ("ALL", False),
+        ("x", False),
+    ],
 )
 def test_gate_is_off_golden(value, off):
     assert ladder._gate_is_off(value) is off
@@ -1347,7 +1362,10 @@ def test_blank_or_missing_scanner_falls_to_global(scanner, default_level):
 def test_non_text_scanner_threshold_is_unset_and_warns(scanner, default_level, ash_log):
     assert resolve_scanner_threshold(scanner, _config("LOW")) == ("LOW", "global")
     assert len(ash_log) == 1
-    assert "is ignored; the global severity threshold applies to that scanner" in ash_log[0]
+    assert (
+        "is ignored; the global severity threshold applies to that scanner"
+        in ash_log[0]
+    )
 
 
 def test_dropped_scanner_warning_text_and_dedupe(default_level, ash_log):
@@ -1359,14 +1377,22 @@ def test_dropped_scanner_warning_text_and_dedupe(default_level, ash_log):
     resolve_scanner_threshold(5, cfg)
     resolve_scanner_threshold(5, cfg)
     assert ash_log == [
-        "Scanner bandit's severity threshold a value of type int (not shown: not "
-        "text) is ignored; the global severity threshold applies to that scanner",
-        "Scanner grype's severity threshold a value of type int (not shown: not "
-        "text) is ignored; the global severity threshold applies to that scanner",
-        "Scanner bandit's severity threshold a value of type list (not shown: not "
-        "text) is ignored; the global severity threshold applies to that scanner",
-        "Scanner severity threshold a value of type int (not shown: not text) is "
-        "ignored; the global severity threshold applies to that scanner",
+        (
+            "Scanner bandit's severity threshold a value of type int (not shown: not "
+            "text) is ignored; the global severity threshold applies to that scanner"
+        ),
+        (
+            "Scanner grype's severity threshold a value of type int (not shown: not "
+            "text) is ignored; the global severity threshold applies to that scanner"
+        ),
+        (
+            "Scanner bandit's severity threshold a value of type list (not shown: not "
+            "text) is ignored; the global severity threshold applies to that scanner"
+        ),
+        (
+            "Scanner severity threshold a value of type int (not shown: not text) is "
+            "ignored; the global severity threshold applies to that scanner"
+        ),
     ]
     assert ladder._WARNED_DROPPED_SCANNER == {
         "bandit: <int>",
@@ -1466,7 +1492,10 @@ def test_resolve_then_gate_end_to_end(default_level):
     assert result_fails_scanner_threshold(note, lambda n: resolver_for("low")) is True
     assert result_fails_scanner_threshold(note, lambda n: resolver_for(None)) is False
     assert result_fails_scanner_threshold(warning, lambda n: resolver_for(None)) is True
-    assert result_fails_scanner_threshold(warning, lambda n: resolver_for("critical")) is False
+    assert (
+        result_fails_scanner_threshold(warning, lambda n: resolver_for("critical"))
+        is False
+    )
 
 
 # ---------------------------------------------------------------------------

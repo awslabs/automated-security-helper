@@ -402,7 +402,9 @@ def duplicate_ids_on_both_sides():
 
 @diff_case
 def exact_duplicates_get_ordinals_and_pair():
-    return build([spec(1, "old"), spec(1, "old")]), build([spec(1, "old"), spec(1, "old")])
+    return build([spec(1, "old"), spec(1, "old")]), build(
+        [spec(1, "old"), spec(1, "old")]
+    )
 
 
 @diff_case
@@ -580,18 +582,21 @@ def large_n_mixed_exact_moved_new_absent():
         [spec(n, f"msg-{n % 9}", "LOW", rule=f"R{n % 5}") for n in range(1, 61)]
     )
     after = build(
-        [spec(n + (7 if n % 3 == 0 else 0), f"msg-{n % 9}", "LOW", rule=f"R{n % 5}")
-         for n in range(5, 66)]
+        [
+            spec(n + (7 if n % 3 == 0 else 0), f"msg-{n % 9}", "LOW", rule=f"R{n % 5}")
+            for n in range(5, 66)
+        ]
     )
     return before, after
 
 
 @diff_case
 def large_n_shuffled_input_order():
-    items = [spec((n * 37) % 101 + 1, f"msg-{n % 6}", "LOW", rule=f"R{n % 4}") for n in range(50)]
-    shifted = [
-        {**item, "line": item["line"] + 200} for item in reversed(items)
+    items = [
+        spec((n * 37) % 101 + 1, f"msg-{n % 6}", "LOW", rule=f"R{n % 4}")
+        for n in range(50)
     ]
+    shifted = [{**item, "line": item["line"] + 200} for item in reversed(items)]
     return build(items), build(shifted)
 
 
@@ -646,7 +651,9 @@ def key_additional_report_with_id_has_none():
 @key_case
 def key_additional_report_without_id_has_none_because_of_source():
     return _key_summary(
-        build([{"report": {"description": "d", "line_start": 3, "file_path": "a.py"}}])[0]
+        build([{"report": {"description": "d", "line_start": 3, "file_path": "a.py"}}])[
+            0
+        ]
     )
 
 
@@ -716,7 +723,9 @@ def check_comparable_matrix():
         "workspace_and_sharded": _stub(workspace=object(), shard=object()),
         "sharded_and_filtered": _stub(shard=object(), baseline_filtered=True),
     }
-    return {name: _outcome(lambda r=r: check_comparable(r)) for name, r in cases.items()}
+    return {
+        name: _outcome(lambda r=r: check_comparable(r)) for name, r in cases.items()
+    }
 
 
 @compare_case
@@ -822,15 +831,11 @@ def comparable_findings_checks_in_order():
             lambda: counts(sharded, _sarif_results([spec(1, "a")]))
         ),
         "current_sharded": _outcome(lambda: counts(clean, sharded)),
-        "both_sharded_names_baseline_first": _outcome(
-            lambda: counts(sharded, sharded)
-        ),
+        "both_sharded_names_baseline_first": _outcome(lambda: counts(sharded, sharded)),
         "project_names_differ": _outcome(lambda: counts(named_p, named_q)),
         "duplicate_baseline_ids": _outcome(lambda: counts(duplicated, clean)),
         "duplicate_current_ids": _outcome(lambda: counts(clean, duplicated)),
-        "sharded_wins_over_duplicates": _outcome(
-            lambda: counts(sharded, duplicated)
-        ),
+        "sharded_wins_over_duplicates": _outcome(lambda: counts(sharded, duplicated)),
     }
 
 
@@ -864,11 +869,20 @@ def coverage_warnings_matrix():
         ),
         "expected_set_differs": warn(
             side(expected=["bandit"], rows={"bandit": passed}),
-            side(expected=["bandit", "semgrep"], rows={"bandit": passed, "semgrep": passed}),
+            side(
+                expected=["bandit", "semgrep"],
+                rows={"bandit": passed, "semgrep": passed},
+            ),
         ),
         "evaluated_set_differs": warn(
-            side(expected=["bandit", "semgrep"], rows={"bandit": passed, "semgrep": passed}),
-            side(expected=["bandit", "semgrep"], rows={"bandit": passed, "semgrep": failed}),
+            side(
+                expected=["bandit", "semgrep"],
+                rows={"bandit": passed, "semgrep": passed},
+            ),
+            side(
+                expected=["bandit", "semgrep"],
+                rows={"bandit": passed, "semgrep": failed},
+            ),
         ),
         "baseline_scanner_missing": warn(
             side(expected=["bandit"], rows={"bandit": missing}),
@@ -919,7 +933,9 @@ def apply_case(function):
     return function
 
 
-def scanner_results_of(*runs: List[Dict[str, Any]], status="PASSED") -> AshAggregatedResults:
+def scanner_results_of(
+    *runs: List[Dict[str, Any]], status="PASSED"
+) -> AshAggregatedResults:
     """Results with one SARIF run per list of specs; each scanner's row passes."""
     model = AshAggregatedResults()
     model.sarif = SarifReport.model_validate(
@@ -1043,23 +1059,17 @@ def apply_group_shrink_drops_the_ordered_prefix():
 
 @apply_case
 def apply_severity_rise_on_exact_pair_is_kept():
-    return apply_one(
-        [b(10, "m", "LOW", "fp")], [b(10, "m", "HIGH", "fp")]
-    )
+    return apply_one([b(10, "m", "LOW", "fp")], [b(10, "m", "HIGH", "fp")])
 
 
 @apply_case
 def apply_low_to_medium_rise_on_exact_pair_is_kept():
-    return apply_one(
-        [b(10, "m", "LOW", "fp")], [b(10, "m", "MEDIUM", "fp")]
-    )
+    return apply_one([b(10, "m", "LOW", "fp")], [b(10, "m", "MEDIUM", "fp")])
 
 
 @apply_case
 def apply_severity_drop_on_exact_pair_is_dropped():
-    return apply_one(
-        [b(10, "m", "HIGH", "fp")], [b(10, "m", "LOW", "fp")]
-    )
+    return apply_one([b(10, "m", "HIGH", "fp")], [b(10, "m", "LOW", "fp")])
 
 
 @apply_case
@@ -1069,9 +1079,7 @@ def apply_same_severity_high_is_dropped():
 
 @apply_case
 def apply_critical_to_high_is_dropped():
-    return apply_one(
-        [b(10, "m", "CRITICAL", "fp")], [b(10, "m", "HIGH", "fp")]
-    )
+    return apply_one([b(10, "m", "CRITICAL", "fp")], [b(10, "m", "HIGH", "fp")])
 
 
 @apply_case
@@ -1084,16 +1092,12 @@ def apply_info_to_info_is_dropped_and_unknown_severity_is_kept():
 
 @apply_case
 def apply_lapsed_suppression_is_kept():
-    return apply_one(
-        [b(10, "m", "HIGH", supp_sarif=True)], [b(10, "m", "HIGH")]
-    )
+    return apply_one([b(10, "m", "HIGH", supp_sarif=True)], [b(10, "m", "HIGH")])
 
 
 @apply_case
 def apply_added_suppression_is_dropped():
-    return apply_one(
-        [b(10, "m", "HIGH")], [b(10, "m", "HIGH", supp_sarif=True)]
-    )
+    return apply_one([b(10, "m", "HIGH")], [b(10, "m", "HIGH", supp_sarif=True)])
 
 
 @apply_case
@@ -1106,9 +1110,7 @@ def apply_still_suppressed_is_dropped():
 
 @apply_case
 def apply_moved_with_lapsed_suppression_is_kept():
-    return apply_one(
-        [b(10, "m", "HIGH", supp_sarif=True)], [b(40, "m", "HIGH")]
-    )
+    return apply_one([b(10, "m", "HIGH", supp_sarif=True)], [b(40, "m", "HIGH")])
 
 
 @apply_case
@@ -1158,17 +1160,13 @@ def apply_baseline_scanner_not_completed_keeps_findings():
     base.scanner_results["bandit"] = ScannerTargetStatusInfo(
         status=ScannerStatus.MISSING, excluded=False
     )
-    return apply_summary(
-        scanner_results_of([b(10, "m", "HIGH")]), baseline_of(base)
-    )
+    return apply_summary(scanner_results_of([b(10, "m", "HIGH")]), baseline_of(base))
 
 
 @apply_case
 def apply_baseline_scanner_failed_still_counts_as_evaluated():
     base = scanner_results_of([b(10, "m", "HIGH")], status="FAILED")
-    return apply_summary(
-        scanner_results_of([b(10, "m", "HIGH")]), baseline_of(base)
-    )
+    return apply_summary(scanner_results_of([b(10, "m", "HIGH")]), baseline_of(base))
 
 
 @apply_case
@@ -1177,18 +1175,14 @@ def apply_baseline_scanner_excluded_keeps_findings():
     base.scanner_results["bandit"] = ScannerTargetStatusInfo(
         status="PASSED", excluded=True
     )
-    return apply_summary(
-        scanner_results_of([b(10, "m", "HIGH")]), baseline_of(base)
-    )
+    return apply_summary(scanner_results_of([b(10, "m", "HIGH")]), baseline_of(base))
 
 
 @apply_case
 def apply_baseline_finding_of_unrecorded_scanner_is_ignored():
     base = scanner_results_of([b(10, "m", "HIGH")])
     base.scanner_results.clear()
-    return apply_summary(
-        scanner_results_of([b(10, "m", "HIGH")]), baseline_of(base)
-    )
+    return apply_summary(scanner_results_of([b(10, "m", "HIGH")]), baseline_of(base))
 
 
 @apply_case
@@ -1252,9 +1246,7 @@ def apply_additional_report_rows_are_neither_matched_nor_counted():
 def apply_warnings_pass_through_from_coverage():
     base = scanner_results_of([b(10, "m", "HIGH")])
     base.metadata.expected_scanners = {"bandit", "semgrep"}
-    return apply_summary(
-        scanner_results_of([b(10, "m", "HIGH")]), baseline_of(base)
-    )
+    return apply_summary(scanner_results_of([b(10, "m", "HIGH")]), baseline_of(base))
 
 
 @apply_case

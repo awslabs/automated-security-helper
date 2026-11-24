@@ -148,7 +148,7 @@ def remaining(result):
     return [
         [
             (
-                row.locations[0].physical_location.root.region.start_line,
+                row.locations[0].physicalLocation.root.region.startLine,
                 row.message.root.text,
             )
             for row in (run.results or [])
@@ -295,8 +295,14 @@ def test_a_group_of_equal_size_pairs_in_line_order_not_input_order():
 
 
 def test_end_line_breaks_a_start_line_tie_in_the_alignment():
-    before = flats((10, "m", "LOW", None, "a.py", "R1", 30), (10, "m", "LOW", None, "a.py", "R1", 20))
-    after = flats((50, "m", "LOW", None, "a.py", "R1", 70), (50, "m", "LOW", None, "a.py", "R1", 60))
+    before = flats(
+        (10, "m", "LOW", None, "a.py", "R1", 30),
+        (10, "m", "LOW", None, "a.py", "R1", 20),
+    )
+    after = flats(
+        (50, "m", "LOW", None, "a.py", "R1", 70),
+        (50, "m", "LOW", None, "a.py", "R1", 60),
+    )
     match = match_findings(before, after)
     assert [(a.line_end, b.line_end) for a, b in match.moved] == [(20, 60), (30, 70)]
 
@@ -316,8 +322,10 @@ def test_large_group_alignment_is_by_line_order_and_input_order_independent():
     assert [(a.line_start, b.line_start) for a, b in match.moved] == [
         (n, n + 1000) for n in lines_before
     ]
-    reference = match_findings(sorted(before, key=lambda f: f.line_start),
-                               sorted(after, key=lambda f: f.line_start))
+    reference = match_findings(
+        sorted(before, key=lambda f: f.line_start),
+        sorted(after, key=lambda f: f.line_start),
+    )
     assert pair_labels(reference.moved) == pair_labels(match.moved)
 
 
@@ -346,7 +354,12 @@ def test_new_and_absent_are_sorted_by_id_then_lines():
     after = flats((30, "n"), (10, "n"), (20, "n"))
     match = match_findings([], list(reversed(after)))
     expected = sorted(
-        after, key=lambda f: (f.id, f.line_start, f.line_end if f.line_end is not None else -1)
+        after,
+        key=lambda f: (
+            f.id,
+            f.line_start,
+            f.line_end if f.line_end is not None else -1,
+        ),
     )
     assert match.new == expected
 
@@ -355,7 +368,9 @@ def test_output_is_independent_of_input_order():
     rows_before = [(n, "a") for n in range(1, 8)] + [(n, "b") for n in range(20, 24)]
     rows_after = [(n + 3, "a") for n in range(1, 6)] + [(40, "c")]
     forward = match_findings(flats(*rows_before), flats(*rows_after))
-    backward = match_findings(flats(*reversed(rows_before)), flats(*reversed(rows_after)))
+    backward = match_findings(
+        flats(*reversed(rows_before)), flats(*reversed(rows_after))
+    )
     assert pair_labels(forward.exact) == pair_labels(backward.exact)
     assert pair_labels(forward.moved) == pair_labels(backward.moved)
     assert labels(forward.new) == labels(backward.new)
@@ -566,19 +581,19 @@ def test_compare_is_a_function_of_the_sets_not_their_order():
 
 
 def _scan(**overrides):
-    metadata = dict(
-        shard=None,
-        changed_files_only=False,
-        workspace_project=None,
-        project_name="p",
-    )
+    metadata = {
+        "shard": None,
+        "changed_files_only": False,
+        "workspace_project": None,
+        "project_name": "p",
+    }
     metadata.update(overrides.pop("metadata", {}))
-    base = dict(
-        workspace=None,
-        baseline_filtered=False,
-        metadata=SimpleNamespace(**metadata),
-        findings=[],
-    )
+    base = {
+        "workspace": None,
+        "baseline_filtered": False,
+        "metadata": SimpleNamespace(**metadata),
+        "findings": [],
+    }
     base.update(overrides)
     scan = SimpleNamespace(**base)
     scan.to_flat_vulnerabilities = lambda: scan.findings
@@ -644,12 +659,8 @@ def test_a_named_workspace_project_is_comparable():
 
 def test_same_project_passes_when_names_agree_or_one_is_missing():
     assert check_same_project(_scan(), _scan()) is None
-    assert (
-        check_same_project(_scan(), _scan(metadata={"project_name": None})) is None
-    )
-    assert (
-        check_same_project(_scan(metadata={"project_name": ""}), _scan()) is None
-    )
+    assert check_same_project(_scan(), _scan(metadata={"project_name": None})) is None
+    assert check_same_project(_scan(metadata={"project_name": ""}), _scan()) is None
 
 
 def test_different_project_names_are_refused():
@@ -1003,7 +1014,10 @@ def test_findings_are_dropped_by_run_and_result_coordinate_across_runs():
                     "results": [sarif_row(10), sarif_row(12, "fresh")],
                 },
                 {"tool": {"driver": {"name": "two"}}, "results": [sarif_row(30)]},
-                {"tool": {"driver": {"name": "three"}}, "results": [sarif_row(40, "x")]},
+                {
+                    "tool": {"driver": {"name": "three"}},
+                    "results": [sarif_row(40, "x")],
+                },
             ],
         }
     )
@@ -1081,6 +1095,7 @@ def test_apply_warnings_are_the_coverage_warnings_of_baseline_against_current():
     old = results_of(sarif_row(10))
     current = results_of(sarif_row(10))
     outcome = apply_baseline(current, baseline_of(old))
-    assert outcome.warnings == tuple(
-        coverage_warnings(old, current)
-    ) or outcome.warnings != ()
+    assert (
+        outcome.warnings == tuple(coverage_warnings(old, current))
+        or outcome.warnings != ()
+    )
