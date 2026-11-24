@@ -9,6 +9,11 @@ from typing import Annotated, Any, ClassVar, List, Literal, Optional, Set
 from pydantic import Field
 
 from automated_security_helper.base.options import ScannerOptionsBase
+from automated_security_helper.base.scanner_facets import (
+    FacetDecl,
+    FacetState,
+    ScannerFacets,
+)
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.config.tool_config_trust import empty_tool_directory
 from automated_security_helper.models.core import ToolArgs
@@ -178,6 +183,121 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
     # passes --exit-code=0, which outranks TRIVY_EXIT_CODE and a trivy.yaml, so a
     # nonzero exit only ever means trivy failed.
     success_exit_codes: ClassVar[Set[int]] = {0}
+
+    #: The facets register row (base/scanner_facets.py). Declaration only.
+    #: trivy-repo shares trivy's SARIF reading through TrivyScannerBase but
+    #: classifies its own output: its default scanners are vuln, secret,
+    #: misconfig and license, so the misconfig resource facet applies to its
+    #: DEFAULT run (M0 settled it: the address exists natively in JSON and
+    #: dies at the SARIF format ASH reads).
+    #: Native fields are quoted from the committed trivy SARIF
+    #: (tests/test_data/scanners/trivy/trivy-0.69.3.vuln.sarif) and from the
+    #: M0 misconfig capture (tests/test_data/scanners/trivy/captured/
+    #: trivy-0.76.2-misconfig-terraform.{json,sarif}, M0-FINDINGS.md (a)).
+    facets: ClassVar[ScannerFacets] = ScannerFacets(
+        rule_id=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="SARIF result ruleId",
+        ),
+        severity=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result message line "Severity: <level>", checked '
+            "against the result level and the rule tags (issue_severity)",
+        ),
+        file_path=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="SARIF locations[].physicalLocation.artifactLocation.uri",
+        ),
+        line_range=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="SARIF region.startLine / region.endLine",
+        ),
+        column=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="SARIF region.startColumn",
+        ),
+        message=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="SARIF result message.text",
+        ),
+        resource_id=FacetDecl(
+            state=FacetState.DROPPED,
+            native_field="Results[].Misconfigurations[].CauseMetadata.Resource",
+            reason="misconfig only: the address (aws_s3_bucket.m0_fixture_bucket) "
+            "exists in trivy's JSON format and is absent from the SARIF ASH "
+            "reads (0 occurrences, M0 fixture); the vuln findings are packages, "
+            "so no resource_id is ever written until a side-JSON attach lands",
+        ),
+        resource_type=FacetDecl(
+            state=FacetState.NA,
+            reason="trivy's CauseMetadata names Provider and Service (AWS, "
+            "s3) and no resource type; the type is only the prefix of the "
+            "dropped address, which would be a derivation",
+        ),
+        package_name=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result message line 1 "Package: <name>" '
+            "(_package_from_message)",
+        ),
+        package_version=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result message line 2 "Installed Version: <version>" '
+            "(_package_from_message)",
+        ),
+        package_path=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="npm lockfile entry at the SARIF region.startLine of "
+            "the result's location (one result per installed copy)",
+        ),
+        taxonomy_cve=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="SARIF result ruleId (the CVE id)",
+        ),
+        taxonomy_cwe=FacetDecl(
+            state=FacetState.NA,
+            reason="UNCONFIRMED: trivy's SARIF rules carry no CWE (tags are "
+            "vulnerability, security, <severity>); the JSON format's CweIDs "
+            "has no committed vulnerability fixture, and a `trivy fs --format "
+            "json` run over a lockfile settles it",
+        ),
+        fingerprints=FacetDecl(
+            state=FacetState.NA,
+            reason="trivy's SARIF results carry no fingerprints (result keys "
+            "are level, locations, message, ruleId, ruleIndex)",
+        ),
+        fix_available=FacetDecl(
+            state=FacetState.DROPPED,
+            native_field='message line "Fixed Version: <version>"',
+            reason="the fixed version sits in the message text and is never "
+            "parsed into the fix_available property the flat model reads "
+            "(and ignore_unfixed defaults to true, so the tool pre-filters "
+            "unfixed findings)",
+        ),
+        remediation_text=FacetDecl(
+            state=FacetState.NA,
+            reason="UNCONFIRMED: not classified by the survey; the flat "
+            "model has no remediation column, and the rule help text carries "
+            "the fixed version already declared under fix_available",
+        ),
+        snippet=FacetDecl(
+            state=FacetState.NA,
+            reason="trivy's SARIF results carry no code snippet",
+        ),
+        references=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="SARIF rule helpUri",
+        ),
+        tags=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="SARIF rule properties.tags",
+        ),
+        extras=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="result properties bag (issue_severity and the "
+            "package identity keys this adapter writes) passed through to "
+            "the flat properties",
+        ),
+    )
 
     def model_post_init(self, context):
         if self.config is None:
