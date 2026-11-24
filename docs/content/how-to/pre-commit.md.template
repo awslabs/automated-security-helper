@@ -143,12 +143,13 @@ scanner did not run, and the output says only `Passed`.
 The selection precommit mode runs is resolved in this order, later entries winning:
 
 1. The mode default: the five scanners above.
-2. The ASH config file: `precommit.only_scanners` replaces the default set;
+2. The operator's `default_scanners`, in a trusted config: `only` replaces the default set and `add` adds to it ([Choose which scanners run by default](configure.md#default-scanners)). Every mode reads it, not only precommit.
+3. The ASH config file: `precommit.only_scanners` replaces the set so far;
    `precommit.add_scanners` adds to it. Setting both keys is refused.
-3. The command line: `--only-scanners` replaces everything above, mode default and config
+4. The command line: `--only-scanners` replaces everything above, mode default and config
    keys alike; `--add-scanners`, or the deprecated `--scanners`, adds to whatever stands.
    `--only-scanners` cannot be combined with either additive flag.
-4. `--exclude-scanners` applies last: an excluded name does not run, whichever source
+5. `--exclude-scanners` applies last: an excluded name does not run, whichever source
    included it.
 
 So a repository that wants its hook to run only bandit and detect-secrets states it once

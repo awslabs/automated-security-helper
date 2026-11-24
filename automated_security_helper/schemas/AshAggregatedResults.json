@@ -1673,6 +1673,14 @@
           },
           "description": "Converter configurations by name."
         },
+        "default_scanners": {
+          "$ref": "#/$defs/DefaultScannersConfig",
+          "default": {
+            "add": [],
+            "only": []
+          },
+          "description": "The operator's default scanners, read in every run mode: only replaces the mode's default selection, add extends a mode whose default is a fixed set (today precommit's) and has no effect in a mode with an unbounded default; setting both is refused. Settable only from the defaults, a config file outside every checkout or --config-overrides. The command line and the precommit keys take precedence."
+        },
         "external_reports_to_include": {
           "default": [],
           "description": "List of external reports to include in the final report. These can be paths to SARIF or CycloneDX reports produced by other tools.",
@@ -1718,6 +1726,8 @@
                   "/sandbox/**",
                   "/ash_plugin_modules",
                   "/ash_plugin_modules/**",
+                  "/default_scanners",
+                  "/default_scanners/**",
                   "/scanners/detect-secrets/options/scan_settings/filters_used",
                   "/scanners/detect-secrets/options/scan_settings/filters_used/**",
                   "/scanners/detect-secrets/options/scan_settings/plugins_used",
@@ -2385,6 +2395,8 @@
                 "/sandbox/**",
                 "/ash_plugin_modules",
                 "/ash_plugin_modules/**",
+                "/default_scanners",
+                "/default_scanners/**",
                 "/scanners/detect-secrets/options/scan_settings/filters_used",
                 "/scanners/detect-secrets/options/scan_settings/filters_used/**",
                 "/scanners/detect-secrets/options/scan_settings/plugins_used",
@@ -2548,6 +2560,8 @@
               "/sandbox/**",
               "/ash_plugin_modules",
               "/ash_plugin_modules/**",
+              "/default_scanners",
+              "/default_scanners/**",
               "/scanners/detect-secrets/options/scan_settings/filters_used",
               "/scanners/detect-secrets/options/scan_settings/filters_used/**",
               "/scanners/detect-secrets/options/scan_settings/plugins_used",
@@ -7115,6 +7129,32 @@
         }
       },
       "title": "Declarations",
+      "type": "object"
+    },
+    "DefaultScannersConfig": {
+      "additionalProperties": false,
+      "description": "The operator's default scanners (``default_scanners``).\n\n``only`` replaces the mode's default selection in every run mode; a mode\nwith no fixed default (such as local) then runs exactly these scanners.\n``add`` extends a mode whose default is a fixed set, which today is\nprecommit's five scanners, and has no effect in a mode whose default is\nunbounded: it adds to nothing and cannot narrow anything. Empty or omitted\nchanges nothing, and naming a scanner does not install or enable it.\n\nRead from the defaults, a config file outside every checkout, or\n``--config-overrides``; a file inside the scanned tree or a client's patch\ncannot set it. Precedence, lowest to highest: the mode default, this\nsection, the ``precommit`` keys (read only in precommit mode), the command\nline.",
+      "properties": {
+        "add": {
+          "default": [],
+          "description": "Scanner names to run in addition to a mode whose default is a fixed set, which today is precommit's. Has no effect in a mode with an unbounded default, and does not narrow one. Cannot be set together with only.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Add",
+          "type": "array"
+        },
+        "only": {
+          "default": [],
+          "description": "Run exactly these scanners instead of the mode's default selection, in every run mode. The command line's --only-scanners replaces this list; --add-scanners and the deprecated --scanners add to it; --exclude-scanners removes names from it. Cannot be set together with add.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Only",
+          "type": "array"
+        }
+      },
+      "title": "DefaultScannersConfig",
       "type": "object"
     },
     "Definitions": {
@@ -15953,7 +15993,7 @@
     },
     "PrecommitModeConfig": {
       "additionalProperties": false,
-      "description": "Scanner selection for ``ash scan --mode precommit``.\n\nPrecommit mode starts from a fixed default set\n(``run_ash_scan.PRECOMMIT_MODE_SCANNERS``: bandit, detect-secrets, checkov,\ncdk-nag, npm-audit). These two keys change that selection from the config\nfile, so a repository can state once what its hook runs instead of every\ncommitter spelling flags in ``.pre-commit-config.yaml``.\n\nPrecedence, lowest to highest (``run_ash_scan._selected_scanners`` applies\nit): the mode default; then ``only_scanners`` (replaces the default) and\n``add_scanners`` (adds to it); then the command line, where\n``--only-scanners`` replaces everything this section and the mode give, and\n``--add-scanners`` (or the deprecated ``--scanners``) adds to it.\n``--exclude-scanners`` applies after all of them: an excluded name wins over\nany inclusion. Read only by ``--mode precommit``; other modes ignore this\nsection.",
+      "description": "Scanner selection for ``ash scan --mode precommit``.\n\nPrecommit mode starts from a fixed default set\n(``run_ash_scan.PRECOMMIT_MODE_SCANNERS``: bandit, detect-secrets, checkov,\ncdk-nag, npm-audit). These two keys change that selection from the config\nfile, so a repository can state once what its hook runs instead of every\ncommitter spelling flags in ``.pre-commit-config.yaml``.\n\nPrecedence, lowest to highest (``SelectionLayers.fold`` in\n``core/scanner_selection.py`` applies it): the mode default; then the\noperator's ``default_scanners`` section (read in every mode, see\n``DefaultScannersConfig``); then this section's ``only_scanners`` (replaces\nwhat is below) and ``add_scanners`` (adds to it); then the command line, where\n``--only-scanners`` replaces everything this section and the mode give, and\n``--add-scanners`` (or the deprecated ``--scanners``) adds to it.\n``--exclude-scanners`` applies after all of them: an excluded name wins over\nany inclusion. The ``precommit`` section is read only by ``--mode precommit``;\nother modes ignore it (``default_scanners`` is not ignored there).",
       "properties": {
         "add_scanners": {
           "default": [],

@@ -1092,12 +1092,14 @@ def unknown_keys_text(model: type) -> str:
     key in such a section is dropped without an error.
     """
     extra = model.model_config.get("extra") or "ignore"
-    return {
+    text = {
         "forbid": "A key not listed here is an error when the configuration is loaded.",
         "allow": "A key not listed here is accepted and kept, without validation.",
         "ignore": "A key not listed here is ignored, without an error, when the "
         "configuration is loaded.",
     }[extra]
+    note = getattr(model, "unknown_keys_note", None)
+    return f"{text} {note}" if isinstance(note, str) else text
 
 
 def _plugin_section_rows(
