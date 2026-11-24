@@ -311,7 +311,7 @@ def _locate_rule(
 
 
 def _join_by_stated_id(
-    pending: list[Tuple[int, object, Optional[int], frozenset[str]]],
+    pending: list[Tuple[int, Any, Optional[int], frozenset[str]]],
     components: list[Any],
     component_names: Optional[list[Any]],
 ) -> Dict[int, _RulePosition]:
@@ -394,10 +394,10 @@ def _join_by_stated_id(
         pl.concat(
             [
                 pl.concat([in_named.select(keep), in_scanner.select(keep)])
-                .cast({c: pl.Int64 for c in keep})
+                .cast(dict.fromkeys(keep, pl.Int64))
                 .with_columns(phase=pl.lit(0)),
                 anywhere.select(keep)
-                .cast({c: pl.Int64 for c in keep})
+                .cast(dict.fromkeys(keep, pl.Int64))
                 .with_columns(phase=pl.lit(1)),
             ]
         )
@@ -419,7 +419,7 @@ def _rule_positions(
     None, in input order: the positional route per result, then one id join for
     the results it did not settle."""
     positions: list[Optional[_RulePosition]] = []
-    pending: list[Tuple[int, object, Optional[int], frozenset[str]]] = []
+    pending: list[Tuple[int, Any, Optional[int], frozenset[str]]] = []
     for row, result in enumerate(results):
         position, stated_id, named = _locate_rule(result, components)
         positions.append(position)
