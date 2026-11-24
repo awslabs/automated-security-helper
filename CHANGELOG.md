@@ -140,6 +140,15 @@
   opengrep's `CWE-798: Use of Hard-coded Credentials` gives `CWE-798`, and a rule that
   names several lists each once (`CWE-1357, CWE-353`). A finding whose rule id is
   an advisory id (`GHSA-...`) or whose rule has no CWE tag keeps both empty.
+- **The reports say why a scanner did not run.** The scanner table of the HTML, Markdown
+  and text reports showed `SKIPPED` or `MISSING` and nothing else; the reason was only in
+  `ash.log` and in the scanner's row of `ash_aggregated_results.json`. Each report now
+  lists it under the table, as "Scanners that did not run", for example
+  `npm-audit (SKIPPED): no lockfile ... beside a package.json in the scanned files`.
+  Scanners that share a reason share a line, so a run with `--scanners` names the ones it
+  left out once. A report in which every scanner ran is unchanged, and the compact
+  Markdown report lists the reason of `MISSING` scanners only, as it leaves `SKIPPED`
+  rows out of its table.
 
 ### Fixes
 

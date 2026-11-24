@@ -38,6 +38,9 @@ Actionable findings meet or exceed the scanner threshold. Suppressed findings ar
 PASSED/FAILED describe the severity gate; MISSING/ERROR need attention; SKIPPED did not run (disabled, or nothing to scan).
 Threshold sources: global settings, scanner config, or scanner default.
 
+Scanners that did not run:
+- npm-audit (MISSING): api: its dependencies were not available; no reason was recorded, and ash.log has the scanner's own message
+
 Top 2 Hotspots:
 Files with the highest number of security findings:
 
