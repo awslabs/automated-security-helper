@@ -58,9 +58,8 @@ from automated_security_helper.utils.link_exclusions import (
 )
 from automated_security_helper.utils.error_text import text_without_values
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
-from automated_security_helper.plugin_modules.ash_builtin.scanners.checkov_vcs_frameworks import (
-    vcs_conf_dir_env_vars,
-    vcs_configuration_frameworks,
+from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+    checkov_vcs_frameworks,
 )
 from automated_security_helper.utils.package_identity import ASH_RESOURCE_ID_KEY
 from automated_security_helper.utils.process_env import snapshot_environ
@@ -130,7 +129,9 @@ _CHECKOV_UNSAFE_SKIP_PATH_CHARS = frozenset("()")
 # ``CheckFrameworks`` by checkov's own naming rule (checkov_vcs_frameworks has
 # the rule, its measurements and its drift gates).
 _CHECKOV_VCS_CONF_DIR_ENV = dict(
-    vcs_conf_dir_env_vars(vcs_configuration_frameworks(get_args(CheckFrameworks)))
+    checkov_vcs_frameworks.vcs_conf_dir_env_vars(
+        checkov_vcs_frameworks.vcs_configuration_frameworks(get_args(CheckFrameworks))
+    )
 )
 
 
