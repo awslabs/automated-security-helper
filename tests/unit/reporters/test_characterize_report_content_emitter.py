@@ -422,16 +422,16 @@ class TestTopHotspots:
                 if wanted[i] > round_:
                     vulns.append(_vuln(severity="HIGH", file_path=f"p/{i:03d}.py"))
         rows = _emitter(vulns).get_top_hotspots(8)
-        # Files i with (i * 7) % 5 == 4, i.e. i % 5 == 3, hold 5 findings each.
+        # Files i with (i * 7) % 5 == 4, i.e. i % 5 == 2, hold 5 findings each.
         assert rows == [
-            {"location": "p/003.py", "count": 5},
-            {"location": "p/008.py", "count": 5},
-            {"location": "p/013.py", "count": 5},
-            {"location": "p/018.py", "count": 5},
-            {"location": "p/023.py", "count": 5},
-            {"location": "p/028.py", "count": 5},
-            {"location": "p/033.py", "count": 5},
-            {"location": "p/038.py", "count": 5},
+            {"location": "p/002.py", "count": 5},
+            {"location": "p/007.py", "count": 5},
+            {"location": "p/012.py", "count": 5},
+            {"location": "p/017.py", "count": 5},
+            {"location": "p/022.py", "count": 5},
+            {"location": "p/027.py", "count": 5},
+            {"location": "p/032.py", "count": 5},
+            {"location": "p/037.py", "count": 5},
         ]
 
     def test_the_same_file_under_two_scanners_is_one_hotspot(self):
@@ -894,9 +894,9 @@ class TestExtractCodeSnippet:
         raw = {"message": {"text": "found it\n```python\nx = 1\ny = 2\n```\nmore"}}
         assert self._extract(raw_data=self._raw(raw)) == "x = 1\ny = 2"
 
-    def test_a_message_with_no_fence(self):
+    def test_a_message_with_no_fence_gives_nothing(self):
         raw = {"message": {"text": "just words"}}
-        assert self._extract(raw_data=self._raw(raw)) == "just words"
+        assert self._extract(raw_data=self._raw(raw)) is None
 
     @pytest.mark.parametrize(
         "message",
@@ -1064,8 +1064,9 @@ class TestScanSummary:
         )
         summary = ReportContentEmitter(model).get_scan_summary()
         assert summary["counts"] == {
-            "critical": 0,
-            "high": 1,
+            # SARIF level "error" is graded CRITICAL, not HIGH.
+            "critical": 1,
+            "high": 0,
             "medium": 2,
             "low": 1,
             "info": 1,
@@ -1136,7 +1137,9 @@ class TestScanSummary:
         extra._source_report = "plugin-report"
         suppressed_extra = _vuln(severity="HIGH", scanner="plugin", is_suppressed=True)
         suppressed_extra._source_report = "plugin-report"
-        model.additional_reports["plugin-report"] = [{"id": "x"}]
+        # An empty list marks the report list-form without the model flattening
+        # any finding out of it.
+        model.additional_reports["plugin-report"] = []
         emitter = ReportContentEmitter(model)
         emitter.flat_vulns = list(emitter.flat_vulns) + [extra, suppressed_extra]
         summary = emitter.get_scan_summary()
@@ -1170,6 +1173,8 @@ class TestAdditionalReportFindings:
 class TestMetadata:
     def test_an_unrecorded_scan_has_unknown_fields_and_no_delta(self):
         model = AshAggregatedResults()
+        # A fresh model stamps its own generation time; clear it.
+        model.metadata.generated_at = None
         metadata = ReportContentEmitter(model).get_metadata()
         assert list(metadata) == [
             "project",
