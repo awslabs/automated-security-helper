@@ -82,6 +82,9 @@ ash_config:
   fail_on_incomplete_scanners: true
   fail_on_unknown_keys: false
   global_settings:
+    deduplication:
+      annotate: false
+      fold: false
     ignore_paths: []
     mcp:
       runtime_overrides:

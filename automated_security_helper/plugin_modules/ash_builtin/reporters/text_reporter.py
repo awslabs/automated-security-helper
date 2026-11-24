@@ -27,6 +27,7 @@ from automated_security_helper.utils.ui_theme import FOOTER_CREDIT
 from automated_security_helper.plugin_modules.ash_builtin.reporters.report_content_emitter import (
     ReportContentEmitter,
     coverage_shortfall_text,
+    deduplicated_summary_text,
     refuse_negative_limit,
 )
 from automated_security_helper.utils.display_text import escape_controls
@@ -64,6 +65,9 @@ def _findings_table(findings) -> list[str]:
         lines.append(
             f"{severity:<10} {scanner:<15} {rule_id:<15} {title:<30} {file_path:<30}"
         )
+        # The fold's note goes under its row, only when the row has one.
+        if finding.get("duplicate_note"):
+            lines.append(f"  {shown_on_one_line(finding['duplicate_note'])}")
     return lines
 
 
@@ -219,6 +223,9 @@ class TextReporter(ReporterPluginBase[TextReporterConfig]):
                 "",
             ]
         )
+        deduplicated = deduplicated_summary_text(summary)
+        if deduplicated:
+            text_parts.extend([deduplicated, ""])
         # A scanner's name can be a results file's text (``ash report`` renders
         # one a repository committed), so each line naming one is one shown line.
         if summary["shortfalls"]:
@@ -434,6 +441,15 @@ class TextReporter(ReporterPluginBase[TextReporterConfig]):
                             str(shown_on_one_line(f"CWE: {finding['cwe_id']}"))
                         )
 
+                    if finding.get("duplicate_note"):
+                        text_parts.append(
+                            str(
+                                shown_on_one_line(
+                                    f"Duplicates: {finding['duplicate_note']}"
+                                )
+                            )
+                        )
+
                     text_parts.append("")
                     text_parts.append("Description:")
                     text_parts.append(str(shown_not_obeyed(finding["description"])))
@@ -448,9 +464,7 @@ class TextReporter(ReporterPluginBase[TextReporterConfig]):
                 # ACTIONABLE findings, so the note counts those; counting every
                 # finding (suppressed and below-threshold included) printed a
                 # cut that never happened, with numbers the list did not match.
-                total_actionable = sum(
-                    emitter.is_finding_actionable(vuln) for vuln in emitter.flat_vulns
-                )
+                total_actionable = emitter.actionable_finding_count()
                 if total_actionable > len(detailed_findings):
                     text_parts.append(
                         f"Note: Showing {len(detailed_findings)} of {total_actionable} "

@@ -192,6 +192,39 @@
 │                                                                  and rows for scanners that     │
 │                                                                  were skipped or had zero       │
 │                                                                  findings.                      │
+│ --annotate-duplicates                                            Add `cluster_id`,              │
+│                                                                  `duplicate_of` and             │
+│                                                                  `duplicate_sources` columns to │
+│                                                                  the CSV and flat-JSON reports, │
+│                                                                  naming findings that two       │
+│                                                                  scanners report for one defect │
+│                                                                  (same CVE and package, same    │
+│                                                                  IaC resource, or same line and │
+│                                                                  CWE). Rows, ids, counts,       │
+│                                                                  SARIF, suppressions and        │
+│                                                                  baselines are unchanged. Adds  │
+│                                                                  three columns to the CSV       │
+│                                                                  header, so it is off by        │
+│                                                                  default. Sets                  │
+│                                                                  `global_settings.deduplicatio… │
+│ --fold-duplicates                                                Show one row per duplicate     │
+│                                                                  cluster in the HTML, Markdown  │
+│                                                                  and text reports, with a note  │
+│                                                                  naming the other scanners that │
+│                                                                  reported it, and add           │
+│                                                                  deduplicated counts beside the │
+│                                                                  per-scanner counts. Only the   │
+│                                                                  same CVE and package, or the   │
+│                                                                  same line and CWE, fold.       │
+│                                                                  Finding ids, SARIF,            │
+│                                                                  per-scanner counts,            │
+│                                                                  suppressions, baselines, the   │
+│                                                                  CSV, flat-JSON and JUnit       │
+│                                                                  reports and the exit code are  │
+│                                                                  unchanged. Off by default      │
+│                                                                  because it changes row counts. │
+│                                                                  Sets                           │
+│                                                                  `global_settings.deduplicatio… │
 └─────────────────────────────────────────────────────────────────────────────────────────────────┘
 ┌─ Configuration and plugins ─────────────────────────────────────────────────────────────────────┐
 │ --ash-plugin-modules        <str>  List of Python modules to import containing ASH plugins      │
