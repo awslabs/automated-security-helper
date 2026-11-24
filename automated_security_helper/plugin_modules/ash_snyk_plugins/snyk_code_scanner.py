@@ -6,6 +6,7 @@ from contextlib import ExitStack
 from datetime import datetime, timezone
 import logging
 import os
+import re
 import shutil
 import time
 from pathlib import Path
@@ -55,6 +56,7 @@ from automated_security_helper.utils.scanned_tree import (
     open_in_scanned_tree,
     relative_display,
 )
+from automated_security_helper.utils.taxonomy_ids import cwes_of_tags
 from automated_security_helper.utils.subprocess_utils import (
     find_executable,
     in_tree_refusal,
@@ -273,6 +275,64 @@ def _sarif_result_count(document: Any) -> int:
     )
 
 
+#: A CWE as snyk writes it in a rule's ``properties.cwe``: ``CWE-798``.
+_NATIVE_CWE = re.compile(r"^cwe-(\d+)$", re.IGNORECASE)
+
+
+def normalize_rule_cwe_into_tags(document: Any) -> Any:
+    """Name each rule's native CWE in its tags, the form the flat reader reads.
+
+    ``snyk code test --sarif`` states a rule's CWE in ``properties.cwe`` (for
+    example ``["CWE-798"]``) and keeps language and category words in the tags.
+    The shared reader (``utils/taxonomy_ids``) reads tags only and leaves a
+    scanner that encodes a CWE another way to normalize its own SARIF, so this
+    adds ``external/cwe/cwe-<n>`` to the rule's tags before the report is built.
+
+    Rule-local and fail-closed: the source is the rule's own ``cwe`` list, an
+    entry that is not exactly ``CWE-<n>`` is skipped, a value that is not a list
+    attaches nothing, and a CWE the tags already name is not added again. The
+    native ``cwe`` value stays where snyk put it. A document of any other shape
+    is returned as it came. The document is edited in place and returned.
+    """
+    if not isinstance(document, dict):
+        return document
+    for run in document.get("runs") or []:
+        if not isinstance(run, dict):
+            continue
+        tool = run.get("tool")
+        driver = tool.get("driver") if isinstance(tool, dict) else None
+        rules = driver.get("rules") if isinstance(driver, dict) else None
+        if not isinstance(rules, list):
+            continue
+        for rule in rules:
+            properties = rule.get("properties") if isinstance(rule, dict) else None
+            if not isinstance(properties, dict):
+                continue
+            native = properties.get("cwe")
+            if not isinstance(native, list):
+                continue
+            tags = properties.get("tags")
+            if tags is not None and not isinstance(tags, list):
+                continue
+            tags = list(tags or [])
+            named = set(cwes_of_tags(tags))
+            added = []
+            for entry in native:
+                if not isinstance(entry, str):
+                    continue
+                match = _NATIVE_CWE.match(entry.strip())
+                if match is None:
+                    continue
+                cwe = f"CWE-{match.group(1)}"
+                if cwe in named:
+                    continue
+                named.add(cwe)
+                added.append(f"external/cwe/cwe-{match.group(1)}")
+            if added:
+                properties["tags"] = [*tags, *added]
+    return document
+
+
 class SnykCodeScannerConfigOptions(ScannerOptionsBase):
     honor_tree_exclusions: Annotated[
         bool,
@@ -375,12 +435,11 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
             reason="snyk code rules are source-defect classes, not CVEs",
         ),
         taxonomy_cwe=FacetDecl(
-            state=FacetState.DROPPED,
-            native_field='rule properties "cwe" (e.g. ["CWE-798"])',
-            reason="the shared flat reader reads tags only "
-            "(utils/taxonomy_ids.py) and snyk's tags are language and "
-            "category words, so the flat CWE is None; UNCONFIRMED against a "
-            "real tool run",
+            state=FacetState.MAPPED,
+            native_field='tool.driver.rules[].properties "cwe" (e.g. '
+            '["CWE-798"]), normalized by normalize_rule_cwe_into_tags into '
+            "the rule's tags as external/cwe/cwe-<n>, which the shared flat "
+            "reader reads",
         ),
         fingerprints=FacetDecl(
             state=FacetState.MAPPED,
@@ -923,7 +982,7 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
                     )
                 try:
                     sarif_report: SarifReport = SarifReport.model_validate(
-                        scanner_results
+                        normalize_rule_cwe_into_tags(scanner_results)
                     )
 
                     # Attach scanner details for proper identification
