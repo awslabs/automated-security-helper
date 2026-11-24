@@ -1206,6 +1206,7 @@ def _resolve_project_config(
     trusted_config: Optional[Path] = None,
     remote_client: bool = False,
     permit_base: Optional[Callable[[Path], bool]] = None,
+    operator_fallback_out: Optional[List[bool]] = None,
 ) -> Tuple[AshConfig, Optional[Path], Optional[Path]]:
     """Load one project's config through ASH's ordinary resolution path.
 
@@ -1324,6 +1325,10 @@ def _resolve_project_config(
             overlay = operator if config_path is not None else None
         if config_path is None and default_config is not None:
             config_path = Path(default_config)
+            if operator_fallback_out is not None and (
+                trusted_config is None or str(trusted_config) == str(default_config)
+            ):
+                operator_fallback_out.append(True)
         config = resolve_config(
             config_path=config_path,
             source_dir=candidate.resolved,
@@ -2121,6 +2126,7 @@ def resolve_workspace(
             )
             continue
 
+        operator_fallback: List[bool] = []
         config, config_path, operator_config = _resolve_project_config(
             candidate,
             config_overrides,
@@ -2130,6 +2136,7 @@ def resolve_workspace(
             trusted_config=Path(trusted_config) if trusted_config else None,
             remote_client=remote_client,
             permit_base=permit_base,
+            operator_fallback_out=operator_fallback,
         )
         scanners, pins, twins = _scanner_state(config)
         disabled_pins[candidate.key] = _disabled_scanner_pins(config)
@@ -2169,6 +2176,7 @@ def resolve_workspace(
         )
         # Private: no dump of the plan shows it (ProjectPlan._environment_values).
         project._environment_values = config_environment_values(config)
+        project._config_source_is_operator_fallback = bool(operator_fallback)
         projects.append(project)
 
     active = [project for project in projects if not project.skipped]

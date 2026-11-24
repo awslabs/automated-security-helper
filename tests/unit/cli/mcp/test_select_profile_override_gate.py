@@ -344,6 +344,22 @@ _DENIED_CASES: Dict[str, tuple[Dict[str, Any], Dict[str, Any]]] = {
         {"op": "add", "path": "/ash_plugin_modules/-", "value": "standin_module"},
         {"ash_plugin_modules": ["standin_module"]},
     ),
+    "/scanner_selection": (
+        {
+            "op": "add",
+            "path": "/scanner_selection",
+            "value": {"only_scanners": ["standin_scanner"]},
+        },
+        {"scanner_selection": {"only_scanners": ["standin_scanner"]}},
+    ),
+    "/scanner_selection/**": (
+        {
+            "op": "add",
+            "path": "/scanner_selection/add_scanners",
+            "value": ["standin_scanner"],
+        },
+        {"scanner_selection": {"add_scanners": ["standin_scanner"]}},
+    ),
     "/global_settings/ignore_paths": (
         {
             "op": "add",
@@ -1273,6 +1289,7 @@ def test_override_yaml_is_refused_by_every_shipped_denied_path(
             for prefix in (
                 "/sandbox",
                 "/ash_plugin_modules",
+                "/scanner_selection",
                 "/global_settings/mcp",
                 "/scanners/detect-secrets/options/scan_settings/filters_used",
                 "/scanners/detect-secrets/options/scan_settings/plugins_used",

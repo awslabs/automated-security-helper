@@ -2088,7 +2088,10 @@ def _project_config_with_policy(
     # fallback as this project's config_source when one applied -- this branch
     # covers a plan built without it, and a hand-built plan.
     config_path = project.config_source or settings.default_config_path
-    if config_path is not None:
+    if config_path is not None and not (
+        project.config_source is not None
+        and project._config_source_is_operator_fallback
+    ):
         # Checked again here, not only by the plan: the file is read now, and a
         # link can change between the two (config_sources, "Base paths").
         check_discovered_source(Path(config_path), settings.config_base_gate)
