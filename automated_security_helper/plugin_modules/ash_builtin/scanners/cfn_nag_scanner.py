@@ -315,6 +315,42 @@ def _ruby_headers_present(system_include: Path = Path("/usr/include")) -> bool:
     return not own_include.is_dir()
 
 
+#: The oldest Ruby cfn-nag 0.8.10 installs on: its gemspec's required_ruby_version
+#: is ``>= 2.5`` (RubyGems API, versions/0.8.10.json, ruby_version) and declares no
+#: upper bound, so this floor is the only range the gem itself states. It is a
+#: probe here and not a ``ruby`` line in assets/Gemfile because ``gem install``
+#: never reads the Gemfile, and the two bundler consumers (the container image on
+#: Debian's ruby 3.1, the reusable workflow on setup-ruby 3.3) already pin their own.
+_CFN_NAG_MIN_RUBY = (2, 5)
+
+
+def _ruby_is_too_old(minimum: tuple[int, int] = _CFN_NAG_MIN_RUBY) -> bool:
+    """Whether the ``ruby`` on PATH is measurably older than cfn-nag supports.
+
+    A filesystem probe, like ``_ruby_headers_present``: the interpreter's library
+    directory holds one ``lib/ruby/<major>.<minor>.0`` entry per language version it
+    carries, and that is the version a gem install resolves against. True only when
+    such entries exist and every one is below ``minimum``. No ``ruby`` on PATH (the
+    RubyGems probe reports that), a version manager's shim whose prefix has no
+    ``lib/ruby``, or an unreadable layout all read False: the answer is that this
+    cannot be told, and the gem install then reports a version mismatch itself.
+    """
+    ruby = find_executable("ruby")
+    if ruby is None:
+        return False
+    lib = Path(os.path.realpath(ruby)).parent.parent / "lib" / "ruby"
+    try:
+        entries = [p.name for p in lib.iterdir() if p.is_dir()]
+    except OSError:
+        return False
+    versions = []
+    for name in entries:
+        found = re.fullmatch(r"(\d+)\.(\d+)\.\d+", name)
+        if found:
+            versions.append((int(found.group(1)), int(found.group(2))))
+    return bool(versions) and max(versions) < minimum
+
+
 def _restore_cfn_nag_uris(
     report: SarifReport, staged: Path, cfn_file: str, run_dir: str | Path
 ) -> None:
@@ -714,6 +750,11 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
         missing: List[str] = []
         if find_executable("gem") is None:
             missing.append("RubyGems (`gem`) is not on PATH")
+        elif _ruby_is_too_old():
+            missing.append(
+                "the ruby on PATH is older than 2.5, the oldest cfn-nag 0.8.10's "
+                "gemspec (required_ruby_version) installs on"
+            )
 
         if platform.system() == "Windows":
             # Windows is checked on RI_DEVKIT rather than on a compiler being present,

@@ -1,9 +1,11 @@
 import csv
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from io import StringIO
 from typing import Any, Literal, TYPE_CHECKING
 
 if TYPE_CHECKING:
+    import polars as pl
+
     from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.base.options import ReporterOptionsBase
 from automated_security_helper.base.reporter_plugin import (
@@ -17,6 +19,7 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.workspace_sk
     skipped_projects,
 )
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
+from automated_security_helper.utils.frame_text import unwire, wire
 from automated_security_helper.utils.terminal_text import commands_broken
 
 #: The workspace-mode column header. First rather than appended, because a
@@ -80,6 +83,83 @@ def spreadsheet_safe(value: Any) -> Any:
     return value
 
 
+def cell_frame(
+    rows: Sequence[Mapping[str, Any]], fields: Sequence[str]
+) -> "pl.DataFrame":
+    """The finding rows of the report as a frame of cells: one row per finding in
+    *rows*' order, one String column per entry of *fields* in *fields*' order,
+    every cell the text :func:`spreadsheet_safe` and ``csv`` would have written
+    (held through :func:`~automated_security_helper.utils.frame_text.wire`, which
+    ``unwire`` undoes, so a path with a lone surrogate comes back as it went in).
+
+    What is a projection and is one here: picking each column out of each finding
+    by name (a key a finding lacks is an empty cell), the workspace row-type
+    column as a constant, the empty cell for null, and the quote in front of a
+    text cell that begins with a formula character.
+
+    What stays Python, because it is honestly per cell: how a cell is written as
+    text (``str()`` of an int, a bool or anything else the dump holds, which is
+    ``True`` and not the ``true`` a polars cast gives), and the CI command break,
+    whose pattern needs look-behind and a replacement function, neither of which a
+    polars (Rust) regex has. The break is made on the text before it is wired:
+    wired text is Latin-1 of the UTF-8 bytes, where a regex's notion of whitespace
+    is another text's. Both fill two columns per field, ``text`` for a ``str`` cell
+    (the only kind the quote applies to; ``-3`` stays a number) and ``other`` for
+    any other value, and the frame decides which one a cell is written from.
+    """
+    import polars as pl
+
+    texts: dict[str, list[str | None]] = {}
+    others: dict[str, list[str | None]] = {}
+    for index, field in enumerate(fields):
+        if field == ROW_TYPE_COLUMN:
+            continue
+        text_cells: list[str | None] = []
+        other_cells: list[str | None] = []
+        for row in rows:
+            # .get rather than [], because the header is assembled from the first
+            # finding's keys plus the project column. A later finding missing a
+            # key -- or a project column added to the header of a scan whose
+            # findings predate it -- would otherwise raise a KeyError and lose
+            # the whole report rather than one cell.
+            value = row.get(field)
+            if isinstance(value, str):
+                text_cells.append(wire(commands_broken(value)))
+                other_cells.append(None)
+            else:
+                text_cells.append(None)
+                other_cells.append(None if value is None else wire(str(value)))
+        texts[f"t{index}"] = text_cells
+        others[f"o{index}"] = other_cells
+    frame = pl.DataFrame(
+        {**texts, **others},
+        schema=dict.fromkeys((*texts, *others), pl.String),
+    )
+
+    leads = list(_FORMULA_LEADS)
+    cells = []
+    for index, field in enumerate(fields):
+        if field == ROW_TYPE_COLUMN:
+            # Stated rather than left blank. A blank cell is ambiguous with a
+            # value the producer failed to write, so a consumer cannot tell "this
+            # is a finding" from "something went wrong here" -- and the filter
+            # would have to be a negation, which silently admits any future row
+            # type nobody taught it about.
+            cells.append(pl.lit(FINDING_ROW_TYPE).alias(f"c{index}"))
+            continue
+        text = pl.col(f"t{index}")
+        cells.append(
+            pl.coalesce(
+                pl.when(pl.any_horizontal(*(text.str.starts_with(c) for c in leads)))
+                .then(pl.concat_str([pl.lit("'"), text]))
+                .otherwise(text),
+                pl.col(f"o{index}"),
+                pl.lit(""),
+            ).alias(f"c{index}")
+        )
+    return frame.select(cells)
+
+
 class CSVReporterConfigOptions(ReporterOptionsBase):
     pass
 
@@ -115,6 +195,12 @@ class CsvReporter(ReporterPluginBase[CSVReporterConfig]):
     not acquire a phantom finding. ``workspace_skipped_rows`` carries the full
     argument, including why the same problem is solved differently in junitxml and
     ocsf.
+
+    The finding rows are projected as a frame (:func:`cell_frame`); what stays
+    Python is what is per cell by nature -- how a value is written as text, the
+    CI command break (a look-behind pattern with a replacement function), the
+    skipped-project rows (a handful of fixed-shape rows, not one per finding) and
+    the ``csv`` writing itself, which is I/O formatting.
     """
 
     workspace_behaviour = ReporterWorkspaceBehaviour.MERGED
@@ -197,26 +283,15 @@ class CsvReporter(ReporterPluginBase[CSVReporterConfig]):
         # Write header row
         writer.writerow(fields)
 
-        # Write data rows
-        for vuln in flat_vulns:
-            row = []
-            for field in fields:
-                if field == ROW_TYPE_COLUMN:
-                    # Stated rather than left blank. A blank cell is ambiguous
-                    # with a value the producer failed to write, so a consumer
-                    # cannot tell "this is a finding" from "something went wrong
-                    # here" -- and the filter would have to be a negation, which
-                    # silently admits any future row type nobody taught it about.
-                    row.append(FINDING_ROW_TYPE)
-                    continue
-                # .get rather than [], because the header is assembled from the
-                # first finding's keys plus the project column. A later finding
-                # missing a key -- or a project column added to the header of a
-                # scan whose findings predate it -- would otherwise raise a
-                # KeyError and lose the whole report rather than one cell.
-                value = vuln.get(field)
-                row.append(spreadsheet_safe(value) if value is not None else "")
-            writer.writerow(row)
+        # Write data rows: the cells are projected as a frame, the file is
+        # written from it row by row.
+        if fields:
+            for cells in cell_frame(flat_vulns, fields).iter_rows():
+                writer.writerow([unwire(cell) for cell in cells])
+        else:
+            # A finding that dumped no field at all is one empty line, as ever.
+            for _ in flat_vulns:
+                writer.writerow([])
 
         for entry in skipped:
             writer.writerow(self._skipped_project_row(fields, entry))

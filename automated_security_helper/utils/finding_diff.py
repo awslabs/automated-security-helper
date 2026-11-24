@@ -3,13 +3,15 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+import polars as pl
+
 from automated_security_helper.core.enums import ScannerStatus
 from automated_security_helper.utils.finding_identity import canonical
+from automated_security_helper.utils.frame_text import ranks, wire
 
 if TYPE_CHECKING:
     from automated_security_helper.models.asharp_model import AshAggregatedResults
@@ -154,12 +156,77 @@ def fallback_key(finding: FlatVulnerability) -> tuple[Any, ...] | None:
     )
 
 
-def _order(finding: FlatVulnerability) -> tuple[Any, ...]:
-    return (
-        finding.line_start if finding.line_start is not None else -1,
-        finding.line_end if finding.line_end is not None else -1,
-        finding.id,
+def _wire(text: str | None) -> str | None:
+    """*text* as a string polars can hold, with its equality and its order kept.
+
+    Polars strings are UTF-8, so a lone surrogate (a path ``os.fsdecode`` made
+    from undecodable bytes reaches the key through ``canonical``) cannot enter a
+    frame. The UTF-8 bytes of the text, surrogates passed through, read as Latin-1
+    are one-to-one with the text, and sorting them sorts as the text's code
+    points do.
+    """
+    return wire(text)
+
+
+_SIDE_SCHEMA = {
+    "i": pl.Int64,
+    "id": pl.String,
+    "has_identity": pl.Boolean,
+    "fingerprinted": pl.Boolean,
+    "message": pl.String,
+    "base": pl.String,
+    "key_message": pl.String,
+    "severity": pl.String,
+    "suppressed": pl.Boolean,
+    "line_start": pl.Int64,
+    "line_end": pl.Int64,
+}
+_LOOSE = ["base", "key_message"]
+_FULL = [*_LOOSE, "severity"]
+#: How findings of one place are put in order: lines (-1 for none), then id, then
+#: where the scan listed them (the stable tie-break the old ``sorted`` gave).
+_PLACE = [
+    pl.col("line_start").fill_null(-1),
+    pl.col("line_end").fill_null(-1),
+    pl.col("id"),
+    pl.col("i"),
+]
+
+
+def _side(findings: list[FlatVulnerability]) -> pl.DataFrame:
+    """One scan's findings as a frame, one row per finding, ``i`` its position.
+
+    The identity attributes are properties of the finding objects, so reading
+    them is a Python pass; everything after it is frame operations. ``base`` is
+    null for a finding :func:`fallback_key` does not key.
+    """
+    columns: dict[str, list[Any]] = {name: [] for name in _SIDE_SCHEMA}
+    # Lines are unbounded ints and the frame column is 64-bit, so the column
+    # holds each line's rank (no line is -1, as the old sort key had it). Only
+    # the order of lines is ever used.
+    line_rank = ranks(
+        -1 if line is None else line
+        for finding in findings
+        for line in (finding.line_start, finding.line_end)
     )
+    for index, finding in enumerate(findings):
+        key = fallback_key(finding)
+        row = (
+            index,
+            _wire(finding.id),
+            finding.identity is not None,
+            finding.has_fingerprint_identity,
+            _wire(finding.identity_message),
+            _wire(key[0]) if key else None,
+            _wire(key[1]) if key else None,
+            _wire(key[2]) if key else None,
+            finding.is_suppressed,
+            line_rank[-1 if finding.line_start is None else finding.line_start],
+            line_rank[-1 if finding.line_end is None else finding.line_end],
+        )
+        for name, value in zip(columns, row):
+            columns[name].append(value)
+    return pl.DataFrame(columns, schema=_SIDE_SCHEMA)
 
 
 def match_findings(
@@ -176,106 +243,111 @@ def match_findings(
     """
     before = list(before)
     after = list(after)
-    before_ids = defaultdict(list)
-    after_ids = defaultdict(list)
-    for index, finding in enumerate(before):
-        before_ids[finding.id].append(index)
-    for index, finding in enumerate(after):
-        after_ids[finding.id].append(index)
-    matched_before = set()
-    matched_after = set()
-    exact = []
-    exact_indices = []
-    for finding_id in sorted(before_ids.keys() & after_ids.keys()):
-        if len(before_ids[finding_id]) != 1 or len(after_ids[finding_id]) != 1:
-            continue
-        i, j = before_ids[finding_id][0], after_ids[finding_id][0]
-        previous, current = before[i], after[j]
-        if previous.identity is not None and current.identity is not None:
-            fingerprinted = all(
-                finding.has_fingerprint_identity for finding in (previous, current)
-            )
-            if (
-                not fingerprinted
-                and previous.identity_message != current.identity_message
-            ):
-                continue
-        exact.append((previous, current))
-        exact_indices.append((i, j))
-        matched_before.add(i)
-        matched_after.add(j)
+    old, new = _side(before), _side(after)
 
-    def loose_key(finding: FlatVulnerability) -> tuple[Any, ...] | None:
-        key = fallback_key(finding)
-        return None if key is None else key[:2]
-
-    partner = {j: i for i, j in exact_indices}
-    whole_before = defaultdict(list)
-    whole_after = defaultdict(list)
-    for index, finding in enumerate(before):
-        key = loose_key(finding)
-        if key is not None:
-            whole_before[key].append(index)
-    for index, finding in enumerate(after):
-        key = loose_key(finding)
-        if key is not None:
-            whole_after[key].append(index)
-    ambiguous = {
-        key
-        for key in whole_before.keys() & whole_after.keys()
-        if len({before[i].is_suppressed for i in whole_before[key]}) > 1
-        and not (
-            len(whole_before[key]) == len(whole_after[key])
-            and all(
-                j in partner and loose_key(before[partner[j]]) == key
-                for j in whole_after[key]
+    # Exact: an id carried once on each side, unless both sides have an identity,
+    # are not both fingerprinted, and say different things.
+    exact = (
+        old.filter(pl.col("id").is_unique())
+        .join(new.filter(pl.col("id").is_unique()), on="id", suffix="_a")
+        .filter(
+            ~(
+                pl.col("has_identity")
+                & pl.col("has_identity_a")
+                & ~(pl.col("fingerprinted") & pl.col("fingerprinted_a"))
+                & pl.col("message").ne_missing(pl.col("message_a"))
             )
         )
-    }
-    if ambiguous:
-        kept = []
-        for i, j in exact_indices:
-            if loose_key(before[i]) in ambiguous or loose_key(after[j]) in ambiguous:
-                matched_before.discard(i)
-                matched_after.discard(j)
-            else:
-                kept.append((before[i], after[j]))
-        exact = kept
-    groups_before = defaultdict(list)
-    groups_after = defaultdict(list)
-    for index, finding in enumerate(before):
-        key = fallback_key(finding)
-        if index not in matched_before and key is not None:
-            groups_before[key].append(index)
-    for index, finding in enumerate(after):
-        key = fallback_key(finding)
-        if index not in matched_after and key is not None:
-            groups_after[key].append(index)
-    moved = []
-    for key in sorted(groups_before.keys() & groups_after.keys()):
-        if key[:2] in ambiguous:
-            continue
-        old, new = groups_before[key], groups_after[key]
-        if len(new) > len(old) or len({before[i].is_suppressed for i in old}) > 1:
-            continue
-        for i, j in zip(
-            sorted(old, key=lambda n: _order(before[n])),
-            sorted(new, key=lambda n: _order(after[n])),
-        ):
-            moved.append((before[i], after[j]))
-            matched_before.add(i)
-            matched_after.add(j)
+    )
+
+    # A place (rule, file, message) is ambiguous when its before findings differ
+    # in suppression and the after findings are not simply their exact partners.
+    # Every after finding of the place must have an exact partner of the same place.
+    before_places = (
+        old.filter(pl.col("base").is_not_null())
+        .group_by(_LOOSE)
+        .agg(pl.len().alias("n"), (pl.col("suppressed").n_unique() > 1).alias("mixed"))
+    )
+    after_places = (
+        new.filter(pl.col("base").is_not_null())
+        .join(
+            exact.select(
+                "i_a", pl.col("base").alias("pb"), pl.col("key_message").alias("pm")
+            ),
+            left_on="i",
+            right_on="i_a",
+            how="left",
+        )
+        .group_by(_LOOSE)
+        .agg(
+            pl.len().alias("n_a"),
+            ((pl.col("pb") == pl.col("base")) & (pl.col("pm") == pl.col("key_message")))
+            .fill_null(False)
+            .all()
+            .alias("partnered"),
+        )
+    )
+    ambiguous = (
+        before_places.join(after_places, on=_LOOSE)
+        .filter(
+            pl.col("mixed") & ~((pl.col("n") == pl.col("n_a")) & pl.col("partnered"))
+        )
+        .select(_LOOSE)
+    )
+    exact = (
+        exact.join(ambiguous, on=_LOOSE, how="anti")
+        .join(
+            ambiguous,
+            left_on=["base_a", "key_message_a"],
+            right_on=_LOOSE,
+            how="anti",
+        )
+        .sort("id")
+    )
+
+    # Moved: what is left, grouped by the full key. A group moves when it has no
+    # more after than before findings and its before findings agree on
+    # suppression; they pair off in line order, in order of key.
+    def unmatched(side: pl.DataFrame, matched: pl.Series) -> pl.DataFrame:
+        return side.filter(
+            ~pl.col("i").is_in(matched.implode()) & pl.col("base").is_not_null()
+        )
+
+    left_old = unmatched(old, exact["i"])
+    left_new = unmatched(new, exact["i_a"])
+    moving = (
+        left_old.group_by(_FULL)
+        .agg(pl.len().alias("n"), (pl.col("suppressed").n_unique() > 1).alias("mixed"))
+        .join(left_new.group_by(_FULL).agg(pl.len().alias("n_a")), on=_FULL)
+        .join(ambiguous, on=_LOOSE, how="anti")
+        .filter(~pl.col("mixed") & (pl.col("n_a") <= pl.col("n")))
+        .select(_FULL)
+    )
+
+    def lined_up(side: pl.DataFrame) -> pl.DataFrame:
+        return (
+            side.join(moving, on=_FULL)
+            .sort(_PLACE)
+            .with_columns(pl.int_range(pl.len()).over(_FULL).alias("rank"))
+        )
+
+    moved = (
+        lined_up(left_old)
+        .join(lined_up(left_new), on=[*_FULL, "rank"], suffix="_a")
+        .sort([*_FULL, "rank"])
+    )
+
+    def leftover(side: pl.DataFrame, matched: list[pl.Series]) -> pl.Series:
+        taken = pl.concat(matched)
+        return side.filter(~pl.col("i").is_in(taken.implode())).sort(
+            [pl.col("id"), *_PLACE]
+        )["i"]
+
     return FindingMatch(
-        exact,
-        moved,
-        sorted(
-            (f for i, f in enumerate(after) if i not in matched_after),
-            key=lambda f: (f.id, _order(f)),
-        ),
-        sorted(
-            (f for i, f in enumerate(before) if i not in matched_before),
-            key=lambda f: (f.id, _order(f)),
-        ),
+        [(before[i], after[j]) for i, j in exact.select("i", "i_a").iter_rows()],
+        [(before[i], after[j]) for i, j in moved.select("i", "i_a").iter_rows()],
+        [after[i] for i in leftover(new, [exact["i_a"], moved["i_a"]])],
+        [before[i] for i in leftover(old, [exact["i"], moved["i"]])],
     )
 
 

@@ -6,6 +6,8 @@ import json
 import re
 from typing import Dict, List, Any, TYPE_CHECKING
 
+import polars as pl
+
 from automated_security_helper.models.flat_vulnerability import (
     FlatVulnerability,
     _extract_snippet_from_message,
@@ -27,7 +29,13 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.workspace_se
 )
 from automated_security_helper.utils.policy_origin import is_policy_origin
 from automated_security_helper.utils.severity_ladder import severity_fails_threshold
-from collections import Counter
+from automated_security_helper.plugin_modules.ash_builtin.reporters._report_frames import (
+    active_level_counts,
+    flag_total,
+    graded_frame,
+    severity_order,
+    top_locations,
+)
 
 
 def coverage_shortfall_text(attempted: int | None, failed: int | None) -> str:
@@ -92,6 +100,15 @@ _SEVERITY_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "INFO": 4}
 _UNLISTED_SEVERITY_PLACE = len(_SEVERITY_ORDER)
 
 
+def _severity_level(severity: Any) -> str:
+    """The bucket name a finding of *severity* is counted under.
+
+    A row with no severity is ``unknown``, the name the grading and the finding
+    lists give it, not an empty name.
+    """
+    return str(severity or "UNKNOWN").lower()
+
+
 def _count_severity(counts: Dict[str, int], severity: Any) -> None:
     """Count one finding under its severity's bucket.
 
@@ -105,8 +122,14 @@ def _count_severity(counts: Dict[str, int], severity: Any) -> None:
     A row with no severity counts under ``unknown``, the name the grading and
     the finding lists give it, not under an empty name.
     """
-    level = str(severity or "UNKNOWN").lower()
+    level = _severity_level(severity)
     counts[level] = counts.get(level, 0) + 1
+
+
+def _add_level_counts(counts: Dict[str, int], graded: pl.DataFrame) -> None:
+    """Add the unsuppressed findings of *graded* to *counts* by severity bucket."""
+    for level, found in active_level_counts(graded):
+        counts[level] = counts.get(level, 0) + found
 
 
 def parse_scan_time(text: str) -> datetime | None:
@@ -424,27 +447,24 @@ class ReportContentEmitter:
             # Imported SARIF can contain findings without execution metadata.
             # Count those findings while making no completion claim.
             counts = dict.fromkeys(counts, 0)
-            for vuln in self.flat_vulns:
-                if not vuln.is_suppressed:
-                    _count_severity(counts, vuln.severity)
-            actionable = sum(
-                self.is_finding_actionable(vuln) for vuln in self.flat_vulns
-            )
-            suppressed = sum(vuln.is_suppressed for vuln in self.flat_vulns)
+            every = self._graded_frame(self.flat_vulns, actionable=True)
+            _add_level_counts(counts, every)
+            actionable = flag_total(every, "actionable")
+            suppressed = flag_total(every, "suppressed")
         else:
             # The scanner rows count SARIF results. Findings an additional
             # report lists (a plugin's own list of finding dicts) reach the
             # cards and the hotspots, and a headline that left them out read
             # "No actionable findings" above cards marked Actionable.
-            extras = self._additional_report_findings()
-            for vuln in extras:
-                if vuln.is_suppressed:
-                    suppressed += 1
-                else:
-                    _count_severity(counts, vuln.severity)
+            extras = self._graded_frame(
+                self._additional_report_findings(),
+                actionable=not is_workspace_scan(self.model),
+            )
+            _add_level_counts(counts, extras)
+            suppressed += flag_total(extras, "suppressed")
             if not is_workspace_scan(self.model):
                 # A workspace scan counted every finding above, these included.
-                actionable += sum(self.is_finding_actionable(vuln) for vuln in extras)
+                actionable += flag_total(extras, "actionable")
         completed = sum(ran(result) for result in results)
         skipped = sum(result["status"] == "SKIPPED" for result in results)
         unavailable = [
@@ -475,9 +495,7 @@ class ReportContentEmitter:
         active = sum(counts.values())
         # Policy-scanner findings the project's outcome left out are counted
         # apart: they are active, not actionable, and not below any threshold.
-        policy_not_gating = sum(
-            self.is_policy_not_gating(vuln) for vuln in self.flat_vulns
-        )
+        policy_not_gating = flag_total(self._graded_frame(self.flat_vulns), "left_out")
         # A tool ASH could not stop fails the run whatever the gate says, and it
         # may still be writing into the output directory after this report is
         # rendered, so the report is not final. The exit code reads it from the
@@ -573,6 +591,27 @@ class ReportContentEmitter:
             "could_not_stop": could_not_stop,
         }
 
+    def _graded_frame(
+        self, vulns: List[FlatVulnerability], *, actionable: bool = False
+    ) -> pl.DataFrame:
+        """The findings as a frame of severity bucket and yes/no gradings.
+
+        Each finding's grading is one lookup against the model's recorded
+        gates (:meth:`is_finding_actionable`, :meth:`is_policy_not_gating`),
+        made here row by row; the counting over the result is the frame's.
+        ``actionable`` is asked for only by the callers that read it.
+        """
+        return graded_frame(
+            levels=[_severity_level(vuln.severity) for vuln in vulns],
+            suppressed=[bool(vuln.is_suppressed) for vuln in vulns],
+            left_out=[self.is_policy_not_gating(vuln) for vuln in vulns],
+            actionable=(
+                [self.is_finding_actionable(vuln) for vuln in vulns]
+                if actionable
+                else None
+            ),
+        )
+
     def _additional_report_findings(self) -> List[FlatVulnerability]:
         """The flattened findings that came from list-form additional reports.
 
@@ -600,17 +639,14 @@ class ReportContentEmitter:
             return []
 
         # Count findings by file location, but only include actionable findings
-        location_counts = Counter()
-        for vuln in self.flat_vulns:
-            # Check if the finding is actionable based on severity threshold
-            if vuln.file_path and self.is_finding_actionable(vuln):
-                location_counts[vuln.file_path] += 1
-
-        # Get top hotspots
-        top_hotspots = location_counts.most_common(limit)
-
+        locations = [
+            vuln.file_path
+            for vuln in self.flat_vulns
+            if vuln.file_path and self.is_finding_actionable(vuln)
+        ]
         return [
-            {"location": location, "count": count} for location, count in top_hotspots
+            {"location": location, "count": count}
+            for location, count in top_locations(locations, limit)
         ]
 
     def is_finding_actionable(self, vuln: FlatVulnerability) -> bool:
@@ -742,6 +778,14 @@ class ReportContentEmitter:
             vuln.rule_id or "",
         )
 
+    @classmethod
+    def _by_severity(cls, vulns: List[FlatVulnerability]) -> List[FlatVulnerability]:
+        """*vulns* most severe first; findings equal on every key keep their order."""
+        return [
+            vulns[position]
+            for position in severity_order([cls._severity_sort_key(v) for v in vulns])
+        ]
+
     def get_findings_overview(self) -> List[Dict[str, Any]]:
         """Get overview of all findings."""
         return [self._overview_row(vuln) for vuln in self.flat_vulns]
@@ -757,7 +801,7 @@ class ReportContentEmitter:
         ]
 
         # Limit the number of detailed findings
-        actionable_findings.sort(key=self._severity_sort_key)
+        actionable_findings = self._by_severity(actionable_findings)
         # A negative limit would slice from the end and drop the last findings
         # instead of none; the reporters refuse one, and a caller that passes
         # one anyway gets none.
@@ -777,7 +821,7 @@ class ReportContentEmitter:
         in its summary names none of them.
         """
         left_out = [vuln for vuln in self.flat_vulns if self.is_policy_not_gating(vuln)]
-        left_out.sort(key=self._severity_sort_key)
+        left_out = self._by_severity(left_out)
         return [self._overview_row(vuln) for vuln in left_out[: max(max_findings, 0)]]
 
     def _create_detailed_finding(self, vuln: FlatVulnerability) -> Dict[str, Any]:

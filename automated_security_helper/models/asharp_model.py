@@ -66,6 +66,8 @@ from automated_security_helper.utils.secret_masking import (
 from automated_security_helper.utils.terminal_text import shown_on_one_line
 
 if TYPE_CHECKING:
+    import polars as pl
+
     from automated_security_helper.config.ash_config import AshConfig
 
 __all__ = ["AshAggregatedResults"]
@@ -1738,11 +1740,15 @@ class AshAggregatedResults(RecordModel):
             ScannerStatisticsCalculator,
         )
 
-        counts: Dict[str, int] = {}
-        for flat_vuln in flat_vulns:
-            if flat_vuln.is_suppressed:
-                scanner_key = (flat_vuln.scanner or "").lower()
-                counts[scanner_key] = counts.get(scanner_key, 0) + 1
+        # The SARIF findings' share is a group-by over their frame
+        # (models/flat_frame.py); the dict results' share, read off the model, is
+        # added to it below.
+        from automated_security_helper.models.flat_frame import (
+            flat_frame,
+            suppressed_by_scanner,
+        )
+
+        counts: Dict[str, int] = suppressed_by_scanner(flat_frame(flat_vulns))
 
         seen: set[str] = set()
         for name in [*self.scanner_results, *self.additional_reports]:
@@ -1755,6 +1761,16 @@ class AshAggregatedResults(RecordModel):
             if recorded_by_dict:
                 counts[name.lower()] = counts.get(name.lower(), 0) + recorded_by_dict
         return counts
+
+    def _flat_frame(self) -> "pl.DataFrame":
+        """The flattened findings as a frame, for the reporters that count, group
+        or join them: one row per finding of :meth:`to_flat_vulnerabilities`,
+        ``i`` the position in that list. The columns and how text and line numbers
+        are carried are in ``models/flat_frame.py``. Built from the list each
+        time, not memoized: the list is, and its findings are mutable."""
+        from automated_security_helper.models.flat_frame import flat_frame
+
+        return flat_frame(self.to_flat_vulnerabilities())
 
     def _flat_source(self) -> tuple:
         """What to_flat_vulnerabilities flattens, as it stands now: the sarif and

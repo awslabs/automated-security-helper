@@ -537,3 +537,55 @@ class TestValidationDetail:
         else:  # pragma: no cover - the value is wrong by construction
             pytest.fail("the value validated")
         assert detail.startswith("severity-threshold: Input should be")
+
+
+class TestGeneratedGuideCopyIsNotACorpusPage:
+    def test_the_build_copy_of_the_genai_guide_is_not_collected(
+        self, freshness, tmp_path, monkeypatch
+    ):
+        """hatch_build.py copies docs/content/docs/genai-steering-guide.md to
+        automated_security_helper/assets/. The link check resolved that copy's
+        relative links from assets/, where their targets do not exist, though the
+        source page passes. A tree with no effective ignore rule (an archive extract
+        made a repository) lists the copy, so the corpus names it out."""
+        import subprocess
+
+        subprocess.run(
+            ["git", "init", "-q", str(tmp_path)], check=True, capture_output=True
+        )
+        source = tmp_path / "docs" / "content" / "docs" / "genai-steering-guide.md"
+        copy = tmp_path / "automated_security_helper" / "assets" / source.name
+        for path in (source, copy):
+            path.parent.mkdir(parents=True)
+            path.write_text("# Guide\n", encoding="utf-8")
+        monkeypatch.setattr(freshness, "REPO_ROOT", tmp_path)
+
+        collected = {
+            p.relative_to(tmp_path).as_posix() for p in freshness.collect_md_files()
+        }
+
+        assert collected == {"docs/content/docs/genai-steering-guide.md"}
+
+
+class TestUnsupportedOptionTablesAreNotOptionTables:
+    @pytest.mark.parametrize(
+        "rel",
+        [
+            "automated_security_helper/plugin_modules/ash_ferret_plugins/README.md",
+            "docs/content/docs/plugins/community/ferret-scan-plugin.md",
+        ],
+    )
+    def test_ferret_unsupported_option_tables_need_no_section_marker(
+        self, freshness, rel
+    ):
+        """These tables list ferret-scan CLI options the plugin refuses. No section of
+        the config models holds them, so no marker can name one. Headed as an options
+        table they were reported as unmarked; headed for what they hold they are not."""
+        checks = freshness._docs_checks()
+        page = freshness.REPO_ROOT / rel
+        findings = [
+            f
+            for f in checks.check_option_tables([page], freshness.REPO_ROOT)
+            if "names no section" in f.message
+        ]
+        assert findings == []
