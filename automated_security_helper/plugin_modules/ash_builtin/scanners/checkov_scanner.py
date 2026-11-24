@@ -392,15 +392,64 @@ def rewrite_checkov_paths(
                     record["repo_file_path"] = _source_relative_path(written, base)
 
 
-#: The checkov frameworks whose records name the resource a check was run on:
-#: ``aws_db_instance.this`` and ``module.db.aws_db_instance.this`` (terraform and
-#: a terraform plan), ``AWS::S3::Bucket.Bucket`` (cloudformation) and
-#: ``Deployment.shop.web`` (kubernetes). Other frameworks put something else in
-#: the field (the dockerfile framework a path and an instruction, the secrets
-#: framework a hash), so their results carry no resource.
+#: The checkov frameworks whose records name the infrastructure resource a check
+#: was run on. Every checkov record has a ``resource`` field, and what it holds
+#: depends on the runner, so a framework is listed here only after its records
+#: were read (checkov 3.4.10):
+#:
+#: - terraform ``aws_db_instance.this``, terraform_plan
+#:   ``module.db.aws_db_instance.this``, terraform_json ``aws_s3_bucket.data``
+#: - cloudformation ``AWS::S3::Bucket.Bucket``
+#: - kubernetes ``Deployment.shop.web``
+#: - arm ``Microsoft.Storage/storageAccounts.stdemo``, bicep
+#:   ``Microsoft.Storage/storageAccounts.st``
 _RESOURCE_FRAMEWORKS = frozenset(
-    {"terraform", "terraform_plan", "cloudformation", "kubernetes"}
+    {
+        "terraform",
+        "terraform_plan",
+        "terraform_json",
+        "cloudformation",
+        "kubernetes",
+        "arm",
+        "bicep",
+    }
 )
+
+#: The checkov frameworks whose results carry no resource, and why. Together
+#: with :data:`_RESOURCE_FRAMEWORKS` this names every runner checkov ships
+#: (``checkov.main.DEFAULT_RUNNERS``); a test fails when checkov adds a runner
+#: that is in neither, so a new framework is classified by reading its records
+#: rather than taking whatever its ``resource`` field holds.
+_NO_RESOURCE_FRAMEWORKS = {
+    "secrets": "a hash of the secret (a SHA-1, or commit:hash), which must not "
+    "become a resource id",
+    "dockerfile": "the Dockerfile path, or the path and instruction "
+    "(/Dockerfile.RUN): a file locator",
+    "serverless": "a function or item name, or the literal 'complete'",
+    "sast": "no resource: a source-code finding",
+    "cdk": "no resource: a source-code finding",
+    "sca_package": "a package locator, not an infrastructure resource",
+    "sca_image": "an image locator, not an infrastructure resource",
+    "github_actions": "a locator inside the workflow file (jobs(build).steps[2]): "
+    "meaningful but a file position, not infrastructure",
+    "gitlab_ci": "a locator inside the pipeline file: a file position",
+    "circleci_pipelines": "a locator inside the pipeline file: a file position",
+    "azure_pipelines": "a locator inside the pipeline file: a file position",
+    "bitbucket_pipelines": "a locator inside the pipeline file: a file position",
+    "argo_workflows": "a locator inside the workflow file: a file position",
+    "ansible": "a locator inside the playbook: a file position",
+    "openapi": "a locator inside the spec: a file position",
+    "json": "a locator inside a custom-check JSON file: a file position",
+    "yaml": "a locator inside a custom-check YAML file: a file position",
+    "github_configuration": "a repository setting of a hosted service",
+    "gitlab_configuration": "a repository setting of a hosted service",
+    "bitbucket_configuration": "a repository setting of a hosted service",
+    "helm": "not yet read: the runner needs the helm binary, which no sample "
+    "run had; classify it by reading a record",
+    "kustomize": "not yet read: the runner needs the kustomize binary, which no "
+    "sample run had (its ids are prefixed, base:Deployment...); classify it by "
+    "reading a record",
+}
 
 #: What identifies a checkov record in both of its reports: the rule, the file
 #: as the SARIF URI spells it, and the line range.

@@ -113,8 +113,9 @@
   finding. Two instances of one module, or two resources of a Terraform plan (every
   plan finding is on the plan file), gave findings that differed in nothing. ASH now
   reads the resource from checkov's JSON report, for Terraform, Terraform plans,
-  CloudFormation and Kubernetes: `aws_db_instance.this`,
-  `module.db.aws_db_instance.this`, `AWS::S3::Bucket.Bucket`, `Deployment.shop.web`.
+  Terraform JSON, CloudFormation, Kubernetes, ARM and Bicep: `aws_db_instance.this`,
+  `module.db.aws_db_instance.this`, `AWS::S3::Bucket.Bucket`, `Deployment.shop.web`,
+  `Microsoft.Storage/storageAccounts.st`.
   It is in the `resource_id` of the flat JSON and CSV reports, and a `resource_id`
   suppression now binds to it. checkov is always asked for its JSON report for this,
   so `results_json.json` is in checkov's results directory on every run, not only when

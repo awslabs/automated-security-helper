@@ -15,8 +15,11 @@ under ``ash_resource_id``, the resource-identity contract of
 ``utils/package_identity.py``.
 """
 
+import importlib.util
 import json
 import os
+import subprocess
+import sys
 from pathlib import Path
 from urllib.parse import quote
 
@@ -28,6 +31,8 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.checkov_scann
     CheckovScanner,
     CheckovScannerConfig,
     CheckovScannerConfigOptions,
+    _NO_RESOURCE_FRAMEWORKS,
+    _RESOURCE_FRAMEWORKS,
     attach_checkov_resources,
     checkov_resources,
 )
@@ -199,9 +204,7 @@ class TestAResultTakesTheResourceOfItsRecord:
 
 
 class TestOnlyFrameworksThatNameAResource:
-    @pytest.mark.parametrize(
-        "check_type", ["terraform", "terraform_plan", "cloudformation", "kubernetes"]
-    )
+    @pytest.mark.parametrize("check_type", sorted(_RESOURCE_FRAMEWORKS))
     def test_a_resource_framework_gives_its_resource(self, check_type):
         sarif = _sarif(_result("CKV_X", "file", 3, 4))
 
@@ -219,6 +222,7 @@ class TestOnlyFrameworksThatNameAResource:
             # the secrets framework writes a 40-digit hash of the secret
             ("secrets", "0f" * 20),
             ("github_actions", "jobs(build)"),
+            ("serverless", "complete"),
         ],
     )
     def test_another_framework_gives_none(self, check_type, written):
@@ -231,6 +235,73 @@ class TestOnlyFrameworksThatNameAResource:
 
         assert attached == 0
         assert "properties" not in sarif["runs"][0]["results"][0]
+
+    @pytest.mark.parametrize("check_type", sorted(_NO_RESOURCE_FRAMEWORKS))
+    def test_no_classified_framework_without_a_resource_gives_one(self, check_type):
+        sarif = _sarif(_result("CKV_X", "file", 3, 4))
+
+        attached = _attach(
+            sarif,
+            _report(check_type, failed=[_record("CKV_X", "/file", (3, 4), "R")]),
+        )
+
+        assert attached == 0
+        assert "properties" not in sarif["runs"][0]["results"][0]
+
+    def test_an_unclassified_framework_gives_none(self):
+        # Fail closed: a runner checkov adds later is not trusted until it is
+        # classified (the drift test below says so).
+        sarif = _sarif(_result("CKV_X", "file", 3, 4))
+
+        attached = _attach(
+            sarif,
+            _report("a_new_runner", failed=[_record("CKV_X", "/file", (3, 4), "R")]),
+        )
+
+        assert attached == 0
+
+
+class TestEveryCheckovFrameworkIsClassified:
+    def test_the_two_sets_do_not_overlap(self):
+        assert _RESOURCE_FRAMEWORKS.isdisjoint(_NO_RESOURCE_FRAMEWORKS)
+
+    def test_every_denied_framework_says_why(self):
+        assert all(reason.strip() for reason in _NO_RESOURCE_FRAMEWORKS.values())
+
+    def test_checkovs_runners_are_all_in_one_of_the_sets(self, tmp_path):
+        # Needs checkov in the environment: ASH installs it on first scan, so a
+        # development environment may not have it. It is read in a child with its
+        # own HOME, because importing checkov writes its update-check cache there.
+        if importlib.util.find_spec("checkov") is None:
+            pytest.skip("checkov is not installed")
+        child = subprocess.run(
+            [
+                sys.executable,
+                "-I",
+                "-c",
+                (
+                    "import checkov.main as m, json;"
+                    "print(json.dumps([r.check_type for r in m.DEFAULT_RUNNERS]))"
+                ),
+            ],
+            env={**os.environ, "HOME": str(tmp_path), "XDG_CACHE_HOME": str(tmp_path)},
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=True,
+        )
+        runners = set(json.loads(child.stdout.strip().splitlines()[-1]))
+
+        unclassified = runners - _RESOURCE_FRAMEWORKS - set(_NO_RESOURCE_FRAMEWORKS)
+        gone = (_RESOURCE_FRAMEWORKS | set(_NO_RESOURCE_FRAMEWORKS)) - runners
+
+        assert not unclassified, (
+            f"checkov has runners {sorted(unclassified)} that checkov_scanner.py "
+            "does not classify: read a record of each and add it to "
+            "_RESOURCE_FRAMEWORKS (its resource names an infrastructure "
+            "resource) or _NO_RESOURCE_FRAMEWORKS (with the reason)"
+        )
+        assert not gone, f"classified but no longer a checkov runner: {sorted(gone)}"
 
 
 class TestAKeyTheReportsDisagreeOnGetsNoResource:
