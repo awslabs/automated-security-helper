@@ -26,14 +26,16 @@ unloaded (see tests/unit/models/test_forward_ref_resolves_in_any_import_order.py
 """
 
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Literal, Mapping, Sequence
+from typing import Dict, Iterable, List, Literal, Mapping, Optional, Sequence
 
 from automated_security_helper.core.exceptions import ScannerSelectionError
 
 #: Who made the scanner selection: the CLI's ``--scanners`` and
 #: ``--exclude-scanners``, or the MCP workspace tool's ``scanners`` and
 #: ``excluded_scanners`` parameters. Only the MCP tool sets "mcp".
-SelectionOrigin = Literal["cli", "mcp"]
+SelectionOrigin = Literal["cli", "mcp", "config"]
+
+AllowlistOrigin = Literal["mode", "operator", "precommit", "cli"]
 
 
 @dataclass(frozen=True)
@@ -62,7 +64,91 @@ _SELECTION_NAMES: Dict[str, SelectionNames] = {
         exclusion="the excluded_scanners parameter",
         drop_one="Drop one of the two.",
     ),
+    "config": SelectionNames(
+        allowlist="scanner_selection in the ASH config",
+        exclusion="--exclude-scanners",
+        drop_one=(
+            "Drop the exclusion, or change scanner_selection in the operator's "
+            "ASH config."
+        ),
+    ),
 }
+
+
+@dataclass(frozen=True)
+class FoldedSelection:
+    """The allowlist the layers fold to.
+
+    Attributes:
+        names: The scanners to run, first appearance first; empty means the
+            selection is unrestricted.
+        origin: The highest-precedence layer that named scanners, or None when
+            none did. Which flag or key the refusal and SKIPPED wording names is
+            decided from it, apart from the exclusions' own origin.
+    """
+
+    names: List[str]
+    origin: Optional[AllowlistOrigin]
+
+
+def _unique(names: Iterable[str]) -> List[str]:
+    return list(dict.fromkeys(names))
+
+
+@dataclass(frozen=True)
+class SelectionLayers:
+    """The selection layers the caller knows before the config is settled.
+
+    The operator's ``scanner_selection`` sits between ``mode_default`` and the
+    ``precommit`` keys, and is supplied to :meth:`fold` from the settled config.
+
+    Attributes:
+        mode_default: The mode's own bounded default; empty means unrestricted.
+        precommit_only: ``precommit.only_scanners``, read in precommit mode only.
+        precommit_add: ``precommit.add_scanners``, read in precommit mode only.
+        cli_only: ``--only-scanners``; None when not given.
+        cli_additive: ``--add-scanners`` and the deprecated ``--scanners``.
+        workspace_required: Scanners a workspace's policy requires.
+    """
+
+    mode_default: Sequence[str] = ()
+    precommit_only: Sequence[str] = ()
+    precommit_add: Sequence[str] = ()
+    cli_only: Optional[Sequence[str]] = None
+    cli_additive: Sequence[str] = ()
+    workspace_required: Sequence[str] = ()
+
+    def fold(
+        self,
+        operator_only: Sequence[str] = (),
+        operator_add: Sequence[str] = (),
+    ) -> FoldedSelection:
+        """Fold the layers, lowest precedence first, to one allowlist.
+
+        ``only`` replaces what is below it; ``add`` extends a bounded base and is
+        dropped when the base is unrestricted (empty), since adding to "every
+        scanner" would narrow it. ``cli_only`` states the whole selection and
+        drops ``workspace_required``; ``cli_additive`` extends the base and is
+        listed before it, as the precommit union always listed it. Exclusions are
+        not applied here.
+        """
+        if self.cli_only is not None:
+            return FoldedSelection(_unique(self.cli_only), "cli")
+        base: List[str] = list(self.mode_default)
+        origin: Optional[AllowlistOrigin] = "mode" if base else None
+        if operator_only:
+            base, origin = list(operator_only), "operator"
+        elif operator_add and base:
+            base, origin = base + list(operator_add), "operator"
+        if self.precommit_only:
+            base, origin = list(self.precommit_only), "precommit"
+        elif self.precommit_add and base:
+            base, origin = base + list(self.precommit_add), "precommit"
+        if base:
+            base += list(self.workspace_required)
+        if self.cli_additive:
+            return FoldedSelection(_unique([*self.cli_additive, *base]), "cli")
+        return FoldedSelection(_unique(base), origin)
 
 
 def selection_names(origin: SelectionOrigin = "cli") -> SelectionNames:

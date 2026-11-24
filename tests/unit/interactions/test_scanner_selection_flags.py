@@ -527,3 +527,410 @@ class TestCliConflictsAndDeprecation:
         assert result.exit_code == 0, result.output
         assert forwarded["add_scanners"] == ["grype"]
         assert forwarded["mode"].value == "precommit"
+
+
+# --------------------------------------------------------------------------- #
+# The operator's scanner_selection, folded against the orchestrator's config
+# --------------------------------------------------------------------------- #
+
+
+def _fold(**layers: Any):
+    from automated_security_helper.core.scanner_selection import SelectionLayers
+
+    operator_only = layers.pop("operator_only", ())
+    operator_add = layers.pop("operator_add", ())
+    return SelectionLayers(**layers).fold(operator_only, operator_add)
+
+
+class TestTheFold:
+    def test_nothing_selected_is_unrestricted(self):
+        folded = _fold()
+
+        assert folded.names == []
+        assert folded.origin is None
+
+    def test_operator_only_replaces_the_unrestricted_default(self):
+        folded = _fold(operator_only=["bandit"])
+
+        assert folded.names == ["bandit"]
+        assert folded.origin == "operator"
+
+    def test_operator_add_alone_leaves_the_default_unrestricted(self):
+        folded = _fold(operator_add=["trivy"])
+
+        assert folded.names == []
+        assert folded.origin is None
+
+    def test_operator_add_extends_a_bounded_default(self):
+        folded = _fold(mode_default=["bandit", "checkov"], operator_add=["trivy"])
+
+        assert folded.names == ["bandit", "checkov", "trivy"]
+        assert folded.origin == "operator"
+
+    def test_operator_only_replaces_a_bounded_default(self):
+        folded = _fold(mode_default=["bandit", "checkov"], operator_only=["trivy"])
+
+        assert folded.names == ["trivy"]
+
+    def test_precommit_only_replaces_the_operators_list(self):
+        folded = _fold(
+            mode_default=["bandit", "checkov"],
+            operator_add=["trivy"],
+            precommit_only=["grype"],
+        )
+
+        assert folded.names == ["grype"]
+        assert folded.origin == "precommit"
+
+    def test_precommit_add_extends_the_operators_result(self):
+        folded = _fold(
+            mode_default=["bandit"], operator_add=["trivy"], precommit_add=["grype"]
+        )
+
+        assert folded.names == ["bandit", "trivy", "grype"]
+
+    def test_cli_only_replaces_every_lower_layer(self):
+        folded = _fold(
+            mode_default=["bandit"],
+            operator_only=["trivy"],
+            precommit_add=["grype"],
+            cli_only=["checkov"],
+            workspace_required=["semgrep"],
+        )
+
+        assert folded.names == ["checkov"]
+        assert folded.origin == "cli"
+
+    def test_cli_additions_extend_an_explicit_base_listed_first(self):
+        folded = _fold(operator_only=["bandit"], cli_additive=["checkov"])
+
+        assert folded.names == ["checkov", "bandit"]
+        assert folded.origin == "cli"
+
+    def test_cli_additions_alone_are_the_allowlist(self):
+        assert _fold(cli_additive=["checkov"]).names == ["checkov"]
+
+    def test_cli_additions_do_not_turn_an_add_only_operator_list_into_a_base(self):
+        assert _fold(operator_add=["trivy"], cli_additive=["checkov"]).names == [
+            "checkov"
+        ]
+
+    def test_workspace_required_names_follow_a_bounded_config_selection(self):
+        folded = _fold(operator_only=["bandit"], workspace_required=["trivy"])
+
+        assert folded.names == ["bandit", "trivy"]
+
+    def test_workspace_required_names_do_not_narrow_an_unrestricted_selection(self):
+        assert _fold(workspace_required=["trivy"]).names == []
+
+    def test_names_keep_first_appearance_without_repeats(self):
+        folded = _fold(operator_only=["bandit", "trivy"], cli_additive=["trivy", "x"])
+
+        assert folded.names == ["trivy", "x", "bandit"]
+
+    def test_the_core_helper_imports_no_config_model(self):
+        import subprocess
+        import sys
+
+        probe = (
+            "import sys; "
+            "import automated_security_helper.core.scanner_selection; "
+            "sys.exit(int('automated_security_helper.config.ash_config' in sys.modules))"
+        )
+        assert subprocess.run([sys.executable, "-c", probe]).returncode == 0
+
+
+@pytest.fixture
+def operator_home(tmp_path, monkeypatch):
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    source = tmp_path / "src"
+    source.mkdir()
+    return source
+
+
+def _operator_config(tmp_path: Path, selection: str = "") -> str:
+    path = tmp_path / "operator" / "ash.yaml"
+    path.parent.mkdir(exist_ok=True)
+    path.write_text(f"project_name: t\n{selection}", encoding="utf-8")
+    return str(path)
+
+
+def _created(
+    tmp_path: Path,
+    source: Path,
+    config: str | None,
+    *,
+    mode: RunMode = RunMode.local,
+    excluded: List[str] | None = None,
+    **options: Any,
+):
+    from automated_security_helper.core.orchestrator import ASHScanOrchestrator
+    from automated_security_helper.interactions.run_ash_scan import _selection_layers
+
+    output = tmp_path / "out"
+    opts = _opts(
+        source, output, mode=mode, config=config, excluded_scanners=excluded, **options
+    )
+    layers = _selection_layers(opts, _RecordingLogger())
+    return ASHScanOrchestrator.create(
+        source_dir=source,
+        output_dir=output,
+        work_dir=output / ".ash-work",
+        enabled_scanners=layers.fold().names,
+        selection_layers=layers,
+        excluded_scanners=list(excluded or []),
+        config_path=config,
+        config_overrides=opts.config_overrides or [],
+        no_cleanup=True,
+    )
+
+
+def _engine_allowlist(*args: Any, **kwargs: Any) -> List[str]:
+    return list(_created(*args, **kwargs).execution_engine._init_enabled_scanners)
+
+
+class TestTheOperatorSelectionReachesTheEngine:
+    def test_local_only_selects_exactly_those_scanners(self, tmp_path, operator_home):
+        config = _operator_config(
+            tmp_path, "scanner_selection:\n  only_scanners: [bandit]\n"
+        )
+
+        assert _engine_allowlist(tmp_path, operator_home, config) == ["bandit"]
+
+    def test_local_add_alone_stays_unrestricted(self, tmp_path, operator_home):
+        config = _operator_config(
+            tmp_path, "scanner_selection:\n  add_scanners: [trivy]\n"
+        )
+
+        assert _engine_allowlist(tmp_path, operator_home, config) == []
+
+    def test_precommit_defaults_take_the_global_add(self, tmp_path, operator_home):
+        config = _operator_config(
+            tmp_path, "scanner_selection:\n  add_scanners: [grype]\n"
+        )
+
+        selected = _engine_allowlist(
+            tmp_path, operator_home, config, mode=RunMode.precommit
+        )
+
+        assert selected == [*PRECOMMIT_MODE_SCANNERS, "grype"]
+
+    def test_the_precommit_only_key_replaces_the_global_selection(
+        self, tmp_path, operator_home
+    ):
+        config = _operator_config(
+            tmp_path,
+            "scanner_selection:\n  add_scanners: [grype]\n"
+            "precommit:\n  only_scanners: [checkov]\n",
+        )
+
+        selected = _engine_allowlist(
+            tmp_path, operator_home, config, mode=RunMode.precommit
+        )
+
+        assert selected == ["checkov"]
+
+    def test_the_cli_only_flag_replaces_both(self, tmp_path, operator_home):
+        config = _operator_config(
+            tmp_path,
+            "scanner_selection:\n  only_scanners: [bandit]\n"
+            "precommit:\n  add_scanners: [grype]\n",
+        )
+
+        selected = _engine_allowlist(
+            tmp_path,
+            operator_home,
+            config,
+            mode=RunMode.precommit,
+            only_scanners=["checkov"],
+        )
+
+        assert selected == ["checkov"]
+
+    @pytest.mark.parametrize("flag", ["add_scanners", "scanners"])
+    def test_the_additive_cli_flags_extend_the_configured_base(
+        self, tmp_path, operator_home, flag
+    ):
+        config = _operator_config(
+            tmp_path, "scanner_selection:\n  only_scanners: [bandit]\n"
+        )
+
+        selected = _engine_allowlist(
+            tmp_path, operator_home, config, **{flag: ["checkov"]}
+        )
+
+        assert selected == ["checkov", "bandit"]
+
+    def test_an_operator_override_selects_with_no_file(self, tmp_path, operator_home):
+        selected = _engine_allowlist(
+            tmp_path,
+            operator_home,
+            None,
+            config_overrides=["scanner_selection.only_scanners=[bandit]"],
+        )
+
+        assert selected == ["bandit"]
+
+    def test_exclusions_that_remove_the_whole_list_are_refused_in_config_words(
+        self, tmp_path, operator_home
+    ):
+        from automated_security_helper.core.exceptions import ScannerSelectionError
+
+        config = _operator_config(
+            tmp_path, "scanner_selection:\n  only_scanners: [bandit]\n"
+        )
+
+        with pytest.raises(ScannerSelectionError) as refusal:
+            _engine_allowlist(tmp_path, operator_home, config, excluded=["bandit"])
+
+        text = str(refusal.value)
+        assert "scanner_selection in the ASH config" in text
+        assert "--exclude-scanners" in text
+        assert "--scanners" not in text.replace("--exclude-scanners", "")
+
+    def test_a_list_naming_no_registered_scanner_is_refused(
+        self, tmp_path, operator_home
+    ):
+        from automated_security_helper.core.exceptions import ScannerSelectionError
+
+        config = _operator_config(
+            tmp_path, "scanner_selection:\n  only_scanners: [no-such-scanner]\n"
+        )
+
+        with pytest.raises(ScannerSelectionError) as refusal:
+            _engine_allowlist(tmp_path, operator_home, config)
+
+        assert "None of the requested scanners exist: no-such-scanner" in str(
+            refusal.value
+        )
+        assert "scanner_selection in the ASH config" in str(refusal.value)
+
+    def test_a_flag_cancelled_by_exclusions_keeps_the_flag_wording(
+        self, tmp_path, operator_home
+    ):
+        from automated_security_helper.core.exceptions import ScannerSelectionError
+
+        config = _operator_config(
+            tmp_path, "scanner_selection:\n  only_scanners: [bandit]\n"
+        )
+
+        with pytest.raises(ScannerSelectionError) as refusal:
+            _engine_allowlist(
+                tmp_path,
+                operator_home,
+                config,
+                only_scanners=["checkov"],
+                excluded=["checkov"],
+            )
+
+        assert "named by --scanners" in str(refusal.value)
+
+    def test_a_selection_does_not_enable_a_disabled_scanner(
+        self, tmp_path, operator_home
+    ):
+        config = _operator_config(
+            tmp_path,
+            "scanner_selection:\n  only_scanners: [bandit]\n"
+            "scanners:\n  bandit:\n    enabled: false\n",
+        )
+
+        orchestrator = _created(tmp_path, operator_home, config)
+
+        assert orchestrator.config.scanners.bandit.enabled is False
+        assert list(orchestrator.execution_engine._init_enabled_scanners) == ["bandit"]
+
+
+class TestWithoutTheNewSection:
+    @pytest.mark.parametrize(
+        "mode,kwargs,expected",
+        [
+            (RunMode.local, {}, []),
+            (RunMode.local, {"scanners": ["grype", "bandit"]}, ["grype", "bandit"]),
+            (
+                RunMode.local,
+                {"scanners": ["grype"], "add_scanners": ["checkov"]},
+                ["grype", "checkov"],
+            ),
+            (RunMode.local, {"only_scanners": ["bandit"]}, ["bandit"]),
+            (RunMode.precommit, {}, list(PRECOMMIT_MODE_SCANNERS)),
+            (
+                RunMode.precommit,
+                {"add_scanners": ["grype"], "scanners": ["checkov"]},
+                [
+                    "checkov",
+                    "grype",
+                    *(n for n in PRECOMMIT_MODE_SCANNERS if n != "checkov"),
+                ],
+            ),
+        ],
+    )
+    def test_the_result_and_order_are_unchanged(
+        self, tmp_path, operator_home, mode, kwargs, expected
+    ):
+        config = _operator_config(tmp_path)
+
+        selected = _engine_allowlist(
+            tmp_path, operator_home, config, mode=mode, **kwargs
+        )
+
+        assert selected == expected
+
+    def test_the_precommit_keys_keep_their_existing_refusal_wording(
+        self, tmp_path, operator_home
+    ):
+        from automated_security_helper.core.exceptions import ScannerSelectionError
+
+        config = _operator_config(tmp_path, "precommit:\n  only_scanners: [bandit]\n")
+
+        with pytest.raises(ScannerSelectionError) as refusal:
+            _engine_allowlist(
+                tmp_path,
+                operator_home,
+                config,
+                mode=RunMode.precommit,
+                excluded=["bandit"],
+            )
+
+        assert "named by --scanners" in str(refusal.value)
+
+    def test_the_orchestrator_handed_no_layers_uses_its_own_allowlist(
+        self, tmp_path, operator_home
+    ):
+        from automated_security_helper.core.orchestrator import ASHScanOrchestrator
+
+        config = _operator_config(
+            tmp_path, "scanner_selection:\n  only_scanners: [checkov]\n"
+        )
+        output = tmp_path / "out"
+
+        orchestrator = ASHScanOrchestrator.create(
+            source_dir=operator_home,
+            output_dir=output,
+            work_dir=output / ".ash-work",
+            config_path=config,
+            enabled_scanners=["bandit"],
+            no_cleanup=True,
+        )
+
+        assert list(orchestrator.execution_engine._init_enabled_scanners) == ["bandit"]
+
+
+class TestLocalModeHandsTheLayersToTheOrchestrator:
+    def test_the_layers_travel_beside_the_unfolded_list(
+        self, tmp_path, logger, local_orchestrator
+    ):
+        opts = _opts(
+            tmp_path,
+            tmp_path / "out",
+            mode=RunMode.precommit,
+            add_scanners=["grype"],
+        )
+
+        _run_local_mode(opts, logger)
+
+        created = local_orchestrator["create_kwargs"][0]
+        layers = created["selection_layers"]
+        assert list(layers.mode_default) == list(PRECOMMIT_MODE_SCANNERS)
+        assert list(layers.cli_additive) == ["grype"]
+        assert layers.cli_only is None
+        assert created["enabled_scanners"] == layers.fold().names

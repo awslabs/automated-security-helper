@@ -65,7 +65,10 @@ from automated_security_helper.core.constants import (
     PRECOMMIT_MODE_SCANNERS,
     is_offline_mode,
 )
-from automated_security_helper.core.scanner_selection import SelectionOrigin
+from automated_security_helper.core.scanner_selection import (
+    SelectionLayers,
+    SelectionOrigin,
+)
 from automated_security_helper.core.enums import (
     AshLogLevel,
     BuildTarget,
@@ -6258,51 +6261,70 @@ def _resolved_precommit_config(opts: ScanOptions):
     return None
 
 
-def _selected_scanners(opts: ScanOptions, logger) -> List[str]:
-    """The scanner allowlist the orchestrator is created with, precedence applied.
+def _selection_layers(opts: ScanOptions, logger) -> SelectionLayers:
+    """The selection layers this scan's options and host-side config give.
 
-    The one place the selection precedence lives; the CLI help, the config
-    section's description and docs/content/how-to/pre-commit.md describe it.
-    Lowest to highest:
-
-    1. The mode default: ``--mode precommit`` starts from
-       ``PRECOMMIT_MODE_SCANNERS``; every other mode starts empty (no
-       narrowing).
-    2. The config's ``precommit`` section, in precommit mode only:
-       ``only_scanners`` replaces the mode default, ``add_scanners`` adds to it
-       (the model refuses both at once).
-    3. The command line: ``--only-scanners`` states the whole selection, so the
-       mode default and the config keys are not consulted at all;
-       ``--add-scanners`` and the deprecated ``--scanners`` add to whatever base
-       stands. The CLI refuses ``--only-scanners`` beside either additive flag.
-
-    ``--exclude-scanners`` is not applied here: the engine subtracts it after
-    selection (``selection_after_exclusions``), so an excluded name wins over
-    any inclusion, whichever of the sources above named it.
-
-    De-duplicated preserving first appearance, so the log and the SKIPPED rows
-    read the same from run to run; the engine compares names case-insensitively
-    either way.
+    Everything except the operator's ``scanner_selection``, which only the
+    orchestrator's settled config supplies (``SelectionLayers.fold``). In
+    precommit mode, the mode default and the ``precommit`` keys; in every mode,
+    the command line.
     """
     additive = list(opts.scanners or []) + list(opts.add_scanners or [])
     if opts.only_scanners is not None:
-        return list(opts.only_scanners)
+        return SelectionLayers(cli_only=list(opts.only_scanners))
     if opts.mode != RunMode.precommit:
-        return additive
-    base = list(PRECOMMIT_MODE_SCANNERS)
+        return SelectionLayers(cli_additive=additive)
+    only: List[str] = []
+    add: List[str] = []
     section = _resolved_precommit_config(opts)
     if section is not None:
         only = list(getattr(section, "only_scanners", None) or [])
         add = list(getattr(section, "add_scanners", None) or [])
         if only:
-            base = only
             logger.verbose(
                 f"precommit.only_scanners replaces the precommit default set: {only}"
             )
         if add:
-            base = base + add
             logger.verbose(f"precommit.add_scanners adds to the selection: {add}")
-    return list(dict.fromkeys(additive + base))
+    return SelectionLayers(
+        mode_default=list(PRECOMMIT_MODE_SCANNERS),
+        precommit_only=only,
+        precommit_add=add,
+        cli_additive=additive,
+    )
+
+
+def _selected_scanners(opts: ScanOptions, logger) -> List[str]:
+    """The scanner allowlist the orchestrator is created with, precedence applied.
+
+    The precedence lives in ``SelectionLayers.fold``; the CLI help, the config
+    sections' descriptions and docs/content/how-to/pre-commit.md describe it.
+    Lowest to highest:
+
+    1. The mode default: ``--mode precommit`` starts from
+       ``PRECOMMIT_MODE_SCANNERS``; every other mode starts empty (no
+       narrowing).
+    2. The operator's ``scanner_selection`` section, in every mode. It is not
+       read here: it comes from the config the orchestrator settles, which
+       folds it in at that point (``ASHScanOrchestrator.selection_layers``).
+    3. The config's ``precommit`` section, in precommit mode only:
+       ``only_scanners`` replaces the lower layers, ``add_scanners`` adds to
+       them (the model refuses both at once).
+    4. The command line: ``--only-scanners`` states the whole selection, so the
+       lower layers are not consulted at all; ``--add-scanners`` and the
+       deprecated ``--scanners`` add to whatever base stands. The CLI refuses
+       ``--only-scanners`` beside either additive flag.
+
+    ``--exclude-scanners`` is not applied here: the engine subtracts it after
+    selection (``selection_after_exclusions``), so an excluded name wins over
+    any inclusion, whichever of the sources above named it.
+
+    This list is the selection without layer 2, which is what the orchestrator
+    uses when it has no settled config to fold with. De-duplicated preserving
+    first appearance, so the log and the SKIPPED rows read the same from run to
+    run; the engine compares names case-insensitively either way.
+    """
+    return _selection_layers(opts, logger).fold().names
 
 
 def _folded_scanner_allowlist(opts: ScanOptions) -> List[str]:
@@ -6487,7 +6509,8 @@ def _run_local_mode(
                 f"Applying {len(opts.config_overrides or [])} configuration overrides"
             )
 
-        final_scanners = _selected_scanners(opts, logger)
+        selection_layers = _selection_layers(opts, logger)
+        final_scanners = selection_layers.fold().names
         final_output_formats = _precommit_output_formats(opts, logger)
 
         # --mode precommit --staged: the staged files are the scan's target set.
@@ -6549,6 +6572,7 @@ def _run_local_mode(
             work_dir=opts.output_dir / ASH_WORK_DIR_NAME,
             staged_files=staged_files,
             enabled_scanners=final_scanners,
+            selection_layers=selection_layers,
             excluded_scanners=list(opts.excluded_scanners or []),
             config_path=config,
             config_overrides=opts.config_overrides or [],
