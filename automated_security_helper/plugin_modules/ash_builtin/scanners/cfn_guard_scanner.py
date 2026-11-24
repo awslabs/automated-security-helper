@@ -1044,7 +1044,7 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
     #: own text, which can spell the same words, so only a message that opens
     #: with the genuine prefix attaches, and the id is the one in that prefix.
     _MESSAGE_PATH_SHAPE: ClassVar["re.Pattern[str]"] = re.compile(
-        r"Check was not compliant as property \[[^\]\s]+\] is missing\. "
+        r"Check was not compliant as property \[.+?\] (?:to compare from )?is missing\. "
         r"Value traversed to \[Path=/Resources/([A-Za-z0-9]+)/Properties"
         r"\[L:\d+,C:\d+\] Value=\{"
     )
