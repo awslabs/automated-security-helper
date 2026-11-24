@@ -4391,12 +4391,27 @@ class ConfigValidator:
         ):
             if place not in ignored_places:
                 ignored_places.append(place)
+        selection_ignored, selection_unknown = cls._ignored_scanner_selection(
+            repository, config_overrides, ash_config
+        )
+        for place in selection_ignored:
+            if place not in ignored_places:
+                ignored_places.append(place)
         for place in ignored_places:
             result.warnings.append(
                 result.redact(
                     f"{place} is set in a config file inside the scanned tree, "
                     "and a scan ignores that value: only --config-overrides or a "
                     "config file outside the tree set it."
+                )
+            )
+        for place in selection_unknown:
+            result.warnings.append(
+                result.redact(
+                    f"{place} is not a scanner_selection key, and a scan ignores "
+                    "the scanner_selection section a config file inside the "
+                    "scanned tree writes: only --config-overrides or a config file "
+                    "outside the tree set it."
                 )
             )
         result.ash_config_errors = ash_config_errors
@@ -4464,6 +4479,25 @@ class ConfigValidator:
         return ignored_operator_only_options(
             built, trusted, config_overrides, repository
         )
+
+    @classmethod
+    def _ignored_scanner_selection(
+        cls,
+        repository: Any,
+        config_overrides: Optional[List[str]],
+        ash_config: "_AshConfigCheck",
+    ) -> Tuple[List[str], List[str]]:
+        from automated_security_helper.config.ash_config import AshConfig
+        from automated_security_helper.config.scanner_selection_trust import (
+            ignored_scanner_selection,
+        )
+
+        if repository is None:
+            return [], []
+        trusted = AshConfig()
+        if ash_config.loaded is not None and not ash_config.in_tree:
+            trusted = ash_config.loaded
+        return ignored_scanner_selection(trusted, config_overrides, repository)
 
     @classmethod
     def _ignored_reporter_destinations(

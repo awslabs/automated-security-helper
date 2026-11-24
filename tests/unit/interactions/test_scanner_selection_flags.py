@@ -1179,3 +1179,99 @@ class TestTheHiddenMarkerOnTheCommandLine:
         result = CliRunner().invoke(app, ["scan", "--help"])
 
         assert "--require-scanner-selection" not in result.output
+
+
+class TestTheHostMarkerIsTheSelectionTheInnerScanUses:
+    @pytest.fixture
+    def executed(self, monkeypatch):
+        from automated_security_helper.core.orchestrator import ASHScanOrchestrator
+
+        calls: List[Any] = []
+
+        def fake_execute(self, phases=None):
+            calls.append(self)
+            return AshAggregatedResults()
+
+        monkeypatch.setattr(ASHScanOrchestrator, "execute_scan", fake_execute)
+        return calls
+
+    @staticmethod
+    def _checkout(tmp_path: Path, body: str) -> Path:
+        from tests.utils.helpers import mark_git_checkout
+
+        checkout = tmp_path / "repo"
+        mark_git_checkout(checkout)
+        base = checkout / "ci" / "base.yaml"
+        base.parent.mkdir(parents=True)
+        base.write_text(body, encoding="utf-8")
+        return checkout
+
+    def _marker_then_inner_scan(self, tmp_path, checkout, config, logger, executed):
+        import json
+
+        from automated_security_helper.interactions.run_ash_scan import (
+            _container_selection,
+        )
+
+        host = _container_selection(
+            _opts(checkout, tmp_path / "out", mode=RunMode.container, config=config)
+        )
+        assert host.marker is not None
+        _run_local_mode(
+            _opts(
+                checkout,
+                tmp_path / "out",
+                mode=RunMode.local,
+                config=config,
+                required_scanner_selection=host.marker,
+            ),
+            logger,
+        )
+        [orchestrator] = executed
+        return json.loads(host.marker), list(
+            orchestrator.execution_engine._init_enabled_scanners
+        )
+
+    @pytest.mark.parametrize(
+        "body",
+        ["project_name: repo\n", "scanner_selection:\n  only_scanners: [trivy]\n"],
+        ids=["no-section", "asks-for-trivy"],
+    )
+    def test_ash_config_under_a_named_checkout_config(
+        self, tmp_path, monkeypatch, logger, executed, body
+    ):
+        operator = tmp_path / "operator" / "ash.yaml"
+        operator.parent.mkdir()
+        operator.write_text(
+            "scanner_selection:\n  only_scanners: [bandit]\n", encoding="utf-8"
+        )
+        monkeypatch.setenv("ASH_CONFIG", str(operator))
+        checkout = self._checkout(tmp_path, body)
+
+        marker, allowlist = self._marker_then_inner_scan(
+            tmp_path, checkout, str(checkout / "ci" / "base.yaml"), logger, executed
+        )
+
+        assert marker == {"add": [], "only": ["bandit"]}
+        assert allowlist == ["bandit"]
+
+    def test_an_operator_file_extending_a_checkout_file(
+        self, tmp_path, monkeypatch, logger, executed
+    ):
+        monkeypatch.delenv("ASH_CONFIG", raising=False)
+        checkout = self._checkout(
+            tmp_path, "scanner_selection:\n  only_scanners: [trivy]\n"
+        )
+        operator = tmp_path / "operator.yaml"
+        operator.write_text(
+            f"extends: [{(checkout / 'ci' / 'base.yaml').as_posix()}]\n"
+            "scanner_selection:\n  only_scanners: [bandit]\n",
+            encoding="utf-8",
+        )
+
+        marker, allowlist = self._marker_then_inner_scan(
+            tmp_path, checkout, str(operator), logger, executed
+        )
+
+        assert marker == {"add": [], "only": ["bandit"]}
+        assert allowlist == ["bandit"]

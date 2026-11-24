@@ -449,6 +449,7 @@ class RepositorySettings:
         self._located_places: Set[str] = set()
         self.document: Any = None
         self.selection_written: Dict[str, Any] = {}
+        self.selection_unknown: List[str] = []
 
     def _membership(self, real: Path, named: Path) -> Tuple[bool, bool]:
         """Whether the file is the repository's, and whether that rests on a
@@ -535,6 +536,9 @@ class RepositorySettings:
             for name in SCANNER_SELECTION_KEYS:
                 if name in section:
                     self.selection_written[name] = section[name]
+            for name in section:
+                if name not in SCANNER_SELECTION_KEYS:
+                    self.selection_unknown.append(str(name))
         elif section is not None:
             self.selection_written[SCANNER_SELECTION_FIELD] = section
         return {

@@ -3194,6 +3194,7 @@ class OperatorConfigReads:
             Tuple[str | None, str | None, str, Tuple[Path, ...]], List[str]
         ] = {}
         self._env_config: Tuple[str | None] | None = None
+        self.selected_document: Tuple[Any] | None = None
         self._env_config_named: Dict[Tuple[str, str], bool] = {}
         #: Each config file's ``extends`` entries, read once for the record's
         #: lifetime, with the variables an entry the resolution dropped read;

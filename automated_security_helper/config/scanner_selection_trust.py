@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, List, Optional, Sequence
+from typing import TYPE_CHECKING, List, Optional, Sequence, Tuple
 
 from automated_security_helper.config.operator_only_options import (
     SCANNER_SELECTION_FIELD,
@@ -67,6 +67,37 @@ def confine_scanner_selection(
         f"operator's choice, and {source.reason}. The operator's selection, or "
         f"none, applies instead. {source.remedy}"
     )
+
+
+def ignored_scanner_selection(
+    trusted_config: "AshConfig",
+    config_overrides: Optional[Sequence[str]],
+    repository: RepositorySettings,
+) -> Tuple[List[str], List[str]]:
+    from automated_security_helper.config.resolve_config import (
+        apply_config_overrides,
+    )
+
+    replayed = [o for o in config_overrides or [] if _is_selection_override(o)]
+    wanted = trusted_config.scanner_selection
+    if replayed:
+        try:
+            wanted = apply_config_overrides(trusted_config, replayed).scanner_selection
+        except Exception:
+            pass
+    written = repository.selection_written
+    ignored = [
+        f"{SCANNER_SELECTION_FIELD}.{key}"
+        for key in SCANNER_SELECTION_KEYS
+        if key in written and _differs_from(written[key], getattr(wanted, key))
+    ]
+    if SCANNER_SELECTION_FIELD in written:
+        ignored.append(SCANNER_SELECTION_FIELD)
+    unknown = [
+        f"{SCANNER_SELECTION_FIELD}.{key}"
+        for key in dict.fromkeys(repository.selection_unknown)
+    ]
+    return ignored, unknown
 
 
 def _differs_from(written: object, trusted: Sequence[str]) -> bool:

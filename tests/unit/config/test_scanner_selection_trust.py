@@ -429,6 +429,203 @@ class TestAnOperatorOverrideIsNotBlockedByAnIgnoredFile:
             )
 
 
+def _mixed(
+    tmp_path: Path,
+    checkout_document: Dict[str, Any],
+    operator_document: Dict[str, Any],
+    *own_bases: Path,
+) -> tuple[Path, Path]:
+    repo = tmp_path / "repo"
+    mark_git_checkout(repo)
+    base = _write(repo / "ci" / "base.yaml", checkout_document)
+    operator = _write(
+        tmp_path / "operator.yaml",
+        {
+            "extends": [p.as_posix() for p in (*own_bases, base)],
+            **operator_document,
+        },
+    )
+    return repo, operator
+
+
+def _resolved_by(
+    source: str,
+    operator: Path,
+    repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    **options: Any,
+) -> AshConfig:
+    if source == "ASH_CONFIG":
+        monkeypatch.setenv("ASH_CONFIG", str(operator))
+        return resolve_config(source_dir=repo, **options)
+    return resolve_config(config_path=operator, source_dir=repo, **options)
+
+
+_CHECKOUTS = {
+    "checkout-without-section": {"project_name": "repo"},
+    "checkout-asking-for-trivy": _selecting("trivy"),
+}
+
+
+class TestAnOperatorFileExtendingACheckoutFileKeepsItsSelection:
+    @pytest.mark.parametrize("source", ["--config", "ASH_CONFIG"])
+    @pytest.mark.parametrize("checkout", list(_CHECKOUTS))
+    def test_the_operators_only_list_stands(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        ash_log,
+        source: str,
+        checkout: str,
+    ) -> None:
+        repo, operator = _mixed(tmp_path, _CHECKOUTS[checkout], _selecting("bandit"))
+
+        config = _resolved_by(source, operator, repo, monkeypatch)
+
+        assert _only(config) == ["bandit"]
+        assert _add(config) == []
+        said = _warnings_naming(ash_log, "scanner_selection")
+        if checkout == "checkout-asking-for-trivy":
+            assert len(said) == 1
+            assert "base.yaml" in said[0]
+            assert "operator.yaml" not in said[0]
+        else:
+            assert said == []
+
+    @pytest.mark.parametrize("source", ["--config", "ASH_CONFIG"])
+    def test_an_operator_add_list_stands(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: str
+    ) -> None:
+        repo, operator = _mixed(
+            tmp_path,
+            _selecting("trivy"),
+            {"scanner_selection": {"add_scanners": ["checkov"]}},
+        )
+
+        config = _resolved_by(source, operator, repo, monkeypatch)
+
+        assert _add(config) == ["checkov"]
+        assert _only(config) == []
+
+    def test_a_later_operator_file_replaces_an_earlier_ones_list(
+        self, tmp_path: Path
+    ) -> None:
+        own = _write(tmp_path / "own.yaml", _selecting("checkov"))
+        repo, operator = _mixed(
+            tmp_path, _selecting("trivy"), _selecting("bandit"), own
+        )
+
+        assert _only(resolve_config(config_path=operator, source_dir=repo)) == [
+            "bandit"
+        ]
+
+    def test_an_operator_base_s_list_stands_when_the_root_writes_none(
+        self, tmp_path: Path
+    ) -> None:
+        own = _write(tmp_path / "own.yaml", _selecting("checkov"))
+        repo, operator = _mixed(tmp_path, _selecting("trivy"), {}, own)
+
+        assert _only(resolve_config(config_path=operator, source_dir=repo)) == [
+            "checkov"
+        ]
+
+    def test_an_operator_patch_adds_to_its_own_list(self, tmp_path: Path) -> None:
+        own = _write(tmp_path / "own.yaml", _selecting("checkov"))
+        repo, operator = _mixed(
+            tmp_path,
+            {"project_name": "repo"},
+            {
+                "patch": [
+                    {
+                        "op": "add",
+                        "path": "/scanner_selection/only_scanners/-",
+                        "value": "bandit",
+                    }
+                ]
+            },
+            own,
+        )
+
+        assert _only(resolve_config(config_path=operator, source_dir=repo)) == [
+            "checkov",
+            "bandit",
+        ]
+
+    def test_an_operator_override_still_wins(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        repo, operator = _mixed(tmp_path, _selecting("trivy"), _selecting("bandit"))
+
+        config = resolve_config(
+            config_path=operator,
+            source_dir=repo,
+            config_overrides=['scanner_selection.only_scanners=["checkov"]'],
+        )
+
+        assert _only(config) == ["checkov"]
+
+    @pytest.mark.parametrize("source", ["--config", "ASH_CONFIG"])
+    def test_a_chain_with_no_operator_write_does_not_adopt_the_checkout_s(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        ash_log,
+        source: str,
+    ) -> None:
+        repo, operator = _mixed(tmp_path, _selecting("trivy"), {"project_name": "op"})
+
+        config = _resolved_by(source, operator, repo, monkeypatch)
+
+        assert _only(config) == []
+        assert _add(config) == []
+        assert len(_warnings_naming(ash_log, "scanner_selection")) == 1
+
+    def test_ash_config_s_list_stands_beside_a_discovered_checkout_config(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ash_log
+    ) -> None:
+        repo, operator = _mixed(
+            tmp_path, {"project_name": "repo"}, _selecting("bandit")
+        )
+        _write(repo / ".ash" / ".ash.yaml", {"project_name": "repo"})
+        monkeypatch.setenv("ASH_CONFIG", str(operator))
+
+        config = resolve_config(source_dir=repo)
+
+        assert _only(config) == ["bandit"]
+        assert _warnings_naming(ash_log, "scanner_selection") == []
+
+    def test_ash_config_s_list_stands_under_a_named_checkout_config_asking_for_trivy(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ash_log
+    ) -> None:
+        repo, operator = _mixed(
+            tmp_path, {"project_name": "repo"}, _selecting("bandit")
+        )
+        named = _write(repo / ".ash" / ".ash.yaml", _selecting("trivy"))
+        monkeypatch.setenv("ASH_CONFIG", str(operator))
+
+        config = resolve_config(config_path=named, source_dir=repo)
+
+        assert _only(config) == ["bandit"]
+        assert len(_warnings_naming(ash_log, "scanner_selection")) == 1
+
+    def test_a_named_operator_file_over_a_mixed_ash_config_replaces_its_list(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        repo, operator = _mixed(
+            tmp_path, {"project_name": "repo"}, _selecting("bandit")
+        )
+        named = _write(
+            tmp_path / "named" / "ash.yaml",
+            {"scanner_selection": {"add_scanners": ["checkov"]}},
+        )
+        monkeypatch.setenv("ASH_CONFIG", str(operator))
+
+        config = resolve_config(config_path=named, source_dir=repo)
+
+        assert _add(config) == ["checkov"]
+        assert _only(config) == []
+
+
 class TestAClientPatchIsRefused:
     @pytest.fixture
     def session(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -574,3 +771,82 @@ class TestTheLinterAgreesWithTheScan:
 
         assert list(scanned.scanner_selection.only_scanners) == []
         assert "blocks the scan" not in result.output, result.output
+
+    @staticmethod
+    def _words(output: str) -> str:
+        return " ".join(output.split())
+
+    def test_an_unknown_subkey_in_a_repository_file_is_a_warning_not_a_veto(
+        self, tmp_path: Path
+    ) -> None:
+        repo = _repo(
+            tmp_path, {"scanner_selection": {"only_scanner": ["zz-secret-value"]}}
+        )
+
+        result = self._lint("--source-dir", str(repo))
+        said = self._words(result.output)
+
+        assert result.exit_code == 0, result.output
+        assert "blocks the scan" not in said
+        assert "scanner_selection.only_scanner is not a scanner_selection key" in said
+        assert "a scan ignores the scanner_selection section" in said
+        assert "zz-secret-value" not in said
+
+    def test_a_repository_list_a_scan_ignores_is_a_warning(
+        self, tmp_path: Path
+    ) -> None:
+        repo = _repo(tmp_path, _selecting("trivy"))
+
+        result = self._lint("--source-dir", str(repo))
+        said = self._words(result.output)
+
+        assert result.exit_code == 0, result.output
+        assert (
+            "scanner_selection.only_scanners is set in a config file inside the "
+            "scanned tree, and a scan ignores that value"
+        ) in said
+        assert "trivy" not in said
+
+    def test_a_repository_list_repeating_the_operators_is_quiet(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("ASH_CONFIG", str(_operator(tmp_path, _selecting("bandit"))))
+        repo = _repo(tmp_path, _selecting("bandit"))
+
+        result = self._lint("--source-dir", str(repo))
+
+        assert result.exit_code == 0, result.output
+        assert "scanner_selection" not in result.output
+
+    def test_a_repository_file_without_the_section_is_quiet(
+        self, tmp_path: Path
+    ) -> None:
+        repo = _repo(tmp_path, {"project_name": "repo"})
+
+        result = self._lint("--source-dir", str(repo))
+
+        assert result.exit_code == 0, result.output
+        assert "scanner_selection" not in result.output
+
+
+class TestTheReferenceQualifiesUnknownKeys:
+    def test_the_section_s_unknown_key_sentence_names_the_repository_case(
+        self,
+    ) -> None:
+        text = (
+            Path(__file__).resolve().parents[3]
+            / "docs"
+            / "content"
+            / "reference"
+            / "configuration.md"
+        ).read_text(encoding="utf-8")
+        section = text[text.index('<a id="section-scanner_selection">') :]
+        section = section[: section.index("<!-- doctest: options of=scanner_selection")]
+        said = " ".join(section.split())
+
+        assert (
+            "A key not listed here is an error when the configuration is loaded. "
+            "In a config file inside a git checkout or the scanned tree, or one an "
+            "MCP client delivered, the whole section is ignored instead, an "
+            "unknown key included, and `ash config lint` warns about it."
+        ) in said

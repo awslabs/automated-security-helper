@@ -284,3 +284,139 @@ def test_with_no_config_at_all_the_forwarding_is_unchanged(container, tmp_path):
     [run] = container["runs"]
     assert _values(run, "--scanners") == ["trivy"]
     assert MARKER not in run
+
+
+def _checkout_with_config(tmp_path, body):
+    checkout = tmp_path / "repo"
+    mark_git_checkout(checkout)
+    config = checkout / ".ash" / ".ash.yaml"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_text(body, encoding="utf-8")
+    return checkout, config
+
+
+_CHECKOUT_BODIES = {
+    "no-section": "project_name: repo\n",
+    "asks-for-trivy": "scanner_selection:\n  only_scanners: [trivy]\n",
+}
+
+
+@pytest.mark.parametrize("body", list(_CHECKOUT_BODIES))
+def test_ash_config_s_selection_under_a_named_checkout_config_is_required(
+    container, tmp_path, monkeypatch, body
+):
+    monkeypatch.setenv(
+        "ASH_CONFIG",
+        _operator_config(tmp_path, "scanner_selection:\n  only_scanners: [bandit]\n"),
+    )
+    checkout, config = _checkout_with_config(tmp_path, _CHECKOUT_BODIES[body])
+
+    result = _scan(
+        "--source-dir",
+        str(checkout),
+        "--output-dir",
+        str(tmp_path / "out"),
+        "--config",
+        str(config),
+    )
+
+    [run] = container["runs"]
+    assert json.loads(_values(run, MARKER)[0]) == {"add": [], "only": ["bandit"]}
+    assert result.exit_code == 3, result.output
+    assert MARKER in _words(result.output)
+    assert "Rebuild the image from this ASH" in _words(result.output)
+
+
+@pytest.mark.parametrize("body", list(_CHECKOUT_BODIES))
+def test_ash_config_s_selection_beside_a_discovered_checkout_config_is_required(
+    container, tmp_path, monkeypatch, body
+):
+    from automated_security_helper.core.enums import RunMode
+    from automated_security_helper.interactions.run_ash_scan import run_ash_scan
+
+    monkeypatch.setenv(
+        "ASH_CONFIG",
+        _operator_config(tmp_path, "scanner_selection:\n  only_scanners: [bandit]\n"),
+    )
+    checkout, _ = _checkout_with_config(tmp_path, _CHECKOUT_BODIES[body])
+
+    with pytest.raises(BaseException) as ended:
+        run_ash_scan(
+            source_dir=str(checkout),
+            output_dir=str(tmp_path / "out"),
+            mode=RunMode.container,
+            build=False,
+            progress=False,
+        )
+
+    [run] = container["runs"]
+    assert json.loads(_values(run, MARKER)[0]) == {"add": [], "only": ["bandit"]}
+    assert getattr(ended.value, "code", None) == 3, ended.value
+
+
+@pytest.mark.parametrize(
+    "error",
+    [OSError("synthetic read failure"), ValueError("synthetic resolution failure")],
+    ids=["read-failure", "resolution-failure"],
+)
+def test_a_selection_that_cannot_be_resolved_starts_no_container(
+    container, tmp_path, monkeypatch, error
+):
+    from automated_security_helper.core import orchestrator
+
+    def fail(**_kwargs):
+        raise error
+
+    monkeypatch.setattr(orchestrator, "resolve_scan_config", fail)
+    config = _operator_config(
+        tmp_path, "scanner_selection:\n  only_scanners: [bandit]\n"
+    )
+    out = tmp_path / "out"
+    out.mkdir()
+    stale = out / "stale-marker.txt"
+    stale.write_text("previous run\n", encoding="utf-8")
+
+    result = _scan_with(tmp_path, config)
+
+    assert container["runs"] == []
+    assert result.exit_code == 3, result.output
+    assert "scanner_selection" in _words(result.output)
+    assert "Results file not found" not in _words(result.output)
+    assert stale.read_text(encoding="utf-8") == "previous run\n"
+
+
+_LATER_SCHEMA = "global_settings:\n  zz_option_a_later_schema_declares: true\n"
+
+
+@pytest.mark.parametrize(
+    ("body", "overrides"),
+    [
+        (_LATER_SCHEMA + "scanner_selection:\n  only_scanners: [bandit]\n", []),
+        (
+            _LATER_SCHEMA,
+            ["--config-overrides", 'scanner_selection.only_scanners=["bandit"]'],
+        ),
+    ],
+    ids=["in-ash-config", "in-an-override"],
+)
+def test_a_selection_left_unresolved_for_an_image_that_may_differ_is_refused(
+    container, tmp_path, monkeypatch, body, overrides
+):
+    monkeypatch.setenv("ASH_CONFIG", _operator_config(tmp_path, body))
+
+    result = _scan_with(tmp_path, None, *overrides)
+
+    assert container["runs"] == []
+    assert result.exit_code == 3, result.output
+    assert "scanner_selection" in _words(result.output)
+
+
+def test_without_a_selection_an_image_that_may_differ_still_judges_its_schema(
+    container, tmp_path, monkeypatch
+):
+    monkeypatch.setenv("ASH_CONFIG", _operator_config(tmp_path, _LATER_SCHEMA))
+
+    _scan_with(tmp_path, None)
+
+    [run] = container["runs"]
+    assert MARKER not in run

@@ -5475,6 +5475,7 @@ def _run_container_mode(
     # over for a plan built without the as-named spelling, so an ash-workspace.yaml
     # the repository wrote replaced the operator's policy in the container.
 
+    container_selection = _container_selection(opts, image_may_differ, reads)
     if opts.run:
         # The scan inputs were checked once, above, before anything else of this
         # function ran; nothing between there and here changes them. The build
@@ -5529,7 +5530,6 @@ def _run_container_mode(
     # file it did not finish is not read back as a verdict. See
     # utils/inner_run_outcome.py.
     outer_run_id = new_outer_run_id()
-    container_selection = _container_selection(opts)
     container_result = run_ash_container(
         outer_run_id=outer_run_id,
         source_dir=opts.source_dir,
@@ -6305,15 +6305,95 @@ class _ContainerSelection(NamedTuple):
     marker: Optional[str]
 
 
-def _container_selection(opts: ScanOptions) -> _ContainerSelection:
+def _operator_documents_may_select(opts: ScanOptions, selected_document: Any) -> bool:
+    from automated_security_helper.config.default_config import (
+        default_config_document_for_tree,
+    )
+    from automated_security_helper.config.operator_only_options import (
+        SCANNER_SELECTION_FIELD,
+        SCANNER_SELECTION_KEYS,
+    )
+    from automated_security_helper.config.scanner_selection_trust import (
+        _is_selection_override,
+    )
+
+    if any(_is_selection_override(o) for o in opts.config_overrides or []):
+        return True
     try:
-        section = _host_resolved_config(opts)[0].scanner_selection
+        documents = [default_config_document_for_tree(Path(opts.source_dir))]
+        if selected_document is _NOT_LOADED:
+            selected = _selected_config_path(opts)
+            selected_document = (
+                _parse_and_confine_config(selected, opts) if selected else None
+            )
+        if selected_document is not None:
+            documents.append(selected_document.data)
     except Exception:
-        section = None
-    only = list(section.only_scanners) if section is not None else []
-    add = list(section.add_scanners) if section is not None else []
+        return True
+    for document in documents:
+        if not isinstance(document, dict):
+            continue
+        section = document.get(SCANNER_SELECTION_FIELD)
+        if section is None:
+            continue
+        if not isinstance(section, dict) or any(
+            section.get(key) for key in SCANNER_SELECTION_KEYS
+        ):
+            return True
+    return False
+
+
+def _container_selection(
+    opts: ScanOptions,
+    image_may_differ: Optional[bool] = None,
+    reads: Optional[OperatorConfigReads] = None,
+) -> _ContainerSelection:
+    legacy = _ContainerSelection(_folded_scanner_allowlist(opts), None, [], None)
+    if not opts.run:
+        return legacy
+    silence = _DropThisThreadsRecords()
+    ASH_LOGGER.addFilter(silence)
+    refusal: Optional[ASHConfigValidationError] = None
+    try:
+        if opts.workspace_plan is not None:
+            from automated_security_helper.workspace.execution import (
+                workspace_scanner_selection,
+            )
+
+            settled = workspace_scanner_selection(
+                opts.workspace_plan, build_project_scan_settings(opts)
+            )
+            only, add = list(settled[0]), list(settled[1])
+        else:
+            section = _config_as_the_scan_resolves_it(opts).scanner_selection
+            only, add = list(section.only_scanners), list(section.add_scanners)
+    except Exception as exc:
+        refusal = ASHConfigValidationError(
+            "The scanner_selection the scan would use could not be resolved on "
+            f"the host, so no container was started: {error_text(exc)}"
+        )
+        try:
+            if opts.workspace_plan is None:
+                if image_may_differ is None:
+                    image_may_differ = _image_schema_may_differ(opts)
+                gate = reads.selected_document if reads is not None else None
+                if image_may_differ and not _operator_documents_may_select(
+                    opts, gate[0] if gate is not None else _NOT_LOADED
+                ):
+                    refusal = None
+        except Exception:
+            pass
+        if refusal is None:
+            return legacy
+    finally:
+        ASH_LOGGER.removeFilter(silence)
+    if refusal is not None:
+        if opts.workspace_plan is not None:
+            _print_invalid_config(refusal)
+            sys.exit(int(WorkspaceExitCode.INVALID_PROJECT_CONFIG))
+        _printed_config_refusal(3, refusal)
     if not only and not add:
-        return _ContainerSelection(_folded_scanner_allowlist(opts), None, [], None)
+        return legacy
     return _ContainerSelection(
         list(opts.scanners or []),
         None if opts.only_scanners is None else list(opts.only_scanners),
@@ -8541,6 +8621,12 @@ def _run_with_options(
     gate_image_answer: Optional[bool] = (
         outer_load.image_may_differ if outer_load is not None else None
     )
+    if (
+        reads is not None
+        and outer_load is not None
+        and outer_load.document is not _NOT_LOADED
+    ):
+        reads.selected_document = (outer_load.document,)
     shared = _NOT_LOADED
     if outer_load is not None and outer_load.loaded:
         shared = outer_load.selected
