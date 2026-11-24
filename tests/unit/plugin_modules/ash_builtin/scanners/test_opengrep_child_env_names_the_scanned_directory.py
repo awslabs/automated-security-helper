@@ -20,6 +20,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scan
     OpengrepScannerConfig,
     OpengrepScannerConfigOptions,
 )
+from tests.utils.env_assertions import environ_names
 from tests.utils.tool_guard import stub_tool_probes
 
 pytestmark = pytest.mark.unit
@@ -97,4 +98,4 @@ def test_the_parent_process_environment_is_not_changed(
 
     _child_env(_scanner(test_plugin_context), tmp_path)
 
-    assert "GIT_CONFIG_COUNT" not in os.environ
+    assert "GIT_CONFIG_COUNT" not in environ_names()
