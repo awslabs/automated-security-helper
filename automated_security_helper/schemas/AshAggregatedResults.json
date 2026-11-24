@@ -1715,6 +1715,10 @@
               "annotate": false,
               "fold": false
             },
+            "history": {
+              "enabled": false,
+              "keep_runs": 50
+            },
             "ignore_paths": [],
             "mcp": {
               "runtime_overrides": {
@@ -2382,6 +2386,14 @@
           },
           "description": "Cross-scanner duplicate annotation in the flat reports (opt-in; off by default)."
         },
+        "history": {
+          "$ref": "#/$defs/AshHistoryConfig",
+          "default": {
+            "enabled": false,
+            "keep_runs": 50
+          },
+          "description": "Run history recording (a compact record of each completed scan)."
+        },
         "ignore_paths": {
           "default": [],
           "description": "Global list of IgnorePaths. Each path requires a reason for ignoring, e.g. 'Folder contains test data only and is not committed'.",
@@ -2571,6 +2583,37 @@
         }
       },
       "title": "AshDeduplicationConfig",
+      "type": "object"
+    },
+    "AshHistoryConfig": {
+      "additionalProperties": false,
+      "description": "Run history: a compact record of each completed scan, for ``ash trend``.",
+      "properties": {
+        "enabled": {
+          "default": false,
+          "description": "Append a compact run record to '<output dir>/history/' after each completed scan. Off by default: it adds files to the output directory on every scan.",
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "keep_runs": {
+          "anyOf": [
+            {
+              "maximum": 10000,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
+          "default": 50,
+          "description": "How many run records to keep when history is enabled; the oldest are removed when a new one is written.",
+          "title": "Keep Runs"
+        }
+      },
+      "title": "AshHistoryConfig",
       "type": "object"
     },
     "AshMcpConfig": {

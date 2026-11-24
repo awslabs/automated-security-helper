@@ -93,6 +93,7 @@ A key not listed here is an error when the configuration is loaded.
 | <a id="global_settings.suppressions"></a>`suppressions` | list of [section](#section-global_settings-suppressions) | `[]` | Global list of suppression rules. Each rule specifies findings to suppress based on rule ID, file path, and optional line numbers. |
 | <a id="global_settings.mcp"></a>`mcp` | [section](#section-global_settings-mcp) | see the section | MCP-server-specific configuration (runtime override allowlist, etc.). |
 | <a id="global_settings.deduplication"></a>`deduplication` | [section](#section-global_settings-deduplication) | see the section | Cross-scanner duplicate annotation in the flat reports (opt-in; off by default). |
+| <a id="global_settings.history"></a>`history` | [section](#section-global_settings-history) | see the section | Run history recording (a compact record of each completed scan). |
 
 ### <a id="section-global_settings-ignore_paths"></a>`global_settings.ignore_paths[]`
 
@@ -185,6 +186,18 @@ A key not listed here is an error when the configuration is loaded.
 |-----|------|---------|-------------|
 | <a id="global_settings.deduplication.annotate"></a>`annotate` | boolean | `false` | When true, the CSV and flat-JSON reports gain three columns that name each finding's duplicate cluster: `cluster_id`, `duplicate_of` (the primary finding's id, on every non-primary member) and `duplicate_sources` (on the primary: the other members' scanner, rule, id and severity). Rows and counts are unchanged. Off by default because the columns change the CSV header. CLI: `--annotate-duplicates` on `ash scan` and `ash report`. |
 | <a id="global_settings.deduplication.fold"></a>`fold` | boolean | `false` | When true, the HTML, Markdown and text reports show one row per duplicate cluster (the primary finding, with a note naming the other scanners that reported it) in their findings tables, detailed findings, finding cards and hotspots, and add deduplicated counts beside, never in place of, the per-scanner counts. Only clusters of the same CVE and package, or the same line and CWE, fold; IaC resource clusters are annotated only. Finding ids, SARIF, per-scanner metrics, suppressions, baselines, the CSV, flat-JSON and JUnit reports and the exit code are unchanged. Off by default because it changes row counts. CLI: `--fold-duplicates` on `ash scan` and `ash report`. |
+
+### <a id="section-global_settings-history"></a>`global_settings.history`
+
+Run history: a compact record of each completed scan, for `ash trend`.
+
+A key not listed here is an error when the configuration is loaded.
+
+<!-- doctest: options of=global_settings.history -->
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| <a id="global_settings.history.enabled"></a>`enabled` | boolean | `false` | Append a compact run record to '&lt;output dir&gt;/history/' after each completed scan. Off by default: it adds files to the output directory on every scan. |
+| <a id="global_settings.history.keep_runs"></a>`keep_runs` | integer, at least 1, at most 10,000 | `50` | How many run records to keep when history is enabled; the oldest are removed when a new one is written. |
 
 ### <a id="section-sandbox"></a>`sandbox`
 
