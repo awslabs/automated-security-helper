@@ -127,6 +127,11 @@
   Markdown report lists the reason of `MISSING` scanners only, as it leaves `SKIPPED`
   rows out of its table.
 
+### Fixes
+
+- cfn-nag evaluates templates containing `AWS::EKS::AccessEntry` without passing
+  EKS access policy associations to the OpenSearch and Elasticsearch policy rules.
+
 ## v3.8.0 (2026-11-12)
 
 ### Breaking behavior changes in a minor release
