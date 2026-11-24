@@ -95,7 +95,9 @@ def _print_text(payload: dict[str, Any]) -> None:
     runs = payload["runs"]
     echo(f"Runs: {len(runs)} (oldest first)")
     for index, run in enumerate(runs):
-        echo(shown_on_one_line(f"  {index}: {run['label']} ({run['findings']} findings)"))
+        echo(
+            shown_on_one_line(f"  {index}: {run['label']} ({run['findings']} findings)")
+        )
 
     totals: dict[tuple[int, str], int] = {}
     for entry in payload["series"]:
