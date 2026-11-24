@@ -170,6 +170,8 @@ ash_config:
         - /sandbox/**
         - /ash_plugin_modules
         - /ash_plugin_modules/**
+        - /scanner_selection
+        - /scanner_selection/**
         - /scanners/detect-secrets/options/scan_settings/filters_used
         - /scanners/detect-secrets/options/scan_settings/filters_used/**
         - /scanners/detect-secrets/options/scan_settings/plugins_used
@@ -455,6 +457,9 @@ ash_config:
     mode: 'off'
     network_scanners: null
     read_path_scanners: []
+  scanner_selection:
+    add_scanners: []
+    only_scanners: []
   scanners:
     actionlint:
       enabled: true

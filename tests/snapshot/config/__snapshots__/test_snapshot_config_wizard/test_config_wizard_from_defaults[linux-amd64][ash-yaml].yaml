@@ -20,6 +20,8 @@ global_settings:
       - /sandbox/**
       - /ash_plugin_modules
       - /ash_plugin_modules/**
+      - /scanner_selection
+      - /scanner_selection/**
       - /scanners/detect-secrets/options/scan_settings/filters_used
       - /scanners/detect-secrets/options/scan_settings/filters_used/**
       - /scanners/detect-secrets/options/scan_settings/plugins_used
@@ -433,5 +435,8 @@ workspace:
   max_parallel_projects: null
   project_timeout: null
 precommit:
+  only_scanners: []
+  add_scanners: []
+scanner_selection:
   only_scanners: []
   add_scanners: []

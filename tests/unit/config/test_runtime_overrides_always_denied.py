@@ -52,6 +52,8 @@ FLOOR = [
     "/sandbox/**",
     "/ash_plugin_modules",
     "/ash_plugin_modules/**",
+    "/scanner_selection",
+    "/scanner_selection/**",
     "/scanners/detect-secrets/options/scan_settings/filters_used",
     "/scanners/detect-secrets/options/scan_settings/filters_used/**",
     "/scanners/detect-secrets/options/scan_settings/plugins_used",

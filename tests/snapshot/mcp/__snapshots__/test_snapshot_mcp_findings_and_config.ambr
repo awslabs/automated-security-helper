@@ -686,6 +686,8 @@
               '/sandbox/**',
               '/ash_plugin_modules',
               '/ash_plugin_modules/**',
+              '/scanner_selection',
+              '/scanner_selection/**',
               '/scanners/detect-secrets/options/scan_settings/filters_used',
               '/scanners/detect-secrets/options/scan_settings/filters_used/**',
               '/scanners/detect-secrets/options/scan_settings/plugins_used',
@@ -992,6 +994,12 @@
         'mode': 'off',
         'network_scanners': None,
         'read_path_scanners': list([
+        ]),
+      }),
+      'scanner_selection': dict({
+        'add_scanners': list([
+        ]),
+        'only_scanners': list([
         ]),
       }),
       'scanners': dict({
@@ -1318,6 +1326,8 @@
               '/sandbox/**',
               '/ash_plugin_modules',
               '/ash_plugin_modules/**',
+              '/scanner_selection',
+              '/scanner_selection/**',
               '/scanners/detect-secrets/options/scan_settings/filters_used',
               '/scanners/detect-secrets/options/scan_settings/filters_used/**',
               '/scanners/detect-secrets/options/scan_settings/plugins_used',
@@ -1624,6 +1634,12 @@
         'mode': 'off',
         'network_scanners': None,
         'read_path_scanners': list([
+        ]),
+      }),
+      'scanner_selection': dict({
+        'add_scanners': list([
+        ]),
+        'only_scanners': list([
         ]),
       }),
       'scanners': dict({

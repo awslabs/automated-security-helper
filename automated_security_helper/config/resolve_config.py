@@ -105,6 +105,9 @@ from automated_security_helper.config.restrictions_kept import keep_restrictions
 from automated_security_helper.config.secret_verification_trust import (
     confine_detect_secrets_settings,
 )
+from automated_security_helper.config.scanner_selection_trust import (
+    confine_scanner_selection,
+)
 from automated_security_helper.config.staleness_trust import (
     confine_content_db_staleness,
 )
@@ -2943,6 +2946,9 @@ def resolve_config(
         config, trusted, tier_two_overrides, list(in_tree), source=tier_two_source
     )
     confine_content_db_staleness(
+        config, trusted, tier_two_overrides, list(in_tree), source=tier_two_source
+    )
+    confine_scanner_selection(
         config, trusted, tier_two_overrides, list(in_tree), source=tier_two_source
     )
     tier_two_reason = CLIENT_SUPPLIED if client_supplied else REPOSITORY_WRITTEN

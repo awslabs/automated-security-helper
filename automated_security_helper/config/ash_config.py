@@ -1284,6 +1284,8 @@ ALWAYS_DENIED_PATHS = (
     "/sandbox/**",
     "/ash_plugin_modules",
     "/ash_plugin_modules/**",
+    "/scanner_selection",
+    "/scanner_selection/**",
     "/scanners/detect-secrets/options/scan_settings/filters_used",
     "/scanners/detect-secrets/options/scan_settings/filters_used/**",
     "/scanners/detect-secrets/options/scan_settings/plugins_used",
@@ -1377,6 +1379,8 @@ class RuntimeOverridesConfig(RedactedSection):
         # Plugin modules are imported into ASH's own process, unsandboxed.
         "/ash_plugin_modules",
         "/ash_plugin_modules/**",
+        "/scanner_selection",
+        "/scanner_selection/**",
         # detect-secrets settings the trust checks count as the operator's: the
         # verification filter sends each candidate secret to the service that issued
         # it, plugins and filters named by file are imported, and a baseline file can
@@ -2150,6 +2154,58 @@ class PrecommitModeConfig(RedactedSection):
         return self
 
 
+class ScannerSelectionConfig(RedactedSection):
+    """The operator's default scanner selection, for every run mode.
+
+    ``only_scanners`` replaces the mode's default selection. ``add_scanners``
+    adds to a bounded default (precommit's) and cannot narrow an unrestricted
+    one. Empty or omitted changes nothing, and naming a scanner does not install
+    or enable it.
+
+    Read from the defaults, a config file outside every checkout, or
+    ``--config-overrides``; a file inside the scanned tree or a client's patch
+    cannot set it. Precedence, lowest to highest: the mode default, this
+    section, the ``precommit`` keys in precommit mode, the command line.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    only_scanners: Annotated[
+        List[str],
+        Field(
+            description=(
+                "Run exactly these scanners instead of the mode's default "
+                "selection. The command line's --only-scanners replaces this "
+                "list; --add-scanners and the deprecated --scanners add to it; "
+                "--exclude-scanners removes names from it. Cannot be set "
+                "together with add_scanners."
+            )
+        ),
+    ] = []
+
+    add_scanners: Annotated[
+        List[str],
+        Field(
+            description=(
+                "Scanner names to run in addition to a bounded default such as "
+                "precommit's. Does not narrow an unrestricted default. Cannot "
+                "be set together with only_scanners."
+            )
+        ),
+    ] = []
+
+    @model_validator(mode="after")
+    def _refuse_only_with_add(self) -> "ScannerSelectionConfig":
+        if self.only_scanners and self.add_scanners:
+            raise ValueError(
+                "scanner_selection.only_scanners and scanner_selection.add_scanners "
+                "cannot be set together: only_scanners already states the whole "
+                "selection. Put every name in only_scanners, or drop it and keep "
+                "add_scanners."
+            )
+        return self
+
+
 class ContentDbStalenessOverride(RedactedSection):
     """One content database held to a different staleness policy, until a fixed date.
 
@@ -2823,6 +2879,20 @@ class AshConfig(RedactedSection):
             ),
         ),
     ] = PrecommitModeConfig()
+
+    scanner_selection: Annotated[
+        ScannerSelectionConfig,
+        Field(
+            description=(
+                "The operator's default scanner selection for every run mode: "
+                "only_scanners replaces the mode's default, add_scanners adds to "
+                "a bounded default; setting both is refused. Settable only from "
+                "the defaults, a config file outside every checkout or "
+                "--config-overrides. The command line and the precommit keys "
+                "take precedence."
+            ),
+        ),
+    ] = ScannerSelectionConfig()
 
     # `extends` and `patch` are read by the config loader (config/config_sources.py)
     # and removed before validation, so a loaded config always has both as None.

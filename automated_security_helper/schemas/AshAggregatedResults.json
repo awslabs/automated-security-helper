@@ -1718,6 +1718,8 @@
                   "/sandbox/**",
                   "/ash_plugin_modules",
                   "/ash_plugin_modules/**",
+                  "/scanner_selection",
+                  "/scanner_selection/**",
                   "/scanners/detect-secrets/options/scan_settings/filters_used",
                   "/scanners/detect-secrets/options/scan_settings/filters_used/**",
                   "/scanners/detect-secrets/options/scan_settings/plugins_used",
@@ -2098,6 +2100,14 @@
           },
           "description": "OS-level sandboxing of scanner subprocesses."
         },
+        "scanner_selection": {
+          "$ref": "#/$defs/ScannerSelectionConfig",
+          "default": {
+            "add_scanners": [],
+            "only_scanners": []
+          },
+          "description": "The operator's default scanner selection for every run mode: only_scanners replaces the mode's default, add_scanners adds to a bounded default; setting both is refused. Settable only from the defaults, a config file outside every checkout or --config-overrides. The command line and the precommit keys take precedence."
+        },
         "scanners": {
           "$ref": "#/$defs/ScannerConfigSegment",
           "default": {
@@ -2385,6 +2395,8 @@
                 "/sandbox/**",
                 "/ash_plugin_modules",
                 "/ash_plugin_modules/**",
+                "/scanner_selection",
+                "/scanner_selection/**",
                 "/scanners/detect-secrets/options/scan_settings/filters_used",
                 "/scanners/detect-secrets/options/scan_settings/filters_used/**",
                 "/scanners/detect-secrets/options/scan_settings/plugins_used",
@@ -2548,6 +2560,8 @@
               "/sandbox/**",
               "/ash_plugin_modules",
               "/ash_plugin_modules/**",
+              "/scanner_selection",
+              "/scanner_selection/**",
               "/scanners/detect-secrets/options/scan_settings/filters_used",
               "/scanners/detect-secrets/options/scan_settings/filters_used/**",
               "/scanners/detect-secrets/options/scan_settings/plugins_used",
@@ -20547,6 +20561,32 @@
         }
       },
       "title": "ScannerPluginConfigBase",
+      "type": "object"
+    },
+    "ScannerSelectionConfig": {
+      "additionalProperties": false,
+      "description": "The operator's default scanner selection, for every run mode.\n\n``only_scanners`` replaces the mode's default selection. ``add_scanners``\nadds to a bounded default (precommit's) and cannot narrow an unrestricted\none. Empty or omitted changes nothing, and naming a scanner does not install\nor enable it.\n\nRead from the defaults, a config file outside every checkout, or\n``--config-overrides``; a file inside the scanned tree or a client's patch\ncannot set it. Precedence, lowest to highest: the mode default, this\nsection, the ``precommit`` keys in precommit mode, the command line.",
+      "properties": {
+        "add_scanners": {
+          "default": [],
+          "description": "Scanner names to run in addition to a bounded default such as precommit's. Does not narrow an unrestricted default. Cannot be set together with only_scanners.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Add Scanners",
+          "type": "array"
+        },
+        "only_scanners": {
+          "default": [],
+          "description": "Run exactly these scanners instead of the mode's default selection. The command line's --only-scanners replaces this list; --add-scanners and the deprecated --scanners add to it; --exclude-scanners removes names from it. Cannot be set together with add_scanners.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Only Scanners",
+          "type": "array"
+        }
+      },
+      "title": "ScannerSelectionConfig",
       "type": "object"
     },
     "ScannerSeverityCount": {
