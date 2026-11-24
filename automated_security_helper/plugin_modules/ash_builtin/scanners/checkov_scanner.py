@@ -28,6 +28,11 @@ from automated_security_helper.config.path_trust import (
     honored_path,
     resolved_path,
 )
+from automated_security_helper.base.scanner_facets import (
+    FacetDecl,
+    FacetState,
+    ScannerFacets,
+)
 from automated_security_helper.base.options import (
     ScannerOptionsBase,
     tool_version_constraint,
@@ -734,6 +739,128 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
     )
 
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.CACHE_FLAGS
+
+    #: The facets register row (base/scanner_facets.py), declaration only.
+    #: The record read is the committed side report (tests/test_data/scanners/
+    #: checkov/src.test.yaml.json, failed_checks[] keys check_id, file_path,
+    #: file_line_range, check_name, resource, guideline, fixed_definition,
+    #: code_block); no checkov SARIF golden is committed, so the cells that
+    #: live only in the SARIF are n/a with the UNCONFIRMED reason the register
+    #: uses for an unread source. resource_id is MAPPED:
+    #: :func:`attach_checkov_resources` copies each record's ``resource`` from
+    #: the JSON report onto its SARIF result under ``ash_resource_id``, and only
+    #: for the frameworks in :data:`_RESOURCE_FRAMEWORKS` (the per-framework
+    #: allow-list), because the other runners carry non-resources in that field.
+    facets: ClassVar[ScannerFacets] = ScannerFacets(
+        rule_id=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='check "check_id" (e.g. CKV_AWS_55), the SARIF result ruleId',
+        ),
+        severity=FacetDecl(
+            state=FacetState.NA,
+            reason="UNCONFIRMED: the committed side report carries "
+            '"severity": null on every check and no checkov SARIF golden is '
+            "committed; one checkov --output sarif run settles whether a "
+            "level is emitted",
+        ),
+        file_path=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='check "repo_file_path", the SARIF artifact uri '
+            "(rewritten by rewrite_checkov_paths)",
+        ),
+        line_range=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='check "file_line_range", the SARIF region startLine/endLine',
+        ),
+        column=FacetDecl(
+            state=FacetState.NA,
+            reason="UNCONFIRMED: the side report carries a line range only "
+            "and no checkov SARIF golden is committed; one SARIF run settles "
+            "whether a column is emitted",
+        ),
+        message=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='check "check_name"',
+        ),
+        resource_id=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='check "resource" (the results_json.json side report), '
+            "copied onto the SARIF result by attach_checkov_resources for the "
+            "frameworks in _RESOURCE_FRAMEWORKS only",
+            example="AWS::S3::Bucket.S3Bucket3",
+        ),
+        resource_type=FacetDecl(
+            state=FacetState.NA,
+            reason="the side report's resource field is one dotted string "
+            '("AWS::S3::Bucket.S3Bucket3"); no separate type field exists '
+            "and splitting it would be a derivation",
+        ),
+        package_name=FacetDecl(
+            state=FacetState.NA,
+            reason="IaC policy checks over resources; no package exists in "
+            "checkov's policy-check output",
+        ),
+        package_version=FacetDecl(
+            state=FacetState.NA,
+            reason="IaC policy checks over resources; no package exists in "
+            "checkov's policy-check output",
+        ),
+        package_path=FacetDecl(
+            state=FacetState.NA,
+            reason="IaC policy checks over resources; no package exists in "
+            "checkov's policy-check output",
+        ),
+        taxonomy_cve=FacetDecl(
+            state=FacetState.NA,
+            reason="checkov publishes its own check ids; no CVE taxonomy in "
+            "the policy-check results",
+        ),
+        taxonomy_cwe=FacetDecl(
+            state=FacetState.NA,
+            reason="checkov publishes its own check ids; no CWE taxonomy in "
+            "the policy-check results",
+        ),
+        fingerprints=FacetDecl(
+            state=FacetState.NA,
+            reason="UNCONFIRMED: the side report carries no fingerprint and "
+            "no checkov SARIF golden is committed; one SARIF run settles it",
+        ),
+        fix_available=FacetDecl(
+            state=FacetState.NA,
+            reason="UNCONFIRMED: the side report has a fixed_definition key "
+            "but it is null on every committed check, so whether a fixable "
+            "check populates it is open; one run over a fixable check "
+            "settles it",
+        ),
+        remediation_text=FacetDecl(
+            state=FacetState.NA,
+            reason="check_name states the finding, not a remediation; no "
+            "remediation text field exists in the side report",
+        ),
+        snippet=FacetDecl(
+            state=FacetState.DROPPED,
+            native_field='check "code_block" ([line number, text] pairs)',
+            reason="the side report carries the resource's source lines; the "
+            "adapter never reads them",
+        ),
+        references=FacetDecl(
+            state=FacetState.DROPPED,
+            native_field='check "guideline" (a policy documentation URL)',
+            reason="the side report carries a guideline URL per check; the "
+            "adapter never reads it",
+        ),
+        tags=FacetDecl(
+            state=FacetState.NA,
+            reason="the adapter adds no tags and the side report's "
+            '"entity_tags" is null in the committed record',
+        ),
+        extras=FacetDecl(
+            state=FacetState.NA,
+            reason="UNCONFIRMED: no checkov SARIF golden is committed, so "
+            "whether results carry a property bag is open; one SARIF run "
+            "settles it",
+        ),
+    )
 
     #: --mode precommit --staged: checkov is handed each staged file as
     #: ``--file <path>`` -- and, for Terraform, the staged file's SAME-DIRECTORY

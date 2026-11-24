@@ -1,0 +1,11 @@
+# Benign test fixture for the facets program's M0 sample runs (never deployed).
+# A property cfn-lint rejects (E3002) inside a resource, so a captured
+# `cfn-lint --format json` run shows whether Location.Path names the resource
+# (Resources/M0FixtureBucket/...).
+AWSTemplateFormatVersion: "2010-09-09"
+Description: ASH M0 facets fixture - cfn-lint should reject NotARealProperty.
+Resources:
+  M0FixtureBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      NotARealProperty: true

@@ -20,6 +20,11 @@ import yaml
 from pydantic import Field, model_validator
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.base.options import ScannerOptionsBase
+from automated_security_helper.base.scanner_facets import (
+    FacetDecl,
+    FacetState,
+    ScannerFacets,
+)
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.core.constants import SHIPPED_SEVERITY_LEVEL
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
@@ -349,6 +354,123 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
     )
 
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.CACHE_FLAGS
+
+    #: The facets register row (base/scanner_facets.py). Declaration only.
+    #: grype is a package-vulnerability matcher: its findings are packages, and
+    #: the one place a finding names where it was found is the manifest, a
+    #: locator and not a resource, so resource_id is n/a and the register's
+    #: must-not row holds the adapter to never writing ``ash_resource_id``.
+    #: Native fields are quoted from the committed native JSON
+    #: (tests/test_data/scanners/grype/grype.src.json) and from ASH's own
+    #: reading of grype's SARIF in this module (``_GRYPE_PACKAGE_MESSAGE``).
+    facets: ClassVar[ScannerFacets] = ScannerFacets(
+        rule_id=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="SARIF result ruleId (the vulnerability id)",
+        ),
+        severity=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='SARIF rule properties "security-severity" (CVSS), '
+            'else the result "level"',
+        ),
+        file_path=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="SARIF locations[].physicalLocation.artifactLocation.uri "
+            "(the manifest or lockfile)",
+        ),
+        line_range=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="SARIF region.startLine (grype always writes line 1 of "
+            "the manifest)",
+        ),
+        column=FacetDecl(
+            state=FacetState.NA,
+            reason="UNCONFIRMED: no grype SARIF fixture in-repo; a "
+            "`grype -o sarif` run settles whether results carry a "
+            "startColumn",
+        ),
+        message=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="SARIF result message.text",
+        ),
+        resource_id=FacetDecl(
+            state=FacetState.NA,
+            reason="LOCATOR-ONLY: grype reports packages; the only location "
+            "is the manifest at line 1, a file locator and package identity "
+            "(artifact.purl), not a resource with its own lifecycle",
+        ),
+        resource_type=FacetDecl(
+            state=FacetState.NA,
+            reason="grype output names no resource; artifact.type is a "
+            "package ecosystem (gem, npm), not a resource type",
+        ),
+        package_name=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='SARIF message "package: <name>, version <version> '
+            'was found at:" (_GRYPE_PACKAGE_MESSAGE)',
+        ),
+        package_version=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='SARIF message "package: <name>, version <version> '
+            'was found at:" (_GRYPE_PACKAGE_MESSAGE)',
+        ),
+        package_path=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="npm lockfile entry found by name and version beside "
+            "the manifest; grype's own output carries no per-copy path "
+            "(set only when exactly one copy matches)",
+        ),
+        taxonomy_cve=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="SARIF result ruleId (CVE or GHSA id; "
+            "matches[].vulnerability.id)",
+        ),
+        taxonomy_cwe=FacetDecl(
+            state=FacetState.NA,
+            reason="UNCONFIRMED: the committed native grype JSON "
+            "(vulnerability keys advisories, cvss, dataSource, description, "
+            "epss, fix, id, namespace, severity, urls) carries no CWE; a "
+            "`grype -o sarif` run settles whether rule properties do",
+        ),
+        fingerprints=FacetDecl(
+            state=FacetState.NA,
+            reason="UNCONFIRMED: no grype SARIF fixture in-repo; a "
+            "`grype -o sarif` run settles whether results carry "
+            "fingerprints or partialFingerprints",
+        ),
+        fix_available=FacetDecl(
+            state=FacetState.DROPPED,
+            native_field="matches[].vulnerability.fix",
+            reason="the native fix {state, versions} is never read; the flat "
+            "model reads fix_available but this adapter never writes it",
+        ),
+        remediation_text=FacetDecl(
+            state=FacetState.NA,
+            reason="UNCONFIRMED: not classified by the survey; the flat "
+            "model has no remediation column, and matchDetails[].fix."
+            "suggestedVersion is a version, not text",
+        ),
+        snippet=FacetDecl(
+            state=FacetState.NA,
+            reason="a package match has no source code snippet",
+        ),
+        references=FacetDecl(
+            state=FacetState.DROPPED,
+            native_field="matches[].vulnerability.urls",
+            reason="the native urls (and relatedVulnerabilities[].urls, "
+            "dataSource) are never read into references",
+        ),
+        tags=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="SARIF rule properties.tags",
+        ),
+        extras=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="SARIF result properties bag (package identity keys "
+            "this adapter writes) passed through to the flat properties",
+        ),
+    )
+
     check_conf: str = "NOT_PROVIDED"
     # Env vars to layer onto the subprocess. Populated by
     # _process_config_options (e.g. offline-mode flags). Kept local to the

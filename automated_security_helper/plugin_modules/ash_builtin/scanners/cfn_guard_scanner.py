@@ -90,6 +90,11 @@ from typing import (
 from pydantic import AnyUrl, Field, PrivateAttr, field_validator, model_validator
 
 from automated_security_helper.base.options import ScannerOptionsBase
+from automated_security_helper.base.scanner_facets import (
+    FacetDecl,
+    FacetState,
+    ScannerFacets,
+)
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
@@ -363,6 +368,119 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
     python_only: ClassVar[bool | None] = False
 
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
+
+    #: The facets register row (base/scanner_facets.py), declaration only. The
+    #: native fields are those of cfn-guard's SARIF (committed fixture
+    #: tests/test_data/scanners/cfn_lint_guard/captured/
+    #: cfn-guard-3.2.1-wa-Security-Pillar-insecure.sarif: result keys exactly
+    #: ruleId, level, message, locations; the driver has no rules array). The
+    #: logical resource id exists only inside the message prose
+    #: ("Value traversed to [Path=/Resources/<LogicalId>/..."), so
+    #: resource_id is DROPPED with the derivation named; attaching it is the
+    #: later M3b unit and an owner decision, not part of this declaration.
+    facets: ClassVar[ScannerFacets] = ScannerFacets(
+        rule_id=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="result ruleId (e.g. LAMBDA_INSIDE_VPC)",
+        ),
+        severity=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="result level (always error); ASH maps every "
+            "violation to the constant VIOLATION_SEVERITY HIGH because the "
+            "rules declare no severity of their own",
+        ),
+        file_path=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="result locations[].physicalLocation."
+            "artifactLocation.uri (overwritten with the scanned template's "
+            "path)",
+        ),
+        line_range=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="result locations[].physicalLocation.region startLine",
+        ),
+        column=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="result locations[].physicalLocation.region startColumn",
+        ),
+        message=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="result message.text",
+        ),
+        resource_id=FacetDecl(
+            state=FacetState.DROPPED,
+            native_field='result message.text "Path=/Resources/<LogicalId>/" segment',
+            reason="recoverable only by parsing message prose (a derivation, "
+            "not a field copy, and a message-format change would silently "
+            "stop it); attaching it is a later unit gated on an owner "
+            "decision",
+        ),
+        resource_type=FacetDecl(
+            state=FacetState.NA,
+            reason="the message path names the logical id only; the "
+            "CloudFormation Type is not in the SARIF and would need a "
+            "template read the adapter does not make",
+        ),
+        package_name=FacetDecl(
+            state=FacetState.NA,
+            reason="findings are CloudFormation template rule checks; no "
+            "package exists in cfn-guard output",
+        ),
+        package_version=FacetDecl(
+            state=FacetState.NA,
+            reason="findings are CloudFormation template rule checks; no "
+            "package exists in cfn-guard output",
+        ),
+        package_path=FacetDecl(
+            state=FacetState.NA,
+            reason="findings are CloudFormation template rule checks; no "
+            "package exists in cfn-guard output",
+        ),
+        taxonomy_cve=FacetDecl(
+            state=FacetState.NA,
+            reason="cfn-guard publishes its own rule ids; no CVE taxonomy in "
+            "the results",
+        ),
+        taxonomy_cwe=FacetDecl(
+            state=FacetState.NA,
+            reason="cfn-guard publishes its own rule ids; no CWE taxonomy in "
+            "the results",
+        ),
+        fingerprints=FacetDecl(
+            state=FacetState.NA,
+            reason="the SARIF results carry no fingerprints (result keys "
+            "are exactly ruleId, level, message, locations)",
+        ),
+        fix_available=FacetDecl(
+            state=FacetState.NA,
+            reason="cfn-guard results carry no fix state or fixed version",
+        ),
+        remediation_text=FacetDecl(
+            state=FacetState.NA,
+            reason="the message states the failed check, not a remediation; "
+            "no remediation field exists",
+        ),
+        snippet=FacetDecl(
+            state=FacetState.DROPPED,
+            native_field='result message.text "Value={...}" segment',
+            reason="the traversed value is dumped inside the message prose "
+            "and no region snippet is emitted; ASH keeps the whole message "
+            "and extracts no snippet from it",
+        ),
+        references=FacetDecl(
+            state=FacetState.NA,
+            reason="the driver carries no rules array, so no help URI exists",
+        ),
+        tags=FacetDecl(
+            state=FacetState.NA,
+            reason="the adapter adds no tags and the SARIF results carry none",
+        ),
+        extras=FacetDecl(
+            state=FacetState.NA,
+            reason="the native results carry no property bag; the only "
+            "property written is the ASH-computed issue_severity",
+        ),
+    )
 
     #: The exit codes a completed cfn-guard run may end with (19 = at least one
     #: rule failed), the same set ``_parse_response`` accepts per template. Declared

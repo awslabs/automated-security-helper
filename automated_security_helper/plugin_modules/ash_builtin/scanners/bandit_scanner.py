@@ -36,6 +36,11 @@ from automated_security_helper.models.core import (
     IgnorePathWithReason,
     ToolExtraArg,
 )
+from automated_security_helper.base.scanner_facets import (
+    FacetDecl,
+    FacetState,
+    ScannerFacets,
+)
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginConfigBase,
 )
@@ -802,6 +807,99 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
     # The uv --from spec the install command and the version probe were built
     # for; _apply_config rebuilds both only when a new configuration changes it.
     _applied_from_spec: Optional[str] = PrivateAttr(default=None)
+
+    #: The facets register row (base/scanner_facets.py). Declaration only, zero
+    #: behavior change. Native fields are those of bandit's own SARIF formatter,
+    #: read from the M0 capture (tests/test_data/scanners/bandit/captured/
+    #: bandit-1.9.4-m0.sarif): every result carries a property bag
+    #: {issue_confidence, issue_severity} and a structured region snippet. Pure
+    #: Python code SAST: the only locators are file paths, never resource ids.
+    facets: ClassVar[ScannerFacets] = ScannerFacets(
+        rule_id=FacetDecl(state=FacetState.MAPPED, native_field="results[].ruleId"),
+        severity=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="results[].properties.issue_severity (and results[].level)",
+        ),
+        file_path=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="results[].locations[].physicalLocation.artifactLocation.uri",
+        ),
+        line_range=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="results[].locations[].physicalLocation.region."
+            "startLine/endLine",
+        ),
+        column=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="results[].locations[].physicalLocation.region."
+            "startColumn/endColumn",
+        ),
+        message=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="results[].message.text (ASH masks secret-shaped "
+            "values in it)",
+        ),
+        resource_id=FacetDecl(
+            state=FacetState.NA,
+            reason="pure Python code SAST; the only locators in its output are "
+            "file paths, which are never resource ids",
+        ),
+        resource_type=FacetDecl(
+            state=FacetState.NA,
+            reason="pure Python code SAST; no deployable resource exists in the output",
+        ),
+        package_name=FacetDecl(
+            state=FacetState.NA,
+            reason="code findings name a file and a rule, not a package",
+        ),
+        package_version=FacetDecl(
+            state=FacetState.NA,
+            reason="code findings name a file and a rule, not a package",
+        ),
+        package_path=FacetDecl(
+            state=FacetState.NA,
+            reason="code findings name a file and a rule, not a package",
+        ),
+        taxonomy_cve=FacetDecl(
+            state=FacetState.NA,
+            reason="code rules carry no CVE ids",
+        ),
+        taxonomy_cwe=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="tool.driver.rules[].properties.tags (external/cwe/cwe-<n>)",
+        ),
+        fingerprints=FacetDecl(
+            state=FacetState.NA,
+            reason="bandit SARIF results carry no fingerprints (0 in the M0 "
+            "capture); finding identity keys on scanner/rule/file",
+        ),
+        fix_available=FacetDecl(
+            state=FacetState.NA,
+            reason="bandit findings carry no fix or fixed-version data",
+        ),
+        remediation_text=FacetDecl(
+            state=FacetState.NA,
+            reason="bandit publishes the issue text and a docs link, no "
+            "remediation field",
+        ),
+        snippet=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="results[].locations[].physicalLocation.region."
+            "snippet.text (settled by the M0 capture)",
+        ),
+        references=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="tool.driver.rules[].helpUri",
+        ),
+        tags=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="tool.driver.rules[].properties.tags",
+        ),
+        extras=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="results[].properties (issue_confidence, issue_severity)",
+        ),
+    )
 
     def model_post_init(self, context):
         if self.config is None:

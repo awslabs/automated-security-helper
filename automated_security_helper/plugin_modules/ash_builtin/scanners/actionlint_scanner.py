@@ -199,6 +199,11 @@ from pydantic import Field, PrivateAttr, model_validator
 
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.plugin_base import worse_exit_code
+from automated_security_helper.base.scanner_facets import (
+    FacetDecl,
+    FacetState,
+    ScannerFacets,
+)
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
@@ -1257,6 +1262,96 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
     # workflows and ASH's config file, and needs no network, cache or variables. An
     # enabled shellcheck or pyflakes is found through PATH, which the baseline mounts.
     sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements()
+    #: The facets register row (base/scanner_facets.py). Declaration only, zero
+    #: behavior change. actionlint writes its own JSON (a Go template) and ASH
+    #: converts it to SARIF, so the native fields are the keys of each
+    #: ``errors[]`` record (fixture tests/test_data/scanners/actionlint/
+    #: actionlint-1.7.12-default.json: column, end_column, filepath, kind, line,
+    #: message, snippet). Resource identity is a LOCATOR-ONLY N/A: the output
+    #: names no job or step at all, only a file, a line and a column, and a
+    #: position in a workflow file is a locator, never a resource id.
+    facets: ClassVar[ScannerFacets] = ScannerFacets(
+        rule_id=FacetDecl(state=FacetState.MAPPED, native_field="errors[].kind"),
+        severity=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="errors[].kind (ASH severity table; a message matching "
+            "the untrusted-input pattern raises it to HIGH)",
+        ),
+        file_path=FacetDecl(state=FacetState.MAPPED, native_field="errors[].filepath"),
+        line_range=FacetDecl(state=FacetState.MAPPED, native_field="errors[].line"),
+        column=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="errors[].column / errors[].end_column",
+        ),
+        message=FacetDecl(state=FacetState.MAPPED, native_field="errors[].message"),
+        resource_id=FacetDecl(
+            state=FacetState.NA,
+            reason="locator-only: the output carries file, line and column but "
+            "no job or step identifier; a workflow position is a locator, "
+            "never a resource id",
+        ),
+        resource_type=FacetDecl(
+            state=FacetState.NA,
+            reason="locator-only: no resource exists in the output, so no "
+            "resource type either",
+        ),
+        package_name=FacetDecl(
+            state=FacetState.NA,
+            reason="workflow lint findings name a file position, not a package",
+        ),
+        package_version=FacetDecl(
+            state=FacetState.NA,
+            reason="workflow lint findings name a file position, not a package",
+        ),
+        package_path=FacetDecl(
+            state=FacetState.NA,
+            reason="workflow lint findings name a file position, not a package",
+        ),
+        taxonomy_cve=FacetDecl(
+            state=FacetState.NA,
+            reason="actionlint check kinds carry no CVE ids",
+        ),
+        taxonomy_cwe=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='errors[].kind == "credentials" (ASH writes the '
+            "CWE-798 tag; no native CWE field)",
+        ),
+        fingerprints=FacetDecl(
+            state=FacetState.NA,
+            reason="actionlint's JSON carries no fingerprint; finding "
+            "identity keys on scanner/rule/file",
+        ),
+        fix_available=FacetDecl(
+            state=FacetState.NA,
+            reason="actionlint findings carry no fix data",
+        ),
+        remediation_text=FacetDecl(
+            state=FacetState.NA,
+            reason="actionlint publishes the check message and no separate "
+            "remediation field",
+        ),
+        snippet=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="errors[].snippet (dropped on a line with a "
+            "credentials finding, where it would hold the password)",
+        ),
+        references=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="errors[].kind (ASH builds the pinned checks.md "
+            "helpUri; no native URL field)",
+        ),
+        tags=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='errors[].kind == "credentials" (ASH writes the '
+            "secret/CWE-798 tags; no native tags field)",
+        ),
+        extras=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="ASH-written result properties (issue_severity and "
+            "actionlint_kind, from errors[].kind); no native property bag",
+        ),
+    )
+
     # Integrations already reported as refused, so each is logged once per scan.
     _refused_integrations: Set[str] = PrivateAttr(default_factory=set)
     # actionlint's absolute path, from validate_plugin_dependencies; see

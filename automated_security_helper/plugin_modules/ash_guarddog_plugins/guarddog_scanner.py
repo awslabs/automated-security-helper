@@ -123,6 +123,11 @@ from automated_security_helper.base.options import (
 )
 from automated_security_helper.base.plugin_base import CustomCommand
 from automated_security_helper.base.plugin_context import PluginContext
+from automated_security_helper.base.scanner_facets import (
+    FacetDecl,
+    FacetState,
+    ScannerFacets,
+)
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
@@ -801,6 +806,108 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
     #: Local ``scan`` is offline: the YARA rules ship inside the GuardDog
     #: package. ``verify`` needs the network and is refused under ASH_OFFLINE.
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
+
+    #: The facets register row (base/scanner_facets.py). Declaration only: no
+    #: behavior changes. GuardDog's output is its own JSON (fixtures in
+    #: tests/test_data/scanners/guarddog/captured), converted to SARIF by this
+    #: adapter, so the native fields name that JSON.
+    facets: ClassVar[ScannerFacets] = ScannerFacets(
+        rule_id=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='"results" key (the heuristic name, e.g. '
+            "capability-network-lolbas)",
+        ),
+        severity=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="(no native severity) the adapter's risk ladder over "
+            "the heuristic's category",
+        ),
+        file_path=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='match "location" file part (e.g. setup.py:16)',
+        ),
+        line_range=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='match "location" line part',
+        ),
+        column=FacetDecl(
+            state=FacetState.NA,
+            reason="GuardDog locations are file:line only",
+        ),
+        message=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='match "message", assembled with the rule and match '
+            "into the result text by the adapter",
+        ),
+        resource_id=FacetDecl(
+            state=FacetState.NA,
+            reason="findings name a package and a file:line inside it, not a "
+            "deployable resource; package identity is declared under the "
+            "package facets",
+        ),
+        resource_type=FacetDecl(
+            state=FacetState.NA,
+            reason="findings name a package and a file:line inside it, not a "
+            "deployable resource",
+        ),
+        package_name=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="the verified requirement's name (verify mode), "
+            'written as the result property "package_name"',
+            reason="scan mode's root package identity is not read: the native "
+            'top-level "package" is a scanned directory path',
+        ),
+        package_version=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="the verified requirement's version (verify mode), "
+            'written as the result property "package_version"',
+            reason="scan mode's root package version is not read",
+        ),
+        package_path=FacetDecl(
+            state=FacetState.NA,
+            reason="the adapter writes package_name and package_version only",
+        ),
+        taxonomy_cve=FacetDecl(
+            state=FacetState.NA,
+            reason="malicious-package heuristics carry no CVE taxonomy",
+        ),
+        taxonomy_cwe=FacetDecl(
+            state=FacetState.NA,
+            reason="malicious-package heuristics carry no CWE taxonomy",
+        ),
+        fingerprints=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='partialFingerprints["guarddog/v1"], a sha256 the '
+            "adapter computes over rule, uri, line and hits (not a native field)",
+        ),
+        fix_available=FacetDecl(
+            state=FacetState.NA,
+            reason="malicious-package findings carry no fix state",
+        ),
+        remediation_text=FacetDecl(
+            state=FacetState.NA,
+            reason="GuardDog results carry no remediation text",
+        ),
+        snippet=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='match "code" / risk "threat_code"',
+        ),
+        references=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="rule helpUri https://github.com/DataDog/guarddog"
+            "#heuristics (adapter-written, not per-heuristic)",
+        ),
+        tags=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="rule-level PropertyBag tags guarddog and "
+            "malicious-package, written by the adapter",
+        ),
+        extras=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="extra_properties merged into the result PropertyBag "
+            "(package_name and package_version in verify mode)",
+        ),
+    )
 
     # The strict default. ``scan`` reads the staged package files with rules shipped
     # in the GuardDog package, a uv tool whose directories the baseline exposes.

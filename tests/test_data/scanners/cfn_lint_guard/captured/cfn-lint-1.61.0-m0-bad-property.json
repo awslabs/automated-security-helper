@@ -1,0 +1,31 @@
+[
+    {
+        "Filename": "m0_bad_property.yaml",
+        "Id": "36e0472b-54a7-1062-08c9-707d6e555446",
+        "Level": "Error",
+        "Location": {
+            "End": {
+                "ColumnNumber": 23,
+                "LineNumber": 11
+            },
+            "Path": [
+                "Resources",
+                "M0FixtureBucket",
+                "Properties",
+                "NotARealProperty"
+            ],
+            "Start": {
+                "ColumnNumber": 7,
+                "LineNumber": 11
+            }
+        },
+        "Message": "Additional properties are not allowed ('NotARealProperty' was unexpected)",
+        "ParentId": null,
+        "Rule": {
+            "Description": "Making sure that resources properties are properly configured",
+            "Id": "E3002",
+            "ShortDescription": "Resource properties are invalid",
+            "Source": "https://github.com/aws-cloudformation/cfn-lint/blob/main/docs/cfn-schema-specification.md#properties"
+        }
+    }
+]

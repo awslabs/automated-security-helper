@@ -10,6 +10,11 @@ from typing import Annotated, Any, ClassVar, List, Literal, Set
 from pydantic import Field, PrivateAttr, ValidationError, model_validator
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.base.options import ScannerOptionsBase
+from automated_security_helper.base.scanner_facets import (
+    FacetDecl,
+    FacetState,
+    ScannerFacets,
+)
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.config.confinement_remedy import SET_BY_THE_OPERATOR
@@ -119,6 +124,103 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
     )
 
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.CACHE_FLAGS
+
+    #: The facets register row (base/scanner_facets.py). Declaration only.
+    #: syft is an SBOM generator: it returns a CycloneDXReport and writes no
+    #: SARIF Result at all, so no finding facet exists. The component
+    #: inventory is the package identity, carried in the CycloneDX document
+    #: outside the flat-vulnerability path. Every other cell is n/a because
+    #: there are no findings to carry it.
+    facets: ClassVar[ScannerFacets] = ScannerFacets(
+        rule_id=FacetDecl(
+            state=FacetState.NA,
+            reason="SBOM scanner: no findings exist, so no rule id",
+        ),
+        severity=FacetDecl(
+            state=FacetState.NA,
+            reason="SBOM scanner: no findings exist, so no severity",
+        ),
+        file_path=FacetDecl(
+            state=FacetState.NA,
+            reason="SBOM scanner: no findings exist; component locations are "
+            "inventory evidence, not a finding location",
+        ),
+        line_range=FacetDecl(
+            state=FacetState.NA,
+            reason="SBOM scanner: no findings exist, so no line range",
+        ),
+        column=FacetDecl(
+            state=FacetState.NA,
+            reason="SBOM scanner: no findings exist, so no column",
+        ),
+        message=FacetDecl(
+            state=FacetState.NA,
+            reason="SBOM scanner: no findings exist, so no message",
+        ),
+        resource_id=FacetDecl(
+            state=FacetState.NA,
+            reason="no findings exist; the SBOM names packages (package "
+            "identity), not infrastructure resources, and writes no "
+            "ash_resource_id",
+        ),
+        resource_type=FacetDecl(
+            state=FacetState.NA,
+            reason="no findings exist; component types (library, "
+            "application) are package kinds, not resource types",
+        ),
+        package_name=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="CycloneDX components[].name",
+        ),
+        package_version=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="CycloneDX components[].version",
+        ),
+        package_path=FacetDecl(
+            state=FacetState.NA,
+            reason="UNCONFIRMED: syft's native artifacts[].locations[].path "
+            "(fixture syft.src.json) has a CycloneDX counterpart this "
+            "adapter has not been read against; a cyclonedx-json run "
+            "settles it",
+        ),
+        taxonomy_cve=FacetDecl(
+            state=FacetState.NA,
+            reason="SBOM scanner: inventory only, no vulnerability matching",
+        ),
+        taxonomy_cwe=FacetDecl(
+            state=FacetState.NA,
+            reason="SBOM scanner: inventory only, no vulnerability matching",
+        ),
+        fingerprints=FacetDecl(
+            state=FacetState.NA,
+            reason="SBOM scanner: no findings exist to fingerprint",
+        ),
+        fix_available=FacetDecl(
+            state=FacetState.NA,
+            reason="SBOM scanner: no vulnerabilities, so no fix state",
+        ),
+        remediation_text=FacetDecl(
+            state=FacetState.NA,
+            reason="SBOM scanner: no findings exist, so no remediation",
+        ),
+        snippet=FacetDecl(
+            state=FacetState.NA,
+            reason="SBOM scanner: no findings exist, so no snippet",
+        ),
+        references=FacetDecl(
+            state=FacetState.NA,
+            reason="SBOM scanner: no findings exist, so no references",
+        ),
+        tags=FacetDecl(
+            state=FacetState.NA,
+            reason="SBOM scanner: no findings exist, so no tags",
+        ),
+        extras=FacetDecl(
+            state=FacetState.NA,
+            reason="SBOM scanner: no SARIF property bag; the CycloneDX "
+            "document is passed through whole outside the flat path",
+        ),
+    )
 
     # syft exits 0 for a completed run; cmd/syft/main.go runs clio, whose Run exits 1
     # on any error, and syft installs no other exit-code mapping. An SBOM has no
