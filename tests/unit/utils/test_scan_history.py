@@ -104,9 +104,17 @@ def test_fingerprint_identity_is_recorded_for_the_matcher(tmp_path):
     assert row["has_identity"] is True
 
 
-def test_a_lone_surrogate_in_a_path_round_trips(tmp_path):
-    run = results(finding("B101", path="src/\udcffname.py"))
+def test_a_lone_surrogate_in_a_row_round_trips(tmp_path, monkeypatch):
+    # A path os.fsdecode made from undecodable bytes holds a lone surrogate; the
+    # record is ASCII JSON, so it is written and read back as the same text.
+    monkeypatch.setattr(
+        scan_history,
+        "_finding_row",
+        lambda finding: {"id": finding.id, "file_path": "src/\udcffname.py"},
+    )
+    run = results(finding("B101"))
     path = scan_history.write_run_record(run, tmp_path)
+    assert path.read_bytes().isascii()
     record = scan_history.read_run_record(path)
     assert record["findings"][0]["file_path"] == "src/\udcffname.py"
 
