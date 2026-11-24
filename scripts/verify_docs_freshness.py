@@ -148,6 +148,11 @@ _EXCLUDED_MD_PATHS = (
     # and as current claims. The plugin's README.md and DEVELOPMENT.md beside
     # them are documentation and stay in the corpus.
     "automated_security_helper/plugin_modules/ash_ferret_plugins/spec/",
+    # hatch_build.py copies docs/content/docs/genai-steering-guide.md here for the
+    # wheel. The copy is gitignored, but a tree with no effective ignore rule lists
+    # it, and its relative links (../how-to/...) resolve from docs/content/docs/, not
+    # from assets/. The source page is in the corpus and holds the same text.
+    "automated_security_helper/assets/genai-steering-guide.md",
 )
 
 

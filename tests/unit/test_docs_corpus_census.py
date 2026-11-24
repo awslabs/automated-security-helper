@@ -78,7 +78,10 @@ EXCLUDED_DIRS = frozenset(
     }
 )
 #: Paths below the repository root collect_md_files leaves out, restated the same way.
-EXCLUDED_PATHS = ("automated_security_helper/plugin_modules/ash_ferret_plugins/spec/",)
+EXCLUDED_PATHS = (
+    "automated_security_helper/plugin_modules/ash_ferret_plugins/spec/",
+    "automated_security_helper/assets/genai-steering-guide.md",
+)
 
 _MARKER = re.compile(r"^\s*<!--\s*doctest:(.*?)-->\s*$")
 
