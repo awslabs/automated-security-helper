@@ -7,8 +7,10 @@ The report served by the fake subprocess is built by ``_report`` from the shape
 ``ggshield``'s ``SecretSARIFOutputHandler`` writes (read from its source: SARIF
 2.1.0, one run, no ``rules`` array, ``ruleId`` the detector's display name, level
 ``error`` on every result, ``partialFingerprints["secret/v1"]``, 1-based regions).
-It is NOT a capture of a real run, which needs a GitGuardian API key; the
-expected findings below are written out by hand. The scan() tests replace the
+It is NOT a capture: it exercises URI forms and edge cases the captured run
+does not show, and the expected findings below are written out by hand. The
+report ggshield itself wrote is served by
+``test_ggshield_captured_report_and_sandbox.py``. The scan() tests replace the
 subprocess, so they run on every platform without ggshield, uv or network.
 """
 
