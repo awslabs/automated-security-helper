@@ -16,6 +16,7 @@ sandboxed spawn goes through, so a declaration the policy ignores fails here.
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -136,7 +137,15 @@ class TestCapturedReport:
             for loc in result.relatedLocations
         ]
         assert related == ["app/config.py"]
-        assert tree.absolute().as_posix() not in report.model_dump_json()
+        # The invocation record keeps the command line, which names the scan path;
+        # the artifact locations are what the findings carry.
+        uris = [
+            part
+            for part in re.findall(r'"uri":"([^"]*)"', report.model_dump_json())
+            if part
+        ]
+        assert uris
+        assert not [u for u in uris if tree.absolute().as_posix() in u], uris
 
     def test_the_captured_negative_report_is_a_clean_scan(
         self,
