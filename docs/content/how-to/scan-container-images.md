@@ -26,12 +26,14 @@ ash scan --image-layout ./app-layout/
 
 Prefer a digest-pinned reference (`repo@sha256:...`): two scans of the same pinned
 image then agree across machines. A tag-only reference is accepted and handed to the
-tool as written; ASH does not resolve it to a digest.
+tool as written, and ASH asks the registry which digest the tag points at (see
+[Tag-only references](#tag-only-references-and-their-digest)) so its finding ids key on
+that digest; where that lookup cannot run, the ids key on the reference text.
 
 **Current status.** grype, syft and trivy are the scanners that read images; every other
 scanner is filesystem-only and is reported SKIPPED. ASH detects an engine (below) to pick
-how the tools reach the image, but it does not ask the engine for a digest, and an image
-scan is only as complete as those three tools' own coverage.
+how the tools reach the image, and an image scan is only as complete as those three
+tools' own coverage.
 
 The two payload shapes are checked at the stat level before anything uses them, the way
 a source directory is: the archive must exist, be readable and carry tar magic (a
@@ -42,11 +44,20 @@ malformed images themselves.
 
 Image options run in local mode, single-directory, on a fresh scan: they cannot be
 combined with any other `--mode` (container, nix and precommit are refused), a workspace
-scan, `--use-existing`, `--changed-files-only` or a shard (`--shard-index`,
+scan, `--use-existing`, `--staged`, `--baseline` or a shard (`--shard-index`,
 `--shard-count`). The convert phase does not run (converters read source files, which an
 image presents none of), so asking for the convert phase alone is refused. The scan
 records the image, not the directory it was started from, as its scan source, and does
 not walk that directory.
+
+`--changed-files-only` scopes a scan by git history, and an image has no diff base, so it
+means nothing there. It is not refused: ASH warns once that it has no meaning for an image
+scan and scans the whole image.
+
+**One subject per scan, by design.** A scan reports on one asset, and each image keeps its
+own report, its own identity scope (`image_ref`, `image_digest`) and its own exit code.
+To scan several images, call ASH once per image and loop in the caller; the reports are not
+merged, so no finding of one image can be attributed to another.
 
 ## Which scanners look at the image
 
@@ -81,6 +92,26 @@ which is what air-gapped hosts use.
 
 containerd is reached only through a tool's own options and is never probed by ASH.
 
+trivy reads a reference or a saved archive, not an OCI layout directory, so for
+`--image-layout` ASH re-packs the layout as a docker-archive tarball in a temporary file
+of the scan's own, in pure Python, and gives trivy that archive. The layout is only read.
+A layout whose layers are compressed any way but gzip is reported with the layer named.
+
+### Tag-only references and their digest
+
+For a tag-only reference (`repo:tag`) ASH runs `crane digest <ref>` once at scan start, a
+registry request for the manifest's digest that needs no engine and fetches no layer.
+`crane` is a pinned tool like grype (`ash dependencies install --tool crane`, and the
+container image carries it). The digest it prints is recorded for the scan, so finding ids
+key on it: they stay the same when the tag is moved to another name and change when the tag
+moves to a different image.
+
+The lookup is skipped, and the ids key on the reference text exactly as before, when the
+reference already carries its digest (no notice: nothing is missing), when ASH is offline
+(`--offline`, `ASH_OFFLINE`), when `crane` is not installed, and when the registry answers
+with an error. Each of those three cases logs one notice naming the fallback; the scan
+itself is never failed or skipped by it. Pin the reference by digest for ids that need no lookup at all.
+
 ## Over the MCP server
 
 The MCP server carries both shapes beside its git and zip channels:
@@ -106,12 +137,12 @@ as written. Three attribution columns say which image it came from:
 | Column | Meaning |
 |---|---|
 | `image_ref` | The image as submitted: the reference, or the archive or layout path. |
-| `image_digest` | The image's sha256 digest, when there is one: the tool's own run output (trivy records the image ID), else the digest a pinned reference (`repo@sha256:...`) states. A tag-only reference scanned by a tool that reports no digest (grype, syft) has none. |
-| `layer_digest` | The layer that introduced the finding, for a scanner that reports one. Attribution only. |
+| `image_digest` | The image's sha256 digest, when there is one: the tool's own run output (trivy records the image ID), else the digest the registry gave for a tag-only reference (`crane digest`, above), else the digest a pinned reference (`repo@sha256:...`) states. Empty only when the lookup could not run (offline, no `crane`, a registry error). |
+| `layer_digest` | Empty today. No wired tool writes a per-result layer digest into its SARIF, so the column stays empty until one does; a tool (or a plugin's post-process) that writes the `layerDigest` result property fills it with no further change. Attribution only. |
 
 A finding's id keys on the in-image path and the image's digest, or on the submitted
-reference when there is no digest. Pin the reference by digest when ids must survive a
-tag moving. Two scans of one pinned image therefore agree
+reference when there is no digest. Pin the reference by digest when ids must survive
+without a registry lookup. Two scans of one pinned image therefore agree
 across machines and output directories, a re-tagged image that resolves to the same
 digest keeps its ids, and an image finding never shares an id with a source finding at
 the same path. The layer digest is not part of the id: a rebuilt layer that still
@@ -130,10 +161,21 @@ global_settings:
 ```
 
 A suppression without `image` applies to any finding, image or filesystem, as before.
-One with `image` never applies to a filesystem finding. `ignore_paths` and
-`--changed-files-only` stay filesystem-only: there is no directory walk inside an image.
+One with `image` never applies to a filesystem finding.
+
+`ignore_paths` filters image findings by the in-image path, through the same matcher as a
+directory scan and after the scan, like a suppression: an entry names the path as the tool
+reports it, leading slash included (`/usr/share/doc/`), and a finding whose every location
+is under one is dropped. The directory the scan was started from only anchors it, so no
+path is read relative to it. Because the tool is handed the whole image, an ignore path
+leaves findings out of the report but never saves the tool any work.
+`--changed-files-only` has no meaning for an image and is warned about, as above.
 
 ## Tests never pull
 
-ASH's own test fixtures build OCI layout directories from scratch; no third-party
-image is pulled by a test, and no engine is required for CI.
+ASH's own test fixtures build OCI layout directories and a small saved-image archive from
+scratch; no third-party image is pulled by a test, and no engine is required for CI. One
+integration test runs the real trivy over that committed archive, and over the same image
+re-packed as an OCI layout, and checks that it finds the token the image holds. A live
+container engine or registry read is the part CI does not cover: those paths are tested
+with fakes.
