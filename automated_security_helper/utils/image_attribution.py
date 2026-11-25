@@ -49,6 +49,23 @@ def _digest_text(value: Any) -> Optional[str]:
     return tail if _DIGEST.fullmatch(tail) else None
 
 
+def image_scan_source(image: ImageLocator) -> str:
+    """The ``scan_source`` an image scan records: ``image:<digest>`` or ``image:<ref>``.
+
+    The scope a reporter that archives resolved findings compares (aws-security-hub
+    reads "not reported" as "fixed" within one scope only). It names the image by
+    its digest when the scan knows one (the locator's ``resolved_digest``, or the
+    digest a pinned reference states), so two tags of one image are one scope and
+    a tag that moves to another image is a new one: the findings of the image it
+    left are not archived as fixed by a scan of the image it now names. With no
+    digest it names the submitted reference or payload path, as before. The
+    ``image:`` prefix keeps it from reading as a directory of the same name, and
+    no repository scope (a directory or ``.``) can equal it.
+    """
+    digest = _digest_text(image.resolved_digest) or _digest_text(image.ref)
+    return f"image:{digest}" if digest is not None else f"image:{image.shown()}"
+
+
 def image_digest_of_run(run: Any) -> Optional[str]:
     """The subject image's digest, where *run*'s own properties name one.
 

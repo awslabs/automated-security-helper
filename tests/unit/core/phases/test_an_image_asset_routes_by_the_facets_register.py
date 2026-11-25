@@ -401,6 +401,36 @@ class TestATagIsResolvedOnceBeforeAnyScannerRuns:
         image = scan_phase.plugin_context.asset.image
         assert (image.ref, image.resolved_digest) == (IMAGE_REF, self.DIGEST)
 
+    def test_the_recorded_scan_source_then_names_the_digest_not_the_tag(
+        self, scan_phase, monkeypatch
+    ):
+        self._patched(
+            monkeypatch,
+            lambda image: image.model_copy(update={"resolved_digest": self.DIGEST}),
+        )
+        scan_phase.plugin_context.asset = Asset.for_image(ImageLocator(ref=IMAGE_REF))
+        results = AshAggregatedResults()
+        results.metadata.scan_source = f"image:{IMAGE_REF}"
+
+        scan_phase._execute_phase(aggregated_results=results, parallel=False)
+
+        assert results.metadata.scan_source == f"image:{self.DIGEST}"
+
+    def test_a_scan_source_that_is_not_an_image_is_left_alone(
+        self, scan_phase, monkeypatch
+    ):
+        self._patched(
+            monkeypatch,
+            lambda image: image.model_copy(update={"resolved_digest": self.DIGEST}),
+        )
+        scan_phase.plugin_context.asset = Asset.for_image(ImageLocator(ref=IMAGE_REF))
+        results = AshAggregatedResults()
+        results.metadata.scan_source = "some/dir"
+
+        scan_phase._execute_phase(aggregated_results=results, parallel=False)
+
+        assert results.metadata.scan_source == "some/dir"
+
     def test_an_unresolved_locator_leaves_the_asset_as_submitted(
         self, scan_phase, monkeypatch
     ):

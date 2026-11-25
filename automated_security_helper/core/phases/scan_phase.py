@@ -1158,6 +1158,17 @@ class ScanPhase(EnginePhase):
             resolved = resolve_image_locator(subject.image, offline=is_offline_mode())
             if resolved is not subject.image:
                 self.plugin_context.asset = Asset.for_image(resolved)
+                # The scope a reporter that archives resolved findings compares
+                # now names the image by this digest, not by the tag it was
+                # asked for (utils/image_attribution.image_scan_source).
+                from automated_security_helper.utils.image_attribution import (
+                    image_scan_source,
+                )
+
+                metadata = getattr(aggregated_results, "metadata", None)
+                recorded = getattr(metadata, "scan_source", None)
+                if isinstance(recorded, str) and recorded.startswith("image:"):
+                    metadata.scan_source = image_scan_source(resolved)
         source_files = (
             []
             if image_subject
