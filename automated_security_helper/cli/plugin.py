@@ -615,8 +615,12 @@ def _live_results_by_scanner(
                 f"{entry!r} is not [SCANNER@]PLATFORM=pass or [SCANNER@]PLATFORM=fail."
             )
         scanner, at, platform = target.partition("@")
+        # Stripped once, before validation and keying, so " host" and "host" are one
+        # cell: the raw spelling stored would make a retried job's result a silent
+        # second cell instead of the duplicate the check below exists to catch.
+        scanner, platform = scanner.strip(), platform.strip()
         if not at:
-            scanner, platform = "", target
+            scanner, platform = "", target.strip()
             if len(verified) != 1:
                 refuse(
                     f"{entry!r} names no scanner, and this run verifies "
@@ -624,7 +628,7 @@ def _live_results_by_scanner(
                     "CI result cannot vouch for another."
                 )
             scanner = verified[0]
-        if not scanner or not platform.strip():
+        if not scanner or not platform:
             refuse(
                 f"{entry!r} needs both a scanner and a platform in SCANNER@PLATFORM."
             )
@@ -747,6 +751,11 @@ def verify_plugins(
         manifests = list(scanner_manifests())
     live = _live_results_by_scanner(live_result, [m.name for m in manifests])
     reports = []
+    # One plugin that cannot be loaded never discards the others' computed reports:
+    # everyone else is still judged and printed, the load errors are named per
+    # scanner, and the run still exits 2 (the load failure is a usage error, not a
+    # verdict on any promotion bar).
+    load_errors: list[tuple[str, str]] = []
     for manifest in manifests:
         try:
             reports.append(
@@ -758,10 +767,17 @@ def verify_plugins(
                 )
             )
         except PluginLoadError as error:
-            secho(f"Error: {error}", err=True)
-            raise typer.Exit(2)
+            load_errors.append((manifest.name, str(error)))
     if as_json:
-        echo_raw(json.dumps([r.as_dict() for r in reports], indent=2))
+        echo_raw(
+            json.dumps(
+                [r.as_dict() for r in reports]
+                + [
+                    {"scanner": name, "error": message} for name, message in load_errors
+                ],
+                indent=2,
+            )
+        )
     else:
         for report in reports:
             echo(f"{report.scanner} ({report.tier}): {report.verdict}")
@@ -769,6 +785,10 @@ def verify_plugins(
                 echo(f"  {row.number}. [{row.status.value}] {row.name}")
                 for detail in row.details:
                     echo(f"       - {detail}")
+    for _name, message in load_errors:
+        secho(f"Error: {message}", err=True)
+    if load_errors:
+        raise typer.Exit(2)
     codes = {r.exit_code for r in reports}
     raise typer.Exit(
         EXIT_FAIL if EXIT_FAIL in codes else EXIT_INCOMPLETE if codes - {0} else 0

@@ -200,10 +200,18 @@ class Discovery:
 
 
 def _scanners_named_by(data: Any) -> Optional[frozenset[str]]:
+    """The scanners a damaged transcript file still names, or None for every scanner.
+
+    This runs over a file :func:`parse_transcript_file` refused, so no key holds a
+    promised shape: a ``transcripts`` that is not a list is part of the damage, never
+    a reason to raise out of the walk. And a damaged file that names no scanner is
+    everyone's problem (None), not no one's: an empty set would report it to no row.
+    """
     if not isinstance(data, Mapping):
         return None
     names: set[str] = set()
-    for entry in data.get("transcripts") or ():
+    transcripts = data.get("transcripts")
+    for entry in transcripts if isinstance(transcripts, (list, tuple)) else ():
         if not isinstance(entry, Mapping):
             continue
         if isinstance(entry.get("scanner"), str):
@@ -211,10 +219,11 @@ def _scanners_named_by(data: Any) -> Optional[frozenset[str]]:
         also = entry.get("also_for")
         if isinstance(also, (list, tuple)):
             names.update(s for s in also if isinstance(s, str))
-    for entry in data.get("unrecorded") or ():
+    unrecorded = data.get("unrecorded")
+    for entry in unrecorded if isinstance(unrecorded, (list, tuple)) else ():
         if isinstance(entry, Mapping) and isinstance(entry.get("scanner"), str):
             names.add(entry["scanner"])
-    return frozenset(names)
+    return frozenset(names) or None
 
 
 def discover_transcripts(root: Path) -> Discovery:
@@ -785,9 +794,12 @@ class PluginLoadError(RuntimeError):
 
 
 def _scanner_class(manifest: ScannerManifest) -> type:
+    # Exception, not a named few: an import executes the plugin module, so a
+    # SyntaxError or a RuntimeError raised at its top level is the same finding
+    # (this plugin cannot be loaded), never a traceback out of the verify run.
     try:
         return resolve_ref(manifest.entry_points.scanner)
-    except (ImportError, AttributeError, ValueError) as error:
+    except Exception as error:  # noqa: BLE001 - an unloadable plugin is a finding
         raise PluginLoadError(
             f"{manifest.name}'s scanner entry point {manifest.entry_points.scanner!r} "
             f"cannot be loaded ({_describe(error)})"
@@ -801,10 +813,19 @@ def _own_row(cls: type, attribute: str) -> Any:
 
 
 def _tool_type_of(name: str, cls: type, override: Optional[str]) -> Optional[str]:
-    """The scanner's tool type: the caller's override, else what its operational row
-    declares, else the shipped table or the class default, else None."""
+    """The scanner's tool type: the caller's override, else the shipped table, else
+    what its operational row declares, else the class default, else None.
+
+    The shipped table outranks the operational row so this resolver and
+    :func:`observed_frame` (which the parity gates drive, and which reads
+    ``SCANNER_TOOL_TYPES`` directly) cannot read one scanner's flat rows under two
+    different tool types: the verify bar and the PR gate judge one table.
+    """
     if override:
         return override
+    shipped = SCANNER_TOOL_TYPES.get(name)
+    if shipped:
+        return shipped
     operational = _own_row(cls, OPERATIONAL_FACETS_ATTR)
     declared = getattr(getattr(operational, "targets", None), "tool_type", None)
     value = getattr(declared, "value", declared)
@@ -881,9 +902,20 @@ def _row_facets(
                 "mapped cell is judged over a recording of the tool as shipped, "
                 "never over a historical one)"
             )
+            # When no current recording could be read at all AND the cause is
+            # already a detail on this row (pinned but historical-only at :853,
+            # a current recording that failed its digest, results that could not
+            # be read), the per-facet MAPPED judgments would restate that one
+            # cause once per facet; the cause row is the finding. An unpinned
+            # scanner with only historical recordings records no such cause, so
+            # its MAPPED cells are still judged (and red) rather than silent.
+            had_current = any(t.retention == "current" for _b, t in mine)
+            cause_recorded = had_current or bool(pinned)
             for facet in FACET_NAMES:
                 state: FacetState = getattr(declared, facet).state
                 mapped = state is FacetState.MAPPED
+                if mapped and observed.current is None and cause_recorded:
+                    continue
                 frame = observed.current if mapped else observed.every
                 verdict = judge(
                     name,

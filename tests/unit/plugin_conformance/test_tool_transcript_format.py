@@ -125,6 +125,18 @@ def test_recorded_on_is_a_date_when_given() -> None:
             _transcript(recorded_on=bad)
 
 
+def test_recorded_on_is_a_calendar_date_in_ascii_digits() -> None:
+    """The shape alone admitted 2026-13-45 (no such month or day) and non-ASCII
+    digits (``\\d`` matches every Unicode digit); both are refused."""
+    with pytest.raises(ValueError, match="not a calendar date"):
+        _transcript(recorded_on="2026-13-45")
+    with pytest.raises(ValueError, match="not a calendar date"):
+        _transcript(recorded_on="2026-02-30")
+    # Eastern Arabic-Indic digits, length and dash positions matching
+    with pytest.raises(ValueError, match="YYYY-MM-DD"):
+        _transcript(recorded_on="٢٠٢٦-١١-٢٥")
+
+
 def test_also_for_names_other_scanners_once_each() -> None:
     assert _transcript(also_for=("trivy-repo",)).scanners == ("gitleaks", "trivy-repo")
     with pytest.raises(ValueError, match="never the transcript's own scanner"):
@@ -400,9 +412,14 @@ def _old_recording() -> ToolTranscript:
     )
 
 
+#: The new run's record every restamp carries (restamp requires it: the restamped
+#: transcript attests to THIS run, not the one it replaces).
+_RUN = {"argv": ("gitleaks", "detect", "--no-banner"), "exit_code": 0}
+
+
 def test_restamping_after_a_rerecord_takes_the_version_the_run_reported() -> None:
     fresh = restamp(
-        _old_recording(), PINS, observed_version="8.30.1", results=_rerecord()
+        _old_recording(), PINS, observed_version="8.30.1", results=_rerecord(), **_RUN
     )
     assert fresh.retention == "current" and fresh.reason is None
     assert fresh.pin_stamp == PinStamp(tool="gitleaks", version="v8.30.1")
@@ -412,29 +429,96 @@ def test_restamping_after_a_rerecord_takes_the_version_the_run_reported() -> Non
     assert stale_transcripts([fresh], PINS) == []
 
 
+def test_restamping_takes_the_new_runs_record_and_marks_it_captured() -> None:
+    """A re-record replaces an attested transcript with a captured one; every field of
+    the old run's record goes with it, because the old argv, date or environment kept
+    on the new bytes would attest to a run that never produced them."""
+    old = _old_recording()
+    assert old.provenance == "attested" and old.argv is None
+    fresh = restamp(
+        old,
+        PINS,
+        observed_version="8.30.1",
+        results=_rerecord(),
+        argv=("gitleaks", "detect", "--no-banner"),
+        exit_code=0,
+        stderr_tail="leaks found: 2",
+        recorded_on="2026-11-25",
+        env_allowlist=("PATH",),
+    )
+    assert fresh.provenance == "captured"
+    assert fresh.argv == ("gitleaks", "detect", "--no-banner")
+    assert fresh.exit_code == 0
+    assert fresh.stderr_tail == "leaks found: 2"
+    assert fresh.recorded_on == "2026-11-25"
+    assert fresh.env_allowlist == ("PATH",)
+
+
+def test_restamping_drops_the_old_runs_record_fields_it_is_not_given() -> None:
+    """The old run's stderr tail and date never survive onto the new bytes: left
+    unstated by the new run, they come back unknown, not inherited."""
+    old = _transcript(
+        retention="historical",
+        reason="old",
+        pin_stamp=PinStamp(tool="gitleaks", version="v8.29.0"),
+        tool=ToolRef(name="gitleaks", version="8.29.0"),
+        provenance="captured",
+        argv=("gitleaks", "detect"),
+        exit_code=1,
+        stderr_tail="the OLD run's tail",
+        recorded_on="2020-01-01",
+        env_allowlist=("HOME",),
+    )
+    fresh = restamp(old, PINS, observed_version="8.30.1", results=_rerecord(), **_RUN)
+    assert fresh.exit_code == 0
+    assert fresh.stderr_tail is None
+    assert fresh.recorded_on is None
+    assert fresh.env_allowlist == ()
+
+
 def test_restamping_a_run_of_the_wrong_binary_still_trips_the_version_check() -> None:
     """The stray gitleaks 8.1.0 on PATH: the stamp moves, the version it printed stays."""
     liar = restamp(
-        _old_recording(), PINS, observed_version="8.1.0", results=_rerecord()
+        _old_recording(), PINS, observed_version="8.1.0", results=_rerecord(), **_RUN
     )
     problems = stale_transcripts([liar], PINS)
     assert len(problems) == 1 and "is not the version it is stamped with" in problems[0]
 
 
-def test_restamping_refuses_when_no_results_digest_changed() -> None:
+def test_restamping_refuses_when_neither_digests_nor_version_changed() -> None:
     old = _old_recording()
     with pytest.raises(TranscriptRestampError, match="nothing was re-recorded"):
-        restamp(old, PINS, observed_version="8.30.1", results=old.results)
+        restamp(
+            old,
+            PINS,
+            observed_version=old.tool.version,
+            results=old.results,
+            **_RUN,
+        )
+
+
+def test_restamping_a_byte_identical_rerecord_at_a_new_version_is_accepted() -> None:
+    """A tool whose output carries no version (actionlint JSON, cdk-nag CSV, guarddog
+    JSON) reproduces byte-identical results on a real re-record; the new version the
+    run printed is the evidence the run happened, so the restamp is not refused."""
+    old = _old_recording()
+    fresh = restamp(old, PINS, observed_version="8.30.1", results=old.results, **_RUN)
+    assert fresh.tool.version == "8.30.1"
+    assert fresh.results == old.results
+    assert fresh.retention == "current" and fresh.provenance == "captured"
+    assert stale_transcripts([fresh], PINS) == []
 
 
 def test_restamping_a_stamp_whose_pin_is_gone_is_a_readable_error() -> None:
     with pytest.raises(TranscriptRestampError, match="no manifest pins now"):
-        restamp(_old_recording(), {}, observed_version="8.30.1", results=_rerecord())
+        restamp(
+            _old_recording(), {}, observed_version="8.30.1", results=_rerecord(), **_RUN
+        )
 
 
 def test_restamping_an_unstamped_transcript_changes_nothing() -> None:
     unstamped = _transcript(pin_stamp=None)
     assert (
-        restamp(unstamped, PINS, observed_version="8.30.1", results=_rerecord())
+        restamp(unstamped, PINS, observed_version="8.30.1", results=_rerecord(), **_RUN)
         == unstamped
     )

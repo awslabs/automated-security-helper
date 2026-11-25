@@ -39,6 +39,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from datetime import date
 from pathlib import Path
 from typing import Any, Iterable, Literal, Mapping, Optional
 
@@ -52,7 +53,9 @@ TRANSCRIPT_FILE_NAME = "transcripts.json"
 
 _ID = re.compile(r"[a-z0-9][a-z0-9._-]*")
 _SHA256 = re.compile(r"[0-9a-f]{64}")
-_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
+#: ASCII digits only: ``\d`` would admit any Unicode digit, and the calendar check
+#: behind the shape (``date.fromisoformat``) is what refuses 2026-13-45.
+_DATE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
 
 
 def is_sha256(value: object) -> bool:
@@ -218,8 +221,14 @@ class ToolTranscript(_Frozen):
     @field_validator("recorded_on")
     @classmethod
     def _recorded_on(cls, value: Optional[str]) -> Optional[str]:
-        if value is not None and not _DATE.fullmatch(value):
+        if value is None:
+            return value
+        if not _DATE.fullmatch(value):
             raise ValueError(f"recorded_on {value!r} is not YYYY-MM-DD")
+        try:
+            date.fromisoformat(value)
+        except ValueError:
+            raise ValueError(f"recorded_on {value!r} is not a calendar date") from None
         return value
 
     @model_validator(mode="after")
@@ -488,18 +497,33 @@ def restamp(
     observed_version: str,
     results: tuple[ResultsFile, ...],
     side_reports: Optional[tuple[ResultsFile, ...]] = None,
+    argv: tuple[str, ...],
+    exit_code: int,
+    stderr_tail: Optional[str] = None,
+    recorded_on: Optional[str] = None,
+    env_allowlist: tuple[str, ...] = (),
 ) -> ToolTranscript:
     """The final step of a re-record: *transcript* carrying the new run's results,
-    the version the run reported, and the stamp of the pin now in force.
+    the new run's record, the version the run reported, and the stamp of the pin now
+    in force.
 
     The re-record path calls this AFTER it has run the tool and replaced the results
     bytes, passing what it recorded: *observed_version* is the version string the tool
     printed (it goes into ``tool.version`` as printed, not as the manifest spells the
-    pin, so :func:`stale_transcripts` can still catch a run of the wrong binary) and
-    *results* are the new files' digests. Digests identical to the transcript's own mean
-    nothing was re-recorded, and the call is refused: a stamp moved onto old bytes would
-    hide exactly the rot the stamp exists to expose. A transcript with no stamp has
-    nothing to move and is returned as it is.
+    pin, so :func:`stale_transcripts` can still catch a run of the wrong binary),
+    *results* are the new files' digests, and *argv*, *exit_code*, *stderr_tail*,
+    *recorded_on* and *env_allowlist* are the new run's own record. They replace the
+    old run's wholesale and the transcript comes back ``captured``: a re-record
+    replaces an attested transcript with a captured one, and the old run's argv or
+    date kept on new bytes would attest to a run that never produced them.
+
+    Digests identical to the transcript's own AND an unchanged tool version mean
+    nothing shows a re-record happened, and the call is refused: a stamp moved onto
+    old bytes would hide exactly the rot the stamp exists to expose. Identical bytes
+    under a NEW version are accepted, because a tool whose output carries no version
+    (actionlint's JSON, cdk-nag's CSV, guarddog's JSON) reproduces them on a real
+    re-record. A transcript with no stamp has nothing to move and is returned as it
+    is.
     """
     stamp = transcript.pin_stamp
     if stamp is None:
@@ -515,14 +539,18 @@ def restamp(
     def _digests(entries: tuple[ResultsFile, ...]) -> set[tuple[str, str]]:
         return {(entry.path, entry.sha256) for entry in entries}
 
-    if _digests(results) == _digests(transcript.results) and (
-        side_reports is None
-        or _digests(side_reports) == _digests(transcript.side_reports)
+    if (
+        observed_version == transcript.tool.version
+        and _digests(results) == _digests(transcript.results)
+        and (
+            side_reports is None
+            or _digests(side_reports) == _digests(transcript.side_reports)
+        )
     ):
         raise TranscriptRestampError(
-            f"{transcript.id}: the results digests are the ones it already records, so "
-            "nothing was re-recorded; restamp is the last step of a re-record that "
-            "replaced the bytes"
+            f"{transcript.id}: the results digests and the tool version are the ones "
+            "it already records, so nothing was re-recorded; restamp is the last step "
+            "of a re-record that replaced the bytes"
         )
     data = transcript.model_dump()
     data.update(
@@ -531,6 +559,12 @@ def restamp(
         retention="current",
         reason=None,
         results=[entry.model_dump() for entry in results],
+        provenance="captured",
+        argv=list(argv),
+        exit_code=exit_code,
+        stderr_tail=stderr_tail,
+        recorded_on=recorded_on,
+        env_allowlist=list(env_allowlist),
     )
     if side_reports is not None:
         data["side_reports"] = [entry.model_dump() for entry in side_reports]

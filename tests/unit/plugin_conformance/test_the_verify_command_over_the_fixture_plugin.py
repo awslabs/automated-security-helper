@@ -183,6 +183,31 @@ def test_a_retried_cell_cannot_turn_a_red_result_green_by_coming_last(
     assert result.exit_code == 2 and "more than once" in result.output
 
 
+def test_a_live_result_is_stripped_before_validation_and_keying(
+    one_scanner, transcripts_copy
+) -> None:
+    """``' host '`` and ``host`` are one cell: a padded retry is the duplicate the
+    check exists to catch, never a silent second cell, and a padded result still
+    reaches the row it names."""
+    dupe = _verify(
+        transcripts_copy,
+        "fixture-lint",
+        "--live-result",
+        "fixture-lint@host=fail",
+        "--live-result",
+        "fixture-lint@ host =pass",
+    )
+    assert dupe.exit_code == 2 and "more than once" in dupe.output
+    green = _verify(
+        transcripts_copy,
+        "fixture-lint",
+        "--json",
+        "--live-result",
+        "fixture-lint @ host =pass",
+    )
+    assert _rows(green)["fixture-lint"][3] == "green"
+
+
 # ---- damaged directories and plugins ---------------------------------------------
 
 
@@ -232,6 +257,75 @@ def test_a_manifest_whose_entry_point_cannot_be_loaded_is_a_usage_error_not_a_re
     result = _verify(transcripts_copy, "--all")
     assert result.exit_code == 2, result.output
     assert "cannot be loaded" in result.output
+
+
+def _one_broken_beside_the_fixture(fixture_manifest, monkeypatch):
+    import automated_security_helper.plugin_manifests as manifests
+
+    broken = fixture_manifest.model_copy(
+        update={
+            "name": "fixture-broken",
+            "entry_points": EntryPoints(scanner="no_such_plugin_module:Scanner"),
+        }
+    )
+    both = (fixture_manifest, broken)
+    monkeypatch.setattr(manifests, "scanner_manifests", lambda: both)
+    monkeypatch.setattr(
+        manifests, "manifest_for", lambda name: {m.name: m for m in both}.get(name)
+    )
+
+
+def test_one_unloadable_plugin_does_not_discard_the_other_scanners_reports(
+    fixture_manifest, monkeypatch, transcripts_copy
+) -> None:
+    """Everyone else is still judged: one plugin that cannot be imported is named
+    per scanner and the run exits 2, with the computed reports printed, never
+    discarded (the module's own rule for one damaged element among many)."""
+    _one_broken_beside_the_fixture(fixture_manifest, monkeypatch)
+    result = _verify(transcripts_copy, "--all")
+    assert result.exit_code == 2, result.output
+    assert "fixture-lint (alpha): incomplete" in result.output
+    assert "fixture-broken's scanner entry point" in result.output
+    assert "cannot be loaded" in result.output
+
+
+def test_one_unloadable_plugin_is_an_error_entry_in_the_json_output(
+    fixture_manifest, monkeypatch, transcripts_copy
+) -> None:
+    _one_broken_beside_the_fixture(fixture_manifest, monkeypatch)
+    result = _verify(transcripts_copy, "--all", "--json")
+    assert result.exit_code == 2, result.output
+    assert '"scanner": "fixture-lint"' in result.output
+    assert '"scanner": "fixture-broken"' in result.output
+    assert '"error"' in result.output
+
+
+def test_an_unloadable_plugin_whose_module_raises_at_import_is_still_a_finding(
+    fixture_manifest, monkeypatch, transcripts_copy, tmp_path
+) -> None:
+    """A SyntaxError or a RuntimeError at the plugin module's top level is the same
+    finding as a missing module (this plugin cannot be loaded), never a traceback."""
+    import sys
+
+    import automated_security_helper.plugin_manifests as manifests
+
+    (tmp_path / "ash_broken_plugin.py").write_text(
+        "raise RuntimeError('broken at import')\n", encoding="utf-8"
+    )
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.delitem(sys.modules, "ash_broken_plugin", raising=False)
+    broken = fixture_manifest.model_copy(
+        update={
+            "name": "fixture-broken",
+            "entry_points": EntryPoints(scanner="ash_broken_plugin:Scanner"),
+        }
+    )
+    monkeypatch.setattr(manifests, "scanner_manifests", lambda: (broken,))
+    monkeypatch.setattr(manifests, "manifest_for", lambda name: broken)
+    result = _verify(transcripts_copy, "--all")
+    assert result.exit_code == 2, result.output
+    assert "cannot be loaded" in result.output
+    assert "Traceback" not in result.output
 
 
 def test_the_json_output_carries_the_per_cell_verdicts(
