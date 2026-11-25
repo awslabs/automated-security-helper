@@ -279,11 +279,12 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
                 content_database="semgrep-offline-rules",
                 source=(
                     "semgrep_scanner.py sandbox_requirements and default rulesets; "
-                    "_grep_scanner_base.py offline_strategy; utils/content_databases.py"
-                ),
-                unconfirmed=(
-                    "whether metrics 'auto' sends metrics on every registry-rules run at "
-                    "the pinned version; one semgrep documentation read settles it"
+                    "_grep_scanner_base.py offline_strategy and metrics_value_online "
+                    "('auto' in online mode); utils/content_databases.py; online runs "
+                    "send metrics: `semgrep scan --help` (1.180.0) says --metrics 'auto' "
+                    "sends metrics whenever the --config value pulls from the Semgrep "
+                    "server or the user is logged in, and the default rulesets are "
+                    "registry configs"
                 ),
             ),
             output=opsf.OutputFacet(
@@ -319,12 +320,12 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
                     opsf.SilencingLayer(
                         layer=opsf.SilencingLayerKind.INLINE_COMMENT,
                         writer=opsf.SilencingWriter.REPOSITORY,
-                        honored=opsf.Honored.UNCONFIRMED,
+                        honored=opsf.Honored.YES,
                         surface="nosemgrep comments",
-                        cite="tool feature; _grep_scanner_base.py was not read for an ASH-side switch",
-                        reason=(
-                            "whether ASH leaves nosemgrep on was not read at the adapter; "
-                            "one adapter read settles it"
+                        cite=(
+                            "_grep_scanner_base.py and semgrep_scanner.py pass no "
+                            "--disable-nosem anywhere in the package; `semgrep scan "
+                            "--help` (1.180.0): --enable-nosem is enabled by default"
                         ),
                     ),
                     opsf.SilencingLayer(

@@ -593,8 +593,8 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                 ),
             ),
             identity=opsf.IdentityFacet(
-                fingerprint_class=opsf.FingerprintClass.UNCONFIRMED,
-                note="no fixture read classifies cfn-nag's fingerprints (no golden is committed: the tool could not be run to a result); reads as positional-only until one does",
+                fingerprint_class=opsf.FingerprintClass.POSITIONAL_ONLY,
+                note="the native JSON fixtures (tests/test_data/scanners/cfn_nag/src.test.yaml.json) carry id, line_numbers and logical_resource_ids and no fingerprint key, and the adapter writes none; identity is file and line through the shared floor",
             ),
             extensibility=opsf.ExtensibilityFacet(
                 custom_rules=opsf.CustomRules.NONE,
