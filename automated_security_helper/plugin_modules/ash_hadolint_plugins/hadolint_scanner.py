@@ -491,7 +491,7 @@ class HadolintScanner(ScannerPluginBase[HadolintScannerConfig]):
         return self
 
     def _execute_scan(
-        self, target: Any, target_type: Any, global_ignore_paths: Any
+        self, target: Any, target_type: TargetType, global_ignore_paths: Any
     ) -> Any:
         """Abstract stub: hadolint overrides scan() directly."""
         raise NotImplementedError(

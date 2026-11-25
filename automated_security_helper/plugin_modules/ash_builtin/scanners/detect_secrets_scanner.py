@@ -2648,7 +2648,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             return path.relative_to(source).as_posix()
         return path.as_posix()
 
-    def _baseline_anchor(self, scan_root: Path, target_type: str) -> Path:
+    def _baseline_anchor(self, scan_root: Path, target_type: TargetType) -> Path:
         """The directory the baseline's paths are relative to.
 
         ``detect-secrets scan`` writes a baseline from the directory it runs in,

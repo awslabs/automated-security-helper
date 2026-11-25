@@ -853,7 +853,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
 
     def _package_manifests(
         self,
-        target_type: str,
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason] | None = None,
     ) -> List[str]:
         """Every package.json in one tree: the scan set, or the work directory.
@@ -1065,7 +1065,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             ),
         }
 
-    def _shown_path(self, path: Path, target_type: str) -> str:
+    def _shown_path(self, path: Path, target_type: TargetType) -> str:
         """``path`` as recorded in the results: relative to the target, as named."""
         base = Path(
             self.context.work_dir
@@ -3184,7 +3184,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
     )
 
     def _offline_skips(
-        self, package_files: List[str], target_type: str
+        self, package_files: List[str], target_type: TargetType
     ) -> List[Dict[str, str]]:
         """The not-scanned entries for every lockfile beside *package_files*.
 
@@ -3201,7 +3201,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         return skipped
 
     def _skip_offline(
-        self, package_files: List[str], target: Path, target_type: str
+        self, package_files: List[str], target: Path, target_type: TargetType
     ) -> None:
         """Record every lockfile as not audited.
 

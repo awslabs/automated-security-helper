@@ -34,8 +34,10 @@ PKG = REPO / "automated_security_helper"
 # Files cured for TargetType by the string-spelling scan. Not in this scan (named so
 # nobody reads the gate as whole-tree): the scanner modules under plugin_modules/
 # (SCANNER_SCOPE below, a context-aware scan because "source" is an ordinary word
-# there), utils/finding_identity.py (CONVERTED_TREE), core/phases/scan_phase.py
-# (task dicts) and core/resource_management/scan_tracking.py.
+# there), core/phases/scan_phase.py (task dicts) and
+# core/resource_management/scan_tracking.py. A file another change cures (for
+# example utils/finding_identity.py) is added to SCOPE by that change; this list
+# does not decide it.
 SCOPE = (
     "base/scanner_plugin.py",
     "base/plugin_base.py",
