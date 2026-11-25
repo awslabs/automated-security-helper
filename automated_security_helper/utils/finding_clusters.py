@@ -319,7 +319,9 @@ def cluster_findings(rows: Sequence[FlatVulnerability]) -> List[FindingCluster]:
     for key, members in grouped.items():
         if len(members) < 2:
             continue
-        copies = _package_copies(rows, members) if key[0] == CLASS_PACKAGE else [members]
+        copies = (
+            _package_copies(rows, members) if key[0] == CLASS_PACKAGE else [members]
+        )
         for copy in copies:
             if len(copy) > 1:
                 clusters.append(_build(rows, key[0], copy))
