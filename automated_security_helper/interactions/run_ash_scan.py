@@ -32,13 +32,14 @@ import typer
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 from rich.text import Text
 
+from automated_security_helper.models.vocab import Severity
+
 # `print` shadows the builtin on purpose: this is rich's documented import
 # idiom, so every print() below renders markup and respects the console. The
 # fix A004 wants is an alias, which would mean rewriting every call in this
 # module for no behavior change -- and tests/unit/cli/mcp/test_stdout_jsonrpc_safety.py
 # reasons about this exact import form. It is utils/console.py's print, not rich's:
 # its console checks each line it writes off a terminal, so none reads as a CI command.
-from automated_security_helper.models.vocab import Severity
 from automated_security_helper.utils.console import echo, global_console, secho
 from automated_security_helper.utils.console import print  # noqa: A004
 from automated_security_helper.utils.terminal_text import (
@@ -344,7 +345,9 @@ class ScanOptions(BaseModel):
     # scanners that were supposed to look actually ran.
     fail_on_incomplete_scanners: Optional[bool] = None
     ignore_suppressions: bool = False
-    min_severity: str = MinSeverity.LOW
+    # Plain text, as every explicit value is after _known_min_severity: a default
+    # skips that validator, and a member here would print as "MinSeverity.LOW".
+    min_severity: str = MinSeverity.LOW.value
     baseline: Optional[str] = None
     baseline_data: Optional[Any] = Field(default=None, exclude=True)
     changed_files_only: bool = False
@@ -988,7 +991,7 @@ class ScanIncompleteExit(SystemExit):
     def __init__(
         self, incompleteness: ScanIncompleteness, results: AshAggregatedResults
     ):
-        super().__init__(1)
+        super().__init__(AshExitCode.SCAN_ERRORS.value)
         self.incompleteness = incompleteness
         self.results = results
 
@@ -1006,7 +1009,7 @@ class ReportPathRefusedExit(SystemExit):
     """
 
     def __init__(self, reason: str):
-        super().__init__(1)
+        super().__init__(AshExitCode.SCAN_ERRORS.value)
         self.reason = reason
 
 
@@ -3211,7 +3214,7 @@ def _scan_config_path(opts: ScanOptions, log_selection: bool = False) -> Optiona
 #: ASH writes below it, is reached through a link: 3, as for container mode's other
 #: unusable inputs, and the same whichever check refuses it (container mode's own
 #: rule, the general check, or the log file's open).
-OUTPUT_DIR_REFUSED_EXIT_CODE = 3
+OUTPUT_DIR_REFUSED_EXIT_CODE = AshExitCode.INVALID_CONFIG.value
 
 
 class OutputDirRefusedExit(SystemExit):
@@ -7126,7 +7129,7 @@ def run_ash_scan(
     fail_on_findings: bool | None = None,
     fail_on_incomplete_scanners: bool | None = None,
     ignore_suppressions: bool = False,
-    min_severity: str = MinSeverity.LOW,
+    min_severity: str = MinSeverity.LOW.value,
     changed_files_only: bool = False,
     base_ref: str = "origin/main",
     staged: bool = False,

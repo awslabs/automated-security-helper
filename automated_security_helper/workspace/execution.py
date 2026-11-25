@@ -349,6 +349,7 @@ from automated_security_helper.core.enums import (
     DEFAULT_EXECUTION_PHASES,
     ExecutionPhase,
     ExecutionStrategy,
+    ScannerStatus,
     ThresholdSource,
 )
 from automated_security_helper.core.previous_results import holds_restored_results
@@ -363,7 +364,6 @@ from automated_security_helper.core.exceptions import (
     ScannerSelectionError,
     WorkspaceDefinitionError,
 )
-from automated_security_helper.core.enums import ScannerStatus
 from automated_security_helper.core.unified_metrics import recorded_error
 from automated_security_helper.models.core import IgnoreFileExclusions
 from automated_security_helper.models.workspace import (

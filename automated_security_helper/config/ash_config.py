@@ -18,7 +18,7 @@ from pydantic import (
     field_validator,
     model_validator,
 )
-from automated_security_helper.models.vocab import PluginKind
+from automated_security_helper.models.vocab import PluginKind, SeverityThresholdText
 from typing import (
     Annotated,
     Any,
@@ -81,7 +81,6 @@ from automated_security_helper.core.exceptions import ASHConfigUnsetVariableErro
 from automated_security_helper.core.enums import ExportFormat, SandboxMode
 from automated_security_helper.utils.content_databases import StalenessPolicy
 from automated_security_helper.models.asharp_model import AshAggregatedResults
-from automated_security_helper.models.vocab import SeverityThresholdText
 from automated_security_helper.models.core import (
     AshSuppression,
     IgnorePathWithReason,
