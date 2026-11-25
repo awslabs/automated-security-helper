@@ -127,11 +127,11 @@ reason = "probe"
 expiration = "${ASH_PROBE_CANARY_SHORT}"
 
 [[global_settings.ignore_paths]]
-path = "${ASH_PROBE_CANARY_DIRECTORY}"
+path = "**/${ASH_PROBE_CANARY_DIRECTORY}"
 reason = "probe"
 
 [[global_settings.ignore_paths]]
-path = "literalprobedir"
+path = "**/literalprobedir"
 reason = "probe"
 """
 
@@ -154,9 +154,9 @@ global_settings:
       reason: probe
       expiration: {tag}${{ASH_PROBE_CANARY_SHORT}}
   ignore_paths:
-    - path: {tag}${{ASH_PROBE_CANARY_DIRECTORY}}
+    - path: {tag}"**/${{ASH_PROBE_CANARY_DIRECTORY}}"
       reason: probe
-    - path: literalprobedir
+    - path: "**/literalprobedir"
       reason: probe
 """
 
@@ -309,7 +309,7 @@ def test_lint_names_values_a_toml_file_read_from_the_environment_by_place(
     )
     assert any(f"line_end = {ENVIRONMENT_VALUE_SHOWN}" in f for f in fixes), fixes
     assert any(f"Path '{ENVIRONMENT_VALUE_SHOWN}'" in m for m in messages), messages
-    assert any(f"Path '{LITERAL_DIRECTORY}'" in m for m in messages), messages
+    assert any(f"Path '**/{LITERAL_DIRECTORY}'" in m for m in messages), messages
 
 
 @pytest.mark.parametrize("shape", ["base", "base-tagged"])
@@ -321,7 +321,7 @@ def test_lint_names_values_a_base_read_from_the_environment_by_place(
     result = ConfigLinter.lint(CONFIGS[shape](tmp_path))
     text = "\n".join(issue.message for issue in result.issues)
     _assert_hidden(text)
-    assert f"Path '{LITERAL_DIRECTORY}'" in text, text
+    assert f"Path '**/{LITERAL_DIRECTORY}'" in text, text
     assert repr(ENVIRONMENT_VALUE_SHOWN) in text, text
 
 
@@ -346,15 +346,15 @@ def test_lint_reports_each_directory_read_from_the_environment_once(
         "project_name: probe\n"
         "global_settings:\n"
         "  ignore_paths:\n"
-        "    - path: ${ASH_PROBE_CANARY_DIRECTORY}\n"
+        '    - path: "**/${ASH_PROBE_CANARY_DIRECTORY}"\n'
         "      reason: probe\n"
-        "    - path: literalprobedir\n"
+        '    - path: "**/literalprobedir"\n'
         "      reason: probe\n"
         "patch:\n"
         "  - op: add\n"
         "    path: /global_settings/ignore_paths/-\n"
         "    value:\n"
-        "      path: ${ASH_PROBE_CANARY_OTHER_DIRECTORY}\n"
+        '      path: "**/${ASH_PROBE_CANARY_OTHER_DIRECTORY}"\n'
         "      reason: patched\n",
         encoding="utf-8",
     )
@@ -381,7 +381,9 @@ def test_lint_reports_each_directory_read_from_the_environment_once(
     # The file's own entry at its place; the one the patch added, which no
     # entry of the file holds, unlocated.
     assert sorted(i.path for i in read) == ["", "global_settings.ignore_paths[0].path"]
-    literal = [i for i in paths if i.message.startswith(f"Path '{LITERAL_DIRECTORY}'")]
+    literal = [
+        i for i in paths if i.message.startswith(f"Path '**/{LITERAL_DIRECTORY}'")
+    ]
     assert [i.path for i in literal] == ["global_settings.ignore_paths[1].path"]
 
 

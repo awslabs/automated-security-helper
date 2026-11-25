@@ -845,12 +845,14 @@ def _hides(kind: Any, pattern: str, relative: str) -> bool:
         # ``**`` stands for directories, from the start of the path.
         ("vendor/**", "vendor/lib/a.py", True, True),
         ("**/tests/**", "tests/test_a.py", True, True),
-        # A pattern that names only a directory, a file name or a run of
-        # directories in the path: the glob kind hides the file, and
-        # GuardDog's filter, which reads the whole path, keeps it.
-        ("vendor", "vendor/lib/a.py", True, False),
-        ("src", "src/a.py", True, False),
-        ("a/b", "a/b/c.py", True, False),
+        # A glob-free directory name: both readings hide the files below it
+        # since the bare-directory rule (issue #894) reached file_path_matches,
+        # which GuardDog's candidate filter calls.
+        ("vendor", "vendor/lib/a.py", True, True),
+        ("src", "src/a.py", True, True),
+        ("a/b", "a/b/c.py", True, True),
+        # A file name that is not the path's first component: the glob kind
+        # hides it at any depth; GuardDog's filter, anchored, keeps it.
         ("a.py", "src/a.py", True, False),
         # A ``/`` inside the pattern anchors it at the root for BOTH readings.
         ("vendor/**", "src/vendor/a.py", False, False),
