@@ -25,12 +25,12 @@ Entry points and the options model are therefore dotted ``module:Class``
 STRINGS, resolved by the tests (and by a kernel, later) and never by the
 manifest.
 
-Two axes, not one (her decision row 5): ``tier`` is maturity (``supported``,
+Two axes, not one (design decision 5): ``tier`` is maturity (``supported``,
 ``alpha``, ``deprecated``) and ``default_enabled`` is loading. A maintained
 integration that is opt-in is ``supported`` and not default-enabled; calling it
 alpha would misstate its maturity to express that it is opt-in.
 
-``deprecated`` is the retirement shape (her decision row 7): the manifest names
+``deprecated`` is the retirement shape (design decision 7): the manifest names
 its target in ``superseded_by``, and the target lists the deprecated name among
 its ``aliases``. The manifest only DECLARES the retirement; whether and when a
 scanner is actually retired stays a separate decision, so no code here changes

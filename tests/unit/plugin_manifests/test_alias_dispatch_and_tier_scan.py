@@ -3,7 +3,7 @@
 
 """Alias dispatch and the manifest tier scan.
 
-Her decision rows 5 and 7. The semgrep retirement is manifest DATA: opengrep
+Design decisions 5 and 7. The semgrep retirement is manifest DATA: opengrep
 declares ``aliases: ["semgrep"]`` and semgrep's manifest is ``deprecated`` and
 ``superseded_by`` opengrep, and these rows prove the data dispatches. They also
 prove the declaration changes no run: semgrep stays a manifest of its own, still
