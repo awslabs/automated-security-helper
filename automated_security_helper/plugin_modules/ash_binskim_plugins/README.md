@@ -53,7 +53,7 @@ This module is self-contained; three shared-file edits belong to the integration
 
 1. `utils/tool_downloads.py`: a `binskim` entry in `TOOL_VERSIONS` and `_ASSET_TABLES` (the pinned `Microsoft.CodeAnalysis.BinSkim` NuGet package and its digest). Until it lands the scanner constructs with no install commands and reports the tool `MISSING`; when it lands, `pinned_tool_install_commands("binskim")` fills them and the register row's runtime becomes `PINNED_BINARY`.
 2. `utils/scanner_names.py`: `"binskim": "sast"` in `SCANNER_TOOL_TYPES`.
-3. `tests/unit/plugin_modules/test_scanner_operational_facets_consistency.py`: the universe count in `test_the_universe_is_the_twenty_two_shipped_scanners`.
+3. The two universe counts (22) in `tests/unit/plugin_modules/test_scanner_operational_facets_consistency.py` and `test_scanner_facets_registry_totality.py`, and the corpus table in `test_scanner_facets_corpus_consistency.py`: a `binskim` entry once a real BinSkim log is committed under `tests/test_data/scanners/binskim/captured/`, at which point the scanner's `rule_id`, `severity`, `file_path` and `message` cells become MAPPED. `tests/test_data/scanners/binskim/reference.sarif` is hand-written, not a capture, and is not a corpus.
 
 ## Documentation
 

@@ -191,22 +191,26 @@ class BinskimScanner(ScannerPluginBase[BinskimScannerConfig]):
 
     #: The facets register row (base/scanner_facets.py). BinSkim's output has not
     #: been read from a real run (see tests/test_data/scanners/binskim/README.md),
-    #: so only the SARIF fields every BinSkim result is documented to carry are
-    #: MAPPED; every other cell is n/a with "a sample run would settle it".
+    #: so every cell is n/a with "a sample run would settle it". The four cells
+    #: the adapter does handle (rule id, severity, file path, message) become
+    #: MAPPED when a captured log and its corpus-table entry land (the integration
+    #: lane; see the plugin README).
     facets: ClassVar[ScannerFacets] = ScannerFacets(
         rule_id=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="result.ruleId (BA#### rule id)",
+            state=FacetState.NA,
+            reason="output not read; a sample run would settle it (the adapter "
+            "passes result.ruleId through; the register's consistency gate "
+            "refuses a MAPPED cell with no captured corpus)",
         ),
         severity=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="result.level (error/warning/note), mapped by "
-            "BINSKIM_LEVEL_MAP",
+            state=FacetState.NA,
+            reason="output not read; a sample run would settle it (the adapter "
+            "maps result.level through BINSKIM_LEVEL_MAP; no captured corpus yet)",
         ),
         file_path=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="result.locations[0].physicalLocation.artifactLocation.uri "
-            "(the analyzed binary)",
+            state=FacetState.NA,
+            reason="output not read; a sample run would settle it (the adapter "
+            "makes artifactLocation.uri source-relative; no captured corpus yet)",
         ),
         line_range=FacetDecl(
             state=FacetState.NA,
@@ -218,8 +222,9 @@ class BinskimScanner(ScannerPluginBase[BinskimScannerConfig]):
             reason="a binary has no source columns",
         ),
         message=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="result.message.text",
+            state=FacetState.NA,
+            reason="output not read; a sample run would settle it (the adapter "
+            "passes result.message.text through; no captured corpus yet)",
         ),
         resource_id=FacetDecl(
             state=FacetState.NA,
