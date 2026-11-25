@@ -25,7 +25,10 @@ pytestmark = pytest.mark.unit
 
 
 def test_command_order_names_exactly_the_registered_and_lazy_commands():
-    eager = {command.name for command in cli_main.app.registered_commands}
+    # `scan` is a group (`add_typer`), so it is registered beside the commands.
+    eager = {command.name for command in cli_main.app.registered_commands} | {
+        group.name for group in cli_main.app.registered_groups
+    }
     lazy = set(cli_main._LAZY_SUBCOMMANDS)
     assert set(cli_main._COMMAND_ORDER) == eager | lazy
     assert len(cli_main._COMMAND_ORDER) == len(eager) + len(lazy)

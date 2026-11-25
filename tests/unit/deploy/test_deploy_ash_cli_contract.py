@@ -118,11 +118,18 @@ class Invocation:
 
 
 def _option(command, spelling: str):
-    for param in command.params:
-        if spelling in getattr(param, "opts", ()) or spelling in getattr(
-            param, "secondary_opts", ()
-        ):
-            return param
+    # `ash scan [options]` with no subject runs the scan's default subject, so that
+    # subject's options are the group's too (the form every deployment still uses).
+    candidates = [command]
+    default = getattr(command, "legacy_default_subject", None)
+    if default is not None:
+        candidates.append(command.commands[default])
+    for candidate in candidates:
+        for param in candidate.params:
+            if spelling in getattr(param, "opts", ()) or spelling in getattr(
+                param, "secondary_opts", ()
+            ):
+                return param
     return None
 
 

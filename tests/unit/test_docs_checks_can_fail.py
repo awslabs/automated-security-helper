@@ -787,7 +787,8 @@ def test_cli_model_is_the_real_click_tree():
     assert set(model.subcommands) == set(click_root.commands)
     scan_options = {
         name
-        for p in click_root.commands["scan"].params
+        for p in click_root.commands["scan"].commands["fs"].params
+        if p.param_type_name == "option"
         for name in p.opts + p.secondary_opts
     }
     assert scan_options <= set(model.subcommands["scan"].options)

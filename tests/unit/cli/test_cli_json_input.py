@@ -406,7 +406,11 @@ class TestSkeleton:
             # document is opened, so a document key for it could never take
             # effect; it is kept out of the skeleton (json_input.py).
             - ARGV_ONLY_PARAMETERS
-        )
+        ) | {
+            # `scan fs` takes the directory as an argument; the engine's own
+            # signature has none (it is the source_dir option there).
+            "path"
+        }
         assert hidden == {
             "config_from_scanned_repository",
             "config_file_from_scanned_repository",

@@ -124,9 +124,13 @@ class TestWorkspaceRelativeFile:
 
 
 class TestRunCommandAssembly:
-    def test_single_directory_mode_still_passes_source_dir(self, tmp_path):
+    def test_single_directory_mode_passes_the_directory_to_the_fs_subject(
+        self, tmp_path
+    ):
         command = _run_command(tmp_path, tmp_path / "out")
-        assert "--source-dir" in command
+        index = command.index("fs")
+        assert command[index - 1 : index + 2] == ["scan", "fs", "/src"]
+        assert "--source-dir" not in command
         assert "--workspace" not in command
 
     def test_workspace_mode_passes_the_workspace_flag(self, tmp_path):

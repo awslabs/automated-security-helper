@@ -41,13 +41,12 @@ SOURCE_DIR_LINE = (
 
 def warn_deprecated(message: str) -> None:
     """Print ``Deprecated: <message>`` to stderr, once per call."""
-    from rich.markup import escape
-
     from automated_security_helper.utils.console import ash_console
+    from automated_security_helper.utils.log import escape_markup
     from automated_security_helper.utils.ui_theme import rich_theme
 
     ash_console(stderr=True, theme=rich_theme()).print(
-        f"[bold yellow]Deprecated:[/bold yellow] {escape(message)}",
+        f"[bold yellow]Deprecated:[/bold yellow] {escape_markup(message)}",
         highlight=False,
     )
 

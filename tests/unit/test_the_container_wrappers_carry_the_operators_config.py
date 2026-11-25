@@ -901,7 +901,9 @@ def test_the_root_command_and_the_scan_command_read_the_same_config_variable():
     command = typer.main.get_command(app)
     (root_option,) = [p for p in command.params if "--config" in p.opts]
     (scan_option,) = [
-        p for p in command.commands["scan"].params if "--config" in p.opts
+        p
+        for p in command.commands["scan"].commands["fs"].params
+        if "--config" in p.opts
     ]
 
     assert root_option.envvar == scan_option.envvar == "ASH_CONFIG"
@@ -1185,7 +1187,7 @@ def test_the_scan_option_reads_ash_config_from_the_environment():
 
     from automated_security_helper.cli.main import app
 
-    scan = typer.main.get_command(app).commands["scan"]
+    scan = typer.main.get_command(app).commands["scan"].commands["fs"]
     (option,) = [p for p in scan.params if "--config" in p.opts]
 
     assert option.envvar == "ASH_CONFIG"

@@ -121,3 +121,50 @@ def test_the_options_that_take_a_value_are_the_roots():
     assert all(
         param.nargs == 1 for param in root.params if param.param_type_name == "option"
     )
+
+
+def test_the_scan_subjects_and_their_value_options_are_the_real_ones():
+    """``scan <subject> <path>`` is refused (the directory is -SourceDir here), and
+    that refusal finds the subject and skips an option's value from these two lists,
+    which are the CLI's: the subjects of ``scan``, and the options a subject takes a
+    value for that the root does not."""
+    root = typer.main.get_command(app)
+    subjects = root.commands["scan"].commands
+    root_value_options = {
+        spelling
+        for param in root.params
+        if param.param_type_name == "option" and not param.is_flag and not param.count
+        for spelling in param.opts
+    }
+    subject_value_options = {
+        spelling
+        for subject in subjects.values()
+        for param in subject.params
+        if param.param_type_name == "option" and not param.is_flag and not param.count
+        for spelling in param.opts
+    } - root_value_options
+    assert set(_ps1_list("ashScanSubjects")) == set(subjects)
+    assert set(_ps1_list("ashScanValueOptions")) == subject_value_options
+    assert subject_value_options == {"--cli-json-input"}
+
+
+def test_the_completer_offers_what_the_wrapper_parses():
+    """The argument completer is generated from the parser's tables: it names every
+    subcommand, every subject and the option that takes a value."""
+    text = _text()
+    start = text.index("# BEGIN generated: ps1-completion")
+    block = text[start : text.index("# END generated: ps1-completion", start)]
+    root = typer.main.get_command(app)
+    for name in root.commands:
+        assert f"'{name}'" in block, name
+    for subject in root.commands["scan"].commands:
+        assert f"'{subject}'" in block, subject
+    assert "'--cli-json-input'" in block
+    assert (
+        "Register-ArgumentCompleter -CommandName Invoke-ASH -ParameterName 'AshArgs'"
+        in block
+    )
+    assert (
+        "Register-ArgumentCompleter -CommandName Invoke-ASH -ParameterName 'RemainingAshArgs'"
+        in block
+    )

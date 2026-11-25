@@ -266,7 +266,7 @@ def test_the_cli_model_records_click_choices():
 
     click_root = typer.main.get_command(app)
     scan = dc.load_cli().subcommands["scan"]
-    for param in click_root.commands["scan"].params:
+    for param in click_root.commands["scan"].commands["fs"].params:
         choices = getattr(param.type, "choices", None)
         if param.param_type_name != "option" or choices is None:
             continue

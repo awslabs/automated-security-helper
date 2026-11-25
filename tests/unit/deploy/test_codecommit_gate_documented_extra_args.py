@@ -110,7 +110,7 @@ def test_the_example_gate_reaches_ash_scan(monkeypatch, tmp_path):
         )
 
     assert captured and captured[0][:2] == ["ash", "scan"], captured
-    scan = typer.main.get_command(app).commands["scan"]
+    scan = typer.main.get_command(app).commands["scan"].commands["fs"]
     context = scan.make_context("scan", captured[0][2:], resilient_parsing=False)
     assert not context.args, (
         f"`ash scan` collected unknown options from the example's argv: {context.args}"

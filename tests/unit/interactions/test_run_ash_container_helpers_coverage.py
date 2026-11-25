@@ -1539,11 +1539,18 @@ class TestTheInnerArgvIsAcceptedByTheInnerCli:
     def _parse(self, argv: List[str]):
         import typer.main
 
-        from automated_security_helper.cli.scan import run_ash_scan_cli_command
+        from automated_security_helper.cli.scan_group import (
+            run_ash_scan_fs_cli_command,
+        )
 
+        # The container runs `ash scan fs /src ...`: the words after `scan fs` are
+        # what the `fs` command parses.
+        words = list(argv)
+        if words[:2] == ["scan", "fs"]:
+            words = words[2:]
         app = typer.Typer()
-        app.command()(run_ash_scan_cli_command)
-        return typer.main.get_command(app).make_context("ash", list(argv))
+        app.command()(run_ash_scan_fs_cli_command)
+        return typer.main.get_command(app).make_context("ash", words)
 
     def test_every_flag_a_fully_populated_invocation_emits_is_declared(self, tmp_path):
         out = tmp_path / "out"
@@ -1578,6 +1585,7 @@ class TestTheInnerArgvIsAcceptedByTheInnerCli:
         with self._parse(argv) as ctx:
             # The value, not the flag's presence: the defect this replaces was a flag
             # that was present and meant nothing.
+            assert ctx.params["path"] == "/src"
             assert ctx.params["use_existing"] is True
             assert ctx.params["fail_on_findings"] is False
             assert ctx.params["fail_on_incomplete_scanners"] is True

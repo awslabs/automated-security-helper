@@ -166,7 +166,7 @@ def _effective_config(argv: List[str], env: Dict[str, str]) -> Optional[str]:
 
     from automated_security_helper.cli.main import app
 
-    scan_command = typer.main.get_command(app).commands["scan"]
+    scan_command = typer.main.get_command(app).commands["scan"].commands["fs"]
     hidden = os.environ.pop("ASH_CONFIG", None)
     try:
         params = scan_command.make_context(

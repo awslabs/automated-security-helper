@@ -51,7 +51,7 @@
   
         ''',
         'scan',
-        '--source-dir',
+        'fs',
         '<TMP>/src',
         '--output-dir',
         '<TMP>/out',
@@ -105,7 +105,7 @@
   
         ''',
         'scan',
-        '--source-dir',
+        'fs',
         '<TMP>/src',
         '--output-dir',
         '<TMP>/out',
@@ -183,7 +183,7 @@
   
         ''',
         'scan',
-        '--source-dir',
+        'fs',
         '<TMP>/src',
         '--output-dir',
         '<TMP>/out',
@@ -235,7 +235,7 @@
   
         ''',
         'scan',
-        '--source-dir',
+        'fs',
         '<TMP>/src',
         '--output-dir',
         '<TMP>/out',
@@ -288,7 +288,7 @@
   
         ''',
         'scan',
-        '--source-dir',
+        'fs',
         '<TMP>/src',
         '--output-dir',
         '<TMP>/out',

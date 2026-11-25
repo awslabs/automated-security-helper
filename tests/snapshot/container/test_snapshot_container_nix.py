@@ -28,11 +28,11 @@ FAKE_NIX = "/nix/var/nix/profiles/default/bin/nix"
 
 SCAN = [
     "scan",
+    "fs",
+    "src",
     "--mode",
     "nix",
     "--no-progress",
-    "--source-dir",
-    "src",
     "--output-dir",
     "out",
 ]
@@ -254,7 +254,7 @@ def test_the_hosts_equals_form_of_mode_is_not_forwarded(scan, nix_shell):
     built from the scan's own options, so that spelling is not forwarded, and the
     inner scan gets the local mode once, or it would try to enter the shell
     again."""
-    args = ["scan", "--mode=nix", *SCAN[3:]]
+    args = ["scan", "fs", "src", "--mode=nix", *SCAN[5:]]
     nix_shell.returncode = 1
 
     scan(args)

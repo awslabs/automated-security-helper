@@ -216,6 +216,51 @@ def test_the_subject_less_form_still_forwards_its_words(runner, tmp_path):
     assert _inner_argv(run_argv) == ["ash", "scan", "--sandbox", "off"]
 
 
+def _table(name):
+    import re
+
+    script = ASH_SCRIPT.read_text(encoding="utf-8")
+    found = re.findall(rf'^{name}="([^"]*)"$', script, re.MULTILINE)
+    assert len(found) == 1, (name, found)
+    return set(found[0].split())
+
+
+@pytest.mark.unit
+def test_the_scan_tables_are_the_clis():
+    """The subjects the entrypoint reads a PATH after, the value options that are not
+    the root's, and the options the completion offers, held to the real commands."""
+    import typer.main
+
+    from automated_security_helper.cli.main import app
+
+    root = typer.main.get_command(app)
+    subjects = root.commands["scan"].commands
+    root_value = {
+        spelling
+        for param in root.params
+        if param.param_type_name == "option" and not param.is_flag and not param.count
+        for spelling in param.opts
+    }
+    subject_value = {
+        spelling
+        for subject in subjects.values()
+        for param in subject.params
+        if param.param_type_name == "option" and not param.is_flag and not param.count
+        for spelling in param.opts
+    } - root_value
+    every_long_option = {
+        spelling
+        for param in [*root.params, *(p for s in subjects.values() for p in s.params)]
+        if param.param_type_name == "option"
+        for spelling in (*param.opts, *param.secondary_opts)
+        if spelling.startswith("--")
+    }
+
+    assert _table("ASH_SCAN_SUBJECTS") == set(subjects)
+    assert _table("ASH_SCAN_VALUE_OPTIONS") == subject_value
+    assert _table("ASH_ROOT_OPTIONS") == every_long_option
+
+
 def _completions(tmp_path, words, cword):
     """What the printed function offers for COMP_WORDS=words at index cword."""
     script = tmp_path / "complete.bash"

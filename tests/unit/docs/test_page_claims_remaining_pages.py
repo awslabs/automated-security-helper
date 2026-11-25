@@ -296,7 +296,7 @@ def test_plugin_modules_are_named_by_a_config_key_an_option_and_an_environment_v
     from automated_security_helper.config.ash_config import AshConfig
 
     assert "ash_plugin_modules" in AshConfig.model_fields
-    scan = _click_commands().commands["scan"]
+    scan = _click_commands().commands["scan"].commands["fs"]
     option = next(p for p in scan.params if "--ash-plugin-modules" in p.opts)
     assert option.envvar == "ASH_PLUGIN_MODULES"
 
@@ -351,8 +351,9 @@ def test_the_plugin_runs_the_two_scans_at_the_two_checkpoints_the_page_names():
     assert "ash scan --no-progress" in build
 
     commands = _click_commands()
-    assert "--no-progress" in _options(commands.commands["scan"])
-    mode = next(p for p in commands.commands["scan"].params if "--mode" in p.opts)
+    scan = commands.commands["scan"].commands["fs"]
+    assert "--no-progress" in _options(scan)
+    mode = next(p for p in scan.params if "--mode" in p.opts)
     assert "precommit" in list(getattr(mode.type, "choices", []))
 
 
@@ -423,7 +424,9 @@ def test_the_express_commands_and_scan_flags_the_page_uses_exist():
     express = _click_commands().commands["express"]
     assert {"start", "status", "stop"} <= set(express.commands)
     assert "--json" in _options(express.commands["status"])
-    assert {"--express", "--no-express"} <= _options(_click_commands().commands["scan"])
+    assert {"--express", "--no-express"} <= _options(
+        _click_commands().commands["scan"].commands["fs"]
+    )
 
 
 @unix_only

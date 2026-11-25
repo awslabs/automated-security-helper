@@ -16,6 +16,7 @@ import pytest
 import typer
 
 from automated_security_helper.cli.main import app
+from tests.utils.helpers import declared_params
 from automated_security_helper.utils.sandbox.scope import (
     SandboxBackendUnavailable,
     SandboxUnavailable,
@@ -28,7 +29,9 @@ pytestmark = pytest.mark.unit
 def _sandbox_help() -> str:
     root = typer.main.get_command(app)
     scan = root.commands["scan"]
-    (option,) = [param for param in scan.params if "--sandbox" in param.opts]
+    (option,) = [
+        param for param in declared_params("scan", scan) if "--sandbox" in param.opts
+    ]
     return option.help
 
 

@@ -34,6 +34,7 @@ import pytest
 import typer.main
 
 from automated_security_helper.cli.main import app
+from tests.utils.helpers import declared_params
 
 pytestmark = pytest.mark.unit
 
@@ -49,7 +50,9 @@ def _plain(text: str) -> str:
 def _option_help(command: str, name: str) -> str:
     root = typer.main.get_command(app)
     cmd = root.commands[command]
-    return next(param.help for param in cmd.params if param.name == name)
+    return next(
+        param.help for param in declared_params(command, cmd) if param.name == name
+    )
 
 
 class TestTheIncompleteScanOptOut:

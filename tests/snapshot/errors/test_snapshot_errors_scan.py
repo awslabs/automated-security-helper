@@ -30,7 +30,7 @@ from automated_security_helper.utils.content_db_staleness import ContentDbAgeRec
 
 pytestmark = pytest.mark.unit
 
-SCAN = ["scan", "--no-progress"]
+SCAN = ["scan", "fs", "--no-progress"]
 
 
 def _write(path: Path, text: str) -> Path:
@@ -81,7 +81,7 @@ class TestArgumentRefusals:
             _report_orchestrator_reached,
         )
         assert (
-            run_cli(["--source-dir", "does-not-exist", "scan", "--no-progress"])
+            run_cli(["--source-dir", "does-not-exist", "scan", "fs", "--no-progress"])
             == snapshot
         )
 

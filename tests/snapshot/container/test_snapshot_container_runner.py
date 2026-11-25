@@ -17,7 +17,7 @@ import pytest
 
 from tests.snapshot.container.conftest import FakeStep
 
-SCAN = ["scan", "--mode", "container", "--no-progress", "--source-dir", "src"]
+SCAN = ["scan", "fs", "src", "--mode", "container", "--no-progress"]
 
 #: The snapshots are POSIX text by construction: they name /nonexistent/ash-test/docker.
 _POSIX_TEXT = pytest.mark.skipif(

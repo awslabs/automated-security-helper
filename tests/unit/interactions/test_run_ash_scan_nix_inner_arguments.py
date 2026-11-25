@@ -100,7 +100,8 @@ def test_a_library_callers_options_reach_the_inner_scan_not_the_host_programs_ar
 
     argv = launched.get("argv")
     assert argv is not None, "the inner scan was built from the process's argv"
-    assert _after_flag(argv, "--source-dir") == [str(opts.source_dir)]
+    assert argv[:3] == ["scan", "fs", str(opts.source_dir)]
+    assert "--source-dir" not in argv
     assert _after_flag(argv, "--output-dir") == [str(opts.output_dir)]
     assert _after_flag(argv, "--scanners") == ["bandit"]
     assert _after_flag(argv, "--config-overrides") == ["global_settings.x=1"]
@@ -188,13 +189,14 @@ def test_the_scan_cli_reads_every_forwarded_option_as_the_builder_spells_it(
     opts = _every_option_set(tmp_path)
     argv = ras._nix_inner_argv(opts)
 
-    scan = typer.main.get_command(app).commands["scan"]
-    parsed = scan.make_context("scan", argv[1:], resilient_parsing=False).params
+    scan = typer.main.get_command(app).commands["scan"].commands["fs"]
+    assert argv[:2] == ["scan", "fs"]
+    parsed = scan.make_context("fs", argv[2:], resilient_parsing=False).params
 
     def read(name):
         return _as_the_command_reads_it(parsed[name])
 
-    assert read("source_dir") == str(opts.source_dir)
+    assert read("path") == str(opts.source_dir)
     assert read("output_dir") == str(opts.output_dir)
     assert read("config") == opts.config
     assert read("config_overrides") == ["a=1", "b=2"]
@@ -236,8 +238,7 @@ def test_every_forwarded_option_is_spelled_as_the_scan_cli_reads_it(tmp_path):
 
     argv = ras._nix_inner_argv(opts)
 
-    assert argv[0] == "scan"
-    assert _after_flag(argv, "--source-dir") == [str(opts.source_dir)]
+    assert argv[:3] == ["scan", "fs", str(opts.source_dir)]
     assert _after_flag(argv, "--output-dir") == [str(opts.output_dir)]
     assert _after_flag(argv, "--config") == [str(tmp_path / "ash.yaml")]
     assert _after_flag(argv, "--config-overrides") == ["a=1", "b=2"]
@@ -287,7 +288,7 @@ def test_the_defaults_forward_only_the_directories_the_phases_and_the_strategy(
 
     assert argv[:5] == [
         "scan",
-        "--source-dir",
+        "fs",
         str(opts.source_dir),
         "--output-dir",
         str(opts.output_dir),
@@ -708,7 +709,7 @@ def test_values_a_shell_would_split_reach_the_launcher_as_single_arguments(
 
     cmd = entered_shell["cmd"]
     for flag, value in (
-        ("--source-dir", str(awkward_dir)),
+        ("fs", str(awkward_dir)),
         ("--config-overrides", awkward_override),
         ("--scanners", "scanner with space"),
     ):

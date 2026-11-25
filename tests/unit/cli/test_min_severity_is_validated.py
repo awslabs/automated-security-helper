@@ -20,6 +20,7 @@ from pydantic import ValidationError
 from typer.testing import CliRunner
 
 from automated_security_helper.cli.main import app
+from tests.utils.helpers import declared_params
 
 pytestmark = pytest.mark.unit
 
@@ -128,7 +129,9 @@ def test_the_cli_choices_are_the_ranked_values():
     command = typer.main.get_command(app)
     for name in ("scan", "merge"):
         param = next(
-            p for p in command.commands[name].params if p.name == "min_severity"
+            p
+            for p in declared_params(name, command.commands[name])
+            if p.name == "min_severity"
         )
         assert list(param.type.choices) == values, name
     assert values == VALID

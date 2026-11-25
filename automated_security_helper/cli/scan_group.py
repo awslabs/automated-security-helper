@@ -11,9 +11,9 @@ the engine reaches ``fs`` with no second declaration.
 
 ``ash scan [options]`` with no subject, and bare ``ash [options]``, still run the
 scan and print the deprecation line of ``scan_deprecation``; both are removed in
-ASH v4.0. This module imports nothing heavy: ``ash scan --help`` lists the subjects
-from the group's own help, and the engine's heavy trees stay deferred as they are
-for ``ash --version`` (tests/unit/cli/test_version_startup_budget.py).
+ASH v4.0. This module imports nothing heavy: ``ash scan --help`` prints ``fs``'s help
+(the options tools read it for), and the engine's heavy trees stay deferred as they
+are for ``ash --version`` (tests/unit/cli/test_version_startup_budget.py).
 """
 
 from __future__ import annotations
@@ -46,25 +46,22 @@ def _spellings(param: Any) -> set[str]:
     return {*param.opts, *param.secondary_opts}
 
 
-def first_positional(args: list[str], params: list[Any]) -> int | None:
-    """Index of the first token in *args* that is neither an option nor an option's value.
-
-    Read as click reads the tokens: a long option takes the next token as its value
-    unless it is a flag or carries ``=value``; in a cluster of short options the
-    first one that takes a value takes the rest of the cluster, or the next token
-    when it is last. Nothing after a bare ``--`` is looked at.
-    """
+def _read_tokens(args: list[str], params: list[Any]) -> tuple[int | None, bool]:
+    """``(index of the first positional, whether an option no param names came first)``."""
     owners = {opt: param for param in params for opt in _spellings(param)}
     expecting_value = False
+    unknown = False
     for index, token in enumerate(args):
         if expecting_value:
             expecting_value = False
             continue
         if token == "--":
-            return None
+            return None, unknown
         if token.startswith("--"):
             name, equals, _ = token.partition("=")
             owner = owners.get(name)
+            if owner is None:
+                unknown = True
             expecting_value = owner is not None and not owner.is_flag and not equals
             continue
         if token.startswith("-") and len(token) > 1:
@@ -73,13 +70,25 @@ def first_positional(args: list[str], params: list[Any]) -> int | None:
                 name, rest = "-" + rest[0], rest[1:]
                 owner = owners.get(name)
                 if owner is None:
+                    unknown = True
                     break
                 if not owner.is_flag:
                     expecting_value = not rest
                     break
             continue
-        return index
-    return None
+        return index, unknown
+    return None, unknown
+
+
+def first_positional(args: list[str], params: list[Any]) -> int | None:
+    """Index of the first token in *args* that is neither an option nor an option's value.
+
+    Read as click reads the tokens: a long option takes the next token as its value
+    unless it is a flag or carries ``=value``; in a cluster of short options the
+    first one that takes a value takes the rest of the cluster, or the next token
+    when it is last. Nothing after a bare ``--`` is looked at.
+    """
+    return _read_tokens(args, params)[0]
 
 
 class ScanTyperGroup(TyperGroup):
@@ -88,8 +97,13 @@ class ScanTyperGroup(TyperGroup):
     A subject may be given after options (``ash --output-dir out scan fs .`` hands
     the root's option on in front of it), so the first token that is not an option
     or an option's value is read as the subject. With no subject the arguments run
-    as ``fs`` and the deprecation line prints; a lone ``--help`` is the group's.
+    as ``fs`` and the deprecation line prints. A lone ``--help`` is among them, so
+    ``ash scan --help`` shows ``fs``'s help, options included, as it showed the scan's.
     """
+
+    #: The subject the arguments run as when none is named. The docs checker reads
+    #: this to model ``ash scan [options]`` (scripts/docs_checks.py).
+    legacy_default_subject = DEFAULT_SUBJECT
 
     def fs_command(self) -> Any:
         return self.commands[DEFAULT_SUBJECT]
@@ -109,11 +123,13 @@ class ScanTyperGroup(TyperGroup):
 
     def _routed(self, ctx: Any, args: list[str]) -> list[str]:
         params = list(self.fs_command().get_params(ctx))
-        index = first_positional(args, params)
-        if index is None:
-            help_names = set(self.get_help_option_names(ctx))
-            if args and all(token in help_names for token in args):
-                return args
+        index, unknown_option = _read_tokens(args, params)
+        if index is None or (unknown_option and args[index] not in self.commands):
+            # No subject: the arguments run as `fs`, `--help` included. Tools read
+            # `ash scan --help` for the scan's options (the deploy gates probe it
+            # for --fail-on-incomplete-scanners), so it keeps listing them. An
+            # option `fs` does not have, before a word, is `fs`'s to refuse as the
+            # unknown option it is (it may take the word as its value).
             ctx.meta[SCAN_FORM_META] = "scan"
             return [DEFAULT_SUBJECT, *args]
         subject = args[index]
@@ -153,7 +169,8 @@ def run_ash_scan_fs_cli_command(*args: Any, **kwargs: Any) -> Any:
 
     Review the result with: ash inspect findings
 
-    Options are grouped by workflow below.
+    Options are grouped by workflow below. `fs` is the only subject of `ash scan`
+    today; `ash scan` with no subject runs it, but that form is deprecated.
     """
     ctx = kwargs["ctx"]
     path = kwargs.pop("path", None)

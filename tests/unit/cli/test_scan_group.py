@@ -49,13 +49,15 @@ def _deprecation_lines(text: str) -> list[str]:
     return [line for line in text.splitlines() if line.startswith("Deprecated:")]
 
 
-def test_scan_help_lists_fs_and_stops_there():
+def test_scan_help_still_lists_the_scan_options():
+    # Tools read `ash scan --help` for the scan's options (the deploy gates probe it
+    # for --fail-on-incomplete-scanners), so a no-subject --help is fs's.
     result = _invoke(["scan", "--help"])
 
     assert result.exit_code == 0, result.output
-    assert "Usage: ash scan [OPTIONS] COMMAND [ARGS]..." in result.output
-    assert " fs " in result.output
-    assert "--mode" not in result.output, "the group's help lists no scan options"
+    assert "Usage: ash scan fs [OPTIONS] [PATH]" in result.output
+    assert "--shard-count" in result.output
+    assert "--mode" in result.output
 
 
 def test_fs_help_takes_a_path_argument_and_every_scan_option():

@@ -7,7 +7,8 @@
 
  Review the result with: ash inspect findings
 
- Options are grouped by workflow below.
+ Options are grouped by workflow below. `fs` is the only subject of `ash scan`
+ today; `ash scan` with no subject runs it, but that form is deprecated.
 
 ╭─ Scan ───────────────────────────────────────────────────────────────────────────────────────────╮
 │   [PATH]      <str>  The directory to scan. Defaults to the current directory. --source-dir and  │

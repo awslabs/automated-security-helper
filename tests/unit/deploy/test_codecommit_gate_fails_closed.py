@@ -129,7 +129,7 @@ def _resolve_scan_params(argv: list[str]) -> dict[str, Any]:
     from automated_security_helper.cli.main import app
 
     assert argv[:2] == ["ash", "scan"], f"unexpected argv prefix: {argv[:2]}"
-    scan_command = typer.main.get_command(app).commands["scan"]
+    scan_command = typer.main.get_command(app).commands["scan"].commands["fs"]
     return scan_command.make_context("scan", argv[2:], resilient_parsing=False).params
 
 
@@ -485,7 +485,7 @@ def test_every_reserved_spelling_is_one_the_cli_actually_accepts():
 
     from automated_security_helper.cli.main import app
 
-    scan_command = typer.main.get_command(app).commands["scan"]
+    scan_command = typer.main.get_command(app).commands["scan"].commands["fs"]
     declared = {
         spelling
         for param in scan_command.params

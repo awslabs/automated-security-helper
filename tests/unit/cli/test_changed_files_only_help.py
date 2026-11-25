@@ -23,7 +23,11 @@ pytestmark = pytest.mark.unit
 @pytest.mark.parametrize("command", ["scan", None], ids=["ash scan", "ash"])
 def test_the_help_says_every_file_is_still_scanned(command):
     root = typer.main.get_command(app)
-    target = root if command is None else root.commands[command]
+    if command is None:
+        target = root
+    else:
+        # `scan` is a group; the options are on its subject, `fs`.
+        target = root.commands[command].commands["fs"]
     (option,) = [p for p in target.params if "--changed-files-only" in p.opts]
     help_text = " ".join(option.help.split())
 

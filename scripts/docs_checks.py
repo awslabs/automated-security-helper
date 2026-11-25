@@ -2020,6 +2020,9 @@ class CliCommand:
     #: True when click is told to pass unknown options through (scan and
     #: build-image forward them to the ASH inside the container).
     forwards_unknown: bool = False
+    #: The subject a group runs when none is named (``ash scan`` runs ``fs``); its
+    #: options are this command's own, and it takes no positional argument that way.
+    legacy_default: str | None = None
 
     @property
     def display(self) -> str:
@@ -2057,12 +2060,25 @@ def _command_from_click(cmd: Any, path: tuple[str, ...]) -> CliCommand:
     subcommands = {}
     for name, sub in sorted(getattr(cmd, "commands", {}).items()):
         subcommands[name] = _command_from_click(sub, path + (name,))
+    forwards_unknown = bool(cmd.context_settings.get("ignore_unknown_options"))
+    legacy_default = getattr(cmd, "legacy_default_subject", None)
+    if legacy_default in subcommands:
+        # `ash scan [options]` with no subject runs the default subject, so its
+        # options are the group's too, and it takes no positional argument that way.
+        default = subcommands[legacy_default]
+        for name, option in default.options.items():
+            options.setdefault(name, option)
+        forwards_unknown = forwards_unknown or default.forwards_unknown
+        max_args = 0
+    else:
+        legacy_default = None
     return CliCommand(
         path=path,
         options=options,
         max_args=max_args,
         subcommands=subcommands,
-        forwards_unknown=bool(cmd.context_settings.get("ignore_unknown_options")),
+        forwards_unknown=forwards_unknown,
+        legacy_default=legacy_default,
     )
 
 
@@ -2152,7 +2168,9 @@ def ash_args_problems(
                     used = 2
             index += used
             continue
-        if command.subcommands:
+        if command.subcommands and not (
+            command.legacy_default is not None and word not in command.subcommands
+        ):
             sub = command.subcommands.get(word)
             if sub is None:
                 close = difflib.get_close_matches(word, list(command.subcommands), n=1)
@@ -2230,6 +2248,9 @@ REGISTRY_OPTIONS = {
     (("ash", "scan"), "--scanners"): "scanner",
     (("ash", "scan"), "--exclude-scanners"): "scanner",
     (("ash", "scan"), "--output-formats"): "output format",
+    (("ash", "scan", "fs"), "--scanners"): "scanner",
+    (("ash", "scan", "fs"), "--exclude-scanners"): "scanner",
+    (("ash", "scan", "fs"), "--output-formats"): "output format",
     (("ash", "merge"), "--output-formats"): "output format",
     (("ash", "report"), "--format"): "reporter",
     (("ash", "dependencies", "install"), "--tool"): "tool",
@@ -6810,7 +6831,17 @@ def cli_section(of: str) -> tuple[Section | None, str | None]:
             return None, f"of={of}: ash {' '.join(words)} is not a command"
         command = sub
     keys: dict[str, KeySpec] = {}
-    for param in command.params:
+    params = list(command.params)
+    default_subject = getattr(command, "legacy_default_subject", None)
+    if default_subject is not None:
+        # `ash scan [options]` with no subject runs the default subject, so its
+        # options are the group's; its positional PATH is not.
+        params.extend(
+            p
+            for p in command.commands[default_subject].params
+            if p.param_type_name == "option"
+        )
+    for param in params:
         if param.param_type_name == "option":
             names = tuple(param.opts) + tuple(param.secondary_opts)
         else:
