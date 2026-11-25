@@ -55,13 +55,10 @@ SUPERSEDING = {
     "ash-actions-pinned.yml",
     "ash-agent-plugins-drift.yml",
     "ash-cdk-extra-drift.yml",
-    # The approval a superseded run would have left gets dismissed by the newer
-    # push anyway (the ruleset dismisses stale reviews), so cancelling loses
-    # nothing and frees the runner for the new head's run.
-    "ash-dependabot-auto-merge.yml",
     "ash-docs-ci-runners.yml",
     "ash-iac-drift.yml",
     "ash-install-methods.yml",
+    "ash-offline-scanners.yml",
     "ash-package.yml",
     "ash-pr-title-check.yml",
     "ash-repo-scan-pr-head.yml",
@@ -84,6 +81,13 @@ QUEUEING = {
     "ash-create-release.yml": "create-release",
     # Weekly schedule plus dispatch; one run at a time, none superseded.
     "ash-pinned-tool-versions.yml": "${{ github.workflow }}",
+    # Fires on workflow_run, where github.ref is the default branch for every pull
+    # request, so a ref-keyed group would make all PRs share one group. It is keyed
+    # on the head commit and queues: each completing workflow of one head gets its
+    # turn at the decision, because the last one sees the full set green.
+    "ash-dependabot-auto-merge.yml": (
+        "${{ github.workflow }}-${{ github.event.workflow_run.head_sha }}"
+    ),
     # The docs publish. Keyed on what it publishes (main, or the release tag given as
     # the `ref` input), never on the caller's ref, and never cancelled: the job only
     # publishes main or a release tag, so the rule above has nothing to cancel here.

@@ -122,7 +122,13 @@ from typing import (
 from pydantic import Field, PrivateAttr, field_validator
 
 from automated_security_helper.base.options import ScannerOptionsBase
+from automated_security_helper.base import scanner_operational_facets as opsf
 from automated_security_helper.base.plugin_base import read_log_bounded
+from automated_security_helper.base.scanner_facets import (
+    FacetDecl,
+    FacetState,
+    ScannerFacets,
+)
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
@@ -256,6 +262,246 @@ class TruffleHogScanner(ScannerPluginBase[TruffleHogScannerConfig]):
     #: Without --fail, which ASH never passes, TruffleHog exits 0 with or without
     #: findings, and 1 when the scan failed.
     success_exit_codes: ClassVar[Set[int]] = {0}
+
+    #: The facets register row (base/scanner_facets.py). Declaration only: no
+    #: behavior changes. Native fields name TruffleHog's own SARIF (fixtures
+    #: tests/test_data/scanners/trufflehog/captured/positive.sarif and
+    #: negative.sarif, TruffleHog 3.100.0, four results over three files). A cell
+    #: the capture does not settle is UNCONFIRMED with the run that would settle
+    #: it. ``--no-verification`` is the default argv, so no capture holds a
+    #: verified (``level: error``) result.
+    facets: ClassVar[ScannerFacets] = ScannerFacets(
+        rule_id=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result "ruleId" (the detector name, for example Github or URI)',
+        ),
+        severity=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result "level" (warning in every result of the capture; '
+            "error is a provider-confirmed credential per the module header), rated "
+            'by _post_process_sarif into properties "issue_severity" (error to '
+            "CRITICAL, anything else to HIGH)",
+        ),
+        file_path=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="locations[].physicalLocation.artifactLocation.uri",
+        ),
+        line_range=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="locations[].physicalLocation.region.startLine "
+            "(no endLine in the capture)",
+        ),
+        column=FacetDecl(
+            state=FacetState.NA,
+            reason="the regions of the capture carry startLine only (4 of 4 "
+            "results); TruffleHog's SARIF holds no column",
+        ),
+        message=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result "message.text" (names the detector and the '
+            "verification state, never the secret)",
+        ),
+        resource_id=FacetDecl(
+            state=FacetState.NA,
+            reason="secret findings name a file location, not a deployable "
+            "resource; the SARIF carries a detector, a region and a fingerprint only",
+        ),
+        resource_type=FacetDecl(
+            state=FacetState.NA,
+            reason="secret findings name a file location, not a deployable resource",
+        ),
+        package_name=FacetDecl(
+            state=FacetState.NA,
+            reason="secret findings carry no package",
+        ),
+        package_version=FacetDecl(
+            state=FacetState.NA,
+            reason="secret findings carry no package",
+        ),
+        package_path=FacetDecl(
+            state=FacetState.NA,
+            reason="secret findings carry no package",
+        ),
+        taxonomy_cve=FacetDecl(
+            state=FacetState.NA,
+            reason="secret findings carry no CVE taxonomy",
+        ),
+        taxonomy_cwe=FacetDecl(
+            state=FacetState.NA,
+            reason="the rules of the capture carry id, name and shortDescription "
+            "only; no CWE taxonomy",
+        ),
+        fingerprints=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result "partialFingerprints" '
+            '("trufflehogFingerprint/v1", one value per result; 4 distinct '
+            "values over 4 results in the capture)",
+        ),
+        fix_available=FacetDecl(
+            state=FacetState.NA,
+            reason="secret findings carry no fix state",
+        ),
+        remediation_text=FacetDecl(
+            state=FacetState.NA,
+            reason="the rules of the capture carry id, name and shortDescription only",
+        ),
+        snippet=FacetDecl(
+            state=FacetState.NA,
+            reason="the regions of the capture carry no snippet, and ASH never asks "
+            "for the --json output whose Raw fields hold the secret (module header)",
+        ),
+        references=FacetDecl(
+            state=FacetState.NA,
+            reason="the rules of the capture carry id, name and shortDescription "
+            "only; no reference URLs",
+        ),
+        tags=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result properties "tags" (absent natively); the adapter '
+            "appends secret and security",
+        ),
+        extras=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result properties "issue_severity" and "verification" '
+            "written by the adapter",
+        ),
+    )
+
+    #: The operational register row (base/scanner_operational_facets.py),
+    #: checked against the production declarations it mirrors by
+    #: tests/unit/plugin_modules/test_scanner_operational_facets_consistency.py.
+    operational_facets: ClassVar[opsf.ScannerOperationalFacets] = (
+        opsf.ScannerOperationalFacets(
+            scanner_name="trufflehog",
+            network=opsf.NetworkFacet(
+                fetch_kind=opsf.FetchKind.CONTENT_FETCH,
+                fetches=(opsf.Fetched.ISSUER_VERIFICATION,),
+                prefetch=(),
+                offline_outcome=opsf.OfflineOutcome.DEGRADED,
+                offline_reason=(
+                    "verification is off by default; with options.verify on, an "
+                    "offline run falls back to --no-verification and the detections "
+                    "are all reported unverified, none dropped"
+                ),
+                offline_strategy=OfflineStrategy.BUNDLED,
+                sandbox_network=opsf.SandboxNetwork.NONE,
+                sandbox_tension=(
+                    "options.verify (operator-only, off by default) sends each "
+                    "credential found to its provider, or to a host the scanned file "
+                    "names, but the sandbox declaration grants no network, so under "
+                    "--sandbox a verifying run gets one only when "
+                    "sandbox.network_scanners lists trufflehog; without it each check "
+                    "fails and the detection is reported as unknown"
+                ),
+                source=(
+                    "trufflehog_scanner.py offline_strategy, sandbox_requirements and "
+                    "_verify; module header (Verification is off unless the operator "
+                    "turns it on; Sandbox); the default argv passes --no-verification "
+                    "and --no-update"
+                ),
+            ),
+            output=opsf.OutputFacet(
+                native_formats=(opsf.OutputFormat.SARIF,),
+                side_reports=(),
+                non_finding_artifacts=(),
+                note="the SARIF goes to stdout and ASH writes it to "
+                "TruffleHogScanner.stdout.log; the tool has no report-file option",
+            ),
+            targets=opsf.TargetsFacet(
+                kinds=(opsf.TargetKind.SECRETS_CONTENTS,),
+                tool_type=ScannerToolType.SECRETS,
+                selection="`trufflehog filesystem` over the target; the files on disk, "
+                "not history, and not .git directories (--exclude-paths; module header)",
+                covers_note=(
+                    "the community scanners declare no covers display string; no "
+                    "scanner claims git-history secrets (UNCLAIMED_TARGET_KINDS)"
+                ),
+            ),
+            runtime=opsf.RuntimeFacet(
+                kind=opsf.RuntimeKind.USER_INSTALLED_CLI,
+                external_programs=("trufflehog",),
+                invocations=opsf.Invocations.ONE,
+                python_only=False,
+                use_uv_tool=False,
+            ),
+            platforms=opsf.PlatformsFacet(
+                provisionable=(),
+                note="the user's installed TruffleHog, absent from TOOL_VERSIONS, so "
+                "ASH provisions no platform (module header: ASH does not install it); "
+                "the committed capture is from the darwin/arm64 release asset, and "
+                "which other platforms the tool runs on is the user's install",
+            ),
+            severity=opsf.SeverityFacet(
+                severity_class=opsf.SeverityClass.DERIVED,
+                note="the native level has two values; ASH rates a provider-confirmed "
+                "credential (level error) CRITICAL and every other detection HIGH",
+            ),
+            silencing=opsf.SilencingFacet(
+                tool_side=(
+                    opsf.SilencingLayer(
+                        layer=opsf.SilencingLayerKind.INLINE_COMMENT,
+                        writer=opsf.SilencingWriter.REPOSITORY,
+                        honored=opsf.Honored.NO,
+                        surface="trufflehog:ignore comments; options.honor_inline_ignores "
+                        "turns them back on when the operator sets it",
+                        cite="trufflehog_scanner.py module header (Invocation, "
+                        "--no-ignore-tag) and _honor_inline_ignores; the capture's "
+                        "src/services/settings.py result is reported despite its "
+                        "ignore comment (captured/README.md)",
+                    ),
+                    opsf.SilencingLayer(
+                        layer=opsf.SilencingLayerKind.TOOL_DEFAULT_FILTER,
+                        writer=opsf.SilencingWriter.TOOL_DEFAULT,
+                        honored=opsf.Honored.YES,
+                        surface="--results=verified,unknown, passed only when "
+                        "options.verify is on, drops the results a provider "
+                        "rejected; TruffleHog's own filtered_unverified class is "
+                        "never requested",
+                        cite="trufflehog_scanner.py module header (Verification is "
+                        "off unless the operator turns it on), RESULT_KINDS and "
+                        "DEFAULT_RESULTS",
+                    ),
+                ),
+            ),
+            identity=opsf.IdentityFacet(
+                fingerprint_class=opsf.FingerprintClass.UNCONFIRMED,
+                note="every result of the capture carries partialFingerprints "
+                "trufflehogFingerprint/v1; the capture README says it is a hash over "
+                "the detector, path, line and a hash of the secret, so it may move "
+                "with an edit above the finding, and no capture moves a line; a "
+                "before and after run over one edit settles it",
+            ),
+            extensibility=opsf.ExtensibilityFacet(
+                custom_rules=opsf.CustomRules.NONE,
+                env_prefixes=(),
+                options_surface="typed options (verify, results, honor_inline_ignores); "
+                "--config is never passed, so no custom detector or verification "
+                "endpoint is loaded and no configuration is read from the scanned tree",
+            ),
+            exit_codes=opsf.ExitCodesFacet(
+                success_exit_codes=(0,),
+                semantics="0 with or without findings, because ASH never passes "
+                "--fail; 1 when the scan itself failed (--fail-on-scan-errors); a "
+                "file it cannot read is only logged and the exit stays 0",
+            ),
+            provenance=opsf.ProvenanceFacet(
+                tier=opsf.Tier.COMMUNITY_OPTIN,
+                source=opsf.ProvenanceSource.USER_INSTALLED,
+                selection_surfaces=(
+                    "ash_trufflehog_plugins in ash_plugin_modules",
+                    "options.verify",
+                    "options.results",
+                    "options.honor_inline_ignores",
+                ),
+                upstream_license=opsf.LICENSE_NOT_READ,
+            ),
+            prerequisites=opsf.PrerequisitesFacet(
+                kinds=(opsf.Prerequisite.NONE,),
+                note="no git repository is required and no history is read",
+            ),
+        )
+    )
+
     # The strict default; see "Sandbox" in the module docstring.
     sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements()
 

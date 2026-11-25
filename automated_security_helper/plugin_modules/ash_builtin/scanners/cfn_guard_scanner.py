@@ -90,6 +90,12 @@ from typing import (
 from pydantic import AnyUrl, Field, PrivateAttr, field_validator, model_validator
 
 from automated_security_helper.base.options import ScannerOptionsBase
+from automated_security_helper.base import scanner_operational_facets as opsf
+from automated_security_helper.base.scanner_facets import (
+    FacetDecl,
+    FacetState,
+    ScannerFacets,
+)
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
@@ -134,6 +140,7 @@ from automated_security_helper.utils.config_trust import (
 )
 from automated_security_helper.utils.error_text import text_without_values
 from automated_security_helper.utils.output_excerpt import tool_output_excerpt
+from automated_security_helper.utils.package_identity import ASH_RESOURCE_ID_KEY
 from automated_security_helper.utils.rules_bundles import (
     RulesBundleUnavailable,
     create_rules_bundle_install_command,
@@ -363,6 +370,208 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
     python_only: ClassVar[bool | None] = False
 
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
+
+    #: The facets register row (base/scanner_facets.py), declaration only. The
+    #: native fields are those of cfn-guard's SARIF (committed fixture
+    #: tests/test_data/scanners/cfn_lint_guard/captured/
+    #: cfn-guard-3.2.1-wa-Security-Pillar-insecure.sarif: result keys exactly
+    #: ruleId, level, message, locations; the driver has no rules array). The
+    #: logical resource id exists only inside the message prose
+    #: ("Value traversed to [Path=/Resources/<LogicalId>/..."), so
+    #: resource_id is MAPPED-derived: ``_derived_resource_id`` parses the
+    #: ``Value traversed to [Path=/Resources/<LogicalId>/`` segment that opens a
+    #: missing-property message (the one attach in the adapter that reads prose,
+    #: owner decision D7) and attaches nothing for any other message shape, the
+    #: resolved-comparison messages that dump template strings included.
+    #: ``_MESSAGE_PATH_SHAPE`` is the shape pinned by the ROT-GUARD test over the
+    #: committed captures of the pinned tool version.
+    facets: ClassVar[ScannerFacets] = ScannerFacets(
+        rule_id=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="result ruleId (e.g. LAMBDA_INSIDE_VPC)",
+        ),
+        severity=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="result level (always error); ASH maps every "
+            "violation to the constant VIOLATION_SEVERITY HIGH because the "
+            "rules declare no severity of their own",
+        ),
+        file_path=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="result locations[].physicalLocation."
+            "artifactLocation.uri (overwritten with the scanned template's "
+            "path)",
+        ),
+        line_range=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="result locations[].physicalLocation.region startLine",
+        ),
+        column=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="result locations[].physicalLocation.region startColumn",
+        ),
+        message=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="result message.text",
+        ),
+        resource_id=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='DERIVED: result message.text "Value traversed to '
+            '[Path=/Resources/<LogicalId>/" segment, parsed by '
+            "_derived_resource_id (anchored at the start of a missing-property "
+            "message; any other message shape attaches nothing)",
+            example="LegacyFunction",
+        ),
+        resource_type=FacetDecl(
+            state=FacetState.NA,
+            reason="the message path names the logical id only; the "
+            "CloudFormation Type is not in the SARIF and would need a "
+            "template read the adapter does not make",
+        ),
+        package_name=FacetDecl(
+            state=FacetState.NA,
+            reason="findings are CloudFormation template rule checks; no "
+            "package exists in cfn-guard output",
+        ),
+        package_version=FacetDecl(
+            state=FacetState.NA,
+            reason="findings are CloudFormation template rule checks; no "
+            "package exists in cfn-guard output",
+        ),
+        package_path=FacetDecl(
+            state=FacetState.NA,
+            reason="findings are CloudFormation template rule checks; no "
+            "package exists in cfn-guard output",
+        ),
+        taxonomy_cve=FacetDecl(
+            state=FacetState.NA,
+            reason="cfn-guard publishes its own rule ids; no CVE taxonomy in "
+            "the results",
+        ),
+        taxonomy_cwe=FacetDecl(
+            state=FacetState.NA,
+            reason="cfn-guard publishes its own rule ids; no CWE taxonomy in "
+            "the results",
+        ),
+        fingerprints=FacetDecl(
+            state=FacetState.NA,
+            reason="the SARIF results carry no fingerprints (result keys "
+            "are exactly ruleId, level, message, locations)",
+        ),
+        fix_available=FacetDecl(
+            state=FacetState.NA,
+            reason="cfn-guard results carry no fix state or fixed version",
+        ),
+        remediation_text=FacetDecl(
+            state=FacetState.NA,
+            reason="the message states the failed check, not a remediation; "
+            "no remediation field exists",
+        ),
+        snippet=FacetDecl(
+            state=FacetState.DROPPED,
+            native_field='result message.text "Value={...}" segment',
+            reason="the traversed value is dumped inside the message prose "
+            "and no region snippet is emitted; ASH keeps the whole message "
+            "and extracts no snippet from it",
+        ),
+        references=FacetDecl(
+            state=FacetState.NA,
+            reason="the driver carries no rules array, so no help URI exists",
+        ),
+        tags=FacetDecl(
+            state=FacetState.NA,
+            reason="the adapter adds no tags and the SARIF results carry none",
+        ),
+        extras=FacetDecl(
+            state=FacetState.NA,
+            reason="the native results carry no property bag; the only "
+            "property written is the ASH-computed issue_severity",
+        ),
+    )
+
+    #: The operational register row (base/scanner_operational_facets.py),
+    #: checked against the production declarations it mirrors by
+    #: tests/unit/plugin_modules/test_scanner_operational_facets_consistency.py.
+    operational_facets: ClassVar[opsf.ScannerOperationalFacets] = (
+        opsf.ScannerOperationalFacets(
+            scanner_name="cfn-guard",
+            network=opsf.NetworkFacet(
+                fetch_kind=opsf.FetchKind.NONE,
+                fetches=(),
+                prefetch=(),
+                offline_outcome=opsf.OfflineOutcome.UNCHANGED,
+                offline_strategy=OfflineStrategy.BUNDLED,
+                sandbox_network=opsf.SandboxNetwork.NONE,
+                source=(
+                    "cfn_guard_scanner.py offline_strategy and sandbox_requirements "
+                    "(read paths only, never a network); rules are passed as local files"
+                ),
+            ),
+            output=opsf.OutputFacet(
+                native_formats=(opsf.OutputFormat.SARIF,),
+                side_reports=(),
+                non_finding_artifacts=(),
+            ),
+            targets=opsf.TargetsFacet(
+                kinds=(opsf.TargetKind.IAC_CLOUDFORMATION,),
+                tool_type=ScannerToolType.IAC,
+                selection="shared template discovery (utils/cfn_template_discovery.py)",
+            ),
+            runtime=opsf.RuntimeFacet(
+                kind=opsf.RuntimeKind.PINNED_BINARY,
+                external_programs=(),
+                invocations=opsf.Invocations.PER_TARGET,
+                invocation_note="one cfn-guard validate per template",
+                tool_versions_key="cfn-guard",
+                python_only=False,
+                use_uv_tool=False,
+            ),
+            platforms=opsf.PlatformsFacet(
+                provisionable=opsf.PLATFORMS_ALL,
+                note="asset table lists all six platform/arch pairs",
+            ),
+            severity=opsf.SeverityFacet(
+                severity_class=opsf.SeverityClass.CONSTANT,
+                note="every finding is HIGH (a constant in the adapter)",
+            ),
+            silencing=opsf.SilencingFacet(
+                tool_side=(),
+                none_reason=(
+                    "cfn-guard's own suppression surface was not surveyed; ASH-side "
+                    "suppressions are the surface this register records"
+                ),
+            ),
+            identity=opsf.IdentityFacet(
+                fingerprint_class=opsf.FingerprintClass.POSITIONAL_ONLY,
+                note="identity is file and line through the shared floor",
+            ),
+            extensibility=opsf.ExtensibilityFacet(
+                custom_rules=opsf.CustomRules.OPERATOR_PATHS,
+                env_prefixes=(),
+                options_surface=(
+                    "rule_sets selects among the bundled rule sets; rules_paths takes the "
+                    "operator's own .guard files (operator-only, copied outside the tree)"
+                ),
+            ),
+            exit_codes=opsf.ExitCodesFacet(
+                success_exit_codes=(0, 19),
+                semantics="19 means at least one rule failed (findings)",
+            ),
+            provenance=opsf.ProvenanceFacet(
+                tier=opsf.Tier.BUILTIN_DEFAULT,
+                source=opsf.ProvenanceSource.PINNED_RELEASE_BINARY,
+                selection_surfaces=("options.rule_sets", "options.rules_paths"),
+                upstream_license=(
+                    "Apache-2.0 (source: utils/tool_downloads.py "
+                    "THIRD_PARTY_LICENSES['cfn-guard'], pinned commit db494a1)"
+                ),
+            ),
+            prerequisites=opsf.PrerequisitesFacet(
+                kinds=(opsf.Prerequisite.TEMPLATE,),
+                note="a .json/.yaml/.yml file the template model reads as CloudFormation",
+            ),
+        )
+    )
 
     #: The exit codes a completed cfn-guard run may end with (19 = at least one
     #: rule failed), the same set ``_parse_response`` accepts per template. Declared
@@ -824,6 +1033,32 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
             ],
         )
 
+    #: The message shape the derived resource id is read from, as cfn-guard
+    #: 3.2.1 and 3.3.0 write a missing-property result: ``Check was not
+    #: compliant as property [<Prop>] is missing. Value traversed to
+    #: [Path=/Resources/<LogicalId>/Properties[L:13,C:6] Value={...}]. ``. A
+    #: CloudFormation logical id is alphanumeric. The match is anchored at the
+    #: start of the message: the ``Value=`` dump
+    #: and the resolved-comparison messages ("... as property value [Path=...
+    #: Value="<template string>"] not equal to value ...") carry the template's
+    #: own text, which can spell the same words, so only a message that opens
+    #: with the genuine prefix attaches, and the id is the one in that prefix.
+    _MESSAGE_PATH_SHAPE: ClassVar["re.Pattern[str]"] = re.compile(
+        r"Check was not compliant as property \[.+?\] (?:to compare from )?is missing\. "
+        r"Value traversed to \[Path=/Resources/([A-Za-z0-9]+)/Properties"
+        r"\[L:\d+,C:\d+\] Value=\{"
+    )
+
+    @classmethod
+    def _derived_resource_id(cls, result: Result) -> Optional[str]:
+        """The logical id the message's ``Path=`` names, or ``None`` (fail closed)."""
+        message = result.message
+        text = getattr(getattr(message, "root", None), "text", None)
+        if not isinstance(text, str):
+            return None
+        match = cls._MESSAGE_PATH_SHAPE.match(text)
+        return match.group(1) if match else None
+
     @staticmethod
     def normalize_results(report: SarifReport, uri: str) -> List[Result]:
         """One template's results, located at ``uri``, severity-mapped, each once.
@@ -866,6 +1101,9 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
                 if result.properties is None:
                     result.properties = PropertyBag()
                 setattr(result.properties, "issue_severity", VIOLATION_SEVERITY)  # noqa: B010
+                resource_id = CfnGuardScanner._derived_resource_id(result)
+                if resource_id is not None:
+                    setattr(result.properties, ASH_RESOURCE_ID_KEY, resource_id)  # noqa: B010
                 identity = result.model_dump_json()
                 if identity in seen:
                     continue

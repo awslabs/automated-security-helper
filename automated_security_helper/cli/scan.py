@@ -88,6 +88,7 @@ from automated_security_helper.utils.output_dir_links import (
     OUTPUT_RESULT_FILES,
     OUTPUT_WORKING_DIRS,
 )
+from automated_security_helper.core.scanner_selection import SelectionLayers
 from automated_security_helper.utils.terminal_text import shown_on_one_line
 
 if TYPE_CHECKING:
@@ -934,6 +935,9 @@ def _exit_with_workspace_dry_run(
     scanners: tuple[str, ...],
     exclude_scanners: tuple[str, ...],
     ash_plugin_modules: tuple[str, ...],
+    selection_layers: SelectionLayers | None = None,
+    config: str | None = None,
+    config_overrides: tuple[str, ...] = (),
 ) -> None:
     """Print *plan* and exit 0, the ``--dry-run`` answer, after the real run's own
     pre-checks.
@@ -969,6 +973,9 @@ def _exit_with_workspace_dry_run(
         enabled_scanners=tuple(scanners),
         excluded_scanners=tuple(exclude_scanners),
         ash_plugin_modules=tuple(ash_plugin_modules),
+        selection_layers=selection_layers,
+        default_config_path=config,
+        config_overrides=tuple(config_overrides),
     )
     try:
         prewarm_plugin_registry(plan, selection)
@@ -1408,6 +1415,22 @@ def run_ash_scan_cli_command(
             help="Produce a shorter markdown report suitable for PR comments. Omits the severity legend, scan metadata, footer, and rows for scanners that were skipped or had zero findings.",
         ),
     ] = False,
+    annotate_duplicates: Annotated[
+        bool,
+        typer.Option(
+            "--annotate-duplicates",
+            rich_help_panel="Reports",
+            help="Add `cluster_id`, `duplicate_of` and `duplicate_sources` columns to the CSV and flat-JSON reports, naming findings that two scanners report for one defect (same CVE and package, same IaC resource, or same line and CWE). Rows, ids, counts, SARIF, suppressions and baselines are unchanged. Adds three columns to the CSV header, so it is off by default. Sets `global_settings.deduplication.annotate`.",
+        ),
+    ] = False,
+    fold_duplicates: Annotated[
+        bool,
+        typer.Option(
+            "--fold-duplicates",
+            rich_help_panel="Reports",
+            help="Show one row per duplicate cluster in the HTML, Markdown and text reports, with a note naming the other scanners that reported it, and add deduplicated counts beside the per-scanner counts. Only the same CVE and package, or the same line and CWE, fold. Finding ids, SARIF, per-scanner counts, suppressions, baselines, the CSV, flat-JSON and JUnit reports and the exit code are unchanged. Off by default because it changes row counts. Sets `global_settings.deduplication.fold`.",
+        ),
+    ] = False,
     changed_files_only: Annotated[
         bool,
         typer.Option(
@@ -1496,6 +1519,14 @@ def run_ash_scan_cli_command(
             "--config-file-from-another-checkout",
             hidden=True,
             help="Apply the limits ASH puts on a config file inside a git checkout other than the scanned one to this one file of the extends chain of the --config file or of the file ASH_CONFIG names. The file cannot grant, and still sets what only restricts, as it does on the host: a lowered archive extraction limit, a scanner option that sends no usage data, and a network_scanners list as a limit. Container mode passes it, once per file, for each file of those chains that is in such a checkout, by its path inside the container, where the scan inside cannot see the checkout. Refused for a file that is in neither chain.",
+        ),
+    ] = None,
+    require_scanner_selection: Annotated[
+        Optional[str],
+        typer.Option(
+            "--require-scanner-selection",
+            hidden=True,
+            help='Refuse to scan unless the default_scanners this scan settles equals this JSON document ({"only": [...], "add": [...]}, names lower-cased). Container mode passes it, with the lists it read on the host, when the selection comes from the operator\'s config, so an image built from an ASH that does not know it rejects the command and an image that lost the mounted config refuses before any scanner runs.',
         ),
     ] = None,
     ash_config_from_host: Annotated[
@@ -1925,6 +1956,12 @@ def run_ash_scan_cli_command(
         config_overrides = []
     if compact_report:
         config_overrides.append("reporters.markdown.options.compact=true")
+    # The same route again, for the same reason; only an explicit flag adds it, so
+    # a run without it leaves the config file's value alone.
+    if annotate_duplicates:
+        config_overrides.append("global_settings.deduplication.annotate=true")
+    if fold_duplicates:
+        config_overrides.append("global_settings.deduplication.fold=true")
     # The same route as --compact-report, for the same reason and one more: as a config
     # override it reaches every mode unchanged -- local, nix, workspace, and the container,
     # which is handed config_overrides verbatim -- and overrides are applied after the
@@ -2102,6 +2139,14 @@ def run_ash_scan_cli_command(
             ),
             exclude_scanners=tuple(exclude_scanners),
             ash_plugin_modules=tuple(ash_plugin_modules),
+            selection_layers=SelectionLayers(
+                cli_only=None if only_scanners is None else list(only_scanners),
+                cli_additive=[]
+                if only_scanners is not None
+                else [*scanners, *add_scanners],
+            ),
+            config=config,
+            config_overrides=tuple(config_overrides or ()),
         )
 
     # Apply mode presets if specified (precommit_mode is folded into simple
@@ -2183,6 +2228,7 @@ def run_ash_scan_cli_command(
                 exclude_scanners=exclude_scanners,
                 only_scanners=only_scanners,
                 add_scanners=add_scanners,
+                required_scanner_selection=require_scanner_selection,
                 progress=cli_final_show_progress,
                 output_formats=parsed_output_formats,
                 cleanup=cleanup,

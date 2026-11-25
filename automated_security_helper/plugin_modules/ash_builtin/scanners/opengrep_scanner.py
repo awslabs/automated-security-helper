@@ -11,6 +11,7 @@ lives in :mod:`_grep_scanner_base`. This module only customises:
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import platform
@@ -20,11 +21,21 @@ from typing import Annotated, ClassVar, Dict, List, Literal
 
 from pydantic import Field, PrivateAttr, model_validator
 
-from automated_security_helper.utils.sandbox.policy import SandboxRequirements
+from automated_security_helper.utils.sandbox.policy import (
+    SAFE_DIRECTORIES_ENV,
+    SandboxRequirements,
+    git_config_env,
+)
 from automated_security_helper.base.options import ScannerOptionsBase, release_tag
 from automated_security_helper.base.plugin_base import CustomCommand
+from automated_security_helper.base import scanner_operational_facets as opsf
+from automated_security_helper.base.scanner_facets import (
+    FacetDecl,
+    FacetState,
+    ScannerFacets,
+)
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
-from automated_security_helper.core.enums import ScannerToolType
+from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import ToolArgs
 from automated_security_helper.plugin_modules.ash_builtin.scanners._grep_scanner_base import (
@@ -45,6 +56,24 @@ from automated_security_helper.utils.subprocess_utils import (
     spawn_run,
 )
 from automated_security_helper.utils.process_env import snapshot_environ
+
+
+def _safe_directories(target: Path) -> list[str]:
+    """The real path of ``target`` and, when it sits in a checkout, the checkout's top.
+
+    The top is the first parent holding a ``.git`` (a directory, or the file a
+    linked work tree and a submodule have). No ``.git`` above it names nothing
+    more: the conservative reading, as the scanner's prerequisites facet says.
+    """
+    real = Path(os.path.realpath(target))
+    named = [str(real)]
+    start = real if real.is_dir() else real.parent
+    for parent in (start, *start.parents):
+        if os.path.lexists(parent / ".git"):
+            if str(parent) not in named:
+                named.append(str(parent))
+            break
+    return named
 
 
 class OpengrepScannerConfigOptions(ScannerOptionsBase):
@@ -208,55 +237,6 @@ def _refuse_windows_zip_install_command(version: str, url: str) -> CustomCommand
     )
 
 
-#: What opengrep 2.0.0 writes to stderr, in this order, when a ruleset named by a
-#: registry reference (``p/ci``) cannot be downloaded, before it exits 2.
-_REGISTRY_FETCH_MARKER = "trying to download from"
-_REGISTRY_FETCH_FATAL = "Error: fatal error"
-_STDERR_TAIL_BYTES = 256 * 1024
-
-
-def _is_registry_reference(value: str) -> bool:
-    """Whether an opengrep ``--config`` value names a ruleset to download.
-
-    A URL is fetched whatever it ends in. Otherwise a path that exists, or a rules
-    file name, is local; ``p/ci`` and ``r/...`` registry references and ``auto``
-    are fetched.
-    """
-    if value.startswith(("http://", "https://")):
-        return True
-    if os.path.exists(value) or value.lower().endswith((".yml", ".yaml", ".json")):
-        return False
-    return value == "auto" or value.startswith(("p/", "r/", "http://", "https://"))
-
-
-def without_registry_configs(command: List[str]) -> List[str]:
-    """``command`` with every ``--config`` that names a registry ruleset removed."""
-    kept: List[str] = []
-    index = 0
-    while index < len(command):
-        argument = command[index]
-        if argument == "--config" and index + 1 < len(command):
-            if _is_registry_reference(command[index + 1]):
-                index += 2
-                continue
-        elif argument.startswith("--config=") and _is_registry_reference(
-            argument.split("=", 1)[1]
-        ):
-            index += 1
-            continue
-        kept.append(argument)
-        index += 1
-    return kept
-
-
-def _has_local_config(command: List[str]) -> bool:
-    """Whether ``command`` still names at least one ruleset after the removal."""
-    return any(
-        argument == "--config" or argument.startswith("--config=")
-        for argument in command
-    )
-
-
 def _release_number(version: str) -> str:
     """``version`` without the one leading ``v`` a release tag may carry."""
     return version.removeprefix("v")
@@ -338,6 +318,228 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
         system_trust_roots=True,
         # The offline rule cache ASH checked before the scan and passes as --config.
         read_path_env=("OPENGREP_RULES_CACHE_DIR",),
+        # extra_subprocess_env's safe.directory entries: the sandbox's allowlist
+        # passes no GIT_CONFIG_* variable, so it writes them from the directories
+        # the scanner names (SAFE_DIRECTORIES_ENV) instead.
+        git_safe_directory=True,
+    )
+
+    #: The facets register row (base/scanner_facets.py). Declaration only, zero
+    #: behavior change: opengrep's own SARIF is validated and passed through
+    #: without result edits, so every native field below is a field of that
+    #: SARIF. Pure code SAST: the only resource-shaped values in its output are
+    #: file paths, which are locators, never resource ids. Fingerprints are
+    #: settled by the M0 capture (tests/test_data/scanners/opengrep/captured/
+    #: opengrep-2.0.0-m0.sarif): the fork emits a real matchBasedId/v1, not the
+    #: semgrep OSS login placeholder.
+    facets: ClassVar[ScannerFacets] = ScannerFacets(
+        rule_id=FacetDecl(state=FacetState.MAPPED, native_field="results[].ruleId"),
+        severity=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="results[].level",
+        ),
+        file_path=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="results[].locations[].physicalLocation.artifactLocation.uri",
+        ),
+        line_range=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="results[].locations[].physicalLocation.region."
+            "startLine/endLine",
+        ),
+        column=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="results[].locations[].physicalLocation.region."
+            "startColumn/endColumn",
+        ),
+        message=FacetDecl(
+            state=FacetState.MAPPED, native_field="results[].message.text"
+        ),
+        resource_id=FacetDecl(
+            state=FacetState.NA,
+            reason="pure code SAST; the only locators in its output are file "
+            "paths, which are never resource ids",
+        ),
+        resource_type=FacetDecl(
+            state=FacetState.NA,
+            reason="pure code SAST; no deployable resource exists in the output",
+        ),
+        package_name=FacetDecl(
+            state=FacetState.NA,
+            reason="code findings name a file and a rule, not a package",
+        ),
+        package_version=FacetDecl(
+            state=FacetState.NA,
+            reason="code findings name a file and a rule, not a package",
+        ),
+        package_path=FacetDecl(
+            state=FacetState.NA,
+            reason="code findings name a file and a rule, not a package",
+        ),
+        taxonomy_cve=FacetDecl(
+            state=FacetState.NA,
+            reason="code rules carry no CVE ids",
+        ),
+        taxonomy_cwe=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="tool.driver.rules[].properties.tags (CWE entries)",
+        ),
+        fingerprints=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='results[].fingerprints."matchBasedId/v1"',
+        ),
+        fix_available=FacetDecl(
+            state=FacetState.NA,
+            reason="opengrep 2.0.0's SARIF has no fixes key even for a rule "
+            "that carries `fix:` (tests/test_data/scanners/opengrep/captured/"
+            "opengrep-2.0.0-fix-rule.sarif: result keys are exactly "
+            "fingerprints, locations, message, properties, ruleId), so there "
+            "is nothing in the SARIF ASH reads to map",
+        ),
+        remediation_text=FacetDecl(
+            state=FacetState.NA,
+            reason="rule help describes the rule, not a remediation; fixes are "
+            "recorded under fix_available",
+        ),
+        snippet=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="results[].locations[].physicalLocation.region.snippet.text",
+        ),
+        references=FacetDecl(
+            state=FacetState.UNCONFIRMED,
+            reason="UNCONFIRMED: the committed captures' SARIF rules carry no "
+            "helpUri (the rule help is help.markdown text, not a link). A "
+            "rule helpUri would be read into the flat references by the "
+            "shared rule read (FlatVulnerability.from_sarif_result); "
+            "redeclare MAPPED when a capture carrying one is committed (the "
+            "corpus gate lists this cell as a fixture owed until then)",
+        ),
+        tags=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="tool.driver.rules[].properties.tags, read into the "
+            "flat tags when the result carries none (they also feed the CWE "
+            "read)",
+        ),
+        extras=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="results[].properties (SARIF property bag, passed "
+            "through unmodified)",
+        ),
+    )
+
+    #: The operational register row (base/scanner_operational_facets.py),
+    #: checked against the production declarations it mirrors by
+    #: tests/unit/plugin_modules/test_scanner_operational_facets_consistency.py.
+    operational_facets: ClassVar[opsf.ScannerOperationalFacets] = (
+        opsf.ScannerOperationalFacets(
+            scanner_name="opengrep",
+            network=opsf.NetworkFacet(
+                fetch_kind=opsf.FetchKind.CONTENT_FETCH,
+                fetches=(opsf.Fetched.RULESET_REGISTRY,),
+                prefetch=(opsf.Prefetch.IMAGE_BUILD,),
+                offline_outcome=opsf.OfflineOutcome.DEGRADED,
+                offline_reason=(
+                    "runs against the operator's local rules or the validated offline "
+                    "ruleset cache as --config; opengrep runs once, and a registry "
+                    "ruleset it cannot download exits 2 and ends the scan as a fatal "
+                    "scanner error, with no second run on the local configs"
+                ),
+                offline_strategy=OfflineStrategy.CACHE_FLAGS,
+                sandbox_network=opsf.SandboxNetwork.ONLINE,
+                content_database="opengrep-offline-rules",
+                source=(
+                    "opengrep_scanner.py sandbox_requirements and default rulesets; "
+                    "_grep_scanner_base.py offline_strategy; utils/content_databases.py"
+                ),
+            ),
+            output=opsf.OutputFacet(
+                native_formats=(opsf.OutputFormat.SARIF,),
+                side_reports=(),
+                non_finding_artifacts=(),
+            ),
+            targets=opsf.TargetsFacet(
+                kinds=(opsf.TargetKind.SOURCE_CODE,),
+                tool_type=ScannerToolType.SAST,
+                selection=(
+                    "whole scan set, languages defined by the ruleset; .semgrepignore "
+                    "normalized to ASH's ignore model (_grep_scanner_base.py)"
+                ),
+            ),
+            runtime=opsf.RuntimeFacet(
+                kind=opsf.RuntimeKind.PINNED_BINARY,
+                external_programs=(),
+                invocations=opsf.Invocations.ONE,
+                tool_versions_key="opengrep",
+                python_only=False,
+                use_uv_tool=False,
+            ),
+            platforms=opsf.PlatformsFacet(
+                provisionable=opsf.PLATFORMS_NO_WINDOWS_ARM64,
+                note=(
+                    "one static Linux build per architecture since v2.0.0; no "
+                    "windows/arm64 asset (tool_downloads.py _OPENGREP_ASSETS)"
+                ),
+            ),
+            severity=opsf.SeverityFacet(
+                severity_class=opsf.SeverityClass.NATIVE,
+                note="the SARIF level only: three grades",
+            ),
+            silencing=opsf.SilencingFacet(
+                tool_side=(
+                    opsf.SilencingLayer(
+                        layer=opsf.SilencingLayerKind.IGNORE_FILE,
+                        writer=opsf.SilencingWriter.REPOSITORY,
+                        honored=opsf.Honored.NO,
+                        surface=".semgrepignore in the scanned tree",
+                        cite="_grep_scanner_base.py:359-375; ASH warns and names global_settings.ignore_paths",
+                    ),
+                ),
+            ),
+            identity=opsf.IdentityFacet(
+                fingerprint_class=opsf.FingerprintClass.STABLE_NATIVE,
+                note=(
+                    "matchBasedId/v1, read in tests/test_data/scanners/opengrep/"
+                    "captured/opengrep-2.0.0-m0.sarif (results[].fingerprints)"
+                ),
+            ),
+            extensibility=opsf.ExtensibilityFacet(
+                custom_rules=opsf.CustomRules.BOTH,
+                env_prefixes=("OPENGREP_", "SEMGREP_"),
+                options_surface=(
+                    "options.config: a registry entry, a URL, or a local rule file or "
+                    "directory through the path-trust resolver; a refused or missing "
+                    "value declines the scanner"
+                ),
+            ),
+            exit_codes=opsf.ExitCodesFacet(
+                success_exit_codes=(0, 1),
+                semantics=(
+                    "the base default {0, 1}; opengrep runs once, and exit 2 (a ruleset "
+                    "download failed) and exit 7 (a downloaded ruleset is invalid YAML) "
+                    "are fatal scanner errors"
+                ),
+            ),
+            provenance=opsf.ProvenanceFacet(
+                tier=opsf.Tier.BUILTIN_DEFAULT,
+                source=opsf.ProvenanceSource.PINNED_RELEASE_BINARY,
+                selection_surfaces=("options.config",),
+                upstream_license=(
+                    "LGPL-2.1-only (source: utils/tool_downloads.py "
+                    "THIRD_PARTY_LICENSES['opengrep'], pinned commit 526deaf)"
+                ),
+            ),
+            prerequisites=opsf.PrerequisitesFacet(
+                kinds=(opsf.Prerequisite.NONE,),
+                note=(
+                    "no prerequisite: opengrep 2.0.0 (the pinned release, sha256 checked) "
+                    "scanned a copy of tests/test_data/scanners/opengrep/fixture_repo with "
+                    "no .git directory and exited 0 with the one finding it reports on a "
+                    "git copy of the same files. In a git checkout it runs git ls-files "
+                    "itself and exits 2 when git refuses the directory; ASH supplies "
+                    "safe.directory"
+                ),
+            ),
+        )
     )
 
     def model_post_init(self, context):
@@ -493,49 +695,6 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
         self._scan_target_path = target
         return super()._resolve_scan_arguments(target, results_file)
 
-    def _run_subprocess(self, command: List[str], *args, **kwargs):
-        """Run opengrep; when it cannot download a ruleset, run it on the local ones.
-
-        opengrep 2.0.0 exits 2 ("Error: fatal error") when a ruleset named by a
-        registry reference such as ``p/ci`` cannot be fetched, which is what a run
-        without network (a sandbox, an air-gapped host) meets. The rules ASH ships
-        and any cached rules are named by local ``--config`` values and need no
-        network, so the run is repeated once without the registry references, with
-        one warning. With no local ruleset left, or any other failure, the first
-        run's result stands.
-        """
-        response = super()._run_subprocess(command, *args, **kwargs)
-        if not self._registry_fetch_failed(response, kwargs.get("results_dir")):
-            return response
-        fallback = without_registry_configs(command)
-        if fallback == command or not _has_local_config(fallback):
-            return response
-        ASH_LOGGER.warning(
-            "opengrep could not download a ruleset from the registry (no network?); "
-            "scanning with the local rulesets only: ASH's bundled rules and any "
-            "rule cache."
-        )
-        # In place, so the invocation record shows the command that ran.
-        command[:] = fallback
-        return super()._run_subprocess(command, *args, **kwargs)
-
-    @staticmethod
-    def _registry_fetch_failed(response, results_dir) -> bool:
-        """Whether this run ended on opengrep's failed-ruleset-download exit."""
-        if not isinstance(response, dict) or response.get("returncode") != 2:
-            return False
-        if results_dir is None:
-            return False
-        log = Path(results_dir) / "OpengrepScanner.stderr.log"
-        try:
-            with open(log, "rb") as handle:
-                handle.seek(0, os.SEEK_END)
-                handle.seek(max(0, handle.tell() - _STDERR_TAIL_BYTES))
-                text = handle.read().decode("utf-8", errors="replace")
-        except OSError:
-            return False
-        return _REGISTRY_FETCH_MARKER in text and _REGISTRY_FETCH_FATAL in text
-
     def extra_subprocess_env(self) -> dict | None:
         """Git's ``safe.directory`` for the one directory this scan reads.
 
@@ -545,18 +704,25 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
         that. The entry reaches only this child, through ``GIT_CONFIG_*``, and names
         the real path of the scanned directory, never ``*``; ASH's own git calls
         and every other process keep the ownership check.
+
+        Git compares ``safe.directory`` with the top of the work tree, so a scan
+        pointed at a subdirectory of a checkout names the checkout's top level as
+        well: the first parent that holds a ``.git``. Outside a checkout only the
+        scanned directory is named.
+
+        The same directories travel under ``SAFE_DIRECTORIES_ENV`` for a sandboxed
+        spawn, whose allowlist drops every ``GIT_CONFIG_*`` name and rebuilds the
+        entries from that list (``SandboxPolicy.filter_env``). The direct spawn
+        uses the ``GIT_CONFIG_*`` entries built here, numbered after the caller's
+        own block when that block is whole.
         """
         target = self._scan_target_path
         if target is None:
             return None
-        # Entries the caller already set keep their places; this one goes after them.
-        existing = snapshot_environ().get("GIT_CONFIG_COUNT", "0")
-        index = int(existing) if existing.isdigit() else 0
-        return {
-            "GIT_CONFIG_COUNT": str(index + 1),
-            f"GIT_CONFIG_KEY_{index}": "safe.directory",
-            f"GIT_CONFIG_VALUE_{index}": os.path.realpath(target),
-        }
+        directories = _safe_directories(target)
+        env = git_config_env(snapshot_environ(), directories)
+        env[SAFE_DIRECTORIES_ENV] = json.dumps(directories)
+        return env
 
     # ---------------------------------------------------------------
     # Dependency resolution

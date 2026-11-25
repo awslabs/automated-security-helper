@@ -1,5 +1,6 @@
 """Utility functions for working with SARIF reports."""
 
+import fnmatch
 import math
 import os
 import random
@@ -24,6 +25,7 @@ from automated_security_helper.utils.log import (
     escape_markup,
 )
 from automated_security_helper.utils.severity_ladder import (
+    SEVERITIES,
     component_labels,
     resolve_missing_levels,
     result_scanner_labels,
@@ -37,6 +39,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
 )
 from automated_security_helper.utils.suppression_matcher import (
     active_ignore_paths,
+    file_path_matches,
     find_inline_suppressions,
     recorded_suppressions,
     should_suppress_finding,
@@ -60,6 +63,10 @@ from automated_security_helper.models.asharp_model import ScannerSeverityCount
 from automated_security_helper.utils.secret_masking import mask_secret_in_text
 from automated_security_helper.utils.shared_finding_ids import shared_ids_by_position
 from automated_security_helper.utils.symbol_spans import SymbolResolver
+from automated_security_helper.utils.suppression_frame import (
+    first_ignore_path,
+    ignore_verdict,
+)
 from automated_security_helper.utils.suppression_matcher import ignore_path_matches
 from automated_security_helper.utils.undecodable_text import (
     path_in_record_form,
@@ -524,7 +531,7 @@ def _severity_from_security_score(value: object) -> str | None:
 #: The severity bands _resolve_result_severity honors from ``issue_severity``.
 #: Kept as one constant so the normalizer's skip test and the resolver's read
 #: cannot drift apart.
-_CANONICAL_SEVERITIES = ("CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO")
+_CANONICAL_SEVERITIES = SEVERITIES
 
 
 def _rule_for_result(
@@ -994,18 +1001,26 @@ def get_severity_metrics_from_sarif(
     # The aggregate gives a result that states no level its rule's default level
     # (SARIF 3.27.10) before grading it; the same here, so the two agree.
     resolve_missing_levels(sarif_report)
-    counts = ScannerSeverityCount()
-    for result in sarif_report.get_all_results():
-        if is_result_suppressed(result):
-            counts.increment("suppressed")
-        else:
-            # result_severity reads issue_severity first and the level after it,
-            # and a missing level as MISSING_SARIF_LEVEL, as every gate does. A
-            # result with an explicit null level was counted "info" here while the
-            # gate graded it MEDIUM, so the per-scanner row disagreed with the exit
-            # code.
-            counts.increment(_resolve_result_severity(result))
-    return counts
+    # The two readings of a result stay on the tree; the counting is the group-by
+    # the per-scanner statistics share (utils.count_frame).
+    from automated_security_helper.utils.count_frame import (
+        SUPPRESSED,
+        severity_frame,
+        tally_severities,
+    )
+
+    kinds = [
+        SUPPRESSED
+        if is_result_suppressed(result)
+        # result_severity reads issue_severity first and the level after it,
+        # and a missing level as MISSING_SARIF_LEVEL, as every gate does. A
+        # result with an explicit null level was counted "info" here while the
+        # gate graded it MEDIUM, so the per-scanner row disagreed with the exit
+        # code.
+        else _resolve_result_severity(result)
+        for result in sarif_report.get_all_results()
+    ]
+    return tally_severities(severity_frame(kinds))
 
 
 def mask_secrets_in_sarif(sarif_report: SarifReport) -> SarifReport:
@@ -1261,9 +1276,47 @@ def _matching_ignore_path(
 
     ``ignore_path_matches``: a path ending in ``/`` names its directory.
     """
-    for ignore_path in ignore_paths:
-        if ignore_path_matches(normalized_uri, ignore_path.path):
-            return ignore_path
+    # The decision of which entry is first is the frame layer's; the glob
+    # predicate stays Python (utils/suppression_frame.py).
+    index = first_ignore_path(normalized_uri, ignore_paths, ignore_path_matches)
+    return ignore_paths[index] if index is not None else None
+
+
+def _matching_exclusion(
+    rule_id: str,
+    located_uris: List[str],
+    exclusions: List[Any],
+    scanner: str | None,
+) -> Any | None:
+    """The first ``global_settings.exclusions`` entry that drops this result, or None.
+
+    An entry drops a result (issue #894) when its ``rule_id`` matches the
+    result's -- the exact id, case-insensitively, or a glob, as a suppression's
+    rule id is read -- its ``scanner``, when named, is the result's scanner
+    (case-insensitively), and EVERY location that names a file is under its
+    ``path``, read as a suppression's path (``file_path_matches``, the
+    bare-directory rule included). Every location, as the ignore-path drop
+    requires: a result also located in a file outside the path is a finding
+    about that file too, and dropping it would hide it. A result naming no file
+    is never dropped. The caller filters expired entries and ones kept from a
+    results file with unknown keys (``active_ignore_paths``); a blank rule id
+    kept from a results file applies to nothing.
+    """
+    if not located_uris:
+        return None
+    found = rule_id.lower()
+    for exclusion in exclusions:
+        wanted = (exclusion.rule_id or "").strip().lower()
+        if not wanted:
+            continue
+        if found != wanted and not fnmatch.fnmatch(found, wanted):
+            continue
+        if exclusion.scanner and (
+            scanner is None or scanner.lower() != exclusion.scanner.strip().lower()
+        ):
+            continue
+        if all(file_path_matches(uri, exclusion.path) for uri in located_uris):
+            return exclusion
     return None
 
 
@@ -2056,6 +2109,13 @@ def _apply_suppressions_within_budget(
     ignore_paths = active_ignore_paths(
         plugin_context.config.global_settings.ignore_paths
     )
+    # Rule+path exclusions (issue #894), filtered through the same
+    # expiry/unknown-keys gate as ignore paths. The field is read with getattr
+    # so a stand-in config (a test double) without it reads as none.
+    exclusions = active_ignore_paths(
+        getattr(plugin_context.config.global_settings, "exclusions", None),
+        where="global_settings.exclusions",
+    )
 
     suppressions = plugin_context.config.global_settings.suppressions or []
     # The written form each used entry is recorded by (written_suppression_id),
@@ -2145,7 +2205,8 @@ def _apply_suppressions_within_budget(
             # the one matching location hid it. A location in ASH's own output
             # still drops the result on its own.
             located = 0
-            under_ignore_path = 0
+            # The ignore path each located location matched, in location order.
+            matched_ignore_paths: list[IgnorePathWithReason] = []
             if result.locations:
                 for location in result.locations:
                     if is_in_ignorable_path:
@@ -2191,22 +2252,25 @@ def _apply_suppressions_within_budget(
                             f"[yellow]{escape_markup(matched_ignore.reason)}[/yellow]",
                             extra=MARKUP,
                         )
-                        under_ignore_path += 1
-                        # ``is True``: an ignore path is a model here, and a stand-in
-                        # without the field must not count as the client's.
-                        if getattr(matched_ignore, "client_supplied", False) is True:
-                            client_ignored = matched_ignore
+                        matched_ignore_paths.append(matched_ignore)
 
-            if (
-                not is_in_ignorable_path
-                and located
-                and under_ignore_path == located
-                and client_ignored is None
-            ):
+            # The verdict is the frame layer's: dropped when every located
+            # location is under an ignore path and none is the client's, marked
+            # by the last client-supplied one when all are under one, and left
+            # as it is when a location is outside every ignore path.
+            # ``is True``: an ignore path is a model here, and a stand-in
+            # without the field must not count as the client's.
+            dropped, client_at = ignore_verdict(
+                [
+                    getattr(matched, "client_supplied", False) is True
+                    for matched in matched_ignore_paths
+                ],
+                located,
+            )
+            if not is_in_ignorable_path and dropped:
                 is_in_ignorable_path = True
-            if client_ignored is not None and under_ignore_path < located:
-                # A location outside every ignore path keeps the result as it is.
-                client_ignored = None
+            if client_at is not None:
+                client_ignored = matched_ignore_paths[client_at]
 
             if is_in_ignorable_path:
                 continue
@@ -2220,6 +2284,49 @@ def _apply_suppressions_within_budget(
                 )
                 updated_results.append(result)
                 continue
+
+            # --- Step 1b: rule+path exclusions (issue #894) ---
+            # After the ignore paths and before the config suppressions: a
+            # matching result is DROPPED, not marked, so a known-benign class
+            # (bandit B101 under tests/) does not pile up as suppressed noise.
+            # Exclusions are a suppression mechanism, so --ignore-suppressions
+            # lifts them with the rest; an entry a client-delivered config
+            # supplied marks the result instead, so the results show what the
+            # client chose to hide, as a client-supplied ignore path does.
+            if exclusions and not ignore_suppressions and result.ruleId:
+                located_uris = [
+                    output_exclusion.normalize(
+                        location.physicalLocation.root.artifactLocation.uri
+                    )
+                    for location in (result.locations or [])
+                    if location.physicalLocation
+                    and location.physicalLocation.root.artifactLocation
+                    and location.physicalLocation.root.artifactLocation.uri
+                ]
+                excluding = _matching_exclusion(
+                    result.ruleId,
+                    located_uris,
+                    exclusions,
+                    _suppression_scanner_identity(result, run, scanner_name),
+                )
+                if excluding is not None:
+                    if getattr(excluding, "client_supplied", False) is True:
+                        _add_client_suppression(
+                            result,
+                            "(ASH, client-supplied config) Excluding finding on "
+                            f"rule '{excluding.rule_id}' under path "
+                            f"'{excluding.path}' with reason: {excluding.reason}",
+                        )
+                        updated_results.append(result)
+                        continue
+                    ASH_LOGGER.verbose(
+                        f"Excluding finding on rule '{escape_markup(result.ruleId)}' "
+                        f"file location '{escape_markup(located_uris[0])}' based on "
+                        f"global_settings.exclusions match with reason: "
+                        f"[yellow]{escape_markup(excluding.reason)}[/yellow]",
+                        extra=MARKUP,
+                    )
+                    continue
 
             if client_exclusions:
                 excluded_by = _client_exclusion_for(

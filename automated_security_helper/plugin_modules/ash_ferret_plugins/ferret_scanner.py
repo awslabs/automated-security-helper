@@ -57,6 +57,12 @@ from automated_security_helper.base.plugin_base import (
     pep440_requirement,
 )
 from automated_security_helper.utils.uv_tool_runner import checked_requirement
+from automated_security_helper.base import scanner_operational_facets as opsf
+from automated_security_helper.base.scanner_facets import (
+    FacetDecl,
+    FacetState,
+    ScannerFacets,
+)
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.models.core import (
     EMPTY_SCOPE_RULE,
@@ -1084,6 +1090,190 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
     python_only: ClassVar[bool | None] = False
 
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
+
+    #: The facets register row (base/scanner_facets.py). Declaration only: no
+    #: behavior changes. The cells below are observed by the facets corpus
+    #: gate over tests/test_data/scanners/ferret-scan/captured, a
+    #: `ferret-scan --format sarif` run (2.5.3) over the committed sample.txt,
+    #: through the adapter's own base-relative URI resolution.
+    facets: ClassVar[ScannerFacets] = ScannerFacets(
+        rule_id=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result "ruleId" (the detected data type, e.g. CREDIT_CARD)',
+        ),
+        severity=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result "level" (the tool\'s own rating)',
+        ),
+        file_path=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="locations[].physicalLocation.artifactLocation.uri "
+            "(uriBaseId resolved by the adapter)",
+        ),
+        line_range=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="region.startLine",
+        ),
+        column=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="region.startColumn / region.endColumn",
+        ),
+        message=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result "message.text" (matched values masked by the '
+            "shared secret-masking pass downstream)",
+        ),
+        resource_id=FacetDecl(
+            state=FacetState.NA,
+            reason="sensitive-data findings name a file location and a matched "
+            "value, not a deployable resource; the matched value is masked "
+            "downstream and is never a resource id",
+        ),
+        resource_type=FacetDecl(
+            state=FacetState.NA,
+            reason="sensitive-data findings name a file location, not a "
+            "deployable resource",
+        ),
+        package_name=FacetDecl(
+            state=FacetState.NA,
+            reason="sensitive-data findings carry no package",
+        ),
+        package_version=FacetDecl(
+            state=FacetState.NA,
+            reason="sensitive-data findings carry no package",
+        ),
+        package_path=FacetDecl(
+            state=FacetState.NA,
+            reason="sensitive-data findings carry no package",
+        ),
+        taxonomy_cve=FacetDecl(
+            state=FacetState.NA,
+            reason="sensitive-data findings carry no CVE taxonomy",
+        ),
+        taxonomy_cwe=FacetDecl(
+            state=FacetState.NA,
+            reason="ferret-scan results carry no CWE taxonomy",
+        ),
+        fingerprints=FacetDecl(
+            state=FacetState.NA,
+            reason="the captured 2.5.3 SARIF (108 results over sample.txt) "
+            "carries no fingerprints or partialFingerprints on any result",
+        ),
+        fix_available=FacetDecl(
+            state=FacetState.NA,
+            reason="sensitive-data findings carry no fix state",
+        ),
+        remediation_text=FacetDecl(
+            state=FacetState.NA,
+            reason="ferret-scan results carry no remediation text",
+        ),
+        snippet=FacetDecl(
+            state=FacetState.NA,
+            reason="the captured 2.5.3 SARIF regions carry startLine, "
+            "startColumn and endColumn and no snippet, and the flat "
+            "snippet column is empty across all 108 results",
+        ),
+        references=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="tool.driver.rules[].helpUri, read into the flat "
+            "references by the shared rule read when the result carries "
+            "none of its own",
+            reason="ferret-scan results carry no reference URLs of their own; "
+            "the rule-level helpUri is what the flat row carries",
+        ),
+        tags=FacetDecl(
+            state=FacetState.NA,
+            reason="ferret-scan results carry no tags; the adapter attaches "
+            "scanner details, not tags",
+        ),
+        extras=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result properties "confidenceLevel" and "validator"',
+        ),
+    )
+
+    #: The operational register row (base/scanner_operational_facets.py),
+    #: checked against the production declarations it mirrors by
+    #: tests/unit/plugin_modules/test_scanner_operational_facets_consistency.py.
+    operational_facets: ClassVar[opsf.ScannerOperationalFacets] = (
+        opsf.ScannerOperationalFacets(
+            scanner_name="ferret-scan",
+            network=opsf.NetworkFacet(
+                fetch_kind=opsf.FetchKind.NONE,
+                fetches=(),
+                prefetch=(),
+                offline_outcome=opsf.OfflineOutcome.UNCHANGED,
+                offline_strategy=OfflineStrategy.BUNDLED,
+                sandbox_network=opsf.SandboxNetwork.NONE,
+                source=(
+                    "ferret_scanner.py offline_strategy, sandbox_requirements and the "
+                    "option text 'Fully offline: no data leaves the host'; its "
+                    "validators are local confidence validators, not issuer-API "
+                    "verification"
+                ),
+            ),
+            output=opsf.OutputFacet(
+                native_formats=(opsf.OutputFormat.SARIF,),
+                side_reports=(),
+                non_finding_artifacts=(),
+                note="always --format sarif, as ASH requires",
+            ),
+            targets=opsf.TargetsFacet(
+                kinds=(opsf.TargetKind.SECRETS_CONTENTS,),
+                tool_type=ScannerToolType.SECRETS,
+                selection="the scan set, with local confidence validators under a time budget",
+                covers_note="a community scanner; it declares no covers display string",
+            ),
+            runtime=opsf.RuntimeFacet(
+                kind=opsf.RuntimeKind.PYPI_PACKAGE,
+                external_programs=("ferret-scan",),
+                invocations=opsf.Invocations.ONE,
+                python_only=False,
+                use_uv_tool=False,
+            ),
+            platforms=opsf.PlatformsFacet(
+                provisionable=(),
+                note="a PyPI package under a version constraint (a bare install resolves differently); platform support was not read here",
+            ),
+            severity=opsf.SeverityFacet(
+                severity_class=opsf.SeverityClass.NATIVE,
+                note="the tool's own per-finding severity is mapped",
+            ),
+            silencing=opsf.SilencingFacet(
+                tool_side=(),
+                none_reason="no tool-side silencing surface was surveyed; the adapter drafts a suppression reason into the finding's details for the ASH-side suppression",
+            ),
+            identity=opsf.IdentityFacet(
+                fingerprint_class=opsf.FingerprintClass.POSITIONAL_ONLY,
+                note="read at tests/test_data/scanners/ferret-scan/captured/ferret-scan-2.5.3-sample-txt.sarif: "
+                "no result carries fingerprints or partialFingerprints, so identity is file and line "
+                "through the shared floor",
+            ),
+            extensibility=opsf.ExtensibilityFacet(
+                custom_rules=opsf.CustomRules.NONE,
+                env_prefixes=("FERRET_",),
+                options_surface="typed options; a ferret-config.yaml ships with the plugin and an operator rules path was not surveyed",
+            ),
+            exit_codes=opsf.ExitCodesFacet(
+                success_exit_codes=(0, 3),
+                semantics="exit 3 is an accepted coverage-accounting outcome",
+            ),
+            provenance=opsf.ProvenanceFacet(
+                tier=opsf.Tier.COMMUNITY_OPTIN,
+                source=opsf.ProvenanceSource.PYPI_PINNED_DEPENDENCY,
+                selection_surfaces=("ash_ferret_plugins in ash_plugin_modules",),
+                upstream_license=(
+                    "Apache-2.0 (source: the ferret-scan row of the 2026-11-24 "
+                    "scanner license check, a live GitHub license read; not pinned to the version the plugin "
+                    "installs and not in THIRD_PARTY_LICENSES)"
+                ),
+            ),
+            prerequisites=opsf.PrerequisitesFacet(
+                kinds=(opsf.Prerequisite.NONE,),
+                note="files in the scan set",
+            ),
+        )
+    )
 
     # The absolute target of the scan in progress, set by scan() and read by
     # _subprocess_cwd.

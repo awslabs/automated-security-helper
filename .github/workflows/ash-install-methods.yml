@@ -70,7 +70,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-15, windows-latest]
-        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
         method: [pip, pipx, uvx, homebrew, pre-commit, podman, finch, nerdctl, mcp, nix]
         exclude:
           # THE PULL REQUEST COVER (the note on ensure-cache in ash-unified-ci.yml).
@@ -132,19 +132,15 @@ jobs:
           - { os: windows-latest, method: nix }
           # Nix supplies the scanners itself, so the host Python version does not change
           # what is under test here. One version per OS is enough.
-          - { os: ubuntu-latest, python-version: "3.10", method: nix }
           - { os: ubuntu-latest, python-version: "3.11", method: nix }
           - { os: ubuntu-latest, python-version: "3.13", method: nix }
           - { os: ubuntu-latest, python-version: "3.14", method: nix }
-          - { os: ubuntu-24.04-arm, python-version: "3.10", method: nix }
           - { os: ubuntu-24.04-arm, python-version: "3.11", method: nix }
           - { os: ubuntu-24.04-arm, python-version: "3.13", method: nix }
           - { os: ubuntu-24.04-arm, python-version: "3.14", method: nix }
-          - { os: macos-latest, python-version: "3.10", method: nix }
           - { os: macos-latest, python-version: "3.11", method: nix }
           - { os: macos-latest, python-version: "3.13", method: nix }
           - { os: macos-latest, python-version: "3.14", method: nix }
-          - { os: macos-15, python-version: "3.10", method: nix }
           - { os: macos-15, python-version: "3.11", method: nix }
           - { os: macos-15, python-version: "3.13", method: nix }
           - { os: macos-15, python-version: "3.14", method: nix }
@@ -172,23 +168,19 @@ jobs:
           - { os: macos-latest, method: nerdctl }
           - { os: macos-15, method: nerdctl }
           # Container runtimes only need one Python version
-          - { os: ubuntu-latest, python-version: "3.10", method: nerdctl }
           - { os: ubuntu-latest, python-version: "3.11", method: nerdctl }
           - { os: ubuntu-latest, python-version: "3.13", method: nerdctl }
           - { os: ubuntu-latest, python-version: "3.14", method: nerdctl }
           # Container runtimes only need one Python version
-          - { os: ubuntu-latest, python-version: "3.10", method: podman }
           - { os: ubuntu-latest, python-version: "3.11", method: podman }
           - { os: ubuntu-latest, python-version: "3.13", method: podman }
           - { os: ubuntu-latest, python-version: "3.14", method: podman }
-          - { os: ubuntu-24.04-arm, python-version: "3.10", method: podman }
           - { os: ubuntu-24.04-arm, python-version: "3.11", method: podman }
           - { os: ubuntu-24.04-arm, python-version: "3.13", method: podman }
           - { os: ubuntu-24.04-arm, python-version: "3.14", method: podman }
           # Podman/Finch not on macOS (no nested virtualization on hosted runners)
           - { os: macos-latest, method: podman }
           - { os: macos-15, method: podman }
-          - { os: ubuntu-latest, python-version: "3.10", method: finch }
           - { os: ubuntu-latest, python-version: "3.11", method: finch }
           - { os: ubuntu-latest, python-version: "3.13", method: finch }
           - { os: ubuntu-latest, python-version: "3.14", method: finch }
@@ -196,36 +188,28 @@ jobs:
           - { os: macos-15, method: finch }
           # Homebrew only needs one host Python: the formula builds ASH on its own
           # python@3.12, and the host one only runs the formula renderer.
-          - { os: ubuntu-latest, python-version: "3.10", method: homebrew }
           - { os: ubuntu-latest, python-version: "3.11", method: homebrew }
           - { os: ubuntu-latest, python-version: "3.13", method: homebrew }
           - { os: ubuntu-latest, python-version: "3.14", method: homebrew }
-          - { os: macos-latest, python-version: "3.10", method: homebrew }
           - { os: macos-latest, python-version: "3.11", method: homebrew }
           - { os: macos-latest, python-version: "3.13", method: homebrew }
           - { os: macos-latest, python-version: "3.14", method: homebrew }
-          - { os: macos-15, python-version: "3.10", method: homebrew }
           - { os: macos-15, python-version: "3.11", method: homebrew }
           - { os: macos-15, python-version: "3.13", method: homebrew }
           - { os: macos-15, python-version: "3.14", method: homebrew }
           # uvx doesn't need Python setup (it bundles its own)
-          - { os: ubuntu-latest, python-version: "3.10", method: uvx }
           - { os: ubuntu-latest, python-version: "3.11", method: uvx }
           - { os: ubuntu-latest, python-version: "3.13", method: uvx }
           - { os: ubuntu-latest, python-version: "3.14", method: uvx }
-          - { os: ubuntu-24.04-arm, python-version: "3.10", method: uvx }
           - { os: ubuntu-24.04-arm, python-version: "3.11", method: uvx }
           - { os: ubuntu-24.04-arm, python-version: "3.13", method: uvx }
           - { os: ubuntu-24.04-arm, python-version: "3.14", method: uvx }
-          - { os: macos-latest, python-version: "3.10", method: uvx }
           - { os: macos-latest, python-version: "3.11", method: uvx }
           - { os: macos-latest, python-version: "3.13", method: uvx }
           - { os: macos-latest, python-version: "3.14", method: uvx }
-          - { os: macos-15, python-version: "3.10", method: uvx }
           - { os: macos-15, python-version: "3.11", method: uvx }
           - { os: macos-15, python-version: "3.13", method: uvx }
           - { os: macos-15, python-version: "3.14", method: uvx }
-          - { os: windows-latest, python-version: "3.10", method: uvx }
           - { os: windows-latest, python-version: "3.11", method: uvx }
           - { os: windows-latest, python-version: "3.13", method: uvx }
           - { os: windows-latest, python-version: "3.14", method: uvx }

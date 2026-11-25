@@ -162,6 +162,12 @@ from typing import (
 from pydantic import Field, PrivateAttr, model_validator
 
 from automated_security_helper.base.options import ScannerOptionsBase
+from automated_security_helper.base import scanner_operational_facets as opsf
+from automated_security_helper.base.scanner_facets import (
+    FacetDecl,
+    FacetState,
+    ScannerFacets,
+)
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
@@ -535,6 +541,198 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
 
     # gitleaks' rules are compiled into the binary and it makes no network calls.
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
+
+    #: The facets register row (base/scanner_facets.py). Declaration only: no
+    #: behavior changes. Native fields name gitleaks' own SARIF (fixture
+    #: tests/test_data/scanners/gitleaks/gitleaks-8.30.1.sarif).
+    facets: ClassVar[ScannerFacets] = ScannerFacets(
+        rule_id=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result "ruleId" (e.g. github-pat)',
+        ),
+        severity=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="(no native severity) constant level error plus "
+            'properties "issue_severity" CRITICAL, both set by _post_process_sarif',
+        ),
+        file_path=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="locations[].physicalLocation.artifactLocation.uri",
+        ),
+        line_range=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="region.startLine / region.endLine",
+        ),
+        column=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="region.startColumn / region.endColumn",
+        ),
+        message=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result "message.text"',
+        ),
+        resource_id=FacetDecl(
+            state=FacetState.NA,
+            reason="secret findings name a file location, not a deployable "
+            "resource; the SARIF carries a rule id and a region only",
+        ),
+        resource_type=FacetDecl(
+            state=FacetState.NA,
+            reason="secret findings name a file location, not a deployable resource",
+        ),
+        package_name=FacetDecl(
+            state=FacetState.NA,
+            reason="secret findings carry no package",
+        ),
+        package_version=FacetDecl(
+            state=FacetState.NA,
+            reason="secret findings carry no package",
+        ),
+        package_path=FacetDecl(
+            state=FacetState.NA,
+            reason="secret findings carry no package",
+        ),
+        taxonomy_cve=FacetDecl(
+            state=FacetState.NA,
+            reason="secret findings carry no CVE taxonomy",
+        ),
+        taxonomy_cwe=FacetDecl(
+            state=FacetState.NA,
+            reason="gitleaks rules carry no CWE taxonomy in the SARIF",
+        ),
+        fingerprints=FacetDecl(
+            state=FacetState.DROPPED,
+            native_field='result "partialFingerprints" (commitSha, author, '
+            "email, date, commitMessage)",
+            reason="dir mode emits empty-string git metadata, which "
+            "_post_process_sarif drops because an empty fingerprint is "
+            "identical across every result; git-mode values pass through",
+        ),
+        fix_available=FacetDecl(
+            state=FacetState.NA,
+            reason="secret findings carry no fix state",
+        ),
+        remediation_text=FacetDecl(
+            state=FacetState.NA,
+            reason="the SARIF rules carry id and shortDescription only",
+        ),
+        snippet=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="region.snippet.text, forced to REDACTED by "
+            "--redact=100 and again by _post_process_sarif",
+        ),
+        references=FacetDecl(
+            state=FacetState.NA,
+            reason="the SARIF rules carry id and shortDescription only; no "
+            "reference URLs",
+        ),
+        tags=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result properties "tags" (empty natively); the '
+            "adapter appends secret and security",
+        ),
+        extras=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result properties "issue_severity" written by the adapter',
+        ),
+    )
+
+    #: The operational register row (base/scanner_operational_facets.py),
+    #: checked against the production declarations it mirrors by
+    #: tests/unit/plugin_modules/test_scanner_operational_facets_consistency.py.
+    operational_facets: ClassVar[opsf.ScannerOperationalFacets] = (
+        opsf.ScannerOperationalFacets(
+            scanner_name="gitleaks",
+            network=opsf.NetworkFacet(
+                fetch_kind=opsf.FetchKind.NONE,
+                fetches=(),
+                prefetch=(),
+                offline_outcome=opsf.OfflineOutcome.UNCHANGED,
+                offline_strategy=OfflineStrategy.BUNDLED,
+                sandbox_network=opsf.SandboxNetwork.NONE,
+                source="gitleaks_scanner.py offline_strategy, sandbox_requirements",
+            ),
+            output=opsf.OutputFacet(
+                native_formats=(opsf.OutputFormat.SARIF,),
+                side_reports=(),
+                non_finding_artifacts=(),
+            ),
+            targets=opsf.TargetsFacet(
+                kinds=(opsf.TargetKind.SECRETS_CONTENTS,),
+                tool_type=ScannerToolType.SECRETS,
+                selection=(
+                    "`gitleaks dir` over the target (subcommands = ['dir']); history "
+                    "scanning is deliberately not offered (module header)"
+                ),
+                covers_note=(
+                    "no scanner claims git-history secrets: gitleaks and betterleaks run "
+                    "dir mode only (UNCLAIMED_TARGET_KINDS)"
+                ),
+            ),
+            runtime=opsf.RuntimeFacet(
+                kind=opsf.RuntimeKind.PINNED_BINARY,
+                external_programs=(),
+                invocations=opsf.Invocations.MULTI_PASS,
+                invocation_note="a second run over a copy of the files a .gitleaksignore names, to add back what the ignore file dropped",
+                tool_versions_key="gitleaks",
+                python_only=False,
+                use_uv_tool=False,
+            ),
+            platforms=opsf.PlatformsFacet(
+                provisionable=opsf.PLATFORMS_ALL,
+                note="asset table lists all six platform/arch pairs",
+            ),
+            severity=opsf.SeverityFacet(
+                severity_class=opsf.SeverityClass.CONSTANT,
+                note="every finding is CRITICAL",
+            ),
+            silencing=opsf.SilencingFacet(
+                tool_side=(
+                    opsf.SilencingLayer(
+                        layer=opsf.SilencingLayerKind.IGNORE_FILE,
+                        writer=opsf.SilencingWriter.REPOSITORY,
+                        honored=opsf.Honored.NO,
+                        surface=".gitleaksignore in the scan root",
+                        cite="gitleaks_scanner.py module header: gitleaks reads it whatever flag is passed; ASH re-scans a copy and adds every dropped finding back",
+                    ),
+                    opsf.SilencingLayer(
+                        layer=opsf.SilencingLayerKind.INLINE_COMMENT,
+                        writer=opsf.SilencingWriter.REPOSITORY,
+                        honored=opsf.Honored.NO,
+                        surface="gitleaks:allow comments; options.honor_inline_ignores turns them back on when the operator sets it",
+                        cite="gitleaks_scanner.py module header: ASH passes --ignore-gitleaks-allow",
+                    ),
+                ),
+            ),
+            identity=opsf.IdentityFacet(
+                fingerprint_class=opsf.FingerprintClass.POSITIONAL_ONLY,
+                note="the git-metadata fingerprints are empty and dropped in dir mode; identity is file and line",
+            ),
+            extensibility=opsf.ExtensibilityFacet(
+                custom_rules=opsf.CustomRules.OPERATOR_PATHS,
+                env_prefixes=(),
+                options_surface="an operator .gitleaks.toml whose rules and allowlists apply on top of ASH suppressions; a repository-written config is refused with a note",
+            ),
+            exit_codes=opsf.ExitCodesFacet(
+                success_exit_codes=(0, 2),
+                semantics="ASH passes --exit-code=2 because the tool's default 1 means both leaks and some errors",
+            ),
+            provenance=opsf.ProvenanceFacet(
+                tier=opsf.Tier.BUILTIN_DEFAULT,
+                source=opsf.ProvenanceSource.PINNED_RELEASE_BINARY,
+                selection_surfaces=("options.honor_inline_ignores",),
+                upstream_license=(
+                    "MIT (source: utils/tool_downloads.py "
+                    "THIRD_PARTY_LICENSES['gitleaks'], pinned commit 83d9cd6)"
+                ),
+            ),
+            prerequisites=opsf.PrerequisitesFacet(
+                kinds=(opsf.Prerequisite.NONE,),
+                note="no git repository is required and no history is read",
+            ),
+        )
+    )
+
     success_exit_codes: ClassVar[Set[int]] = {0, LEAKS_EXIT_CODE}
     # The strict default: no network, and no variables or paths beyond the
     # baseline. GITLEAKS_CONFIG and GITLEAKS_CONFIG_TOML are not passed into a
@@ -1677,10 +1875,23 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
         final_args: List[str],
         target: Path,
     ) -> SarifReport:
-        """Drop ASH's own files, rate every result, drop empty fingerprints, keep
-        snippets redacted, and report the files the re-scan did not reach."""
+        """Drop ASH's own files, report the files the re-scan did not reach, and
+        normalize every result (:meth:`normalize_results`)."""
         self._drop_results_under_output_dir(sarif_report, target)
         self._report_rescan_skipped(sarif_report)
+        return self.normalize_results(sarif_report)
+
+    @staticmethod
+    def normalize_results(sarif_report: SarifReport) -> SarifReport:
+        """Rate every result, tag it, drop empty fingerprints, keep snippets redacted.
+
+        The result-level half of the adapter's post-processing, separated from
+        the instance-bound half (output-directory dropping, re-scan reporting)
+        so that conformance tests can drive gitleaks' own normalization over a
+        committed capture without a scanner instance, the way
+        ``CfnGuardScanner.normalize_results`` is driven. Pure over the report:
+        no tool is run and nothing outside the report is read.
+        """
         for result in sarif_report.get_all_results():
             # See "Severity" in the module docstring.
             result.level = Level.error

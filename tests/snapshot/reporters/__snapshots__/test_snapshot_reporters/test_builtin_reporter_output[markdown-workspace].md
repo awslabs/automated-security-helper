@@ -48,6 +48,10 @@ Each project is scanned independently and judged against its own threshold, so a
 
 </details>
 
+Scanners that did not run:
+
+- npm-audit (MISSING): api: its dependencies were not available; no reason was recorded, and ash.log has the scanner's own message
+
 **Scanners needing attention:** npm-audit. Check their dependencies and execution logs.
 
 ### Top 2 hotspots

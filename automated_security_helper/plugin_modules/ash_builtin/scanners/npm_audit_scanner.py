@@ -14,6 +14,12 @@ from typing import Annotated, ClassVar, Dict, List, Literal, Any, Sequence, Set
 from pydantic import Field, PrivateAttr, model_validator
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.base.options import ScannerOptionsBase
+from automated_security_helper.base import scanner_operational_facets as opsf
+from automated_security_helper.base.scanner_facets import (
+    FacetDecl,
+    FacetState,
+    ScannerFacets,
+)
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.models.core import ToolArgs
@@ -437,6 +443,210 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
     # npm, yarn and pnpm audit by asking the registry, so offline there is nothing to
     # run: validate_plugin_dependencies says no, as snyk-code's does.
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.SKIP_OFFLINE
+
+    #: The facets register row (base/scanner_facets.py). Declaration only.
+    #: npm audit reports vulnerable packages. The SARIF location is INVENTED
+    #: by this adapter (``node_modules/<location>/package.json`` at 1:1, built
+    #: from the native ``nodes``), a locator and not a resource, so
+    #: resource_id is n/a and the register's must-not row holds the adapter to
+    #: never writing ``ash_resource_id``. Native fields are quoted from the
+    #: committed native report (tests/test_data/scanners/npmaudit/npm.json).
+    facets: ClassVar[ScannerFacets] = ScannerFacets(
+        rule_id=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='vulnerabilities.<name>.via[]."url" (the GHSA id, '
+            'synthesized as the ruleId); "npm-audit-transitive-<name>" for '
+            "a transitive-only entry",
+        ),
+        severity=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='vulnerabilities.<name>.via[]."severity", else the '
+            'entry\'s "severity"',
+        ),
+        file_path=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='vulnerabilities.<name>."nodes" (the install '
+            "location, synthesized as node_modules/<location>/package.json)",
+        ),
+        line_range=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="(no native line) the adapter writes line 1 of the "
+            "synthesized manifest location on every result",
+        ),
+        column=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="(no native column) the adapter writes column 1 of "
+            "the synthesized manifest location on every result, beside the "
+            "line_range cell's line 1",
+        ),
+        message=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='vulnerabilities.<name>.via[]."title" composed with '
+            'the package, "range" and "url"',
+        ),
+        resource_id=FacetDecl(
+            state=FacetState.NA,
+            reason="LOCATOR-ONLY (synthesized): the URI node_modules/<loc>/"
+            'package.json is built from the native "nodes", an install '
+            "locator; the findings are packages, not resources",
+        ),
+        resource_type=FacetDecl(
+            state=FacetState.NA,
+            reason="npm audit output names no resource; findings are packages",
+        ),
+        package_name=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='vulnerabilities.<name>."name"',
+        ),
+        package_version=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="installed version read from the lockfile beside the "
+            "manifest (npm audit's own report gives only a vulnerable range)",
+        ),
+        package_path=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='vulnerabilities.<name>."nodes" resolved against the '
+            "lockfile entry for the install path",
+        ),
+        taxonomy_cve=FacetDecl(
+            state=FacetState.NA,
+            reason="npm audit names no CVE field: the advisory id carried as "
+            'the ruleId is vulnerabilities.<name>.via[]."url" (a GHSA id), '
+            "and the flat CVE column reads CVE-shaped rule ids only",
+        ),
+        taxonomy_cwe=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='vulnerabilities.<name>.via[]."cwe" (and the v1 '
+            'advisory "cwe"), written as CWE-<n> rule tags by _cwe_tags and '
+            'kept in the result property "cwe"',
+        ),
+        fingerprints=FacetDecl(
+            state=FacetState.NA,
+            reason="npm audit output carries no fingerprint; finding "
+            "identity keys on scanner, rule and package",
+        ),
+        fix_available=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='vulnerabilities.<name>."fixAvailable"',
+        ),
+        remediation_text=FacetDecl(
+            state=FacetState.UNCONFIRMED,
+            reason="UNCONFIRMED: not classified by the survey; the adapter "
+            'writes a composed "recommendation" property, but the flat model '
+            "has no remediation column to read it and npm audit's native "
+            "fixAvailable is a flag or a fix object, not text",
+        ),
+        snippet=FacetDecl(
+            state=FacetState.NA,
+            reason="a package advisory has no source code snippet",
+        ),
+        references=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='vulnerabilities.<name>.via[]."url" (rule helpUri), '
+            "read into the flat references when the result carries no "
+            "relatedLocations",
+        ),
+        tags=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="rule properties.tags (ASH-composed: security, "
+            "npm-audit, the severity word), read into the flat tags when the "
+            "result carries none",
+        ),
+        extras=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="result properties bag (vulnerable_versions, "
+            "recommendation, severity, cwe, cvss, package identity) passed "
+            "through to the flat properties",
+        ),
+    )
+
+    #: The operational register row (base/scanner_operational_facets.py),
+    #: checked against the production declarations it mirrors by
+    #: tests/unit/plugin_modules/test_scanner_operational_facets_consistency.py.
+    operational_facets: ClassVar[opsf.ScannerOperationalFacets] = (
+        opsf.ScannerOperationalFacets(
+            scanner_name="npm-audit",
+            network=opsf.NetworkFacet(
+                fetch_kind=opsf.FetchKind.CONTENT_FETCH,
+                fetches=(
+                    opsf.Fetched.ADVISORY_FEED,
+                    opsf.Fetched.PACKAGE_METADATA,
+                ),
+                prefetch=(),
+                offline_outcome=opsf.OfflineOutcome.NOT_RUN,
+                offline_reason=(
+                    "npm, yarn and pnpm audit a lockfile by asking the registry, so an "
+                    "offline run would read every lockfile as clean; the scanner does "
+                    "not run, each lockfile is listed as not scanned with the reason, "
+                    "and it is MISSING when lockfiles exist and SKIPPED when none do"
+                ),
+                offline_strategy=OfflineStrategy.SKIP_OFFLINE,
+                sandbox_network=opsf.SandboxNetwork.ONLINE,
+                source=(
+                    "npm_audit_scanner.py offline_strategy, sandbox_requirements and "
+                    "dependency_unavailable_reason; the audit is the network call"
+                ),
+            ),
+            output=opsf.OutputFacet(
+                native_formats=(opsf.OutputFormat.TOOL_JSON,),
+                side_reports=(),
+                non_finding_artifacts=(),
+                note="three dialects: npm, yarn and pnpm; the SARIF URI is synthesized",
+            ),
+            targets=opsf.TargetsFacet(
+                kinds=(opsf.TargetKind.DEPENDENCY_LOCKFILES,),
+                tool_type=ScannerToolType.SCA,
+                selection=(
+                    "lockfile discovery over the scan set: package-lock.json, "
+                    "npm-shrinkwrap.json, yarn.lock, pnpm-lock.yaml; one audit per "
+                    "lockfile, shrinkwrap outranks package-lock"
+                ),
+            ),
+            runtime=opsf.RuntimeFacet(
+                kind=opsf.RuntimeKind.NODE_SUBCOMMAND,
+                external_programs=("node", "npm", "yarn", "pnpm"),
+                invocations=opsf.Invocations.PER_TARGET,
+                invocation_note="one subprocess per lockfile, by the package manager that owns it",
+                python_only=False,
+                use_uv_tool=False,
+            ),
+            platforms=opsf.PlatformsFacet(
+                provisionable=(),
+                note="the Node.js toolchain is the user's; ASH installs none of it",
+            ),
+            severity=opsf.SeverityFacet(
+                severity_class=opsf.SeverityClass.NATIVE,
+                note="npm's own critical/high/moderate/low/info scale is mapped (npm_audit_scanner.py severity tables)",
+            ),
+            silencing=opsf.SilencingFacet(
+                tool_side=(),
+                none_reason="no tool-side silencing surface was surveyed for npm audit; ASH suppressions are the surface this register records",
+            ),
+            identity=opsf.IdentityFacet(
+                fingerprint_class=opsf.FingerprintClass.POSITIONAL_ONLY,
+                note="identity is the synthesized lockfile location through the shared floor",
+            ),
+            extensibility=opsf.ExtensibilityFacet(
+                custom_rules=opsf.CustomRules.NONE,
+                env_prefixes=("npm_config_", "NPM_CONFIG_"),
+                options_surface="typed options only; npm's own configuration is passed through the environment under the sandbox",
+            ),
+            exit_codes=opsf.ExitCodesFacet(
+                success_exit_codes=(0, 1),
+                semantics="the base default {0, 1}; the adapter owns the audit-failure handling",
+            ),
+            provenance=opsf.ProvenanceFacet(
+                tier=opsf.Tier.BUILTIN_DEFAULT,
+                source=opsf.ProvenanceSource.USER_INSTALLED,
+                selection_surfaces=(),
+                upstream_license=opsf.LICENSE_NOT_READ,
+            ),
+            prerequisites=opsf.PrerequisitesFacet(
+                kinds=(opsf.Prerequisite.LOCKFILE, opsf.Prerequisite.NODE_RUNTIME),
+                note="a lockfile must exist (a manifest alone is not auditable) and the Node.js runtime must be installed",
+            ),
+        )
+    )
 
     #: Lockfiles the ignore paths dropped from the last package selection
     #: (``_package_manifests``), so ``_lockfile_beside`` never picks one of them
@@ -1636,6 +1846,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                         "security",
                         "npm-audit",
                         severity,
+                        *_cwe_tags(record["cwe"]),
                         f"tool_name::{self.config.name}",
                         f"tool_type::{self.tool_type or 'UNKNOWN'}",
                     ],
@@ -2277,6 +2488,48 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             return True
         return score > kept
 
+    @classmethod
+    def convert_results(
+        cls,
+        npm_audit_results: Dict[str, Any],
+        target_path: Path,
+        lock_file: Path | None = None,
+    ) -> SarifReport:
+        """A default-configured scanner's SARIF view of an npm audit report.
+
+        Tool-free: the plugin context is a default-configured one over
+        ``target_path`` and nothing runs, so conformance tests can drive the
+        conversion over a committed audit capture the way
+        ``CfnGuardScanner.normalize_results`` is driven (the conversion itself
+        is an instance method because it reads the scanner's name, tool type
+        and exit state). ``exit_code`` 0 is the successful-run shape, so the
+        invocation record reads as a completed scan.
+        """
+        from automated_security_helper.base.plugin_context import PluginContext
+        from automated_security_helper.config.ash_config import AshConfig
+        from automated_security_helper.config.default_config import (
+            get_default_config,
+        )
+
+        # The scanner's model carries forward references to AshConfig, which
+        # must be resolved before it is built; done here so a caller needs no
+        # setup of its own. Idempotent.
+        AshConfig.model_rebuild()
+        target = Path(target_path)
+        scanner = cls(
+            context=PluginContext(
+                source_dir=target,
+                output_dir=target / "ash-output",
+                work_dir=target / "ash-work",
+                config=get_default_config(),
+            ),
+            config=NpmAuditScannerConfig(),
+        )
+        scanner.exit_code = 0
+        return scanner._convert_npm_audit_to_sarif(
+            npm_audit_results, target_path, lock_file
+        )
+
     def _convert_npm_audit_to_sarif(
         self,
         npm_audit_results: Dict[str, Any],
@@ -2424,6 +2677,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                                 "security",
                                 "npm-audit",
                                 via_severity,
+                                *_cwe_tags(via.get("cwe")),
                                 f"tool_name::{self.config.name}",
                                 f"tool_type::{self.tool_type or 'UNKNOWN'}",
                             ],
@@ -3538,6 +3792,25 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         except Exception as e:
             # Check if there are useful error details
             raise ScannerError(f"NpmAudit scan failed: {str(e)}")
+
+
+def _cwe_tags(cwe: Any) -> List[str]:
+    """An advisory's CWE ids as the ``CWE-<n>`` tags the flat reader reads.
+
+    npm's ``via[].cwe`` and the v1 advisory's ``cwe`` list ``CWE-79``-style ids
+    (and the odd ``NVD-CWE-Other``, which names no CWE and is left out). The flat
+    ``cwe_id`` column reads tags (``utils/taxonomy_ids.cwes_of_tags``), not the
+    ``cwe`` result property, so the ids go on the rule's tag list too. Defined
+    last in the module, and importing where it runs, so the module's import
+    block and the code above its first call site keep their lines: the call
+    sites themselves shift every line after them, so a suppression pinned below
+    one has to be re-pinned when a call is added or removed.
+    """
+    from automated_security_helper.utils.taxonomy_ids import cwes_of_tags
+
+    if isinstance(cwe, str):
+        cwe = [cwe]
+    return cwes_of_tags(cwe) if isinstance(cwe, (list, tuple)) else []
 
 
 if __name__ == "__main__":

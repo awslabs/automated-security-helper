@@ -25,7 +25,10 @@ import pytest
 from _pytest.reports import TestReport
 
 from tests.utils import env_assertions
-from tests.utils.helpers import run_a_child_pytest_under_this_suite
+from tests.utils.helpers import (
+    WINDOWS_CHILD_START_NAMES,
+    run_a_child_pytest_under_this_suite,
+)
 
 CANARY = "ASH_TEST_BACKSTOP_CANARY"
 REMOVED = "ASH_TEST_BACKSTOP_REMOVED"
@@ -1237,6 +1240,28 @@ def test_the_childs_environment_keeps_this_runs_containment_names(
     )
     assert returncode == 0 and "1 passed" in output, (
         "the child lost one of the run's containment names",
+        output[-2000:],
+    )
+
+
+@pytest.mark.integration
+def test_the_childs_environment_keeps_the_names_a_windows_python_needs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """On Windows ``platform.machine()`` reads PROCESSOR_ARCHITECTURE from the
+    environment, and polars' import-time CPU check reads no CPU flags (and
+    raises "unknown feature flag") when it answers "". The child's environment
+    is built, not inherited, so the names a Windows Python needs must be
+    carried by the build. The stand-in values prove the carry on any
+    platform."""
+    expected = dict.fromkeys(WINDOWS_CHILD_START_NAMES, "stand-in")
+    for name, value in expected.items():
+        monkeypatch.setenv(name, value)
+    returncode, output, _ = _run_under_the_suites_conftest(
+        tmp_path, _CONTAINMENT_CHILD.format(expected=expected), {}
+    )
+    assert returncode == 0 and "1 passed" in output, (
+        "the child lost a name a Windows Python needs",
         output[-2000:],
     )
 

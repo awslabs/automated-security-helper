@@ -1,0 +1,11 @@
+# Benign test fixture for the facets program's M0 sample runs.
+# One local opengrep rule (no registry, no network at scan time), so a captured
+# `opengrep scan --sarif` run shows whether the fork emits a real
+# fingerprints.matchBasedId (semgrep OSS ships a "requires login" placeholder).
+rules:
+  - id: m0-subprocess-shell-true
+    languages: [python]
+    severity: ERROR
+    message: "ASH M0 fixture rule: subprocess.call with shell=True"
+    patterns:
+      - pattern: subprocess.call(..., shell=True)

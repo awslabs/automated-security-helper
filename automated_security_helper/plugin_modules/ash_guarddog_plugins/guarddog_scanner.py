@@ -123,6 +123,12 @@ from automated_security_helper.base.options import (
 )
 from automated_security_helper.base.plugin_base import CustomCommand
 from automated_security_helper.base.plugin_context import PluginContext
+from automated_security_helper.base import scanner_operational_facets as opsf
+from automated_security_helper.base.scanner_facets import (
+    FacetDecl,
+    FacetState,
+    ScannerFacets,
+)
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
@@ -801,6 +807,210 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
     #: Local ``scan`` is offline: the YARA rules ship inside the GuardDog
     #: package. ``verify`` needs the network and is refused under ASH_OFFLINE.
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
+
+    #: The facets register row (base/scanner_facets.py). Declaration only: no
+    #: behavior changes. GuardDog's output is its own JSON (fixtures in
+    #: tests/test_data/scanners/guarddog/captured), converted to SARIF by this
+    #: adapter, so the native fields name that JSON.
+    facets: ClassVar[ScannerFacets] = ScannerFacets(
+        rule_id=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='"results" key (the heuristic name, e.g. '
+            "capability-network-lolbas)",
+        ),
+        severity=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="(no native severity) the adapter's risk ladder over "
+            "the heuristic's category",
+        ),
+        file_path=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='match "location" file part (e.g. setup.py:16)',
+        ),
+        line_range=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='match "location" line part',
+        ),
+        column=FacetDecl(
+            state=FacetState.NA,
+            reason="GuardDog locations are file:line only",
+        ),
+        message=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='match "message", assembled with the rule and match '
+            "into the result text by the adapter",
+        ),
+        resource_id=FacetDecl(
+            state=FacetState.NA,
+            reason="findings name a package and a file:line inside it, not a "
+            "deployable resource; package identity is declared under the "
+            "package facets",
+        ),
+        resource_type=FacetDecl(
+            state=FacetState.NA,
+            reason="findings name a package and a file:line inside it, not a "
+            "deployable resource",
+        ),
+        package_name=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="the verified requirement's name (verify mode), "
+            'written as the result property "package_name"',
+            reason="scan mode names no package to read: the native top-level "
+            '"package" is the scanned directory path (<scanned-dir>/<name> in '
+            "every captured scan_*.json), which holds neither a package name "
+            "nor a version, so verify mode's requirement is the only source",
+        ),
+        package_version=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="the verified requirement's version (verify mode), "
+            'written as the result property "package_version"',
+            reason="scan mode names no version to read: its top-level keys "
+            "are errors, issues, package (a directory path), results, "
+            "risk_score and risks, none of them a version (every captured "
+            "scan_*.json), so verify mode's requirement is the only source",
+        ),
+        package_path=FacetDecl(
+            state=FacetState.NA,
+            reason="the adapter writes package_name and package_version only",
+        ),
+        taxonomy_cve=FacetDecl(
+            state=FacetState.NA,
+            reason="malicious-package heuristics carry no CVE taxonomy",
+        ),
+        taxonomy_cwe=FacetDecl(
+            state=FacetState.NA,
+            reason="malicious-package heuristics carry no CWE taxonomy",
+        ),
+        fingerprints=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='partialFingerprints["guarddog/v1"], a sha256 the '
+            "adapter computes over rule, uri, line and hits (not a native field)",
+        ),
+        fix_available=FacetDecl(
+            state=FacetState.NA,
+            reason="malicious-package findings carry no fix state",
+        ),
+        remediation_text=FacetDecl(
+            state=FacetState.NA,
+            reason="GuardDog results carry no remediation text",
+        ),
+        snippet=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='match "code" / risk "threat_code"',
+        ),
+        references=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="rule helpUri https://github.com/DataDog/guarddog"
+            "#heuristics (adapter-written, not per-heuristic), read into the "
+            "flat references when the result carries no relatedLocations",
+        ),
+        tags=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="rule-level PropertyBag tags guarddog and "
+            "malicious-package, written by the adapter, read into the flat "
+            "tags when the result carries none",
+        ),
+        extras=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="extra_properties merged into the result PropertyBag "
+            "(package_name and package_version in verify mode)",
+        ),
+    )
+
+    #: The operational register row (base/scanner_operational_facets.py),
+    #: checked against the production declarations it mirrors by
+    #: tests/unit/plugin_modules/test_scanner_operational_facets_consistency.py.
+    operational_facets: ClassVar[opsf.ScannerOperationalFacets] = (
+        opsf.ScannerOperationalFacets(
+            scanner_name="guarddog",
+            network=opsf.NetworkFacet(
+                fetch_kind=opsf.FetchKind.CONTENT_FETCH,
+                fetches=(opsf.Fetched.PACKAGE_DOWNLOADS,),
+                prefetch=(),
+                offline_outcome=opsf.OfflineOutcome.DEGRADED,
+                offline_reason=(
+                    "scan mode is unchanged (the YARA rules ship in the package); the "
+                    "opt-in verify mode is not attempted and each manifest is listed "
+                    "with the reason"
+                ),
+                offline_strategy=OfflineStrategy.BUNDLED,
+                sandbox_network=opsf.SandboxNetwork.NONE,
+                sandbox_tension=(
+                    "verify mode (options.verify, opt-in) downloads every dependency a "
+                    "manifest names from its registry, but the sandbox declaration "
+                    "grants no network, so under --sandbox verify runs without one"
+                ),
+                source=(
+                    "guarddog_scanner.py offline_strategy comment and sandbox "
+                    "declaration; module header on verify mode"
+                ),
+            ),
+            output=opsf.OutputFacet(
+                native_formats=(opsf.OutputFormat.TOOL_JSON,),
+                side_reports=(),
+                non_finding_artifacts=(),
+            ),
+            targets=opsf.TargetsFacet(
+                kinds=(opsf.TargetKind.PACKAGE_SOURCES,),
+                tool_type=ScannerToolType.SCA,
+                selection=(
+                    "package roots by per-ecosystem manifest sets across pypi, npm, go, "
+                    "github_action, rubygems and crates (GUARDDOG_ECOSYSTEMS); verify "
+                    "mode reads dependency manifests such as requirements.txt"
+                ),
+                covers_note="a community scanner; it declares no covers display string",
+            ),
+            runtime=opsf.RuntimeFacet(
+                kind=opsf.RuntimeKind.UV_PYTHON,
+                external_programs=(),
+                invocations=opsf.Invocations.PER_TARGET,
+                invocation_note="one scan per package root and ecosystem",
+                python_only=True,
+                use_uv_tool=True,
+            ),
+            platforms=opsf.PlatformsFacet(
+                provisionable=(),
+                note="a PyPI package run through uv; it is not installable offline and the remedy (pre-install) is named by the scanner",
+            ),
+            severity=opsf.SeverityFacet(
+                severity_class=opsf.SeverityClass.DERIVED,
+                note="a risk ladder",
+            ),
+            silencing=opsf.SilencingFacet(
+                tool_side=(),
+                none_reason="GuardDog's rules ship in its package and no tool-side silencing surface was surveyed; ASH suppressions are the surface this register records",
+            ),
+            identity=opsf.IdentityFacet(
+                fingerprint_class=opsf.FingerprintClass.STABLE_COMPUTED,
+                note="a computed sha256 under guarddog/v1",
+            ),
+            extensibility=opsf.ExtensibilityFacet(
+                custom_rules=opsf.CustomRules.NONE,
+                env_prefixes=(),
+                options_surface="typed options (ecosystems, verify); no rules path",
+            ),
+            exit_codes=opsf.ExitCodesFacet(
+                success_exit_codes=(0, 1),
+                semantics="the base default {0, 1}; the adapter notes a registry-lookup-failure exit",
+            ),
+            provenance=opsf.ProvenanceFacet(
+                tier=opsf.Tier.COMMUNITY_OPTIN,
+                source=opsf.ProvenanceSource.PYPI_VIA_UV,
+                selection_surfaces=(
+                    "ash_guarddog_plugins in ash_plugin_modules",
+                    "options.verify (opt-in)",
+                ),
+                upstream_license=(
+                    "Apache-2.0 (source: utils/tool_downloads.py "
+                    "THIRD_PARTY_LICENSES['guarddog'], pinned commit 3da1726)"
+                ),
+            ),
+            prerequisites=opsf.PrerequisitesFacet(
+                kinds=(opsf.Prerequisite.MANIFEST,),
+                note="a package manifest per ecosystem defines each root; verify mode also needs the manifests' registries reachable",
+            ),
+        )
+    )
 
     # The strict default. ``scan`` reads the staged package files with rules shipped
     # in the GuardDog package, a uv tool whose directories the baseline exposes.

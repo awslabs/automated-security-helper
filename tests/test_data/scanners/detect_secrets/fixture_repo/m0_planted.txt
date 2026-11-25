@@ -1,0 +1,2 @@
+# Benign test fixture for the facets corpus gate (never a real credential).
+password = "m0-planted-not-a-secret"

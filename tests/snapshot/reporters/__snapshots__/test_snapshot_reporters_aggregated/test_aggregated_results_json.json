@@ -73,6 +73,7 @@
           "resource_id": null
         }
       ],
+      "exclusions": [],
       "mcp": {
         "runtime_overrides": {
           "enabled": false,
@@ -88,6 +89,8 @@
             "/sandbox/**",
             "/ash_plugin_modules",
             "/ash_plugin_modules/**",
+            "/default_scanners",
+            "/default_scanners/**",
             "/scanners/detect-secrets/options/scan_settings/filters_used",
             "/scanners/detect-secrets/options/scan_settings/filters_used/**",
             "/scanners/detect-secrets/options/scan_settings/plugins_used",
@@ -95,6 +98,7 @@
             "/scanners/detect-secrets/options/baseline_file",
             "/global_settings/ignore_paths",
             "/global_settings/suppressions",
+            "/global_settings/exclusions",
             "/global_settings/mcp",
             "/global_settings/mcp/**",
             "/scanners/opengrep/options/exclude_rule",
@@ -197,6 +201,14 @@
           "denied_value_patterns": {},
           "replace_default_denied_paths": false
         }
+      },
+      "deduplication": {
+        "annotate": false,
+        "fold": false
+      },
+      "history": {
+        "enabled": false,
+        "keep_runs": 50
       }
     },
     "fail_on_findings": true,
@@ -656,6 +668,10 @@
     "precommit": {
       "only_scanners": [],
       "add_scanners": []
+    },
+    "default_scanners": {
+      "only": [],
+      "add": []
     }
   },
   "scanner_results": {

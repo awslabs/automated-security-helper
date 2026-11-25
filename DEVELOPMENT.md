@@ -293,7 +293,23 @@ Nix legs do after their scans. Keep such modules in `runtime/`: syrupy reads eve
 `__snapshots__` directory once one test beside it runs, so a deselected module's
 snapshots next to collected ones would fail the default run as unused. To update them,
 build the image (or have Nix) and run the module with `pytest -n 0 --snapshot-update`
-and its flag; see the module docstrings for the environment they read.
+and its flag, plus `pytest --run-integration` (the modules carry the integration or e2e
+tier marker, and without it every test is skipped); see the module docstrings for the
+environment they read.
+
+### The PowerShell wrapper against recording runners
+
+`tests/snapshot/wrappers/` runs the real `utils/ash_helpers.ps1` under `pwsh` against
+recording stand-ins for finch, docker, nerdctl and podman, so it needs no runtime and
+is not deselected: it runs in the normal test tiers on every OS, which is how
+`Invoke-ASH` is exercised end to end on Windows, where the hosted runners cannot run a
+Linux container. There is one snapshot per test, shared by every OS. Platform defaults
+(the build target, the container UID and GID) are passed explicitly, and the paths, the
+day's build epoch and the console size are normalized, so a difference in command
+assembly on one OS fails that OS's leg. To update them, run
+`uv run pytest tests/snapshot/wrappers -n 0 --run-integration --snapshot-update` on any
+host with `pwsh` 7. The module is marked `integration`, so `pytest --run-integration`
+is required: without it every test is skipped and nothing is written.
 
 ## Development Commands
 
@@ -310,6 +326,23 @@ uv run ruff format .
 ```bash
 uv run ash
 ```
+
+- Regenerate the wrapper tables after you add or change a subcommand or an option of the
+  `ash` CLI:
+
+<!-- doctest: illustrative reason="rewrites ./ash and utils/ash_helpers.ps1 in this repository's own checkout" -->
+```bash
+uv run python scripts/generate_wrapper_tables.py
+```
+
+  `./ash` and `utils/ash_helpers.ps1` run on hosts with no Python, so each carries
+  written-out lists of the CLI's subcommands, the root options that take a value, which
+  subcommands take the options the wrapper adds, and the order OCI runners are looked
+  for. Those lists sit between `BEGIN generated` and `END generated` comments and are
+  computed from the CLI by `automated_security_helper/interactions/wrapper_contract.py`.
+  Do not edit inside the markers. The lint job and a unit test run
+  `scripts/generate_wrapper_tables.py --check`, which fails and prints a diff when a block
+  is stale.
 
 ## Project Dependencies
 
@@ -352,7 +385,7 @@ redirect only to the same scheme, host and port.
 
 If you encounter any issues:
 
-1. Verify your Python version matches the required version (3.10+):
+1. Verify your Python version matches the required version (3.11+):
 
 ```bash
 python --version

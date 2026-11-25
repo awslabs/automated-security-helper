@@ -74,11 +74,21 @@ ash_config:
       options:
         install_timeout: 300
         tool_version: '>=7.16.0,<8.0.0'
+  default_scanners:
+    add: []
+    only: []
   external_reports_to_include: []
   fail_on_findings: true
   fail_on_incomplete_scanners: true
   fail_on_unknown_keys: false
   global_settings:
+    deduplication:
+      annotate: false
+      fold: false
+    exclusions: []
+    history:
+      enabled: false
+      keep_runs: 50
     ignore_paths: []
     mcp:
       runtime_overrides:
@@ -94,6 +104,8 @@ ash_config:
         - /sandbox/**
         - /ash_plugin_modules
         - /ash_plugin_modules/**
+        - /default_scanners
+        - /default_scanners/**
         - /scanners/detect-secrets/options/scan_settings/filters_used
         - /scanners/detect-secrets/options/scan_settings/filters_used/**
         - /scanners/detect-secrets/options/scan_settings/plugins_used
@@ -101,6 +113,7 @@ ash_config:
         - /scanners/detect-secrets/options/baseline_file
         - /global_settings/ignore_paths
         - /global_settings/suppressions
+        - /global_settings/exclusions
         - /global_settings/mcp
         - /global_settings/mcp/**
         - /scanners/opengrep/options/exclude_rule

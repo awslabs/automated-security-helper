@@ -26,8 +26,11 @@ from automated_security_helper.utils.converter_refusals import (
     markdown_summary_lines,
 )
 from automated_security_helper.plugin_modules.ash_builtin.reporters.report_content_emitter import (
+    SUMMARY_BELOW_THRESHOLD,
+    SUMMARY_POLICY_NOT_GATING,
     ReportContentEmitter,
     coverage_shortfall_text,
+    deduplicated_summary_text,
     refuse_negative_limit,
 )
 from automated_security_helper.plugin_modules.ash_builtin.reporters.workspace_section import (
@@ -217,6 +220,22 @@ def _findings_table(findings) -> list[str]:
     line, as the rule ID, title and path come from the scan.
     """
     keys = ("severity", "scanner", "rule_id", "title", "file_path")
+    # A column for the fold's note, only when some row has one: with the fold
+    # off the table is the one it has always been.
+    noted = any(finding.get("duplicate_note") for finding in findings)
+    if noted:
+        return [
+            "| Severity | Scanner | Rule ID | Title | File | Duplicates |",
+            "| --- | --- | --- | --- | --- | --- |",
+            *(
+                "| "
+                + " | ".join(_cell(shown_on_one_line(finding[key])) for key in keys)
+                + " | "
+                + _cell(shown_on_one_line(finding.get("duplicate_note") or ""))
+                + " |"
+                for finding in findings
+            ),
+        ]
     return [
         "| Severity | Scanner | Rule ID | Title | File |",
         "| --- | --- | --- | --- | --- |",
@@ -241,6 +260,7 @@ def outcome_markdown(summary: Dict[str, Any]) -> str:
     alert = {"danger": "CAUTION", "warning": "WARNING", "success": "TIP"}[
         summary["tone"]
     ]
+    deduplicated = deduplicated_summary_text(summary)
     return "\n".join(
         [
             f"> [!{alert}]",
@@ -250,17 +270,18 @@ def outcome_markdown(summary: Dict[str, Any]) -> str:
             ">",
             (
                 f"> **{summary['actionable']} actionable** · "
-                f"{summary['below_threshold']} below threshold · "
+                f"{summary[SUMMARY_BELOW_THRESHOLD]} below threshold · "
                 # Findings the project's outcome left out are counted apart from
                 # the ones the threshold sets aside, only when present.
                 + (
-                    f"{summary['policy_not_gating']} not gating (workspace policy) · "
-                    if summary.get("policy_not_gating")
+                    f"{summary[SUMMARY_POLICY_NOT_GATING]} not gating (workspace policy) · "
+                    if summary.get(SUMMARY_POLICY_NOT_GATING)
                     else ""
                 )
                 + f"{summary['suppressed']} suppressed · "
                 f"{summary['completed']}/{summary['scanners']} scanners completed"
             ),
+            *([">", f"> {deduplicated}"] if deduplicated else []),
             ">",
             f"> Next action: {summary['next_step']}\n",
         ]
@@ -544,6 +565,23 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
                         "</details>\n",
                     ]
                 )
+            # Why each SKIPPED or MISSING scanner did not run. Compact view
+            # leaves the SKIPPED rows out of the table, so it leaves their
+            # reasons out too; a MISSING scanner needs attention in every view.
+            not_run = [
+                entry
+                for entry in emitter.get_scanners_not_run()
+                if not (options.compact and entry["status"] == "SKIPPED")
+            ]
+            if not_run:
+                parts.append("Scanners that did not run:\n")
+                parts.extend(
+                    f"- {_text(shown_on_one_line(', '.join(entry['scanners'])))} "
+                    f"({entry['status']}): "
+                    f"{_text(shown_on_one_line(entry['reason']))}"
+                    for entry in not_run
+                )
+                parts.append("")
 
         parts.append(coverage_markdown(summary))
 
@@ -606,9 +644,7 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
         if options.include_detailed_findings:
             findings = emitter.get_detailed_findings(options.max_detailed_findings)
             if findings:
-                total = sum(
-                    emitter.is_finding_actionable(v) for v in emitter.flat_vulns
-                )
+                total = emitter.actionable_finding_count()
                 parts.extend(
                     [
                         "## Detailed findings\n",
@@ -651,6 +687,10 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
                             parts.append(
                                 f"- {label}: {_text(shown_on_one_line(finding[key]))}"
                             )
+                    if finding.get("duplicate_note"):
+                        parts.append(
+                            f"- Duplicates: {_text(shown_on_one_line(finding['duplicate_note']))}"
+                        )
                     parts.append(
                         f"\n{_block_text(shown_not_obeyed(finding['description']))}\n"
                     )
@@ -680,12 +720,12 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
             )
             # A limit of 0 lists none of them, yet the summary still counts
             # them, so the section and the pointer follow the count.
-            if summary["policy_not_gating"]:
+            if summary[SUMMARY_POLICY_NOT_GATING]:
                 parts.append("## Not gating (workspace policy)\n")
                 if left_out:
                     parts.append(
                         f"Showing {len(left_out)} of "
-                        f"{summary['policy_not_gating']} findings reported and "
+                        f"{summary[SUMMARY_POLICY_NOT_GATING]} findings reported and "
                         "left out of the outcome because "
                         "`policy_scanners_gate` is off.\n"
                     )
@@ -693,9 +733,9 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
                     parts.append("")
                 # The table stops at the same limit as the list above, so
                 # say where the rest is, as that list does.
-                if len(left_out) < summary["policy_not_gating"]:
+                if len(left_out) < summary[SUMMARY_POLICY_NOT_GATING]:
                     parts.append(
-                        f"> Showing {len(left_out)} of {summary['policy_not_gating']} "
+                        f"> Showing {len(left_out)} of {summary[SUMMARY_POLICY_NOT_GATING]} "
                         "findings left out of the outcome. "
                         'Open the HTML report and choose the "Not gating" scope '
                         "to review the full set. "

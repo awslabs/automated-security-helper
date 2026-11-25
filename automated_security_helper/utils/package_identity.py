@@ -41,8 +41,9 @@ import re
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional, Tuple, Union
 
+from automated_security_helper.utils.frame_text import unwire_cell, wire
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.undecodable_text import (
     path_in_record_form,
@@ -54,6 +55,9 @@ from automated_security_helper.utils.scanned_tree import (
     TreeInputRefused,
     open_in_scanned_tree,
 )
+
+if TYPE_CHECKING:
+    import polars as pl
 
 PACKAGE_NAME_KEY = "package_name"
 PACKAGE_VERSION_KEY = "package_version"
@@ -458,3 +462,100 @@ def extract_root_advisories(properties: Any) -> List[Dict[str, str]]:
                 ref = {}
         out.append(ref)
     return out
+
+
+# ---------------------------------------------------------------------------
+# The same projections over many results, as columns of one frame.
+#
+# Reading a property bag is the host's job (a bag is a pydantic model or a dict,
+# with the cdk-nag fallbacks above), so each record is read by the functions above
+# and what they answer becomes a column. Columns, not tuples, are what a join on
+# package or resource identity (a suppression's package and resource scope) takes.
+# Text goes into a String column through ``frame_text.wire``, so a name or a path
+# that carries a lone surrogate is held, not refused, and comes back unchanged.
+# ---------------------------------------------------------------------------
+
+# A package column is named for the property-bag key it is read from
+# (``package_name``, ``package_version``, ``package_path``), so a join on package
+# identity names the same thing the model does; the bare ``name`` / ``version`` /
+# ``path`` it had read as three other model fields.
+_PACKAGE_COLUMNS = (PACKAGE_NAME_KEY, PACKAGE_VERSION_KEY, PACKAGE_PATH_KEY)
+_RESOURCE_COLUMNS = ("resource_id", "resource_type")
+
+
+def package_identity_frame(properties: Iterable[Any]) -> "pl.DataFrame":
+    """One row per record of *properties*: ``package_name``, ``package_version``,
+    ``package_path``.
+
+    A row is what :func:`extract_package_identity` reads from that record, so a
+    key the record does not carry (or carries as something other than a
+    non-empty string) is null. Row order is the order of *properties*.
+    """
+    import polars as pl
+
+    columns: Dict[str, List[Optional[str]]] = {key: [] for key in _PACKAGE_COLUMNS}
+    for record in properties:
+        # Unpacked by name, not zipped by position: the extractor's tuple order
+        # and the column order are two facts, and each cell lands in the column
+        # that is named for it.
+        name, version, path = extract_package_identity(record)
+        columns[PACKAGE_NAME_KEY].append(wire(name))
+        columns[PACKAGE_VERSION_KEY].append(wire(version))
+        columns[PACKAGE_PATH_KEY].append(wire(path))
+    return pl.DataFrame(columns, schema=dict.fromkeys(_PACKAGE_COLUMNS, pl.String))
+
+
+def resource_identity_frame(properties: Iterable[Any]) -> "pl.DataFrame":
+    """One row per record of *properties*: ``resource_id``, ``resource_type``.
+
+    A row is what :func:`extract_resource_identity` reads from that record, the
+    cdk-nag fallbacks included. Row order is the order of *properties*.
+    """
+    import polars as pl
+
+    columns: Dict[str, List[Optional[str]]] = {key: [] for key in _RESOURCE_COLUMNS}
+    for record in properties:
+        resource_id, resource_type = extract_resource_identity(record)
+        columns["resource_id"].append(wire(resource_id))
+        columns["resource_type"].append(wire(resource_type))
+    return pl.DataFrame(columns, schema=dict.fromkeys(_RESOURCE_COLUMNS, pl.String))
+
+
+def identity_properties_from_frame(frame: "pl.DataFrame") -> List[Dict[str, str]]:
+    """:func:`identity_properties` for every row of a :func:`package_identity_frame`.
+
+    A null or empty cell is a piece the row does not know and is left out, as
+    :func:`identity_properties` leaves it out.
+    """
+    out: List[Dict[str, str]] = []
+    for name, version, path in frame.select(
+        PACKAGE_NAME_KEY, PACKAGE_VERSION_KEY, PACKAGE_PATH_KEY
+    ).iter_rows():
+        out.append(
+            identity_properties(
+                unwire_cell(name),
+                unwire_cell(version),
+                unwire_cell(path),
+            )
+        )
+    return out
+
+
+def package_identities_from_frame(
+    frame: "pl.DataFrame",
+) -> List[Tuple[Optional[str], Optional[str], Optional[str]]]:
+    """The ``(name, version, path)`` tuples a :func:`package_identity_frame` holds."""
+    return [
+        tuple(unwire_cell(cell) for cell in row)  # type: ignore[misc]
+        for row in frame.select(*_PACKAGE_COLUMNS).iter_rows()
+    ]
+
+
+def resource_identities_from_frame(
+    frame: "pl.DataFrame",
+) -> List[Tuple[Optional[str], Optional[str]]]:
+    """The ``(resource_id, resource_type)`` tuples a :func:`resource_identity_frame` holds."""
+    return [
+        tuple(unwire_cell(cell) for cell in row)  # type: ignore[misc]
+        for row in frame.select(*_RESOURCE_COLUMNS).iter_rows()
+    ]

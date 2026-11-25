@@ -32,6 +32,8 @@ daemon with a scan still running.
 
 from __future__ import annotations
 
+import atexit
+import contextlib
 import errno
 import json
 import os
@@ -41,6 +43,7 @@ import socket
 import sys
 import threading
 import time
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, Optional
 
@@ -77,6 +80,46 @@ WARM_MODULES = (
 )
 
 
+#: Exit hooks a warm import registered through a Rust extension (pyo3), recorded
+#: while the daemon warms up. A Rust library that starts native threads (polars'
+#: spill-file cleaner is one) registers a hook that asks those threads to stop
+#: and waits for the answer. ``os.fork`` carries only the forking thread into a
+#: scan's child, so in the child nobody answers and the hook blocks forever,
+#: after the scan has printed its report. :func:`_run_exit_hooks_in_child`
+#: leaves these out; a library the child imports for itself starts its own
+#: threads and keeps its hooks.
+_NATIVE_EXIT_HOOKS: list[Any] = []
+
+
+def _is_native_exit_hook(func: Any) -> bool:
+    """True for a callable pyo3 built: a bound method of a ``PyCapsule``."""
+    return type(getattr(func, "__self__", None)).__name__ == "PyCapsule"
+
+
+@contextlib.contextmanager
+def _recording_native_exit_hooks() -> Iterator[None]:
+    """Record the exit hooks Rust extensions register while the block runs."""
+    original = atexit.register
+
+    def register(func: Any, *args: Any, **kwargs: Any) -> Any:
+        if _is_native_exit_hook(func):
+            _NATIVE_EXIT_HOOKS.append(func)
+        return original(func, *args, **kwargs)
+
+    atexit.register = register  # type: ignore[assignment]
+    try:
+        yield
+    finally:
+        atexit.register = original
+
+
+def _run_exit_hooks_in_child() -> None:
+    """Run a forked scan's inherited exit hooks, minus the native ones."""
+    for hook in _NATIVE_EXIT_HOOKS:
+        atexit.unregister(hook)
+    atexit._run_exitfuncs()
+
+
 def warm_imports() -> list[str]:
     """Import :data:`WARM_MODULES` and ``ash_builtin``'s subpackages; return failures.
 
@@ -84,6 +127,11 @@ def warm_imports() -> list[str]:
     child imports whatever is missing itself, exactly as a cold run would, so a
     broken optional module costs warmth, never correctness.
     """
+    with _recording_native_exit_hooks():
+        return _warm_imports()
+
+
+def _warm_imports() -> list[str]:
     import importlib
     import pkgutil
 
@@ -618,11 +666,11 @@ class ExpressDaemon:
         if request is None:
             raise runtime.ExpressProtocolError("connection ended before any request")
         op = request.get("op")
-        if op == "status":
+        if op == runtime.OP_STATUS:
             runtime.send_frame(connection.sock, self._status())
             connection.close()
             return
-        if op == "stop":
+        if op == runtime.OP_STOP:
             # The pid is in the answer so the stopper can wait for this
             # process to actually exit instead of guessing with a timer.
             runtime.send_frame(
@@ -631,7 +679,7 @@ class ExpressDaemon:
             connection.close()
             self.stopping = True
             return
-        if op != "scan":
+        if op != runtime.OP_SCAN:
             runtime.send_frame(
                 connection.sock, {"ok": False, "reason": f"unknown op {op!r}"}
             )
@@ -743,7 +791,7 @@ class ExpressDaemon:
             _log(f"client went away before the scan started ({exc}); not forking")
             self._discard(connection, kill=False)
             return
-        if not isinstance(go, dict) or go.get("op") != "go":
+        if not isinstance(go, dict) or go.get("op") != runtime.OP_GO:
             _log("client never sent go after the ok; not forking")
             self._discard(connection, kill=False)
             return
@@ -885,9 +933,7 @@ class ExpressDaemon:
             # flush. Then the streams, then the hard exit, which is what keeps
             # the child out of the daemon's stack.
             try:
-                import atexit
-
-                atexit._run_exitfuncs()
+                _run_exit_hooks_in_child()
             except BaseException:
                 pass
             try:
@@ -1032,7 +1078,7 @@ class ExpressDaemon:
             # is told to stop rather than left running unowned.
             self._discard(connection, kill=True)
             return
-        if frame.get("op") == "signal":
+        if frame.get("op") == runtime.OP_SIGNAL:
             signum = frame.get("signum")
             if connection.child_pid is not None and signum in (
                 int(signal.SIGINT),

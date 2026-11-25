@@ -91,12 +91,15 @@ import uuid
 from collections.abc import Iterable, Iterator
 from typing import Any
 
+import polars as pl
+
 from automated_security_helper.schemas.cyclonedx_bom_1_6_schema import (
     Component,
     CycloneDXReport,
     Dependency,
     RefLinkType,
 )
+from automated_security_helper.utils.frame_text import wire
 from automated_security_helper.utils.log import ASH_LOGGER
 
 __all__ = ["component_key", "merge_cyclonedx_reports", "sbom_is_empty"]
@@ -214,6 +217,137 @@ def _verdict(
     if not holders or any(_same_package(held, component) for held in holders):
         return _REPEAT
     return _SHARED_REF
+
+
+_ROW_SCHEMA = {
+    "n": pl.Int64,
+    "key": pl.String,
+    "ref": pl.String,
+    "purl": pl.String,
+    "type": pl.String,
+    "group": pl.String,
+    "name": pl.String,
+    "version": pl.String,
+}
+_IDENTITY = ["type", "group", "name", "version"]
+
+
+def _rows(components: list[Component]) -> pl.DataFrame:
+    """The components as a frame, one row each, ``n`` their position in *components*.
+
+    Every text goes through :func:`wire`: a ``bom-ref``, ``purl`` or name can hold a
+    lone surrogate, which a polars string cannot, and ``wire`` keeps equality.
+    ``purl`` and ``group`` are null when empty, as :func:`component_key` and
+    :func:`_identity` read them.
+    """
+    columns: dict[str, list[Any]] = {name: [] for name in _ROW_SCHEMA}
+    for n, component in enumerate(components):
+        type_, group, name, version = _identity(component)
+        row = (
+            n,
+            wire(component_key(component)),
+            wire(component.bom_ref.root if component.bom_ref is not None else None),
+            wire(component.purl or None),
+            wire(type_),
+            wire(group),
+            wire(name),
+            wire(version),
+        )
+        for column, value in zip(columns, row):
+            columns[column].append(value)
+    return pl.DataFrame(columns, schema=_ROW_SCHEMA)
+
+
+def _verdicts(
+    held: Iterable[Component] | None, incoming: Iterable[Component] | None
+) -> tuple[list[str], dict[int, list[str]]]:
+    """What the merge does with each component of *incoming*, in :func:`_walk` order.
+
+    The verdict of a component is what :func:`_verdict` says given the keys of the
+    held components and of the earlier ones of *incoming* that were not repeats.
+    Most components do not depend on the earlier ones, and for them it is a join of
+    two frames: a key the held SBOM lacks that no other incoming component has is
+    new; a key it has, on a component with no ``bom-ref``, is a repeat; a held
+    component with the same ``bom-ref`` and the same package makes a repeat.
+    Components that share a key with one another, and a ``bom-ref`` the held SBOM
+    only has as a ``purl``, depend on the order: those are replayed with
+    :func:`_verdict` over the held state, in order. No other component shares a key
+    with them, so the replay needs only them.
+
+    The second value maps the position of each ``shared-ref`` component to the
+    sorted descriptions of the components that held its ``bom-ref`` just before it.
+    """
+    held_all = list(_walk(held))
+    incoming_all = list(_walk(incoming))
+    if not incoming_all:
+        return [], {}
+    new, old = _rows(incoming_all), _rows(held_all)
+    in_held = old.filter(pl.col("key").is_not_null()).select("key").unique()
+    in_held = in_held.with_columns(pl.lit(True).alias("in_held"))
+    # An incoming component of a held ``bom-ref`` that is one of its held packages.
+    # Two components with a purl are one package when the purl is equal; when either
+    # has none, when type, group, name and version are.
+    same = (
+        new.filter(pl.col("ref").is_not_null())
+        .join(
+            old.filter(pl.col("ref").is_not_null()),
+            on="ref",
+            suffix="_held",
+        )
+        .filter(
+            pl.when(pl.col("purl").is_not_null() & pl.col("purl_held").is_not_null())
+            .then(pl.col("purl") == pl.col("purl_held"))
+            .otherwise(
+                pl.all_horizontal(
+                    pl.col(name).eq_missing(pl.col(f"{name}_held"))
+                    for name in _IDENTITY
+                )
+            )
+        )
+        .select("n")
+        .unique()
+        .with_columns(pl.lit(True).alias("same"))
+    )
+    settled = (
+        new.join(in_held, on="key", how="left")
+        .join(same, on="n", how="left")
+        .with_columns(
+            pl.col("in_held").fill_null(False),
+            pl.col("same").fill_null(False),
+            pl.col("n").count().over("key").alias("key_count"),
+        )
+        .with_columns(
+            pl.when(pl.col("key").is_null())
+            .then(pl.lit(_NEW))
+            .when(~pl.col("in_held") & (pl.col("key_count") == 1))
+            .then(pl.lit(_NEW))
+            .when(pl.col("in_held") & pl.col("ref").is_null())
+            .then(pl.lit(_REPEAT))
+            .when(pl.col("in_held") & pl.col("same"))
+            .then(pl.lit(_REPEAT))
+            .otherwise(None)
+            .alias("verdict")
+        )
+        .sort("n")
+    )
+    verdicts: list[str | None] = settled["verdict"].to_list()
+    shared: dict[int, list[str]] = {}
+    if any(verdict is None for verdict in verdicts):
+        keys: set[str] = set()
+        held_by_ref: dict[str, list[Component]] = {}
+        _record(held_all, keys, held_by_ref)
+        for n, verdict in enumerate(verdicts):
+            if verdict is not None:
+                continue
+            component = incoming_all[n]
+            verdicts[n] = verdict = _verdict(component, keys, held_by_ref)
+            if verdict == _SHARED_REF and component.bom_ref is not None:
+                shared[n] = sorted(
+                    _describe(h) for h in held_by_ref[component.bom_ref.root]
+                )
+            if verdict != _REPEAT:
+                _note(component, keys, held_by_ref)
+    return [verdict for verdict in verdicts if verdict is not None], shared
 
 
 def _every_ref(*reports: CycloneDXReport) -> set[str]:
@@ -334,13 +468,15 @@ class _Walk:
 
     def __init__(
         self,
-        keys: set[str],
-        held_by_ref: dict[str, list[Component]],
+        verdicts: list[str],
+        shared: dict[int, list[str]],
         used_refs: set[str],
     ) -> None:
-        #: The keys already taken, and each ``bom-ref`` with the components holding it.
-        self.keys = keys
-        self.held_by_ref = held_by_ref
+        #: What to do with each component, in :func:`_walk` order, and for a
+        #: shared ``bom-ref`` the held packages that have it.
+        self.verdicts = verdicts
+        self.shared = shared
+        self.position = 0
         #: Every ref either SBOM uses, so a new one never collides.
         self.used_refs = used_refs
         #: The old ``bom-ref`` of each re-referenced component, and its new one.
@@ -361,7 +497,8 @@ class _Walk:
         the held SBOM lacks.
         """
         for component in components or []:
-            verdict = _verdict(component, self.keys, self.held_by_ref)
+            n, self.position = self.position, self.position + 1
+            verdict = self.verdicts[n]
             if verdict == _REPEAT:
                 self.take(component.components, kept)
                 continue
@@ -385,12 +522,10 @@ class _Walk:
                 ASH_LOGGER.debug(
                     f"SBOM merge: bom-ref {old!r} names more than one package "
                     f"({_describe(component)!r} and "
-                    f"{sorted(_describe(h) for h in self.held_by_ref[old])!r}); "
+                    f"{self.shared[n]!r}); "
                     f"keeping both, the first under {old!r} and the second under "
                     f"{new!r}"
                 )
-            # Under the key it came with, so a later copy of it here is a repeat.
-            _note(component, self.keys, self.held_by_ref)
             if component.components is not None:
                 nested: list[Component] = []
                 self.take(component.components, nested)
@@ -415,10 +550,8 @@ def merge_cyclonedx_reports(
     if sbom_is_empty(incoming):
         return held.model_copy(deep=True)
 
-    keys: set[str] = set()
-    held_by_ref: dict[str, list[Component]] = {}
-    _record(held.components or [], keys, held_by_ref)
-    walk = _Walk(keys, held_by_ref, _every_ref(held, incoming))
+    verdicts, shared = _verdicts(held.components, incoming.components)
+    walk = _Walk(verdicts, shared, _every_ref(held, incoming))
     added: list[Component] = []
     walk.take(incoming.components, added)
     _warn_re_referenced(walk.re_referenced)

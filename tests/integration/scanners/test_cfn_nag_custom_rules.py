@@ -168,6 +168,10 @@ def test_the_rules_do_not_raise_without_exception_isolation():
 # Fixture file -> for each rule, the logical resource ids it must report on that template,
 # no more and no fewer. Every set is the one the fixture's own description names.
 SHAPE_CASES = {
+    "eks_access_entry_and_opensearch_policy.yaml": {
+        STAR_ACCESS_POLICY: {"OpenSearchDomain"},
+        STAR_ACCESS_VERB: {"OpenSearchDomain"},
+    },
     "opensearch_policy_principal_forms.yaml": {
         STAR_ACCESS_POLICY: {
             "AwsListStar",
@@ -260,6 +264,7 @@ SHAPE_CASES = {
 # arity defect and for a Hash method called on a String come first; the class names cover
 # a raise of any other kind.
 RAISE_MARKERS = (
+    "no implicit conversion of",
     "undefined method",
     "wrong number of arguments",
     "NoMethodError",

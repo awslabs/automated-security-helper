@@ -21,6 +21,7 @@ from pydantic import (
 from typing import (
     Annotated,
     Any,
+    ClassVar,
     Callable,
     List,
     Dict,
@@ -79,6 +80,7 @@ from automated_security_helper.core.exceptions import ASHConfigUnsetVariableErro
 from automated_security_helper.core.enums import ExportFormat
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.models.core import (
+    AshExclusion,
     AshSuppression,
     IgnorePathWithReason,
     expiration_date_problem,
@@ -1285,6 +1287,8 @@ ALWAYS_DENIED_PATHS = (
     "/sandbox/**",
     "/ash_plugin_modules",
     "/ash_plugin_modules/**",
+    "/default_scanners",
+    "/default_scanners/**",
     "/scanners/detect-secrets/options/scan_settings/filters_used",
     "/scanners/detect-secrets/options/scan_settings/filters_used/**",
     "/scanners/detect-secrets/options/scan_settings/plugins_used",
@@ -1380,6 +1384,8 @@ class RuntimeOverridesConfig(RedactedSection):
         # Plugin modules are imported into ASH's own process, unsandboxed.
         "/ash_plugin_modules",
         "/ash_plugin_modules/**",
+        "/default_scanners",
+        "/default_scanners/**",
         # detect-secrets settings the trust checks count as the operator's: the
         # verification filter sends each candidate secret to the service that issued
         # it, plugins and filters named by file are imported, and a baseline file can
@@ -1389,9 +1395,10 @@ class RuntimeOverridesConfig(RedactedSection):
         "/scanners/detect-secrets/options/scan_settings/plugins_used",
         "/scanners/detect-secrets/options/scan_settings/plugins_used/**",
         "/scanners/detect-secrets/options/baseline_file",
-        # Suppressions and ignore paths can hide findings outright.
+        # Suppressions, ignore paths and exclusions can hide findings outright.
         "/global_settings/ignore_paths",
         "/global_settings/suppressions",
+        "/global_settings/exclusions",
         # The runtime-override policy itself: a client that could rewrite it
         # through patch_ops could then lift every other entry here.
         "/global_settings/mcp",
@@ -1904,6 +1911,81 @@ class AshMcpConfig(RedactedSection):
     ] = RuntimeOverridesConfig()
 
 
+class AshDeduplicationConfig(RedactedSection):
+    """Cross-scanner duplicate annotation (opt-in).
+
+    Findings that two scanners report for one defect are grouped into a
+    duplicate cluster (``utils/finding_clusters``). This section only chooses
+    whether the flat reports say so. Finding ids, SARIF results, metrics,
+    suppressions and baselines never change either way.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    annotate: Annotated[
+        bool,
+        Field(
+            description=(
+                "When true, the CSV and flat-JSON reports gain three columns that "
+                "name each finding's duplicate cluster: `cluster_id`, `duplicate_of` "
+                "(the primary finding's id, on every non-primary member) and "
+                "`duplicate_sources` (on the primary: the other members' scanner, "
+                "rule, id and severity). Rows and counts are unchanged. Off by "
+                "default because the columns change the CSV header. CLI: "
+                "`--annotate-duplicates` on `ash scan` and `ash report`."
+            )
+        ),
+    ] = False
+
+    fold: Annotated[
+        bool,
+        Field(
+            description=(
+                "When true, the HTML, Markdown and text reports show one row per "
+                "duplicate cluster (the primary finding, with a note naming the "
+                "other scanners that reported it) in their findings tables, "
+                "detailed findings, finding cards and hotspots, and add "
+                "deduplicated counts beside, never in place of, the per-scanner "
+                "counts. Only clusters of the same CVE and package, or the same "
+                "line and CWE, fold; IaC resource clusters are annotated only. "
+                "Finding ids, SARIF, per-scanner metrics, suppressions, "
+                "baselines, the CSV, flat-JSON and JUnit reports and the exit "
+                "code are unchanged. Off by default because it changes row "
+                "counts. CLI: `--fold-duplicates` on `ash scan` and `ash report`."
+            )
+        ),
+    ] = False
+
+
+class AshHistoryConfig(RedactedSection):
+    """Run history: a compact record of each completed scan, for ``ash trend``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: Annotated[
+        bool,
+        Field(
+            description=(
+                "Append a compact run record to '<output dir>/history/' after each "
+                "completed scan. Off by default: it adds files to the output "
+                "directory on every scan."
+            )
+        ),
+    ] = False
+
+    keep_runs: Annotated[
+        int,
+        Field(
+            ge=1,
+            le=10000,
+            description=(
+                "How many run records to keep when history is enabled; the oldest "
+                "are removed when a new one is written."
+            ),
+        ),
+    ] = 50
+
+
 class AshConfigGlobalSettingsSection(RedactedSection):
     # validate_default is here because `severity_threshold`'s default is derived
     # from an environment variable, and pydantic does not validate a default no
@@ -1947,12 +2029,40 @@ class AshConfigGlobalSettingsSection(RedactedSection):
         ),
     ] = []
 
+    exclusions: Annotated[
+        List[AshExclusion],
+        Field(
+            description=(
+                "Global list of rule+path exclusions. Each entry names a rule ID "
+                "(glob allowed), a path (matched like a suppression's), an "
+                "optional scanner and a required reason, and DROPS the matching "
+                "results from SARIF instead of keeping them marked suppressed: "
+                "for finding classes that are always benign in a known place, "
+                "such as bandit B101 under tests/."
+            )
+        ),
+    ] = []
+
     mcp: Annotated[
         AshMcpConfig,
         Field(
             description="MCP-server-specific configuration (runtime override allowlist, etc.)."
         ),
     ] = AshMcpConfig()
+
+    deduplication: Annotated[
+        AshDeduplicationConfig,
+        Field(
+            description="Cross-scanner duplicate annotation in the flat reports (opt-in; off by default)."
+        ),
+    ] = AshDeduplicationConfig()
+
+    history: Annotated[
+        AshHistoryConfig,
+        Field(
+            description="Run history recording (a compact record of each completed scan)."
+        ),
+    ] = AshHistoryConfig()
 
 
 # Distinguishes "caller did not pass cpu_count" from "caller passed None", which
@@ -2104,14 +2214,16 @@ class PrecommitModeConfig(RedactedSection):
     file, so a repository can state once what its hook runs instead of every
     committer spelling flags in ``.pre-commit-config.yaml``.
 
-    Precedence, lowest to highest (``run_ash_scan._selected_scanners`` applies
-    it): the mode default; then ``only_scanners`` (replaces the default) and
-    ``add_scanners`` (adds to it); then the command line, where
+    Precedence, lowest to highest (``SelectionLayers.fold`` in
+    ``core/scanner_selection.py`` applies it): the mode default; then the
+    operator's ``default_scanners`` section (read in every mode, see
+    ``DefaultScannersConfig``); then this section's ``only_scanners`` (replaces
+    what is below) and ``add_scanners`` (adds to it); then the command line, where
     ``--only-scanners`` replaces everything this section and the mode give, and
     ``--add-scanners`` (or the deprecated ``--scanners``) adds to it.
     ``--exclude-scanners`` applies after all of them: an excluded name wins over
-    any inclusion. Read only by ``--mode precommit``; other modes ignore this
-    section.
+    any inclusion. The ``precommit`` section is read only by ``--mode precommit``;
+    other modes ignore it (``default_scanners`` is not ignored there).
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -2157,6 +2269,67 @@ class PrecommitModeConfig(RedactedSection):
                 "set together: only_scanners already states the whole "
                 "selection. Put every name in only_scanners, or drop it and "
                 "keep add_scanners."
+            )
+        return self
+
+
+class DefaultScannersConfig(RedactedSection):
+    """The operator's default scanners (``default_scanners``).
+
+    ``only`` replaces the mode's default selection in every run mode; a mode
+    with no fixed default (such as local) then runs exactly these scanners.
+    ``add`` extends a mode whose default is a fixed set, which today is
+    precommit's five scanners, and has no effect in a mode whose default is
+    unbounded: it adds to nothing and cannot narrow anything. Empty or omitted
+    changes nothing, and naming a scanner does not install or enable it.
+
+    Read from the defaults, a config file outside every checkout, or
+    ``--config-overrides``; a file inside the scanned tree or a client's patch
+    cannot set it. Precedence, lowest to highest: the mode default, this
+    section, the ``precommit`` keys (read only in precommit mode), the command
+    line.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    unknown_keys_note: ClassVar[str] = (
+        "In a config file inside a git checkout or the scanned tree, or one an "
+        "MCP client delivered, the whole section is ignored instead, an unknown "
+        "key included, and `ash config lint` warns about it."
+    )
+
+    only: Annotated[
+        List[str],
+        Field(
+            description=(
+                "Run exactly these scanners instead of the mode's default "
+                "selection, in every run mode. The command line's "
+                "--only-scanners replaces this list; --add-scanners and the "
+                "deprecated --scanners add to it; --exclude-scanners removes "
+                "names from it. Cannot be set together with add."
+            )
+        ),
+    ] = []
+
+    add: Annotated[
+        List[str],
+        Field(
+            description=(
+                "Scanner names to run in addition to a mode whose default is a "
+                "fixed set, which today is precommit's. Has no effect in a mode "
+                "with an unbounded default, and does not narrow one. Cannot be "
+                "set together with only."
+            )
+        ),
+    ] = []
+
+    @model_validator(mode="after")
+    def _refuse_only_with_add(self) -> "DefaultScannersConfig":
+        if self.only and self.add:
+            raise ValueError(
+                "default_scanners.only and default_scanners.add cannot be set "
+                "together: only already states the whole selection. Put every "
+                "name in only, or drop it and keep add."
             )
         return self
 
@@ -2834,6 +3007,21 @@ class AshConfig(RedactedSection):
             ),
         ),
     ] = PrecommitModeConfig()
+
+    default_scanners: Annotated[
+        DefaultScannersConfig,
+        Field(
+            description=(
+                "The operator's default scanners, read in every run mode: only "
+                "replaces the mode's default selection, add extends a mode whose "
+                "default is a fixed set (today precommit's) and has no effect in "
+                "a mode with an unbounded default; setting both is refused. "
+                "Settable only from the defaults, a config file outside every "
+                "checkout or --config-overrides. The command line and the "
+                "precommit keys take precedence."
+            ),
+        ),
+    ] = DefaultScannersConfig()
 
     # `extends` and `patch` are read by the config loader (config/config_sources.py)
     # and removed before validation, so a loaded config always has both as None.

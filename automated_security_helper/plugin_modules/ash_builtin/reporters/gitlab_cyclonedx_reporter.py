@@ -13,11 +13,32 @@ uploaded as ``artifacts:reports:cyclonedx`` in GitLab CI.
 
 Reference:
   https://docs.gitlab.com/ee/development/sec/cyclonedx_property_taxonomy.html
+
+What is a frame and what is row-wise Python here
+------------------------------------------------
+The report-level source (the ecosystem, and the input file naming it) is a vote
+over the declared components: count the (package manager, language) pairs, take
+the winner; then count the input paths of the winner's components, take the
+winner. A vote is a group-by with a count and a stable sort, so
+:func:`_vote_frame` projects the voting components onto columns (``pm``,
+``lang``, ``path``) and :func:`_winner` answers each vote on the frame, ties
+going to the first-seen value as ``Counter.most_common`` did. A path goes into
+the frame through :func:`~automated_security_helper.utils.frame_text.wire`,
+since a location can hold a lone surrogate and polars strings are UTF-8.
+
+What stays row-wise Python, because it is not algebra over rows: reading a
+component's values out of its nested ``properties`` list and its PURL, deciding
+whether a location lies in a vendored tree (a walk over the path's directory
+names with a whole-inventory fallback), and writing each top-level component's
+GitLab properties back into the CycloneDX document. That last step is an edit of
+one JSON document in place, each component's properties a few string lookups
+with the operator's overrides applied; it has no key to group or join on.
 """
 
 import json
 from typing import Literal, Optional, TYPE_CHECKING
 
+import polars as pl
 from pydantic import Field
 from typing import Annotated
 
@@ -34,6 +55,8 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.cyclonedx_re
     conforming_bom,
 )
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
+from automated_security_helper.utils.frame_ops import ordered_counts, stable_top
+from automated_security_helper.utils.frame_text import unwire, wire
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
@@ -514,6 +537,58 @@ def _build_gitlab_properties_for_component(
     return props
 
 
+def _vote_frame(components: list[dict], with_paths: bool = False) -> pl.DataFrame:
+    """The declared components as one row each: ``pm``, ``lang`` and ``path``.
+
+    ``pm`` and ``lang`` are what :func:`_ecosystem_of` gives (null when no table
+    maps the component); ``path`` is the component's normalized input file, null
+    when it has none, and is read only when *with_paths* asks for it.
+    """
+    declared = _declared_components(components)
+    ecosystems = [_ecosystem_of(component) for component in declared]
+    columns = {
+        "pm": pl.Series("pm", [pm for pm, _ in ecosystems], dtype=pl.String),
+        "lang": pl.Series(
+            "lang", [lang or "" for _, lang in ecosystems], dtype=pl.String
+        ),
+    }
+    if with_paths:
+        columns["path"] = pl.Series(
+            "path",
+            [
+                wire(
+                    _normalize_input_file_path(
+                        _get_component_property(component, "syft:location:0:path")
+                    )
+                    or None
+                )
+                for component in declared
+            ],
+            dtype=pl.String,
+        )
+    return pl.DataFrame(columns)
+
+
+def _winner(frame: pl.DataFrame, columns: list[str]) -> tuple | None:
+    """The most common non-null combination of *columns*, or None.
+
+    Ties go to the combination seen first: the group-by keeps first-seen order
+    and the sort is stable, which is what ``Counter.most_common(1)`` gave.
+    """
+    counted = stable_top(
+        ordered_counts(
+            frame.filter(pl.all_horizontal(pl.col(c).is_not_null() for c in columns)),
+            columns,
+        ),
+        "n",
+        1,
+        descending=True,
+    )
+    if counted.height == 0:
+        return None
+    return counted.row(0)[: len(columns)]
+
+
 # ---------------------------------------------------------------------------
 # Reporter
 # ---------------------------------------------------------------------------
@@ -572,18 +647,10 @@ class GitLabCycloneDXReporter(ReporterPluginBase[GitLabCycloneDXReporterConfig])
             if override_type is not None:
                 return override_type
 
-        from collections import Counter
-
-        pairs: Counter[tuple[str, str]] = Counter()
-        for component in _declared_components(components):
-            pm, lang = _ecosystem_of(component)
-            if pm is not None:
-                pairs[(pm, lang or "")] += 1
-
-        if not pairs:
+        winner = _winner(_vote_frame(components), ["pm", "lang"])
+        if winner is None:
             return None
-        pm, _ = pairs.most_common(1)[0][0]
-        return _type_key_for_manager(pm)
+        return _type_key_for_manager(winner[0])
 
     def _dominant_input_file(
         self, components: list[dict], dominant_type: str | None = None
@@ -603,29 +670,17 @@ class GitLabCycloneDXReporter(ReporterPluginBase[GitLabCycloneDXReporterConfig])
 
         *components* is the flat list :func:`_walk_components` returns.
         """
-        from collections import Counter
-
         dominant_pm = None
         if dominant_type in PURL_TYPE_TO_GITLAB:
             dominant_pm = PURL_TYPE_TO_GITLAB[dominant_type][0]
         elif dominant_type in SYFT_TYPE_TO_GITLAB:
             dominant_pm = SYFT_TYPE_TO_GITLAB[dominant_type][0]
 
-        declared = _declared_components(components)
+        voters = _vote_frame(components, with_paths=True)
         if dominant_pm is not None:
-            voters = [c for c in declared if _ecosystem_of(c)[0] == dominant_pm]
-        else:
-            voters = declared
-
-        files: Counter[str] = Counter()
-        for component in voters:
-            raw_path = _get_component_property(component, "syft:location:0:path")
-            normalized = _normalize_input_file_path(raw_path)
-            if normalized:
-                files[normalized] += 1
-        if files:
-            return files.most_common(1)[0][0]
-        return None
+            voters = voters.filter(pl.col("pm") == dominant_pm)
+        winner = _winner(voters, ["path"])
+        return None if winner is None else unwire(winner[0])
 
     def _build_minimal_empty_sbom(
         self,

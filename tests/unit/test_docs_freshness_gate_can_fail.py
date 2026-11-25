@@ -86,6 +86,7 @@ def _own_repository(root: Path) -> Path:
 NON_VACUITY_COVERAGE = {
     "Reporter list in docs matches code": "test_reporter_check_can_fail_in_both_directions",
     "Scanner list in docs matches code": "test_scanner_check_can_fail",
+    "Scanner facets reference lists the scanners ASH ships": "test_scanner_facets_check_can_fail",
     "Plugin data behind the home page graphics matches code": "test_plugin_data_check_can_fail",
     "MCP tool names in docs match code": "test_mcp_tool_check_can_fail",
     "Version consistency": "test_version_check_can_fail",
@@ -446,6 +447,26 @@ def test_scanner_check_can_fail(gate, tmp_path, monkeypatch):
         return gate.check_scanners()
 
     assert publish(names) == [], "the complete scanner table was rejected"
+    assert publish(names[1:]), "a scanner missing from the table was accepted"
+    assert publish(names + ["gosec"]), "a row naming a nonexistent scanner was accepted"
+
+
+@pytest.mark.unit
+def test_scanner_facets_check_can_fail(gate, tmp_path, monkeypatch):
+    names = sorted(gate.scanner_names())
+    doc = tmp_path / "scanner-facets.md"
+
+    def publish(rows):
+        lines = [
+            "| Scanner | Mapped | Mappable, dropped | Not applicable |",
+            "|---------|--------|-------------------|----------------|",
+        ]
+        lines += [f"| [`{r}`](#{r}) | 1 | 2 | 17 |" for r in rows]
+        doc.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        monkeypatch.setattr(gate, "SCANNER_FACETS_REFERENCE_MD", doc)
+        return gate.check_scanner_facets_page()
+
+    assert publish(names) == [], "the complete facets summary table was rejected"
     assert publish(names[1:]), "a scanner missing from the table was accepted"
     assert publish(names + ["gosec"]), "a row naming a nonexistent scanner was accepted"
 
@@ -1081,6 +1102,10 @@ def test_the_md_corpus_includes_the_templates_docs_are_generated_from(gate):
 GATE_WIRING = {
     "Reporter list in docs matches code": ("gate", "check_reporters"),
     "Scanner list in docs matches code": ("gate", "check_scanners"),
+    "Scanner facets reference lists the scanners ASH ships": (
+        "gate",
+        "check_scanner_facets_page",
+    ),
     "Plugin data behind the home page graphics matches code": (
         "gate",
         "check_plugin_data",
@@ -1233,13 +1258,23 @@ def _wire(gate, monkeypatch, tmp_path, planted_label=None, raises=False):
     return planted_line, calls, expected_args
 
 
+# The three wiring tests below run the gate with --serial. They assert HOW main()
+# invokes each check -- once, in this process, with the gate's corpus and root --
+# through a spy dict the stubs append to, and the default mode runs the checks in
+# forked workers, where the stubs run but their appends never reach this process's
+# dict. The wiring they pin is the registry's, identical in both modes; that the
+# parallel mode reports the same labels, findings and exit codes as --serial is
+# pinned on the real tree and on synthetic registries by
+# tests/unit/test_verify_docs_freshness_parallel.py.
+
+
 @pytest.mark.unit
 def test_the_gate_passes_when_every_check_is_silent(
     gate, monkeypatch, tmp_path, capsys
 ):
     """Control: with nothing to report, every label passes and the gate exits 0."""
     _planted, calls, expected_args = _wire(gate, monkeypatch, tmp_path)
-    assert gate.main([]) == 0
+    assert gate.main(["--serial"]) == 0
     output = capsys.readouterr().out
     report = _gate_report(output)
     registered = _registered_check_names()
@@ -1260,7 +1295,9 @@ def test_a_finding_fails_the_gate_under_its_own_label(
     layer, name = GATE_WIRING[label]
     planted_line, calls, expected_args = _wire(gate, monkeypatch, tmp_path, label)
 
-    assert gate.main([]) == 1, f"a finding from {layer}.{name} did not fail the gate"
+    assert gate.main(["--serial"]) == 1, (
+        f"a finding from {layer}.{name} did not fail the gate"
+    )
     output = capsys.readouterr().out
     report = _gate_report(output)
     assert report.get(label) == ("FAIL", [planted_line]), (
@@ -1298,7 +1335,7 @@ def test_a_check_that_raises_fails_the_gate_under_its_own_label(
         gate, monkeypatch, tmp_path, label, raises=True
     )
 
-    assert gate.main([]) == 2, (
+    assert gate.main(["--serial"]) == 2, (
         f"{layer}.{name} raising did not fail the gate as not run"
     )
     output = capsys.readouterr().out

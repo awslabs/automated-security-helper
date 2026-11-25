@@ -1461,7 +1461,9 @@ def _default_entries(reads: list[EnvRead], cli: list, config: list) -> list[str]
 
 
 def default_entries(
-    repo_root: Optional[Path] = None, with_cli: bool = True
+    repo_root: Optional[Path] = None,
+    with_cli: bool = True,
+    scan: Optional[EnvScan] = None,
 ) -> dict[str, list[str]]:
     """Every variable's Default column entries, as the page renders them.
 
@@ -1469,8 +1471,15 @@ def default_entries(
     column with what the code gives. With ``with_cli`` the CLI options and config
     keys a variable is the default of are imported and read; without it only the
     reads themselves are.
+
+    ``scan`` is an EnvScan already collected over the same tree; a caller that holds
+    one (docs_checks.load_env_read_set does) passes it so the package is not
+    AST-walked a second time. That second walk was over half of the env-vars docs
+    check's time: read_env_names swept the tree once for the read set, and this
+    function swept it again for the defaults.
     """
-    scan = collect_env_reads(Path(repo_root or REPO_ROOT).resolve())
+    if scan is None:
+        scan = collect_env_reads(Path(repo_root or REPO_ROOT).resolve())
     cli = _cli_envvars() if with_cli else {}
     config = _config_env_sources() if with_cli else {}
     by_name: dict[str, list[EnvRead]] = {}

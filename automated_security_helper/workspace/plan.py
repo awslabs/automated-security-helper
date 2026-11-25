@@ -364,6 +364,7 @@ class ProjectPlan(BaseModel):
     #: leave it out, the MCP resolve tool dumps every entry, and model_copy
     #: keeps it.
     _environment_values: Tuple[str, ...] = PrivateAttr(default=())
+    _config_source_is_operator_fallback: bool = PrivateAttr(default=False)
 
     @model_validator(mode="after")
     def _a_skipped_project_states_why(self) -> "ProjectPlan":
@@ -467,6 +468,17 @@ class WorkspacePlan(BaseModel):
             ),
         ),
     ] = False
+    required_scanners: Annotated[
+        List[str],
+        Field(
+            default_factory=list,
+            description=(
+                "Every scanner the workspace policy requires, whether or not a "
+                "project already runs it. A configured default_scanners keeps "
+                "all of them, so each project runs the same selected set."
+            ),
+        ),
+    ]
     workspace_config_source: Annotated[
         Optional[str],
         Field(

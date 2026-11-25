@@ -54,6 +54,12 @@ from automated_security_helper.config.secret_verification_trust import (
 )
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.uv_tool_mixin import guarded_values_read
+from automated_security_helper.base import scanner_operational_facets as opsf
+from automated_security_helper.base.scanner_facets import (
+    FacetDecl,
+    FacetState,
+    ScannerFacets,
+)
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
@@ -351,6 +357,204 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
     resolves_tool_off_path: ClassVar[bool] = True
 
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
+
+    #: The facets register row (base/scanner_facets.py). Declaration only: no
+    #: behavior changes. detect-secrets has no JSON output to map -- the
+    #: adapter rebuilds PotentialSecret objects from the in-process worker and
+    #: builds the SARIF Result itself -- so the native fields below name those
+    #: objects' attributes. ``secret_hash`` is deliberately never mapped: it is
+    #: sensitive baseline-join state and must not enter a report.
+    facets: ClassVar[ScannerFacets] = ScannerFacets(
+        rule_id=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="PotentialSecret.type (written as ruleId SECRET-<TYPE>)",
+        ),
+        severity=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="(no native severity) constant Level.error set by the "
+            "adapter on every result",
+        ),
+        file_path=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="PotentialSecret.filename (the worker's file key)",
+        ),
+        line_range=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="PotentialSecret.line_number",
+        ),
+        column=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="the secret's start column computed by the worker "
+            "from the scanned file (_secret_columns)",
+        ),
+        message=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="synthesized by the adapter from PotentialSecret.type, "
+            "filename and line_number; value-free",
+        ),
+        resource_id=FacetDecl(
+            state=FacetState.NA,
+            reason="secret findings name a file location, not a deployable "
+            "resource; the secret hash is baseline-join state and is never "
+            "a resource id",
+        ),
+        resource_type=FacetDecl(
+            state=FacetState.NA,
+            reason="secret findings name a file location, not a deployable resource",
+        ),
+        package_name=FacetDecl(
+            state=FacetState.NA,
+            reason="secret findings carry no package",
+        ),
+        package_version=FacetDecl(
+            state=FacetState.NA,
+            reason="secret findings carry no package",
+        ),
+        package_path=FacetDecl(
+            state=FacetState.NA,
+            reason="secret findings carry no package",
+        ),
+        taxonomy_cve=FacetDecl(
+            state=FacetState.NA,
+            reason="secret findings carry no CVE taxonomy",
+        ),
+        taxonomy_cwe=FacetDecl(
+            state=FacetState.NA,
+            reason="detect-secrets plugin types carry no CWE taxonomy",
+        ),
+        fingerprints=FacetDecl(
+            state=FacetState.NA,
+            reason="deliberate policy, not a gap: PotentialSecret.secret_hash "
+            "is sensitive baseline-join state and never enters the SARIF",
+        ),
+        fix_available=FacetDecl(
+            state=FacetState.NA,
+            reason="secret findings carry no fix state",
+        ),
+        remediation_text=FacetDecl(
+            state=FacetState.NA,
+            reason="PotentialSecret carries no remediation text",
+        ),
+        snippet=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="placeholder 'Secret of type <type> detected' written "
+            "to Region.snippet; the secret value never enters the report",
+        ),
+        references=FacetDecl(
+            state=FacetState.NA,
+            reason="PotentialSecret carries no reference URLs",
+        ),
+        tags=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="adapter-written PropertyBag tags (detect-secrets, "
+            "secret, security, tool_name, tool_type)",
+        ),
+        extras=FacetDecl(
+            state=FacetState.NA,
+            reason="the result property bag carries the tags only",
+        ),
+    )
+
+    #: The operational register row (base/scanner_operational_facets.py),
+    #: checked against the production declarations it mirrors by
+    #: tests/unit/plugin_modules/test_scanner_operational_facets_consistency.py.
+    operational_facets: ClassVar[opsf.ScannerOperationalFacets] = (
+        opsf.ScannerOperationalFacets(
+            scanner_name="detect-secrets",
+            network=opsf.NetworkFacet(
+                fetch_kind=opsf.FetchKind.CONTENT_FETCH,
+                fetches=(opsf.Fetched.ISSUER_VERIFICATION,),
+                prefetch=(),
+                offline_outcome=opsf.OfflineOutcome.DEGRADED,
+                offline_reason=(
+                    "verification reads as unverified: more findings are reported and "
+                    "none are dropped; a declared degradation, not a skip"
+                ),
+                offline_strategy=OfflineStrategy.BUNDLED,
+                sandbox_network=opsf.SandboxNetwork.VERIFYING,
+                source=(
+                    "detect_secrets_scanner.py sandbox_requirements (a property: "
+                    "network follows the baseline's verification filter, "
+                    "network_requires_grant is always True)"
+                ),
+            ),
+            output=opsf.OutputFacet(
+                native_formats=(opsf.OutputFormat.PYTHON_API,),
+                side_reports=(),
+                non_finding_artifacts=(),
+                consumed_by_deviation="no results file exists; Results are built in-process",
+            ),
+            targets=opsf.TargetsFacet(
+                kinds=(opsf.TargetKind.SECRETS_CONTENTS,),
+                tool_type=ScannerToolType.SECRETS,
+                selection="an in-process worker over every text file of the scan set; git history is not read",
+            ),
+            runtime=opsf.RuntimeFacet(
+                kind=opsf.RuntimeKind.IN_PROCESS,
+                external_programs=(),
+                invocations=opsf.Invocations.ONE,
+                python_only=True,
+                use_uv_tool=False,
+            ),
+            platforms=opsf.PlatformsFacet(
+                provisionable=(),
+                note="a pinned Python dependency imported in-process; platform support is the package's and was not read here",
+            ),
+            severity=opsf.SeverityFacet(
+                severity_class=opsf.SeverityClass.CONSTANT,
+                note="every finding is error",
+            ),
+            silencing=opsf.SilencingFacet(
+                tool_side=(
+                    opsf.SilencingLayer(
+                        layer=opsf.SilencingLayerKind.TOOL_DEFAULT_FILTER,
+                        writer=opsf.SilencingWriter.TOOL_DEFAULT,
+                        honored=opsf.Honored.YES,
+                        surface="the verification filter, when enabled, drops issuer-rejected candidates",
+                        cite="detect_secrets_scanner.py sandbox_requirements and the verification note",
+                    ),
+                    opsf.SilencingLayer(
+                        layer=opsf.SilencingLayerKind.IGNORE_FILE,
+                        writer=opsf.SilencingWriter.REPOSITORY,
+                        honored=opsf.Honored.UNCONFIRMED,
+                        surface="the baseline file's trust, echo and suppression joins",
+                        cite="detect_secrets_scanner.py IS_BASELINE_FILE_FILTER; the baseline is read once at configuration",
+                        reason=(
+                            "the baseline is trust-gated, but whether a repository-written "
+                            "baseline silences findings was not re-read here"
+                        ),
+                    ),
+                ),
+            ),
+            identity=opsf.IdentityFacet(
+                fingerprint_class=opsf.FingerprintClass.DROPPED_BY_POLICY,
+                note="the secret hash is baseline-join state that deliberately never enters the SARIF",
+            ),
+            extensibility=opsf.ExtensibilityFacet(
+                custom_rules=opsf.CustomRules.NONE,
+                env_prefixes=(),
+                options_surface="the baseline and scan settings; no rules path",
+            ),
+            exit_codes=opsf.ExitCodesFacet(
+                success_exit_codes=(0, 1),
+                semantics="the base default {0, 1}; the scan is in-process, so there is no tool exit",
+            ),
+            provenance=opsf.ProvenanceFacet(
+                tier=opsf.Tier.BUILTIN_DEFAULT,
+                source=opsf.ProvenanceSource.PYPI_PINNED_DEPENDENCY,
+                selection_surfaces=("verification (baseline-driven)",),
+                upstream_license=(
+                    "Apache-2.0 (source: the detect-secrets row of the 2026-11-24 "
+                    "scanner license check, a live GitHub license read; not pinned to the version in "
+                    "uv.lock and not in THIRD_PARTY_LICENSES)"
+                ),
+            ),
+            prerequisites=opsf.PrerequisitesFacet(
+                kinds=(opsf.Prerequisite.NONE,),
+                note="a baseline file is an optional input that changes trust and suppression behavior",
+            ),
+        )
+    )
 
     # The baseline as parsed when the scanner was configured, read once from its
     # checked path. The scan uses this copy and never reopens the file, so a path
@@ -2362,6 +2566,66 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                     )
         return collection
 
+    @staticmethod
+    def build_secret_result(
+        *,
+        finding_type: str,
+        uri: str,
+        line_number: int,
+        start_column: Optional[int] = None,
+        suppressions: Optional[List[Any]] = None,
+        config_name: str = "detect-secrets",
+        tool_type: str = "SECRETS",
+    ) -> Result:
+        """One SARIF result for one detect-secrets finding, value-free.
+
+        The result-shaped half of :meth:`scan`'s reporting loop, separated so
+        conformance tests can drive it over a committed worker-output capture
+        (``PotentialSecret.json()`` dicts, hashed only) without a scanner
+        instance, the way ``CfnGuardScanner.normalize_results`` is driven.
+        Pure: no library scan runs and nothing outside the arguments is read.
+        The message and snippet are synthesized from the finding's type and
+        place; the secret value never enters the report.
+        """
+        rule_id = re.sub(pattern=r"\W+", repl="-", string=finding_type).upper()
+        return Result(
+            ruleId=f"SECRET-{rule_id}",
+            suppressions=suppressions,
+            properties=PropertyBag(
+                tags=[
+                    "detect-secrets",
+                    "secret",
+                    "security",
+                    f"tool_name::{config_name}",
+                    f"tool_type::{tool_type}",
+                ],
+            ),
+            level=Level.error,
+            kind=Kind.fail,
+            message=Message(
+                text=f"Secret of type '{finding_type}' detected in file "
+                f"'{uri}' at line {line_number}"
+            ),
+            locations=[
+                Location(
+                    id=1,
+                    physicalLocation=PhysicalLocation(
+                        artifactLocation=ArtifactLocation(
+                            uri=uri,
+                        ),
+                        region=Region(
+                            startLine=line_number,
+                            endLine=line_number,
+                            startColumn=start_column,
+                            snippet=ArtifactContent(
+                                text=f"Secret of type {finding_type} detected"
+                            ),
+                        ),
+                    ),
+                )
+            ],
+        )
+
     def _finding_uri(self, key: str, scan_root: Path) -> str:
         """The URI of the file detect-secrets keyed as *key*, relative to the source.
 
@@ -3232,61 +3496,30 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                     suppressed = is_known and not is_real
                     if suppressed:
                         kept_known += 1
-                    rule_id = re.sub(
-                        pattern=r"\W+", repl="-", string=finding.type
-                    ).upper()
                     results.append(
-                        Result(
-                            # Adjust as needed to capture findings from scanner as
-                            # SARIF Result objects. Reference the current CDK Nag
-                            # Scanner/Wrapper for examples on custom SARIF structure.
-                            ruleId=f"SECRET-{rule_id}",
+                        self.build_secret_result(
+                            finding_type=finding.type,
+                            uri=uri,
+                            line_number=finding.line_number,
+                            # Where the secret starts, so two of one type on one
+                            # line are two findings; see _scan_in_worker.
+                            start_column=self._secret_columns.get(
+                                (filename, finding.secret_hash, finding.type)
+                            ),
                             suppressions=(
                                 [baseline_suppression]
                                 if suppressed and baseline_suppression is not None
                                 else None
                             ),
-                            properties=PropertyBag(
-                                tags=[
-                                    "detect-secrets",
-                                    "secret",
-                                    "security",
-                                    f"tool_name::{self.config.name}",
-                                    f"tool_type::{self.tool_type or 'UNKNOWN'}",
-                                ],
+                            config_name=self.config.name,
+                            # The enum's value, not str(): str() of a (str, Enum)
+                            # reads "ScannerToolType.SECRETS" on every Python,
+                            # where the f-string this replaced gave the bare
+                            # value on 3.10 and 3.11 (the project supports 3.10).
+                            tool_type=str(
+                                getattr(self.tool_type, "value", self.tool_type)
+                                or "UNKNOWN"
                             ),
-                            level=Level.error,
-                            kind=Kind.fail,
-                            message=Message(
-                                text=f"Secret of type '{finding.type}' detected in file '{uri}' at line {finding.line_number}"
-                            ),
-                            locations=[
-                                Location(
-                                    id=1,
-                                    physicalLocation=PhysicalLocation(
-                                        artifactLocation=ArtifactLocation(
-                                            uri=uri,
-                                        ),
-                                        region=Region(
-                                            startLine=finding.line_number,
-                                            endLine=finding.line_number,
-                                            # Where the secret starts, so two of
-                                            # one type on one line are two
-                                            # findings; see _scan_in_worker.
-                                            startColumn=self._secret_columns.get(
-                                                (
-                                                    filename,
-                                                    finding.secret_hash,
-                                                    finding.type,
-                                                )
-                                            ),
-                                            snippet=ArtifactContent(
-                                                text=f"Secret of type {finding.type} detected"
-                                            ),
-                                        ),
-                                    ),
-                                )
-                            ],
                         )
                     )
             if kept_known:

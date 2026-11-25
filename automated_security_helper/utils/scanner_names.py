@@ -144,7 +144,7 @@ SCANNER_TOOL_TYPES: Mapping[str, str] = {
     "snyk-code": "SAST",
     "syft": "SBOM",
     "trivy": "SCA",
-    "trivy-repo": "SAST",
+    "trivy-repo": "SCA",
     "trufflehog": "SECRETS",
     "zizmor": "SAST",
 }

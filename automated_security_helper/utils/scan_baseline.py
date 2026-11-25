@@ -138,6 +138,10 @@ def apply_baseline(
         ),
         current,
     )
+    # Row-wise on purpose: each pair is decided by a chain of early exits, and the
+    # threshold lookup in ``actionable`` goes through a scanner-statistics
+    # callback that must run only for pairs that reach it. Evaluating the
+    # predicates as frame columns would call it for every pair.
     removed = set()
     moved = set()
     for pairs, without_lines in ((match.exact, False), (match.moved, True)):

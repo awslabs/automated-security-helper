@@ -3,7 +3,7 @@
 #checkov:skip=CKV_DOCKER_8:Same as CKV_DOCKER_3 — root is intentional for scanner tool execution
 ARG BASE_IMAGE=public.ecr.aws/docker/library/python:3.12-slim-bookworm
 # Change this in the same commit as the tag above. Why, and how to get the value: below.
-ARG BASE_IMAGE_DIGEST=sha256:935c3c5b12357a7e10caa9c1e6ca5692344d97cf229832ef584be2cec9fc03df
+ARG BASE_IMAGE_DIGEST=sha256:44cf1793efa7c7a476bb0f2cff81443f4a072c90c1cb127e2924933daa3e8c64
 
 # BASE_IMAGE_DIGEST
 #
@@ -58,12 +58,12 @@ ENV PYTHONDONTWRITEBYTECODE=1
 # version per suite, so a point release or security update retires a pin and the
 # build fails with "Version '...' for '...' was not found"; take the new version
 # from `apt-cache policy <package>` in the base image. nodejs pins come from the
-# NodeSource repository, which keeps its old releases.
+# NodeSource, which keeps old releases. ca-certificates is a glob (20*deb12u*): it rotted.
 RUN apt-get clean && \
     apt-get update && \
     apt-get upgrade -y && \
     apt-get install -y --no-install-recommends \
-    ca-certificates=20250419~deb12u2 \
+    ca-certificates=20*deb12u* \
     python3-venv=3.11.2-1+b1 \
     git=1:2.39.5-0+deb12u3 \
     tree=2.1.0-1 \
@@ -285,7 +285,7 @@ RUN echo "Upgrading OS packages for BUILD_DATE_EPOCH=${BUILD_DATE_EPOCH}" && \
     apt-get update && \
     apt-get upgrade -y && \
     apt-get install -y --no-install-recommends \
-    ca-certificates=20250419~deb12u2 \
+    ca-certificates=20*deb12u* \
     curl=7.88.1-10+deb12u15 \
     git=1:2.39.5-0+deb12u3 \
     gnupg=2.2.40-1.1+deb12u2 \

@@ -1,0 +1,2313 @@
+{
+ "all_legacy": {
+  "vulnerabilities": [
+   {
+    "id": "c1d370d9-2006-4ed8-8a42-2adaffafb8ce",
+    "identifiers": [
+     {
+      "type": "bandit-rule",
+      "name": "bandit Rule B101",
+      "value": "B101"
+     },
+     {
+      "type": "ash-finding-id",
+      "name": "ASH Finding ID",
+      "value": "c1d370d9-2006-4ed8-8a42-2adaffafb8ce"
+     }
+    ],
+    "location": {
+     "file": "app/a.py",
+     "start_line": 3
+    },
+    "description": "B101 at 3",
+    "raw_source_code_extract": "B101 at 3",
+    "details": {
+     "scanner": {
+      "name": "Scanner",
+      "type": "text",
+      "value": "bandit"
+     },
+     "rule_id": {
+      "name": "Rule ID",
+      "type": "text",
+      "value": "B101"
+     },
+     "properties": {
+      "name": "Properties",
+      "type": "text",
+      "value": "{\n  \"scanner_name\": \"bandit\"\n}"
+     },
+     "raw_data": {
+      "name": "Raw Data",
+      "type": "code",
+      "value": "{\"ruleId\":\"B101\",\"level\":\"warning\",\"message\":{\"text\":\"B101 at 3\"},\"locations\":[{\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"app/a.py\"},\"region\":{\"startLine\":3}}}],\"properties\":{\"scanner_name\":\"bandit\"}}",
+      "lang": "json"
+     },
+     "detected_at": {
+      "name": "Detected At",
+      "type": "text",
+      "value": "2026-01-02T03:04:05+00:00"
+     },
+     "location_details": {
+      "name": "Location Details",
+      "type": "text",
+      "value": "Line 3"
+     }
+    },
+    "name": "B101",
+    "severity": "Medium"
+   },
+   {
+    "id": "1676cc36-643a-4012-8d61-121f7124e48c",
+    "identifiers": [
+     {
+      "type": "bandit-rule",
+      "name": "bandit Rule B101",
+      "value": "B101"
+     },
+     {
+      "type": "ash-finding-id",
+      "name": "ASH Finding ID",
+      "value": "1676cc36-643a-4012-8d61-121f7124e48c"
+     }
+    ],
+    "location": {
+     "file": "app/a.py",
+     "start_line": 3
+    },
+    "description": "B101 at 3",
+    "raw_source_code_extract": "B101 at 3",
+    "details": {
+     "scanner": {
+      "name": "Scanner",
+      "type": "text",
+      "value": "bandit"
+     },
+     "rule_id": {
+      "name": "Rule ID",
+      "type": "text",
+      "value": "B101"
+     },
+     "properties": {
+      "name": "Properties",
+      "type": "text",
+      "value": "{\n  \"scanner_name\": \"bandit\"\n}"
+     },
+     "raw_data": {
+      "name": "Raw Data",
+      "type": "code",
+      "value": "{\"ruleId\":\"B101\",\"level\":\"warning\",\"message\":{\"text\":\"B101 at 3\"},\"locations\":[{\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"app/a.py\"},\"region\":{\"startLine\":3}}}],\"properties\":{\"scanner_name\":\"bandit\"}}",
+      "lang": "json"
+     },
+     "detected_at": {
+      "name": "Detected At",
+      "type": "text",
+      "value": "2026-01-02T03:04:05+00:00"
+     },
+     "location_details": {
+      "name": "Location Details",
+      "type": "text",
+      "value": "Line 3"
+     }
+    },
+    "name": "B101",
+    "severity": "Medium"
+   },
+   {
+    "id": "95014826-6ab8-4468-884b-57d674e6bba9",
+    "identifiers": [
+     {
+      "type": "bandit-rule",
+      "name": "bandit Rule B101",
+      "value": "B101"
+     },
+     {
+      "type": "ash-finding-id",
+      "name": "ASH Finding ID",
+      "value": "95014826-6ab8-4468-884b-57d674e6bba9"
+     }
+    ],
+    "location": {
+     "file": "app/a.py",
+     "start_line": 3
+    },
+    "description": "B101 at 3",
+    "raw_source_code_extract": "B101 at 3",
+    "details": {
+     "scanner": {
+      "name": "Scanner",
+      "type": "text",
+      "value": "bandit"
+     },
+     "rule_id": {
+      "name": "Rule ID",
+      "type": "text",
+      "value": "B101"
+     },
+     "properties": {
+      "name": "Properties",
+      "type": "text",
+      "value": "{\n  \"scanner_name\": \"bandit\"\n}"
+     },
+     "raw_data": {
+      "name": "Raw Data",
+      "type": "code",
+      "value": "{\"ruleId\":\"B101\",\"level\":\"warning\",\"message\":{\"text\":\"B101 at 3\"},\"locations\":[{\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"app/a.py\"},\"region\":{\"startLine\":3}}}],\"suppressions\":[{\"kind\":\"inSource\",\"justification\":\"assert is fine here\"}],\"properties\":{\"scanner_name\":\"bandit\"}}",
+      "lang": "json"
+     },
+     "detected_at": {
+      "name": "Detected At",
+      "type": "text",
+      "value": "2026-01-02T03:04:05+00:00"
+     },
+     "location_details": {
+      "name": "Location Details",
+      "type": "text",
+      "value": "Line 3"
+     }
+    },
+    "name": "B101",
+    "severity": "Info",
+    "solution": "This finding was suppressed by ASH: assert is fine here. You can dismiss this vulnerability in the GitLab Security Dashboard."
+   },
+   {
+    "id": "0a25f4c3-5ec3-4624-b99e-f93fd7ccddec",
+    "identifiers": [
+     {
+      "type": "bandit-rule",
+      "name": "bandit Rule B101",
+      "value": "B101"
+     },
+     {
+      "type": "ash-finding-id",
+      "name": "ASH Finding ID",
+      "value": "0a25f4c3-5ec3-4624-b99e-f93fd7ccddec"
+     }
+    ],
+    "location": {
+     "file": "app/a.py",
+     "start_line": 3
+    },
+    "description": "B101 at 3",
+    "raw_source_code_extract": "B101 at 3",
+    "details": {
+     "scanner": {
+      "name": "Scanner",
+      "type": "text",
+      "value": "bandit"
+     },
+     "rule_id": {
+      "name": "Rule ID",
+      "type": "text",
+      "value": "B101"
+     },
+     "properties": {
+      "name": "Properties",
+      "type": "text",
+      "value": "{\n  \"scanner_name\": \"bandit\",\n  \"issue_severity\": \"high\"\n}"
+     },
+     "raw_data": {
+      "name": "Raw Data",
+      "type": "code",
+      "value": "{\"ruleId\":\"B101\",\"level\":\"warning\",\"message\":{\"text\":\"B101 at 3\"},\"locations\":[{\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"app/a.py\"},\"region\":{\"startLine\":3}}}],\"properties\":{\"scanner_name\":\"bandit\",\"issue_severity\":\"high\"}}",
+      "lang": "json"
+     },
+     "detected_at": {
+      "name": "Detected At",
+      "type": "text",
+      "value": "2026-01-02T03:04:05+00:00"
+     },
+     "location_details": {
+      "name": "Location Details",
+      "type": "text",
+      "value": "Line 3"
+     }
+    },
+    "name": "B101",
+    "severity": "High"
+   },
+   {
+    "id": "f23b32ad-ca42-4255-8545-35aaf923d833",
+    "identifiers": [
+     {
+      "type": "bandit-rule",
+      "name": "bandit Rule B102",
+      "value": "B102"
+     },
+     {
+      "type": "ash-finding-id",
+      "name": "ASH Finding ID",
+      "value": "f23b32ad-ca42-4255-8545-35aaf923d833"
+     }
+    ],
+    "location": {
+     "file": "app/b.py",
+     "start_line": 9
+    },
+    "description": "B102 at 9",
+    "raw_source_code_extract": "B102 at 9",
+    "details": {
+     "scanner": {
+      "name": "Scanner",
+      "type": "text",
+      "value": "bandit"
+     },
+     "rule_id": {
+      "name": "Rule ID",
+      "type": "text",
+      "value": "B102"
+     },
+     "properties": {
+      "name": "Properties",
+      "type": "text",
+      "value": "{\n  \"scanner_name\": \"bandit\"\n}"
+     },
+     "raw_data": {
+      "name": "Raw Data",
+      "type": "code",
+      "value": "{\"ruleId\":\"B102\",\"level\":\"error\",\"message\":{\"text\":\"B102 at 9\"},\"locations\":[{\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"app/b.py\"},\"region\":{\"startLine\":9}}}],\"properties\":{\"scanner_name\":\"bandit\"}}",
+      "lang": "json"
+     },
+     "detected_at": {
+      "name": "Detected At",
+      "type": "text",
+      "value": "2026-01-02T03:04:05+00:00"
+     },
+     "location_details": {
+      "name": "Location Details",
+      "type": "text",
+      "value": "Line 9"
+     }
+    },
+    "name": "B102",
+    "severity": "Critical"
+   },
+   {
+    "id": "2a8680ab-94e9-4100-b448-ad9b57424a1b",
+    "identifiers": [
+     {
+      "type": "bandit-rule",
+      "name": "bandit Rule B102",
+      "value": "B102"
+     },
+     {
+      "type": "ash-finding-id",
+      "name": "ASH Finding ID",
+      "value": "2a8680ab-94e9-4100-b448-ad9b57424a1b"
+     }
+    ],
+    "location": {
+     "file": "app/b.py",
+     "start_line": 9
+    },
+    "description": "B102 at 9",
+    "raw_source_code_extract": "B102 at 9",
+    "details": {
+     "scanner": {
+      "name": "Scanner",
+      "type": "text",
+      "value": "bandit"
+     },
+     "rule_id": {
+      "name": "Rule ID",
+      "type": "text",
+      "value": "B102"
+     },
+     "properties": {
+      "name": "Properties",
+      "type": "text",
+      "value": "{\n  \"scanner_name\": \"bandit\"\n}"
+     },
+     "raw_data": {
+      "name": "Raw Data",
+      "type": "code",
+      "value": "{\"ruleId\":\"B102\",\"level\":\"error\",\"message\":{\"text\":\"B102 at 9\"},\"locations\":[{\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"app/b.py\"},\"region\":{\"startLine\":9}}}],\"properties\":{\"scanner_name\":\"bandit\"}}",
+      "lang": "json"
+     },
+     "detected_at": {
+      "name": "Detected At",
+      "type": "text",
+      "value": "2026-01-02T03:04:05+00:00"
+     },
+     "location_details": {
+      "name": "Location Details",
+      "type": "text",
+      "value": "Line 9"
+     }
+    },
+    "name": "B102",
+    "severity": "Critical"
+   },
+   {
+    "id": "45ac61e0-6dec-48fb-8353-c5832ab77d9b",
+    "identifiers": [
+     {
+      "type": "bandit-rule",
+      "name": "bandit Rule B103",
+      "value": "B103"
+     },
+     {
+      "type": "ash-finding-id",
+      "name": "ASH Finding ID",
+      "value": "45ac61e0-6dec-48fb-8353-c5832ab77d9b"
+     }
+    ],
+    "location": {
+     "file": "app/\\udcffbad.py",
+     "start_line": 5
+    },
+    "description": "B103 at 5",
+    "raw_source_code_extract": "B103 at 5",
+    "details": {
+     "scanner": {
+      "name": "Scanner",
+      "type": "text",
+      "value": "bandit"
+     },
+     "rule_id": {
+      "name": "Rule ID",
+      "type": "text",
+      "value": "B103"
+     },
+     "properties": {
+      "name": "Properties",
+      "type": "text",
+      "value": "{\n  \"scanner_name\": \"bandit\"\n}"
+     },
+     "raw_data": {
+      "name": "Raw Data",
+      "type": "code",
+      "value": "{\"ruleId\":\"B103\",\"level\":\"note\",\"message\":{\"text\":\"B103 at 5\"},\"locations\":[{\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"app/\\\\udcffbad.py\"},\"region\":{\"startLine\":5}}}],\"properties\":{\"scanner_name\":\"bandit\"}}",
+      "lang": "json"
+     },
+     "detected_at": {
+      "name": "Detected At",
+      "type": "text",
+      "value": "2026-01-02T03:04:05+00:00"
+     },
+     "location_details": {
+      "name": "Location Details",
+      "type": "text",
+      "value": "Line 5"
+     }
+    },
+    "name": "B103",
+    "severity": "Low"
+   },
+   {
+    "id": "4c37953b-fcbf-4c30-b23c-5d80bd93e09a",
+    "identifiers": [
+     {
+      "type": "bandit-rule",
+      "name": "bandit Rule B103",
+      "value": "B103"
+     },
+     {
+      "type": "ash-finding-id",
+      "name": "ASH Finding ID",
+      "value": "4c37953b-fcbf-4c30-b23c-5d80bd93e09a"
+     }
+    ],
+    "location": {
+     "file": "app/\\udcffbad.py",
+     "start_line": 5
+    },
+    "description": "B103 at 5",
+    "raw_source_code_extract": "B103 at 5",
+    "details": {
+     "scanner": {
+      "name": "Scanner",
+      "type": "text",
+      "value": "bandit"
+     },
+     "rule_id": {
+      "name": "Rule ID",
+      "type": "text",
+      "value": "B103"
+     },
+     "properties": {
+      "name": "Properties",
+      "type": "text",
+      "value": "{\n  \"scanner_name\": \"bandit\"\n}"
+     },
+     "raw_data": {
+      "name": "Raw Data",
+      "type": "code",
+      "value": "{\"ruleId\":\"B103\",\"level\":\"note\",\"message\":{\"text\":\"B103 at 5\"},\"locations\":[{\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"app/\\\\udcffbad.py\"},\"region\":{\"startLine\":5}}}],\"properties\":{\"scanner_name\":\"bandit\"}}",
+      "lang": "json"
+     },
+     "detected_at": {
+      "name": "Detected At",
+      "type": "text",
+      "value": "2026-01-02T03:04:05+00:00"
+     },
+     "location_details": {
+      "name": "Location Details",
+      "type": "text",
+      "value": "Line 5"
+     }
+    },
+    "name": "B103",
+    "severity": "Low"
+   },
+   {
+    "id": "34f68880-986c-4b00-b458-f93cf5d15920",
+    "identifiers": [
+     {
+      "type": "ash-finding-id",
+      "name": "ASH Finding ID",
+      "value": "34f68880-986c-4b00-b458-f93cf5d15920"
+     }
+    ],
+    "location": {},
+    "description": "None at None",
+    "raw_source_code_extract": "None at None",
+    "details": {
+     "rule_id": {
+      "name": "Rule ID",
+      "type": "text",
+      "value": ""
+     },
+     "raw_data": {
+      "name": "Raw Data",
+      "type": "code",
+      "value": "{\"level\":\"none\",\"message\":{\"text\":\"None at None\"}}",
+      "lang": "json"
+     },
+     "detected_at": {
+      "name": "Detected At",
+      "type": "text",
+      "value": "2026-01-02T03:04:05+00:00"
+     }
+    },
+    "severity": "Info"
+   },
+   {
+    "id": "aeeafd98-63e0-440d-b40d-2b522ca1fd11",
+    "identifiers": [
+     {
+      "type": "ash-finding-id",
+      "name": "ASH Finding ID",
+      "value": "aeeafd98-63e0-440d-b40d-2b522ca1fd11"
+     }
+    ],
+    "location": {},
+    "description": "None at None",
+    "raw_source_code_extract": "None at None",
+    "details": {
+     "rule_id": {
+      "name": "Rule ID",
+      "type": "text",
+      "value": ""
+     },
+     "raw_data": {
+      "name": "Raw Data",
+      "type": "code",
+      "value": "{\"level\":\"none\",\"message\":{\"text\":\"None at None\"}}",
+      "lang": "json"
+     },
+     "detected_at": {
+      "name": "Detected At",
+      "type": "text",
+      "value": "2026-01-02T03:04:05+00:00"
+     }
+    },
+    "severity": "Info"
+   },
+   {
+    "id": "cadb2590-589e-4665-a223-5e2d7b6aa47d",
+    "identifiers": [
+     {
+      "type": "grype-rule",
+      "name": "grype Rule B104",
+      "value": "B104"
+     },
+     {
+      "type": "ash-finding-id",
+      "name": "ASH Finding ID",
+      "value": "cadb2590-589e-4665-a223-5e2d7b6aa47d"
+     }
+    ],
+    "location": {
+     "file": "app/c.py",
+     "start_line": 1
+    },
+    "description": "B104 at 1",
+    "raw_source_code_extract": "B104 at 1",
+    "details": {
+     "scanner": {
+      "name": "Scanner",
+      "type": "text",
+      "value": "grype"
+     },
+     "rule_id": {
+      "name": "Rule ID",
+      "type": "text",
+      "value": "B104"
+     },
+     "properties": {
+      "name": "Properties",
+      "type": "text",
+      "value": "{\n  \"scanner_name\": \"grype\"\n}"
+     },
+     "raw_data": {
+      "name": "Raw Data",
+      "type": "code",
+      "value": "{\"ruleId\":\"B104\",\"level\":\"warning\",\"message\":{\"text\":\"B104 at 1\"},\"locations\":[{\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"app/c.py\"},\"region\":{\"startLine\":1}}}],\"properties\":{\"scanner_name\":\"grype\"}}",
+      "lang": "json"
+     },
+     "detected_at": {
+      "name": "Detected At",
+      "type": "text",
+      "value": "2026-01-02T03:04:05+00:00"
+     },
+     "location_details": {
+      "name": "Location Details",
+      "type": "text",
+      "value": "Line 1"
+     }
+    },
+    "name": "B104",
+    "severity": "Medium"
+   }
+  ],
+  "status": "failure",
+  "messages": [
+   {
+    "level": "warn",
+    "value": "1 SARIF result(s) could not be converted to GitLab vulnerabilities and are absent from this report. It is incomplete; see the ASH log for each error."
+   },
+   {
+    "level": "warn",
+    "value": "Scanner bandit did not complete (ERROR); its findings are absent from this report."
+   },
+   {
+    "level": "warn",
+    "value": "Scanner grype did not complete (ERROR); its findings are absent from this report."
+   },
+   {
+    "level": "warn",
+    "value": "No scanner reached a verdict; this report describes a tree that was not scanned."
+   }
+  ]
+ },
+ "mixed_shared": {
+  "vulnerabilities": [
+   {
+    "id": "shared-0",
+    "identifiers": [
+     {
+      "type": "bandit-rule",
+      "name": "bandit Rule B101",
+      "value": "B101"
+     },
+     {
+      "type": "ash-finding-id",
+      "name": "ASH Finding ID",
+      "value": "shared-0"
+     }
+    ],
+    "location": {
+     "file": "app/a.py",
+     "start_line": 3
+    },
+    "description": "B101 at 3",
+    "raw_source_code_extract": "B101 at 3",
+    "details": {
+     "scanner": {
+      "name": "Scanner",
+      "type": "text",
+      "value": "bandit"
+     },
+     "rule_id": {
+      "name": "Rule ID",
+      "type": "text",
+      "value": "B101"
+     },
+     "properties": {
+      "name": "Properties",
+      "type": "text",
+      "value": "{\n  \"scanner_name\": \"bandit\"\n}"
+     },
+     "raw_data": {
+      "name": "Raw Data",
+      "type": "code",
+      "value": "{\"ruleId\":\"B101\",\"level\":\"warning\",\"message\":{\"text\":\"B101 at 3\"},\"locations\":[{\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"app/a.py\"},\"region\":{\"startLine\":3}}}],\"properties\":{\"scanner_name\":\"bandit\"}}",
+      "lang": "json"
+     },
+     "detected_at": {
+      "name": "Detected At",
+      "type": "text",
+      "value": "2026-01-02T03:04:05+00:00"
+     },
+     "location_details": {
+      "name": "Location Details",
+      "type": "text",
+      "value": "Line 3"
+     }
+    },
+    "name": "B101",
+    "severity": "Medium"
+   },
+   {
+    "id": "c1d370d9-2006-4ed8-8a42-2adaffafb8ce",
+    "identifiers": [
+     {
+      "type": "bandit-rule",
+      "name": "bandit Rule B101",
+      "value": "B101"
+     },
+     {
+      "type": "ash-finding-id",
+      "name": "ASH Finding ID",
+      "value": "c1d370d9-2006-4ed8-8a42-2adaffafb8ce"
+     }
+    ],
+    "location": {
+     "file": "app/a.py",
+     "start_line": 3
+    },
+    "description": "B101 at 3",
+    "raw_source_code_extract": "B101 at 3",
+    "details": {
+     "scanner": {
+      "name": "Scanner",
+      "type": "text",
+      "value": "bandit"
+     },
+     "rule_id": {
+      "name": "Rule ID",
+      "type": "text",
+      "value": "B101"
+     },
+     "properties": {
+      "name": "Properties",
+      "type": "text",
+      "value": "{\n  \"scanner_name\": \"bandit\"\n}"
+     },
+     "raw_data": {
+      "name": "Raw Data",
+      "type": "code",
+      "value": "{\"ruleId\":\"B101\",\"level\":\"warning\",\"message\":{\"text\":\"B101 at 3\"},\"locations\":[{\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"app/a.py\"},\"region\":{\"startLine\":3}}}],\"properties\":{\"scanner_name\":\"bandit\"}}",
+      "lang": "json"
+     },
+     "detected_at": {
+      "name": "Detected At",
+      "type": "text",
+      "value": "2026-01-02T03:04:05+00:00"
+     },
+     "location_details": {
+      "name": "Location Details",
+      "type": "text",
+      "value": "Line 3"
+     }
+    },
+    "name": "B101",
+    "severity": "Medium"
+   },
+   {
+    "id": "1676cc36-643a-4012-8d61-121f7124e48c",
+    "identifiers": [
+     {
+      "type": "bandit-rule",
+      "name": "bandit Rule B101",
+      "value": "B101"
+     },
+     {
+      "type": "ash-finding-id",
+      "name": "ASH Finding ID",
+      "value": "1676cc36-643a-4012-8d61-121f7124e48c"
+     }
+    ],
+    "location": {
+     "file": "app/a.py",
+     "start_line": 3
+    },
+    "description": "B101 at 3",
+    "raw_source_code_extract": "B101 at 3",
+    "details": {
+     "scanner": {
+      "name": "Scanner",
+      "type": "text",
+      "value": "bandit"
+     },
+     "rule_id": {
+      "name": "Rule ID",
+      "type": "text",
+      "value": "B101"
+     },
+     "properties": {
+      "name": "Properties",
+      "type": "text",
+      "value": "{\n  \"scanner_name\": \"bandit\"\n}"
+     },
+     "raw_data": {
+      "name": "Raw Data",
+      "type": "code",
+      "value": "{\"ruleId\":\"B101\",\"level\":\"warning\",\"message\":{\"text\":\"B101 at 3\"},\"locations\":[{\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"app/a.py\"},\"region\":{\"startLine\":3}}}],\"suppressions\":[{\"kind\":\"inSource\",\"justification\":\"assert is fine here\"}],\"properties\":{\"scanner_name\":\"bandit\"}}",
+      "lang": "json"
+     },
+     "detected_at": {
+      "name": "Detected At",
+      "type": "text",
+      "value": "2026-01-02T03:04:05+00:00"
+     },
+     "location_details": {
+      "name": "Location Details",
+      "type": "text",
+      "value": "Line 3"
+     }
+    },
+    "name": "B101",
+    "severity": "Info",
+    "solution": "This finding was suppressed by ASH: assert is fine here. You can dismiss this vulnerability in the GitLab Security Dashboard."
+   },
+   {
+    "id": "95014826-6ab8-4468-884b-57d674e6bba9",
+    "identifiers": [
+     {
+      "type": "bandit-rule",
+      "name": "bandit Rule B101",
+      "value": "B101"
+     },
+     {
+      "type": "ash-finding-id",
+      "name": "ASH Finding ID",
+      "value": "95014826-6ab8-4468-884b-57d674e6bba9"
+     }
+    ],
+    "location": {
+     "file": "app/a.py",
+     "start_line": 3
+    },
+    "description": "B101 at 3",
+    "raw_source_code_extract": "B101 at 3",
+    "details": {
+     "scanner": {
+      "name": "Scanner",
+      "type": "text",
+      "value": "bandit"
+     },
+     "rule_id": {
+      "name": "Rule ID",
+      "type": "text",
+      "value": "B101"
+     },
+     "properties": {
+      "name": "Properties",
+      "type": "text",
+      "value": "{\n  \"scanner_name\": \"bandit\",\n  \"issue_severity\": \"high\"\n}"
+     },
+     "raw_data": {
+      "name": "Raw Data",
+      "type": "code",
+      "value": "{\"ruleId\":\"B101\",\"level\":\"warning\",\"message\":{\"text\":\"B101 at 3\"},\"locations\":[{\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"app/a.py\"},\"region\":{\"startLine\":3}}}],\"properties\":{\"scanner_name\":\"bandit\",\"issue_severity\":\"high\"}}",
+      "lang": "json"
+     },
+     "detected_at": {
+      "name": "Detected At",
+      "type": "text",
+      "value": "2026-01-02T03:04:05+00:00"
+     },
+     "location_details": {
+      "name": "Location Details",
+      "type": "text",
+      "value": "Line 3"
+     }
+    },
+    "name": "B101",
+    "severity": "High"
+   },
+   {
+    "id": "shared-5",
+    "identifiers": [
+     {
+      "type": "bandit-rule",
+      "name": "bandit Rule B102",
+      "value": "B102"
+     },
+     {
+      "type": "ash-finding-id",
+      "name": "ASH Finding ID",
+      "value": "shared-5"
+     }
+    ],
+    "location": {
+     "file": "app/b.py",
+     "start_line": 9
+    },
+    "description": "B102 at 9",
+    "raw_source_code_extract": "B102 at 9",
+    "details": {
+     "scanner": {
+      "name": "Scanner",
+      "type": "text",
+      "value": "bandit"
+     },
+     "rule_id": {
+      "name": "Rule ID",
+      "type": "text",
+      "value": "B102"
+     },
+     "properties": {
+      "name": "Properties",
+      "type": "text",
+      "value": "{\n  \"scanner_name\": \"bandit\"\n}"
+     },
+     "raw_data": {
+      "name": "Raw Data",
+      "type": "code",
+      "value": "{\"ruleId\":\"B102\",\"level\":\"error\",\"message\":{\"text\":\"B102 at 9\"},\"locations\":[{\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"app/b.py\"},\"region\":{\"startLine\":9}}}],\"properties\":{\"scanner_name\":\"bandit\"}}",
+      "lang": "json"
+     },
+     "detected_at": {
+      "name": "Detected At",
+      "type": "text",
+      "value": "2026-01-02T03:04:05+00:00"
+     },
+     "location_details": {
+      "name": "Location Details",
+      "type": "text",
+      "value": "Line 9"
+     }
+    },
+    "name": "B102",
+    "severity": "Critical"
+   },
+   {
+    "id": "f23b32ad-ca42-4255-8545-35aaf923d833",
+    "identifiers": [
+     {
+      "type": "bandit-rule",
+      "name": "bandit Rule B102",
+      "value": "B102"
+     },
+     {
+      "type": "ash-finding-id",
+      "name": "ASH Finding ID",
+      "value": "f23b32ad-ca42-4255-8545-35aaf923d833"
+     }
+    ],
+    "location": {
+     "file": "app/b.py",
+     "start_line": 9
+    },
+    "description": "B102 at 9",
+    "raw_source_code_extract": "B102 at 9",
+    "details": {
+     "scanner": {
+      "name": "Scanner",
+      "type": "text",
+      "value": "bandit"
+     },
+     "rule_id": {
+      "name": "Rule ID",
+      "type": "text",
+      "value": "B102"
+     },
+     "properties": {
+      "name": "Properties",
+      "type": "text",
+      "value": "{\n  \"scanner_name\": \"bandit\"\n}"
+     },
+     "raw_data": {
+      "name": "Raw Data",
+      "type": "code",
+      "value": "{\"ruleId\":\"B102\",\"level\":\"error\",\"message\":{\"text\":\"B102 at 9\"},\"locations\":[{\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"app/b.py\"},\"region\":{\"startLine\":9}}}],\"properties\":{\"scanner_name\":\"bandit\"}}",
+      "lang": "json"
+     },
+     "detected_at": {
+      "name": "Detected At",
+      "type": "text",
+      "value": "2026-01-02T03:04:05+00:00"
+     },
+     "location_details": {
+      "name": "Location Details",
+      "type": "text",
+      "value": "Line 9"
+     }
+    },
+    "name": "B102",
+    "severity": "Critical"
+   },
+   {
+    "id": "45ac61e0-6dec-48fb-8353-c5832ab77d9b",
+    "identifiers": [
+     {
+      "type": "bandit-rule",
+      "name": "bandit Rule B103",
+      "value": "B103"
+     },
+     {
+      "type": "ash-finding-id",
+      "name": "ASH Finding ID",
+      "value": "45ac61e0-6dec-48fb-8353-c5832ab77d9b"
+     }
+    ],
+    "location": {
+     "file": "app/\\udcffbad.py",
+     "start_line": 5
+    },
+    "description": "B103 at 5",
+    "raw_source_code_extract": "B103 at 5",
+    "details": {
+     "scanner": {
+      "name": "Scanner",
+      "type": "text",
+      "value": "bandit"
+     },
+     "rule_id": {
+      "name": "Rule ID",
+      "type": "text",
+      "value": "B103"
+     },
+     "properties": {
+      "name": "Properties",
+      "type": "text",
+      "value": "{\n  \"scanner_name\": \"bandit\"\n}"
+     },
+     "raw_data": {
+      "name": "Raw Data",
+      "type": "code",
+      "value": "{\"ruleId\":\"B103\",\"level\":\"note\",\"message\":{\"text\":\"B103 at 5\"},\"locations\":[{\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"app/\\\\udcffbad.py\"},\"region\":{\"startLine\":5}}}],\"properties\":{\"scanner_name\":\"bandit\"}}",
+      "lang": "json"
+     },
+     "detected_at": {
+      "name": "Detected At",
+      "type": "text",
+      "value": "2026-01-02T03:04:05+00:00"
+     },
+     "location_details": {
+      "name": "Location Details",
+      "type": "text",
+      "value": "Line 5"
+     }
+    },
+    "name": "B103",
+    "severity": "Low"
+   },
+   {
+    "id": "4c37953b-fcbf-4c30-b23c-5d80bd93e09a",
+    "identifiers": [
+     {
+      "type": "bandit-rule",
+      "name": "bandit Rule B103",
+      "value": "B103"
+     },
+     {
+      "type": "ash-finding-id",
+      "name": "ASH Finding ID",
+      "value": "4c37953b-fcbf-4c30-b23c-5d80bd93e09a"
+     }
+    ],
+    "location": {
+     "file": "app/\\udcffbad.py",
+     "start_line": 5
+    },
+    "description": "B103 at 5",
+    "raw_source_code_extract": "B103 at 5",
+    "details": {
+     "scanner": {
+      "name": "Scanner",
+      "type": "text",
+      "value": "bandit"
+     },
+     "rule_id": {
+      "name": "Rule ID",
+      "type": "text",
+      "value": "B103"
+     },
+     "properties": {
+      "name": "Properties",
+      "type": "text",
+      "value": "{\n  \"scanner_name\": \"bandit\"\n}"
+     },
+     "raw_data": {
+      "name": "Raw Data",
+      "type": "code",
+      "value": "{\"ruleId\":\"B103\",\"level\":\"note\",\"message\":{\"text\":\"B103 at 5\"},\"locations\":[{\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"app/\\\\udcffbad.py\"},\"region\":{\"startLine\":5}}}],\"properties\":{\"scanner_name\":\"bandit\"}}",
+      "lang": "json"
+     },
+     "detected_at": {
+      "name": "Detected At",
+      "type": "text",
+      "value": "2026-01-02T03:04:05+00:00"
+     },
+     "location_details": {
+      "name": "Location Details",
+      "type": "text",
+      "value": "Line 5"
+     }
+    },
+    "name": "B103",
+    "severity": "Low"
+   },
+   {
+    "id": "shared-9",
+    "identifiers": [
+     {
+      "type": "ash-finding-id",
+      "name": "ASH Finding ID",
+      "value": "shared-9"
+     }
+    ],
+    "location": {},
+    "description": "None at None",
+    "raw_source_code_extract": "None at None",
+    "details": {
+     "rule_id": {
+      "name": "Rule ID",
+      "type": "text",
+      "value": ""
+     },
+     "raw_data": {
+      "name": "Raw Data",
+      "type": "code",
+      "value": "{\"level\":\"none\",\"message\":{\"text\":\"None at None\"}}",
+      "lang": "json"
+     },
+     "detected_at": {
+      "name": "Detected At",
+      "type": "text",
+      "value": "2026-01-02T03:04:05+00:00"
+     }
+    },
+    "severity": "Info"
+   },
+   {
+    "id": "34f68880-986c-4b00-b458-f93cf5d15920",
+    "identifiers": [
+     {
+      "type": "ash-finding-id",
+      "name": "ASH Finding ID",
+      "value": "34f68880-986c-4b00-b458-f93cf5d15920"
+     }
+    ],
+    "location": {},
+    "description": "None at None",
+    "raw_source_code_extract": "None at None",
+    "details": {
+     "rule_id": {
+      "name": "Rule ID",
+      "type": "text",
+      "value": ""
+     },
+     "raw_data": {
+      "name": "Raw Data",
+      "type": "code",
+      "value": "{\"level\":\"none\",\"message\":{\"text\":\"None at None\"}}",
+      "lang": "json"
+     },
+     "detected_at": {
+      "name": "Detected At",
+      "type": "text",
+      "value": "2026-01-02T03:04:05+00:00"
+     }
+    },
+    "severity": "Info"
+   },
+   {
+    "id": "cadb2590-589e-4665-a223-5e2d7b6aa47d",
+    "identifiers": [
+     {
+      "type": "grype-rule",
+      "name": "grype Rule B104",
+      "value": "B104"
+     },
+     {
+      "type": "ash-finding-id",
+      "name": "ASH Finding ID",
+      "value": "cadb2590-589e-4665-a223-5e2d7b6aa47d"
+     }
+    ],
+    "location": {
+     "file": "app/c.py",
+     "start_line": 1
+    },
+    "description": "B104 at 1",
+    "raw_source_code_extract": "B104 at 1",
+    "details": {
+     "scanner": {
+      "name": "Scanner",
+      "type": "text",
+      "value": "grype"
+     },
+     "rule_id": {
+      "name": "Rule ID",
+      "type": "text",
+      "value": "B104"
+     },
+     "properties": {
+      "name": "Properties",
+      "type": "text",
+      "value": "{\n  \"scanner_name\": \"grype\"\n}"
+     },
+     "raw_data": {
+      "name": "Raw Data",
+      "type": "code",
+      "value": "{\"ruleId\":\"B104\",\"level\":\"warning\",\"message\":{\"text\":\"B104 at 1\"},\"locations\":[{\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"app/c.py\"},\"region\":{\"startLine\":1}}}],\"properties\":{\"scanner_name\":\"grype\"}}",
+      "lang": "json"
+     },
+     "detected_at": {
+      "name": "Detected At",
+      "type": "text",
+      "value": "2026-01-02T03:04:05+00:00"
+     },
+     "location_details": {
+      "name": "Location Details",
+      "type": "text",
+      "value": "Line 1"
+     }
+    },
+    "name": "B104",
+    "severity": "Medium"
+   }
+  ],
+  "status": "failure",
+  "messages": [
+   {
+    "level": "warn",
+    "value": "1 SARIF result(s) could not be converted to GitLab vulnerabilities and are absent from this report. It is incomplete; see the ASH log for each error."
+   },
+   {
+    "level": "warn",
+    "value": "Scanner bandit did not complete (ERROR); its findings are absent from this report."
+   },
+   {
+    "level": "warn",
+    "value": "Scanner grype did not complete (ERROR); its findings are absent from this report."
+   },
+   {
+    "level": "warn",
+    "value": "No scanner reached a verdict; this report describes a tree that was not scanned."
+   }
+  ]
+ },
+ "all_shared": {
+  "vulnerabilities": [
+   {
+    "id": "shared-0",
+    "identifiers": [
+     {
+      "type": "bandit-rule",
+      "name": "bandit Rule B101",
+      "value": "B101"
+     },
+     {
+      "type": "ash-finding-id",
+      "name": "ASH Finding ID",
+      "value": "shared-0"
+     }
+    ],
+    "location": {
+     "file": "app/a.py",
+     "start_line": 3
+    },
+    "description": "B101 at 3",
+    "raw_source_code_extract": "B101 at 3",
+    "details": {
+     "scanner": {
+      "name": "Scanner",
+      "type": "text",
+      "value": "bandit"
+     },
+     "rule_id": {
+      "name": "Rule ID",
+      "type": "text",
+      "value": "B101"
+     },
+     "properties": {
+      "name": "Properties",
+      "type": "text",
+      "value": "{\n  \"scanner_name\": \"bandit\"\n}"
+     },
+     "raw_data": {
+      "name": "Raw Data",
+      "type": "code",
+      "value": "{\"ruleId\":\"B101\",\"level\":\"warning\",\"message\":{\"text\":\"B101 at 3\"},\"locations\":[{\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"app/a.py\"},\"region\":{\"startLine\":3}}}],\"properties\":{\"scanner_name\":\"bandit\"}}",
+      "lang": "json"
+     },
+     "detected_at": {
+      "name": "Detected At",
+      "type": "text",
+      "value": "2026-01-02T03:04:05+00:00"
+     },
+     "location_details": {
+      "name": "Location Details",
+      "type": "text",
+      "value": "Line 3"
+     }
+    },
+    "name": "B101",
+    "severity": "Medium"
+   },
+   {
+    "id": "shared-1",
+    "identifiers": [
+     {
+      "type": "bandit-rule",
+      "name": "bandit Rule B101",
+      "value": "B101"
+     },
+     {
+      "type": "ash-finding-id",
+      "name": "ASH Finding ID",
+      "value": "shared-1"
+     }
+    ],
+    "location": {
+     "file": "app/a.py",
+     "start_line": 3
+    },
+    "description": "B101 at 3",
+    "raw_source_code_extract": "B101 at 3",
+    "details": {
+     "scanner": {
+      "name": "Scanner",
+      "type": "text",
+      "value": "bandit"
+     },
+     "rule_id": {
+      "name": "Rule ID",
+      "type": "text",
+      "value": "B101"
+     },
+     "properties": {
+      "name": "Properties",
+      "type": "text",
+      "value": "{\n  \"scanner_name\": \"bandit\"\n}"
+     },
+     "raw_data": {
+      "name": "Raw Data",
+      "type": "code",
+      "value": "{\"ruleId\":\"B101\",\"level\":\"warning\",\"message\":{\"text\":\"B101 at 3\"},\"locations\":[{\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"app/a.py\"},\"region\":{\"startLine\":3}}}],\"properties\":{\"scanner_name\":\"bandit\"}}",
+      "lang": "json"
+     },
+     "detected_at": {
+      "name": "Detected At",
+      "type": "text",
+      "value": "2026-01-02T03:04:05+00:00"
+     },
+     "location_details": {
+      "name": "Location Details",
+      "type": "text",
+      "value": "Line 3"
+     }
+    },
+    "name": "B101",
+    "severity": "Medium"
+   },
+   {
+    "id": "shared-2",
+    "identifiers": [
+     {
+      "type": "bandit-rule",
+      "name": "bandit Rule B101",
+      "value": "B101"
+     },
+     {
+      "type": "ash-finding-id",
+      "name": "ASH Finding ID",
+      "value": "shared-2"
+     }
+    ],
+    "location": {
+     "file": "app/a.py",
+     "start_line": 3
+    },
+    "description": "B101 at 3",
+    "raw_source_code_extract": "B101 at 3",
+    "details": {
+     "scanner": {
+      "name": "Scanner",
+      "type": "text",
+      "value": "bandit"
+     },
+     "rule_id": {
+      "name": "Rule ID",
+      "type": "text",
+      "value": "B101"
+     },
+     "properties": {
+      "name": "Properties",
+      "type": "text",
+      "value": "{\n  \"scanner_name\": \"bandit\"\n}"
+     },
+     "raw_data": {
+      "name": "Raw Data",
+      "type": "code",
+      "value": "{\"ruleId\":\"B101\",\"level\":\"warning\",\"message\":{\"text\":\"B101 at 3\"},\"locations\":[{\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"app/a.py\"},\"region\":{\"startLine\":3}}}],\"suppressions\":[{\"kind\":\"inSource\",\"justification\":\"assert is fine here\"}],\"properties\":{\"scanner_name\":\"bandit\"}}",
+      "lang": "json"
+     },
+     "detected_at": {
+      "name": "Detected At",
+      "type": "text",
+      "value": "2026-01-02T03:04:05+00:00"
+     },
+     "location_details": {
+      "name": "Location Details",
+      "type": "text",
+      "value": "Line 3"
+     }
+    },
+    "name": "B101",
+    "severity": "Info",
+    "solution": "This finding was suppressed by ASH: assert is fine here. You can dismiss this vulnerability in the GitLab Security Dashboard."
+   },
+   {
+    "id": "shared-4",
+    "identifiers": [
+     {
+      "type": "bandit-rule",
+      "name": "bandit Rule B101",
+      "value": "B101"
+     },
+     {
+      "type": "ash-finding-id",
+      "name": "ASH Finding ID",
+      "value": "shared-4"
+     }
+    ],
+    "location": {
+     "file": "app/a.py",
+     "start_line": 3
+    },
+    "description": "B101 at 3",
+    "raw_source_code_extract": "B101 at 3",
+    "details": {
+     "scanner": {
+      "name": "Scanner",
+      "type": "text",
+      "value": "bandit"
+     },
+     "rule_id": {
+      "name": "Rule ID",
+      "type": "text",
+      "value": "B101"
+     },
+     "properties": {
+      "name": "Properties",
+      "type": "text",
+      "value": "{\n  \"scanner_name\": \"bandit\",\n  \"issue_severity\": \"high\"\n}"
+     },
+     "raw_data": {
+      "name": "Raw Data",
+      "type": "code",
+      "value": "{\"ruleId\":\"B101\",\"level\":\"warning\",\"message\":{\"text\":\"B101 at 3\"},\"locations\":[{\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"app/a.py\"},\"region\":{\"startLine\":3}}}],\"properties\":{\"scanner_name\":\"bandit\",\"issue_severity\":\"high\"}}",
+      "lang": "json"
+     },
+     "detected_at": {
+      "name": "Detected At",
+      "type": "text",
+      "value": "2026-01-02T03:04:05+00:00"
+     },
+     "location_details": {
+      "name": "Location Details",
+      "type": "text",
+      "value": "Line 3"
+     }
+    },
+    "name": "B101",
+    "severity": "High"
+   },
+   {
+    "id": "shared-5",
+    "identifiers": [
+     {
+      "type": "bandit-rule",
+      "name": "bandit Rule B102",
+      "value": "B102"
+     },
+     {
+      "type": "ash-finding-id",
+      "name": "ASH Finding ID",
+      "value": "shared-5"
+     }
+    ],
+    "location": {
+     "file": "app/b.py",
+     "start_line": 9
+    },
+    "description": "B102 at 9",
+    "raw_source_code_extract": "B102 at 9",
+    "details": {
+     "scanner": {
+      "name": "Scanner",
+      "type": "text",
+      "value": "bandit"
+     },
+     "rule_id": {
+      "name": "Rule ID",
+      "type": "text",
+      "value": "B102"
+     },
+     "properties": {
+      "name": "Properties",
+      "type": "text",
+      "value": "{\n  \"scanner_name\": \"bandit\"\n}"
+     },
+     "raw_data": {
+      "name": "Raw Data",
+      "type": "code",
+      "value": "{\"ruleId\":\"B102\",\"level\":\"error\",\"message\":{\"text\":\"B102 at 9\"},\"locations\":[{\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"app/b.py\"},\"region\":{\"startLine\":9}}}],\"properties\":{\"scanner_name\":\"bandit\"}}",
+      "lang": "json"
+     },
+     "detected_at": {
+      "name": "Detected At",
+      "type": "text",
+      "value": "2026-01-02T03:04:05+00:00"
+     },
+     "location_details": {
+      "name": "Location Details",
+      "type": "text",
+      "value": "Line 9"
+     }
+    },
+    "name": "B102",
+    "severity": "Critical"
+   },
+   {
+    "id": "shared-6",
+    "identifiers": [
+     {
+      "type": "bandit-rule",
+      "name": "bandit Rule B102",
+      "value": "B102"
+     },
+     {
+      "type": "ash-finding-id",
+      "name": "ASH Finding ID",
+      "value": "shared-6"
+     }
+    ],
+    "location": {
+     "file": "app/b.py",
+     "start_line": 9
+    },
+    "description": "B102 at 9",
+    "raw_source_code_extract": "B102 at 9",
+    "details": {
+     "scanner": {
+      "name": "Scanner",
+      "type": "text",
+      "value": "bandit"
+     },
+     "rule_id": {
+      "name": "Rule ID",
+      "type": "text",
+      "value": "B102"
+     },
+     "properties": {
+      "name": "Properties",
+      "type": "text",
+      "value": "{\n  \"scanner_name\": \"bandit\"\n}"
+     },
+     "raw_data": {
+      "name": "Raw Data",
+      "type": "code",
+      "value": "{\"ruleId\":\"B102\",\"level\":\"error\",\"message\":{\"text\":\"B102 at 9\"},\"locations\":[{\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"app/b.py\"},\"region\":{\"startLine\":9}}}],\"properties\":{\"scanner_name\":\"bandit\"}}",
+      "lang": "json"
+     },
+     "detected_at": {
+      "name": "Detected At",
+      "type": "text",
+      "value": "2026-01-02T03:04:05+00:00"
+     },
+     "location_details": {
+      "name": "Location Details",
+      "type": "text",
+      "value": "Line 9"
+     }
+    },
+    "name": "B102",
+    "severity": "Critical"
+   },
+   {
+    "id": "shared-7",
+    "identifiers": [
+     {
+      "type": "bandit-rule",
+      "name": "bandit Rule B103",
+      "value": "B103"
+     },
+     {
+      "type": "ash-finding-id",
+      "name": "ASH Finding ID",
+      "value": "shared-7"
+     }
+    ],
+    "location": {
+     "file": "app/\\udcffbad.py",
+     "start_line": 5
+    },
+    "description": "B103 at 5",
+    "raw_source_code_extract": "B103 at 5",
+    "details": {
+     "scanner": {
+      "name": "Scanner",
+      "type": "text",
+      "value": "bandit"
+     },
+     "rule_id": {
+      "name": "Rule ID",
+      "type": "text",
+      "value": "B103"
+     },
+     "properties": {
+      "name": "Properties",
+      "type": "text",
+      "value": "{\n  \"scanner_name\": \"bandit\"\n}"
+     },
+     "raw_data": {
+      "name": "Raw Data",
+      "type": "code",
+      "value": "{\"ruleId\":\"B103\",\"level\":\"note\",\"message\":{\"text\":\"B103 at 5\"},\"locations\":[{\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"app/\\\\udcffbad.py\"},\"region\":{\"startLine\":5}}}],\"properties\":{\"scanner_name\":\"bandit\"}}",
+      "lang": "json"
+     },
+     "detected_at": {
+      "name": "Detected At",
+      "type": "text",
+      "value": "2026-01-02T03:04:05+00:00"
+     },
+     "location_details": {
+      "name": "Location Details",
+      "type": "text",
+      "value": "Line 5"
+     }
+    },
+    "name": "B103",
+    "severity": "Low"
+   },
+   {
+    "id": "shared-8",
+    "identifiers": [
+     {
+      "type": "bandit-rule",
+      "name": "bandit Rule B103",
+      "value": "B103"
+     },
+     {
+      "type": "ash-finding-id",
+      "name": "ASH Finding ID",
+      "value": "shared-8"
+     }
+    ],
+    "location": {
+     "file": "app/\\udcffbad.py",
+     "start_line": 5
+    },
+    "description": "B103 at 5",
+    "raw_source_code_extract": "B103 at 5",
+    "details": {
+     "scanner": {
+      "name": "Scanner",
+      "type": "text",
+      "value": "bandit"
+     },
+     "rule_id": {
+      "name": "Rule ID",
+      "type": "text",
+      "value": "B103"
+     },
+     "properties": {
+      "name": "Properties",
+      "type": "text",
+      "value": "{\n  \"scanner_name\": \"bandit\"\n}"
+     },
+     "raw_data": {
+      "name": "Raw Data",
+      "type": "code",
+      "value": "{\"ruleId\":\"B103\",\"level\":\"note\",\"message\":{\"text\":\"B103 at 5\"},\"locations\":[{\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"app/\\\\udcffbad.py\"},\"region\":{\"startLine\":5}}}],\"properties\":{\"scanner_name\":\"bandit\"}}",
+      "lang": "json"
+     },
+     "detected_at": {
+      "name": "Detected At",
+      "type": "text",
+      "value": "2026-01-02T03:04:05+00:00"
+     },
+     "location_details": {
+      "name": "Location Details",
+      "type": "text",
+      "value": "Line 5"
+     }
+    },
+    "name": "B103",
+    "severity": "Low"
+   },
+   {
+    "id": "shared-9",
+    "identifiers": [
+     {
+      "type": "ash-finding-id",
+      "name": "ASH Finding ID",
+      "value": "shared-9"
+     }
+    ],
+    "location": {},
+    "description": "None at None",
+    "raw_source_code_extract": "None at None",
+    "details": {
+     "rule_id": {
+      "name": "Rule ID",
+      "type": "text",
+      "value": ""
+     },
+     "raw_data": {
+      "name": "Raw Data",
+      "type": "code",
+      "value": "{\"level\":\"none\",\"message\":{\"text\":\"None at None\"}}",
+      "lang": "json"
+     },
+     "detected_at": {
+      "name": "Detected At",
+      "type": "text",
+      "value": "2026-01-02T03:04:05+00:00"
+     }
+    },
+    "severity": "Info"
+   },
+   {
+    "id": "shared-10",
+    "identifiers": [
+     {
+      "type": "ash-finding-id",
+      "name": "ASH Finding ID",
+      "value": "shared-10"
+     }
+    ],
+    "location": {},
+    "description": "None at None",
+    "raw_source_code_extract": "None at None",
+    "details": {
+     "rule_id": {
+      "name": "Rule ID",
+      "type": "text",
+      "value": ""
+     },
+     "raw_data": {
+      "name": "Raw Data",
+      "type": "code",
+      "value": "{\"level\":\"none\",\"message\":{\"text\":\"None at None\"}}",
+      "lang": "json"
+     },
+     "detected_at": {
+      "name": "Detected At",
+      "type": "text",
+      "value": "2026-01-02T03:04:05+00:00"
+     }
+    },
+    "severity": "Info"
+   },
+   {
+    "id": "shared-11",
+    "identifiers": [
+     {
+      "type": "grype-rule",
+      "name": "grype Rule B104",
+      "value": "B104"
+     },
+     {
+      "type": "ash-finding-id",
+      "name": "ASH Finding ID",
+      "value": "shared-11"
+     }
+    ],
+    "location": {
+     "file": "app/c.py",
+     "start_line": 1
+    },
+    "description": "B104 at 1",
+    "raw_source_code_extract": "B104 at 1",
+    "details": {
+     "scanner": {
+      "name": "Scanner",
+      "type": "text",
+      "value": "grype"
+     },
+     "rule_id": {
+      "name": "Rule ID",
+      "type": "text",
+      "value": "B104"
+     },
+     "properties": {
+      "name": "Properties",
+      "type": "text",
+      "value": "{\n  \"scanner_name\": \"grype\"\n}"
+     },
+     "raw_data": {
+      "name": "Raw Data",
+      "type": "code",
+      "value": "{\"ruleId\":\"B104\",\"level\":\"warning\",\"message\":{\"text\":\"B104 at 1\"},\"locations\":[{\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"app/c.py\"},\"region\":{\"startLine\":1}}}],\"properties\":{\"scanner_name\":\"grype\"}}",
+      "lang": "json"
+     },
+     "detected_at": {
+      "name": "Detected At",
+      "type": "text",
+      "value": "2026-01-02T03:04:05+00:00"
+     },
+     "location_details": {
+      "name": "Location Details",
+      "type": "text",
+      "value": "Line 1"
+     }
+    },
+    "name": "B104",
+    "severity": "Medium"
+   }
+  ],
+  "status": "failure",
+  "messages": [
+   {
+    "level": "warn",
+    "value": "1 SARIF result(s) could not be converted to GitLab vulnerabilities and are absent from this report. It is incomplete; see the ASH log for each error."
+   },
+   {
+    "level": "warn",
+    "value": "Scanner bandit did not complete (ERROR); its findings are absent from this report."
+   },
+   {
+    "level": "warn",
+    "value": "Scanner grype did not complete (ERROR); its findings are absent from this report."
+   },
+   {
+    "level": "warn",
+    "value": "No scanner reached a verdict; this report describes a tree that was not scanned."
+   }
+  ]
+ },
+ "all_legacy_excluding_suppressed": {
+  "vulnerabilities": [
+   {
+    "id": "c1d370d9-2006-4ed8-8a42-2adaffafb8ce",
+    "identifiers": [
+     {
+      "type": "bandit-rule",
+      "name": "bandit Rule B101",
+      "value": "B101"
+     },
+     {
+      "type": "ash-finding-id",
+      "name": "ASH Finding ID",
+      "value": "c1d370d9-2006-4ed8-8a42-2adaffafb8ce"
+     }
+    ],
+    "location": {
+     "file": "app/a.py",
+     "start_line": 3
+    },
+    "description": "B101 at 3",
+    "raw_source_code_extract": "B101 at 3",
+    "details": {
+     "scanner": {
+      "name": "Scanner",
+      "type": "text",
+      "value": "bandit"
+     },
+     "rule_id": {
+      "name": "Rule ID",
+      "type": "text",
+      "value": "B101"
+     },
+     "properties": {
+      "name": "Properties",
+      "type": "text",
+      "value": "{\n  \"scanner_name\": \"bandit\"\n}"
+     },
+     "raw_data": {
+      "name": "Raw Data",
+      "type": "code",
+      "value": "{\"ruleId\":\"B101\",\"level\":\"warning\",\"message\":{\"text\":\"B101 at 3\"},\"locations\":[{\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"app/a.py\"},\"region\":{\"startLine\":3}}}],\"properties\":{\"scanner_name\":\"bandit\"}}",
+      "lang": "json"
+     },
+     "detected_at": {
+      "name": "Detected At",
+      "type": "text",
+      "value": "2026-01-02T03:04:05+00:00"
+     },
+     "location_details": {
+      "name": "Location Details",
+      "type": "text",
+      "value": "Line 3"
+     }
+    },
+    "name": "B101",
+    "severity": "Medium"
+   },
+   {
+    "id": "1676cc36-643a-4012-8d61-121f7124e48c",
+    "identifiers": [
+     {
+      "type": "bandit-rule",
+      "name": "bandit Rule B101",
+      "value": "B101"
+     },
+     {
+      "type": "ash-finding-id",
+      "name": "ASH Finding ID",
+      "value": "1676cc36-643a-4012-8d61-121f7124e48c"
+     }
+    ],
+    "location": {
+     "file": "app/a.py",
+     "start_line": 3
+    },
+    "description": "B101 at 3",
+    "raw_source_code_extract": "B101 at 3",
+    "details": {
+     "scanner": {
+      "name": "Scanner",
+      "type": "text",
+      "value": "bandit"
+     },
+     "rule_id": {
+      "name": "Rule ID",
+      "type": "text",
+      "value": "B101"
+     },
+     "properties": {
+      "name": "Properties",
+      "type": "text",
+      "value": "{\n  \"scanner_name\": \"bandit\"\n}"
+     },
+     "raw_data": {
+      "name": "Raw Data",
+      "type": "code",
+      "value": "{\"ruleId\":\"B101\",\"level\":\"warning\",\"message\":{\"text\":\"B101 at 3\"},\"locations\":[{\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"app/a.py\"},\"region\":{\"startLine\":3}}}],\"properties\":{\"scanner_name\":\"bandit\"}}",
+      "lang": "json"
+     },
+     "detected_at": {
+      "name": "Detected At",
+      "type": "text",
+      "value": "2026-01-02T03:04:05+00:00"
+     },
+     "location_details": {
+      "name": "Location Details",
+      "type": "text",
+      "value": "Line 3"
+     }
+    },
+    "name": "B101",
+    "severity": "Medium"
+   },
+   {
+    "id": "95014826-6ab8-4468-884b-57d674e6bba9",
+    "identifiers": [
+     {
+      "type": "bandit-rule",
+      "name": "bandit Rule B101",
+      "value": "B101"
+     },
+     {
+      "type": "ash-finding-id",
+      "name": "ASH Finding ID",
+      "value": "95014826-6ab8-4468-884b-57d674e6bba9"
+     }
+    ],
+    "location": {
+     "file": "app/a.py",
+     "start_line": 3
+    },
+    "description": "B101 at 3",
+    "raw_source_code_extract": "B101 at 3",
+    "details": {
+     "scanner": {
+      "name": "Scanner",
+      "type": "text",
+      "value": "bandit"
+     },
+     "rule_id": {
+      "name": "Rule ID",
+      "type": "text",
+      "value": "B101"
+     },
+     "properties": {
+      "name": "Properties",
+      "type": "text",
+      "value": "{\n  \"scanner_name\": \"bandit\",\n  \"issue_severity\": \"high\"\n}"
+     },
+     "raw_data": {
+      "name": "Raw Data",
+      "type": "code",
+      "value": "{\"ruleId\":\"B101\",\"level\":\"warning\",\"message\":{\"text\":\"B101 at 3\"},\"locations\":[{\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"app/a.py\"},\"region\":{\"startLine\":3}}}],\"properties\":{\"scanner_name\":\"bandit\",\"issue_severity\":\"high\"}}",
+      "lang": "json"
+     },
+     "detected_at": {
+      "name": "Detected At",
+      "type": "text",
+      "value": "2026-01-02T03:04:05+00:00"
+     },
+     "location_details": {
+      "name": "Location Details",
+      "type": "text",
+      "value": "Line 3"
+     }
+    },
+    "name": "B101",
+    "severity": "High"
+   },
+   {
+    "id": "f23b32ad-ca42-4255-8545-35aaf923d833",
+    "identifiers": [
+     {
+      "type": "bandit-rule",
+      "name": "bandit Rule B102",
+      "value": "B102"
+     },
+     {
+      "type": "ash-finding-id",
+      "name": "ASH Finding ID",
+      "value": "f23b32ad-ca42-4255-8545-35aaf923d833"
+     }
+    ],
+    "location": {
+     "file": "app/b.py",
+     "start_line": 9
+    },
+    "description": "B102 at 9",
+    "raw_source_code_extract": "B102 at 9",
+    "details": {
+     "scanner": {
+      "name": "Scanner",
+      "type": "text",
+      "value": "bandit"
+     },
+     "rule_id": {
+      "name": "Rule ID",
+      "type": "text",
+      "value": "B102"
+     },
+     "properties": {
+      "name": "Properties",
+      "type": "text",
+      "value": "{\n  \"scanner_name\": \"bandit\"\n}"
+     },
+     "raw_data": {
+      "name": "Raw Data",
+      "type": "code",
+      "value": "{\"ruleId\":\"B102\",\"level\":\"error\",\"message\":{\"text\":\"B102 at 9\"},\"locations\":[{\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"app/b.py\"},\"region\":{\"startLine\":9}}}],\"properties\":{\"scanner_name\":\"bandit\"}}",
+      "lang": "json"
+     },
+     "detected_at": {
+      "name": "Detected At",
+      "type": "text",
+      "value": "2026-01-02T03:04:05+00:00"
+     },
+     "location_details": {
+      "name": "Location Details",
+      "type": "text",
+      "value": "Line 9"
+     }
+    },
+    "name": "B102",
+    "severity": "Critical"
+   },
+   {
+    "id": "2a8680ab-94e9-4100-b448-ad9b57424a1b",
+    "identifiers": [
+     {
+      "type": "bandit-rule",
+      "name": "bandit Rule B102",
+      "value": "B102"
+     },
+     {
+      "type": "ash-finding-id",
+      "name": "ASH Finding ID",
+      "value": "2a8680ab-94e9-4100-b448-ad9b57424a1b"
+     }
+    ],
+    "location": {
+     "file": "app/b.py",
+     "start_line": 9
+    },
+    "description": "B102 at 9",
+    "raw_source_code_extract": "B102 at 9",
+    "details": {
+     "scanner": {
+      "name": "Scanner",
+      "type": "text",
+      "value": "bandit"
+     },
+     "rule_id": {
+      "name": "Rule ID",
+      "type": "text",
+      "value": "B102"
+     },
+     "properties": {
+      "name": "Properties",
+      "type": "text",
+      "value": "{\n  \"scanner_name\": \"bandit\"\n}"
+     },
+     "raw_data": {
+      "name": "Raw Data",
+      "type": "code",
+      "value": "{\"ruleId\":\"B102\",\"level\":\"error\",\"message\":{\"text\":\"B102 at 9\"},\"locations\":[{\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"app/b.py\"},\"region\":{\"startLine\":9}}}],\"properties\":{\"scanner_name\":\"bandit\"}}",
+      "lang": "json"
+     },
+     "detected_at": {
+      "name": "Detected At",
+      "type": "text",
+      "value": "2026-01-02T03:04:05+00:00"
+     },
+     "location_details": {
+      "name": "Location Details",
+      "type": "text",
+      "value": "Line 9"
+     }
+    },
+    "name": "B102",
+    "severity": "Critical"
+   },
+   {
+    "id": "45ac61e0-6dec-48fb-8353-c5832ab77d9b",
+    "identifiers": [
+     {
+      "type": "bandit-rule",
+      "name": "bandit Rule B103",
+      "value": "B103"
+     },
+     {
+      "type": "ash-finding-id",
+      "name": "ASH Finding ID",
+      "value": "45ac61e0-6dec-48fb-8353-c5832ab77d9b"
+     }
+    ],
+    "location": {
+     "file": "app/\\udcffbad.py",
+     "start_line": 5
+    },
+    "description": "B103 at 5",
+    "raw_source_code_extract": "B103 at 5",
+    "details": {
+     "scanner": {
+      "name": "Scanner",
+      "type": "text",
+      "value": "bandit"
+     },
+     "rule_id": {
+      "name": "Rule ID",
+      "type": "text",
+      "value": "B103"
+     },
+     "properties": {
+      "name": "Properties",
+      "type": "text",
+      "value": "{\n  \"scanner_name\": \"bandit\"\n}"
+     },
+     "raw_data": {
+      "name": "Raw Data",
+      "type": "code",
+      "value": "{\"ruleId\":\"B103\",\"level\":\"note\",\"message\":{\"text\":\"B103 at 5\"},\"locations\":[{\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"app/\\\\udcffbad.py\"},\"region\":{\"startLine\":5}}}],\"properties\":{\"scanner_name\":\"bandit\"}}",
+      "lang": "json"
+     },
+     "detected_at": {
+      "name": "Detected At",
+      "type": "text",
+      "value": "2026-01-02T03:04:05+00:00"
+     },
+     "location_details": {
+      "name": "Location Details",
+      "type": "text",
+      "value": "Line 5"
+     }
+    },
+    "name": "B103",
+    "severity": "Low"
+   },
+   {
+    "id": "4c37953b-fcbf-4c30-b23c-5d80bd93e09a",
+    "identifiers": [
+     {
+      "type": "bandit-rule",
+      "name": "bandit Rule B103",
+      "value": "B103"
+     },
+     {
+      "type": "ash-finding-id",
+      "name": "ASH Finding ID",
+      "value": "4c37953b-fcbf-4c30-b23c-5d80bd93e09a"
+     }
+    ],
+    "location": {
+     "file": "app/\\udcffbad.py",
+     "start_line": 5
+    },
+    "description": "B103 at 5",
+    "raw_source_code_extract": "B103 at 5",
+    "details": {
+     "scanner": {
+      "name": "Scanner",
+      "type": "text",
+      "value": "bandit"
+     },
+     "rule_id": {
+      "name": "Rule ID",
+      "type": "text",
+      "value": "B103"
+     },
+     "properties": {
+      "name": "Properties",
+      "type": "text",
+      "value": "{\n  \"scanner_name\": \"bandit\"\n}"
+     },
+     "raw_data": {
+      "name": "Raw Data",
+      "type": "code",
+      "value": "{\"ruleId\":\"B103\",\"level\":\"note\",\"message\":{\"text\":\"B103 at 5\"},\"locations\":[{\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"app/\\\\udcffbad.py\"},\"region\":{\"startLine\":5}}}],\"properties\":{\"scanner_name\":\"bandit\"}}",
+      "lang": "json"
+     },
+     "detected_at": {
+      "name": "Detected At",
+      "type": "text",
+      "value": "2026-01-02T03:04:05+00:00"
+     },
+     "location_details": {
+      "name": "Location Details",
+      "type": "text",
+      "value": "Line 5"
+     }
+    },
+    "name": "B103",
+    "severity": "Low"
+   },
+   {
+    "id": "34f68880-986c-4b00-b458-f93cf5d15920",
+    "identifiers": [
+     {
+      "type": "ash-finding-id",
+      "name": "ASH Finding ID",
+      "value": "34f68880-986c-4b00-b458-f93cf5d15920"
+     }
+    ],
+    "location": {},
+    "description": "None at None",
+    "raw_source_code_extract": "None at None",
+    "details": {
+     "rule_id": {
+      "name": "Rule ID",
+      "type": "text",
+      "value": ""
+     },
+     "raw_data": {
+      "name": "Raw Data",
+      "type": "code",
+      "value": "{\"level\":\"none\",\"message\":{\"text\":\"None at None\"}}",
+      "lang": "json"
+     },
+     "detected_at": {
+      "name": "Detected At",
+      "type": "text",
+      "value": "2026-01-02T03:04:05+00:00"
+     }
+    },
+    "severity": "Info"
+   },
+   {
+    "id": "aeeafd98-63e0-440d-b40d-2b522ca1fd11",
+    "identifiers": [
+     {
+      "type": "ash-finding-id",
+      "name": "ASH Finding ID",
+      "value": "aeeafd98-63e0-440d-b40d-2b522ca1fd11"
+     }
+    ],
+    "location": {},
+    "description": "None at None",
+    "raw_source_code_extract": "None at None",
+    "details": {
+     "rule_id": {
+      "name": "Rule ID",
+      "type": "text",
+      "value": ""
+     },
+     "raw_data": {
+      "name": "Raw Data",
+      "type": "code",
+      "value": "{\"level\":\"none\",\"message\":{\"text\":\"None at None\"}}",
+      "lang": "json"
+     },
+     "detected_at": {
+      "name": "Detected At",
+      "type": "text",
+      "value": "2026-01-02T03:04:05+00:00"
+     }
+    },
+    "severity": "Info"
+   },
+   {
+    "id": "cadb2590-589e-4665-a223-5e2d7b6aa47d",
+    "identifiers": [
+     {
+      "type": "grype-rule",
+      "name": "grype Rule B104",
+      "value": "B104"
+     },
+     {
+      "type": "ash-finding-id",
+      "name": "ASH Finding ID",
+      "value": "cadb2590-589e-4665-a223-5e2d7b6aa47d"
+     }
+    ],
+    "location": {
+     "file": "app/c.py",
+     "start_line": 1
+    },
+    "description": "B104 at 1",
+    "raw_source_code_extract": "B104 at 1",
+    "details": {
+     "scanner": {
+      "name": "Scanner",
+      "type": "text",
+      "value": "grype"
+     },
+     "rule_id": {
+      "name": "Rule ID",
+      "type": "text",
+      "value": "B104"
+     },
+     "properties": {
+      "name": "Properties",
+      "type": "text",
+      "value": "{\n  \"scanner_name\": \"grype\"\n}"
+     },
+     "raw_data": {
+      "name": "Raw Data",
+      "type": "code",
+      "value": "{\"ruleId\":\"B104\",\"level\":\"warning\",\"message\":{\"text\":\"B104 at 1\"},\"locations\":[{\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"app/c.py\"},\"region\":{\"startLine\":1}}}],\"properties\":{\"scanner_name\":\"grype\"}}",
+      "lang": "json"
+     },
+     "detected_at": {
+      "name": "Detected At",
+      "type": "text",
+      "value": "2026-01-02T03:04:05+00:00"
+     },
+     "location_details": {
+      "name": "Location Details",
+      "type": "text",
+      "value": "Line 1"
+     }
+    },
+    "name": "B104",
+    "severity": "Medium"
+   }
+  ],
+  "status": "failure",
+  "messages": [
+   {
+    "level": "warn",
+    "value": "1 SARIF result(s) could not be converted to GitLab vulnerabilities and are absent from this report. It is incomplete; see the ASH log for each error."
+   },
+   {
+    "level": "warn",
+    "value": "Scanner bandit did not complete (ERROR); its findings are absent from this report."
+   },
+   {
+    "level": "warn",
+    "value": "Scanner grype did not complete (ERROR); its findings are absent from this report."
+   },
+   {
+    "level": "warn",
+    "value": "No scanner reached a verdict; this report describes a tree that was not scanned."
+   }
+  ]
+ }
+}

@@ -10,6 +10,38 @@ package (that import registers the AWS reporters as a side effect). Nothing here
 touches the network or needs AWS credentials, which is also why the partition of a
 region is read from botocore's bundled data file rather than through a botocore
 session.
+
+The frame boundary
+------------------
+
+A run's results are projected on a polars frame, one row per result in the order
+the runs list them (:func:`_derived`), and the Id de-duplication is a ``unique``
+over a frame of the ids (:func:`_unique_by_id`). On the frame, from three columns
+the host reads off each result (its severity, whether it is suppressed, whether
+its rule id names a CVE): the severity label (a lookup, with ``INFORMATIONAL``
+for a severity the table does not name), the finding type (a case-when), and
+``RecordState`` and the ``ash/suppressed`` text (case-whens over the suppressed
+flag). The Id de-duplication keeps the first row of each Id, as Security Hub does.
+
+What stays on the host, a result at a time, is the text, and the nested document
+built from it: the message with its fenced code removed, its first non-blank
+line, the title and description sentences, the regular expression that tells a
+CVE rule, the cut at each documented limit, whether a field is blank, and the
+finding's nested ``Severity``, ``Resources``, ``FindingProviderFields`` and
+``ProductFields`` objects with their documented field order. Text operations are
+defined on characters: Python's ``len``, ``str.strip`` and a regular expression's
+word boundary see a character as one unit, and polars strings are UTF-8, so a
+column of them sees a multi-byte character as several. A frame holds text through
+:func:`~automated_security_helper.utils.frame_text.wire` (a path or a message can
+hold a lone surrogate, which a polars string cannot), which is one-to-one and
+keeps equality and order but not a character count, a whitespace test or a word
+boundary: a cut or a blank test run on such a column would differ from the text's
+for non-ASCII input. And a finding is one JSON object, not a row, so building it
+from its pieces has nothing to group, join or count.
+
+``AsffFormatter._to_asff`` is the per-finding assembly and stays a static method
+over one prepared result: the Security Hub reporter's tests wrap it to make a
+finding botocore refuses.
 """
 
 import functools
@@ -26,6 +58,7 @@ from automated_security_helper.utils.finding_identity import (
     relative_path,
     relative_to_scan_root,
 )
+from automated_security_helper.utils.frame_text import wire
 from automated_security_helper.utils.sarif_utils import _resolve_result_severity
 
 if TYPE_CHECKING:
@@ -173,6 +206,8 @@ class AsffFormatter:
         keys = identity_keys(
             [entry["identity"] for entry in prepared], default_project=model_project
         )
+        for entry, derived in zip(prepared, _derived(prepared)):
+            entry["derived"] = derived
         return [
             self._to_asff(
                 entry,
@@ -218,6 +253,8 @@ class AsffFormatter:
                 identity, source_dir, resolve_root=not self.offline
             ),
             "message": _without_code_blocks(flat.description or ""),
+            "severity": _resolve_result_severity(result),
+            "is_cve": bool(_CVE_PATTERN.search(flat.rule_id or "unknown")),
         }
 
     @staticmethod
@@ -232,9 +269,8 @@ class AsffFormatter:
         timestamp: str,
     ) -> dict[str, Any]:
         flat = entry["flat"]
-        ash_severity = _resolve_result_severity(entry["result"])
-        label = _ASFF_SEVERITY_LABELS.get(ash_severity, "INFORMATIONAL")
-        original = ash_severity.upper()
+        derived = entry["derived"]
+        original = entry["severity"].upper()
 
         scanner = entry["scanner"]
         rule_id = entry["rule_id"]
@@ -254,8 +290,8 @@ class AsffFormatter:
             message if first_line else f"{scanner} reported {rule_id} at {location}"
         )
 
-        types = [_TYPE_CVE if _CVE_PATTERN.search(rule_id) else _TYPE_VULNERABILITY]
-        severity = {"Label": label, "Original": original}
+        types = [derived["type"]]
+        severity = {"Label": derived["label"], "Original": original}
         resource_id = f"{target_key}/{file_path}" if file_path else target_key
 
         product_fields = {
@@ -264,7 +300,7 @@ class AsffFormatter:
             "ash/scanner": scanner,
             "ash/ruleId": rule_id,
             "ash/severity": original,
-            "ash/suppressed": "true" if flat.is_suppressed else "false",
+            "ash/suppressed": derived["suppressed_text"],
             "ash/file": file_path,
             "ash/startLine": _str_or_none(flat.line_start),
             "ash/endLine": _str_or_none(flat.line_end),
@@ -304,8 +340,53 @@ class AsffFormatter:
             },
             "ProductName": PRODUCT_NAME,
             "CompanyName": COMPANY_NAME,
-            "RecordState": "ARCHIVED" if flat.is_suppressed else "ACTIVE",
+            "RecordState": derived["record_state"],
         }
+
+
+def _derived(prepared: list[dict[str, Any]]) -> list[dict[str, str]]:
+    """What a result's severity and two flags give, for every result at once.
+
+    One row per entry of *prepared*, in order, with the severity ``label``, the
+    finding ``type``, the ``record_state`` and the ``suppressed_text`` the finding
+    carries. All four are ASCII constants or keys, so ``wire`` leaves them as
+    they are.
+    """
+    if not prepared:
+        return []
+    import polars as pl
+
+    frame = pl.DataFrame(
+        {
+            "severity": [wire(entry["severity"]) for entry in prepared],
+            "is_suppressed": [bool(entry["flat"].is_suppressed) for entry in prepared],
+            "is_cve": [entry["is_cve"] for entry in prepared],
+        },
+        schema={
+            "severity": pl.String,
+            "is_suppressed": pl.Boolean,
+            "is_cve": pl.Boolean,
+        },
+    )
+    suppressed = pl.col("is_suppressed")
+    return frame.select(
+        # A severity the table does not name is informational.
+        pl.col("severity")
+        .replace_strict(_ASFF_SEVERITY_LABELS, default="INFORMATIONAL")
+        .alias("label"),
+        pl.when(pl.col("is_cve"))
+        .then(pl.lit(_TYPE_CVE))
+        .otherwise(pl.lit(_TYPE_VULNERABILITY))
+        .alias("type"),
+        pl.when(suppressed)
+        .then(pl.lit("ARCHIVED"))
+        .otherwise(pl.lit("ACTIVE"))
+        .alias("record_state"),
+        pl.when(suppressed)
+        .then(pl.lit("true"))
+        .otherwise(pl.lit("false"))
+        .alias("suppressed_text"),
+    ).to_dicts()
 
 
 def _target_key(target: str, project: str | None) -> str:
@@ -364,13 +445,19 @@ def _unique_by_id(
     (https://docs.aws.amazon.com/securityhub/latest/userguide/securityhub-custom-providers.html)
     Doing the same here keeps the counts in the receipt honest.
     """
-    seen: set[str] = set()
-    kept: list[dict[str, Any]] = []
-    for finding in findings:
-        if finding["Id"] in seen:
-            continue
-        seen.add(finding["Id"])
-        kept.append(finding)
+    if not findings:
+        return [], 0
+    import polars as pl
+
+    ids = pl.DataFrame(
+        {
+            "i": list(range(len(findings))),
+            "id": [wire(finding["Id"]) for finding in findings],
+        },
+        schema={"i": pl.Int64, "id": pl.String},
+    )
+    first = ids.unique(subset="id", keep="first", maintain_order=True)["i"]
+    kept = [findings[index] for index in first.to_list()]
     return kept, len(findings) - len(kept)
 
 

@@ -65,6 +65,7 @@ from automated_security_helper.core.enums import (
     ExportFormat,
     RunMode,
 )
+from automated_security_helper.core.scanner_selection import SelectionLayers
 from automated_security_helper.interactions.run_ash_scan import ScanOptions
 from automated_security_helper.workspace.execution import ProjectScanSettings
 
@@ -211,7 +212,12 @@ def _opts(tmp_path: Path) -> ScanOptions:
         config_base_gate=_GATE,
         keep_previous_results=True,
         selection_origin="mcp",
+        required_scanner_selection=_MARKER,
     )
+
+
+#: The host's marker for a container-run workspace, carried to the executor.
+_MARKER = '{"add": [], "only": ["bandit"]}'
 
 
 #: Non-None, so the entry discriminates against the dataclass default.
@@ -272,6 +278,10 @@ def _expected(tmp_path: Path) -> Dict[str, Any]:
         # "mcp" only from the MCP workspace tool; the CLI leaves it "cli". It decides
         # whether a SKIPPED row and the selection refusals name flags or parameters.
         "selection_origin": "mcp",
+        # An MCP scanners argument is a limit, so the layers carry it as the
+        # replacement list, not as an addition.
+        "selection_layers": SelectionLayers(cli_only=["bandit", "semgrep"]),
+        "required_scanner_selection": _MARKER,
     }
 
 

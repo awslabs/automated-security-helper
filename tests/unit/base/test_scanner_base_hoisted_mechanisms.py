@@ -290,7 +290,7 @@ def test_the_failure_text_names_the_log_and_never_quotes_it(tmp_path):
     text = scanner._describe_scan_failure(RuntimeError("boom"), results_file)
     assert "TOKEN-IN-STDERR" not in text
     assert "boom" in text
-    assert "walker-tool' log is not quoted here" in text
+    assert "walker-tool's log is not quoted here" in text
     assert log.as_posix() in text
     assert "exit code 2" in text
 
@@ -310,4 +310,5 @@ def test_the_unquoted_failure_text_for_a_tool_ash_could_not_stop(tmp_path):
         RuntimeError("boom"), tmp_path / "results" / "source" / "walker.sarif"
     )
     assert "no exit code: ASH could not stop walker-tool" in text
+    assert "walker-tool's log is not quoted here" in text
     assert "exit code " not in text.replace("no exit code", "")

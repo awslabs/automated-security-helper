@@ -74,7 +74,7 @@ You need git, [uv](https://docs.astral.sh/uv/getting-started/installation/), and
     ASH first, because `uv run` puts the project's environment at the front of `PATH`;
     outside `uv run`, the `ashv3` alias runs the same entry point.
 - CI runs the unit suite on Linux (x86_64 and arm64), macOS on Apple silicon, and
-  Windows, each with Python 3.10 to 3.14, so any of these works for development.
+  Windows, each with Python 3.11 to 3.14, so any of these works for development.
 - Some tests need programs that are not Python packages, such as a container runtime,
   a sandbox backend, or Nix. [Test your change](testing.md) says which, and how they are
   selected.
@@ -123,7 +123,7 @@ option is in the [CLI reference](../reference/cli.md).
 | `.ash/` | The ASH configuration that CI uses to scan this repository |
 | `Formula/` | The Homebrew formula |
 | `nix/` | Nix packages for the scanners nixpkgs does not carry; `flake.nix` at the root defines the development shell |
-| `utils/` | `ash_helpers.sh`, which you source from a shell profile to get an `invoke-ash` command that runs this checkout's `./ash` from any directory; `ash_helpers.ps1`, which defines `Invoke-ASH`, the container wrapper for PowerShell; and older per-scanner scripts that ASH does not run |
+| `utils/` | `ash_helpers.sh`, which you source from a shell profile to get an `invoke-ash` command that runs this checkout's `./ash` from any directory; `ash_helpers.ps1`, which defines `Invoke-ASH`, the container wrapper for PowerShell. The subcommand and option tables in `./ash` and `ash_helpers.ps1` sit between `BEGIN generated` and `END generated` comments and are generated from the CLI by `scripts/generate_wrapper_tables.py`; run it after you change a command or option, and CI fails if they are stale |
 
 ## Open a pull request
 
@@ -210,7 +210,7 @@ does not merge.
 | `lint` | the JSON schemas match a regeneration; the docs checks pass; every CI artifact upload and cache is allowlisted; every cached content database is time-bounded; and `ruff check`, `ruff format --check`, and mypy pass. ty runs for information only | through `required-checks` |
 | `actionlint` | actionlint and shellcheck over every workflow | through `required-checks` |
 | `snapshot-trailers` | every changed golden file has a `Snapshot-Update:` trailer, and every snapshot belongs to a test module | through `required-checks` |
-| `unit-test (<os>, py<version>, shard <i>of<n>)` | the unit and snapshot suite with both extras, on five runners and Python 3.10 to 3.14, plus the cdk-nag integration tests, in six shards per Linux combination and eight per macOS and Windows one. A test that cannot find an extra fails rather than skipping, and the leg fails when total coverage of `automated_security_helper/` is under 80% | through `required-checks` |
+| `unit-test (<os>, py<version>, shard <i>of<n>)` | the unit and snapshot suite with both extras, on five runners and Python 3.11 to 3.14, plus the cdk-nag integration tests, in six shards per Linux combination and eight per macOS and Windows one. A test that cannot find an extra fails rather than skipping, and the leg fails when total coverage of `automated_security_helper/` is under 80% | through `required-checks` |
 | `integration-test (ubuntu-latest, shard <i>of4)` | the integration suite with `pytest --run-integration --run-slow`, in four shards | through `required-checks` |
 | `docs-examples` | every runnable shell and Python block in the docs, one test per page | through `required-checks` |
 | `build-docs` | `mkdocs build --strict`, and `scripts/docs_versions.py check` on the versioned site | through `required-checks` |
@@ -299,7 +299,7 @@ uv run pre-commit run --all-files
 ```
 
 Run pre-commit through `uv run`, so it uses the project's Python; the pinned commitizen
-hook needs Python 3.10 or later. The first commit takes longer while pre-commit builds
+hook needs Python 3.11 or later. The first commit takes longer while pre-commit builds
 the hook environments, and the schema regeneration runs on every commit.
 
 On a clean checkout, `pre-commit run --all-files` passes and changes nothing. The JSON

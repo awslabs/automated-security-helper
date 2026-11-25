@@ -9,6 +9,12 @@ from typing import Annotated, Any, ClassVar, List, Literal, Optional, Set
 from pydantic import Field
 
 from automated_security_helper.base.options import ScannerOptionsBase
+from automated_security_helper.base import scanner_operational_facets as opsf
+from automated_security_helper.base.scanner_facets import (
+    FacetDecl,
+    FacetState,
+    ScannerFacets,
+)
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.config.tool_config_trust import empty_tool_directory
 from automated_security_helper.models.core import ToolArgs
@@ -24,7 +30,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners._trivy_scanne
 from automated_security_helper.base.scanner_plugin import (
     redacted_command_record,
 )
-from automated_security_helper.core.enums import ScannerToolType
+from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.schemas.sarif_schema_model import (
@@ -179,12 +185,266 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
     # nonzero exit only ever means trivy failed.
     success_exit_codes: ClassVar[Set[int]] = {0}
 
+    #: The facets register row (base/scanner_facets.py). Declaration only.
+    #: trivy-repo shares trivy's SARIF reading through TrivyScannerBase but
+    #: classifies its own output: its default scanners are vuln, secret,
+    #: misconfig and license, so the misconfig resource facet applies to its
+    #: DEFAULT run (M0 settled it: the address exists natively in JSON and
+    #: dies at the SARIF format ASH reads).
+    #: Native fields are quoted from the committed trivy SARIF
+    #: (tests/test_data/scanners/trivy/trivy-0.69.3.vuln.sarif) and from the
+    #: M0 misconfig capture (tests/test_data/scanners/trivy/captured/
+    #: trivy-0.76.2-misconfig-terraform.{json,sarif}, M0-FINDINGS.md (a)).
+    facets: ClassVar[ScannerFacets] = ScannerFacets(
+        rule_id=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="SARIF result ruleId",
+        ),
+        severity=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result message line "Severity: <level>", checked '
+            "against the result level and the rule tags (issue_severity)",
+        ),
+        file_path=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="SARIF locations[].physicalLocation.artifactLocation.uri",
+        ),
+        line_range=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="SARIF region.startLine / region.endLine",
+        ),
+        column=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="SARIF region.startColumn",
+        ),
+        message=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="SARIF result message.text",
+        ),
+        resource_id=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="Results[].Misconfigurations[].CauseMetadata.Resource "
+            "(trivy's JSON report, absent from its SARIF), copied onto the "
+            "SARIF result under ash_resource_id by attach_trivy_resources "
+            "for result type terraform only: cloudformation carries a "
+            "file:line locator (t.yaml:3-4) and kubernetes and dockerfile "
+            "carry none (trivy 0.76.2, M0-FINDINGS.md (a))",
+            example="aws_s3_bucket.m0_fixture_bucket",
+        ),
+        resource_type=FacetDecl(
+            state=FacetState.NA,
+            reason="trivy's CauseMetadata names Provider and Service (AWS, "
+            "s3) and no resource type; the type is only the prefix of the "
+            "dropped address, which would be a derivation",
+        ),
+        package_name=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result message line 1 "Package: <name>" '
+            "(_package_from_message)",
+        ),
+        package_version=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result message line 2 "Installed Version: <version>" '
+            "(_package_from_message)",
+        ),
+        package_path=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="npm lockfile entry at the SARIF region.startLine of "
+            "the result's location (one result per installed copy)",
+        ),
+        taxonomy_cve=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="SARIF result ruleId (the CVE id)",
+        ),
+        taxonomy_cwe=FacetDecl(
+            state=FacetState.UNCONFIRMED,
+            reason="UNCONFIRMED: trivy's SARIF rules carry no CWE (tags are "
+            "vulnerability, security, <severity>); the JSON format's CweIDs "
+            "has no committed vulnerability fixture, and a `trivy fs --format "
+            "json` run over a lockfile settles it",
+        ),
+        fingerprints=FacetDecl(
+            state=FacetState.NA,
+            reason="trivy's SARIF results carry no fingerprints (result keys "
+            "are level, locations, message, ruleId, ruleIndex)",
+        ),
+        fix_available=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='message line "Fixed Version: <version>", written as '
+            "fix_available=True when non-empty by "
+            "TrivyScannerBase._fixed_version_from_message (an empty value "
+            "writes nothing; ignore_unfixed defaults to true, so the tool "
+            "pre-filters unfixed findings)",
+        ),
+        remediation_text=FacetDecl(
+            state=FacetState.UNCONFIRMED,
+            reason="UNCONFIRMED: not classified by the survey; the flat "
+            "model has no remediation column, and the rule help text carries "
+            "the fixed version already declared under fix_available",
+        ),
+        snippet=FacetDecl(
+            state=FacetState.NA,
+            reason="trivy's SARIF results carry no code snippet",
+        ),
+        references=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="SARIF rule helpUri, read into the flat references "
+            "by FlatVulnerability.from_sarif_result when the result carries "
+            "no relatedLocations",
+        ),
+        tags=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="SARIF rule properties.tags, read into the flat tags "
+            "by FlatVulnerability.from_sarif_result when the result carries "
+            "none (the severity word among them still feeds issue_severity)",
+        ),
+        extras=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="result properties bag (issue_severity and the "
+            "package identity keys this adapter writes) passed through to "
+            "the flat properties",
+        ),
+    )
+
+    #: The operational register row (base/scanner_operational_facets.py),
+    #: checked against the production declarations it mirrors by
+    #: tests/unit/plugin_modules/test_scanner_operational_facets_consistency.py.
+    operational_facets: ClassVar[opsf.ScannerOperationalFacets] = (
+        opsf.ScannerOperationalFacets(
+            scanner_name="trivy-repo",
+            network=opsf.NetworkFacet(
+                fetch_kind=opsf.FetchKind.CONTENT_FETCH,
+                fetches=(
+                    opsf.Fetched.VULN_DB,
+                    opsf.Fetched.CHECKS_BUNDLE,
+                    opsf.Fetched.MODULE_SOURCES,
+                ),
+                prefetch=(opsf.Prefetch.CONTENT_DB_REFRESH,),
+                offline_outcome=opsf.OfflineOutcome.DEGRADED,
+                offline_reason=(
+                    "--skip-db-update, --skip-java-db-update and --skip-check-update "
+                    "against the cached databases; Terraform checks are removed from the "
+                    "misconfiguration set offline with the reason logged; a scan that "
+                    "reads the vulnerability database with none cached is refused before "
+                    "the scan"
+                ),
+                offline_strategy=OfflineStrategy.CACHE_FLAGS,
+                sandbox_network=opsf.SandboxNetwork.ONLINE,
+                content_database="trivy-db",
+                source=(
+                    "_trivy_scanner_base.py offline_strategy, sandbox_requirements, "
+                    "SCAN_FLAGS and OFFLINE_FLAGS; utils/content_databases.py trivy-db "
+                    "(declared for trivy-repo)"
+                ),
+                unconfirmed=(
+                    "the default scanner set is all four, so the online Terraform module "
+                    "fetch and the offline misconfig degradation apply by default here, "
+                    "unlike the builtin trivy scanner"
+                ),
+            ),
+            output=opsf.OutputFacet(
+                native_formats=(opsf.OutputFormat.SARIF,),
+                side_reports=(),
+                non_finding_artifacts=(),
+            ),
+            targets=opsf.TargetsFacet(
+                kinds=(
+                    opsf.TargetKind.DEPENDENCY_LOCKFILES,
+                    opsf.TargetKind.SECRETS_CONTENTS,
+                    opsf.TargetKind.IAC_TERRAFORM,
+                    opsf.TargetKind.IAC_KUBERNETES,
+                    opsf.TargetKind.IAC_CLOUDFORMATION,
+                    opsf.TargetKind.DOCKERFILES,
+                ),
+                tool_type=ScannerToolType.SCA,
+                selection="`trivy repository` over the target; scanners default to vuln, secret, misconfig and license",
+                covers_note="a community scanner; it declares no covers display string",
+                tool_type_note=(
+                    "was SAST, which contradicted what it runs (vuln, secret, misconfig "
+                    "and license scanners, no source analysis) and fed the reporter-side "
+                    "scanner-type exclusions the wrong type; corrected to SCA, the type "
+                    "the builtin trivy scanner declares"
+                ),
+            ),
+            runtime=opsf.RuntimeFacet(
+                kind=opsf.RuntimeKind.PINNED_BINARY,
+                external_programs=(),
+                invocations=opsf.Invocations.ONE,
+                tool_versions_key="trivy",
+                python_only=False,
+                use_uv_tool=False,
+            ),
+            platforms=opsf.PlatformsFacet(
+                provisionable=opsf.PLATFORMS_NO_WINDOWS_ARM64,
+                note="no windows/arm64 and no 32-bit macOS asset (tool_downloads.py docstring)",
+            ),
+            severity=opsf.SeverityFacet(
+                severity_class=opsf.SeverityClass.DERIVED,
+                note="issue_severity is computed from the message and tags",
+            ),
+            silencing=opsf.SilencingFacet(
+                tool_side=(
+                    opsf.SilencingLayer(
+                        layer=opsf.SilencingLayerKind.TOOL_DEFAULT_FILTER,
+                        writer=opsf.SilencingWriter.TOOL_DEFAULT,
+                        honored=opsf.Honored.YES,
+                        surface="options.ignore_unfixed defaults to True and pre-filters tool-side",
+                        cite="trivy_repo_scanner.py ignore_unfixed option and the warning at :273",
+                    ),
+                    opsf.SilencingLayer(
+                        layer=opsf.SilencingLayerKind.IGNORE_FILE,
+                        writer=opsf.SilencingWriter.REPOSITORY,
+                        honored=opsf.Honored.UNCONFIRMED,
+                        surface="a trivy ignore file in the scanned tree",
+                        cite="tool feature; _trivy_scanner_base.py lists TRIVY_IGNORE_* and TRIVY_SKIP_* as passed-through variables",
+                        reason=(
+                            "whether a repository-written ignore file can silence findings "
+                            "under ASH was not read; one adapter read settles it"
+                        ),
+                    ),
+                ),
+            ),
+            identity=opsf.IdentityFacet(
+                fingerprint_class=opsf.FingerprintClass.POSITIONAL_ONLY,
+                note="identity is file and line through the shared floor",
+            ),
+            extensibility=opsf.ExtensibilityFacet(
+                custom_rules=opsf.CustomRules.NONE,
+                env_prefixes=("TRIVY_",),
+                options_surface="typed options (scanners, ignore_unfixed, license_full); ASH always passes its own --config",
+            ),
+            exit_codes=opsf.ExitCodesFacet(
+                success_exit_codes=(0,),
+                semantics="trivy reports findings in the file, not through its exit code",
+            ),
+            provenance=opsf.ProvenanceFacet(
+                tier=opsf.Tier.COMMUNITY_OPTIN,
+                source=opsf.ProvenanceSource.PINNED_RELEASE_BINARY,
+                selection_surfaces=(
+                    "ash_trivy_plugins in ash_plugin_modules",
+                    "options.scanners (all four on by default)",
+                ),
+                upstream_license=(
+                    "Apache-2.0 (source: utils/tool_downloads.py "
+                    "THIRD_PARTY_LICENSES['trivy'], pinned commit 3f6334d; the "
+                    "trivy binary this plugin invokes)"
+                ),
+            ),
+            prerequisites=opsf.PrerequisitesFacet(
+                kinds=(opsf.Prerequisite.NONE,),
+                note="a directory",
+            ),
+        )
+    )
+
     def model_post_init(self, context):
         if self.config is None:
             self.config = TrivyRepoScannerConfig()
         self.command = "trivy"
         self.subcommands = ["repository"]
-        self.tool_type = ScannerToolType.SAST
+        # SCA, not SAST: it runs the vuln, secret, misconfig and license
+        # scanners and no source analysis (operational_facets.targets).
+        self.tool_type = ScannerToolType.SCA
         self.args = ToolArgs(
             format_arg="--format",
             format_arg_value="sarif",
@@ -497,6 +757,9 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
                         scanner_results
                     )
                     sarif_report = self._attach_package_identity(sarif_report, target)
+                    sarif_report = self._attach_misconfig_resources(
+                        sarif_report, final_args
+                    )
                     # trivy's own per-result severity, as the builtin trivy scanner
                     # reports it: without it ASH buckets the CVE rule's last CVSS
                     # score, which is another package's rating for the same CVE.

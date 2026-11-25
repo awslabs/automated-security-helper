@@ -105,8 +105,11 @@ def directory_path_advice(path_pattern: str, *, ignore_path: bool) -> str:
     """The warning for a path that names an existing directory and no file in it.
 
     Shared by ``ash config validate`` and ``ash config lint``, and spelled as
-    ``path_matching.directory_spelling`` spells it, as the warning after the scan
-    does: ``<dir>/`` for an ignore path, ``<dir>/**/*`` for a suppression path.
+    ``path_matching.directory_spelling`` spells it: ``<dir>/`` for an ignore
+    path, ``<dir>/**/*`` for a suppression path. Since the bare-directory rule
+    (issue #894) a glob-free pattern matches the files below the directory it
+    names, so only a ``**`` pattern whose last component names a directory gets
+    this advice.
     """
     spelling = directory_spelling(path_pattern, ignore_path=ignore_path)
     action = (
@@ -333,9 +336,6 @@ def path_pattern_advice(
             )
         return f"Path '{shown}' matches '{spelled}' {CASE_ONLY_PROBLEM}."
 
-    # An ignore path ending in / names the directory and what is in it.
-    if ignore_path and form.endswith("/"):
-        return None
     clean_path = form.rstrip("/")
     # A glob in the last component matches files.
     from pathlib import PurePosixPath
@@ -347,12 +347,12 @@ def path_pattern_advice(
         # '**' matches any run of directories, and the last component then
         # names a path exactly: '**/node_modules' is a file of that name, and
         # the files inside a directory of that name do not match. Advised only
-        # for a directory the tree holds somewhere, by a bounded walk.
+        # for a directory the tree holds somewhere, by a bounded walk. A
+        # glob-free pattern gets no such advice: under the bare-directory rule
+        # (issue #894) it names the directory and matches the files below it,
+        # in ignore paths and suppressions alike.
         if basename != "**" and _names_a_directory_below(basename, project_root):
             return directory_path_advice(shown, ignore_path=ignore_path)
-        return None
-    if _names_a_directory(project_root / clean_path):
-        return directory_path_advice(shown, ignore_path=ignore_path)
     return None
 
 
@@ -3864,6 +3864,8 @@ class ConfigValidator:
         "workspace",
         # Scanner selection for --mode precommit (only_scanners, add_scanners).
         "precommit",
+        # The operator's default scanners, read in every mode (only, add).
+        "default_scanners",
         # Loader directives (#289), resolved before the config is validated.
         EXTENDS_KEY,
         PATCH_KEY,
@@ -4390,12 +4392,27 @@ class ConfigValidator:
         ):
             if place not in ignored_places:
                 ignored_places.append(place)
+        selection_ignored, selection_unknown = cls._ignored_default_scanners(
+            repository, config_overrides, ash_config
+        )
+        for place in selection_ignored:
+            if place not in ignored_places:
+                ignored_places.append(place)
         for place in ignored_places:
             result.warnings.append(
                 result.redact(
                     f"{place} is set in a config file inside the scanned tree, "
                     "and a scan ignores that value: only --config-overrides or a "
                     "config file outside the tree set it."
+                )
+            )
+        for place in selection_unknown:
+            result.warnings.append(
+                result.redact(
+                    f"{place} is not a default_scanners key, and a scan ignores "
+                    "the default_scanners section a config file inside the "
+                    "scanned tree writes: only --config-overrides or a config file "
+                    "outside the tree set it."
                 )
             )
         result.ash_config_errors = ash_config_errors
@@ -4463,6 +4480,25 @@ class ConfigValidator:
         return ignored_operator_only_options(
             built, trusted, config_overrides, repository
         )
+
+    @classmethod
+    def _ignored_default_scanners(
+        cls,
+        repository: Any,
+        config_overrides: Optional[List[str]],
+        ash_config: "_AshConfigCheck",
+    ) -> Tuple[List[str], List[str]]:
+        from automated_security_helper.config.ash_config import AshConfig
+        from automated_security_helper.config.default_scanners_trust import (
+            ignored_default_scanners,
+        )
+
+        if repository is None:
+            return [], []
+        trusted = AshConfig()
+        if ash_config.loaded is not None and not ash_config.in_tree:
+            trusted = ash_config.loaded
+        return ignored_default_scanners(trusted, config_overrides, repository)
 
     @classmethod
     def _ignored_reporter_destinations(
