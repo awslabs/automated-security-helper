@@ -77,8 +77,8 @@ def test_no_tool_environment_variable_is_passed_into_the_sandbox(layout):
     passed = policy.filter_env(
         {
             "NODE_OPTIONS": "--require /tmp/x.js",
-            "NODE_EXTRA_CA_CERTS": "/tmp/ca.pem",
             "HTTPS_PROXY": "http://127.0.0.1:9",
+            "SPECTRAL_RULESET": "/tmp/rules.js",
         }
     )
     assert passed.keys() == {"HOME"} | set(policy.extra_env)
