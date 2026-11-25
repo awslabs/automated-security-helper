@@ -19,7 +19,7 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.workspace_sk
     skipped_projects,
 )
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
-from automated_security_helper.utils.frame_text import unwire, wire
+from automated_security_helper.utils.frame_text import unwire, wire, wire_cell
 from automated_security_helper.utils.terminal_text import commands_broken
 
 #: The workspace-mode column header. First rather than appended, because a
@@ -128,7 +128,7 @@ def cell_frame(
                 other_cells.append(None)
             else:
                 text_cells.append(None)
-                other_cells.append(None if value is None else wire(str(value)))
+                other_cells.append(wire_cell(value))
         texts[f"t{index}"] = text_cells
         others[f"o{index}"] = other_cells
     frame = pl.DataFrame(

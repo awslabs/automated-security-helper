@@ -59,7 +59,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence, Tuple
 
 from automated_security_helper.utils.finding_identity import canonical
-from automated_security_helper.utils.frame_text import unwire, wire
+from automated_security_helper.utils.frame_ops import ordered_counts
+from automated_security_helper.utils.frame_text import unwire, wire, wire_cell
 
 if TYPE_CHECKING:
     import polars as pl
@@ -68,12 +69,6 @@ if TYPE_CHECKING:
 
 _INT64_MIN = -(2**63)
 _INT64_MAX = 2**63 - 1
-
-
-def _text(value: Any) -> Optional[str]:
-    return (
-        None if value is None else wire(value if isinstance(value, str) else str(value))
-    )
 
 
 def _line(value: Optional[int]) -> Tuple[Optional[int], bool]:
@@ -117,18 +112,18 @@ def flat_frame(findings: Sequence["FlatVulnerability"]) -> "pl.DataFrame":
         base = finding.identity_base
         row = (
             index,
-            _text(finding.id),
-            _text(finding.scanner),
+            wire_cell(finding.id),
+            wire_cell(finding.scanner),
             wire((finding.scanner or "").lower()),
-            _text(finding.scanner_type),
-            _text(finding.rule_id),
-            _text(finding.severity),
-            _text(finding.file_path),
+            wire_cell(finding.scanner_type),
+            wire_cell(finding.rule_id),
+            wire_cell(finding.severity),
+            wire_cell(finding.file_path),
             start,
             end,
             start_over or end_over,
             bool(finding.is_suppressed),
-            _text(finding.source_report),
+            wire_cell(finding.source_report),
             finding.identity is not None,
             finding.has_fingerprint_identity,
             None if base is None else wire(canonical(base)),
@@ -164,9 +159,5 @@ def suppressed_by_scanner(frame: "pl.DataFrame") -> Dict[str, int]:
     appears. A scanner with none has no entry."""
     import polars as pl
 
-    counted = (
-        frame.filter(pl.col("is_suppressed"))
-        .group_by("scanner_key", maintain_order=True)
-        .agg(pl.len().alias("n"))
-    )
+    counted = ordered_counts(frame.filter(pl.col("is_suppressed")), "scanner_key")
     return {unwire(scanner): count for scanner, count in counted.iter_rows()}
