@@ -1,0 +1,168 @@
+{
+  "version": "2.1.0",
+  "$schema": "https://json.schemastore.org/sarif-2.1.0-rtm.5.json",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "informationUri": "https://github.com/goodwithtech/dockle",
+          "name": "Dockle",
+          "rules": [
+            {
+              "id": "CIS-DI-0010",
+              "name": "CIS-DI-0010",
+              "shortDescription": {
+                "text": "Do not store credential in environment variables/files"
+              },
+              "helpUri": "https://github.com/goodwithtech/dockle/blob/master/CHECKPOINT.md#CIS-DI-0010"
+            },
+            {
+              "id": "DKL-LI-0001",
+              "name": "DKL-LI-0001",
+              "shortDescription": {
+                "text": "Avoid empty password"
+              },
+              "helpUri": "https://github.com/goodwithtech/dockle/blob/master/CHECKPOINT.md#DKL-LI-0001"
+            },
+            {
+              "id": "DKL-LI-0002",
+              "name": "DKL-LI-0002",
+              "shortDescription": {
+                "text": "Be unique UID/GROUP"
+              },
+              "helpUri": "https://github.com/goodwithtech/dockle/blob/master/CHECKPOINT.md#DKL-LI-0002"
+            },
+            {
+              "id": "CIS-DI-0001",
+              "name": "CIS-DI-0001",
+              "shortDescription": {
+                "text": "Create a user for the container"
+              },
+              "helpUri": "https://github.com/goodwithtech/dockle/blob/master/CHECKPOINT.md#CIS-DI-0001"
+            },
+            {
+              "id": "CIS-DI-0005",
+              "name": "CIS-DI-0005",
+              "shortDescription": {
+                "text": "Enable Content trust for Docker"
+              },
+              "helpUri": "https://github.com/goodwithtech/dockle/blob/master/CHECKPOINT.md#CIS-DI-0005"
+            },
+            {
+              "id": "CIS-DI-0006",
+              "name": "CIS-DI-0006",
+              "shortDescription": {
+                "text": "Add HEALTHCHECK instruction to the container image"
+              },
+              "helpUri": "https://github.com/goodwithtech/dockle/blob/master/CHECKPOINT.md#CIS-DI-0006"
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "CIS-DI-0010",
+          "ruleIndex": 0,
+          "level": "error",
+          "message": {
+            "text": "Suspicious filename found : app/id_rsa (You can suppress it with \"-af id_rsa\")"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "app/id_rsa"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "DKL-LI-0001",
+          "ruleIndex": 1,
+          "level": "error",
+          "message": {
+            "text": "No password user found! username : root"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "etc/shadow"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "DKL-LI-0002",
+          "ruleIndex": 2,
+          "level": "none",
+          "message": {
+            "text": "failed to detect etc/group"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ""
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CIS-DI-0001",
+          "ruleIndex": 3,
+          "level": "warning",
+          "message": {
+            "text": "Last user should not be root"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "metadata"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CIS-DI-0005",
+          "ruleIndex": 4,
+          "level": "note",
+          "message": {
+            "text": "export DOCKER_CONTENT_TRUST=1 before docker pull/build"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "ENVIRONMENT variable on HOST OS"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CIS-DI-0006",
+          "ruleIndex": 5,
+          "level": "note",
+          "message": {
+            "text": "not found HEALTHCHECK statement"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "metadata"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
