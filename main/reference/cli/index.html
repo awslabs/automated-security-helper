@@ -758,6 +758,8 @@ SOFTWARE.
       
         
       
+        
+      
     
     
     
@@ -1029,6 +1031,34 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
+      <a href="../../how-to/deduplicate-findings/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deduplicate findings
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../docs/scanner-sandbox/" class="md-nav__link">
         
   
@@ -1213,10 +1243,10 @@ SOFTWARE.
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_15" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_16" >
         
           
-          <label class="md-nav__link" for="__nav_4_15" id="__nav_4_15_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_4_16" id="__nav_4_16_label" tabindex="0">
             
   
   
@@ -1234,8 +1264,8 @@ SOFTWARE.
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_15_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_4_15">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_16_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_16">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -2329,6 +2359,17 @@ SOFTWARE.
     <span class="md-ellipsis">
       
         ash scan
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ash-trend" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ash trend
       
     </span>
   </a>
@@ -4019,6 +4060,17 @@ SOFTWARE.
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#ash-trend" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ash trend
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -4225,13 +4277,17 @@ SOFTWARE.
 <td><a href="#scan"><code>ash scan</code></a></td>
 <td>Scan code, infrastructure, secrets, and dependencies.</td>
 </tr>
+<tr>
+<td><a href="#trend"><code>ash trend</code></a></td>
+<td>Show new, carried and fixed findings over a series of saved ASH scans.</td>
+</tr>
 </tbody>
 </table>
 <h2 id="ash"><code>ash</code><a class="headerlink" href="#ash" title="Permanent link">&para;</a></h2>
 <p>Automated Security Helper, the agentic security harness · one workflow for your scanners.</p>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>ash [OPTIONS] COMMAND [ARGS]...
 </span></code></pre></div>
-<p>Run with no command, <code>ash</code> runs a scan. It accepts these options of <a href="#scan"><code>ash scan</code></a>, with the same types, defaults and environment variables: <a href="#scan--source-dir"><code>--source-dir</code></a>, <a href="#scan--output-dir"><code>--output-dir</code></a>, <a href="#scan--scanners"><code>--scanners</code></a>, <a href="#scan--exclude-scanners"><code>--exclude-scanners</code></a>, <a href="#scan--only-scanners"><code>--only-scanners</code></a>, <a href="#scan--add-scanners"><code>--add-scanners</code></a>, <a href="#scan--ash-plugin-modules"><code>--ash-plugin-modules</code></a>, <a href="#scan--config-overrides"><code>--config-overrides</code></a>, <a href="#scan--offline"><code>--offline</code></a>, <a href="#scan--sandbox"><code>--sandbox</code></a>, <a href="#scan--express"><code>--express</code></a>, <a href="#scan--offline-semgrep-rulesets"><code>--offline-semgrep-rulesets</code></a>, <a href="#scan--strategy"><code>--strategy</code></a>, <a href="#scan--progress"><code>--progress</code></a>, <a href="#scan--output-formats"><code>--output-formats</code></a>, <a href="#scan--cleanup"><code>--cleanup</code></a>, <a href="#scan--phases"><code>--phases</code></a>, <a href="#scan--inspect"><code>--inspect</code></a>, <a href="#scan--use-existing"><code>--use-existing</code></a>, <a href="#scan--version"><code>--version</code></a>, <a href="#scan--mode"><code>--mode</code></a>, <a href="#scan--python-only"><code>--python-only</code></a>, <a href="#scan--show-summary"><code>--show-summary</code></a>, <a href="#scan--quiet"><code>--quiet</code></a>, <a href="#scan--log-level"><code>--log-level</code></a>, <a href="#scan--config"><code>--config</code></a>, <a href="#scan--verbose"><code>--verbose</code></a>, <a href="#scan--debug"><code>--debug</code></a>, <a href="#scan--color"><code>--color</code></a>, <a href="#scan--fail-on-findings"><code>--fail-on-findings</code></a>, <a href="#scan--fail-on-incomplete-scanners"><code>--fail-on-incomplete-scanners</code></a>, <a href="#scan--allow-stale-content-db"><code>--allow-stale-content-db</code></a>, <a href="#scan--simple"><code>--simple</code></a>, <a href="#scan--ignore-suppressions"><code>--ignore-suppressions</code></a>, <a href="#scan--honor-ignore-files"><code>--honor-ignore-files</code></a>, <a href="#scan--min-severity"><code>--min-severity</code></a>, <a href="#scan--compact-report"><code>--compact-report</code></a>, <a href="#scan--changed-files-only"><code>--changed-files-only</code></a>, <a href="#scan--base-ref"><code>--base-ref</code></a>, <a href="#scan--staged"><code>--staged</code></a>, <a href="#scan--allow-in-tree-tools"><code>--allow-in-tree-tools</code></a>, <a href="#scan--shard-index"><code>--shard-index</code></a>, <a href="#scan--shard-count"><code>--shard-count</code></a>, <a href="#scan--config-from-scanned-repository"><code>--config-from-scanned-repository</code></a>, <a href="#scan--config-file-from-scanned-repository"><code>--config-file-from-scanned-repository</code></a>, <a href="#scan--config-file-from-another-checkout"><code>--config-file-from-another-checkout</code></a>, <a href="#scan--require-scanner-selection"><code>--require-scanner-selection</code></a>, <a href="#scan--ash-config-from-host"><code>--ash-config-from-host</code></a>, <a href="#scan--workspace"><code>--workspace</code></a>, <a href="#scan--workspace-config"><code>--workspace-config</code></a>, <a href="#scan--allow-missing-projects"><code>--allow-missing-projects</code></a>, <a href="#scan--dry-run"><code>--dry-run</code></a>, <a href="#scan--build"><code>--build</code></a>, <a href="#scan--run"><code>--run</code></a>, <a href="#scan--force"><code>--force</code></a>, <a href="#scan--oci-runner"><code>--oci-runner</code></a>, <a href="#scan--build-target"><code>--build-target</code></a>, <a href="#scan--container-uid"><code>--container-uid</code></a>, <a href="#scan--container-gid"><code>--container-gid</code></a>, <a href="#scan--ash-revision-to-install"><code>--ash-revision-to-install</code></a>, <a href="#scan--custom-containerfile"><code>--custom-containerfile</code></a>, <a href="#scan--custom-build-arg"><code>--custom-build-arg</code></a>, <a href="#scan--baseline"><code>--baseline</code></a>.</p>
+<p>Run with no command, <code>ash</code> runs a scan. It accepts these options of <a href="#scan"><code>ash scan</code></a>, with the same types, defaults and environment variables: <a href="#scan--source-dir"><code>--source-dir</code></a>, <a href="#scan--output-dir"><code>--output-dir</code></a>, <a href="#scan--scanners"><code>--scanners</code></a>, <a href="#scan--exclude-scanners"><code>--exclude-scanners</code></a>, <a href="#scan--only-scanners"><code>--only-scanners</code></a>, <a href="#scan--add-scanners"><code>--add-scanners</code></a>, <a href="#scan--ash-plugin-modules"><code>--ash-plugin-modules</code></a>, <a href="#scan--config-overrides"><code>--config-overrides</code></a>, <a href="#scan--offline"><code>--offline</code></a>, <a href="#scan--sandbox"><code>--sandbox</code></a>, <a href="#scan--express"><code>--express</code></a>, <a href="#scan--offline-semgrep-rulesets"><code>--offline-semgrep-rulesets</code></a>, <a href="#scan--strategy"><code>--strategy</code></a>, <a href="#scan--progress"><code>--progress</code></a>, <a href="#scan--output-formats"><code>--output-formats</code></a>, <a href="#scan--cleanup"><code>--cleanup</code></a>, <a href="#scan--phases"><code>--phases</code></a>, <a href="#scan--inspect"><code>--inspect</code></a>, <a href="#scan--use-existing"><code>--use-existing</code></a>, <a href="#scan--version"><code>--version</code></a>, <a href="#scan--mode"><code>--mode</code></a>, <a href="#scan--python-only"><code>--python-only</code></a>, <a href="#scan--show-summary"><code>--show-summary</code></a>, <a href="#scan--quiet"><code>--quiet</code></a>, <a href="#scan--log-level"><code>--log-level</code></a>, <a href="#scan--config"><code>--config</code></a>, <a href="#scan--verbose"><code>--verbose</code></a>, <a href="#scan--debug"><code>--debug</code></a>, <a href="#scan--color"><code>--color</code></a>, <a href="#scan--fail-on-findings"><code>--fail-on-findings</code></a>, <a href="#scan--fail-on-incomplete-scanners"><code>--fail-on-incomplete-scanners</code></a>, <a href="#scan--allow-stale-content-db"><code>--allow-stale-content-db</code></a>, <a href="#scan--simple"><code>--simple</code></a>, <a href="#scan--ignore-suppressions"><code>--ignore-suppressions</code></a>, <a href="#scan--honor-ignore-files"><code>--honor-ignore-files</code></a>, <a href="#scan--min-severity"><code>--min-severity</code></a>, <a href="#scan--compact-report"><code>--compact-report</code></a>, <a href="#scan--annotate-duplicates"><code>--annotate-duplicates</code></a>, <a href="#scan--fold-duplicates"><code>--fold-duplicates</code></a>, <a href="#scan--changed-files-only"><code>--changed-files-only</code></a>, <a href="#scan--base-ref"><code>--base-ref</code></a>, <a href="#scan--staged"><code>--staged</code></a>, <a href="#scan--allow-in-tree-tools"><code>--allow-in-tree-tools</code></a>, <a href="#scan--shard-index"><code>--shard-index</code></a>, <a href="#scan--shard-count"><code>--shard-count</code></a>, <a href="#scan--config-from-scanned-repository"><code>--config-from-scanned-repository</code></a>, <a href="#scan--config-file-from-scanned-repository"><code>--config-file-from-scanned-repository</code></a>, <a href="#scan--config-file-from-another-checkout"><code>--config-file-from-another-checkout</code></a>, <a href="#scan--require-scanner-selection"><code>--require-scanner-selection</code></a>, <a href="#scan--ash-config-from-host"><code>--ash-config-from-host</code></a>, <a href="#scan--workspace"><code>--workspace</code></a>, <a href="#scan--workspace-config"><code>--workspace-config</code></a>, <a href="#scan--allow-missing-projects"><code>--allow-missing-projects</code></a>, <a href="#scan--dry-run"><code>--dry-run</code></a>, <a href="#scan--build"><code>--build</code></a>, <a href="#scan--run"><code>--run</code></a>, <a href="#scan--force"><code>--force</code></a>, <a href="#scan--oci-runner"><code>--oci-runner</code></a>, <a href="#scan--build-target"><code>--build-target</code></a>, <a href="#scan--container-uid"><code>--container-uid</code></a>, <a href="#scan--container-gid"><code>--container-gid</code></a>, <a href="#scan--ash-revision-to-install"><code>--ash-revision-to-install</code></a>, <a href="#scan--custom-containerfile"><code>--custom-containerfile</code></a>, <a href="#scan--custom-build-arg"><code>--custom-build-arg</code></a>, <a href="#scan--baseline"><code>--baseline</code></a>.</p>
 <p>Options that only <code>ash</code> itself accepts:</p>
 <!-- doctest: options of=cli -->
 <table>
@@ -4261,7 +4317,7 @@ SOFTWARE.
 </tr>
 </tbody>
 </table>
-<p>Subcommands: <a href="#build-image"><code>ash build-image</code></a>, <a href="#config"><code>ash config</code></a>, <a href="#dependencies"><code>ash dependencies</code></a>, <a href="#diff"><code>ash diff</code></a>, <a href="#express"><code>ash express</code></a>, <a href="#get-genai-guide"><code>ash get-genai-guide</code></a>, <a href="#inspect"><code>ash inspect</code></a>, <a href="#mcp"><code>ash mcp</code></a>, <a href="#merge"><code>ash merge</code></a>, <a href="#plugin"><code>ash plugin</code></a>, <a href="#report"><code>ash report</code></a>, <a href="#scan"><code>ash scan</code></a>.</p>
+<p>Subcommands: <a href="#build-image"><code>ash build-image</code></a>, <a href="#config"><code>ash config</code></a>, <a href="#dependencies"><code>ash dependencies</code></a>, <a href="#diff"><code>ash diff</code></a>, <a href="#express"><code>ash express</code></a>, <a href="#get-genai-guide"><code>ash get-genai-guide</code></a>, <a href="#inspect"><code>ash inspect</code></a>, <a href="#mcp"><code>ash mcp</code></a>, <a href="#merge"><code>ash merge</code></a>, <a href="#plugin"><code>ash plugin</code></a>, <a href="#report"><code>ash report</code></a>, <a href="#scan"><code>ash scan</code></a>, <a href="#trend"><code>ash trend</code></a>.</p>
 <h2 id="ash-build-image"><a id="build-image"></a><code>ash build-image</code><a class="headerlink" href="#ash-build-image" title="Permanent link">&para;</a></h2>
 <p>Builds the ASH container image, then scans the current directory with it unless --no-run is given.</p>
 <p>It takes only the options below. To scan with scan options, run <code>ash scan --mode container</code>, which builds the image the same way and accepts every scan option.</p>
@@ -5846,6 +5902,20 @@ across different scanners and ensure fields are preserved during aggregation.</p
 <td>Configuration overrides specified as key-value pairs (e.g., 'reporters.cloudwatch-logs.options.aws_region=us-west-2')</td>
 </tr>
 <tr>
+<td><a id="report--annotate-duplicates"></a><code>--annotate-duplicates</code></td>
+<td>flag</td>
+<td>off</td>
+<td></td>
+<td>Add <code>cluster_id</code>, <code>duplicate_of</code> and <code>duplicate_sources</code> columns to the csv and flat-json reports, naming findings that two scanners report for one defect. Rows, ids and counts are unchanged. Adds three columns to the CSV header, so it is off by default. Sets <code>global_settings.deduplication.annotate</code>.</td>
+</tr>
+<tr>
+<td><a id="report--fold-duplicates"></a><code>--fold-duplicates</code></td>
+<td>flag</td>
+<td>off</td>
+<td></td>
+<td>Show one row per duplicate cluster in the HTML, Markdown and text reports, with a note naming the other scanners that reported it, and add deduplicated counts beside the per-scanner counts. Off by default because it changes row counts. Sets <code>global_settings.deduplication.fold</code>.</td>
+</tr>
+<tr>
 <td><a id="report--verbose"></a><code>--verbose</code>, <code>-v</code></td>
 <td>flag</td>
 <td>off</td>
@@ -6161,6 +6231,20 @@ across different scanners and ensure fields are preserved during aggregation.</p
 <td>Produce a shorter markdown report suitable for PR comments. Omits the severity legend, scan metadata, footer, and rows for scanners that were skipped or had zero findings.</td>
 </tr>
 <tr>
+<td><a id="scan--annotate-duplicates"></a><code>--annotate-duplicates</code></td>
+<td>flag</td>
+<td>off</td>
+<td></td>
+<td>Add <code>cluster_id</code>, <code>duplicate_of</code> and <code>duplicate_sources</code> columns to the CSV and flat-JSON reports, naming findings that two scanners report for one defect (same CVE and package, same IaC resource, or same line and CWE). Rows, ids, counts, SARIF, suppressions and baselines are unchanged. Adds three columns to the CSV header, so it is off by default. Sets <code>global_settings.deduplication.annotate</code>.</td>
+</tr>
+<tr>
+<td><a id="scan--fold-duplicates"></a><code>--fold-duplicates</code></td>
+<td>flag</td>
+<td>off</td>
+<td></td>
+<td>Show one row per duplicate cluster in the HTML, Markdown and text reports, with a note naming the other scanners that reported it, and add deduplicated counts beside the per-scanner counts. Only the same CVE and package, or the same line and CWE, fold. Finding ids, SARIF, per-scanner counts, suppressions, baselines, the CSV, flat-JSON and JUnit reports and the exit code are unchanged. Off by default because it changes row counts. Sets <code>global_settings.deduplication.fold</code>.</td>
+</tr>
+<tr>
 <td><a id="scan--changed-files-only"></a><code>--changed-files-only</code></td>
 <td>flag</td>
 <td>off</td>
@@ -6351,6 +6435,73 @@ across different scanners and ensure fields are preserved during aggregation.</p
 </tr>
 <tr>
 <td><a id="scan--generate-cli-skeleton"></a><code>--generate-cli-skeleton</code></td>
+<td>flag</td>
+<td>off</td>
+<td></td>
+<td>Print a JSON template for --cli-json-input, listing every parameter of this command with its default, or null where it is required or an environment variable backs it, and exit.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="ash-trend"><a id="trend"></a><code>ash trend</code><a class="headerlink" href="#ash-trend" title="Permanent link">&para;</a></h2>
+<p>Show new, carried and fixed findings over a series of saved ASH scans.</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-30-1"><a id="__codelineno-30-1" name="__codelineno-30-1" href="#__codelineno-30-1"></a>ash trend [OPTIONS] [files]...
+</span></code></pre></div>
+<!-- doctest: options of=cli.trend -->
+<table>
+<thead>
+<tr>
+<th>Argument</th>
+<th>Type</th>
+<th>Default</th>
+<th>Environment variable</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a id="trend--arg-files"></a><code>files</code></td>
+<td>path, any number</td>
+<td>not set</td>
+<td></td>
+<td>ASH scan results JSON files, one per run. They are put in chronological order by report id. At least two.</td>
+</tr>
+</tbody>
+</table>
+<!-- doctest: options of=cli.trend -->
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Type</th>
+<th>Default</th>
+<th>Environment variable</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a id="trend--history"></a><code>--history</code></td>
+<td>path</td>
+<td>not set</td>
+<td></td>
+<td>Read the run history recorded under this scan output directory (global_settings.history.enabled) instead of results files.</td>
+</tr>
+<tr>
+<td><a id="trend--format"></a><code>--format</code></td>
+<td>one of <code>text</code>, <code>json</code></td>
+<td><code>text</code></td>
+<td></td>
+<td>Output format (text or json).</td>
+</tr>
+<tr>
+<td><a id="trend--cli-json-input"></a><code>--cli-json-input</code></td>
+<td>text</td>
+<td>not set</td>
+<td></td>
+<td>Read parameter values from a JSON object: a path, a file:// URI, or '-' for stdin. Keys are parameter names (output_dir) or long flag spellings (--output-dir). Flags given on the command line override the file; the file overrides environment variables. Run with --generate-cli-skeleton for a template.</td>
+</tr>
+<tr>
+<td><a id="trend--generate-cli-skeleton"></a><code>--generate-cli-skeleton</code></td>
 <td>flag</td>
 <td>off</td>
 <td></td>

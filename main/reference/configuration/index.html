@@ -758,6 +758,8 @@ SOFTWARE.
       
         
       
+        
+      
     
     
     
@@ -1029,6 +1031,34 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
+      <a href="../../how-to/deduplicate-findings/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deduplicate findings
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../docs/scanner-sandbox/" class="md-nav__link">
         
   
@@ -1213,10 +1243,10 @@ SOFTWARE.
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_15" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_16" >
         
           
-          <label class="md-nav__link" for="__nav_4_15" id="__nav_4_15_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_4_16" id="__nav_4_16_label" tabindex="0">
             
   
   
@@ -1234,8 +1264,8 @@ SOFTWARE.
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_15_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_4_15">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_16_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_16">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -2108,6 +2138,28 @@ SOFTWARE.
     <span class="md-ellipsis">
       
         global_settings.mcp.runtime_overrides
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#global_settingsdeduplication" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        global_settings.deduplication
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#global_settingshistory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        global_settings.history
       
     </span>
   </a>
@@ -3726,6 +3778,28 @@ SOFTWARE.
 </li>
         
           <li class="md-nav__item">
+  <a href="#global_settingsdeduplication" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        global_settings.deduplication
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#global_settingshistory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        global_settings.history
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#sandbox" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4232,6 +4306,18 @@ SOFTWARE.
 <td>see the section</td>
 <td>MCP-server-specific configuration (runtime override allowlist, etc.).</td>
 </tr>
+<tr>
+<td><a id="global_settings.deduplication"></a><code>deduplication</code></td>
+<td><a href="#section-global_settings-deduplication">section</a></td>
+<td>see the section</td>
+<td>Cross-scanner duplicate annotation in the flat reports (opt-in; off by default).</td>
+</tr>
+<tr>
+<td><a id="global_settings.history"></a><code>history</code></td>
+<td><a href="#section-global_settings-history">section</a></td>
+<td>see the section</td>
+<td>Run history recording (a compact record of each completed scan).</td>
+</tr>
 </tbody>
 </table>
 <h3 id="global_settingsignore_paths"><a id="section-global_settings-ignore_paths"></a><code>global_settings.ignore_paths[]</code><a class="headerlink" href="#global_settingsignore_paths" title="Permanent link">&para;</a></h3>
@@ -4469,6 +4555,62 @@ SOFTWARE.
 <td>boolean</td>
 <td><code>false</code></td>
 <td>When true, denied_paths is used as written instead of being added to ASH's default list, and each default entry it leaves out is named in a warning. When false (the default), the entries listed are denied as well as the defaults. Either way, an unset list, or one equal to a default ASH has shipped, gets the current default list.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="global_settingsdeduplication"><a id="section-global_settings-deduplication"></a><code>global_settings.deduplication</code><a class="headerlink" href="#global_settingsdeduplication" title="Permanent link">&para;</a></h3>
+<p>Cross-scanner duplicate annotation (opt-in).</p>
+<p>A key not listed here is an error when the configuration is loaded.</p>
+<!-- doctest: options of=global_settings.deduplication -->
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a id="global_settings.deduplication.annotate"></a><code>annotate</code></td>
+<td>boolean</td>
+<td><code>false</code></td>
+<td>When true, the CSV and flat-JSON reports gain three columns that name each finding's duplicate cluster: <code>cluster_id</code>, <code>duplicate_of</code> (the primary finding's id, on every non-primary member) and <code>duplicate_sources</code> (on the primary: the other members' scanner, rule, id and severity). Rows and counts are unchanged. Off by default because the columns change the CSV header. CLI: <code>--annotate-duplicates</code> on <code>ash scan</code> and <code>ash report</code>.</td>
+</tr>
+<tr>
+<td><a id="global_settings.deduplication.fold"></a><code>fold</code></td>
+<td>boolean</td>
+<td><code>false</code></td>
+<td>When true, the HTML, Markdown and text reports show one row per duplicate cluster (the primary finding, with a note naming the other scanners that reported it) in their findings tables, detailed findings, finding cards and hotspots, and add deduplicated counts beside, never in place of, the per-scanner counts. Only clusters of the same CVE and package, or the same line and CWE, fold; IaC resource clusters are annotated only. Finding ids, SARIF, per-scanner metrics, suppressions, baselines, the CSV, flat-JSON and JUnit reports and the exit code are unchanged. Off by default because it changes row counts. CLI: <code>--fold-duplicates</code> on <code>ash scan</code> and <code>ash report</code>.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="global_settingshistory"><a id="section-global_settings-history"></a><code>global_settings.history</code><a class="headerlink" href="#global_settingshistory" title="Permanent link">&para;</a></h3>
+<p>Run history: a compact record of each completed scan, for <code>ash trend</code>.</p>
+<p>A key not listed here is an error when the configuration is loaded.</p>
+<!-- doctest: options of=global_settings.history -->
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a id="global_settings.history.enabled"></a><code>enabled</code></td>
+<td>boolean</td>
+<td><code>false</code></td>
+<td>Append a compact run record to '&lt;output dir&gt;/history/' after each completed scan. Off by default: it adds files to the output directory on every scan.</td>
+</tr>
+<tr>
+<td><a id="global_settings.history.keep_runs"></a><code>keep_runs</code></td>
+<td>integer, at least 1, at most 10,000</td>
+<td><code>50</code></td>
+<td>How many run records to keep when history is enabled; the oldest are removed when a new one is written.</td>
 </tr>
 </tbody>
 </table>
