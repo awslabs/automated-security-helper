@@ -119,6 +119,11 @@ FLAT_SPEC = FrameSpec(
             nullable=False,
         ),
         Computed("base", "String", _base, reads=("identity_base",)),
+        # The cross-scanner correlation id: a nullable String column, so a
+        # consumer can group the findings of a run that share an observation
+        # without re-deriving the key (utils/finding_identity, "Correlation
+        # ids"). Null for a finding that carries none.
+        "correlation_id",
     ),
     waived={
         "_identity": "read through the identity and identity_base properties",
