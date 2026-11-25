@@ -912,6 +912,10 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
     # warned about once per scanner.
     _refused_options: Set[str] = PrivateAttr(default_factory=set)
 
+    # The reasons the resources report was skipped that were already warned
+    # about, once per scanner (``_warn_side_report_skipped``).
+    _side_report_warnings: Set[str] = PrivateAttr(default_factory=set)
+
     def model_post_init(self, context: Any) -> None:
         if self.config is None:
             self.config = CfnLintScannerConfig()
@@ -2100,6 +2104,48 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
     ) -> None:
         """Name the logical resource of each result, from cfn-lint's JSON report.
 
+        Guarded as a whole: whatever the second run or the matching raises other
+        than a cancellation (which is not an ``Exception`` and propagates) leaves
+        the report as it came, so it cannot reach ``scan()``'s catch-all and fail
+        a scan whose lint already succeeded.
+        """
+        try:
+            self._attach_resources_unguarded(
+                report, arguments, batch_file, option_args, results_dir, cwd, child_env
+            )
+        except Exception as error:  # noqa: BLE001 -- best-effort enrichment
+            self._warn_side_report_skipped(type(error).__name__)
+
+    def _warn_side_report_skipped(self, reason: str) -> None:
+        """Say once per scanner that the resources report was not obtained.
+
+        A scan that passes with this behind it carries no resource ids, so a
+        suppression scoped to a resource never matches and nothing else in the run
+        says why. ``reason`` names an exit code or the kind of failure, never the
+        text of an error.
+        """
+        warning = f"cfn-lint's resources report was skipped: {reason}"
+        if warning in self._side_report_warnings:
+            return
+        self._side_report_warnings.add(warning)
+        self._plugin_log(
+            f"{warning}. Results carry no resource id for this scan, so a "
+            "suppression scoped to a resource does not match them.",
+            level=logging.WARNING,
+        )
+
+    def _attach_resources_unguarded(
+        self,
+        report: SarifReport,
+        arguments: List[str],
+        batch_file: Path,
+        option_args: List[str],
+        results_dir: Path,
+        cwd: Path,
+        child_env: Dict[str, str],
+    ) -> None:
+        """The body of :meth:`_attach_resources`.
+
         The SARIF cfn-lint writes carries no resource; ``--format json`` does
         (``Location.Path``). One more cfn-lint run over the same templates with
         the same options writes it, and :func:`attach_cfn_lint_resources` matches
@@ -2135,6 +2181,11 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
             # cfn-lint exits with a bit set per finding class, so a non-zero exit
             # is expected; the report's presence is what says it ran.
             if not isinstance(response, dict) or not json_file.is_file():
+                self._warn_side_report_skipped(
+                    f"the second run exited {response.get('returncode')} and wrote no report"
+                    if isinstance(response, dict)
+                    else "the second run gave no response"
+                )
                 return
             document = json.loads(json_file.read_text(encoding="utf-8"))
         except (OSError, ValueError) as error:
@@ -2142,6 +2193,7 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
                 f"cfn-lint's JSON report was not read, so no resource is named: {error}",
                 level=logging.DEBUG,
             )
+            self._warn_side_report_skipped("the report could not be read")
             return
         finally:
             json_file.unlink(missing_ok=True)

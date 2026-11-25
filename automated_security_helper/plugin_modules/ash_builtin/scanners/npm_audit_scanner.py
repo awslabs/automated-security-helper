@@ -3797,8 +3797,10 @@ def _cwe_tags(cwe: Any) -> List[str]:
     (and the odd ``NVD-CWE-Other``, which names no CWE and is left out). The flat
     ``cwe_id`` column reads tags (``utils/taxonomy_ids.cwes_of_tags``), not the
     ``cwe`` result property, so the ids go on the rule's tag list too. Defined
-    last in the module, and importing where it runs, so that the line-pinned
-    suppressions above it keep their lines.
+    last in the module, and importing where it runs, so the module's import
+    block and the code above its first call site keep their lines: the call
+    sites themselves shift every line after them, so a suppression pinned below
+    one has to be re-pinned when a call is added or removed.
     """
     from automated_security_helper.utils.taxonomy_ids import cwes_of_tags
 
