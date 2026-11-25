@@ -1095,25 +1095,27 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
     #: behavior changes. No tool SARIF fixture is committed
     #: (tests/test_data/scanners/ferret-scan holds only the inputs) and the
     #: tests synthesize the SARIF shape by hand, so every cell the survey
-    #: could only read off ferret-scan's own output is declared n/a with the
-    #: run that would settle it, per the register's unread-source rule.
+    #: could only read off ferret-scan's own output (the core cells, the column
+    #: and the extras alike) is declared unconfirmed with the run that would
+    #: settle it, per the register's unread-source rule. N/A stays for what the
+    #: tool cannot carry (packages, CVEs, CWEs, references, tags).
     facets: ClassVar[ScannerFacets] = ScannerFacets(
         rule_id=FacetDecl(
-            state=FacetState.NA,
+            state=FacetState.UNCONFIRMED,
             reason='output not read: the survey reads result "ruleId" off '
             "the tests' hand-written SARIF shape, and no ferret-scan SARIF "
             "from a real run is committed; one `ferret-scan --format sarif` "
             "run over the committed samples would settle it",
         ),
         severity=FacetDecl(
-            state=FacetState.NA,
+            state=FacetState.UNCONFIRMED,
             reason='output not read: the survey reads result "level" (the '
             "tool's own rating) off the tests' hand-written SARIF shape, and "
             "no ferret-scan SARIF from a real run is committed; one "
             "`ferret-scan --format sarif` run would settle it",
         ),
         file_path=FacetDecl(
-            state=FacetState.NA,
+            state=FacetState.UNCONFIRMED,
             reason="output not read: the survey reads locations[]."
             "physicalLocation.artifactLocation.uri (uriBaseId resolved by "
             "the adapter) off the tests' hand-written SARIF shape, and no "
@@ -1121,18 +1123,21 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
             "`ferret-scan --format sarif` run would settle it",
         ),
         line_range=FacetDecl(
-            state=FacetState.NA,
+            state=FacetState.UNCONFIRMED,
             reason="output not read: the survey reads region.startLine / "
             "region.endLine off the tests' hand-written SARIF shape, and no "
             "ferret-scan SARIF from a real run is committed; one "
             "`ferret-scan --format sarif` run would settle it",
         ),
         column=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="region.startColumn / region.endColumn",
+            state=FacetState.UNCONFIRMED,
+            reason="UNCONFIRMED: the survey reads region.startColumn / "
+            "region.endColumn off the tests' hand-written SARIF shape, and no "
+            "ferret-scan SARIF from a real run is committed; one `ferret-scan "
+            "--format sarif` run would settle it",
         ),
         message=FacetDecl(
-            state=FacetState.NA,
+            state=FacetState.UNCONFIRMED,
             reason='output not read: the survey reads result "message.text" '
             "(matched values masked by the shared secret-masking pass "
             "downstream) off the tests' hand-written SARIF shape, and no "
@@ -1171,7 +1176,7 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
             reason="ferret-scan results carry no CWE taxonomy",
         ),
         fingerprints=FacetDecl(
-            state=FacetState.NA,
+            state=FacetState.UNCONFIRMED,
             reason="UNCONFIRMED: no ferret-scan SARIF fixture is committed; "
             "one `ferret-scan --format sarif` run over a sample with a "
             "finding settles whether partialFingerprints is emitted",
@@ -1185,7 +1190,7 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
             reason="ferret-scan results carry no remediation text",
         ),
         snippet=FacetDecl(
-            state=FacetState.NA,
+            state=FacetState.UNCONFIRMED,
             reason="output not read: the survey reads region.snippet.text "
             "(matched values masked by the shared secret-masking pass "
             "downstream) off the tests' hand-written SARIF shape, and no "
@@ -1202,8 +1207,11 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
             "scanner details, not tags",
         ),
         extras=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field='result properties "confidenceLevel" and "validator"',
+            state=FacetState.UNCONFIRMED,
+            reason="UNCONFIRMED: the survey reads the result properties "
+            '"confidenceLevel" and "validator" off the tests\' hand-written '
+            "SARIF shape, and no ferret-scan SARIF from a real run is "
+            "committed; one `ferret-scan --format sarif` run would settle it",
         ),
     )
 

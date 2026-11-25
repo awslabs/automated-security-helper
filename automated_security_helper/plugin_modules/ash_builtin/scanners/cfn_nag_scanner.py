@@ -420,7 +420,7 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
     #: reason, never a guess.
     facets: ClassVar[ScannerFacets] = ScannerFacets(
         rule_id=FacetDecl(
-            state=FacetState.NA,
+            state=FacetState.UNCONFIRMED,
             reason='UNCONFIRMED: the JSON violation "id" (e.g. W51, the '
             "committed fixture) should render as the SARIF ruleId, but the "
             "SARIF the pipeline reads was never read to a real result (M0 "
@@ -428,14 +428,14 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
             "settles it",
         ),
         severity=FacetDecl(
-            state=FacetState.NA,
+            state=FacetState.UNCONFIRMED,
             reason='UNCONFIRMED: the JSON violation "type" (WARN or FAIL) '
             "should render as the SARIF result level, but the SARIF the "
             "pipeline reads was never read to a real result (M0 item b); one "
             "cfn_nag_scan --output-format sarif run settles it",
         ),
         file_path=FacetDecl(
-            state=FacetState.NA,
+            state=FacetState.UNCONFIRMED,
             reason='UNCONFIRMED: the JSON file result "filename" should '
             "render as the SARIF artifact uri (restored from the staged copy "
             "by _restore_cfn_nag_uris), but the SARIF the pipeline reads was "
@@ -443,20 +443,20 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
             "--output-format sarif run settles it",
         ),
         line_range=FacetDecl(
-            state=FacetState.NA,
+            state=FacetState.UNCONFIRMED,
             reason='UNCONFIRMED: the JSON violation "line_numbers" should '
             "render as the SARIF region startLine, but the SARIF the "
             "pipeline reads was never read to a real result (M0 item b); one "
             "cfn_nag_scan --output-format sarif run settles it",
         ),
         column=FacetDecl(
-            state=FacetState.NA,
+            state=FacetState.UNCONFIRMED,
             reason="UNCONFIRMED: the tool's JSON carries line_numbers only and "
             "no cfn-nag SARIF golden is committed; one cfn_nag_scan "
             "--output-format sarif run settles whether a column is emitted",
         ),
         message=FacetDecl(
-            state=FacetState.NA,
+            state=FacetState.UNCONFIRMED,
             reason='UNCONFIRMED: the JSON violation "message" should render '
             "as the SARIF message text, but the SARIF the pipeline reads was "
             "never read to a real result (M0 item b); one cfn_nag_scan "
@@ -502,7 +502,7 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
             "the violations",
         ),
         fingerprints=FacetDecl(
-            state=FacetState.NA,
+            state=FacetState.UNCONFIRMED,
             reason="UNCONFIRMED: the tool's JSON carries no fingerprint and "
             "no cfn-nag SARIF golden is committed; one SARIF run settles it",
         ),
@@ -516,13 +516,13 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
             "remediation; no remediation field exists",
         ),
         snippet=FacetDecl(
-            state=FacetState.NA,
+            state=FacetState.UNCONFIRMED,
             reason="UNCONFIRMED: the tool's JSON carries no source excerpt "
             "and no cfn-nag SARIF golden is committed; one SARIF run settles "
             "whether a region snippet is emitted",
         ),
         references=FacetDecl(
-            state=FacetState.NA,
+            state=FacetState.UNCONFIRMED,
             reason="UNCONFIRMED: the tool's JSON carries no URL and no "
             "cfn-nag SARIF golden is committed; one SARIF run settles "
             "whether the rule driver carries a helpUri",

@@ -385,39 +385,42 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
     #: `snyk code test --sarif` run over a sample with a finding settles them.
     facets: ClassVar[ScannerFacets] = ScannerFacets(
         rule_id=FacetDecl(
-            state=FacetState.NA,
+            state=FacetState.UNCONFIRMED,
             reason='output not read: the survey reads result "ruleId" off the '
             "in-test double's shape, and no snyk SARIF from a real run is "
             "committed (M0 item e); a licensed `snyk code test --sarif` run "
             "would settle it",
         ),
         severity=FacetDecl(
-            state=FacetState.NA,
+            state=FacetState.UNCONFIRMED,
             reason='output not read: the survey reads result "level" (no '
             "security-severity on rules, so a bare error reads as CRITICAL) "
             "off the in-test double's shape, and no snyk SARIF from a real "
             "run is committed (M0 item e); a licensed run would settle it",
         ),
         file_path=FacetDecl(
-            state=FacetState.NA,
+            state=FacetState.UNCONFIRMED,
             reason="output not read: the survey reads locations[]."
             "physicalLocation.artifactLocation.uri (%SRCROOT% base) off the "
             "in-test double's shape, and no snyk SARIF from a real run is "
             "committed (M0 item e); a licensed run would settle it",
         ),
         line_range=FacetDecl(
-            state=FacetState.NA,
+            state=FacetState.UNCONFIRMED,
             reason="output not read: the survey reads region.startLine / "
             "region.endLine off the in-test double's shape, and no snyk "
             "SARIF from a real run is committed (M0 item e); a licensed run "
             "would settle it",
         ),
         column=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="region.startColumn / region.endColumn",
+            state=FacetState.UNCONFIRMED,
+            reason="UNCONFIRMED: the survey reads region.startColumn / "
+            "region.endColumn off the in-test double's shape, and no snyk SARIF "
+            "from a real run is committed (M0 item e); a licensed run would "
+            "settle it",
         ),
         message=FacetDecl(
-            state=FacetState.NA,
+            state=FacetState.UNCONFIRMED,
             reason='output not read: the survey reads result "message.text" '
             "off the in-test double's shape, and no snyk SARIF from a real "
             "run is committed (M0 item e); a licensed run would settle it",
@@ -448,7 +451,7 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
             reason="snyk code rules are source-defect classes, not CVEs",
         ),
         taxonomy_cwe=FacetDecl(
-            state=FacetState.NA,
+            state=FacetState.UNCONFIRMED,
             reason='output not read: rules\' properties "cwe" (e.g. '
             '["CWE-798"]) is normalized by normalize_rule_cwe_into_tags into '
             "the rule's tags as external/cwe/cwe-<n>, which the shared flat "
@@ -457,7 +460,7 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
             "licensed run would settle it",
         ),
         fingerprints=FacetDecl(
-            state=FacetState.NA,
+            state=FacetState.UNCONFIRMED,
             reason="output not read: the survey reads result "
             '"fingerprints" {"0", "1"} off the in-test double\'s shape, and '
             "no snyk SARIF from a real run is committed (M0 item e); a "
@@ -471,13 +474,13 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
             "against a real tool run",
         ),
         remediation_text=FacetDecl(
-            state=FacetState.NA,
+            state=FacetState.UNCONFIRMED,
             reason="UNCONFIRMED: the survey classified rule help.markdown "
             "under references only; a `snyk code test --sarif` run settles "
             "whether remediation text is separate",
         ),
         snippet=FacetDecl(
-            state=FacetState.NA,
+            state=FacetState.UNCONFIRMED,
             reason="the survey read no snippet in the native regions; "
             "UNCONFIRMED against a real tool run",
         ),
@@ -488,7 +491,7 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
             "flat reader; UNCONFIRMED against a real tool run",
         ),
         tags=FacetDecl(
-            state=FacetState.NA,
+            state=FacetState.UNCONFIRMED,
             reason="UNCONFIRMED: the survey records ASH-added tags, but no tag "
             "write exists in this adapter at this checkout; a "
             "`snyk code test --sarif` run through the pipeline settles it",

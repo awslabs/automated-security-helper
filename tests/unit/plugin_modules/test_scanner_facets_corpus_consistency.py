@@ -198,7 +198,7 @@ class Verdict:
     state: str
     non_null: Optional[int]
     total: Optional[int]
-    outcome: str  # "ok" | "FAIL" | "excluded"
+    outcome: str  # "ok" | "FAIL" | "excluded" | "owed"
     detail: str
 
     def row(self) -> str:
@@ -224,6 +224,20 @@ def judge(
     non_null, total = observed if observed is not None else (None, None)
     populated = bool(non_null)
     cell = f"{scanner}.{facet} declared {state.value}"
+    if state is FacetState.UNCONFIRMED:
+        # Neither contamination nor proof: nobody has read a real run for this
+        # cell, so whatever the corpus holds proves nothing yet. It is a fixture
+        # owed, listed in the table and never failed.
+        return Verdict(
+            scanner,
+            facet,
+            state.value,
+            non_null,
+            total,
+            "owed",
+            "fixture owed: author or capture the real run that settles the cell, "
+            "then redeclare it MAPPED or N/A with the evidence",
+        )
     if state is FacetState.MAPPED:
         if observed is None or not total:
             why = (
@@ -571,15 +585,9 @@ def _prep_trivy(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]]]:
 def _prep_npm_audit(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]]]:
     import tempfile
 
-    from automated_security_helper.config.ash_config import AshConfig
     from automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_scanner import (
         NpmAuditScanner,
     )
-
-    # The conversion constructs a default-configured scanner, whose model
-    # carries forward references to AshConfig; resolve them the way the other
-    # construction tests do.
-    AshConfig.model_rebuild()
 
     with tempfile.TemporaryDirectory(prefix="facets-npmaudit-corpus-") as scratch:
         target = _materialized(
@@ -847,6 +855,50 @@ def test_planted_legitimate_cells_pass(
     state: FacetState, observed: Optional[tuple[int, int]]
 ) -> None:
     assert judge("planted", "tags", state, observed).outcome == "ok"
+
+
+@pytest.mark.parametrize(
+    "observed", [(3, 4), (0, 4), None], ids=["populated", "empty", "no-corpus"]
+)
+def test_planted_an_unconfirmed_facet_is_owed_never_failed(
+    observed: Optional[tuple[int, int]],
+) -> None:
+    """UNCONFIRMED is neither contamination (a populated column does not fail
+    it, as it fails N/A) nor proof (an empty one does not pass it, as it passes
+    N/A): it is listed as a fixture owed whatever the corpus holds."""
+    verdict = judge("planted", "rule_id", FacetState.UNCONFIRMED, observed)
+    assert verdict.outcome == "owed", verdict.detail
+    assert "fixture owed" in verdict.detail
+    # The same populated column fails an N/A declaration: the states differ.
+    if observed == (3, 4):
+        assert judge("planted", "rule_id", FacetState.NA, observed).outcome == "FAIL"
+
+
+def test_the_owed_fixtures_are_listed_by_the_gate_table() -> None:
+    owed = [v for v in verdict_rows() if v.outcome == "owed"]
+    assert owed, (
+        "no UNCONFIRMED cell is listed: the register has none, or the gate hides them"
+    )
+    assert {v.state for v in owed} == {FacetState.UNCONFIRMED.value}
+
+
+def test_no_na_cell_is_the_unread_state_in_disguise() -> None:
+    """N/A means the tool cannot carry the facet. A cell whose reason says no run
+    was read, or begins UNCONFIRMED, is the unconfirmed state and is declared so."""
+    stretched = []
+    for cls in SCANNER_CLASSES:
+        facets = vars(cls).get(SCANNER_FACETS_ATTR)
+        for facet in FACET_NAMES:
+            cell = getattr(facets, facet)
+            reason = (cell.reason or "").lower()
+            if cell.state is FacetState.NA and (
+                reason.startswith("unconfirmed") or "output not read" in reason
+            ):
+                stretched.append(f"{_name(cls)}.{facet}")
+    assert not stretched, (
+        "declared n/a but worded as unread: declare these UNCONFIRMED -- "
+        + ", ".join(stretched)
+    )
 
 
 def test_planted_an_excluded_facet_is_never_judged() -> None:
