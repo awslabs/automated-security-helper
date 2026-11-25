@@ -73,6 +73,7 @@ NON_SCAN_SUBCOMMANDS = frozenset(
         "inspect",
         "plugin",
         "express",
+        "trend",
     }
 )
 
