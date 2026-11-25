@@ -20,7 +20,11 @@ from automated_security_helper.cli.json_input import (
     usage_error_text,
 )
 from automated_security_helper.cli.scan import run_ash_scan_cli_command
-from automated_security_helper.core.enums import AshLogLevel
+from automated_security_helper.core.enums import (
+    TRANSPORT_HELP,
+    AshLogLevel,
+    Transport,
+)
 from automated_security_helper.utils.console import echo, typer_console
 from automated_security_helper.utils.log import show_debug_locals
 from automated_security_helper.utils.terminal_text import shown_not_obeyed
@@ -643,9 +647,9 @@ def _mcp_wrapper(
     color: bool = typer.Option(True, help="Enable/disable colorized output"),
     quiet: bool = typer.Option(False, help="Hide all log output"),
     transport: str = typer.Option(
-        "stdio",
+        Transport.STDIO.value,
         "--transport",
-        help="Transport: 'stdio' (default), 'streamable-http', or 'sse'.",
+        help=TRANSPORT_HELP,
     ),
     host: str = typer.Option(
         "127.0.0.1",

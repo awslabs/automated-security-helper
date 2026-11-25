@@ -1,4 +1,5 @@
 from enum import Enum, IntEnum
+from typing import Optional
 
 
 class AshExitCode(IntEnum):
@@ -139,6 +140,58 @@ class SandboxMode(str, Enum):
     firejail = "firejail"
     landlock = "landlock"
     sandbox_exec = "sandbox-exec"
+
+
+class Transport(str, Enum):
+    """A transport ``ash mcp --transport`` accepts.
+
+    The one definition of the three spellings that used to live in the
+    ``--transport`` validation tuple (``cli/mcp/__init__.py``), the known and
+    networked sets (``cli/mcp/sandbox.py``) and the ``HttpCaller.transport`` values
+    (``cli/mcp/http_sessions.py``). It lives here, not under ``cli/mcp``, because
+    ``cli/main.py`` needs it for the ``--transport`` help text and importing
+    ``cli.mcp`` loads the MCP SDK, which the lazy ``mcp`` command exists to avoid.
+
+    A ``str`` Enum, so a member equals its wire spelling (``--transport`` and
+    ``ASH_MCP_TRANSPORT`` carry the plain string). ``__str__`` returns the value so
+    an f-string reads the same on every Python version: ``format()`` of a mixed-in
+    Enum changed in 3.12.
+    """
+
+    STDIO = "stdio"
+    STREAMABLE_HTTP = "streamable-http"
+    SSE = "sse"
+
+    def __str__(self) -> str:
+        return self.value
+
+    @property
+    def is_networked(self) -> bool:
+        """True for the transports that carry callers the server does not trust."""
+        return self is not Transport.STDIO
+
+    @classmethod
+    def parse(cls, value: object) -> Optional["Transport"]:
+        """The member whose value is exactly ``value``, or None when none is."""
+        try:
+            return cls(value)
+        except ValueError:
+            return None
+
+
+#: Every ``--transport`` spelling, in the order the help text lists them.
+TRANSPORT_VALUES = tuple(member.value for member in Transport)
+
+#: What ``--transport`` and ``ASH_MCP_TRANSPORT`` mean when unset.
+DEFAULT_TRANSPORT = Transport.STDIO
+
+#: The ``--transport`` help text, built from the members so the option and the
+#: enum cannot drift. Byte-equal to the text both CLI declarations carried by hand;
+#: ``tests/unit/cli/mcp/test_mcp_transport_enum.py`` pins it.
+TRANSPORT_HELP = (
+    f"Transport: '{Transport.STDIO.value}' (default), "
+    f"'{Transport.STREAMABLE_HTTP.value}', or '{Transport.SSE.value}'."
+)
 
 
 class MinSeverity(str, Enum):
