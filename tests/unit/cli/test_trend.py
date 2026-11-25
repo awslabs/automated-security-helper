@@ -58,7 +58,7 @@ def write(tmp_path, filename, payload):
 def trend(tmp_path, *payloads, json_output=True, extra=()):
     files = [write(tmp_path, f"run{i}.json", p) for i, p in enumerate(payloads)]
     options = ["--format", "json"] if json_output else []
-    return CliRunner().invoke(app, ["trend", *files, *options, *extra])
+    return CliRunner().invoke(app, ["results", "trend", *files, *options, *extra])
 
 
 def three_runs():
@@ -138,7 +138,7 @@ def test_a_removed_scanner_labels_the_boundary_not_like_for_like(tmp_path):
 )
 def test_too_few_inputs_are_refused(tmp_path, arguments, reason):
     files = [write(tmp_path, "only.json", results(second=1)) for _ in arguments]
-    response = CliRunner().invoke(app, ["trend", *files])
+    response = CliRunner().invoke(app, ["results", "trend", *files])
     assert response.exit_code == 1
     assert reason in response.stderr
 
@@ -172,14 +172,16 @@ def test_a_file_that_is_not_results_is_refused(tmp_path):
     good = write(tmp_path, "good.json", results(second=1))
     bad = tmp_path / "bad.json"
     bad.write_text("{not json", encoding="utf-8")
-    response = CliRunner().invoke(app, ["trend", good, str(bad)])
+    response = CliRunner().invoke(app, ["results", "trend", good, str(bad)])
     assert response.exit_code == 1
     assert "bad.json" in response.stderr
 
 
 def test_files_and_history_together_are_refused(tmp_path):
     files = [write(tmp_path, f"r{i}.json", results(second=i + 1)) for i in range(2)]
-    response = CliRunner().invoke(app, ["trend", *files, "--history", str(tmp_path)])
+    response = CliRunner().invoke(
+        app, ["results", "trend", *files, "--history", str(tmp_path)]
+    )
     assert response.exit_code == 1
     assert "not both" in response.stderr
 
@@ -205,7 +207,7 @@ def record(tmp_path, payloads):
 def test_history_is_read_from_an_output_directory(tmp_path):
     record(tmp_path, three_runs())
     response = CliRunner().invoke(
-        app, ["trend", "--history", str(tmp_path), "--format", "json"]
+        app, ["results", "trend", "--history", str(tmp_path), "--format", "json"]
     )
     assert response.exit_code == 0, response.output
     payload = json.loads(response.stdout)
@@ -220,7 +222,17 @@ def test_history_and_files_give_the_same_series(tmp_path):
     from_files = json.loads(trend(tmp_path, *runs).stdout)
     from_history = json.loads(
         CliRunner()
-        .invoke(app, ["trend", "--history", str(tmp_path / "out"), "--format", "json"])
+        .invoke(
+            app,
+            [
+                "results",
+                "trend",
+                "--history",
+                str(tmp_path / "out"),
+                "--format",
+                "json",
+            ],
+        )
         .stdout
     )
     assert from_history["series"] == from_files["series"]
@@ -247,7 +259,7 @@ def test_a_tampered_record_is_skipped_and_the_trend_still_runs(tmp_path):
         encoding="utf-8",
     )
     response = CliRunner().invoke(
-        app, ["trend", "--history", str(tmp_path), "--format", "json"]
+        app, ["results", "trend", "--history", str(tmp_path), "--format", "json"]
     )
     assert response.exit_code == 0, response.output
     payload = json.loads(response.stdout)
@@ -256,13 +268,13 @@ def test_a_tampered_record_is_skipped_and_the_trend_still_runs(tmp_path):
 
 
 def test_an_empty_history_is_refused(tmp_path):
-    response = CliRunner().invoke(app, ["trend", "--history", str(tmp_path)])
+    response = CliRunner().invoke(app, ["results", "trend", "--history", str(tmp_path)])
     assert response.exit_code == 1
     assert "no readable run records" in response.stderr
 
 
 def test_a_single_recorded_run_is_refused(tmp_path):
     record(tmp_path, [results(second=1)])
-    response = CliRunner().invoke(app, ["trend", "--history", str(tmp_path)])
+    response = CliRunner().invoke(app, ["results", "trend", "--history", str(tmp_path)])
     assert response.exit_code == 1
     assert "at least two runs" in response.stderr

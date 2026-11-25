@@ -658,12 +658,12 @@
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
 │ scan             Scan code, infrastructure, secrets, and dependencies.                           │
-│ build-image      Builds the ASH container image, then scans the current directory with it unless │
-│                  --no-run is given.                                                              │
+│ build-image      Deprecated: use `ash container build`, which takes the same options.            │
 │ results          Read, compare and combine the results of saved ASH scans: report, diff, trend,  │
 │                  merge and inspect. None of them runs a scan.                                    │
 │ mcp              Start the ASH MCP server (Model Context Protocol)                               │
 │ get-genai-guide  Write the ASH GenAI Integration Guide for AI assistants and LLMs to a file.     │
+│ container        Work with the ASH container image.                                              │
 │ config           ASH configuration management                                                    │
 │ dependencies     Check or install dependencies for ASH plugins                                   │
 │ plugin           Manage ASH plugins                                                              │

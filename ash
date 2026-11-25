@@ -355,7 +355,7 @@ require_mountable() {
 # tests/unit/test_sandbox_refused_by_every_container_entrypoint.py checks both
 # lists against the real commands and options.
 # BEGIN generated: sh-subcommands (scripts/generate_wrapper_tables.py)
-ASH_SUBCOMMANDS="scan build-image report diff trend merge results mcp get-genai-guide config dependencies inspect plugin suppress express"
+ASH_SUBCOMMANDS="scan build-image report diff trend merge results mcp get-genai-guide container config dependencies inspect plugin suppress express"
 # END generated: sh-subcommands
 # The subcommands whose own -o is NOT the container runtime: get-genai-guide's -o is
 # its --output, config's its --output-dir. After one of these, -o is the
@@ -1996,8 +1996,8 @@ else
       # tests/unit/test_ash_bash_entrypoint_subcommand_args.py checks them against
       # the real commands.
       # BEGIN generated: sh-takes-quiet-and-color (scripts/generate_wrapper_tables.py)
-      ASH_TAKES_QUIET="scan build-image mcp"
-      ASH_TAKES_COLOR="scan build-image report merge mcp"
+      ASH_TAKES_QUIET="scan build-image mcp container"
+      ASH_TAKES_COLOR="scan build-image report merge mcp container"
       # END generated: sh-takes-quiet-and-color
       # Container mode never sandboxes the scanners inside the image; the container
       # is the boundary. So the scan is given --sandbox off, as `ash scan --mode

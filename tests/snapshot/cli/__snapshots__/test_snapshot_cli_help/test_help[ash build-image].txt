@@ -1,6 +1,8 @@
 
  Usage: ash build-image [OPTIONS]
 
+ Deprecated: use `ash container build`, which takes the same options.
+
  Builds the ASH container image, then scans the current directory with it unless --no-run is given.
 
  It takes only the options below. To scan with scan options, run `ash scan --mode container`, which

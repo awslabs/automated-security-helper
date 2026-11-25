@@ -210,10 +210,12 @@ def _asks_for_help(command: Any, ctx: Any, args: list[str]) -> bool:
 #: tests/unit/cli/test_version_startup_budget.py pins that none of these modules
 #: is imported by ``import automated_security_helper.cli.main``.
 _LAZY_SUBCOMMANDS: dict[str, tuple[str, str]] = {
+    # The 3.8 spelling of `ash container build`: same command, one warning.
     "build-image": (
         "automated_security_helper.cli.image",
-        "build_ash_image_cli_command",
+        "build_image_deprecated_cli_command",
     ),
+    "container": ("automated_security_helper.cli.container", "container_app"),
     "report": ("automated_security_helper.cli.report", "report_command"),
     "diff": ("automated_security_helper.cli.diff", "diff_command"),
     "trend": ("automated_security_helper.cli.trend", "trend_command"),
@@ -252,7 +254,9 @@ Pass one --results per shard. The command refuses to merge a set of shards that 
 _LAZY_COMMAND_KWARGS: dict[str, dict[str, Any]] = {
     "build-image": {
         "no_args_is_help": False,
-        "help": """Builds the ASH container image, then scans the current directory with it unless --no-run is given.
+        "help": """Deprecated: use `ash container build`, which takes the same options.
+
+Builds the ASH container image, then scans the current directory with it unless --no-run is given.
 
 It takes only the options below. To scan with scan options, run `ash scan --mode container`, which builds the image the same way and accepts every scan option.
 """,
@@ -276,6 +280,7 @@ _COMMAND_ORDER: tuple[str, ...] = (
     "results",
     "mcp",
     "get-genai-guide",
+    "container",
     "config",
     "dependencies",
     "inspect",
@@ -484,7 +489,11 @@ class AshTyperGroup(TyperGroup):
                 # tokens put first here are parsed as though written right after it:
                 # an option the subcommand is also given directly resolves to that
                 # later value, and a repeatable one collects both.
-                ctx.args = [*self._options_for_subcommand(ctx), *ctx.args]
+                spelled = self._options_for_subcommand(ctx)
+                # Under a nested group (`ash container build`) the options go
+                # after the leaf's name, where the leaf parses them.
+                skip = ctx.meta.pop("ash.leaf_name_tokens", 0)
+                ctx.args = [*ctx.args[:skip], *spelled, *ctx.args[skip:]]
             return super().invoke(ctx)
         except UsageError as exc:
             exc.exit_code = ASH_EXIT_USAGE_ERROR
@@ -515,7 +524,14 @@ class AshTyperGroup(TyperGroup):
         if command is None:
             # Not a command; super().invoke reports it as one.
             return []
-        if _asks_for_help(command, ctx, ctx.args):
+        leaf_args = ctx.args
+        if hasattr(command, "get_command") and ctx.args:
+            # A nested group: the options belong to the leaf it names.
+            leaf = command.get_command(ctx, ctx.args[0])
+            if leaf is not None:
+                command, leaf_args = leaf, ctx.args[1:]
+                ctx.meta["ash.leaf_name_tokens"] = 1
+        if _asks_for_help(command, ctx, leaf_args):
             # The subcommand prints its help and exits; nothing given here is used.
             return []
         subcommand_params = [
