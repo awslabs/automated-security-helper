@@ -199,6 +199,10 @@
       "deduplication": {
         "annotate": false,
         "fold": false
+      },
+      "history": {
+        "enabled": false,
+        "keep_runs": 50
       }
     },
     "fail_on_findings": true,

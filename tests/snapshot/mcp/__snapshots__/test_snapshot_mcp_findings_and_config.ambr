@@ -679,6 +679,10 @@
           'annotate': False,
           'fold': False,
         }),
+        'history': dict({
+          'enabled': False,
+          'keep_runs': 50,
+        }),
         'ignore_paths': list([
         ]),
         'mcp': dict({
@@ -1322,6 +1326,10 @@
         'deduplication': dict({
           'annotate': False,
           'fold': False,
+        }),
+        'history': dict({
+          'enabled': False,
+          'keep_runs': 50,
         }),
         'ignore_paths': list([
         ]),
