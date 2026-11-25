@@ -70,7 +70,7 @@ For a repository's own config that sets `reporters.aws-security-hub.enabled: tru
 warning reads:
 
 ```text
-Ignoring reporters.aws-security-hub.enabled from /home/me/repo/.ash/.ash.yaml: that config is inside a git checkout or the scanned tree, or was delivered by an MCP client, and these options choose whether findings are sent, where they are sent or written, and which credentials send them. To keep a setting, move the file outside every git checkout, or pass the setting with --config-overrides. A file inside the scanned directory has to move out of it as well.
+Ignoring reporters.aws-security-hub.enabled from /home/me/repo/.ash.yaml: that config is inside a git checkout or the scanned tree, or was delivered by an MCP client, and these options choose whether findings are sent, where they are sent or written, and which credentials send them. To keep a setting, move the file outside every git checkout, or pass the setting with --config-overrides. A file inside the scanned directory has to move out of it as well.
 ```
 
 Under its default policy, the MCP server refuses a delivered config that turns one of
@@ -296,6 +296,16 @@ finding's identity, so a re-scan updates a finding and does not add a second one
 repositories that import into the same account and Region. It is required: without it the
 reporter refuses to import, before it calls AWS. Like the Region and the account, it is the
 operator's to set.
+
+ASH does not deduplicate, so a secret that two scanners find is two findings in Security
+Hub, each with its own `Id`. A secret detection also carries `ash/correlationId` in its
+`ProductFields`: a value ASH derives from `findings_scope`, the file, the start line and the
+workspace project, and not from the scanner or the rule, so every finding of one secret has
+the same one. Filter or group on it to see one secret with the scanners that reported it.
+It identifies no finding: nothing is merged, left out or archived because of it. Only a
+secret detection has one, since only there does the place say which problem it is; a
+detection with no file or no start line has none. Two secrets on one line share a value,
+and scanners that place one secret on different lines get different values.
 
 With `archive_resolved_findings: true`, a finding that an earlier scan of the same scope
 imported and this scan no longer reports is imported again as `ARCHIVED`, for the scanners

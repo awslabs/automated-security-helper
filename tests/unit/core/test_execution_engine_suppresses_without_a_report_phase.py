@@ -76,10 +76,6 @@ def _run(engine, phases):
             f"{_SARIF_UTILS}.apply_suppressions_to_sarif",
             side_effect=lambda sarif_report, **kwargs: sarif_report,
         ) as suppress,
-        patch(
-            "automated_security_helper.utils.suppression_matcher."
-            "warn_unmatched_directory_suppressions"
-        ),
     ):
         engine.execute_phases(phases=phases)
     return suppress

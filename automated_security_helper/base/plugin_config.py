@@ -50,7 +50,7 @@ class PluginConfigBase(RedactedSection):
         says to move an option there, and names any other key as unknown.
 
         As for options (base/options.py), the generic bases record nothing when
-        a results file is read: a community plugin's section is validated
+        a results file is read: an out-of-tree plugin's section is validated
         against one of them as a branch of a union, which then keeps the plain
         mapping, and a note recorded there would survive the discarded branch.
         A loaded plugin's section is checked against its own config class once
@@ -83,7 +83,10 @@ class PluginConfigBase(RedactedSection):
             description="Name of the component using letters, numbers, underscores and hyphens. Must begin with a letter.",
             pattern=r"^[a-zA-Z][\w-]+$",
         ),
-    ] = None
+        # A subclass or the loader fills the name in; the base default is None,
+        # which pydantic does not validate. Typing it Optional would change the
+        # generated JSON schema of every plugin config.
+    ] = None  # ty: ignore[invalid-assignment]
     enabled: Annotated[bool, Field(description="Whether the component is enabled")] = (
         True
     )

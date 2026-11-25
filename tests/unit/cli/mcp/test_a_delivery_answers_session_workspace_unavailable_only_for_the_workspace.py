@@ -34,6 +34,7 @@ import io
 import zipfile
 from pathlib import Path
 
+from automated_security_helper.cli.mcp.error_types import McpErrorType
 import pytest
 
 from automated_security_helper.cli.mcp import source_delivery as sd
@@ -139,5 +140,7 @@ def test_a_workspace_that_cannot_be_created_is_answered_as_unavailable(
         )
 
     assert result["success"] is False, result
-    assert result.get("error_type") == sd.SESSION_WORKSPACE_UNAVAILABLE, result
+    assert (
+        result.get("error_type") == McpErrorType.SESSION_WORKSPACE_UNAVAILABLE.value
+    ), result
     assert str(blocker) in result["error"], result

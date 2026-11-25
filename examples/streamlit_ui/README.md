@@ -11,7 +11,7 @@ This is a Streamlit-based UI for the Automated Security Helper (ASH). It provide
 
 ## Prerequisites
 
-- Python 3.10 to 3.14
+- Python 3.11 to 3.14
 - ASH v3 installed
 - AWS credentials configured (for Amazon Bedrock integration)
 

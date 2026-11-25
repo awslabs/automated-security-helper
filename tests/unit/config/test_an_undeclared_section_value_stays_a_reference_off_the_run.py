@@ -41,7 +41,7 @@ pytestmark = pytest.mark.unit
 VARIABLE = "ASH_UNDECLARED_REFERENCE_CANARY"
 REFERENCE = "${" + VARIABLE + "}"
 CANARY = "ash-canary-4b2e-7713905"
-SECTION = "community-demo-scanner"
+SECTION = "alpha-demo-scanner"
 OPTION = "ignore_unfixed"
 
 

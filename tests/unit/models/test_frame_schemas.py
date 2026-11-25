@@ -96,7 +96,7 @@ HAND_SCHEMAS: Dict[
     str, Tuple[Callable[[], Dict[str, Any]], Callable[[], pl.DataFrame]]
 ] = {
     "graded_frame": (
-        lambda: {k: v for k, v in GRADED_SCHEMA.items() if k != "actionable"},
+        lambda: dict(GRADED_SCHEMA),
         lambda: graded_frame([], [], []),
     ),
     "graded_frame_actionable": (
@@ -236,14 +236,45 @@ def test_the_emitters_severity_order_is_the_models_vocabulary():
     assert list(_SEVERITY_ORDER.values()) == list(range(len(vocabulary)))
 
 
-def test_severity_records_its_vocabulary_and_stays_a_string():
-    assert column_vocabularies(FLAT_SPEC) == {
-        "severity": ("CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO")
-    }
-    assert frame_schema(FLAT_SPEC)["severity"] == pl.String
+def test_a_non_nullable_flag_is_never_null_for_a_finding_holding_none():
+    # FlatVulnerability does not validate assignment, so an instance built around
+    # validation (model_construct, __dict__) can hold None in a required bool; the
+    # builder this frame replaced wrote bool(...) there, so the cell is False
+    finding = row(0)
+    finding.__dict__["is_suppressed"] = None
+    cells = flat_frame([finding])["is_suppressed"]
+    assert cells.to_list() == [False]
+    assert cells.null_count() == 0
+
+
+def test_the_flatjson_report_gives_that_finding_a_real_is_suppressed_value():
+    from automated_security_helper.plugin_modules.ash_builtin.reporters.flatjson_reporter import (
+        FlatJSONReporter,
+    )
+
+    finding = row(0)
+    finding.__dict__["is_suppressed"] = None
+    flag = flat_frame([finding])["is_suppressed"].to_list()[0]
+    assert FlatJSONReporter._finding_dict(finding, flag)["is_suppressed"] is False
+
+
+def test_every_string_column_of_the_flat_frame_is_wired():
+    # the flat_frame docstring says so; a RawText marker on a projected field
+    # would opt a column out without any sign at the use site
+    assert not any(column.raw for column in frame_columns(FLAT_SPEC))
+    finding = row(0)
+    finding.__dict__["scanner"] = "SÄVERE\udcff"
+    assert unwire(flat_frame([finding])["scanner"][0]) == "SÄVERE\udcff"
+
+
+def test_severity_is_a_polars_enum_of_its_vocabulary():
+    ladder = ("CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO")
+    assert column_vocabularies(FLAT_SPEC) == {"severity": ladder}
+    assert frame_schema(FLAT_SPEC)["severity"] == pl.Enum(list(ladder))
     off_ladder = row(0)
     off_ladder.__dict__["severity"] = "WEIRD"  # built around the model's validation
-    assert flat_frame([off_ladder])["severity"].to_list() == ["WEIRD"]
+    with pytest.raises(FrameSpecError, match="severity"):
+        flat_frame([off_ladder])
 
 
 def test_the_markers_leave_validation_and_the_json_schema_alone():
@@ -321,7 +352,7 @@ def test_a_toy_spec_derives_columns_dtypes_and_order():
         ("over", pl.Boolean),
         ("lo", pl.Int64),
         ("hi", pl.Int64),
-        ("level", pl.String),
+        ("level", pl.Enum(["A", "B"])),
         ("n_chars", pl.Int64),
     ]
     assert unaccounted(TOY_SPEC) == []

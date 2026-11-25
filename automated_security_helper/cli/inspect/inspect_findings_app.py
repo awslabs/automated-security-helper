@@ -45,7 +45,9 @@ from textual.widgets import (
 from textual.widgets.data_table import ColumnKey
 
 from automated_security_helper.config.ash_config import add_suppression_to_config
+from automated_security_helper.core.enums import AshExitCode
 from automated_security_helper.core.exceptions import ASHConfigSourceError
+from automated_security_helper.models.vocab import SEVERITY_BUCKETS, Severity
 from automated_security_helper.utils.console import echo, secho
 from automated_security_helper.config.resolve_config import find_config_file
 from automated_security_helper.core.constants import (
@@ -71,7 +73,9 @@ from automated_security_helper.utils.scanned_tree import (
     open_in_scanned_tree,
 )
 from automated_security_helper.utils.secret_masking import source_snippet_masker
-from automated_security_helper.utils.severity_ladder import result_severity
+from automated_security_helper.utils.severity_ladder import (
+    result_severity,
+)
 from automated_security_helper.utils.terminal_text import (
     controls_shown,
     only_controls_shown,
@@ -393,8 +397,11 @@ def _source_excerpt(
     the last line's, the finding's with an arrow.
     """
     file_value = finding.get("file")
+    raw_line = finding.get("line")
+    if raw_line is None:
+        return None
     try:
-        line_number = int(finding.get("line"))
+        line_number = int(raw_line)
     except (TypeError, ValueError):
         return None
     if scan_root is None or not file_value or line_number < 1:
@@ -504,8 +511,9 @@ def _as_scanned(finding: dict) -> Optional[FlatVulnerability]:
     file_value = finding.get("file")
     if not file_value:
         return None
+    raw_line = finding.get("line")
     try:
-        line_number = int(finding.get("line"))
+        line_number = None if raw_line is None else int(raw_line)
     except (TypeError, ValueError):
         line_number = None
     rule_id = finding.get("rule_id")
@@ -513,7 +521,10 @@ def _as_scanned(finding: dict) -> Optional[FlatVulnerability]:
         id="",
         title="",
         description="",
-        severity=str(finding.get("severity") or ""),
+        # The matcher keys on rule, file and line, never on severity. The field is a
+        # closed type, so a recorded word the ladder does not know (a hand-edited
+        # or older record) reads as MEDIUM, as a result with no level does.
+        severity=Severity.from_text(finding.get("severity")) or Severity.MEDIUM,
         scanner=str(finding.get("scanner") or ""),
         scanner_type="",
         rule_id=None if rule_id is None else str(rule_id),
@@ -932,7 +943,7 @@ def _summary_line(findings: list) -> Text:
     summary = Text()
     active = [finding for finding in findings if not finding.get("suppressed")]
     summary.append(f"{len(active)} active", style=f"bold {COLORS['foreground']}")
-    for level in ("critical", "high", "medium", "low", "info"):
+    for level in SEVERITY_BUCKETS:
         count = sum(finding.get("severity", "").lower() == level for finding in active)
         if count:
             summary.append("  ·  ", style=COLORS["muted"])
@@ -1573,7 +1584,14 @@ class FindingsExplorerApp(App):
         # Each cell goes through _finding_cells, which shows every value's
         # controls and invisible characters as escapes.
         for i, finding in enumerate(self.filtered_findings):
-            table.add_row(*_finding_cells(finding, self._table_fields), key=i, height=2)
+            # The row key is the finding's index, read back as an int by the
+            # highlight and selection handlers; Textual stores any hashable key
+            # though its annotation says str.
+            table.add_row(
+                *_finding_cells(finding, self._table_fields),
+                key=i,  # ty: ignore[invalid-argument-type]
+                height=2,
+            )
 
         if self.filtered_findings:
             selected_index = next(
@@ -1628,7 +1646,7 @@ class FindingsExplorerApp(App):
 
         # Update the suppressed select widget if it exists
         try:
-            suppressed_select = self.query_one("#suppressed_select")
+            suppressed_select = self.query_one("#suppressed_select", Select)
             suppressed_select.value = (
                 "all" if self.show_suppressed else "not_suppressed"
             )
@@ -1940,11 +1958,11 @@ class FindingsExplorerApp(App):
 
     def _apply_sorting(self) -> None:
         """Sort the filtered findings."""
-        severity_order = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
+        severity_order = {level: rank for rank, level in enumerate(SEVERITY_BUCKETS)}
 
         if self.current_sort == "severity":
             self.filtered_findings.sort(
-                key=lambda f: severity_order.get(f["severity"], 5),
+                key=lambda f: severity_order.get(f["severity"], len(severity_order)),
                 reverse=self.sort_reverse,
             )
         elif self.current_sort == "file":
@@ -2288,14 +2306,14 @@ def findings_command(
             echo(
                 "No model or report file available. Please run a scan first or provide a report file."
             )
-            raise typer.Exit(1)
+            raise typer.Exit(AshExitCode.SCAN_ERRORS)
 
         model = AshAggregatedResults.load_model(Path(report_file_actual))
         if model is None:
             echo(
                 "No model or report file available. Please run a scan first or provide a report file."
             )
-            raise typer.Exit(1)
+            raise typer.Exit(AshExitCode.SCAN_ERRORS)
 
         # Extract findings from the model
         findings = extract_findings(model)
@@ -2321,4 +2339,4 @@ def findings_command(
         # A record that does not load is described by field, not by its input
         # (utils/error_text.py).
         secho(f"Error loading model or report: {error_text(e)}", fg="red")
-        raise typer.Exit(1) from None
+        raise typer.Exit(AshExitCode.SCAN_ERRORS) from None

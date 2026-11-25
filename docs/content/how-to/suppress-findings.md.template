@@ -32,9 +32,10 @@ global_settings:
 | `expires` | no | The date, `YYYY-MM-DD`, from which the suppression stops matching. `expiration` is a deprecated alias, removed in ASH v4. |
 | `symbol` | no | Only findings inside this function, class, or method; see [Scope a suppression to a symbol](#symbol) |
 | `package_name`, `package_version`, `package_path` | no | Only findings about this dependency, for dependency scanners such as grype and npm-audit |
+| `image` | no | Only findings inside a container image whose submitted reference or resolved digest matches this case-insensitive glob; see [Scan container images](scan-container-images.md#findings-identity-and-suppressions). A finding that is not inside an image never matches |
 | `resource_id` | no | Only findings about this resource, for the scanners that name one: cdk-nag (the construct path) and checkov (for Terraform, a Terraform plan, CloudFormation and Kubernetes; the name checkov gives it, such as `aws_db_instance.this`, `module.db.aws_db_instance.this` or `AWS::S3::Bucket.Bucket`). A finding with no resource never matches |
 
-- Paths match case-sensitively: `tests/**` does not match `Tests/`. In a pattern without `**`, `*` also matches across directory separators, so `src/*.py` matches `src/sub/app.py`; `**` matches any depth. A path that starts with `./` matches nothing, and neither does an empty path, `.` or `./`. A trailing slash is literal, unlike in an ignore path: `tests/` matches no finding, and the scan warns that it matched nothing and gives `tests/**/*`, the pattern for the files under the directory. A bare directory name such as `tests` names only the path `tests` itself and matches nothing inside it. When the directory exists in the scanned directory, `ash config validate` and `ash config lint` warn about either one with that pattern and exit 0. They warn in the same way, saying what to write instead, about a path that starts with `./` (`./src/app.py` is `src/app.py`) and about an empty path or `.`. A path whose leading names match the tree only in another case (`tests/**` against `Tests/`) gets a warning that names the tree's spelling and says that patterns match case-sensitively.
+- Paths match case-sensitively: `tests/**` does not match `Tests/`. In a pattern without `**`, `*` also matches across directory separators, so `src/*.py` matches `src/sub/app.py`; `**` matches any depth. A path that starts with `./` matches nothing, and neither does an empty path, `.` or `./`. A path with no glob character names a file and the directory of that name: `tests` and `tests/` both match every finding below `tests/`, and the bare `tests` also matches a file named `tests`. Both are anchored at the top of the scanned directory, so neither matches anything in `pkg/tests/`; write `**/tests/**` for a `tests` directory at any depth. `ash config validate` and `ash config lint` warn, saying what to write instead, about a path that starts with `./` (`./src/app.py` is `src/app.py`) and about an empty path or `.`, and exit 0. A path whose leading names match the tree only in another case (`tests/**` against `Tests/`) gets a warning that names the tree's spelling and says that patterns match case-sensitively.
 - A file whose name is not valid UTF-8 is reported with each such byte written as `\udcNN` (a latin-1 `secr\xe9t.py` as `secr\udce9t.py`). A `path` matches it written that way, since the `\` of a `\udcNN` escape is part of the name and not a separator, or with `?` for that `\` (`secr?udce9t.py`), or by a glob such as `secr*t.py`. An ignore path matches such a file the same way when ASH lists the files to scan. A UTF-8 file name that spells the same `\udcNN` text reads as the same name, so in a tree that holds both files, both are reported under that name, and a path that matches one matches both.
 - `rule_id` is a case-insensitive pattern with no scanner prefix. It matches any scanner that reports that rule ID.
 - Quote the `expires` date. YAML reads an unquoted `2027-01-31` as a date, not a string, and ASH then refuses the whole config (exit 3). `ash config lint` and `ash config get` name the problem.
@@ -48,6 +49,35 @@ ash --source-dir . --scanners detect-secrets --offline --no-progress \
 ```
 
 With `rule_id` misspelled, the entry suppresses nothing instead of suppressing every rule in `app.py`: the run warns, naming the key, and fails on the finding the entry was meant to suppress (exit 2). Set `fail_on_unknown_keys: true` to refuse the config outright (exit 3); ASH v4 makes that the default.
+
+### Suppress a finding in a harvested lockfile {#harvested}
+
+A finding can sit in a file the scan materialized rather than one in your tree:
+the [sdist lockfile harvest](../docs/plugins/builtin/syft.md#the-sdist-lockfile-harvest)
+writes a compiled dependency's embedded lockfiles into the converted target at
+`sdist-locks/<package>/<version>/<lockfile>`, and grype and trivy report
+advisories against them. Such a finding is fixed by upgrading the parent
+package, never by an edit, so while no fixed release exists the honest
+disposition is a time-boxed suppression whose `path` globs over the harvest
+layout -- the version segment is a `*` so the entry survives a version bump,
+and `expires` plus the pinned package version force the revisit:
+
+```yaml
+global_settings:
+  suppressions:
+    - rule_id: "GHSA-2mjx-qc3c-rqvc"
+      path: "**/sdist-locks/polars-runtime-32/*/Cargo.lock"
+      package_name: "rustls"
+      package_version: "0.23.43"
+      expires: "2026-12-27"
+      reason: >-
+        rustls 0.23.43 is statically linked into the polars-runtime-32 wheel;
+        only a polars release built against rustls 0.23.45 or later removes it.
+```
+
+ASH's own `.ash.yaml` carries the worked set of these entries (the rustls
+advisories in polars' harvested `Cargo.lock`), one per scanner spelling of the
+same GHSA id, each with the evidence in its reason.
 
 <!-- doctest: run expect-exit=2 -->
 ```bash
@@ -86,7 +116,40 @@ global_settings:
       reason: run_hook only runs commands from the deploy manifest
 ```
 
-ASH finds the definition by parsing the file with tree-sitter, for Python, JavaScript, TypeScript, and Java files. The parsers are in the `symbols` extra, which is not installed by default; without it, a suppression with `symbol` matches nothing and the scan logs a warning that names the extra. The container image includes it.
+A symbol suppression also needs an entry for its file in `.ash.lock`; [create both with `ash suppress add`](#lock).
+
+ASH finds the definition by parsing the file with tree-sitter, for Python, JavaScript, TypeScript, and Java files. The parsers are in the `symbols` extra, which is not installed by default; without it, a suppression with `symbol` matches nothing and the scan logs a warning that names the extra. The container image includes it. For the qualified-name grammar, the fail-closed rules, and the resolver's API and limits, see [Symbol resolution](../reference/symbol-resolution.md).
+
+### Lock a symbol suppression to its file {#lock}
+
+A symbol suppression follows its definition when the code moves, so a definition that is rewritten would keep a review that no longer describes it. The lock prevents that. `.ash.lock`, at the repository root beside `.ash.yaml`, is a committed JSON file that records the SHA-256 of each file a symbol suppression names, taken when the suppression was reviewed:
+
+- A symbol suppression whose file has no entry in the lock is refused when the config is validated, by `ash scan` and by `ash config validate`. The message names the `ash suppress add` command to run.
+- When the file's bytes no longer hash to the entry, every symbol suppression bound to that file stops applying. Its findings are reported again, and the scan prints one notice that names the file, the suppressions, and the refresh command.
+- Line-range suppressions are not affected.
+
+The whole file is hashed, not the definition, so reformatting a definition and editing it are treated alike. The file is read as bytes, so a checkout that rewrites line endings changes the hash; refresh the lock on that checkout.
+
+Create the suppression and its lock entry together with `ash suppress add`:
+
+```bash
+ash suppress add B602 --symbol Deployer.run_hook --file src/deploy.py \
+  --reason "run_hook only runs commands from the deploy manifest"
+```
+
+This writes the suppression to the config a scan of the current directory uses (`--config` names another YAML file) and the hash to `.ash.lock`. A suppression already in the config for the same rule, file, and symbol is not written twice, which is how you bring an existing symbol suppression under the lock. Pass `--source-dir` to run it from another directory.
+
+After you change a locked file, read the change, confirm the suppressions still hold, and record the review:
+
+```bash
+ash suppress refresh src/deploy.py   # or no path, for every locked file
+```
+
+`ash suppress verify` exits 1 and lists every locked file that changed or is gone, and every symbol suppression in the config that has no lock entry. Run it in CI. `--config` is repeatable for a repository with more than one config.
+
+Commit `.ash.lock` with the change it belongs to, so a reviewer sees the new hash beside the edit it covers. The commands are the supported way to write the file; its keys are sorted, so the same tree always produces the same bytes.
+
+The lock was first written inside the `.ash/` directory. ASH still reads that older file when `.ash.lock` does not exist, with a deprecation warning, and `ash suppress add` or `refresh` writes `.ash.lock` at the repository root; remove the old file with `git rm` on its path. Reading it is deprecated since v3.9 and ends in v4.0.
 
 ### Installing the extra {#installing-the-extra}
 
@@ -164,6 +227,24 @@ global_settings:
 
 `path` and `reason` are required, and paths match the way suppression paths do. The findings an ignore path drops include a dependency scanner's findings about a package installed under it: a `node_modules/` ignore path also drops grype's findings located in `node_modules/<package>/package.json`.
 
+npm-audit does not work that way. npm, pnpm and yarn name no file in their audit output, so npm-audit locates each advisory at the lockfile it audited (`package-lock.json`, `npm-shrinkwrap.json`, `pnpm-lock.yaml` or `yarn.lock`), as a path relative to the scanned directory. That file is in your checkout, a `node_modules/` ignore path does not match it, and it is where a fix is made. For an npm lockfile the result also carries the line of the package's entry; for `pnpm-lock.yaml` and `yarn.lock` it has no line. Findings of one lockfile share its location, so the package, its installed version and where it is installed are what tell them apart: they are in the result's `package_name`, `package_version` and `package_path` properties, and in its `partialFingerprints`.
+
+Two ignore paths still silence npm-audit, and neither is a mistake in the scanner. An ignore path that matches a lockfile, such as `**/pnpm-lock.yaml`, drops that lockfile's findings. And a lockfile under an ignore path is skipped rather than audited, so a generic ignore list that names lockfiles leaves those projects out of the audit and the scan has no npm-audit finding for them. Check the ignore list for lockfile names before relying on a clean npm-audit result.
+
+Earlier releases located every npm-audit finding at `node_modules/<package>/package.json`. A suppression whose `path` is that location does not match the finding now, and neither does a baseline keyed on it. Re-key the suppression by setting `path` to the lockfile and keeping `package_name`, `package_version` and `package_path` to name the dependency:
+
+```yaml
+global_settings:
+  suppressions:
+    - rule_id: GHSA-vfj7-8cjw-p6xm
+      path: deploy/cdk/package-lock.json
+      package_name: braces
+      package_path: deploy/cdk/node_modules/braces
+      reason: Not reachable from the deployed code
+```
+
+Grype's findings in a lockfile are suppressed the same way.
+
 An ignore path can also have an `expires` date, which works the way a suppression's does: on that date the ignore path stops applying, so the files it covered are scanned again and their findings count on the next scan. The same holds for the entries of bandit `excluded_paths`, checkov `skip_path`, and syft `exclude`. This expired ignore path no longer drops the finding in `app.py`:
 
 <!-- doctest: run expect-exit=2 -->
@@ -184,6 +265,21 @@ rm -r vendor
 
 ASH does not read a `.ashignore` file. It does apply the repository's `.gitignore` and `.ignore` files to the files it hands several scanners; see [Coverage](../reference/coverage.md#what-decides-the-files). Several scanners also have their own exclusion options, such as bandit's `excluded_paths`, checkov's `skip_path`, and semgrep's `exclude`; the [scanner reference](../reference/scanners.md) lists them.
 
+## Drop one rule under a path (exclusions) {#exclusions}
+
+A suppression keeps the result in SARIF marked suppressed, and an ignore path drops every rule under the path. When one rule is always benign in one place -- bandit B101 (`assert`) under `tests/`, say -- a rule+path exclusion drops just that rule's results there, so they do not pile up as suppressed noise in SARIF consumers while B105 or B108 under `tests/` are still reported:
+
+```yaml
+global_settings:
+  exclusions:
+    - rule_id: B101
+      path: "**/tests/**"
+      scanner: bandit
+      reason: "pytest assert idiom; tests are not shipped"
+```
+
+`rule_id`, `path`, and `reason` are required. The rule ID matches the finding's exact ID case-insensitively, or as a glob (`B1*`); the path matches the way a suppression's does, every file-naming location of the result included; `scanner` (optional) bounds the exclusion to one scanner's results by its registered name; `expires` works the way a suppression's does. Each dropped result is logged when the scan runs with `--verbose`. [Suppressions, ignore paths, and scanner exclusions](../concepts/suppressions.md) places exclusions among the other mechanisms.
+
 ## Find suppressions that no longer match {#unused}
 
 The `unused-suppressions` reporter, on by default, writes `.ash/ash_output/reports/ash.unused-suppressions.json` and `ash.unused-suppressions.md`. They list each entry in `global_settings.suppressions` that matched no finding in the scan, including expired ones. They do not cover ignore paths or inline suppressions.
@@ -192,7 +288,7 @@ After a scan, `ash config lint --fix-unused` comments out the entries that the r
 
 ## Add a suppression while you review findings {#inspect}
 
-`ash inspect findings` opens the last scan's findings in your terminal. Select a finding and press `x` to suppress it: ASH asks for a reason and an optional expiration, and adds an entry with the finding's path and rule ID, and its line as `line_start` and `line_end`, to the config file (the `--config` file, else the config ASH discovers, else a new `.ashrc.yaml` in the current directory). It keeps the comments of a YAML file, except one whose `global_settings` is written inline (`global_settings: {...}`), which it rewrites in full, and it writes a JSON config back as JSON. If the file already has an identical entry, nothing is added, and the status bar says so; an entry for another line, reason, or expiration with the same rule ID and path is added. It does not edit TOML files, or a file that uses `extends` but has no suppressions list of its own.
+`ash inspect findings` opens the last scan's findings in your terminal. Select a finding and press `x` to suppress it: ASH asks for a reason and an optional expiration, and adds an entry with the finding's path and rule ID, and its line as `line_start` and `line_end`, to the config file (the `--config` file, else the config ASH discovers, else a new `.ash.yaml` in the current directory). It keeps the comments of a YAML file, except one whose `global_settings` is written inline (`global_settings: {...}`), which it rewrites in full, and it writes a JSON config back as JSON. If the file already has an identical entry, nothing is added, and the status bar says so; an entry for another line, reason, or expiration with the same rule ID and path is added. It does not edit TOML files, or a file that uses `extends` but has no suppressions list of its own.
 
 ## See every finding {#ignore-suppressions}
 

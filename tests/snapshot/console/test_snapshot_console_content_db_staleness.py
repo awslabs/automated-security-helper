@@ -29,7 +29,7 @@ pytestmark = pytest.mark.unit
 def test_message_variants(snapshot):
     messages = {}
     for entry in cdb.CONTENT_DATABASES:
-        for policy in (cdb.STALENESS_FAIL, cdb.STALENESS_WARN):
+        for policy in (cdb.StalenessPolicy.FAIL, cdb.StalenessPolicy.WARN):
             stale = content_db_record(
                 entry.name,
                 policy=policy,
@@ -41,8 +41,10 @@ def test_message_variants(snapshot):
                 age=None,
                 error=f"ValueError: {entry.scanner} printed no build time",
             )
-            messages[f"{entry.name} / {policy} / stale"] = stale.message()
-            messages[f"{entry.name} / {policy} / unreadable"] = unreadable.message()
+            messages[f"{entry.name} / {policy.value} / stale"] = stale.message()
+            messages[f"{entry.name} / {policy.value} / unreadable"] = (
+                unreadable.message()
+            )
 
     assert messages == snapshot
 

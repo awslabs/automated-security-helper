@@ -1,0 +1,29 @@
+[
+  {
+    "col": 1,
+    "end_col": 23,
+    "end_line": 3,
+    "line": 3,
+    "pointer": "/mcp_servers/elevated",
+    "script_line": 1,
+    "source_file": ".codex/config.toml"
+  },
+  {
+    "col": 1,
+    "end_col": 23,
+    "end_line": 3,
+    "line": 3,
+    "pointer": "/mcp_servers/elevated",
+    "script_line": 2,
+    "source_file": ".codex/config.toml"
+  },
+  {
+    "col": 1,
+    "end_col": 23,
+    "end_line": 3,
+    "line": 3,
+    "pointer": "/mcp_servers/elevated",
+    "script_line": 3,
+    "source_file": ".codex/config.toml"
+  }
+]

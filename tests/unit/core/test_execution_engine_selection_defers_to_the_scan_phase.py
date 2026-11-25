@@ -10,9 +10,9 @@ class that declares no name (the documented unparametrized plugin pattern) has
 its selectable name only as ``config.name`` on an instance the phase constructs,
 so the engine keyed it by its lowercased class name and refused the configured
 name the phase accepts, making the scanner unselectable. And a request naming a
-community scanner whose module this run did not load was refused as a spelling
+shipped scanner whose module this run did not load was refused as a spelling
 error; it is still refused here, before anything is cleared, but with the one
-text the phase also raises (core.scanner_selection.community_scanner_refusal),
+text the phase also raises (plugins.enablement.unloaded_opt_in_refusal),
 which names the module to add and any misspelled name beside it, and only when
 some scanner class is in scope to judge the names against.
 
@@ -101,7 +101,7 @@ def test_an_unnamed_scanner_in_scope_defers_the_refusal_to_the_phase(tmp_path):
     assert engine._initialized is True
 
 
-def test_a_community_scanner_whose_module_is_not_loaded_is_refused_naming_the_module(
+def test_an_alpha_scanner_whose_module_is_not_loaded_is_refused_naming_the_module(
     tmp_path,
 ):
     """Red before the fix: refused as a spelling error, with no module hint
@@ -111,14 +111,14 @@ def test_a_community_scanner_whose_module_is_not_loaded_is_refused_naming_the_mo
     with pytest.raises(ScannerSelectionError, match="ash_snyk_plugins") as refused:
         _reinitialize(engine, ["snyk-code"], [_NamedScanner])
 
-    assert "community scanner" in str(refused.value)
+    assert "is provided by" in str(refused.value)
     assert "--ash-plugin-modules" in str(refused.value)
 
 
-def test_a_misspelled_name_is_named_beside_the_unloaded_community_scanner(
+def test_a_misspelled_name_is_named_beside_the_unloaded_alpha_scanner(
     tmp_path,
 ):
-    """Red before the fix: the refusal named the community scanner only, so the
+    """Red before the fix: the refusal named the alpha scanner only, so the
     operator added the module and was refused again for the misspelling."""
     engine = _engine(tmp_path)
 
@@ -132,7 +132,7 @@ def test_a_misspelled_name_is_named_beside_the_unloaded_community_scanner(
 
 
 def test_no_registered_scanner_defers_every_refusal_to_the_phase(tmp_path):
-    """Red before the fix: with no scanner class in scope the community hint
+    """Red before the fix: with no scanner class in scope the alpha hint
     ran on an empty declared set and refused the request, where the phase and
     refuse_selection_matching_no_scanner skip a registry with nothing in it."""
     engine = _engine(tmp_path)
@@ -142,7 +142,7 @@ def test_no_registered_scanner_defers_every_refusal_to_the_phase(tmp_path):
     assert engine._initialized is True
 
 
-def test_a_declared_name_beside_an_unloaded_community_scanner_is_not_refused(
+def test_a_declared_name_beside_an_unloaded_alpha_scanner_is_not_refused(
     tmp_path,
 ):
     """Control: the request resolves to something; the phase warns about the rest."""
@@ -154,7 +154,7 @@ def test_a_declared_name_beside_an_unloaded_community_scanner_is_not_refused(
 
 
 def test_a_name_matching_no_declared_scanner_is_still_refused(tmp_path):
-    """Control: every class declares a name and none is a community scanner."""
+    """Control: every class declares a name and none is an alpha scanner."""
     engine = _engine(tmp_path)
 
     with pytest.raises(ScannerSelectionError):

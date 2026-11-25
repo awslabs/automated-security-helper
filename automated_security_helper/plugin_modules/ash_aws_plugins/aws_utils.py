@@ -568,7 +568,9 @@ class KeptListingFailure(botocore.exceptions.ClientError):
                     "Message": "the listing failed earlier in this walk",
                 }
             }
-        super().__init__(response, operation_name)
+        # The literal above is a plain dict; botocore types the response as a
+        # TypedDict whose other keys are all optional.
+        super().__init__(response, operation_name)  # ty: ignore[invalid-argument-type]
         self.original = original
         self.failure_code = _service_error_code(original)
         self.failure_label = _botocore_error_name(original)

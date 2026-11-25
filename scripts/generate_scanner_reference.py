@@ -13,7 +13,7 @@ Every scanner class declared by a package under ``plugin_modules/`` is listed (s
 gives, from the code:
 
 * its config name, whether it is enabled by default, and which package provides
-  it (``ash_builtin`` is always loaded; the community modules are loaded through
+  it (``ash_builtin`` is always loaded; the alpha modules are loaded through
   ``ash_plugin_modules``);
 * a link to its own page in the docs tree, when that tree has one (see
   :func:`scanner_page`);
@@ -55,7 +55,7 @@ GENERATOR = "scripts/generate_scanner_reference.py"
 PAGE = "scanners.md"
 #: Where a docs tree keeps one page per scanner, relative to its root.
 BUILTIN_PAGES = Path("docs/content/docs/plugins/builtin")
-COMMUNITY_PAGES = Path("docs/content/docs/plugins/community")
+ALPHA_PAGES = Path("docs/content/docs/plugins/alpha")
 
 
 def scanner_page(plugin, docs_root: Path) -> Optional[Path]:
@@ -63,8 +63,8 @@ def scanner_page(plugin, docs_root: Path) -> Optional[Path]:
 
     A built-in scanner's page is ``BUILTIN_PAGES/<name>.md``, or a page that covers
     several scanners and names them in its file name joined by ``-and-``
-    (``cfn-lint-and-cfn-guard.md``). A community scanner's page is
-    ``COMMUNITY_PAGES/<name>-plugin.md``, or ``<module>-plugin.md`` after the
+    (``cfn-lint-and-cfn-guard.md``). An alpha scanner's page is
+    ``ALPHA_PAGES/<name>-plugin.md``, or ``<module>-plugin.md`` after the
     module name's ``ash_`` and ``_plugins`` (``ash_snyk_plugins`` is
     ``snyk-plugin.md``). Read from the files present, so a link appears in the
     same change that adds the page.
@@ -80,7 +80,7 @@ def scanner_page(plugin, docs_root: Path) -> Optional[Path]:
             if plugin.name in page.stem.split("-and-")
         )
     else:
-        folder = Path(docs_root) / COMMUNITY_PAGES
+        folder = Path(docs_root) / ALPHA_PAGES
         module = module_name(plugin).removeprefix("ash_").removesuffix("_plugins")
         candidates = [
             folder / f"{plugin.name}-plugin.md",
@@ -195,7 +195,7 @@ def generate(docs_root: Path) -> tuple[str, dict]:
         "",
         (
             f"ASH ships {len(plugins)} scanners. The built-in ones are loaded on every "
-            "scan. The others are community scanners, each in a plugin module that "
+            "scan. The others are alpha scanners, each in a plugin module that "
             "`ash scan` loads only when the configuration's `ash_plugin_modules` (or "
             "`--ash-plugin-modules`) names the module; for the MCP server, see "
             "[What a plugin can do](../plugins/index.md#what-a-plugin-can-do)."

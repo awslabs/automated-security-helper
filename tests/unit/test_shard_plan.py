@@ -580,6 +580,29 @@ class TestUpdateScript:
         assert "testcase(s) matched no file" in done.stderr
 
     @pytest.mark.integration
+    def test_the_file_is_written_the_way_the_pretty_format_json_hook_writes_it(
+        self, tmp_path
+    ):
+        # The repository's pre-commit pretty-format-json hook sorts keys and indents by
+        # two. A refresh written any other way is rewritten, whole, by the first commit
+        # that touches it, so the maintainer's diff is not the script's output.
+        repo = self._repo(tmp_path)
+        artifacts = tmp_path / "artifacts"
+        for platform in ("windows-latest", "ubuntu-24.04-arm"):
+            self._artifact(
+                artifacts,
+                f"test-results-{platform}-x86_64-py3.12-unit-shard1of1",
+                self.JUNIT,
+            )
+        out = tmp_path / "out.json"
+        done = self._run(repo, artifacts, out)
+        assert done.returncode == 0, done.stderr
+        written = out.read_text(encoding="utf-8")
+        assert (
+            written == json.dumps(json.loads(written), indent=2, sort_keys=True) + "\n"
+        )
+
+    @pytest.mark.integration
     def test_a_group_with_a_shard_missing_is_skipped_and_the_old_data_kept(
         self, tmp_path
     ):

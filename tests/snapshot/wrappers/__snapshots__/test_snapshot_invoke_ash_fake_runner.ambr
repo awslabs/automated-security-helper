@@ -1,7 +1,7 @@
 # serializer version: 1
-# name: test_a_failed_build_exits_with_the_builds_code
+# name: test_a_failed_build_throws_and_ends_the_script
   dict({
-    'error_message': 'Failed to build image automated-security-helper:ci (exit 1). See the build output above for the failing step.',
+    'error_message': 'Failed to build image automated-security-helper:ci (exit 7). See the build output above for the failing step.',
     'exit_code': 1,
     'runner_commands': list([
       'build',
@@ -39,6 +39,7 @@
       '<REPO>',
     ]),
     'exit_code': 0,
+    'forwarded_the_console_size': True,
     'run_argv': list([
       'docker',
       'run',
@@ -74,8 +75,6 @@
       'ASH_DEBUG': 'NO',
       'ASH_OUTPUT_DIR': '/out',
       'ASH_SOURCE_DIR': '/src',
-      'COLUMNS': '<size>',
-      'LINES': '<size>',
     }),
   })
 # ---

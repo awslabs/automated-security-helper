@@ -28,7 +28,7 @@ Install Ferret Scan:
 # Recommended: let ASH install the version this plugin is tested against, into
 # the Python environment that runs ASH (with pip, or with uv where that
 # environment has no pip). ASH finds ferret-scan there even when it is not on PATH.
-ash dependencies install --config .ash/.ash_community_plugins.yaml
+ash dependencies install --config .ash/.ash_alpha_plugins.yaml
 
 # Or install by hand. Use the constraint, not a bare `pip install ferret-scan`:
 # the latter resolves to whatever is newest, which is how a release published
@@ -47,11 +47,11 @@ constant is correct.
 
 ### Enable the Plugin
 
-The ferret-scan plugin is a community plugin that must be explicitly enabled. There are two ways to do this:
+The ferret-scan plugin is an alpha plugin that must be explicitly enabled. There are two ways to do this:
 
 #### Option 1: Add to ASH Configuration File (Recommended)
 
-Add the plugin module to your ASH config file (`.ashrc.yaml` in a new project):
+Add the plugin module to your ASH config file (`.ash.yaml` in the project root):
 
 ```yaml
 ash_plugin_modules:

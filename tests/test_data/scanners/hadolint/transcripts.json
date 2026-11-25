@@ -1,0 +1,249 @@
+{
+  "schema_version": 1,
+  "transcripts": [
+    {
+      "adapter_prep": null,
+      "also_for": [],
+      "argv": [
+        "hadolint",
+        "--no-fail",
+        "--no-color",
+        "--format",
+        "sarif",
+        "--",
+        "Dockerfile",
+        "services/Dockerfile.broken",
+        "services/api.Dockerfile"
+      ],
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": {
+        "paths": [
+          "positive"
+        ],
+        "sha256": "86c377d8e1885853a35477150e89d37a63574b691d7561f161a7fb14e4d203db"
+      },
+      "id": "hadolint-2.15.1-positive-sarif",
+      "live_input": false,
+      "note": null,
+      "observable": true,
+      "pin_stamp": {
+        "tool": "hadolint",
+        "version": "2.15.1"
+      },
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "sarif",
+          "path": "captured/positive.sarif",
+          "sha256": "61408a5dfa250ce7746550b05d2652899d7dd085ddf8bb7cc5cef8cd6603947a"
+        }
+      ],
+      "retention": "current",
+      "scanner": "hadolint",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "hadolint",
+        "version": "2.15.1"
+      }
+    },
+    {
+      "adapter_prep": null,
+      "also_for": [],
+      "argv": [
+        "hadolint",
+        "--no-fail",
+        "--no-color",
+        "--format",
+        "json",
+        "--",
+        "Dockerfile",
+        "services/Dockerfile.broken",
+        "services/api.Dockerfile"
+      ],
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": {
+        "paths": [
+          "positive"
+        ],
+        "sha256": "86c377d8e1885853a35477150e89d37a63574b691d7561f161a7fb14e4d203db"
+      },
+      "id": "hadolint-2.15.1-positive-json",
+      "live_input": false,
+      "note": null,
+      "observable": true,
+      "pin_stamp": {
+        "tool": "hadolint",
+        "version": "2.15.1"
+      },
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "json",
+          "path": "captured/positive.json",
+          "sha256": "fd2e66d17ded993421d33ab18b1bb04173633c657fea76a5f0bef6873753dec2"
+        }
+      ],
+      "retention": "current",
+      "scanner": "hadolint",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "hadolint",
+        "version": "2.15.1"
+      }
+    },
+    {
+      "adapter_prep": null,
+      "also_for": [],
+      "argv": [
+        "hadolint",
+        "--no-fail",
+        "--no-color",
+        "--format",
+        "sarif",
+        "--",
+        "Containerfile"
+      ],
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": {
+        "paths": [
+          "negative"
+        ],
+        "sha256": "222aa9588cd307d3dbe168dbc5f8397771cf9b01af13258800a3dcf16841e1f4"
+      },
+      "id": "hadolint-2.15.1-negative-sarif",
+      "live_input": false,
+      "note": null,
+      "observable": true,
+      "pin_stamp": {
+        "tool": "hadolint",
+        "version": "2.15.1"
+      },
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "sarif",
+          "path": "captured/negative.sarif",
+          "sha256": "49b17ff037285b7a518f153bdfa447057a093065ec752de839bb91a4ff988622"
+        }
+      ],
+      "retention": "current",
+      "scanner": "hadolint",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "hadolint",
+        "version": "2.15.1"
+      }
+    },
+    {
+      "adapter_prep": null,
+      "also_for": [],
+      "argv": [
+        "hadolint",
+        "--no-fail",
+        "--no-color",
+        "--config",
+        ".hadolint.yaml",
+        "--format",
+        "sarif",
+        "--",
+        "Dockerfile"
+      ],
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": {
+        "paths": [
+          "configured"
+        ],
+        "sha256": "39eb445faa1e6ad131a8109897c04cbc74cfb7e6db9107a00bb12d1f4bdf8d45"
+      },
+      "id": "hadolint-2.15.1-configured-sarif",
+      "live_input": false,
+      "note": null,
+      "observable": true,
+      "pin_stamp": {
+        "tool": "hadolint",
+        "version": "2.15.1"
+      },
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "sarif",
+          "path": "captured/configured.sarif",
+          "sha256": "c6e0a57d50bccb67246aa83af659aee127104cf6e45d7b5c5cf7db2761842f61"
+        }
+      ],
+      "retention": "current",
+      "scanner": "hadolint",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "hadolint",
+        "version": "2.15.1"
+      }
+    },
+    {
+      "adapter_prep": null,
+      "also_for": [],
+      "argv": [
+        "hadolint",
+        "--no-fail",
+        "--no-color",
+        "--config",
+        ".hadolint.yaml",
+        "--format",
+        "json",
+        "--",
+        "Dockerfile"
+      ],
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": {
+        "paths": [
+          "configured"
+        ],
+        "sha256": "39eb445faa1e6ad131a8109897c04cbc74cfb7e6db9107a00bb12d1f4bdf8d45"
+      },
+      "id": "hadolint-2.15.1-configured-json",
+      "live_input": false,
+      "note": null,
+      "observable": true,
+      "pin_stamp": {
+        "tool": "hadolint",
+        "version": "2.15.1"
+      },
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "json",
+          "path": "captured/configured.json",
+          "sha256": "911e0188bec67b8def5b6e82f6bd88532aedffe8d3c9cf4e6e3693e07de4fa72"
+        }
+      ],
+      "retention": "current",
+      "scanner": "hadolint",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "hadolint",
+        "version": "2.15.1"
+      }
+    }
+  ],
+  "unrecorded": []
+}

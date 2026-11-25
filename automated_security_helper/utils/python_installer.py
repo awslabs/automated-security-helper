@@ -4,7 +4,7 @@
 """Install Python packages into the environment that runs ASH.
 
 ``ash dependencies install`` adds packages to ASH's own environment for cdk-nag
-(the ``cdk`` extra's packages), for the ferret-scan community plugin, and for any
+(the ``cdk`` extra's packages), for the ferret-scan alpha plugin, and for any
 plugin that declares a ``pip`` dependency. An environment that uv created --
 ``uv tool install``, ``uvx``, ``uv venv`` -- has no pip, so
 ``<sys.executable> -m pip install`` would fail there with "No module named pip".

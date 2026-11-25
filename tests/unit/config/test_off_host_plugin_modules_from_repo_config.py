@@ -31,8 +31,8 @@ from tests.utils.helpers import checkout_env, importing_this_checkout
 AWS = "automated_security_helper.plugin_modules.ash_aws_plugins"
 SNYK = "automated_security_helper.plugin_modules.ash_snyk_plugins"
 OFF_HOST = [AWS, SNYK]
-#: The community packages an in-tree config can still add.
-COMMUNITY = [
+#: The alpha packages an in-tree config can still add.
+ALPHA = [
     "automated_security_helper.plugin_modules.ash_trivy_plugins",
     "automated_security_helper.plugin_modules.ash_ferret_plugins",
     "automated_security_helper.plugin_modules.ash_guarddog_plugins",
@@ -105,11 +105,11 @@ def test_an_in_tree_config_cannot_add_them(tmp_path, ash_log, entry, sends):
 
 @pytest.mark.unit
 def test_the_other_entries_of_that_config_are_kept(tmp_path, ash_log):
-    source = _tree(tmp_path, [AWS, SNYK, *COMMUNITY])
+    source = _tree(tmp_path, [AWS, SNYK, *ALPHA])
 
     config = resolve_config(source_dir=source)
 
-    assert config.ash_plugin_modules == COMMUNITY
+    assert config.ash_plugin_modules == ALPHA
     warnings = _module_warnings(ash_log)
     assert len(warnings) == 1, _warnings(ash_log)
     assert repr(AWS) in warnings[0] and repr(SNYK) in warnings[0]
@@ -151,7 +151,7 @@ def test_a_config_an_mcp_client_delivered_cannot_add_them(
     (root / "session-a" / "config").mkdir()
     monkeypatch.setenv("ASH_MCP_WORKSPACE_ROOT", str(root))
     document = yaml.safe_dump(
-        {"project_name": "delivered", "ash_plugin_modules": [package, *COMMUNITY]}
+        {"project_name": "delivered", "ash_plugin_modules": [package, *ALPHA]}
     )
     if delivered == "upload":
         config_path = root / "session-a" / "upload-staging" / "ash.yaml"
@@ -172,7 +172,7 @@ def test_a_config_an_mcp_client_delivered_cannot_add_them(
             fallback_to_default=True,
         )
     assert repr(package) in str(refused.value)
-    assert not any(module in str(refused.value) for module in COMMUNITY)
+    assert not any(module in str(refused.value) for module in ALPHA)
 
 
 @pytest.mark.parametrize("package", OFF_HOST)
@@ -310,32 +310,32 @@ def test_the_scan_engine_loads_them_only_from_the_command_line(
 
 
 @pytest.mark.unit
-def test_ash_community_plugins_file_keeps_its_modules(tmp_path, ash_log):
+def test_ash_alpha_plugins_file_keeps_its_modules(tmp_path, ash_log):
     """This repository's own CI scan loads these from a config inside its tree.
 
     snyk is not among them: the CI legs that use this file pass it with
     --ash-plugin-modules (.github/actions/run-scan-test/action.yml).
     """
-    community = REPO / ".ash" / ".ash_community_plugins.yaml"
+    alpha = REPO / ".ash" / ".ash_alpha_plugins.yaml"
     source = tmp_path / "repo"
     (source / ".ash").mkdir(parents=True)
-    copied = source / ".ash" / ".ash_community_plugins.yaml"
-    copied.write_text(community.read_text())
+    copied = source / ".ash" / ".ash_alpha_plugins.yaml"
+    copied.write_text(alpha.read_text())
 
     config = resolve_config(config_path=copied, source_dir=source)
 
-    assert config.ash_plugin_modules == COMMUNITY
+    assert config.ash_plugin_modules == ALPHA
     assert not _module_warnings(ash_log)
 
 
 @pytest.mark.unit
 def test_the_ci_legs_using_that_file_pass_snyk_on_the_command_line():
-    """Every scan the run-scan-test action starts with the community file names snyk."""
+    """Every scan the run-scan-test action starts with the alpha file names snyk."""
     action = (REPO / ".github" / "actions" / "run-scan-test" / "action.yml").read_text()
     scans = [
         line
         for line in action.splitlines()
-        if ".ash_community_plugins.yaml" in line
+        if ".ash_alpha_plugins.yaml" in line
         and line.lstrip().startswith(("ash ", "./ash ", "Invoke-ASH "))
         and " config validate " not in line
         and " dependencies install" not in line
@@ -660,7 +660,7 @@ def test_every_plugin_package_that_sends_data_off_the_host_is_listed(tmp_path):
     assert reporting | scanning == set(OFF_HOST_PLUGIN_PACKAGES)
     assert AWS in reporting
     assert SNYK in scanning
-    assert not (reporting | scanning) & set(COMMUNITY)
+    assert not (reporting | scanning) & set(ALPHA)
     # Each reviewed scanner still asks for a network, and none is handed a credential.
     assert reviewed == dict.fromkeys(_REVIEWED_NETWORK_SCANNERS, False)
     assert not unreviewed

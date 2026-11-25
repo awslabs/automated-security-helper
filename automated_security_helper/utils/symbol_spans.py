@@ -50,6 +50,12 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 
 from automated_security_helper.core.constants import ASH_DOCS_URL
 from automated_security_helper.utils.ash_install import extra_install_command
+from automated_security_helper.utils.ash_lock import (
+    LOCK_RELATIVE_PATH,
+    AshLock,
+    lock_key,
+    stale_notice,
+)
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
 from automated_security_helper.utils.undecodable_text import undecodable_of_text
 
@@ -79,8 +85,14 @@ def symbols_extra_install_command() -> str:
     return extra_install_command(SYMBOLS_EXTRA)
 
 
-#: The docs section with the uvx form of the install.
-SYMBOLS_EXTRA_DOCS_URL = f"{ASH_DOCS_URL}/docs/suppressions/#installing-the-extra"
+#: The docs section with the uvx form of the install: the how-to page's own URL
+#: (docs/content/how-to/suppress-findings.md renders there; the anchor is the
+#: explicit ``{#installing-the-extra}`` on its heading). The earlier
+#: ``/docs/suppressions/`` spelling reached the same section only through two
+#: redirect hops.
+SYMBOLS_EXTRA_DOCS_URL = (
+    f"{ASH_DOCS_URL}/how-to/suppress-findings/#installing-the-extra"
+)
 
 
 def symbols_extra_install_hint() -> str:
@@ -292,7 +304,10 @@ def _load_language(grammar: SymbolGrammar) -> Any:
         try:
             tree_sitter = importlib.import_module("tree_sitter")
             module = importlib.import_module(grammar.module)
-            language = tree_sitter.Language(getattr(module, grammar.loader)())
+            # The grammar's loader hands back the language pointer; py-tree-sitter
+            # marks the int overload of Language() deprecated in favor of a
+            # capsule, which the loaders here do not return.
+            language = tree_sitter.Language(getattr(module, grammar.loader)())  # ty: ignore[deprecated]
         except (ImportError, AttributeError, TypeError, ValueError) as exc:
             raise SymbolsUnavailableError(f"{type(exc).__name__}: {exc}") from exc
         _language_cache[key] = language
@@ -535,9 +550,15 @@ class SymbolResolver:
     logged once per resolver at WARNING.
     """
 
-    def __init__(self, source_dir: Path):
+    def __init__(self, source_dir: Path, lock: "Optional[AshLock]" = None):
         self._source_dir = Path(source_dir).resolve()
         self._warned: set[Tuple[str, str]] = set()
+        # The scan root's ``.ash.lock``, or None to resolve spans with no
+        # content-hash binding (the span resolver on its own). With a lock, a
+        # file whose bytes no longer hash to its entry, or that has none, gets
+        # no match: the suppression is inert and a notice says so once.
+        self._lock = lock
+        self._lock_states: Dict[str, str] = {}
 
     def contains(
         self,
@@ -569,6 +590,11 @@ class SymbolResolver:
             )
             return False
 
+        if self._lock is not None and not self._locked_and_unchanged(
+            self._lock, resolved
+        ):
+            return False
+
         indexed = _index_file(resolved)
         if isinstance(indexed, _Unresolvable):
             self._warn(file_path, symbol, indexed.reason)
@@ -577,6 +603,33 @@ class SymbolResolver:
             first <= line_start and end <= last
             for first, last in indexed.spans.get(symbol, ())
         )
+
+    def _locked_and_unchanged(self, lock: AshLock, resolved: Path) -> bool:
+        """Whether ``resolved`` has a lock entry its bytes still hash to.
+
+        Decided once per file for the life of the resolver, so a scan hashes
+        each file at most once and prints one notice per file, however many
+        findings and suppressions meet it.
+        """
+        key = lock_key(resolved.relative_to(self._source_dir).as_posix())
+        if key is None:
+            return False
+        state = self._lock_states.get(key)
+        if state is None:
+            state = lock.status(key)
+            self._lock_states[key] = state
+            entry = lock.entries.get(key)
+            if state == "unlocked":
+                ASH_LOGGER.warning(
+                    f"Symbol suppressions for '{key}' do not apply: the file has "
+                    f"no entry in {LOCK_RELATIVE_PATH}. Lock it with "
+                    f"`ash suppress add <rule-id> --symbol <name> --file {key} "
+                    "--reason <text>`.",
+                    extra=NO_MARKUP,
+                )
+            elif state != "ok" and entry is not None:
+                ASH_LOGGER.warning(stale_notice(key, entry, state), extra=NO_MARKUP)
+        return state == "ok"
 
     def _resolve(self, file_path: str) -> Optional[Path]:
         # Opened by the name the file has on disk: a finding holds a file name that

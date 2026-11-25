@@ -498,6 +498,135 @@ class TestADifferentBinaryIsStillInstalled:
         assert installed == tmp_path / "ash-bin" / "grype"
 
 
+COMPANION_NAME = "pinned.dll"
+COMPANION = b"MZ pinned companion library\n"
+
+
+def _tarball_with_companion() -> bytes:
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w:gz") as bundle:
+        for name, data in (("grype", PINNED_GRYPE), (COMPANION_NAME, COMPANION)):
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            info.mtime = 0
+            bundle.addfile(info, io.BytesIO(data))
+    return buffer.getvalue()
+
+
+@pytest.fixture
+def companion_pins():
+    """Pin grype to an archive that ships a companion library beside the executable,
+    as opengrep's Windows zip ships its DLLs."""
+    archive = _tarball_with_companion()
+    with (
+        patch.object(
+            tool_downloads, "_DIGESTS", {**_DIGESTS, GRYPE_ASSET: _sha(archive)}
+        ),
+        patch.object(
+            tool_downloads,
+            "_EXECUTABLE_DIGESTS",
+            {**_EXECUTABLE_DIGESTS, GRYPE_ASSET: _sha(PINNED_GRYPE)},
+        ),
+        patch.object(
+            tool_downloads,
+            "_COMPANION_DIGESTS",
+            {GRYPE_ASSET: {COMPANION_NAME: _sha(COMPANION)}},
+        ),
+    ):
+        yield archive
+
+
+class TestAnAssetWithCompanionsIsOnlyPresentWhenTheyAre:
+    """An executable whose pinned companions are missing or different fails to start,
+    so finding the executable alone is not finding the tool."""
+
+    def _bin(self, tmp_path, companion=None):
+        bin_dir = tmp_path / "ash-bin"
+        _binary(bin_dir, PINNED_GRYPE)
+        if companion is not None:
+            (bin_dir / COMPANION_NAME).write_bytes(companion)
+        return bin_dir
+
+    def test_a_lone_executable_is_not_accepted(self, tmp_path, companion_pins, on_path):
+        bin_dir = self._bin(tmp_path)
+
+        assert (
+            find_verified_pinned_executable("grype", "linux", "amd64", bin_dir) is None
+        )
+
+    def test_the_executable_with_its_companion_is_accepted(
+        self, tmp_path, companion_pins, on_path
+    ):
+        bin_dir = self._bin(tmp_path, COMPANION)
+
+        present = find_verified_pinned_executable("grype", "linux", "amd64", bin_dir)
+
+        assert present is not None and present.path == bin_dir / "grype"
+
+    def test_a_companion_with_other_bytes_is_not_accepted(
+        self, tmp_path, companion_pins, on_path
+    ):
+        bin_dir = self._bin(tmp_path, b"MZ another library\n")
+
+        assert (
+            find_verified_pinned_executable("grype", "linux", "amd64", bin_dir) is None
+        )
+
+    def test_a_symlinked_companion_is_not_accepted(
+        self, tmp_path, companion_pins, on_path
+    ):
+        bin_dir = self._bin(tmp_path)
+        real = tmp_path / "elsewhere.dll"
+        real.write_bytes(COMPANION)
+        try:
+            (bin_dir / COMPANION_NAME).symlink_to(real)
+        except (OSError, NotImplementedError):
+            pytest.skip("symlinks are not available on this platform")
+
+        assert (
+            find_verified_pinned_executable("grype", "linux", "amd64", bin_dir) is None
+        )
+
+    def test_a_copy_found_on_the_path_needs_its_companion_beside_it(
+        self, tmp_path, companion_pins, on_path
+    ):
+        on_path.grype = _binary(tmp_path / "usr-local-bin", PINNED_GRYPE)
+
+        assert (
+            find_verified_pinned_executable(
+                "grype", "linux", "amd64", tmp_path / "ash-bin"
+            )
+            is None
+        )
+
+    def test_the_install_command_is_not_satisfied_by_a_lone_executable(
+        self, tmp_path, companion_pins, on_path
+    ):
+        bin_dir = self._bin(tmp_path)
+        command = create_pinned_tool_install_command(
+            "grype", "linux", "amd64", destination=str(bin_dir)
+        )
+
+        assert pinned_install_already_satisfied(command.args) is None
+
+    def test_a_receipt_does_not_skip_the_download_when_the_companion_is_gone(
+        self, tmp_path, companion_pins, on_path, downloads
+    ):
+        downloads.archive = companion_pins
+        bin_dir = tmp_path / "ash-bin"
+        install_pinned_tool("grype", "linux", "amd64", destination=bin_dir)
+        assert (bin_dir / COMPANION_NAME).read_bytes() == COMPANION
+        (bin_dir / COMPANION_NAME).unlink()
+        before = len(downloads.urls)
+
+        install_pinned_tool("grype", "linux", "amd64", destination=bin_dir)
+
+        assert len(downloads.urls) == before + 1, (
+            "the missing companion was not restored"
+        )
+        assert (bin_dir / COMPANION_NAME).read_bytes() == COMPANION
+
+
 class TestTheExecutablePinIsEnforcedOnInstall:
     def test_a_member_that_does_not_match_its_pin_is_refused(
         self, tmp_path, on_path, downloads

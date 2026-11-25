@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from unittest.mock import patch
 
+from automated_security_helper.cli.mcp.error_types import McpErrorType
 import pytest
 import yaml
 
@@ -799,9 +800,9 @@ def test_the_scan_pre_checks_and_validate_config_accept_a_patched_profile(
     ] == []
     assert not {kind for kind, _field in kinds(validated)} & {
         "denied_by_runtime_policy",
-        mcp_tools.CONFIG_INPUT_NOT_PERMITTED,
-        mcp_tools.CONFIG_ENV_NOT_RESOLVED,
-        mcp_tools.CONFIG_POLICY_UNREADABLE,
+        McpErrorType.CONFIG_INPUT_NOT_PERMITTED.value,
+        McpErrorType.CONFIG_ENV_NOT_RESOLVED.value,
+        McpErrorType.CONFIG_POLICY_UNREADABLE.value,
     }
 
 

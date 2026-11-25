@@ -101,6 +101,8 @@ def line_span_spec() -> "FrameSpec":
             "package_name": host_predicate + " (part of the rest column)",
             "package_version": host_predicate + " (part of the rest column)",
             "package_path": host_predicate + " (part of the rest column)",
+            "image": "gated on the host (_image_holds), a glob over the finding's "
+            "image reference and digest; never a column",
             "scope": "gated on the host (_scope_gate), carried as the rest "
             "and engine columns",
             "resource_id": "sugar folded into scope at validation; gated with it",
@@ -199,8 +201,29 @@ def _package_holds(entry: "AshSuppression", finding: "FlatVulnerability") -> boo
     if entry.package_path is not None:
         if finding.package_path is None:
             return False
-        return _path_pattern_matches(finding.package_path, entry.package_path)
+        # package_path separates two installed copies, so it is an identity,
+        # not a scope: the bare-directory rule (issue #894) must not make a
+        # glob-free entry cover packages nested below the copy it names.
+        return _path_pattern_matches(
+            finding.package_path, entry.package_path, bare_directory=False
+        )
     return True
+
+
+def _image_holds(entry: "AshSuppression", finding: "FlatVulnerability") -> bool:
+    """An entry with no ``image`` holds for any finding. One that names an image
+    holds only for a finding inside an image whose submitted reference or
+    resolved digest matches the pattern (case-insensitive glob); a finding that
+    carries no image never matches it, as a finding without a package never
+    matches a package field."""
+    pattern = getattr(entry, "image", None)
+    if pattern is None:
+        return True
+    wanted = pattern.lower()
+    return any(
+        value is not None and fnmatch.fnmatch(value.lower(), wanted)
+        for value in (finding.image_ref, finding.image_digest)
+    )
 
 
 def _scope_gate(
@@ -321,6 +344,7 @@ def _chunk_frame(
             if holds or base_pending:
                 gate_ok = _path_pattern_matches(finding.file_path, entry.path)
                 gate_ok = gate_ok and _package_holds(entry, finding)
+                gate_ok = gate_ok and _image_holds(entry, finding)
                 if gate_ok:
                     gate_ok, needs_engine = _scope_gate(entry, finding)
         live.append(is_live)

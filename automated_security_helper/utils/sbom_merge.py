@@ -38,6 +38,15 @@ The rules, which a reader of ``ash.cdx.json`` can rely on:
   many components it re-references: the count and the first few shared
   ``bom-ref`` values. Each re-referenced component has a debug line of its own.
   A component with neither key is never matched, so both copies stay.
+* A harvest-stamped component of the second SBOM (it carries the
+  ``ash:sbom-harvest:sdist-sha256`` property, written by
+  ``utils/sdist_harvest.py``) whose ``purl`` the merged SBOM already lists under a
+  different ``bom-ref`` is folded onto the listed component: it is not added, the
+  listed one is kept whole, and every reference to its ``bom-ref`` in the second
+  SBOM's ``dependencies`` is redirected to the listed one's, so the two entries
+  unite as one. This is the case of a crate that the artifact pass and the harvest
+  pass both read: the ``purl`` agrees and syft's package-id suffix does not. A
+  component without the property keeps the rule above.
 * A component nested inside a second-SBOM component gets the same check as a
   top-level one. A nested component that repeats a package is left out of the
   copy of its parent, one that only shares a ``bom-ref`` gets a new one, and a new
@@ -54,12 +63,16 @@ The rules, which a reader of ``ash.cdx.json`` can rely on:
 Limits:
 
 * One package that two runs name with different ``bom-ref`` values is listed
-  twice. Matching ``purl`` across different ``bom-ref`` values would also mean
-  rewriting every reference to the dropped one (``dependencies``,
-  ``vulnerabilities``, ``annotations`` and ``compositions``), and nothing here
-  shows that a package keeps its ``bom-ref`` from one run to the next. Listing a
-  package twice is visible and harmless; merging two packages is not. That
-  includes a package that the second SBOM lists under a ``bom-ref`` the first
+  twice, with one exception (the harvest fold above). Matching ``purl`` across
+  different ``bom-ref`` values would also mean rewriting every reference to the
+  dropped one (``dependencies``, ``vulnerabilities``, ``annotations`` and
+  ``compositions``), and nothing here shows that a package keeps its ``bom-ref``
+  from one run to the next: syft numbers its cargo refs with a package-id hash
+  (``pkg:cargo/x@1?package-id=<hash>``) that differs between runs. Listing a
+  package twice is visible and harmless; merging two packages is not. The harvest
+  fold takes that risk only where the second SBOM says which package it is, by the
+  ``purl`` and the sdist sha256 provenance the converted-tree pass stamps, and only
+  ``dependencies`` follow, as for a re-assigned ref. That includes a package that the second SBOM lists under a ``bom-ref`` the first
   gives to a different package: the first SBOM holds it under one ref, the merge
   adds the second copy under a new ref, and each further SBOM that does the same
   adds another copy.
@@ -101,6 +114,7 @@ from automated_security_helper.schemas.cyclonedx_bom_1_6_schema import (
 )
 from automated_security_helper.utils.frame_text import wire
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.sdist_harvest import PROPERTY_SDIST_SHA256
 
 __all__ = ["component_key", "merge_cyclonedx_reports", "sbom_is_empty"]
 
@@ -135,6 +149,17 @@ def component_key(component: Component) -> str | None:
     if component.bom_ref is not None:
         return component.bom_ref.root
     return component.purl or None
+
+
+def is_harvest_stamped(component: Component) -> bool:
+    """Whether *component* carries the sdist-harvest provenance the syft scanner wrote.
+
+    ``stamp_harvested_components`` (``utils/sdist_harvest.py``) puts the sdist's
+    sha256 property on every component read from a harvested lockfile.
+    """
+    return any(
+        prop.name == PROPERTY_SDIST_SHA256 for prop in component.properties or []
+    )
 
 
 def _walk(components: Iterable[Component] | None) -> Iterator[Component]:
@@ -471,7 +496,11 @@ class _Walk:
         verdicts: list[str],
         shared: dict[int, list[str]],
         used_refs: set[str],
+        listed_by_purl: dict[str, str] | None = None,
     ) -> None:
+        #: The ``bom-ref`` of the first component that lists each ``purl``, which a
+        #: harvest-stamped component of another ``bom-ref`` is folded onto.
+        self.listed_by_purl = listed_by_purl if listed_by_purl is not None else {}
         #: What to do with each component, in :func:`_walk` order, and for a
         #: shared ``bom-ref`` the held packages that have it.
         self.verdicts = verdicts
@@ -486,6 +515,30 @@ class _Walk:
         #: The old ``bom-ref`` of each component given a new one, in order.
         self.re_referenced: list[str] = []
 
+    def _fold(self, component: Component) -> bool:
+        """Whether *component* is dropped onto the listed one that has its ``purl``.
+
+        Only a harvest-stamped component of a ``bom-ref`` that is not the listed
+        one's. Its ``bom-ref`` is then renamed to the listed one's, so the
+        dependency entries of the second SBOM follow it.
+        """
+        if component.bom_ref is None or not component.purl:
+            return False
+        listed = self.listed_by_purl.get(component.purl)
+        if listed is None or listed == component.bom_ref.root:
+            return False
+        if not is_harvest_stamped(component):
+            return False
+        old = component.bom_ref.root
+        if old in self.kept_as_is:
+            return False
+        self.renames.setdefault(old, listed)
+        ASH_LOGGER.debug(
+            f"SBOM merge: harvested component {component.purl!r} is already "
+            f"listed as {listed!r}; folding {old!r} onto it"
+        )
+        return True
+
     def take(
         self, components: Iterable[Component] | None, kept: list[Component]
     ) -> None:
@@ -499,6 +552,9 @@ class _Walk:
         for component in components or []:
             n, self.position = self.position, self.position + 1
             verdict = self.verdicts[n]
+            if verdict == _NEW and self._fold(component):
+                self.take(component.components, kept)
+                continue
             if verdict == _REPEAT:
                 self.take(component.components, kept)
                 continue
@@ -530,6 +586,8 @@ class _Walk:
                 nested: list[Component] = []
                 self.take(component.components, nested)
                 copy.components = nested
+            if copy.purl and copy.bom_ref is not None:
+                self.listed_by_purl.setdefault(copy.purl, copy.bom_ref.root)
             kept.append(copy)
 
 
@@ -551,7 +609,11 @@ def merge_cyclonedx_reports(
         return held.model_copy(deep=True)
 
     verdicts, shared = _verdicts(held.components, incoming.components)
-    walk = _Walk(verdicts, shared, _every_ref(held, incoming))
+    listed_by_purl: dict[str, str] = {}
+    for component in _walk(held.components):
+        if component.purl and component.bom_ref is not None:
+            listed_by_purl.setdefault(component.purl, component.bom_ref.root)
+    walk = _Walk(verdicts, shared, _every_ref(held, incoming), listed_by_purl)
     added: list[Component] = []
     walk.take(incoming.components, added)
     _warn_re_referenced(walk.re_referenced)

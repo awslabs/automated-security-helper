@@ -514,9 +514,9 @@ _EXEMPT.update(
             "level of that store and never descends."
         ),
         (".github/scripts/combine-unit-coverage.py", "discover_labels", "results"): (
-            "results is the same --results-dir; the pattern is one runs-on value, one "
-            "wildcard for the architecture label, one Python version and the tier "
-            "marker, none of which carries a separator, so the single `*` matches "
+            "results is the same --results-dir; each pattern is one runs-on value, one "
+            "known architecture label, one Python version and the tier marker, none "
+            "of which carries a separator, so the one `*` (the shard suffix) matches "
             "within one directory name and the glob never descends."
         ),
         ("tests/unit/deploy/test_deploy_ash_cli_contract.py", "_pins", "DEPLOY"): (

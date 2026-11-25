@@ -20,7 +20,7 @@ import pytest
 
 from automated_security_helper.utils.inner_run_outcome import (
     INNER_RUN_OUTCOME_FILE,
-    REPORT_PATH_REFUSED_CHECKPOINT,
+    InnerRunRecordType,
     as_seen_from_the_host,
     read_refusal_outcome,
 )
@@ -33,7 +33,7 @@ RUN_ID = "0" * 32
 def _record(message: str) -> str:
     return json.dumps(
         {
-            "type": REPORT_PATH_REFUSED_CHECKPOINT,
+            "type": InnerRunRecordType.REPORT_PATH_REFUSED.value,
             "message": message,
             "metadata": {"run_id": RUN_ID, "output_dir": "/out"},
         },

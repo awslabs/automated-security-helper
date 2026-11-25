@@ -72,7 +72,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Iterable, List, Literal, Optional, Tuple
+from typing import TYPE_CHECKING, Iterable, List, Optional, Tuple
 
 from automated_security_helper.utils.cfn_template_model import (
     UNDECODABLE_DAMAGED,
@@ -88,6 +88,7 @@ from automated_security_helper.utils.cfn_template_model import (
     unevaluable_template_reason,
     unmarked_wide_template_reason,
 )
+from automated_security_helper.models.vocab import TargetType
 from automated_security_helper.utils.get_scan_set import honors_ignore_files, scan_set
 from automated_security_helper.utils.link_exclusions import drop_ignored
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -134,7 +135,7 @@ class TemplateDiscovery:
 
 def candidate_files(
     context: "PluginContext",
-    target_type: Literal["source", "converted"],
+    target_type: TargetType,
     global_ignore_paths: Optional[Iterable[object]] = None,
 ) -> List[Path]:
     """The JSON/YAML files cfn-nag would consider for ``target_type``, sorted.
@@ -145,7 +146,7 @@ def candidate_files(
     is given them. Sorted so runs are reproducible regardless of filesystem
     enumeration order.
     """
-    if target_type == "converted":
+    if target_type == TargetType.CONVERTED:
         found = [str(p) for p in Path(context.work_dir).glob("**/*.*")]
     else:
         if global_ignore_paths is None:
@@ -177,7 +178,7 @@ def candidate_files(
 
 def discover_templates(
     context: "PluginContext",
-    target_type: Literal["source", "converted"],
+    target_type: TargetType,
     global_ignore_paths: Optional[Iterable[object]] = None,
 ) -> TemplateDiscovery:
     """Classify every candidate file as a template, not-a-template, unmodelable, or refused.
@@ -187,7 +188,9 @@ def discover_templates(
     """
     result = TemplateDiscovery()
     # The tree CfnNagScanner.scan reads each candidate against.
-    scan_root = context.work_dir if target_type == "converted" else context.source_dir
+    scan_root = (
+        context.work_dir if target_type == TargetType.CONVERTED else context.source_dir
+    )
     for path in candidate_files(context, target_type, global_ignore_paths):
         if not path.is_file():
             continue

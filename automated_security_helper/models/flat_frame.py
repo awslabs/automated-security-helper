@@ -119,6 +119,11 @@ FLAT_SPEC = FrameSpec(
             nullable=False,
         ),
         Computed("base", "String", _base, reads=("identity_base",)),
+        # The cross-scanner correlation id: a nullable String column, so a
+        # consumer can group the findings of a run that share an observation
+        # without re-deriving the key (utils/finding_identity, "Correlation
+        # ids"). Null for a finding that carries none.
+        "correlation_id",
     ),
     waived={
         "_identity": "read through the identity and identity_base properties",
@@ -126,13 +131,15 @@ FLAT_SPEC = FrameSpec(
         "identity_base",
         "_identity_message": "the identity message is a join input of the diff "
         "side, not a column of the flat frame",
-        "_secret_detection": "a baseline-gate policy flag, not a column of the "
+        "_secret_detection": "a baseline-gate policy flag, not a column of the "  # pragma: allowlist secret
         "flat frame",
         "_source_report": "read through the source_report property",
         "identity_message": "the identity message is a join input of the diff "
         "side, not a column of the flat frame",
         "location_display": "display text over file_path and the lines, which "
         "the frame carries as columns",
+        "is_secret_detection": "a rule-classification flag the correlation "
+        "registry reads on the host; the frame carries no column for it",
         "requires_exact_identity_match": "a baseline-gate policy flag, not a "
         "column of the flat frame",
     },

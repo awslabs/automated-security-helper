@@ -2222,7 +2222,7 @@ def test_only_the_first_uvx_step_of_the_scan_workflow_gets_the_print():
     rewrite_called = _api("rewrite", "rewrite_called_workflow")
     begin = _api("provenance", "PROVENANCE_BEGIN")
     text = (
-        "on:\n  workflow_call:\nenv:\n  ASH_UVX_SOURCE: automated-security-helper[cdk] "
+        "on:\n  workflow_call:\nenv:\n  ASH_UVX_SOURCE: automated-security-helper[cdk,symbols] "
         "@ git+https://github.com/${{ inputs.ash-repo }}@${{ inputs.ash-version }}\n"
         "jobs:\n  ash:\n    runs-on: ubuntu-latest\n    steps:\n"
         "      - run: echo first\n"
@@ -2241,7 +2241,7 @@ def test_only_the_first_uvx_step_of_the_scan_workflow_gets_the_print():
 
 #: The scan workflow's ASH_UVX_SOURCE, built from the inputs the block's rewrite sets.
 SOURCE_FROM_INPUTS = (
-    "automated-security-helper[cdk] "
+    "automated-security-helper[cdk,symbols] "
     "@ git+https://github.com/${{ inputs.ash-repo }}@${{ inputs.ash-version }}"
 )
 
@@ -3766,7 +3766,7 @@ def test_the_yaml_tag_named_env_is_kept_and_an_env_assignment_is_not():
 
 PIN_STEP_HEAD = "      - name: Pin the ASH ref to a commit\n        id: ash-pin\n"
 PIN_WRITE = (
-    '            echo "ASH_UVX_SOURCE=automated-security-helper[cdk] @ '
+    '            echo "ASH_UVX_SOURCE=automated-security-helper[cdk,symbols] @ '
     'git+https://github.com/${ASH_REPO}@${COMMIT}"\n'
 )
 THIRD_WRITER = (

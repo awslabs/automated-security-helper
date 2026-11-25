@@ -748,6 +748,18 @@ _CLASS_ARGUMENT_SITES = {
         "plugin_instance.__class__",
     ): "lists the enabled scanners' classes",
     (
+        "automated_security_helper/core/phases/scan_phase.py",
+        "serves_asset_kind",
+        "instance.__class__",
+    ): "asks the operational-facets register whether a queued scanner's class "
+    "reads the asset's kind",
+    (
+        "automated_security_helper/core/phases/scan_phase.py",
+        "serves_asset_kind",
+        "plugin_instance.__class__",
+    ): "asks the operational-facets register whether a selected scanner's class "
+    "reads the asset's kind",
+    (
         "automated_security_helper/models/scanner_validation.py",
         "self._tracker.update_scanner_state",
         "scanner_instance.__class__",

@@ -113,6 +113,17 @@ import logging
 import re
 from typing import Any, Callable, Dict, Optional, Set, Tuple
 
+from automated_security_helper.models.vocab import (
+    SEVERITY_BUCKETS,
+    SEVERITY_THRESHOLD_VALUES,
+    SEVERITY_VALUES,
+    Severity,
+    SeverityThreshold,
+)
+from automated_security_helper.models.vocab import (
+    SUPPRESSED_COUNT_KEY as SUPPRESSED_COUNT_KEY,
+)
+
 
 def _ash_logger() -> logging.Logger:
     """ASH's logger, by name and at call time.
@@ -140,45 +151,60 @@ _WARNED_DROPPED_SCANNER: Set[str] = set()
 
 # The ladder, as data. Ordered strictest to loosest -- see the module docstring
 # for why that is the opposite of the severity ordering.
-SEVERITY_THRESHOLDS: Tuple[str, ...] = ("ALL", "LOW", "MEDIUM", "HIGH", "CRITICAL")
+SEVERITY_THRESHOLDS: Tuple[str, ...] = SEVERITY_THRESHOLD_VALUES
 
-# ASH severity names, most severe first.
-SEVERITIES: Tuple[str, ...] = ("CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO")
+# ASH severity names, most severe first: the wire spellings of ``vocab.Severity``,
+# so the ladder is spelled once, in the enum.
+SEVERITIES: Tuple[str, ...] = SEVERITY_VALUES
 
 # Severity rank and the minimum rank each threshold gates on. A finding fails
 # when its rank is at or above its threshold's minimum, which is why the two
 # tables run in opposite directions.
+#
+# Both rank tables are derived from SEVERITIES and SEVERITY_THRESHOLDS above, so
+# the ladder is spelled once: CRITICAL ranks 4 and INFO 0, and a threshold's
+# minimum rank is its own severity's rank (ALL gates on everything, rank 0).
 _SEVERITY_RANK: Dict[str, int] = {
-    "CRITICAL": 4,
-    "HIGH": 3,
-    "MEDIUM": 2,
-    "LOW": 1,
-    "INFO": 0,
+    member.value: len(Severity) - 1 - position
+    for position, member in enumerate(Severity)
 }
 
 _THRESHOLD_MIN_RANK: Dict[str, int] = {
-    "ALL": 0,
-    "LOW": 1,
-    "MEDIUM": 2,
-    "HIGH": 3,
-    "CRITICAL": 4,
+    threshold.value: (
+        _SEVERITY_RANK[threshold.value]
+        if threshold.value in Severity.__members__
+        else 0
+    )
+    for threshold in SeverityThreshold
+}
+
+#: The lower-case count-field names of a severity-count record
+#: (``critical``, ``high``, ``medium``, ``low``, ``info``), most severe first.
+#: Findings counts, statistics rows and the UI palette all key on these; derive
+#: them here instead of re-spelling the five names beside each use.
+SEVERITY_COUNT_KEYS: Tuple[str, ...] = SEVERITY_BUCKETS
+
+#: Display position of each severity, most severe first (CRITICAL 0 ... INFO 4).
+#: A sort key for listings; the opposite direction to :data:`_SEVERITY_RANK`.
+SEVERITY_DISPLAY_ORDER: Dict[str, int] = {
+    member.value: position for position, member in enumerate(Severity)
 }
 
 # An unrecognised threshold gates on critical only, preserving the historical
 # cascade where `counts.critical > 0` was checked before any threshold test.
-_UNKNOWN_THRESHOLD_MIN_RANK = _THRESHOLD_MIN_RANK["CRITICAL"]
+_UNKNOWN_THRESHOLD_MIN_RANK = _THRESHOLD_MIN_RANK[SeverityThreshold.CRITICAL.value]
 
 # An unrecognised severity fails closed: it clears every threshold's minimum.
-_UNKNOWN_SEVERITY_RANK = _SEVERITY_RANK["CRITICAL"]
+_UNKNOWN_SEVERITY_RANK = _SEVERITY_RANK[Severity.CRITICAL.value]
 
 # SARIF's four levels onto ASH's five severities. `error` maps to CRITICAL
 # rather than HIGH so that a threshold of CRITICAL still gates on it, matching
 # the qualifying-level table in run_ash_scan._compute_exit_code.
 _SARIF_LEVEL_TO_SEVERITY: Dict[str, str] = {
-    "error": "CRITICAL",
-    "warning": "MEDIUM",
-    "note": "LOW",
-    "none": "INFO",
+    "error": Severity.CRITICAL.value,
+    "warning": Severity.MEDIUM.value,
+    "note": Severity.LOW.value,
+    "none": Severity.INFO.value,
 }
 
 #: The level of a result that states none, and of one whose level is not a SARIF
@@ -371,11 +397,11 @@ def _join_by_stated_id(
             if c < len(components)
             for label in labels
         ],
-        schema={"comp": pl.Int64, "label": pl.Utf8},
+        schema={"comp": pl.Int64, "label": pl.String},
         orient="row",
     )
     scanner_frame = pl.DataFrame(
-        scope_rows, schema={"row": pl.Int64, "label": pl.Utf8}, orient="row"
+        scope_rows, schema={"row": pl.Int64, "label": pl.String}, orient="row"
     ).join(labels_frame, on="label")  # (row, comp) pairs that share a name
 
     keep = ["row", "k", "tier", "comp", "pos"]
@@ -523,7 +549,7 @@ def resolve_missing_levels(sarif_report: object) -> None:
                     "fail": is_fail,
                     "rule_level": [next(levels) if fail else None for fail in is_fail],
                 },
-                schema={"fail": pl.Boolean, "rule_level": pl.Utf8},
+                schema={"fail": pl.Boolean, "rule_level": pl.String},
             )
             .select(
                 pl.when("fail")

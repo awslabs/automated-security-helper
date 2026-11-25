@@ -1,0 +1,20 @@
+{
+  // Workspace MCP servers
+  "inputs": [],
+  "servers": {
+    "elevated": {
+      "type": "stdio",
+      "command": "sudo",
+      "args": ["/usr/local/bin/mcp-files", "--root", "/srv/data"],
+    },
+    "runner": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "some-mcp-server"]
+    },
+    "remote": {
+      "type": "http",
+      "url": "http://mcp.example.com/docs"
+    },
+  }
+}

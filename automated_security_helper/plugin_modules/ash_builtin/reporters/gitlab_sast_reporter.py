@@ -40,6 +40,7 @@ from automated_security_helper.utils.sarif_utils import (
     is_not_a_finding,
     result_message_text,
     result_rule_id,
+    shared_correlation_ids,
     shared_finding_ids,
     suppressions_in_effect,
 )
@@ -281,6 +282,9 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
         skipped_results = 0
         if all_results:
             shared_ids = shared_finding_ids(model, all_results)
+            # The cross-scanner correlation ids, by the same pairing; None at
+            # every position a finding carries none.
+            correlation_ids = shared_correlation_ids(model, all_results)
             # Read once: the rule each result's message given by id is resolved
             # against, in the run and component the result sits in.
             descriptors = rule_descriptors_by_result(recorded_sarif)
@@ -300,6 +304,7 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
                         model,
                         shared_ids[index],
                         descriptors[index] if index < len(descriptors) else None,
+                        correlation_id=correlation_ids[index],
                     )
                 except Exception as e:  # noqa: BLE001 -- see above
                     skipped_results += 1
@@ -379,6 +384,7 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
         model: "AshAggregatedResults",
         shared_id: str | None = None,
         rule: Any = None,
+        correlation_id: str | None = None,
     ) -> _Draft | None:
         """One SARIF result as a draft of its GitLab vulnerability, or None to
         omit it.
@@ -396,7 +402,12 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
         (:func:`rule_descriptors_by_result`): a message given by ``id`` is
         described by the string its rule or its component names, else by the
         rule's short description, else by the id itself, which is also what a
-        call without *rule* gets.
+        call without *rule* gets. *correlation_id* is the finding's
+        cross-scanner correlation id (``sarif_utils.shared_correlation_ids``),
+        carried as a ``details`` entry; None, the common case, adds nothing. It
+        is deliberately NOT an ``identifiers[]`` entry: identifiers drive
+        GitLab's own vulnerability tracking and dedup semantics, and two
+        scanners' findings of one secret are two findings there.
         """
         # `ruleId` is optional in SARIF 2.1.0 and defaults to None, and a result
         # may name its rule as `rule.id` instead (3.27.5, 3.27.7), so bind the
@@ -595,6 +606,16 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
             "type": "text",
             "value": rule_id,
         }
+
+        # The cross-scanner correlation id (utils/finding_identity,
+        # "Correlation ids"): a details entry, absent for a finding that
+        # carries none, as every other surface omits it.
+        if correlation_id:
+            details["ash_correlation_id"] = {
+                "name": "ASH correlation id",
+                "type": "text",
+                "value": correlation_id,
+            }
 
         # Add properties as JSON string
         if result.properties:

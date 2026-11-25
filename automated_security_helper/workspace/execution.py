@@ -345,6 +345,13 @@ from automated_security_helper.core.cancellation import (
     raise_if_cancelled,
 )
 from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
+from automated_security_helper.core.enums import (
+    DEFAULT_EXECUTION_PHASES,
+    ExecutionPhase,
+    ExecutionStrategy,
+    ScannerStatus,
+    ThresholdSource,
+)
 from automated_security_helper.core.previous_results import holds_restored_results
 from automated_security_helper.core.scanner_selection import (
     SelectionLayers,
@@ -366,6 +373,7 @@ from automated_security_helper.models.workspace import (
     WorkspaceExitCode,
     WorkspaceProjectResult,
     WorkspaceResults,
+    WorkspaceRunStatus,
     workspace_exit_code,
 )
 from automated_security_helper.utils.get_scan_set import (
@@ -458,9 +466,6 @@ _STOP_GRACE_MARGIN_SECONDS = 1.0
 #: less than it named whenever other projects were finishing.
 _ABANDONED_STOP_GRACE_SECONDS = SANDBOX_STOP_GRACE_SECONDS + _STOP_GRACE_MARGIN_SECONDS
 
-#: The phase name that selects report generation, as ``run_ash_scan`` spells it.
-_REPORT_PHASE = "report"
-
 #: The subtree each project's own output lands in.
 PROJECTS_DIR_NAME = "projects"
 
@@ -483,7 +488,7 @@ class ProjectScanSettings:
     """
 
     output_dir: Path
-    phases: Tuple[str, ...] = ("convert", "scan", "report")
+    phases: Tuple[ExecutionPhase, ...] = DEFAULT_EXECUTION_PHASES
     enabled_scanners: Tuple[str, ...] = ()
     excluded_scanners: Tuple[str, ...] = ()
     #: Who gave the two selections above: "mcp" from the MCP workspace tool, whose
@@ -498,7 +503,7 @@ class ProjectScanSettings:
     #: ``resolve_config(client_overrides=)``.
     client_overrides: bool = False
     ash_plugin_modules: Tuple[str, ...] = ()
-    strategy: str = "parallel"
+    strategy: ExecutionStrategy = ExecutionStrategy.PARALLEL
     offline: bool = False
     python_based_plugins_only: bool = False
     ignore_suppressions: bool = False
@@ -549,7 +554,7 @@ class ProjectScanSettings:
     #: operator did not set aside resolves no ``!ENV`` (``resolve_config``). The
     #: same value the plan was resolved with.
     remote_client: bool = False
-    #: The MCP session's gate (``cli/mcp/sandbox.config_base_gate``), or None.
+    #: The MCP session's gate (``config.mcp_sandbox.config_base_gate``), or None.
     #: Each project's config file and its bases must resolve to a file it
     #: permits, as for the plan (``resolver.resolve_workspace``'s
     #: ``permit_base``), so a link changed after the plan is refused too.
@@ -973,8 +978,8 @@ def refuse_unresolvable_scanner_selection(
     :func:`prewarm_plugin_registry` has loaded the one plugin-module set every
     project shares, with the builders every selection refusal shares --
     ``core.scanner_selection.selection_after_exclusions`` for the cancelled
-    selection, ``community_scanner_refusal`` for the one that names a community
-    scanner whose module this run did not load, and
+    selection, ``plugins.enablement.unloaded_opt_in_refusal`` for the one that
+    names a shipped scanner whose module this run did not load, and
     ``refuse_selection_matching_no_scanner`` for the one that matches nothing --
     so the answer is the one each project's scan phase would reach, in the same
     words, named for the selection's origin. That this
@@ -1008,10 +1013,10 @@ def refuse_unresolvable_scanner_selection(
         split_plugin_names,
     )
     from automated_security_helper.core.scanner_selection import (
-        community_scanner_refusal,
         refuse_selection_matching_no_scanner,
     )
     from automated_security_helper.plugins import ash_plugin_manager
+    from automated_security_helper.plugins.enablement import unloaded_opt_in_refusal
     from automated_security_helper.plugins.loader import plugins_of
 
     settings = settled_scanner_selection(plan, settings)
@@ -1038,12 +1043,12 @@ def refuse_unresolvable_scanner_selection(
         if declared is None:
             return
         declared_names.append(declared)
-    # A selection that resolves to nothing and names a community scanner ASH
-    # ships whose module this run did not load is refused naming the module to
-    # add (and any misspelled name beside it), in the one text the engine and
-    # the scan phase raise; read as spelling advice alone, it sent the operator
-    # to fix a name that was right.
-    refusal = community_scanner_refusal(remaining, declared_names, scanner_classes)
+    # A selection that resolves to nothing and names a scanner ASH ships whose
+    # module this run did not load is refused naming the module to add (and
+    # any misspelled name beside it), in the one text the engine and the scan
+    # phase raise; read as spelling advice alone, it sent the operator to fix
+    # a name that was right.
+    refusal = unloaded_opt_in_refusal(remaining, declared_names, scanner_classes)
     if refusal:
         raise ScannerSelectionError(refusal)
     refuse_selection_matching_no_scanner(
@@ -1259,7 +1264,7 @@ def _scanner_threshold_resolver(
                     )
                 )
             except Exception as error:  # noqa: BLE001 -- an unreadable config grades as the project does
-                value, source, from_env = None, "unavailable", False
+                value, source, from_env = None, ThresholdSource.UNAVAILABLE, False
                 ASH_LOGGER.debug(
                     f"Project '{project.key}': the threshold of scanner "
                     f"'{scanner_name}' could not be read from the recorded "
@@ -1267,7 +1272,7 @@ def _scanner_threshold_resolver(
                     f"at the project's threshold",
                     extra=NO_MARKUP,
                 )
-            if source == "config" and isinstance(value, str) and value:
+            if source == ThresholdSource.CONFIG and isinstance(value, str) and value:
                 own = value.upper()
                 if project.severity_ceiling:
                     own = stricter_of(own, project.severity_ceiling)
@@ -1378,7 +1383,7 @@ def _scan_one_project(
             do not exist. The claim and the abandon are taken under one lock, so
             a project is either committed or abandoned, never both.
     """
-    from automated_security_helper.core.enums import ExecutionStrategy, ExportFormat
+    from automated_security_helper.core.enums import ExportFormat
 
     started = time.monotonic()
     project_output = _project_output_dir(settings, project)
@@ -1447,7 +1452,7 @@ def _scan_one_project(
             debug=settings.debug,
             strategy=(
                 ExecutionStrategy.PARALLEL
-                if settings.strategy == ExecutionStrategy.PARALLEL.value
+                if settings.strategy == ExecutionStrategy.PARALLEL
                 else ExecutionStrategy.SEQUENTIAL
             ),
             no_cleanup=not settings.cleanup,
@@ -2610,7 +2615,7 @@ def _scanner_exit_codes(results: Any) -> Dict[str, Optional[int]]:
         was_set = "exit_code" in getattr(info, "model_fields_set", ())
         if was_set and isinstance(recorded, int) and not isinstance(recorded, bool):
             codes[str(name)] = recorded
-        elif statuses.get(str(name)) == "SKIPPED":
+        elif statuses.get(str(name)) == ScannerStatus.SKIPPED.value:
             codes[str(name)] = None
         else:
             codes[str(name)] = SCANNER_EXIT_CODE_UNRECORDED
@@ -2711,11 +2716,11 @@ def _scanner_reasons(results: Any, values: Iterable[str] = ()) -> Dict[str, str]
     for name, info in (getattr(results, "scanner_results", None) or {}).items():
         status = getattr(info, "status", None)
         value = str(getattr(status, "value", status))
-        if value == "SKIPPED":
+        if value == ScannerStatus.SKIPPED.value:
             reason = getattr(info, "skipped_reason", None)
-        elif value == "MISSING":
+        elif value == ScannerStatus.MISSING.value:
             reason = getattr(info, "missing_reason", None)
-        elif value == "ERROR":
+        elif value == ScannerStatus.ERROR.value:
             reason = recorded_error(results, str(name), values)
         else:
             continue
@@ -3014,7 +3019,7 @@ def execute_workspace(
     settings = settled_scanner_selection(plan, settings)
     refuse_unresolvable_scanner_selection(plan, settings)
 
-    reports_requested = _REPORT_PHASE in settings.phases
+    reports_requested = ExecutionPhase.REPORT in settings.phases
     if reports_requested:
         # Before the scan, for two reasons. The operator learns immediately
         # rather than after paying for the whole workspace; and once
@@ -3618,7 +3623,7 @@ def refused_results(plan: WorkspacePlan, detail: str) -> WorkspaceResults:
     return WorkspaceResults(
         workspace_file=plan.workspace_file,
         workspace_root=plan.workspace_root,
-        status="refused",
+        status=WorkspaceRunStatus.REFUSED,
         exit_code=int(WorkspaceExitCode.WORKSPACE_ERROR),
         projects=[],
         unconvertible_finding_paths=0,

@@ -104,7 +104,7 @@ command -v jq && echo "✓ jq available (recommended)" || echo "✗ jq not found
 - **Simplified Results**: `reports/ash.flat.json` (recommended for most use cases)
 - **Human Reports**: HTML, Markdown, Text (NOT for machine parsing)
 - **Dependencies**: `reports/ash.cdx.json` (CycloneDX SBOM)
-- **Configuration**: the ASH config file (`.ashrc.yaml` in a new project; a project's existing `.ash/.ash.yaml` is read first), YAML with a JSON schema
+- **Configuration**: the ASH config file (`.ash.yaml` at the project root; configs at older locations still load, with a deprecation warning), YAML with a JSON schema
 - **Suppressions**: Defined in configuration file under `global_settings.suppressions`
 
 **Tool Requirements**:
@@ -834,7 +834,7 @@ grep -c '"id": "CVE-' reports/ash.cdx.json
 ## Configuration File Schema
 
 ### Location
-- Default: the first config file discovery finds; `ash config init` creates `.ashrc.yaml` in the project root
+- Default: the first config file discovery finds; `ash config init` creates `.ash.yaml` in the project root
 - Custom: Specify with `--config` flag or `ASH_CONFIG` environment variable
 
 ### Schema Structure
@@ -932,6 +932,25 @@ suppressions:
 ```
 
 An unknown key in a suppression warns and disables the entry (it suppresses nothing until fixed); `fail_on_unknown_keys: true` makes it an error at config load, which becomes the default at ASH v4.
+
+#### global_settings.exclusions
+Array of rule+path exclusions, which DROP the matching results from SARIF instead of keeping them marked suppressed: for finding classes that are always benign in a known place, such as bandit B101 (`assert`) under `tests/`. Other rules under the path are still reported, which an `ignore_paths` entry would drop too.
+
+**Exclusion Fields**:
+- `rule_id`: Required - the rule whose findings are dropped; the finding's exact ID (case-insensitive) or a glob (`B1*`)
+- `path`: Required - matched like a suppression's path
+- `scanner`: Optional - only drop this scanner's results, by its registered name (e.g. `bandit`)
+- `reason`: Required - explanation for the exclusion
+- `expires`: Optional - ISO date when the exclusion expires
+
+<!-- doctest: config kind=ash-fragment at=global_settings -->
+```yaml
+exclusions:
+  - rule_id: B101
+    path: '**/tests/**'
+    scanner: bandit
+    reason: 'pytest assert idiom; tests are not shipped'
+```
 
 #### scanners
 Configuration for each scanner. Common options:
@@ -1657,7 +1676,7 @@ Call `suggest_suppression` with the finding's `id`, `results_path` set to the
 `expires` defaults to 90 days from today. Leave out the `client_supplied` key it includes,
 and put the entry under `global_settings.suppressions` in the project's config:
 
-<!-- doctest: save-as=.ashrc.yaml -->
+<!-- doctest: save-as=.ash.yaml -->
 ```yaml
 global_settings:
   suppressions:
@@ -1680,12 +1699,15 @@ global_settings:
 - `ignore_paths` entries also need `path` and `reason`, and drop every finding in the matching
   files. Prefer a suppression for one rule.
 
-Edit the config file the scan used, or create `.ashrc.yaml` in the scanned directory if it
+Edit the config file the scan used, or create `.ash.yaml` in the scanned directory if it
 has none. ASH uses the first of these it finds in the scanned
-directory: `.ash.yml`, `.ash.yaml`, `.ash.json`, `ash.yml`, `ash.yaml`, `ash.json` (each in the
-directory, then in `.ash/`), then `.ashrc.toml`, `.ashrc.yaml`, `.ashrc.yml`, `.ashrc.json`,
-`ashrc.toml`, `ashrc.yaml`, `ashrc.yml`, and `ashrc.json` in the directory, then the
-`[tool.ash]` table of `pyproject.toml`. If the config has an `extends` key, its own
+directory: `.ash.yaml` at the root, then the deprecated locations `.ash.yml`, `.ash.json`,
+`ash.yml`, `ash.yaml`, `ash.json` (each in the directory, then in `.ash/`, which also covers
+`.ash/.ash.yaml`), then the deprecated `.ashrc.toml`, `.ashrc.yaml`, `.ashrc.yml`,
+`.ashrc.json`, `ashrc.toml`, `ashrc.yaml`, `ashrc.yml`, and `ashrc.json` in the directory,
+then the `[tool.ash]` table of `pyproject.toml`. A config at a deprecated location still
+loads, with one warning that names `.ash.yaml` as the path to move it to; support is removed
+in ASH 4.0. If the config has an `extends` key, its own
 `suppressions` list replaces the base config's list instead of adding to it; keep the base's
 entries by adding yours with a `patch` operation `add` at `/global_settings/suppressions/-`.
 

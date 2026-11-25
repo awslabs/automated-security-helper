@@ -43,7 +43,7 @@
         "install",
         "--verbose",
         "--config",
-        "${workspaceFolder}/.ash/.ash.yaml"
+        "${workspaceFolder}/.ash.yaml"
       ],
       "console": "internalConsole",
       "env": {

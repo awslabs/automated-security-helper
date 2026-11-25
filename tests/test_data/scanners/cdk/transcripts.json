@@ -1,0 +1,84 @@
+{
+  "schema_version": 1,
+  "transcripts": [
+    {
+      "adapter_prep": "cdk-nag",
+      "also_for": [],
+      "argv": null,
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": null,
+      "id": "cdk-nag-test-yaml",
+      "live_input": false,
+      "note": "a loose capture from before transcripts; the NagReport CSV is the scanner's native report and the synthesized templates sit beside it",
+      "observable": true,
+      "pin_stamp": null,
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "csv",
+          "path": "test.yaml_cdk_nag_results/AwsSolutions-test-yaml-NagReport.csv",
+          "sha256": "e656e7a14d0cdc461a410d9a8ba5502fea21076f9d3b3eaf6554d3afaa25076f"
+        },
+        {
+          "format": "csv",
+          "path": "test.yaml_cdk_nag_results/AwsSolutions-test-yaml-cfn-NagReport.csv",
+          "sha256": "b0e1f653f5e13af741960814f6b2384441b0bea76c8878cb83fe23352bf5a7de"
+        }
+      ],
+      "retention": "current",
+      "scanner": "cdk-nag",
+      "side_reports": [
+        {
+          "format": "json",
+          "path": "test.yaml_cdk_nag_results/cfn-and-python-test-yaml.template.json",
+          "sha256": "e6c46ed6f381ced5bc5e45518df6ac6dbe7717e98ee09966295a585ef388ddb1"
+        },
+        {
+          "format": "json",
+          "path": "test.yaml_cdk_nag_results/test-yaml.template.json",
+          "sha256": "3dc56beafa16b4e1cce69353b0885429ddc2e04e626fa8d5a097657d88bcf513"
+        }
+      ],
+      "stderr_tail": null,
+      "tool": {
+        "name": "cdk-nag",
+        "version": "unknown"
+      }
+    },
+    {
+      "adapter_prep": null,
+      "also_for": [],
+      "argv": null,
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": null,
+      "id": "cdk-nag-cfn-to-cdk",
+      "live_input": false,
+      "note": "a loose capture from before transcripts; which template produced it and the tool version are not recorded",
+      "observable": true,
+      "pin_stamp": null,
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "csv",
+          "path": "cfn-to-cdk.template.json_cdk_nag_results/AwsSolutions-cfn-to-cdk-NagReport.csv",
+          "sha256": "5da53c66867a96445613fc7bbdb4c8f01c3197b88a1d40e412a2380aa67650dc"
+        }
+      ],
+      "retention": "current",
+      "scanner": "cdk-nag",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "cdk-nag",
+        "version": "unknown"
+      }
+    }
+  ],
+  "unrecorded": []
+}

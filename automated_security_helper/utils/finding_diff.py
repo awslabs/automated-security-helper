@@ -149,6 +149,11 @@ class FindingDiff:
     suppression_changed: list[tuple[FlatVulnerability, FlatVulnerability]]
 
 
+def _severity_upper(finding: FlatVulnerability) -> str:
+    """The finding's severity upper-cased, ``None`` read as ``""``."""
+    return (finding.severity or "").upper()
+
+
 def fallback_key(finding: FlatVulnerability) -> tuple[Any, ...] | None:
     base = finding.identity_base
     if base is None or finding.source_report is not None:
@@ -158,7 +163,7 @@ def fallback_key(finding: FlatVulnerability) -> tuple[Any, ...] | None:
     return (
         canonical(base),
         finding.identity_message or "",
-        (finding.severity or "").upper(),
+        _severity_upper(finding),
     )
 
 
@@ -250,6 +255,10 @@ SIDE_SPEC = FrameSpec(
         "applies on the host",
         "_source_report": "read through the source_report property",
         "location_display": "display text over fields the diff never joins on",
+        "correlation_id": "a cross-scanner grouping id assigned at flatten time; "
+        "the diff pairs findings by identity and never joins on it",
+        "is_secret_detection": "a rule-classification flag the correlation "
+        "registry reads on the host; the diff never joins on it",
         "requires_exact_identity_match": "a gating policy flag the pair "
         "consumer applies on the host (see match_findings' docstring)",
     },
@@ -415,9 +424,7 @@ def compare_findings(
         absent_after=match.absent,
         moved=match.moved,
         severity_changed=[
-            (a, b)
-            for a, b in pairs
-            if (a.severity or "").upper() != (b.severity or "").upper()
+            (a, b) for a, b in pairs if _severity_upper(a) != _severity_upper(b)
         ],
         suppression_changed=[
             (a, b) for a, b in pairs if a.is_suppressed != b.is_suppressed

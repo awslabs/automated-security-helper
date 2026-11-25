@@ -188,7 +188,7 @@ def _record(paths: Dict[str, Dict[str, Set[str]]], path: str, value: Any) -> Non
 def extract_field_paths(
     obj: Any,
     path: str = "",
-    paths: Dict[str, Dict[str, Set[str]]] = None,
+    paths: Optional[Dict[str, Dict[str, Set[str]]]] = None,
     context_path: str = "",
 ) -> Dict[str, Dict[str, Set[str]]]:
     """

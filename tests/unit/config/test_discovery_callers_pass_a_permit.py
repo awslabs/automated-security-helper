@@ -38,6 +38,7 @@ NO_PERMIT = {
     # reaches them.
     "cli/config.py": "operator CLI",
     "cli/plugin.py": "operator CLI",
+    "cli/suppress.py": "operator CLI",
     "cli/inspect/inspect_findings_app.py": "operator CLI",
 }
 

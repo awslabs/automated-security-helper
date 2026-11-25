@@ -3743,8 +3743,8 @@ def _write_lists(
 
 
 def scan_set(
-    source: Optional[str] = None,
-    output: Optional[str] = None,
+    source: Optional[str | Path] = None,
+    output: Optional[str | Path] = None,
     ignorefile: Optional[list[str]] = None,
     debug: bool = False,
     print_results: bool = False,
@@ -3840,6 +3840,11 @@ def scan_set(
     """
     if source is None:
         source = os.getcwd()
+    # Callers pass the plugin context's Path or a string; the walk below is
+    # string-based.
+    source = os.fspath(source)
+    if output is not None:
+        output = os.fspath(output)
     if ignorefile is None:
         ignorefile = []
 

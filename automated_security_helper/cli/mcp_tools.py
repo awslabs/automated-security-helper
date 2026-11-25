@@ -36,6 +36,7 @@ from typing import (
 )
 
 from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
+from automated_security_helper.models.vocab import Severity
 from automated_security_helper.core.resource_management.scan_registry import (
     get_scan_registry,
     MCScanStatus,
@@ -59,6 +60,7 @@ from automated_security_helper.core.resource_management.error_handling import (
 from automated_security_helper.core.resource_management.exceptions import (
     MCPResourceError,
 )
+from automated_security_helper.cli.mcp.error_types import McpErrorType
 from automated_security_helper.cli.mcp.session_identity import (
     UNIDENTIFIED_SESSION_ID,
 )
@@ -95,7 +97,8 @@ from automated_security_helper.utils.log import (
 
 if TYPE_CHECKING:
     # Typing only: the runtime import stays local to the tools that need it.
-    from automated_security_helper.cli.mcp.sandbox import ConfigInputCheck
+    from automated_security_helper.config.mcp_sandbox import ConfigInputCheck
+    from automated_security_helper.core.asset import Asset
     from automated_security_helper.config.ash_config import (
         AshConfig,
         MCPResourceManagementConfig,
@@ -207,7 +210,7 @@ async def stop_running_scans(
     # This loop's: a task of a loop that is gone can never finish, and waiting
     # on it would only run out the timeout.
     loop = asyncio.get_running_loop()
-    running = {
+    running: dict[asyncio.Future, str] = {
         task: scan_id
         for task, scan_id in _scan_tasks.items()
         if task.get_loop() is loop and not task.done()
@@ -236,37 +239,6 @@ async def stop_running_scans(
     return bool(still_running)
 
 
-#: ``error_type`` of every refusal of a config input outside the permitted roots,
-#: whichever tool refused it. The same value ``run_ash_scan`` returns.
-CONFIG_INPUT_NOT_PERMITTED = "config_input_not_permitted"
-#: ``error_type`` for a client-delivered config that sets a field the session's
-#: runtime-override policy denies; see ``config/client_config_policy.py``.
-CONFIG_FIELD_DENIED = "config_field_denied"
-#: ``error_type`` for a client-delivered config whose policy cannot be established.
-CONFIG_POLICY_UNREADABLE = "config_policy_unreadable"
-#: ``error_type`` for a scan refused because the check of the config sources in
-#: its target could not finish (an unreadable entry, a link loop). The config is
-#: not known to be outside the permitted roots, so this is not
-#: ``CONFIG_INPUT_NOT_PERMITTED``.
-CONFIG_CHECK_FAILED = "config_check_failed"
-
-#: ``error_type`` of the refusal of a config file an MCP client delivered that
-#: reads from the environment, which such a file may not
-#: (``ASHConfigEnvNotResolvedError``).
-CONFIG_ENV_NOT_RESOLVED = "config_env_not_resolved"
-
-#: ``error_type`` of the refusal of a profile in which a value read from the
-#: environment is part of a longer string, which a session's copy would hold as
-#: the value (``EnvironmentValueInPath``). The message names the key path and the
-#: variable, never the value.
-ENV_VALUE_IN_LONGER_STRING = "environment_value_in_longer_string"
-
-#: ``error_type`` of the refusal of a config whose ``ash_plugin_modules`` a
-#: scan refuses (a module outside the plugin namespace, or one no installed
-#: package provides). Its own type: the file loaded and parsed, so the
-#: load-failure frame sent a client to re-format a healthy file.
-PLUGIN_MODULE_REFUSED = "plugin_module_refused"
-
 #: The exit code a scan tool's refusal reports, by what it refused, so a client
 #: can branch on it as a script branches on the CLI's status: a config the scan
 #: cannot use (3, as the CLI exits for one), the request itself (5, the CLI's
@@ -277,11 +249,6 @@ REFUSED_CONFIG_EXIT_CODE = 3
 REFUSED_USAGE_EXIT_CODE = ASH_EXIT_USAGE_ERROR
 REFUSED_TARGET_EXIT_CODE = 4
 REFUSED_INTERNAL_EXIT_CODE = 1
-
-#: ``error_type`` of a scan refused for its source directory: one that does not
-#: exist, is not a directory, or cannot be entered. The same value
-#: ``run_ash_scan`` returns.
-SOURCE_DIR_NOT_USABLE = "source_dir_not_usable"
 
 
 def _search_dir_outside_the_scan_roots(
@@ -303,7 +270,7 @@ def _search_dir_outside_the_scan_roots(
             "success": False,
             "operation": "get_config",
             "error": raw_controls_on_one_line(str(target.error)),
-            "error_type": "scan_target_not_permitted",
+            "error_type": McpErrorType.SCAN_TARGET_NOT_PERMITTED.value,
             # Mirrors the category create_error_response sets, as the
             # run_ash_scan wrapper does, so one key identifies a path
             # refusal from any entry point.
@@ -337,7 +304,7 @@ def source_directory_refusal(
     """The refusal of a scan of ``directory_path`` as its source, or None.
 
     In the CLI's words for ``--source-dir`` (``source_directory_error``), with
-    the path as the caller gave it, ``error_type`` SOURCE_DIR_NOT_USABLE and
+    the path as the caller gave it, ``error_type`` McpErrorType.SOURCE_DIR_NOT_USABLE and
     ``exit_code`` 5, the code the CLI exits with for it.
     """
     error = source_directory_error(directory_path)
@@ -351,33 +318,8 @@ def source_directory_refusal(
             "Check that the directory can be read by the user the server runs as",
         ],
     )
-    refusal["error_type"] = SOURCE_DIR_NOT_USABLE
+    refusal["error_type"] = McpErrorType.SOURCE_DIR_NOT_USABLE.value
     return with_exit_code(refusal, REFUSED_USAGE_EXIT_CODE)
-
-
-#: ``error_type`` of a scan refused because a file is where its output directory
-#: goes. The same value ``run_ash_scan`` returns.
-OUTPUT_DIR_NOT_USABLE = "output_dir_not_usable"
-
-#: ``error_type`` of a suggest_suppression refused because no suppression path names
-#: the finding's file alone: its path holds a backslash, a separator in a pattern
-#: (path_matching.literal_path_pattern).
-PATH_NOT_EXPRESSIBLE = "path_not_expressible"
-
-#: ``error_type`` of a suggest_suppression refused because the finding names no
-#: file or no rule: a suppression built from it would match nothing (an empty
-#: path), or every rule in the file (no rule id), never that finding alone.
-SUPPRESSION_NOT_SPECIFIC = "suppression_not_specific"
-
-#: ``error_type`` of a suggest_suppression refused for an ``expiration`` that is
-#: not a YYYY-MM-DD date (``models.core.EXPIRATION_RULE``).
-INVALID_EXPIRATION = "invalid_expiration"
-
-#: ``error_type`` of a diff_scan_results refused because the two results files
-#: cannot be compared (``finding_diff.ComparabilityRefusal``): a sharded or
-#: ``--changed-files-only`` scan, different projects, a workspace mixed with a
-#: standalone scan, or duplicate finding IDs.
-RESULTS_NOT_COMPARABLE = "results_not_comparable"
 
 
 def output_directory_refusal(
@@ -387,7 +329,7 @@ def output_directory_refusal(
 
     In the CLI's words for an ``--output-dir`` that is a file
     (``validate_output_directory_path``), with ``error_type``
-    OUTPUT_DIR_NOT_USABLE and ``exit_code`` 5, the code the CLI exits with for
+    McpErrorType.OUTPUT_DIR_NOT_USABLE and ``exit_code`` 5, the code the CLI exits with for
     it. A missing output directory is not refused: the scan creates it.
     """
     error = validate_output_directory_path(directory_path)
@@ -398,7 +340,7 @@ def output_directory_refusal(
         operation=operation,
         suggestions=["Remove or rename the file where the scan writes its output"],
     )
-    refusal["error_type"] = OUTPUT_DIR_NOT_USABLE
+    refusal["error_type"] = McpErrorType.OUTPUT_DIR_NOT_USABLE.value
     return with_exit_code(refusal, REFUSED_USAGE_EXIT_CODE)
 
 
@@ -1012,7 +954,7 @@ def _bound_profile_unavailable(error: Exception, operation: str) -> Dict[str, An
             {
                 "success": False,
                 "error": raw_controls_on_one_line(str(error)),
-                "error_type": "bound_profile_unavailable",
+                "error_type": McpErrorType.BOUND_PROFILE_UNAVAILABLE.value,
                 "error_category": ErrorCategory.FILE_NOT_FOUND.value,
                 "operation": operation,
             },
@@ -1028,7 +970,7 @@ def _bound_profile_unavailable(error: Exception, operation: str) -> Dict[str, An
         {
             "success": False,
             "error": raw_controls_on_one_line(str(error)),
-            "error_type": "bound_profile_unavailable",
+            "error_type": McpErrorType.BOUND_PROFILE_UNAVAILABLE.value,
             "error_category": (
                 ErrorCategory.PERMISSION_DENIED.value
                 if isinstance(error.__cause__, PermissionError)
@@ -1086,7 +1028,7 @@ def _config_pre_check(
     """
     import yaml
 
-    from automated_security_helper.cli.mcp.sandbox import (
+    from automated_security_helper.config.mcp_sandbox import (
         client_named_config_is_untrusted,
         config_base_gate,
     )
@@ -1202,7 +1144,7 @@ def _config_env_refusal(error: Exception, operation: str) -> Dict[str, Any]:
             "success": False,
             "operation": operation,
             "error": raw_controls_on_one_line(error_text(error)),
-            "error_type": CONFIG_ENV_NOT_RESOLVED,
+            "error_type": McpErrorType.CONFIG_ENV_NOT_RESOLVED.value,
             "error_category": ErrorCategory.INVALID_FORMAT.value,
         },
         REFUSED_CONFIG_EXIT_CODE,
@@ -1215,7 +1157,7 @@ def _plugin_module_refusal(
     """The response of ``operation`` for a config whose ``ash_plugin_modules``
     a scan refuses.
 
-    Its own ``error_type`` and ``error_category`` (PLUGIN_MODULE_REFUSED), so
+    Its own ``error_type`` and ``error_category`` (McpErrorType.PLUGIN_MODULE_REFUSED), so
     a client can branch on either: the file loaded and parsed, and the
     load-failure frame ("Configuration file ... cannot be loaded", under the
     invalid_format category with file-format suggestions) sent a client to
@@ -1244,7 +1186,7 @@ def _plugin_module_refusal(
             "success": False,
             "operation": operation,
             "error": raw_controls_on_one_line(message),
-            "error_type": PLUGIN_MODULE_REFUSED,
+            "error_type": McpErrorType.PLUGIN_MODULE_REFUSED.value,
             "error_category": ErrorCategory.PLUGIN_MODULE_REFUSED.value,
             "context": context,
             "suggestions": list(PLUGIN_MODULE_REFUSED_SUGGESTIONS),
@@ -1260,7 +1202,7 @@ class ConfigCheckFailedError(MCPResourceError):
 def _config_refusal(error: MCPResourceError, operation: str) -> Dict[str, Any]:
     """The response for a config input outside the permitted roots.
 
-    A check that could not finish is ``CONFIG_CHECK_FAILED`` instead: it did not
+    A check that could not finish is ``McpErrorType.CONFIG_CHECK_FAILED`` instead: it did not
     find the config outside the roots, so the fix for that refusal does not apply.
 
     No ``context`` key, unlike ``create_error_response``: it would carry the
@@ -1275,9 +1217,9 @@ def _config_refusal(error: MCPResourceError, operation: str) -> Dict[str, Any]:
             "operation": operation,
             "error": raw_controls_on_one_line(error_text(error)),
             "error_type": (
-                CONFIG_CHECK_FAILED
+                McpErrorType.CONFIG_CHECK_FAILED.value
                 if isinstance(error, ConfigCheckFailedError)
-                else CONFIG_INPUT_NOT_PERMITTED
+                else McpErrorType.CONFIG_INPUT_NOT_PERMITTED.value
             ),
             "error_category": error.context["error_category"],
         },
@@ -1453,7 +1395,7 @@ def _discovered_config_refusal(
 
     A check of the candidates that fails for any other reason is a refusal too.
     """
-    from automated_security_helper.cli.mcp.sandbox import (
+    from automated_security_helper.config.mcp_sandbox import (
         config_base_gate,
         config_chain_refusal,
         validate_config_input,
@@ -1556,8 +1498,8 @@ def _load_error_response(
             document=checked.document,
         )
         if denial is not None and denial.get("error_type") in (
-            CONFIG_FIELD_DENIED,
-            CONFIG_POLICY_UNREADABLE,
+            McpErrorType.CONFIG_FIELD_DENIED.value,
+            McpErrorType.CONFIG_POLICY_UNREADABLE.value,
         ):
             return denial
     return with_exit_code(
@@ -1585,7 +1527,7 @@ def _session_client_rules(
     ASH_CONFIG chain uses, so the server's default config is read as that load
     reads it.
     """
-    from automated_security_helper.cli.mcp.profile_registry import (
+    from automated_security_helper.config.session_profiles import (
         session_client_rules,
     )
 
@@ -1610,9 +1552,9 @@ def _denied_response(exc: Exception, operation: str) -> Dict[str, Any]:
             "operation": operation,
             "error": raw_controls_on_one_line(str(exc)),
             "error_type": (
-                CONFIG_POLICY_UNREADABLE
+                McpErrorType.CONFIG_POLICY_UNREADABLE.value
                 if isinstance(exc, ASHConfigPolicyUnreadableError)
-                else CONFIG_FIELD_DENIED
+                else McpErrorType.CONFIG_FIELD_DENIED.value
             ),
         },
         REFUSED_CONFIG_EXIT_CODE,
@@ -1637,7 +1579,7 @@ def _client_config_denial(
     always has. The scan's own check is the one that decides; this one only
     reports early.
     """
-    from automated_security_helper.cli.mcp.sandbox import (
+    from automated_security_helper.config.mcp_sandbox import (
         caller_is_remote,
         client_named_config_is_untrusted,
         config_base_gate,
@@ -1678,7 +1620,7 @@ def _client_config_denial(
                     "The config could not be checked against this session's "
                     f"runtime-override policy: {error_text(exc)}"
                 ),
-                "error_type": CONFIG_POLICY_UNREADABLE,
+                "error_type": McpErrorType.CONFIG_POLICY_UNREADABLE.value,
             },
             REFUSED_CONFIG_EXIT_CODE,
         )
@@ -1743,7 +1685,7 @@ def _client_config_denial(
         # a start that gives no scan id). Exit code 1, as for a start that fails
         # on the server's side: the config was not found wanting, the check of
         # it broke.
-        response["error_type"] = "scan_start_failure"
+        response["error_type"] = McpErrorType.SCAN_START_FAILURE.value
         return with_exit_code(response, REFUSED_INTERNAL_EXIT_CODE)
     return None
 
@@ -1756,6 +1698,7 @@ async def mcp_scan_directory(
     clean_output: bool = False,
     *,
     config_check: Optional["ConfigInputCheck"] = None,
+    asset: Optional["Asset"] = None,
 ) -> Dict[str, Any]:
     """
     Start a security scan with file-based progress tracking.
@@ -1790,6 +1733,13 @@ async def mcp_scan_directory(
             ``config_path``, this session and this target, when the caller has
             already run it (``run_ash_scan`` does, before it acts on the
             target). The file is then not read again here.
+        asset: The scan's subject when it is not ``directory_path``: a
+            CONTAINER_IMAGE asset carrying the locator the session delivered
+            (``run_ash_scan`` builds it from the session's image binding).
+            ``directory_path`` is then the deliberate anchor -- the session's
+            own workspace, where the output tree goes -- and the scan phase
+            routes every scanner by the asset's kind. None (the default) scans
+            ``directory_path`` exactly as today.
 
     Returns:
         Dictionary with scan ID and status information
@@ -1978,7 +1928,7 @@ async def mcp_scan_directory(
     # The chain the check below read, which the denial check reads from.
     chain_document: Optional[Any] = None
     if config_path is not None:
-        from automated_security_helper.cli.mcp.sandbox import check_config_input
+        from automated_security_helper.config.mcp_sandbox import check_config_input
 
         if not config_path.strip():
             # A parameter that names nothing is the request's own fault, as an
@@ -2030,7 +1980,7 @@ async def mcp_scan_directory(
     else:
         # The config the scan discovers in the target is checked as a named one
         # is, before anything reads it: it can be a link out of the roots.
-        from automated_security_helper.cli.mcp.sandbox import (
+        from automated_security_helper.config.mcp_sandbox import (
             validate_discovered_config,
         )
 
@@ -2096,7 +2046,7 @@ async def mcp_scan_directory(
         # The file the scan will discover, checked as a named one is, in one
         # read: a delivered one that uses !ENV, and one that does not load or
         # validate, are refused before the scan starts, naming the file.
-        from automated_security_helper.cli.mcp.sandbox import config_base_gate
+        from automated_security_helper.config.mcp_sandbox import config_base_gate
 
         discovered, not_discovered = _discovered_config_path(
             resolved_target, permit=config_base_gate(session_id)
@@ -2119,7 +2069,7 @@ async def mcp_scan_directory(
                 REFUSED_CONFIG_EXIT_CODE,
             )
         if discovered is not None:
-            from automated_security_helper.cli.mcp.sandbox import check_config_input
+            from automated_security_helper.config.mcp_sandbox import check_config_input
 
             checked = check_config_input(
                 discovered, session_id=session_id, source_dir=resolved_target
@@ -2154,9 +2104,6 @@ async def mcp_scan_directory(
         from automated_security_helper.cli.mcp.sessions import (
             get_default_registry as _get_session_registry,
         )
-        from automated_security_helper.cli.mcp.source_delivery import (
-            SOURCE_DELIVERY_BUSY,
-        )
 
         claimed_session = _get_session_registry().session_for(session_id)
         if not claimed_session.try_claim_scan():
@@ -2166,7 +2113,7 @@ async def mcp_scan_directory(
                 {
                     "success": False,
                     "operation": "scan_directory",
-                    "error_type": SOURCE_DELIVERY_BUSY,
+                    "error_type": McpErrorType.SOURCE_DELIVERY_BUSY.value,
                     "error": (
                         "the delivered source of this session is being changed; "
                         "start the scan after the change finishes"
@@ -2388,7 +2335,9 @@ async def mcp_scan_directory(
                     operation="scan_directory",
                     suggestions=["Make the scan's output directory one it can create"],
                 )
-                unmakeable_response["error_type"] = OUTPUT_DIR_NOT_USABLE
+                unmakeable_response["error_type"] = (
+                    McpErrorType.OUTPUT_DIR_NOT_USABLE.value
+                )
                 return with_exit_code(unmakeable_response, REFUSED_USAGE_EXIT_CODE)
 
             # The directory is this scan's from here, and its runner puts the
@@ -2458,6 +2407,7 @@ async def mcp_scan_directory(
                     scan_counted=counted,
                     scan_timeout_seconds=limits.scan_timeout_seconds or None,
                     environment_values=environment_values,
+                    asset=asset,
                 ),
                 if_never_run=_give_back_what_the_runner_never_took,
             )
@@ -2468,7 +2418,7 @@ async def mcp_scan_directory(
                 "success": True,
                 "operation": "scan_directory",
                 "scan_id": scan_id,
-                "status": "pending",
+                "status": MCScanStatus.PENDING.value,
                 "directory_path": str(directory_path_obj),
                 "output_directory": str(output_dir),
                 "severity_threshold": severity_threshold,
@@ -2604,12 +2554,13 @@ async def _release_what_the_scan_held_off_the_loop(
     if not _holds_a_session(session_id):
         return
     import anyio
+    from anyio import to_thread
 
     from automated_security_helper.cli.mcp.sessions import finish_ended_session
 
     try:
         with anyio.CancelScope(shield=True):
-            await anyio.to_thread.run_sync(finish_ended_session, session_id)
+            await to_thread.run_sync(finish_ended_session, session_id)
     except Exception as release_error:  # noqa: BLE001 -- the tool's own reply wins
         _logger.error(
             f"Scan {scan_id or '(not started)'}: could not complete the end of "
@@ -2819,6 +2770,7 @@ async def _run_scan_async(
     scan_counted: Optional[Any] = None,
     scan_timeout_seconds: Optional[float] = None,
     environment_values: Tuple[str, ...] = (),
+    asset: Optional["Asset"] = None,
 ) -> None:
     """Run an ASH scan asynchronously, then release what it held of its session.
 
@@ -2843,6 +2795,7 @@ async def _run_scan_async(
             session_id=session_id,
             scan_timeout_seconds=scan_timeout_seconds,
             environment_values=environment_values,
+            asset=asset,
         )
     finally:
         _give_back_the_scans_claim(scan_counted, scan_claim)
@@ -2854,13 +2807,14 @@ async def _run_scan_async(
             # a cancelled task too, and the removal has to complete anyway
             # (http_sessions ends its own sessions the same way).
             import anyio
+            from anyio import to_thread
 
             from automated_security_helper.cli.mcp.sessions import (
                 finish_ended_session,
             )
 
             with anyio.CancelScope(shield=True):
-                await anyio.to_thread.run_sync(finish_ended_session, session_id)
+                await to_thread.run_sync(finish_ended_session, session_id)
 
 
 async def _run_scan(
@@ -2872,6 +2826,7 @@ async def _run_scan(
     session_id: Optional[str] = None,
     scan_timeout_seconds: Optional[float] = None,
     environment_values: Tuple[str, ...] = (),
+    asset: Optional["Asset"] = None,
 ) -> None:
     """
     Run an ASH scan asynchronously.
@@ -2931,11 +2886,11 @@ async def _run_scan(
         run_ash_scan,
     )
 
-    from automated_security_helper.cli.mcp.profile_registry import (
+    from automated_security_helper.config.session_profiles import (
         resolve_session_config_path,
         resolve_session_trusted_config_path,
     )
-    from automated_security_helper.cli.mcp.sandbox import (
+    from automated_security_helper.config.mcp_sandbox import (
         caller_is_remote,
         config_base_gate,
         client_named_config_is_untrusted,
@@ -3517,6 +3472,7 @@ async def _run_scan(
         return run_ash_scan(
             source_dir=directory_path,
             output_dir=output_dir,
+            asset=asset,
             config=config_path,
             severity_threshold_restriction=severity_threshold,
             mode=RunMode.local,
@@ -3997,7 +3953,7 @@ async def mcp_get_scan_progress(
     Returns:
         Dictionary with scan progress information
     """
-    from automated_security_helper.cli.mcp.sandbox import caller_is_remote
+    from automated_security_helper.config.mcp_sandbox import caller_is_remote
     from automated_security_helper.core.resource_management.error_handling import (
         validate_scan_id,
     )
@@ -4341,7 +4297,7 @@ def _builtin_scanner_classes() -> list:
     """The scanners ASH ships in ash_builtin: the set a default scan runs.
 
     Not ``_loaded_scanner_classes``, which list_scanners uses: that also imports
-    the community plugin packages and every installed ``ash_*_plugins``
+    the alpha plugin packages and every installed ``ash_*_plugins``
     distribution, and an installation check has no reason to run their code.
     """
     from automated_security_helper.plugin_modules.ash_builtin import ASH_SCANNERS
@@ -4386,7 +4342,7 @@ async def mcp_check_installation(session_id: Optional[str] = None) -> Dict[str, 
     """
     import shutil
 
-    from automated_security_helper.cli.mcp.sandbox import caller_is_remote
+    from automated_security_helper.config.mcp_sandbox import caller_is_remote
 
     try:
         version = get_ash_version()
@@ -4464,11 +4420,11 @@ async def mcp_check_installation(session_id: Optional[str] = None) -> Dict[str, 
 
 
 _SEVERITY_RATIONALE: Dict[str, str] = {
-    "CRITICAL": "CRITICAL severity — above any threshold",
-    "HIGH": "HIGH severity — above MEDIUM threshold",
-    "MEDIUM": "MEDIUM severity — above LOW threshold",
-    "LOW": "LOW severity — below MEDIUM threshold",
-    "INFO": "INFO severity — below default threshold",
+    Severity.CRITICAL.value: "CRITICAL severity — above any threshold",
+    Severity.HIGH.value: "HIGH severity — above MEDIUM threshold",
+    Severity.MEDIUM.value: "MEDIUM severity — above LOW threshold",
+    Severity.LOW.value: "LOW severity — below MEDIUM threshold",
+    Severity.INFO.value: "INFO severity — below default threshold",
 }
 
 
@@ -4843,7 +4799,7 @@ def mcp_diff_scan_results(
         return {
             "success": False,
             "error": raw_controls_on_one_line(str(exc)),
-            "error_type": RESULTS_NOT_COMPARABLE,
+            "error_type": McpErrorType.RESULTS_NOT_COMPARABLE.value,
         }
     diff = compare_findings(before_findings, after_findings)
     return {
@@ -4874,7 +4830,6 @@ def mcp_diff_scan_results(
 # ---------------------------------------------------------------------------
 from automated_security_helper.core.scanner_inventory import (  # noqa: E402
     _ABSENT_VERSION_MARKERS,
-    _VENDORED_SCANNER_PLUGIN_PACKAGES,
     _declared_config_class,
     _discover_external_scanner_plugin_packages,
     _loaded_scanner_classes,
@@ -4888,7 +4843,6 @@ from automated_security_helper.core.scanner_inventory import (  # noqa: E402
 # unused" for the ones this module does not itself reference.
 __all_scanner_inventory_reexports__ = (
     _ABSENT_VERSION_MARKERS,
-    _VENDORED_SCANNER_PLUGIN_PACKAGES,
     _declared_config_class,
     _discover_external_scanner_plugin_packages,
     _normalized_version,
@@ -4972,7 +4926,7 @@ def _check_and_identify_config(
     approved it. A check that records no identity (only a stand-in for the real
     check does not) is judged by the identity before and after it.
     """
-    from automated_security_helper.cli.mcp.sandbox import validate_config_input
+    from automated_security_helper.config.mcp_sandbox import validate_config_input
     from automated_security_helper.config.config_sources import (
         ABSENT_FILE,
         identity_to_hold,
@@ -5245,11 +5199,11 @@ def _answer_get_config(
         plugin_module_refusal_message,
         refuse_plugin_modules_a_scan_refuses,
     )
-    from automated_security_helper.cli.mcp.profile_registry import (
+    from automated_security_helper.config.session_profiles import (
         DEFAULT_SESSION_ID,
         resolve_session_trusted_config_path,
     )
-    from automated_security_helper.cli.mcp.sandbox import (
+    from automated_security_helper.config.mcp_sandbox import (
         caller_is_remote,
         config_base_gate,
         config_chain_refusal,
@@ -5767,7 +5721,7 @@ def _answer_get_config(
     # load's try it was caught as one.
     trusted_config_path: Optional[str] = None
     if untrusted_config:
-        from automated_security_helper.cli.mcp.profile_registry import (
+        from automated_security_helper.config.session_profiles import (
             ProfileRegistryError,
         )
         from automated_security_helper.cli.mcp.sessions import (
@@ -6014,9 +5968,9 @@ def _classify_validation_message(raw: str) -> Dict[str, Any]:
     # "yaml" would type every extends error naming base.yaml as a YAML parse
     # error of the file being validated.
     if raw.startswith(ConfigValidator.NOT_PERMITTED_ERROR_PREFIX):
-        return _config_problem("", raw, CONFIG_INPUT_NOT_PERMITTED)
+        return _config_problem("", raw, McpErrorType.CONFIG_INPUT_NOT_PERMITTED.value)
     if raw.startswith(ConfigValidator.ENV_NOT_RESOLVED_ERROR_PREFIX):
-        return _config_problem("", raw, CONFIG_ENV_NOT_RESOLVED)
+        return _config_problem("", raw, McpErrorType.CONFIG_ENV_NOT_RESOLVED.value)
     # Also before the generic branches: the message quotes module names.
     # The validator's module check (ConfigValidator._plugin_module_refusal)
     # gives the loader's refusal as it is, which opens with the field's name
@@ -6113,7 +6067,7 @@ def mcp_validate_config(
     """
     import tempfile
 
-    from automated_security_helper.cli.mcp.sandbox import (
+    from automated_security_helper.config.mcp_sandbox import (
         caller_is_remote,
         client_named_config_is_untrusted,
         config_base_gate,
@@ -6166,7 +6120,7 @@ def mcp_validate_config(
                         "!ENV tag or a ${VAR} reference), which a config a remote "
                         "client sends may not. Write the value itself, or leave "
                         "the setting to the server's config.",
-                        CONFIG_ENV_NOT_RESOLVED,
+                        McpErrorType.CONFIG_ENV_NOT_RESOLVED.value,
                     )
                 ],
                 "warnings": [],
@@ -6200,7 +6154,9 @@ def mcp_validate_config(
                 "valid": False,
                 "errors": [
                     _config_problem(
-                        "config_path", str(refusal), CONFIG_INPUT_NOT_PERMITTED
+                        "config_path",
+                        str(refusal),
+                        McpErrorType.CONFIG_INPUT_NOT_PERMITTED.value,
                     )
                 ],
                 "warnings": [],
@@ -6341,7 +6297,7 @@ def _validated_document_denials(
     policy unjudged and the config is not valid. Every refusal of this check is
     returned: a caller reports them beside the validator's errors.
     """
-    from automated_security_helper.cli.mcp.sandbox import (
+    from automated_security_helper.config.mcp_sandbox import (
         caller_is_remote,
         client_named_config_is_untrusted,
     )
@@ -6380,7 +6336,11 @@ def _validated_document_denials(
         and client_named_config_is_untrusted(config_path, session_id=session_id)
     )
     if rules.unreadable is not None and checked:
-        return [_config_problem("", rules.unreadable, CONFIG_POLICY_UNREADABLE)]
+        return [
+            _config_problem(
+                "", rules.unreadable, McpErrorType.CONFIG_POLICY_UNREADABLE.value
+            )
+        ]
     if config_content is not None and not checked:
         return []
     if config_content is None and config_path is None:
@@ -6564,13 +6524,13 @@ def mcp_suggest_suppression(
           - yaml: str — paste-ready YAML block
           - json: dict — same data as a dict
         On error: {"success": False, "error": <message>}. A finding whose file
-        path holds a backslash has ``error_type`` PATH_NOT_EXPRESSIBLE: no
+        path holds a backslash has ``error_type`` McpErrorType.PATH_NOT_EXPRESSIBLE: no
         suppression path names that file alone. A finding that reports no file
-        path, or no rule id, has ``error_type`` SUPPRESSION_NOT_SPECIFIC: a
+        path, or no rule id, has ``error_type`` McpErrorType.SUPPRESSION_NOT_SPECIFIC: a
         suppression with an empty path matches nothing, and one with no rule
         covers every rule in the file (or the lines), never that finding
         alone, so none is suggested. An ``expiration`` that is not a YYYY-MM-DD
-        date has ``error_type`` INVALID_EXPIRATION, with the rule the config
+        date has ``error_type`` McpErrorType.INVALID_EXPIRATION, with the rule the config
         model applies to the field.
     """
     from datetime import date, timedelta
@@ -6597,7 +6557,7 @@ def mcp_suggest_suppression(
         if problem is not None:
             return {
                 "success": False,
-                "error_type": INVALID_EXPIRATION,
+                "error_type": McpErrorType.INVALID_EXPIRATION.value,
                 "error": raw_controls_on_one_line(
                     f"No suppression suggested: the expiration is not a date the "
                     f"config accepts. {problem}."
@@ -6665,7 +6625,7 @@ def mcp_suggest_suppression(
     if not finding.file_path:
         return {
             "success": False,
-            "error_type": SUPPRESSION_NOT_SPECIFIC,
+            "error_type": McpErrorType.SUPPRESSION_NOT_SPECIFIC.value,
             "error": raw_controls_on_one_line(
                 f"No suppression suggested for finding {finding_id}: it reports "
                 "no file path, so a suppression built from it would match "
@@ -6675,7 +6635,7 @@ def mcp_suggest_suppression(
     if not finding.rule_id:
         return {
             "success": False,
-            "error_type": SUPPRESSION_NOT_SPECIFIC,
+            "error_type": McpErrorType.SUPPRESSION_NOT_SPECIFIC.value,
             "error": raw_controls_on_one_line(
                 f"No suppression suggested for finding {finding_id}: it reports "
                 "no rule id, so a suppression built from it would cover every "
@@ -6692,7 +6652,7 @@ def mcp_suggest_suppression(
     except PathNotExpressible as e:
         return {
             "success": False,
-            "error_type": PATH_NOT_EXPRESSIBLE,
+            "error_type": McpErrorType.PATH_NOT_EXPRESSIBLE.value,
             "error": raw_controls_on_one_line(
                 f"No suppression suggested for finding {finding_id}: {e}."
             ),
@@ -6740,7 +6700,7 @@ def mcp_list_profiles() -> Dict[str, Any]:
     profiles with sensitive filesystem paths, and the SHA is sufficient for
     a client to detect "is this the same profile as before".
     """
-    from automated_security_helper.cli.mcp.profile_registry import (
+    from automated_security_helper.config.session_profiles import (
         get_profile_registry,
     )
 
@@ -6801,9 +6761,8 @@ def mcp_select_profile(
     the hold ends. A ``set_source_git`` or ``set_source_zip_finalize`` in
     progress does not refuse it.
     """
-    from automated_security_helper.cli.mcp.profile_registry import binding_writes
+    from automated_security_helper.config.session_profiles import binding_writes
     from automated_security_helper.cli.mcp.sessions import (
-        SESSION_WORKSPACE_BUSY,
         SessionWorkspaceBusyError,
         writing_session_state,
     )
@@ -6825,7 +6784,7 @@ def mcp_select_profile(
         return {
             "success": False,
             "error": raw_controls_on_one_line(str(e)),
-            "error_type": SESSION_WORKSPACE_BUSY,
+            "error_type": McpErrorType.SESSION_WORKSPACE_BUSY.value,
         }
 
 
@@ -6837,7 +6796,7 @@ def _select_profile(
     session_id: Optional[str],
 ) -> Dict[str, Any]:
     """:func:`mcp_select_profile`, once the session is held against the sweep."""
-    from automated_security_helper.cli.mcp.profile_registry import (
+    from automated_security_helper.config.session_profiles import (
         bind_session_config,
         client_values_present,
         get_profile_registry,
@@ -7100,7 +7059,7 @@ def _materialize_or_error(
     missing file and fail with a config error naming a path the client never
     supplied.
     """
-    from automated_security_helper.cli.mcp.profile_registry import (
+    from automated_security_helper.config.session_profiles import (
         materialize_session_binding,
     )
     from automated_security_helper.config.environment_record import (
@@ -7119,7 +7078,7 @@ def _materialize_or_error(
             {
                 "success": False,
                 "error": raw_controls_on_one_line(str(exc)),
-                "error_type": ENV_VALUE_IN_LONGER_STRING,
+                "error_type": McpErrorType.ENV_VALUE_IN_LONGER_STRING.value,
                 "error_category": ErrorCategory.INVALID_FORMAT.value,
             },
             REFUSED_CONFIG_EXIT_CODE,
@@ -7305,7 +7264,7 @@ def _sweep_stale_scan_snapshots(profile: Path) -> None:
 
 def _default_session_id() -> str:
     """Return the profile_registry DEFAULT_SESSION_ID without circular import."""
-    from automated_security_helper.cli.mcp.profile_registry import (
+    from automated_security_helper.config.session_profiles import (
         DEFAULT_SESSION_ID,
     )
 
@@ -7404,13 +7363,6 @@ def mcp_set_source_git(
     """
     from automated_security_helper.cli.mcp.source_delivery import (
         ASH_MCP_GIT_ALLOWED_HOSTS_ENV,
-        CLONE_REF_NOT_PERMITTED,
-        CLONE_TIMED_OUT,
-        CLONE_URL_NOT_PERMITTED,
-        GIT_CLONE_FAILED,
-        INVALID_CLONE_DEPTH,
-        SESSION_WORKSPACE_UNAVAILABLE,
-        SOURCE_DELIVERY_BUSY,
         CloneRefusedError,
         GitCommandError,
         GitTimeoutError,
@@ -7442,16 +7394,16 @@ def mcp_set_source_git(
     try:
         _validate_clone_url(url)
     except ValueError as e:
-        return refused(e, CLONE_URL_NOT_PERMITTED)
+        return refused(e, McpErrorType.CLONE_URL_NOT_PERMITTED.value)
     if ref:
         try:
             _reject_option_like(ref, "ref")
         except ValueError as e:
-            return refused(e, CLONE_REF_NOT_PERMITTED)
+            return refused(e, McpErrorType.CLONE_REF_NOT_PERMITTED.value)
     try:
         _validated_clone_depth(depth)
     except ValueError as e:
-        return refused(e, INVALID_CLONE_DEPTH)
+        return refused(e, McpErrorType.INVALID_CLONE_DEPTH.value)
 
     if local_clone_path(url) is not None:
         return {
@@ -7462,7 +7414,7 @@ def mcp_set_source_git(
                 "filesystem. Name a directory the operator granted as "
                 "run_ash_scan's source_dir instead."
             ),
-            "error_type": "local_clone_source_refused",
+            "error_type": McpErrorType.LOCAL_CLONE_SOURCE_REFUSED.value,
             "error_category": ErrorCategory.INVALID_PATH.value,
         }
 
@@ -7472,7 +7424,7 @@ def mcp_set_source_git(
         return {
             "success": False,
             "error": raw_controls_on_one_line(str(e)),
-            "error_type": "clone_url_not_permitted",
+            "error_type": McpErrorType.CLONE_URL_NOT_PERMITTED.value,
         }
     if not clone_endpoint_allowed(scheme, host, port):
         if host in git_allowed_hosts():
@@ -7495,7 +7447,7 @@ def mcp_set_source_git(
                 where + "Ask the operator to add the host, or deliver the tree "
                 "with set_source_zip_chunk and set_source_zip_finalize."
             ),
-            "error_type": "clone_host_not_permitted",
+            "error_type": McpErrorType.CLONE_HOST_NOT_PERMITTED.value,
         }
 
     try:
@@ -7504,7 +7456,7 @@ def mcp_set_source_git(
         return {
             "success": False,
             "error": raw_controls_on_one_line(str(e)),
-            "error_type": "ssh_key_not_registered",
+            "error_type": McpErrorType.SSH_KEY_NOT_REGISTERED.value,
         }
 
     try:
@@ -7521,13 +7473,13 @@ def mcp_set_source_git(
         return {
             "success": False,
             "error": raw_controls_on_one_line(str(e)),
-            "error_type": SOURCE_DELIVERY_BUSY,
+            "error_type": McpErrorType.SOURCE_DELIVERY_BUSY.value,
         }
     except GitTimeoutError as e:
         return {
             "success": False,
             "error": raw_controls_on_one_line(str(e)),
-            "error_type": CLONE_TIMED_OUT,
+            "error_type": McpErrorType.CLONE_TIMED_OUT.value,
         }
     except CloneRefusedError as e:
         # Every other clone refusal names its own error_type (a clone over the size
@@ -7539,18 +7491,18 @@ def mcp_set_source_git(
             "error_type": e.error_type,
         }
     except SessionWorkspaceError as e:
-        return refused(e, SESSION_WORKSPACE_UNAVAILABLE)
+        return refused(e, McpErrorType.SESSION_WORKSPACE_UNAVAILABLE.value)
     except GitCommandError as e:
         return refused(e, e.error_type)
     except RuntimeError as e:
         # How set_source_git reported a git failure before GitCommandError, and
         # still the type it documents; a substitute raising it gets the same
         # answer a failed clone does.
-        return refused(e, GIT_CLONE_FAILED)
+        return refused(e, McpErrorType.GIT_CLONE_FAILED.value)
     except InvalidSessionIdError as e:
         # The session id set_source_git makes the workspace for, refused before
         # the session is taken.
-        return refused(e, "invalid_session_id")
+        return refused(e, McpErrorType.INVALID_SESSION_ID.value)
     # No arm for any other ValueError. url, ref, depth and the session id passed
     # their checks, and a step git cannot be started for is a GitCommandError with
     # that step's type, caught above, so a ValueError reaching here comes from a
@@ -7588,11 +7540,9 @@ def mcp_set_source_zip_chunk(
         directory could not be created.
     """
     from automated_security_helper.cli.mcp.sessions import (
-        SESSION_WORKSPACE_BUSY,
         SessionWorkspaceBusyError,
     )
     from automated_security_helper.cli.mcp.source_delivery import (
-        SESSION_WORKSPACE_UNAVAILABLE,
         SessionWorkspaceError,
         set_source_zip_chunk,
     )
@@ -7609,13 +7559,13 @@ def mcp_set_source_zip_chunk(
         return {
             "success": False,
             "error": raw_controls_on_one_line(str(e)),
-            "error_type": SESSION_WORKSPACE_BUSY,
+            "error_type": McpErrorType.SESSION_WORKSPACE_BUSY.value,
         }
     except SessionWorkspaceError as e:
         return {
             "success": False,
             "error": raw_controls_on_one_line(error_text(e)),
-            "error_type": SESSION_WORKSPACE_UNAVAILABLE,
+            "error_type": McpErrorType.SESSION_WORKSPACE_UNAVAILABLE.value,
         }
     except ValueError as e:
         return {"success": False, "error": raw_controls_on_one_line(error_text(e))}
@@ -7657,8 +7607,6 @@ def mcp_set_source_zip_finalize(
         ``run_ash_scan`` with no ``source_dir`` answers ``delivered_source_missing``.
     """
     from automated_security_helper.cli.mcp.source_delivery import (
-        SESSION_WORKSPACE_UNAVAILABLE,
-        SOURCE_DELIVERY_BUSY,
         SessionWorkspaceError,
         SourceDeliveryBusyError,
         UploadNotFoundError,
@@ -7675,13 +7623,13 @@ def mcp_set_source_zip_finalize(
         return {
             "success": False,
             "error": raw_controls_on_one_line(str(e)),
-            "error_type": SOURCE_DELIVERY_BUSY,
+            "error_type": McpErrorType.SOURCE_DELIVERY_BUSY.value,
         }
     except SessionWorkspaceError as e:
         return {
             "success": False,
             "error": raw_controls_on_one_line(error_text(e)),
-            "error_type": SESSION_WORKSPACE_UNAVAILABLE,
+            "error_type": McpErrorType.SESSION_WORKSPACE_UNAVAILABLE.value,
         }
     except (UploadNotFoundError, ValueError, zipfile.BadZipFile) as e:
         # BadZipFile is the client's packaging error the delivery documents
@@ -7714,7 +7662,6 @@ def mcp_clear_source(session_id: str) -> Dict[str, Any]:
         "error_type": "source_delivery_busy"}`` while a scan of the session runs.
     """
     from automated_security_helper.cli.mcp.source_delivery import (
-        SOURCE_DELIVERY_BUSY,
         SourceDeliveryBusyError,
         clear_source,
     )
@@ -7725,6 +7672,148 @@ def mcp_clear_source(session_id: str) -> Dict[str, Any]:
         return {
             "success": False,
             "error": raw_controls_on_one_line(str(e)),
-            "error_type": SOURCE_DELIVERY_BUSY,
+            "error_type": McpErrorType.SOURCE_DELIVERY_BUSY.value,
         }
     return {"success": True}
+
+
+def mcp_set_source_image(
+    image_ref: str,
+    *,
+    session_id: str,
+) -> Dict[str, Any]:
+    """Record a container image reference as this session's scan subject.
+
+    The indirect-reference half of the image submission contract: the ref is
+    stored on the session and nothing is fetched at delivery time. The scan
+    that resolves its omitted target reads it as the subject, exactly as a
+    delivered source tree is read.
+
+    Args:
+        image_ref: ``registry/repo[:tag][@sha256:digest]``. Digest-pinned refs
+            preferred; a tag-only ref is resolved at scan start where a
+            container engine is present.
+        session_id: MCP session identifier.
+
+    Returns:
+        ``{"success": True, "image_ref": str}`` on success;
+        ``{"success": False, "error": str}`` for a value that can never be a
+        reference, with ``error_type`` ``source_delivery_busy`` while a scan
+        of the session runs or another change to its source is in progress.
+    """
+    from automated_security_helper.cli.mcp.source_delivery import (
+        SourceDeliveryBusyError,
+        set_source_image,
+    )
+
+    try:
+        locator = set_source_image(image_ref, session_id=session_id)
+    except SourceDeliveryBusyError as e:
+        return {
+            "success": False,
+            "error": raw_controls_on_one_line(str(e)),
+            "error_type": McpErrorType.SOURCE_DELIVERY_BUSY.value,
+        }
+    except ValueError as e:
+        return {"success": False, "error": raw_controls_on_one_line(error_text(e))}
+    return {"success": True, "image_ref": locator.ref}
+
+
+def mcp_set_source_image_archive_chunk(
+    upload_id: str,
+    sequence: int,
+    data_b64: str,
+    last: bool,
+    *,
+    session_id: str,
+) -> Dict[str, Any]:
+    """Append one base64-encoded chunk to an in-flight image-archive upload.
+
+    The zip channel's chunk contract byte for byte (``mcp_set_source_zip_chunk``):
+    same ordering rule, caps, errors and ``upload_id`` namespace. What makes
+    the bytes an image archive is the finalize that claims them.
+    """
+    from automated_security_helper.cli.mcp.sessions import (
+        SessionWorkspaceBusyError,
+    )
+    from automated_security_helper.cli.mcp.source_delivery import (
+        SessionWorkspaceError,
+        set_source_image_archive_chunk,
+    )
+
+    try:
+        result = set_source_image_archive_chunk(
+            upload_id=upload_id,
+            sequence=sequence,
+            data_b64=data_b64,
+            last=last,
+            session_id=session_id,
+        )
+    except SessionWorkspaceBusyError as e:
+        return {
+            "success": False,
+            "error": raw_controls_on_one_line(str(e)),
+            "error_type": McpErrorType.SESSION_WORKSPACE_BUSY.value,
+        }
+    except SessionWorkspaceError as e:
+        return {
+            "success": False,
+            "error": raw_controls_on_one_line(error_text(e)),
+            "error_type": McpErrorType.SESSION_WORKSPACE_UNAVAILABLE.value,
+        }
+    except ValueError as e:
+        return {"success": False, "error": raw_controls_on_one_line(error_text(e))}
+
+    return {"success": True, **result}
+
+
+def mcp_set_source_image_archive_finalize(
+    upload_id: str,
+    expected_sha256: str,
+    *,
+    session_id: str,
+) -> Dict[str, Any]:
+    """Verify an uploaded image archive and record it as the scan subject.
+
+    The zip finalize's verification without its extraction: checksum, size
+    cap, the tar shape sniff (the gate the CLI's ``--image-archive`` runs),
+    then the archive moved whole under the session workspace and the session's
+    image locator pointed at it.
+
+    Returns:
+        ``{"success": True, "image_archive": str}`` on success;
+        ``{"success": False, "error": str}`` on checksum mismatch, oversize
+        upload, bytes that are not a plain tar, or an upload that never
+        received its last chunk, with ``error_type`` ``source_delivery_busy``
+        while a scan of the session runs and ``session_workspace_unavailable``
+        when the workspace cannot take the file.
+    """
+    from automated_security_helper.cli.mcp.source_delivery import (
+        SessionWorkspaceError,
+        SourceDeliveryBusyError,
+        UploadNotFoundError,
+        set_source_image_archive_finalize,
+    )
+
+    try:
+        archive = set_source_image_archive_finalize(
+            upload_id=upload_id,
+            expected_sha256=expected_sha256,
+            session_id=session_id,
+        )
+    except SourceDeliveryBusyError as e:
+        return {
+            "success": False,
+            "error": raw_controls_on_one_line(str(e)),
+            "error_type": McpErrorType.SOURCE_DELIVERY_BUSY.value,
+        }
+    except SessionWorkspaceError as e:
+        return {
+            "success": False,
+            "error": raw_controls_on_one_line(error_text(e)),
+            "error_type": McpErrorType.SESSION_WORKSPACE_UNAVAILABLE.value,
+        }
+    except (UploadNotFoundError, ValueError) as e:
+        return {"success": False, "error": raw_controls_on_one_line(error_text(e))}
+
+    return {"success": True, "image_archive": str(archive)}

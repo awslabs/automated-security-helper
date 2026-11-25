@@ -348,13 +348,13 @@ def test_a_dot_slash_policy_path_is_refused_not_pushed_down_as_everything(field)
     assert "'./'" in str(excinfo.value)
 
 
-@pytest.mark.parametrize(
-    "pattern, pushed", [("***", ()), ("****", ()), ("***/x.py", ("x.py",))]
-)
+@pytest.mark.parametrize("pattern, pushed", [("***", ()), ("****", ())])
 def test_a_run_of_three_stars_is_pushed_down_as_one_star(tmp_path, pattern, pushed):
     """``***`` reads as one ``*`` per component, so at workspace level it covers no
     project file and no project gets it; pushed down as ``**`` it suppressed every
-    finding in every project. ``***/x.py`` covers ``api/x.py`` of project api."""
+    finding in every project. ``***/x.py`` is refused instead (its own test below):
+    its only remainder is glob-free, which the bare-directory rule (issue #894)
+    reads wider than the workspace pattern."""
     policy_file = _write(
         tmp_path / "ash-workspace.yaml",
         f"workspace:\n  suppressions:\n    - path: '{pattern}'\n      reason: r\n",
@@ -369,12 +369,10 @@ def test_a_run_of_three_stars_is_pushed_down_as_one_star(tmp_path, pattern, push
     assert tuple(entry.path for entry in resolved.suppressions) == pushed
 
 
-def test_a_suppression_naming_only_the_project_directory_is_not_passed_down():
-    """ "api" matches the path "api", not "api/src/x.py", so it covers no file.
-
-    Passing "**" here would suppress an entire project the operator never asked
-    to silence -- the failure the workspace_paths contract sweep caught.
-    """
+def test_a_suppression_naming_the_project_directory_covers_the_project():
+    """ "api" names the directory and the files below it (the bare-directory
+    rule, issue #894), so the suppression covers every file of project api and
+    comes down as "**". The operator asked for exactly that subtree."""
     policy = _policy(suppressions=[_suppression("api")])
     resolved = policy_for_project(
         policy,
@@ -382,14 +380,14 @@ def test_a_suppression_naming_only_the_project_directory_is_not_passed_down():
         project_threshold="MEDIUM",
         project_scanners=(),
     )
-    assert resolved.suppressions == ()
+    assert tuple(entry.path for entry in resolved.suppressions) == ("**",)
 
 
 def test_each_entry_is_pushed_down_as_its_own_kind():
-    """ "api/" reads as the directory's files for an ignore path and literally for
-    a suppression, so for project api the ignore path covers the whole project and
-    the suppression covers no file there. Pushed down as an ignore path, the
-    suppression would suppress every finding of the project."""
+    """ "api/" reads as the directory's files for an ignore path, and since the
+    bare-directory rule (issue #894) a glob-free suppression path reads the same
+    way, so for project api both kinds cover the whole project and both come
+    down as "**"."""
     policy = _policy(
         suppressions=[_suppression("api/")],
         ignore_paths=[IgnorePathWithReason(path="api/", reason="test")],
@@ -400,7 +398,7 @@ def test_each_entry_is_pushed_down_as_its_own_kind():
         project_threshold="MEDIUM",
         project_scanners=(),
     )
-    assert resolved.suppressions == ()
+    assert tuple(entry.path for entry in resolved.suppressions) == ("**",)
     assert [entry.path for entry in resolved.ignore_paths] == ["**"]
 
 
@@ -420,6 +418,23 @@ def test_an_unrewritable_suppression_is_refused_and_names_the_pattern():
             project_scanners=(),
         )
     assert "*/sub/*.py" in str(excinfo.value)
+
+
+def test_a_glob_whose_only_remainder_is_glob_free_is_refused():
+    """``***/x.py`` covers exactly ``api/x.py`` of project api, but its only
+    remainder, ``x.py``, is glob-free, and under the bare-directory rule
+    (issue #894) a glob-free project pattern also covers the subtree below
+    ``x.py``, which the workspace pattern never matched. There is no
+    project-side spelling of "this exact path only", so it is refused."""
+    policy = _policy(suppressions=[_suppression("***/x.py")])
+    with pytest.raises((WorkspaceDefinitionError, WorkspacePatternError)) as excinfo:
+        policy_for_project(
+            policy,
+            project_prefix="api",
+            project_threshold="MEDIUM",
+            project_scanners=(),
+        )
+    assert "bare-directory" in str(excinfo.value)
 
 
 def test_ignore_paths_are_pushed_down_the_same_way_as_suppressions():
