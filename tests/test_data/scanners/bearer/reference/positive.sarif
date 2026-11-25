@@ -1,0 +1,177 @@
+{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "runs": [
+    {
+      "results": [
+        {
+          "level": "error",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/app.js"
+                },
+                "region": {
+                  "endColumn": 30,
+                  "endLine": 3,
+                  "startColumn": 14,
+                  "startLine": 3
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "Usage of hard-coded secret"
+          },
+          "partialFingerprints": {
+            "bearer/v1": "fp-critical-3"
+          },
+          "properties": {
+            "issue_severity": "CRITICAL",
+            "tags": [
+              "bearer",
+              "sast",
+              "security",
+              "CWE-798"
+            ]
+          },
+          "ruleId": "javascript_lang_hardcoded_secret"
+        },
+        {
+          "level": "error",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "app.py"
+                },
+                "region": {
+                  "endColumn": 40,
+                  "endLine": 12,
+                  "startColumn": 9,
+                  "startLine": 12
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "Unsanitized user input in SQL query"
+          },
+          "partialFingerprints": {
+            "bearer/v1": "fp-high-12"
+          },
+          "properties": {
+            "issue_severity": "HIGH",
+            "tags": [
+              "bearer",
+              "sast",
+              "security",
+              "CWE-89"
+            ]
+          },
+          "ruleId": "python_django_sql_injection"
+        },
+        {
+          "level": "note",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "lib/h.rb"
+                },
+                "region": {
+                  "endColumn": 12,
+                  "endLine": 7,
+                  "startColumn": 1,
+                  "startLine": 7
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "Usage of weak hashing library (MD5)"
+          },
+          "partialFingerprints": {
+            "bearer/v1": "fp-low-7"
+          },
+          "properties": {
+            "issue_severity": "LOW",
+            "tags": [
+              "bearer",
+              "sast",
+              "security",
+              "CWE-327"
+            ]
+          },
+          "ruleId": "ruby_lang_weak_hash_md5"
+        }
+      ],
+      "tool": {
+        "driver": {
+          "informationUri": "https://github.com/Bearer/bearer",
+          "name": "Bearer",
+          "rules": [
+            {
+              "fullDescription": {
+                "text": "Hard-coded secrets are a risk if the code is shared."
+              },
+              "helpUri": "https://docs.bearer.com/reference/rules/javascript_lang_hardcoded_secret",
+              "id": "javascript_lang_hardcoded_secret",
+              "name": "javascript_lang_hardcoded_secret",
+              "properties": {
+                "tags": [
+                  "bearer",
+                  "sast",
+                  "security",
+                  "CWE-798"
+                ]
+              },
+              "shortDescription": {
+                "text": "Usage of hard-coded secret"
+              }
+            },
+            {
+              "fullDescription": {
+                "text": "Unsanitized input in a query allows injection."
+              },
+              "helpUri": "https://docs.bearer.com/reference/rules/python_django_sql_injection",
+              "id": "python_django_sql_injection",
+              "name": "python_django_sql_injection",
+              "properties": {
+                "tags": [
+                  "bearer",
+                  "sast",
+                  "security",
+                  "CWE-89"
+                ]
+              },
+              "shortDescription": {
+                "text": "Unsanitized user input in SQL query"
+              }
+            },
+            {
+              "fullDescription": {
+                "text": "MD5 is a weak hash."
+              },
+              "helpUri": "https://docs.bearer.com/reference/rules/ruby_lang_weak_hash_md5",
+              "id": "ruby_lang_weak_hash_md5",
+              "name": "ruby_lang_weak_hash_md5",
+              "properties": {
+                "tags": [
+                  "bearer",
+                  "sast",
+                  "security",
+                  "CWE-327"
+                ]
+              },
+              "shortDescription": {
+                "text": "Usage of weak hashing library (MD5)"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "version": "2.1.0"
+}
