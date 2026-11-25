@@ -471,6 +471,57 @@ class TestUpstreamShape:
         assert "_0x10e175" not in dumped
 
 
+RECORDED = Path(__file__).resolve().parents[3] / (
+    "test_data/scanners/malcontent/recorded"
+)
+
+
+class TestRecordedReports:
+    """Malcontent's own recorded ``--format=json`` reports are the oracle."""
+
+    @pytest.mark.parametrize(
+        ("name", "uri", "counts"),
+        [
+            ("ls.json", "macOS/clean/ls", {"INFO": 6}),
+            (
+                "injector.json",
+                "linux/2024.kubo_injector/injector",
+                {"CRITICAL": 1, "HIGH": 3, "MEDIUM": 4, "INFO": 8},
+            ),
+        ],
+    )
+    def test_each_behavior_becomes_one_result_at_its_level(
+        self, name, uri, counts, tmp_path
+    ):
+        document = json.loads((RECORDED / name).read_text(encoding="utf-8"))
+        behaviors = sum(len(f["Behaviors"]) for f in document["Files"].values())
+        sarif = ms.convert_malcontent_report(document, tmp_path)
+        results = sarif["runs"][0]["results"]
+        assert len(results) == behaviors == sum(counts.values())
+        assert {
+            r["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
+            for r in results
+        } == {uri}
+        tally: Dict[str, int] = {}
+        for r in results:
+            severity = r["properties"]["issue_severity"]
+            tally[severity] = tally.get(severity, 0) + 1
+        assert tally == counts
+
+    def test_only_malcontents_own_rules_are_in_the_recorded_reports(self):
+        """The reports carry no ``3P/`` rule, the set ``--third-party=false`` drops."""
+        for path in RECORDED.glob("*.json"):
+            document = json.loads(path.read_text(encoding="utf-8"))
+            ids = [b["ID"] for f in document["Files"].values() for b in f["Behaviors"]]
+            assert ids and not [i for i in ids if i.startswith("3P/")], path.name
+
+    def test_no_matched_text_survives_conversion(self, tmp_path):
+        document = json.loads((RECORDED / "injector.json").read_text(encoding="utf-8"))
+        dumped = json.dumps(ms.convert_malcontent_report(document, tmp_path))
+        assert "successfully injected" not in dumped
+        assert "shellcode_size" not in dumped
+
+
 class TestLinks:
     def test_the_command_names_no_link_and_follows_none(
         self, tree, tmp_path, on_path, monkeypatch

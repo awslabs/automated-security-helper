@@ -1,0 +1,97 @@
+{
+  "Files": {
+    "macOS/clean/ls": {
+      "Behaviors": [
+        {
+          "Description": "binary contains hardcoded URL",
+          "ID": "c2/addr/url",
+          "MatchStrings": [
+            "http://www.apple.com/DTDs/PropertyList",
+            "http://www.apple.com/appleca/root.crl0",
+            "http://crl.apple.com/codesigning.crl0",
+            "https://www.apple.com/appleca/0"
+          ],
+          "RiskLevel": "LOW",
+          "RiskScore": 1,
+          "RuleName": "binary_with_url",
+          "RuleURL": "https://github.com/chainguard-dev/malcontent/blob/main/rules/c2/addr/url.yara#L107"
+        },
+        {
+          "Description": "Look up or override terminal settings",
+          "ID": "exec/shell/TERM",
+          "MatchStrings": [
+            "TERM"
+          ],
+          "ReferenceURL": "https://www.gnu.org/software/gettext/manual/html_node/The-TERM-variable.html",
+          "RiskLevel": "LOW",
+          "RiskScore": 1,
+          "RuleName": "TERM",
+          "RuleURL": "https://github.com/chainguard-dev/malcontent/blob/main/rules/exec/shell/TERM.yara#L1"
+        },
+        {
+          "Description": "traverse filesystem hierarchy",
+          "ID": "fs/directory/traverse",
+          "MatchStrings": [
+            "_fts_children",
+            "_fts_close",
+            "_fts_open",
+            "_fts_read",
+            "_fts_set"
+          ],
+          "RiskLevel": "LOW",
+          "RiskScore": 1,
+          "RuleName": "fts",
+          "RuleURL": "https://github.com/chainguard-dev/malcontent/blob/main/rules/fs/directory/directory-traverse.yara#L1"
+        },
+        {
+          "Description": "read value of a symbolic link",
+          "ID": "fs/link_read",
+          "MatchStrings": [
+            "readlink"
+          ],
+          "ReferenceURL": "https://man7.org/linux/man-pages/man2/readlink.2.html",
+          "RiskLevel": "LOW",
+          "RiskScore": 1,
+          "RuleName": "readlink",
+          "RuleURL": "https://github.com/chainguard-dev/malcontent/blob/main/rules/fs/link-read.yara#L1"
+        },
+        {
+          "Description": "Uses the HTTP protocol",
+          "ID": "net/http",
+          "MatchStrings": [
+            "http"
+          ],
+          "RiskLevel": "LOW",
+          "RiskScore": 1,
+          "RuleName": "http",
+          "RuleURL": "https://github.com/chainguard-dev/malcontent/blob/main/rules/net/http/http.yara#L1"
+        },
+        {
+          "Description": "Retrieve environment variables",
+          "ID": "os/env/get",
+          "MatchStrings": [
+            "getenv"
+          ],
+          "RiskLevel": "LOW",
+          "RiskScore": 1,
+          "RuleName": "getenv",
+          "RuleURL": "https://github.com/chainguard-dev/malcontent/blob/main/rules/os/env/get.yara#L12"
+        }
+      ],
+      "Path": "macOS/clean/ls",
+      "Pledge": [
+        "inet",
+        "rpath"
+      ],
+      "RiskLevel": "LOW",
+      "RiskScore": 1,
+      "SHA256": "461b7ef5288c9c4b0d10aefc9ca42f7ddab9954a3f3d032e3a783e3da0c970b6",
+      "Size": 154352,
+      "Syscalls": [
+        "getdents",
+        "openat",
+        "readlink"
+      ]
+    }
+  }
+}

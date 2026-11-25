@@ -1,0 +1,218 @@
+{
+  "Files": {
+    "linux/2024.kubo_injector/injector": {
+      "Behaviors": [
+        {
+          "Description": "multiple ELF binaries within an ELF binary",
+          "ID": "anti-static/elf/multiple",
+          "MatchStrings": [
+            "\\x7fELF"
+          ],
+          "RiskLevel": "MEDIUM",
+          "RiskScore": 2,
+          "RuleName": "multiple_elf",
+          "RuleURL": "https://github.com/chainguard-dev/malcontent/blob/main/rules/anti-static/elf/multiple.yara#L3"
+        },
+        {
+          "Description": "binary contains hardcoded URL",
+          "ID": "c2/addr/url",
+          "MatchStrings": [
+            "https://wiki.musl"
+          ],
+          "RiskLevel": "LOW",
+          "RiskScore": 1,
+          "RuleName": "binary_with_url",
+          "RuleURL": "https://github.com/chainguard-dev/malcontent/blob/main/rules/c2/addr/url.yara#L107"
+        },
+        {
+          "Description": "references a specific architecture",
+          "ID": "c2/tool_transfer/arch",
+          "MatchStrings": [
+            "https://",
+            "x86_64"
+          ],
+          "RiskLevel": "LOW",
+          "RiskScore": 1,
+          "RuleName": "arch_ref",
+          "RuleURL": "https://github.com/chainguard-dev/malcontent/blob/main/rules/c2/tool_transfer/arch.yara#L1"
+        },
+        {
+          "Description": "references a specific operating system",
+          "ID": "c2/tool_transfer/os",
+          "MatchStrings": [
+            "https://",
+            "linux"
+          ],
+          "RiskLevel": "LOW",
+          "RiskScore": 1,
+          "RuleName": "os_ref",
+          "RuleURL": "https://github.com/chainguard-dev/malcontent/blob/main/rules/c2/tool_transfer/os.yara#L1"
+        },
+        {
+          "Description": "may inject code into other processes",
+          "ID": "evasion/process_injection/process_inject",
+          "MatchStrings": [
+            "successfully injected",
+            "to inject",
+            "to-inject",
+            "/proc",
+            "maps"
+          ],
+          "RiskLevel": "HIGH",
+          "RiskScore": 3,
+          "RuleName": "library_injector",
+          "RuleURL": "https://github.com/chainguard-dev/malcontent/blob/main/rules/evasion/process_injection/process-inject.yara#L1"
+        },
+        {
+          "Description": "may inject code into other processes",
+          "ID": "evasion/process_injection/ptrace",
+          "MatchStrings": [
+            "/proc/%d/maps",
+            "process",
+            "ptrace"
+          ],
+          "RiskLevel": "HIGH",
+          "RiskScore": 3,
+          "RuleName": "ptrace_injector_unknown",
+          "RuleURL": "https://github.com/chainguard-dev/malcontent/blob/main/rules/evasion/process_injection/ptrace.yara#L26"
+        },
+        {
+          "Description": "get the address of a symbol",
+          "ID": "exec/dylib/symbol_address",
+          "MatchStrings": [
+            "dlsym"
+          ],
+          "ReferenceURL": "https://man7.org/linux/man-pages/man3/dlsym.3.html",
+          "RiskLevel": "MEDIUM",
+          "RiskScore": 2,
+          "RuleName": "dlsym",
+          "RuleURL": "https://github.com/chainguard-dev/malcontent/blob/main/rules/exec/dylib/symbol-address.yara#L1"
+        },
+        {
+          "Description": "wait for process to exit",
+          "ID": "exec/program/background",
+          "MatchStrings": [
+            "waitpid"
+          ],
+          "ReferenceURL": "https://linux.die.net/man/2/waitpid",
+          "RiskLevel": "LOW",
+          "RiskScore": 1,
+          "RuleName": "waitpid",
+          "RuleURL": "https://github.com/chainguard-dev/malcontent/blob/main/rules/exec/program/program-background.yara#L1"
+        },
+        {
+          "Description": "read value of a symbolic link",
+          "ID": "fs/link_read",
+          "MatchStrings": [
+            "readlink"
+          ],
+          "ReferenceURL": "https://man7.org/linux/man-pages/man2/readlink.2.html",
+          "RiskLevel": "LOW",
+          "RiskScore": 1,
+          "RuleName": "readlink",
+          "RuleURL": "https://github.com/chainguard-dev/malcontent/blob/main/rules/fs/link-read.yara#L1"
+        },
+        {
+          "Description": "access /proc for arbitrary pids",
+          "ID": "fs/proc/arbitrary_pid",
+          "MatchStrings": [
+            "/proc/%d/maps",
+            "/proc/%d/root",
+            "/proc/%s/exe"
+          ],
+          "RiskLevel": "MEDIUM",
+          "RiskScore": 2,
+          "RuleName": "proc_arbitrary",
+          "RuleURL": "https://github.com/chainguard-dev/malcontent/blob/main/rules/fs/proc/arbitrary-pid.yara#L1"
+        },
+        {
+          "Description": "access process memory maps",
+          "ID": "fs/proc/pid_maps",
+          "MatchStrings": [
+            "/proc/%d/maps"
+          ],
+          "RiskLevel": "MEDIUM",
+          "RiskScore": 2,
+          "RuleName": "proc_maps",
+          "RuleURL": "https://github.com/chainguard-dev/malcontent/blob/main/rules/fs/proc/pid-maps.yara#L1"
+        },
+        {
+          "Description": "resolves symbolic links",
+          "ID": "fs/symlink_resolve",
+          "MatchStrings": [
+            "realpath"
+          ],
+          "ReferenceURL": "https://man7.org/linux/man-pages/man3/realpath.3.html",
+          "RiskLevel": "LOW",
+          "RiskScore": 1,
+          "RuleName": "realpath",
+          "RuleURL": "https://github.com/chainguard-dev/malcontent/blob/main/rules/fs/symlink-resolve.yara#L1"
+        },
+        {
+          "Description": "Buffer overflow exploit",
+          "ID": "impact/exploit/overflow_shellcode",
+          "MatchStrings": [
+            "shellcode",
+            "address",
+            "offset"
+          ],
+          "RiskLevel": "HIGH",
+          "RiskScore": 3,
+          "RuleName": "exploit",
+          "RuleURL": "https://github.com/chainguard-dev/malcontent/blob/main/rules/impact/exploit/overflow-shellcode.yara#L1"
+        },
+        {
+          "Description": "Kubo Injector",
+          "ID": "malware/family/kubo_injector",
+          "MatchStrings": [
+            "inject_in_cloned_thread",
+            "collect_libc_info",
+            "shellcode_size",
+            "remote_vcall",
+            "arch2name"
+          ],
+          "ReferenceURL": "https://github.com/kubo/injector",
+          "RiskLevel": "CRITICAL",
+          "RiskScore": 4,
+          "RuleName": "kubo",
+          "RuleURL": "https://github.com/chainguard-dev/malcontent/blob/main/rules/malware/family/kubo_injector.yara#L1"
+        },
+        {
+          "Description": "contains embedded HTTPS URLs",
+          "ID": "net/url/embedded",
+          "MatchStrings": [
+            "https://wiki.musl-libc.org/functional-differences-from-glibc.html"
+          ],
+          "RiskLevel": "LOW",
+          "RiskScore": 1,
+          "RuleName": "https_url",
+          "RuleURL": "https://github.com/chainguard-dev/malcontent/blob/main/rules/net/url/embedded.yara#L12"
+        },
+        {
+          "Description": "operate on Secure Computing state of the process",
+          "ID": "os/kernel/seccomp",
+          "MatchStrings": [
+            "seccomp"
+          ],
+          "ReferenceURL": "https://man7.org/linux/man-pages/man2/seccomp.2.html",
+          "RiskLevel": "LOW",
+          "RiskScore": 1,
+          "RuleName": "seccomp",
+          "RuleURL": "https://github.com/chainguard-dev/malcontent/blob/main/rules/os/kernel/seccomp.yara#L1"
+        }
+      ],
+      "Path": "linux/2024.kubo_injector/injector",
+      "Pledge": [
+        "rpath"
+      ],
+      "RiskLevel": "CRITICAL",
+      "RiskScore": 4,
+      "SHA256": "7ce664f45e9b00823e93261e8f549e7f1427f9e1a4038a6513e667fc5541d234",
+      "Size": 44760,
+      "Syscalls": [
+        "readlink",
+        "seccomp"
+      ]
+    }
+  }
+}
