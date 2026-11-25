@@ -36,6 +36,14 @@ from automated_security_helper.schemas.sarif_schema_model import SarifReport
 
 pytestmark = pytest.mark.unit
 
+_RECORDED = (
+    Path(__file__).resolve().parents[3]
+    / "test_data"
+    / "scanners"
+    / "kube_linter"
+    / "recorded"
+)
+
 
 def _result(rule_id: str, uri: str, name: str) -> Dict[str, Any]:
     return {
@@ -365,9 +373,19 @@ class TestExitStatus:
     def test_timeout_fails_the_scan(self, tree, tmp_path, monkeypatch, on_path):
         scanner = _scanner(tree, tmp_path)
         fake = FakeKubeLinter(sarif_text=None, exit_code=124, timed_out=True)
-        with pytest.raises(ScannerError):
+        with pytest.raises(ScannerError, match="timed out after"):
             _run(scanner, fake, monkeypatch)
-        assert fake.calls[0]["timeout"] is None or fake.calls[0]["timeout"] > 0
+        # The limit reached the subprocess call: the option's value, not unbounded.
+        assert scanner.config.options.scan_timeout == 1800
+        assert fake.calls[0]["timeout"] == 1800
+
+    def test_the_timeout_option_reaches_the_subprocess(
+        self, tree, tmp_path, monkeypatch, on_path
+    ):
+        scanner = _scanner(tree, tmp_path, scan_timeout=42)
+        fake = FakeKubeLinter()
+        _run(scanner, fake, monkeypatch)
+        assert fake.calls[0]["timeout"] == 42
 
     def test_stderr_is_not_copied_into_errors(
         self, tree, tmp_path, monkeypatch, on_path
@@ -425,9 +443,104 @@ class TestDependencyCheck:
 
 
 class TestInstall:
-    def test_install_commands_cover_every_published_platform(self, tree, tmp_path):
+    def test_construction_survives_a_missing_central_pin(self, tree, tmp_path):
+        """No kube-linter pin is in tool_downloads.py at this tip; building the scanner
+        must not raise (it used to), and no empty command list may stand in for one."""
+        scanner = _scanner(tree, tmp_path)
+        for platform, arches in scanner.custom_install_commands.items():
+            for arch, commands in arches.items():
+                assert commands, (platform, arch)
+
+    def test_install_commands_cover_every_published_platform_when_pinned(
+        self, tree, tmp_path
+    ):
+        from automated_security_helper.core.exceptions import (
+            ToolNotProvisionableError,
+        )
         from automated_security_helper.utils.tool_downloads import supported_platforms
 
+        try:
+            published = supported_platforms("kube-linter")
+        except ToolNotProvisionableError:
+            # Not pinned yet: the table must then be empty rather than half filled.
+            assert _scanner(tree, tmp_path).custom_install_commands == {}
+            return
         table = _scanner(tree, tmp_path).custom_install_commands
-        for platform, arch in supported_platforms("kube-linter"):
+        for platform, arch in published:
             assert table[platform][arch], (platform, arch)
+
+    def test_the_install_hint_does_not_name_a_command_that_cannot_work(
+        self, tree, tmp_path, monkeypatch, caplog
+    ):
+        monkeypatch.setattr(kls, "find_executable", lambda cmd: None)
+        messages = []
+        monkeypatch.setattr(
+            kls.ASH_LOGGER, "warning", lambda msg, *a, **k: messages.append(msg)
+        )
+        _scanner(tree, tmp_path).validate_plugin_dependencies()
+        assert messages and "ash dependencies install" not in messages[0]
+        assert kls.PINNED_VERSION in messages[0]
+
+
+class TestRecordedFixture:
+    """The same checks over the files in tests/test_data/scanners/kube_linter/recorded.
+
+    They are built by hand to the v0.8.3 formatter's shape (the README beside them says
+    so); they are not captured output.
+    """
+
+    def test_the_positive_file_is_rated_and_located(
+        self, tree, tmp_path, monkeypatch, on_path
+    ):
+        fake = FakeKubeLinter(
+            sarif_text=_RECORDED.joinpath("positive.sarif").read_text()
+        )
+        report = _run(_scanner(tree, tmp_path), fake, monkeypatch)
+        assert _findings(report) == POSITIVE_EXPECTED
+
+    def test_the_negative_file_has_no_findings(
+        self, tree, tmp_path, monkeypatch, on_path
+    ):
+        fake = FakeKubeLinter(
+            sarif_text=_RECORDED.joinpath("negative.sarif").read_text(), exit_code=0
+        )
+        report = _run(_scanner(tree, tmp_path), fake, monkeypatch)
+        assert _findings(report) == []
+
+    def test_the_hand_built_text_and_the_file_agree(self):
+        assert (
+            json.loads(POSITIVE)["runs"][0]["results"][0]["ruleId"]
+            == json.loads(_RECORDED.joinpath("positive.sarif").read_text())["runs"][0][
+                "results"
+            ][0]["ruleId"]
+        )
+
+
+class TestSandboxRequirements:
+    def test_the_strict_default_is_declared(self):
+        from automated_security_helper.utils.sandbox.policy import SandboxRequirements
+
+        assert KubeLinterScanner.sandbox_requirements == SandboxRequirements()
+        assert KubeLinterScanner.sandbox_requirements.network is False
+
+
+class TestFacets:
+    def test_the_scanner_declares_its_own_facets(self):
+        from automated_security_helper.base.scanner_facets import (
+            SCANNER_FACETS_ATTR,
+            FacetState,
+            ScannerFacets,
+        )
+
+        declared = vars(KubeLinterScanner).get(SCANNER_FACETS_ATTR)
+        assert isinstance(declared, ScannerFacets)
+        # Fail closed: no resource identity is claimed from message prose.
+        assert declared.resource_id.state is FacetState.NA
+        assert declared.resource_type.state is FacetState.NA
+
+    def test_the_severity_cell_names_the_table_not_a_native_level(self):
+        assert "HIGH_SEVERITY_CHECKS" in KubeLinterScanner.facets.severity.native_field
+
+    def test_the_adapter_never_writes_a_resource_id(self):
+        source = Path(kls.__file__).read_text(encoding="utf-8")
+        assert "ash_resource_id" not in source

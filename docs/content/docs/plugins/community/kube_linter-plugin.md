@@ -26,13 +26,11 @@ ash scan --ash-plugin-modules automated_security_helper.plugin_modules.ash_kube_
 
 ## Installing KubeLinter
 
-- Local: `ash dependencies install` with the module listed installs the pinned release
-  (v0.8.3) for your platform. The command is
-  `ash dependencies install --config-overrides 'ash_plugin_modules+=["automated_security_helper.plugin_modules.ash_kube_linter_plugins"]' --tool kube_linter`.
-- Container: the image installs the pinned release when it is built with this module.
-- Anywhere else: put a `kube-linter` executable on `PATH`.
-
-The release publishes binaries for Linux, macOS and Windows on amd64 and arm64.
+ASH does not install KubeLinter yet: it has no pinned release asset for it. Install the
+release this plugin was written against (v0.8.3) from
+<https://github.com/stackrox/kube-linter/releases> and put a `kube-linter` executable on
+`PATH`, locally or in your own container build. When the pin lands, `ash dependencies
+install` will provision it and this page will say so.
 
 ## What is scanned
 

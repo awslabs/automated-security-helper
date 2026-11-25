@@ -1,0 +1,15 @@
+{
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "kube-linter",
+          "version": "v0.8.3",
+          "informationUri": "https://github.com/stackrox/kube-linter"
+        }
+      },
+      "results": []
+    }
+  ]
+}

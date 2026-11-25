@@ -84,13 +84,22 @@ from typing import (
 
 from pydantic import Field, model_validator
 
+from automated_security_helper.base import scanner_operational_facets as opsf
 from automated_security_helper.base.options import ScannerOptionsBase
+from automated_security_helper.base.scanner_facets import (
+    FacetDecl,
+    FacetState,
+    ScannerFacets,
+)
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
 )
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
-from automated_security_helper.core.exceptions import ScannerError
+from automated_security_helper.core.exceptions import (
+    ScannerError,
+    ToolNotProvisionableError,
+)
 from automated_security_helper.models.core import IgnorePathWithReason, ToolArgs
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.schemas.sarif_schema_model import (
@@ -106,6 +115,9 @@ from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.utils.subprocess_utils import find_executable
+
+#: The release this plugin was written against (see the module docstring).
+PINNED_VERSION = "v0.8.3"
 
 #: Exit codes KubeLinter uses that mean it ran to completion or reported problems. Exit 1
 #: is both "found problems" and "failed"; see the module docstring.
@@ -175,6 +187,199 @@ class KubeLinterScanner(ScannerPluginBase[KubeLinterScannerConfig]):
     # The strict default; see "Sandbox" in the module docstring.
     sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements()
 
+    #: The facets register row (base/scanner_facets.py). Declaration only: no
+    #: behavior changes. Native fields name KubeLinter's own SARIF as the v0.8.3
+    #: formatter writes it (tests/test_data/scanners/kube_linter/recorded/README.md
+    #: says how the fixture was built). A cell the output was not read for is n/a
+    #: with the reason the register asks for.
+    facets: ClassVar[ScannerFacets] = ScannerFacets(
+        rule_id=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result "ruleId" (the check name, e.g. privileged-container)',
+        ),
+        severity=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result "ruleId" rated through HIGH_SEVERITY_CHECKS '
+            "(the native SARIF carries no level or severity)",
+        ),
+        file_path=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="locations[].physicalLocation.artifactLocation.uri",
+        ),
+        line_range=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="region.startLine (KubeLinter writes line 1 for every result)",
+        ),
+        column=FacetDecl(
+            state=FacetState.NA,
+            reason="the native region carries startLine only",
+        ),
+        message=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result "message.text" (diagnostic, then "object: <namespace>/<name>")',
+        ),
+        resource_id=FacetDecl(
+            state=FacetState.NA,
+            reason="the object appears only as '<namespace>/<name>' inside the "
+            "message text, with no kind, so it does not name one deployable "
+            "resource, and a value taken from prose is an inference; fail closed",
+        ),
+        resource_type=FacetDecl(
+            state=FacetState.NA,
+            reason="the native SARIF carries no object kind; it is not in the "
+            "message text either",
+        ),
+        package_name=FacetDecl(
+            state=FacetState.NA,
+            reason="Kubernetes lint findings carry no package",
+        ),
+        package_version=FacetDecl(
+            state=FacetState.NA,
+            reason="Kubernetes lint findings carry no package",
+        ),
+        package_path=FacetDecl(
+            state=FacetState.NA,
+            reason="Kubernetes lint findings carry no package",
+        ),
+        taxonomy_cve=FacetDecl(
+            state=FacetState.NA,
+            reason="KubeLinter checks carry no CVE taxonomy",
+        ),
+        taxonomy_cwe=FacetDecl(
+            state=FacetState.NA,
+            reason="KubeLinter checks carry no CWE taxonomy",
+        ),
+        fingerprints=FacetDecl(
+            state=FacetState.NA,
+            reason="output not read; a sample run would settle it (no "
+            "fingerprint field is read from the formatter source)",
+        ),
+        fix_available=FacetDecl(
+            state=FacetState.NA,
+            reason="lint findings carry no fix state",
+        ),
+        remediation_text=FacetDecl(
+            state=FacetState.NA,
+            reason="output not read; a sample run would settle it (KubeLinter "
+            "holds a remediation per check, but whether its SARIF carries it "
+            "was not read)",
+        ),
+        snippet=FacetDecl(
+            state=FacetState.NA,
+            reason="the native region carries no snippet",
+        ),
+        references=FacetDecl(
+            state=FacetState.NA,
+            reason="output not read; a sample run would settle it",
+        ),
+        tags=FacetDecl(
+            state=FacetState.NA,
+            reason="results carry no native tags; the constant 'kubernetes' and "
+            "'iac' tags are added by the adapter, not read from the output",
+        ),
+        extras=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result property "issue_severity" written by the adapter',
+        ),
+    )
+
+    #: The operational register row (base/scanner_operational_facets.py),
+    #: checked against the production declarations it mirrors by
+    #: tests/unit/plugin_modules/test_scanner_operational_facets_consistency.py.
+    #: The runtime row reads USER_INSTALLED_CLI because ASH ships no pinned
+    #: kube-linter asset yet; it becomes PINNED_BINARY with the central pin.
+    operational_facets: ClassVar[opsf.ScannerOperationalFacets] = (
+        opsf.ScannerOperationalFacets(
+            scanner_name="kube-linter",
+            network=opsf.NetworkFacet(
+                fetch_kind=opsf.FetchKind.NONE,
+                fetches=(),
+                prefetch=(),
+                offline_outcome=opsf.OfflineOutcome.UNCHANGED,
+                offline_strategy=OfflineStrategy.BUNDLED,
+                sandbox_network=opsf.SandboxNetwork.NONE,
+                source="kube_linter_scanner.py offline_strategy, sandbox_requirements",
+                unconfirmed="whether KubeLinter fetches the dependencies of a Helm "
+                "chart that lists any was not read",
+            ),
+            output=opsf.OutputFacet(
+                native_formats=(opsf.OutputFormat.SARIF,),
+                side_reports=(),
+                non_finding_artifacts=(),
+            ),
+            targets=opsf.TargetsFacet(
+                kinds=(opsf.TargetKind.IAC_KUBERNETES,),
+                tool_type=ScannerToolType.IAC,
+                selection="KubeLinter walks the scan path itself and renders Helm "
+                "charts and Kustomize directories; a tree with no Kubernetes "
+                "object is a clean run with no results",
+                covers_note="a community scanner; it declares no covers display string",
+            ),
+            runtime=opsf.RuntimeFacet(
+                kind=opsf.RuntimeKind.USER_INSTALLED_CLI,
+                external_programs=(),
+                invocations=opsf.Invocations.ONE,
+                python_only=False,
+                use_uv_tool=False,
+            ),
+            platforms=opsf.PlatformsFacet(
+                provisionable=(),
+                note="ASH has no kube-linter download table yet; install the "
+                "release by hand",
+            ),
+            severity=opsf.SeverityFacet(
+                severity_class=opsf.SeverityClass.DERIVED,
+                note="no native level; HIGH_SEVERITY_CHECKS rates by check name, "
+                "everything else is MEDIUM",
+            ),
+            silencing=opsf.SilencingFacet(
+                tool_side=(
+                    opsf.SilencingLayer(
+                        layer=opsf.SilencingLayerKind.INLINE_COMMENT,
+                        writer=opsf.SilencingWriter.REPOSITORY,
+                        honored=opsf.Honored.UNCONFIRMED,
+                        surface="ignore-check.kube-linter.io/<check> annotations "
+                        "on the scanned object",
+                        cite="kube_linter_scanner.py module header (Configuration)",
+                        reason="a run over a manifest carrying the annotation "
+                        "would settle whether the stub config leaves it honored",
+                    ),
+                ),
+            ),
+            identity=opsf.IdentityFacet(
+                fingerprint_class=opsf.FingerprintClass.POSITIONAL_ONLY,
+                note="identity is file, line and rule through the shared floor; "
+                "every result sits at line 1, so two objects in one file that "
+                "fail one check share an identity",
+            ),
+            extensibility=opsf.ExtensibilityFacet(
+                custom_rules=opsf.CustomRules.NONE,
+                env_prefixes=(),
+                options_surface="no options; ASH passes a stub config so the "
+                "checks are KubeLinter's defaults",
+            ),
+            exit_codes=opsf.ExitCodesFacet(
+                success_exit_codes=(0, 1),
+                semantics="0 is nothing found; 1 is found problems or failed, "
+                "told apart by whether the report is on disk; any other code fails",
+            ),
+            provenance=opsf.ProvenanceFacet(
+                tier=opsf.Tier.COMMUNITY_OPTIN,
+                source=opsf.ProvenanceSource.USER_INSTALLED,
+                selection_surfaces=("ash_kube_linter_plugins in ash_plugin_modules",),
+                upstream_license=(
+                    "Apache-2.0 (source: stackrox/kube-linter LICENSE at the "
+                    "v0.8.3 tag, as recorded in the module header)"
+                ),
+            ),
+            prerequisites=opsf.PrerequisitesFacet(
+                kinds=(opsf.Prerequisite.NONE,),
+                note="Kubernetes manifests, Helm charts or Kustomize directories "
+                "in the scan set",
+            ),
+        )
+    )
+
     def model_post_init(self, context: Any) -> None:
         if self.config is None:
             self.config = KubeLinterScannerConfig()
@@ -188,8 +393,22 @@ class KubeLinterScanner(ScannerPluginBase[KubeLinterScannerConfig]):
 
     @model_validator(mode="after")
     def setup_custom_install_commands(self) -> "KubeLinterScanner":
-        """Install from the pinned release asset in ``utils/tool_downloads.py``."""
-        self.custom_install_commands.update(pinned_tool_install_commands("kube-linter"))
+        """Install from the pinned release asset in ``utils/tool_downloads.py``.
+
+        ``tool_downloads.py`` holds no ``kube-linter`` pin yet (the pin is a shared
+        file this plugin does not edit), so ``pinned_tool_install_commands`` refuses
+        with ``ToolNotProvisionableError``. That refusal must not escape construction:
+        the scanner is then simply not provisionable by ASH, the table stays empty
+        (an absent platform, never an empty command list that reads as installable),
+        and ``validate_plugin_dependencies`` tells the user to install the tool. Once
+        the pin lands the same call fills the table with no change here.
+        """
+        try:
+            self.custom_install_commands.update(
+                pinned_tool_install_commands("kube-linter")
+            )
+        except ToolNotProvisionableError as exc:
+            ASH_LOGGER.debug("kube-linter is not provisionable by ASH yet: %s", exc)
         return self
 
     def _source_dir(self) -> Path:
@@ -377,10 +596,10 @@ class KubeLinterScanner(ScannerPluginBase[KubeLinterScannerConfig]):
         found = find_executable(self.command or "kube-linter")
         if not found:
             ASH_LOGGER.warning(
-                "kube-linter executable not found in PATH. Install it with "
-                "`ash dependencies install --config-overrides "
-                "'ash_plugin_modules+=[\"automated_security_helper.plugin_modules."
-                "ash_kube_linter_plugins\"]' --tool kube_linter`."
+                "kube-linter executable not found in PATH. ASH does not install it "
+                "yet (no pinned release in utils/tool_downloads.py); install "
+                f"kube-linter {PINNED_VERSION} from "
+                "https://github.com/stackrox/kube-linter/releases and put it on PATH."
             )
         return found is not None
 

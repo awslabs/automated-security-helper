@@ -15,13 +15,10 @@ ash_plugin_modules:
 
 ## Installing
 
-The container image does not include KubeLinter unless your build adds it. Locally:
-
-```bash
-ash dependencies install --config-overrides 'ash_plugin_modules+=["automated_security_helper.plugin_modules.ash_kube_linter_plugins"]' --tool kube_linter
-```
-
-This installs the pinned release (v0.8.3). Or put your own `kube-linter` on `PATH`.
+The container image does not include KubeLinter unless your build adds it, and ASH has
+no pinned release asset for it yet, so `ash dependencies install` cannot provision it.
+Install KubeLinter v0.8.3 (the release this plugin was written against) from its GitHub
+releases and put `kube-linter` on `PATH`.
 
 ## Configuration
 
