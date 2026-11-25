@@ -103,6 +103,15 @@
   warning (deprecated in v3.9, removed in v4.0) and rewritten to `.ash.lock` by
   `ash suppress add` or `refresh`. See
   [Lock a symbol suppression to its file](docs/content/how-to/suppress-findings.md#lock).
+- **ASFF findings of one secret carry one `ash/correlationId`.** ASH does not
+  deduplicate, so a secret that two scanners find is two findings with two Ids in
+  Security Hub, and nothing said they were about one secret. Each secret detection now
+  has a `ProductFields` value derived from `findings_scope`, the file, the start line and
+  the workspace project, without the scanner or the rule, so the findings of one secret
+  share it and can be filtered or grouped on it. Every finding is still sent, with the
+  `Id` it had. Only secret detections have the value: for another kind of finding the
+  place alone does not say which problem it is. In the `asff` and `aws-security-hub`
+  reporters.
 - **`default_scanners` sets the default scanners in a trusted config.** `only`
   replaces a mode's default selection in every mode and `add` extends a fixed one such as
   precommit's; a repository config, an MCP client or a patch cannot set it. The command
