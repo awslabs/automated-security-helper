@@ -54,6 +54,25 @@ WHEEL_URL = f"https://files.test.invalid/{FIXTURE_WHEEL_NAME}"
 pytestmark = pytest.mark.unit
 
 
+class CountedBody(io.BytesIO):
+    """A served body that counts the bytes actually read from it.
+
+    Counted on the object (not read back with ``tell()``) because the
+    download's ``with`` block closes the response, after which ``tell()``
+    raises; the count survives the close, so a test can measure whether a
+    transfer was aborted (consumed < the payload) or drained whole.
+    """
+
+    def __init__(self, body: bytes):
+        super().__init__(body)
+        self.consumed = 0
+
+    def read(self, *args, **kwargs) -> bytes:
+        data = super().read(*args, **kwargs)
+        self.consumed += len(data)
+        return data
+
+
 class CountingOpener:
     """Serves pinned payloads in ``download_utils._open_url``'s shape, counting."""
 
@@ -61,15 +80,15 @@ class CountingOpener:
         self.payloads = payloads
         self.calls: List[str] = []
         #: Every response handed out, so a test can measure how much of a body
-        #: was actually consumed (``.tell()``): an aborted transfer reads less
-        #: than the payload, a completed one reads it whole.
-        self.responses: List[io.BytesIO] = []
+        #: was actually consumed: an aborted transfer reads less than the
+        #: payload, a completed one reads it whole.
+        self.responses: List[CountedBody] = []
 
-    def __call__(self, url: str, timeout: float) -> io.BytesIO:
+    def __call__(self, url: str, timeout: float) -> CountedBody:
         self.calls.append(url)
         if url not in self.payloads:
             raise AssertionError(f"unexpected fetch of {url}")
-        response = io.BytesIO(self.payloads[url])
+        response = CountedBody(self.payloads[url])
         self.responses.append(response)
         return response
 
@@ -397,7 +416,7 @@ def test_oversize_stream_is_aborted_at_the_cap(harvest_env, tmp_path: Path) -> N
     assert HARVEST_SKIPPED_RULE in record.reason
     assert "max_sdist_mb" in record.reason
     (response,) = opener.responses
-    assert response.tell() < len(oversized), (
+    assert response.consumed < len(oversized), (
         "the transfer must be ABORTED at the bound, not completed and discarded"
     )
     roots = [output, tmp_path / "xdg-cache"]

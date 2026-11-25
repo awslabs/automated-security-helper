@@ -37,6 +37,14 @@ class _Response(io.BytesIO):
         #: ``_declared_body_length`` reads ``length`` first, as http.client
         #: parses it: None for a chunked or unusable value, else the byte count.
         self.length = declared
+        #: Bytes the download actually read. Counted here because the download's
+        #: ``with`` block closes the response, after which ``tell()`` raises.
+        self.consumed = 0
+
+    def read(self, *args, **kwargs) -> bytes:
+        data = super().read(*args, **kwargs)
+        self.consumed += len(data)
+        return data
 
 
 class _Opener:
@@ -83,7 +91,7 @@ def test_undeclared_body_is_aborted_once_the_bound_passes(
     with pytest.raises(DownloadTooLargeError):
         download_utils.download_file(URL, tmp_path, max_bytes=1024 * 1024)
 
-    assert response.tell() < len(body), "the stream must be cut, not drained"
+    assert response.consumed < len(body), "the stream must be cut, not drained"
     assert opener.calls == 1, "an oversize body is final, never retried"
     assert list(tmp_path.iterdir()) == [], "nothing may land at the destination"
 
