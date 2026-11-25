@@ -12,6 +12,10 @@ the same operation, minus the waiting that is not the work.
 The scan itself is unchanged. The forked child executes the same console entry a cold run
 executes, with your command line, your working directory and your terminal, so its output,
 reports and exit code are the cold run's. Express is an accelerator, never a different scan.
+That covers every asset kind by construction: a scan of a
+[container image](scan-container-images.md) under express is the same image scan, because
+the child is the cold run and inherits the environment -- the engine socket included --
+that the cold run would have used. Nothing about images is configured here.
 
 Unix only (Linux and macOS). On Windows, and anywhere else without unix-domain sockets,
 there is no express mode: `ash express start` refuses with a clear message,
