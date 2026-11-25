@@ -573,7 +573,7 @@ def test_the_commands_show_no_value_read_from_the_environment(
             command, "--config", str(CONFIGS[shape](work)), "--source-dir", str(work)
         )
         _assert_hidden(output)
-        assert f"Path '{LITERAL_DIRECTORY}'" in output, (shape, output)
+        assert f"Path '**/{LITERAL_DIRECTORY}'" in output, (shape, output)
         assert ENVIRONMENT_VALUE_SHOWN in output, (shape, output)
 
 

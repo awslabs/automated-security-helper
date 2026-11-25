@@ -386,9 +386,11 @@ _DENIED_CASES: Dict[str, tuple[Dict[str, Any], Dict[str, Any]]] = {
             "value": {"rule_id": "*", "path": "**", "reason": "silence everything"},
         },
         {
-            "exclusions": [
-                {"rule_id": "*", "path": "**", "reason": "silence everything"}
-            ]
+            "global_settings": {
+                "exclusions": [
+                    {"rule_id": "*", "path": "**", "reason": "silence everything"}
+                ]
+            }
         },
     ),
     "/global_settings/mcp": (
