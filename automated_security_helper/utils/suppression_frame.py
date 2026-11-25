@@ -101,6 +101,8 @@ def line_span_spec() -> "FrameSpec":
             "package_name": host_predicate + " (part of the rest column)",
             "package_version": host_predicate + " (part of the rest column)",
             "package_path": host_predicate + " (part of the rest column)",
+            "image": "gated on the host (_image_holds), a glob over the finding's "
+            "image reference and digest; never a column",
             "scope": "gated on the host (_scope_gate), carried as the rest "
             "and engine columns",
             "resource_id": "sugar folded into scope at validation; gated with it",
