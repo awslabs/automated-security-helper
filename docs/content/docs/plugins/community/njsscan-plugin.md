@@ -62,6 +62,12 @@ There is no option that points njsscan at a configuration file. njsscan reads a 
 
 njsscan drops a finding when its line carries a `// njsscan-ignore: <rule_id>` comment. It has no flag that turns this off, so ASH cannot: a finding hidden by such a comment is neither reported nor counted as suppressed. Review those comments in your own code review, and use ASH suppressions, which are reported and counted, for anything that should stay suppressed.
 
+## Files njsscan does not read
+
+ASH passes njsscan a configuration of its own that sets nothing, so a `.njsscan` file in the scanned tree is not read: its `ignore-rules`, `ignore-paths`, `severity-filter` and `severity-overrides` have no effect. njsscan's own built-in lists stay in force, and they leave out `node_modules`, `bower_components`, `fixtures`, `spec`, `example`, `.min.js` files and a few well-known minified libraries by name. Code under those paths is not scanned.
+
+njsscan reads neither a symbolic link to a file nor a link to a directory (measured with njsscan 1.0.2 over a link to a file outside the tree and a link to a directory outside it, with a real file in the tree as the control), so a link that leaves the scanned tree cannot put outside content in a report.
+
 ## Severity
 
 njsscan gives each rule a severity and writes it as the SARIF level. ASH sets the level and its own `issue_severity` together:
