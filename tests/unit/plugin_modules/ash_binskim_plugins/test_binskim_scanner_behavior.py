@@ -479,7 +479,10 @@ class TestFacetsRegister:
 
         declared = vars(BinskimScanner).get(SCANNER_FACETS_ATTR)
         assert isinstance(declared, ScannerFacets)
-        assert declared.rule_id.state is FacetState.MAPPED
+        # Every cell is n/a until a captured BinSkim log exists (see the README
+        # in tests/test_data/scanners/binskim); the register says so, not MAPPED.
+        assert declared.rule_id.state is FacetState.NA
+        assert "sample run would settle it" in (declared.rule_id.reason or "")
         assert declared.resource_id.state is FacetState.NA
 
     def test_the_operational_row_mirrors_the_class(self, tree, tmp_path):
