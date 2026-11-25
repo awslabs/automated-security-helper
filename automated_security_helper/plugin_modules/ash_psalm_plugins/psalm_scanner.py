@@ -241,9 +241,11 @@ class PsalmScanner(ScannerPluginBase[PsalmScannerConfig]):
             reason="output not read; a sample run would settle it",
         ),
         tags=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field='rule properties "tags" (security or maintainability); '
-            "the adapter copies the family tags onto each result",
+            state=FacetState.DROPPED,
+            native_field='rule properties "tags" (security or maintainability)',
+            reason="the native result carries no tags of its own; the adapter reads "
+            "the rule tag only to classify the family and then writes its own "
+            "security/taint or maintainability tags onto each result",
         ),
         extras=FacetDecl(
             state=FacetState.MAPPED,
