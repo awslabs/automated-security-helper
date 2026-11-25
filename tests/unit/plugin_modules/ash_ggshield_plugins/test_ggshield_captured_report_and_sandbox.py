@@ -137,13 +137,10 @@ class TestCapturedReport:
             for loc in result.relatedLocations
         ]
         assert related == ["app/config.py"]
-        # The invocation record keeps the command line, which names the scan path;
-        # the artifact locations are what the findings carry.
-        uris = [
-            part
-            for part in re.findall(r'"uri":"([^"]*)"', report.model_dump_json())
-            if part
-        ]
+        # Only the findings' own locations: the run's invocation record keeps the
+        # command line and the working directory, which name the scan path.
+        dumped = result.model_dump_json()
+        uris = [part for part in re.findall(r'"uri":"([^"]*)"', dumped) if part]
         assert uris
         assert not [u for u in uris if tree.absolute().as_posix() in u], uris
 
