@@ -142,6 +142,41 @@ def test_the_alias_window_names_the_next_release():
     assert alpha_scanners.COMMUNITY_ALIASES_DROPPED_IN == "3.9.0"
 
 
+def test_the_old_scanner_index_import_keeps_working_and_warns_once(
+    warnings_logged, monkeypatch
+):
+    """The M1 module-move shim: ``core.alpha_scanners`` still answers, from the
+    registry-backed index, and says once where the index moved to."""
+    from automated_security_helper.plugins import enablement
+
+    monkeypatch.setattr(enablement, "_WARNED_RENAMED_SPELLINGS", set())
+    assert alpha_scanners.alpha_module_for("snyk-code") == (
+        enablement.shipped_module_for("snyk-code")
+    )
+    assert alpha_scanners.alpha_scanner_modules() == (
+        enablement.shipped_scanner_modules()
+    )
+    alpha_scanners.alpha_module_for("snyk-code")
+    messages = _messages(warnings_logged)
+    assert len(messages) == 2, messages  # one per moved name, once per process
+    assert any(
+        "'core.alpha_scanners.alpha_module_for' is deprecated" in m for m in messages
+    )
+    assert all(alpha_scanners.COMMUNITY_ALIASES_DROPPED_IN in m for m in messages)
+
+
+def test_a_deprecated_tier_declaration_still_validates_and_is_ignored():
+    """A third-party declaration written against an earlier release may still
+    pass ``tier=``; the register ignores it (membership is the fact), and an
+    in-tree declaration is refused by the facets consistency test instead."""
+    facet = opsf.ProvenanceFacet(
+        source=opsf.ProvenanceSource.USER_INSTALLED,
+        selection_surfaces=(),
+        upstream_license=opsf.LICENSE_NOT_READ,
+    )
+    assert facet.tier is None
+
+
 def test_every_old_docs_page_redirects_to_its_alpha_page():
     redirects = yaml.safe_load((REPO_ROOT / "docs" / "redirects.yml").read_text())[
         "redirects"

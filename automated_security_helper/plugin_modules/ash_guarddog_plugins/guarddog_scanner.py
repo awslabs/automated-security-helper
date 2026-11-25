@@ -991,7 +991,6 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
                 semantics="the base default {0, 1}; the adapter notes a registry-lookup-failure exit",
             ),
             provenance=opsf.ProvenanceFacet(
-                tier=opsf.Tier.ALPHA_OPTIN,
                 source=opsf.ProvenanceSource.PYPI_VIA_UV,
                 selection_surfaces=(
                     "ash_guarddog_plugins in ash_plugin_modules",

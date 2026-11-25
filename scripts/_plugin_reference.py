@@ -31,11 +31,13 @@ built is still listed, with the instance-only columns marked as not determined.
 
 Built-in and alpha
 ------------------
-``ash_builtin`` is the built-in package. A scanner from any other package under
-``plugin_modules/`` is an alpha scanner, which is how
-``core/alpha_scanners.py`` decides which module to suggest for a scanner
-that was not loaded. Reporters and converters outside ``ash_builtin`` (the AWS
-reporters) are not called alpha plugins; the pages name their module.
+The grouping is registry membership
+(``automated_security_helper/plugins/registries.py``): a ``CORE`` member's
+plugins are built in, an ``ALPHA`` member's scanners are grouped as alpha, and
+a shipped package in no registry (the AWS reporters) or a custom module is
+named by its module with no tier label. The same membership is what
+``plugins/enablement.py`` reads to suggest a module for a scanner that was
+not loaded.
 
 Options tables
 --------------
@@ -78,8 +80,13 @@ from generate_config_reference import (
     unknown_keys_text,
 )
 
+from automated_security_helper.plugins.registries import CORE, registry_of
+
 PLUGIN_ROOT = "automated_security_helper.plugin_modules"
-BUILTIN_PACKAGE = f"{PLUGIN_ROOT}.ash_builtin"
+#: Derived from registry membership (the core registry's one member today):
+#: this generator is the docs/inventory grouping surface, and it reads
+#: membership instead of hand-knowing a package name.
+BUILTIN_PACKAGE = CORE.members[0]
 REGISTRY_LISTS = {
     "scanner": "ASH_SCANNERS",
     "reporter": "ASH_REPORTERS",
@@ -113,7 +120,7 @@ class Plugin:
 
     @property
     def builtin(self) -> bool:
-        return self.package == BUILTIN_PACKAGE
+        return registry_of(self.package) is CORE
 
 
 def _declared_config(cls: type) -> Optional[type]:
@@ -304,7 +311,13 @@ def module_name(plugin: Plugin) -> str:
 
 
 def _origin(plugin: Plugin) -> str:
-    return "alpha module" if plugin.kind == "scanner" else "plugin module"
+    """The grouping label, from registry membership: an ``ALPHA`` member's
+    pages say "alpha module"; a shipped package in no registry (the AWS
+    reporters) and a custom module are a plain "plugin module"."""
+    registry = registry_of(plugin.package)
+    if registry is not None and not plugin.builtin:
+        return f"{registry.name} module"
+    return "plugin module"
 
 
 def package_short(plugin: Plugin) -> str:

@@ -25,6 +25,10 @@ from typing import (
 
 from automated_security_helper.core.exceptions import ASHConfigValidationError
 from automated_security_helper.plugins import ash_plugin_manager
+from automated_security_helper.plugins.enablement import (
+    loads_unnamed,
+    modules_loading_unnamed,
+)
 from automated_security_helper.plugins.plugin_manager import (
     callable_module,
     callback_display_name,
@@ -116,7 +120,7 @@ def load_internal_plugins(record: Optional[PluginLoadRecord] = None):
     """
     if record is None:
         record = {}
-    internal_modules = [INTERNAL_PLUGIN_PACKAGE]
+    internal_modules = list(modules_loading_unnamed())
 
     loaded_plugins = {"converters": [], "scanners": [], "reporters": []}
 
@@ -357,18 +361,10 @@ def _namespace_package_refusal(module_path: str) -> Optional[str]:
     return None
 
 
-#: ASH's built-in plugin package. Every scan selects its plugins without naming it.
-BUILTIN_PLUGIN_PACKAGE = "automated_security_helper.plugin_modules.ash_builtin"
-
-
-def _is_builtin_plugin_module(module: str) -> bool:
-    """Whether *module* is in ``ash_builtin``, whose plugins every scan uses.
-
-    Only ``ash_builtin``: the other packages under ``plugin_modules`` ship with ASH
-    but take part in a scan only when that scan names them, and no ASH module outside
-    ``plugin_modules`` defines a plugin.
-    """
-    return _module_within(module, BUILTIN_PLUGIN_PACKAGE)
+# Which modules a scan selects without naming them is registry membership,
+# read through the one enablement-policy module
+# (plugins.enablement.loads_unnamed): the other packages ASH ships take part
+# in a scan only when that scan names them, exactly as a custom plugin does.
 
 
 def _bound_in(module_name: str) -> List[Any]:
@@ -429,7 +425,7 @@ def scan_plugin_filter(plugin_modules: Iterable[str]) -> Callable[[Any], bool]:
 
     The plugin registry and the event-handler lists are process-wide: a module
     stays registered after the scan that imported it, and ``list_scanners``
-    imports the alpha packages ASH ships so it can describe them. A scan
+    imports the opt-in packages ASH ships so it can describe them. A scan
     therefore selects from them through this filter rather than taking everything
     registered, so it gets ASH's built-in plugins plus, for each module its own
     ``ash_plugin_modules`` names, the classes and handlers that are:
@@ -475,7 +471,7 @@ def scan_plugin_filter(plugin_modules: Iterable[str]) -> Callable[[Any], bool]:
 
     def admits(plugin: Any) -> bool:
         module = callable_module(plugin) or ""
-        if _is_builtin_plugin_module(module):
+        if loads_unnamed(module):
             return True
         if module in modules:
             return True
@@ -559,10 +555,7 @@ def scan_handler_filter(
             # longer be re-read (a one-shot iterator the loader consumed), so
             # the record decides, not the re-read. ASH's own package counts as
             # named, as scan_plugin_filter counts it.
-            return any(
-                owner in names or _is_builtin_plugin_module(owner)
-                for owner in declarers
-            )
+            return any(owner in names or loads_unnamed(owner) for owner in declarers)
         return not inside_namespace
 
     return admits
@@ -2098,9 +2091,11 @@ def load_plugins(plugin_context=None) -> Dict[str, List[Any]]:
     return all_plugins
 
 
-#: The plugin package every run loads, whatever its config lists. The same one
-#: load_internal_plugins imports.
-INTERNAL_PLUGIN_PACKAGE = "automated_security_helper.plugin_modules.ash_builtin"
+#: The plugin package every run loads, whatever its config lists. Derived from
+#: registry membership (the core registry's one member today), never declared
+#: here: kept as a name because tests and callers address "the internal
+#: package" through it.
+INTERNAL_PLUGIN_PACKAGE = modules_loading_unnamed()[0]
 
 
 def plugins_of(plugin_modules: Iterable[object]) -> Callable[[Any], bool]:
@@ -2129,7 +2124,7 @@ def plugins_of(plugin_modules: Iterable[object]) -> Callable[[Any], bool]:
         split_plugin_modules,
     )
 
-    roots = (INTERNAL_PLUGIN_PACKAGE, *split_plugin_modules(plugin_modules))
+    roots = (*modules_loading_unnamed(), *split_plugin_modules(plugin_modules))
     # Keyed by id for identity matching; the values keep each object alive
     # while the filter exists, so no key can be reused by another object (the
     # shape scan_plugin_filter uses): a listed entry a custom iterable built

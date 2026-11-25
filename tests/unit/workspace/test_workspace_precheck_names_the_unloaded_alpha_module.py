@@ -12,14 +12,14 @@ builders was missing here: a request naming an alpha scanner ASH ships whose
 plugin module this run did not load (``--scanners snyk-code`` without
 ``ash_snyk_plugins`` listed) was refused as a spelling error, while the engine
 and the scan phase name the module to add
-(``core.scanner_selection.alpha_scanner_refusal``). The operator read the
+(``plugins.enablement.unloaded_shipped_refusal``). The operator read the
 workspace refusal, checked a name that was right, and got the module hint only
 from a single scan.
 
 The contract these cases pin:
 
 - the workspace pre-check's text for such a request is byte for byte the text
-  ``alpha_scanner_refusal`` builds from the same inputs, so it names the
+  ``unloaded_shipped_refusal`` builds from the same inputs, so it names the
   module and reads as the engine's;
 - a misspelled name requested beside it is named in the same refusal;
 - a request that resolves to a declared scanner is not refused (control), and a
@@ -31,8 +31,8 @@ from __future__ import annotations
 import pytest
 
 from automated_security_helper.core.exceptions import ScannerSelectionError
-from automated_security_helper.core.scanner_selection import (
-    alpha_scanner_refusal,
+from automated_security_helper.plugins.enablement import (
+    unloaded_shipped_refusal,
 )
 from automated_security_helper.plugins import ash_plugin_manager
 from automated_security_helper.workspace.execution import (
@@ -90,10 +90,10 @@ def test_an_unloaded_alpha_scanner_is_refused_in_the_engines_words(
         _precheck(tmp_path, "snyk-code")
 
     text = str(refused.value)
-    assert text == alpha_scanner_refusal(
+    assert text == unloaded_shipped_refusal(
         ["snyk-code"], ["bandit"], one_declared_scanner
     )
-    assert "alpha scanner" in text
+    assert "is provided by" in text and "did not load" in text
     assert "ash_snyk_plugins" in text
     assert "--ash-plugin-modules" in text
     assert "check the spelling" not in text

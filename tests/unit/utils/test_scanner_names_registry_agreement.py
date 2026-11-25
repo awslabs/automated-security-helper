@@ -41,9 +41,7 @@ vendored package list, so neither the declared set nor this test can see it.
 
 import pytest
 
-from automated_security_helper.core.scanner_inventory import (
-    _VENDORED_SCANNER_PLUGIN_PACKAGES,
-)
+from automated_security_helper.plugins.enablement import modules_needing_naming
 from automated_security_helper.models.flat_vulnerability import (
     _GENERIC_ASH_TOOL_NAME,
     _KNOWN_SCANNER_TAGS,
@@ -92,7 +90,7 @@ def _registry_scanner_classes():
     )
 
     internal = load_internal_plugins()
-    external = load_additional_plugin_modules(list(_VENDORED_SCANNER_PLUGIN_PACKAGES))
+    external = load_additional_plugin_modules(list(modules_needing_naming()))
 
     classes = []
     for cls in list(internal.get("scanners", [])) + list(external.get("scanners", [])):

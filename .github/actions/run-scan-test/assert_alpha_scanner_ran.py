@@ -28,6 +28,23 @@ def main(argv=None) -> int:
     parser.add_argument("--min-findings", type=int, default=1)
     args = parser.parse_args(argv)
 
+    # The cell exists to prove a member of the ALPHA registry ran, so the
+    # membership is read from the declaration rather than hand-known here: a
+    # workflow cell naming a scanner that is not (or no longer) an ALPHA
+    # member fails until the cell and the registry agree.
+    from automated_security_helper.plugins.enablement import shipped_module_for
+    from automated_security_helper.plugins.registries import ALPHA
+
+    module = shipped_module_for(args.scanner)
+    if module is None or module not in ALPHA.members:
+        print(
+            f"FAIL: {args.scanner} is not provided by an ALPHA registry member "
+            f"(resolved module: {module}); update the workflow cell or move "
+            "the membership in automated_security_helper/plugins/registries.py",
+            file=sys.stderr,
+        )
+        return 1
+
     if args.exit_code != args.expect_exit:
         print(
             f"FAIL: the scan exited {args.exit_code}, expected {args.expect_exit}",

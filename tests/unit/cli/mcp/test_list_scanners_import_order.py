@@ -138,16 +138,8 @@ def test_a_pattern_of_the_configured_shape_would_catch_the_probe():
     assert fnmatch.fnmatch(PROBE.name, "list_scanners_*.py")
 
 
-@pytest.mark.unit
-def test_the_vendored_list_is_every_in_tree_alpha_module():
-    """A new alpha module that is not listed here is missing from list_scanners."""
-    from automated_security_helper.cli.mcp_tools import (
-        _VENDORED_SCANNER_PLUGIN_PACKAGES,
-    )
-    from automated_security_helper.core.alpha_scanners import (
-        alpha_scanner_modules,
-    )
-
-    assert set(_VENDORED_SCANNER_PLUGIN_PACKAGES) == set(
-        alpha_scanner_modules().values()
-    )
+# The old equality pin between the inventory's hand list and the AST-derived
+# module map retired with both carriers: membership is declared once in
+# automated_security_helper/plugins/registries.py, and
+# tests/unit/plugins/test_registries.py pins the declaration against the
+# shipped package directories.

@@ -2552,7 +2552,7 @@ def wizard(
 
     Reads the existing config (the one a scan of --source-dir, or the current
     directory, would use, or --config), walks through scanner, reporter,
-    offline-mode, and alpha-plugin settings interactively, then writes the
+    offline-mode, and optional plugin-module settings interactively, then writes the
     result back. With no config yet, it creates .ashrc.yaml there.
     """
     get_logger(
@@ -2755,8 +2755,8 @@ def wizard(
         default=current_offline,
     )
 
-    # --- 5. Alpha plugin modules ---
-    console.print("\n[bold]Alpha plugin modules[/bold]")
+    # --- 5. Optional plugin modules ---
+    console.print("\n[bold]Optional plugin modules[/bold]")
     console.print(
         "  Provide Python module paths for additional plugins, "
         "one per line. Leave blank to finish."

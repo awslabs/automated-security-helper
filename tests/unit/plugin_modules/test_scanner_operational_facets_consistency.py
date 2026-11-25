@@ -493,17 +493,26 @@ _SOURCE_FOR_RUNTIME = {
 
 
 @pytest.mark.parametrize("cls", SCANNER_CLASSES, ids=lambda c: c.__name__)
-def test_provenance_and_tier_agree_with_the_runtime_and_the_package(cls) -> None:
+def test_provenance_agrees_with_the_runtime_and_declares_no_tier(cls) -> None:
     facets = _ops(cls)
     assert facets.provenance.source in _SOURCE_FOR_RUNTIME[facets.runtime.kind], (
         f"{facets.scanner_name}: a {facets.runtime.kind.value} runtime cannot "
         f"have provenance {facets.provenance.source.value}"
     )
-    builtin = ".plugin_modules.ash_builtin." in f".{cls.__module__}."
-    expected = opsf.Tier.BUILTIN_DEFAULT if builtin else opsf.Tier.ALPHA_OPTIN
-    assert facets.provenance.tier is expected, (
-        f"{cls.__module__} implies {expected.value}, the register says "
-        f"{facets.provenance.tier.value}"
+    # A scanner's maturity tier is registry membership, declared once in the
+    # member lists: an in-tree scanner that declares the deprecated per-plugin
+    # field is re-growing the parallel carrier the registries deleted.
+    assert facets.provenance.tier is None, (
+        f"{cls.__module__} declares tier={facets.provenance.tier!r}; the tier "
+        "is registry membership (plugins.registries), never a per-scanner "
+        "declaration"
+    )
+    # And every in-tree scanner's module is a member of a shipped registry,
+    # read uniformly (which one is not this test's business).
+    from automated_security_helper.plugins.registries import registry_of
+
+    assert registry_of(cls.__module__) is not None, (
+        f"{cls.__module__} is in no shipped registry's member list"
     )
 
 

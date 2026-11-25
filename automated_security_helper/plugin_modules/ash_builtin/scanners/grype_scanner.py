@@ -646,7 +646,6 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
                 semantics="per the adapter's own comment at the success_exit_codes declaration",
             ),
             provenance=opsf.ProvenanceFacet(
-                tier=opsf.Tier.BUILTIN_DEFAULT,
                 source=opsf.ProvenanceSource.PINNED_RELEASE_BINARY,
                 selection_surfaces=(),
                 upstream_license=(

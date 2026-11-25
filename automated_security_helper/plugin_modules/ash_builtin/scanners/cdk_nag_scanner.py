@@ -1317,7 +1317,6 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                 semantics="the base default {0, 1}; the evaluation is in-process, so there is no tool exit",
             ),
             provenance=opsf.ProvenanceFacet(
-                tier=opsf.Tier.BUILTIN_DEFAULT,
                 source=opsf.ProvenanceSource.PYPI_PINNED_DEPENDENCY,
                 selection_surfaces=("options nag packs",),
                 upstream_license=(

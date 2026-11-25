@@ -8,7 +8,7 @@ native output can map into the shared pipeline. This module is its companion
 for the operational side: network behavior, output types, scan-target types,
 runtime dependency, platform support, severity fidelity, suppression surfaces,
 finding-identity stability, rules extensibility, exit-code semantics,
-provenance and tier, and input prerequisites. Every scanner class declares a
+provenance, and input prerequisites. Every scanner class declares a
 :class:`ScannerOperationalFacets` under :data:`OPERATIONAL_FACETS_ATTR`, read
 from the class's own ``vars()`` exactly as the mapping register is.
 
@@ -650,11 +650,21 @@ class ExitCodesFacet(_Frozen):
 
 
 # --------------------------------------------------------------------------
-# M. Tool provenance and default tier
+# M. Tool provenance
 # --------------------------------------------------------------------------
 
 
 class Tier(str, Enum):
+    """The deprecated per-scanner tier vocabulary, accepted until 3.9.0.
+
+    A scanner's maturity tier is registry membership
+    (:mod:`automated_security_helper.plugins.registries`), declared once in the
+    member lists and nowhere else. This enum remains only so a declaration
+    written against an earlier release -- a third-party plugin passing
+    ``tier=`` -- still validates during the alias window; the value is ignored.
+    It retires with the window (``COMMUNITY_ALIASES_DROPPED_IN``).
+    """
+
     BUILTIN_DEFAULT = "builtin_default"
     ALPHA_OPTIN = "alpha_optin"
 
@@ -681,7 +691,12 @@ class ProvenanceSource(str, Enum):
 
 
 class ProvenanceFacet(_Frozen):
-    tier: Tier
+    #: Deprecated and ignored: the maturity tier is registry membership, read
+    #: from ``plugins.registries`` by whoever renders the register, never a
+    #: per-scanner declaration. Accepted here (and mapped through the alias
+    #: hook) until the alias window closes, so a declaration written against an
+    #: earlier release still validates; in-tree scanners do not declare it.
+    tier: Optional[Tier] = None
     source: ProvenanceSource
     #: Switches below the tier: sub-scanners, opt-in modes.
     selection_surfaces: tuple[str, ...]

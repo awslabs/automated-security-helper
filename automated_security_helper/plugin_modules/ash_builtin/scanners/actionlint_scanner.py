@@ -1432,7 +1432,6 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
                 semantics="the base default {0, 1}; an exit code that disagrees with the findings is raised, not read as clean",
             ),
             provenance=opsf.ProvenanceFacet(
-                tier=opsf.Tier.BUILTIN_DEFAULT,
                 source=opsf.ProvenanceSource.PINNED_RELEASE_BINARY,
                 selection_surfaces=(),
                 upstream_license=(

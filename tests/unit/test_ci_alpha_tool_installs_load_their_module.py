@@ -23,7 +23,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from automated_security_helper.core.alpha_scanners import alpha_module_for
+from automated_security_helper.plugins.enablement import shipped_module_for
 
 pytestmark = pytest.mark.unit
 
@@ -83,7 +83,7 @@ def problems_in(command: str) -> "list[str]":
             loaded.add(value)
     found = []
     for tool in tools:
-        module = alpha_module_for(tool)
+        module = shipped_module_for(tool)
         if module and module not in loaded:
             found.append(f"--tool {tool} without {module}")
     return found

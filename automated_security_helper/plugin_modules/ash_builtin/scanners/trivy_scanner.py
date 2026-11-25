@@ -574,7 +574,6 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
                 semantics="trivy reports findings in the file, not through its exit code",
             ),
             provenance=opsf.ProvenanceFacet(
-                tier=opsf.Tier.BUILTIN_DEFAULT,
                 source=opsf.ProvenanceSource.PINNED_RELEASE_BINARY,
                 selection_surfaces=("options.scanners (non-vuln scanners are opt-in)",),
                 upstream_license=(

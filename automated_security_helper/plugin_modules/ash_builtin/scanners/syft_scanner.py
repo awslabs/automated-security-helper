@@ -295,7 +295,6 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
                 semantics="a completed run exits 0; syft installs no findings-found exit",
             ),
             provenance=opsf.ProvenanceFacet(
-                tier=opsf.Tier.BUILTIN_DEFAULT,
                 source=opsf.ProvenanceSource.PINNED_RELEASE_BINARY,
                 selection_surfaces=(),
                 upstream_license=(

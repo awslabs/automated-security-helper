@@ -57,7 +57,7 @@ The set covers every scanner ASH ships, which is the sixteen in
 ``plugin_modules/ash_builtin/scanners`` plus the scanners of the in-tree packages
 that ``load_internal_plugins()`` does not load: the vendored three
 (``ferret-scan``, ``snyk-code``, ``trivy-repo``) and the Betterleaks, GuardDog and
-hadolint alpha modules. They are included because their results hit the same fallback
+hadolint opt-in modules. They are included because their results hit the same fallback
 as a builtin scanner's, and because a gate that passed only by hand-excluding
 shipped scanners would be a weaker gate.
 

@@ -2440,11 +2440,11 @@ async def list_scanners() -> list:
     still fail on a given target, and a scan may skip a scanner for reasons of
     configuration rather than dependencies.
 
-    The list covers the built-in scanners and the alpha scanners ASH ships
-    (ferret-scan, snyk-code, trivy-repo). Listing an alpha scanner does not add
+    The list covers the built-in scanners and the opt-in scanners ASH ships
+    (ferret-scan, snyk-code, trivy-repo). Listing an opt-in scanner does not add
     it to any scan: a scan runs the built-in scanners plus those of the plugin
-    modules its own ash_plugin_modules names, so an alpha scanner runs only in a
-    scan whose config or --ash-plugin-modules names its module.
+    modules its own ash_plugin_modules names, so an opt-in scanner runs only in
+    a scan whose config or --ash-plugin-modules names its module.
     """
     try:
         # Off the event loop, as check_installation runs the same inventory: the

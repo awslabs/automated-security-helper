@@ -4341,7 +4341,7 @@ def _builtin_scanner_classes() -> list:
     """The scanners ASH ships in ash_builtin: the set a default scan runs.
 
     Not ``_loaded_scanner_classes``, which list_scanners uses: that also imports
-    the alpha plugin packages and every installed ``ash_*_plugins``
+    the shipped opt-in plugin packages and every installed ``ash_*_plugins``
     distribution, and an installation check has no reason to run their code.
     """
     from automated_security_helper.plugin_modules.ash_builtin import ASH_SCANNERS
@@ -4874,7 +4874,6 @@ def mcp_diff_scan_results(
 # ---------------------------------------------------------------------------
 from automated_security_helper.core.scanner_inventory import (  # noqa: E402
     _ABSENT_VERSION_MARKERS,
-    _VENDORED_SCANNER_PLUGIN_PACKAGES,
     _declared_config_class,
     _discover_external_scanner_plugin_packages,
     _loaded_scanner_classes,
@@ -4888,7 +4887,6 @@ from automated_security_helper.core.scanner_inventory import (  # noqa: E402
 # unused" for the ones this module does not itself reference.
 __all_scanner_inventory_reexports__ = (
     _ABSENT_VERSION_MARKERS,
-    _VENDORED_SCANNER_PLUGIN_PACKAGES,
     _declared_config_class,
     _discover_external_scanner_plugin_packages,
     _normalized_version,

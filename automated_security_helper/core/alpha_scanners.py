@@ -1,40 +1,26 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Which in-tree alpha plugin module provides each alpha scanner.
+"""Deprecated shim: the shipped-scanner index moved to ``plugins.enablement``.
 
-Alpha is the maturity tier of the opt-in scanners ASH ships but does not yet
-promote as supported. (Before the tier was renamed this module was
-``core.community_scanners``.)
+Registry membership is now declared in
+:mod:`automated_security_helper.plugins.registries`, and the name-to-module
+index plus the unloaded-name hint live beside the enablement policy in
+:mod:`automated_security_helper.plugins.enablement`. The two functions below
+keep the old import path working for one release
+(:data:`COMMUNITY_ALIASES_DROPPED_IN`) and warn once per process; new code
+calls ``enablement.shipped_module_for`` / ``enablement.shipped_scanner_modules``.
 
-Why this exists
----------------
-The alpha scanners that ship inside ASH (``plugin_modules/ash_*_plugins``)
-are loaded only when their module is listed in ``ash_plugin_modules`` or passed
-with ``--ash-plugin-modules``. A ``--scanners snyk-code`` run without
-``ash_snyk_plugins`` listed names a scanner ASH has but did not load, and the
-generic "no registered scanner matches" message reads as a typo. This module lets
-the scan phase say which module to add instead.
-
-How
----
-The mapping is read from the scanner source files, not by importing the
-modules: importing one runs its ``@ash_scanner_plugin`` registrations, which
-would load the scanners this function exists to report as not loaded. A
-scanner's selectable name is the ``name: Literal["..."]`` default of its config
-class, a subclass of ``ScannerPluginConfigBase``.
+This module also keeps the community-tier alias warning from the tier rename
+(the tier of the opt-in scanners ASH ships was called "community" before it
+was renamed), which retires on the same release.
 """
 
-import ast
-import functools
-from pathlib import Path
 from typing import Dict, Optional
 
-_PLUGIN_MODULES = Path(__file__).resolve().parent.parent / "plugin_modules"
-_PACKAGE = "automated_security_helper.plugin_modules"
-
-#: The release that stops accepting the pre-rename "community" spellings. They are
-#: aliases for one release: accepted, mapped to the alpha spelling, and warned about.
+#: The release that stops accepting the pre-rename "community" spellings -- and
+#: this shim module with them. The old spellings are aliases for one release:
+#: accepted, mapped to the new spelling, and warned about.
 COMMUNITY_ALIASES_DROPPED_IN = "3.9.0"
 
 _WARNED_COMMUNITY_ALIASES: set[str] = set()
@@ -55,43 +41,34 @@ def warn_community_alias(old: str, new: str) -> None:
     )
 
 
-def _scanner_config_names(source: str) -> list[str]:
-    """``name`` defaults of every ``ScannerPluginConfigBase`` subclass in *source*."""
-    names = []
-    for node in ast.walk(ast.parse(source)):
-        if not isinstance(node, ast.ClassDef):
-            continue
-        bases = {
-            b.id if isinstance(b, ast.Name) else getattr(b, "attr", None)
-            for b in node.bases
-        }
-        if "ScannerPluginConfigBase" not in bases:
-            continue
-        for stmt in node.body:
-            if (
-                isinstance(stmt, ast.AnnAssign)
-                and isinstance(stmt.target, ast.Name)
-                and stmt.target.id == "name"
-                and isinstance(stmt.value, ast.Constant)
-                and isinstance(stmt.value.value, str)
-            ):
-                names.append(stmt.value.value)
-    return names
+def _warn_moved(old: str, new: str) -> None:
+    from automated_security_helper.plugins.enablement import warn_renamed_spelling
+
+    warn_renamed_spelling(
+        old,
+        new,
+        COMMUNITY_ALIASES_DROPPED_IN,
+        reason="the shipped-scanner index moved to plugins.enablement",
+    )
 
 
-@functools.lru_cache(maxsize=1)
 def alpha_scanner_modules() -> Dict[str, str]:
-    """``{scanner name, lowercased: dotted module path}`` for every in-tree module."""
-    mapping: Dict[str, str] = {}
-    for package in sorted(_PLUGIN_MODULES.glob("ash_*_plugins")):
-        if package.name == "ash_builtin" or not (package / "__init__.py").is_file():
-            continue
-        for source in sorted(package.glob("*.py")):
-            for name in _scanner_config_names(source.read_text(encoding="utf-8")):
-                mapping.setdefault(name.lower(), f"{_PACKAGE}.{package.name}")
-    return mapping
+    """Deprecated alias of ``plugins.enablement.shipped_scanner_modules``."""
+    from automated_security_helper.plugins.enablement import shipped_scanner_modules
+
+    _warn_moved(
+        "core.alpha_scanners.alpha_scanner_modules",
+        "plugins.enablement.shipped_scanner_modules",
+    )
+    return shipped_scanner_modules()
 
 
 def alpha_module_for(scanner_name: str) -> Optional[str]:
-    """The module that provides *scanner_name*, or None if no in-tree one does."""
-    return alpha_scanner_modules().get(str(scanner_name).lower().strip())
+    """Deprecated alias of ``plugins.enablement.shipped_module_for``."""
+    from automated_security_helper.plugins.enablement import shipped_module_for
+
+    _warn_moved(
+        "core.alpha_scanners.alpha_module_for",
+        "plugins.enablement.shipped_module_for",
+    )
+    return shipped_module_for(scanner_name)
