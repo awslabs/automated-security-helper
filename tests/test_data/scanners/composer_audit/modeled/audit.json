@@ -1,0 +1,39 @@
+{
+  "abandoned": {
+    "acme/dead": "acme/alive",
+    "acme/old": null
+  },
+  "advisories": {
+    "acme/alpha": [
+      {
+        "advisoryId": "PKSA-aaaa-bbbb-cccc",
+        "affectedVersions": ">=1.0.0,<1.2.0",
+        "cve": "CVE-2099-0001",
+        "link": "https://example.invalid/advisories/alpha-1",
+        "packageName": "acme/alpha",
+        "reportedAt": "2099-01-01 00:00:00",
+        "severity": "high",
+        "sources": [
+          {
+            "name": "GithubSecurityAdvisories",
+            "remoteId": "GHSA-xxxx-yyyy-zzzz"
+          }
+        ],
+        "title": "Fictional header injection"
+      }
+    ],
+    "acme/gamma": [
+      {
+        "advisoryId": "PKSA-dddd-eeee-ffff",
+        "affectedVersions": "<4.0.0",
+        "cve": null,
+        "link": "https://example.invalid/advisories/gamma-1",
+        "packageName": "acme/gamma",
+        "reportedAt": "2099-01-02 00:00:00",
+        "severity": null,
+        "sources": [],
+        "title": "Fictional unrated issue"
+      }
+    ]
+  }
+}
