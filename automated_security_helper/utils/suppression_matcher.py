@@ -407,8 +407,9 @@ def warn_unmatched_directory_suppressions(
     used_ids: Iterable[str],
     recorded: Optional[Dict[int, Dict[str, Any]]] = None,
     config: Any = None,
+    source_dir: Optional[Path] = None,
 ) -> None:
-    """Warn once for each suppression whose path ends in ``/`` and matched nothing.
+    """Warn once for each suppression whose path names a directory and matched nothing.
 
     An ignore path ending in ``/`` names a directory; a suppression's path does
     not, and matches only that literal path, which no file has. A suppression
@@ -433,13 +434,23 @@ def warn_unmatched_directory_suppressions(
     this one warning. The record is keyed by ``id()``, so ``suppressions`` are
     the config's own instances (``config.global_settings.suppressions``), not
     copies; with ``config`` given that is what the record is built from.
+
+    ``source_dir`` extends the warning to the slashless spelling. ``tests`` as a
+    suppression path matches only a path named exactly ``tests``, the same silent
+    nothing as ``tests/`` for a directory: with ``source_dir`` given, an unused
+    suppression whose path has no glob character and names an existing directory
+    below it gets the same warning and the same advice. Without it, or for a path
+    that is not a directory there, only the trailing-slash form is warned about.
     """
     if recorded is None and config is not None:
         recorded = recorded_suppressions(config)
     used = set(used_ids)
     for suppression in suppressions:
         path = getattr(suppression, "path", None) or ""
-        if not path.endswith(("/", "\\")) or suppression.id in used:
+        if suppression.id in used:
+            continue
+        if not path.endswith(("/", "\\")):
+            _warn_slashless_directory(suppression, path, recorded, source_dir)
             continue
         directory = path.rstrip("/\\")
         if not directory:
@@ -480,6 +491,35 @@ def warn_unmatched_directory_suppressions(
             "findings below it, write "
             f"'{directory_spelling(directory, ignore_path=False)}'."
         )
+
+
+def _warn_slashless_directory(
+    suppression: AshSuppression,
+    path: str,
+    recorded: Optional[Dict[int, Dict[str, Any]]],
+    source_dir: Optional[Path],
+) -> None:
+    """Warn for an unused suppression whose slashless ``path`` is a directory."""
+    if source_dir is None or not path or any(c in path for c in "*?["):
+        return
+    written = (recorded or {}).get(id(suppression), {}).get("path")
+    shown = written if isinstance(written, str) and written else path
+    # Only a plain relative path below the source directory names a directory.
+    components = [c for c in path.replace("\\", "/").split("/") if c]
+    if not components or path.startswith(("/", "\\")) or ".." in components:
+        return
+    try:
+        is_directory = Path(source_dir).joinpath(*components).is_dir()
+    except (OSError, ValueError):
+        return
+    if not is_directory:
+        return
+    ASH_LOGGER.warning(
+        f"The suppression with path '{shown}' matched no finding: "
+        "a suppression path with no glob matches only that literal path, and "
+        f"'{shown}' is a directory, not a file. To suppress the findings below it, "
+        f"write '{directory_spelling(shown, ignore_path=False)}'."
+    )
 
 
 def _line_range_matches(

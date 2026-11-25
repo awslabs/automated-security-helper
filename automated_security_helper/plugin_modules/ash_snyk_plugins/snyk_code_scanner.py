@@ -628,7 +628,6 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
         Returns:
             bool: True if validation passes
         """
-        # TODO: Validate this is rejecting snyk with offline mode.
         if self._is_offline_mode():
             self._plugin_log(
                 f"Offline mode detected. Skipping validation for {self.__class__.__name__}"
