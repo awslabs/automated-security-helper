@@ -1,6 +1,6 @@
 # cargo-deny (community plugin)
 
-[cargo-deny](https://github.com/EmbarkStudios/cargo-deny) is a lint tool for Rust dependency graphs. Its `advisories` check matches the crates in a `Cargo.lock` against the [RustSec advisory database](https://rustsec.org/); its `licenses`, `bans` and `sources` checks apply a policy you write. ASH runs it as `cargo-deny check` for each Cargo project it finds and turns the diagnostics into findings. ASH pins release 0.21.0 (MIT OR Apache-2.0).
+[cargo-deny](https://github.com/EmbarkStudios/cargo-deny) is a lint tool for Rust dependency graphs. Its `advisories` check matches the crates in a `Cargo.lock` against the [RustSec advisory database](https://rustsec.org/); its `licenses`, `bans` and `sources` checks apply a policy you write. ASH runs it as `cargo-deny check` for each Cargo project it finds and turns the diagnostics into findings. The scanner was measured against release 0.21.0.
 
 ## Enabling it
 
@@ -23,8 +23,7 @@ With the module listed, `cargo-deny` runs by default. `scanners.cargo-deny.enabl
 ## Installing cargo-deny
 
 - **Container mode:** cargo-deny needs a Rust toolchain (`cargo`) on `PATH` as well as its own binary, so an image that runs it has to carry both.
-- **Local mode:** `ash dependencies install --tool cargo-deny`, with the module listed in `ash_plugin_modules` (or added with `--config-overrides 'ash_plugin_modules+=["automated_security_helper.plugin_modules.ash_cargo_deny_plugins"]'`), downloads the pinned release archive from GitHub and verifies it against the SHA256 digest pinned in ASH before installing it. Linux (x86_64 and arm64, musl builds), macOS (arm64) and Windows (x86_64) are the platforms the project publishes assets for.
-- Any `cargo-deny` already on `PATH` is also used.
+- **Local mode:** ASH does not install cargo-deny, because it registers no pinned download for it. Install it yourself (`cargo install --locked cargo-deny`, or a release binary from the project's GitHub releases) and keep it on `PATH`; ASH uses the `cargo-deny` it finds there.
 - cargo-deny runs `cargo metadata`, so `cargo` must be installed too. Without it the scanner is reported `MISSING` with that reason.
 
 ## What is scanned

@@ -1,6 +1,6 @@
 # ASH cargo-deny Plugin
 
-[cargo-deny](https://github.com/EmbarkStudios/cargo-deny) checks a Rust project's dependencies against the RustSec advisory database and, optionally, a license, ban and source policy. ASH runs it once for each `Cargo.toml` that has a `Cargo.lock` beside it and reports the diagnostics as findings. ASH pins release 0.21.0.
+[cargo-deny](https://github.com/EmbarkStudios/cargo-deny) checks a Rust project's dependencies against the RustSec advisory database and, optionally, a license, ban and source policy. ASH runs it once for each `Cargo.toml` that has a `Cargo.lock` beside it and reports the diagnostics as findings. The scanner was measured against release 0.21.0.
 
 ## Enabling
 
@@ -25,10 +25,14 @@ With the module listed, `cargo-deny` runs by default. `scanners.cargo-deny.enabl
 
 cargo-deny needs the `cargo` command too (it runs `cargo metadata`) and the network (the advisory database is fetched from the RustSec repository). Offline, the scanner is reported `MISSING`.
 
-<!-- doctest: illustrative reason="downloads and installs the scanner's tool" -->
+ASH does not install cargo-deny: it registers no pinned download for it. Install the binary yourself and put it on `PATH`:
+
+<!-- doctest: illustrative reason="installs the scanner's tool with cargo" -->
 ```bash
-ash dependencies install --config-overrides "ash_plugin_modules+=[automated_security_helper.plugin_modules.ash_cargo_deny_plugins]" --tool cargo-deny
+cargo install --locked cargo-deny
 ```
+
+Release binaries are also published at <https://github.com/EmbarkStudios/cargo-deny/releases>.
 
 ## Configuration
 

@@ -1,0 +1,2 @@
+{"fields": {"level": "ERROR", "message": "failed to fetch crates: error: cannot create the lock file because --locked was passed to prevent this", "timestamp": "2026-11-19T15:50:37.870061353Z"}, "type": "log"}
+{"fields": {"level": "ERROR", "message": "`cargo metadata` exited with an error", "timestamp": "2026-11-19T15:50:38.152821712Z"}, "type": "log"}

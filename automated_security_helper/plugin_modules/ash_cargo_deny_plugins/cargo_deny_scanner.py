@@ -70,6 +70,11 @@ returns False and the scanner is recorded as missing, like npm-audit.
 Dependencies on the host: ``cargo-deny`` AND ``cargo`` (cargo-deny runs
 ``cargo metadata``). Without a toolchain the run fails and says so.
 
+Installation: ASH does not install cargo-deny. No pinned release asset is
+registered for it in ``utils/tool_downloads.py`` (a shared file this module does
+not edit), so the scanner declares no install commands and a missing binary is
+reported with a user-install hint. Construction needs no download table.
+
 Location: an advisory is located on the ``Cargo.lock`` beside the manifest, any
 other diagnostic on the manifest. cargo-deny's label line numbers refer to
 the lockfile or manifest text it parsed but were not verified against the file
@@ -78,19 +83,27 @@ for every check, so no line is claimed.
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import logging
+import operator
 import os
 import re
 import time
 from pathlib import Path, PurePosixPath
 from typing import Annotated, Any, ClassVar, Dict, List, Literal, Optional, Set, Tuple
 
-from pydantic import AnyUrl, Field, model_validator
+from pydantic import AnyUrl, Field
 
+from automated_security_helper.base import scanner_operational_facets as opsf
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.plugin_context import PluginContext
+from automated_security_helper.base.scanner_facets import (
+    FacetDecl,
+    FacetState,
+    ScannerFacets,
+)
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
@@ -111,9 +124,6 @@ from automated_security_helper.schemas.sarif_schema_model import (
     ToolComponent,
 )
 from automated_security_helper.utils.config_trust import operator_path
-from automated_security_helper.utils.download_utils import (
-    pinned_tool_install_commands,
-)
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.output_excerpt import tool_output_excerpt
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
@@ -199,6 +209,218 @@ class CargoDenyScanner(ScannerPluginBase[CargoDenyScannerConfig]):
     # The advisory database is fetched when the scan runs; offline there is no
     # database. validate_plugin_dependencies says no, as npm-audit's does.
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.SKIP_OFFLINE
+    #: The facets register row (base/scanner_facets.py). Declaration only. Native
+    #: fields name cargo-deny's own ``--format=json`` diagnostics (captured in
+    #: tests/test_data/scanners/cargo-deny/captured/positive.jsonl).
+    facets: ClassVar[ScannerFacets] = ScannerFacets(
+        rule_id=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='diagnostic "fields.advisory.id" (RUSTSEC-yyyy-nnnn), '
+            'else "fields.code"',
+        ),
+        severity=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='diagnostic "fields.severity" (error, warning, note, help)',
+        ),
+        file_path=FacetDecl(
+            state=FacetState.NA,
+            reason="the diagnostic names no file; ASH locates an advisory on the "
+            "Cargo.lock beside the manifest it passed on argv, anything else on "
+            "the manifest, so the path is ASH's own argv, not a native field",
+        ),
+        line_range=FacetDecl(
+            state=FacetState.NA,
+            reason='the native label "line" refers to text cargo-deny parsed and '
+            "was not verified against the file, so no line is claimed",
+        ),
+        column=FacetDecl(
+            state=FacetState.NA,
+            reason='the native label "column" is unverified against the file, so '
+            "no column is claimed",
+        ),
+        message=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='diagnostic "fields.message" with the crate and '
+            '"fields.advisory.url" appended',
+        ),
+        resource_id=FacetDecl(
+            state=FacetState.NA,
+            reason="findings are crate and policy diagnostics; a crate name and "
+            "version is a package locator, not an infrastructure resource id",
+        ),
+        resource_type=FacetDecl(
+            state=FacetState.NA,
+            reason="findings are crate diagnostics, not deployable resources",
+        ),
+        package_name=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='"fields.advisory.package", else the first label "span" '
+            "(<name> <version> <source>)",
+        ),
+        package_version=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='first label "span" (<name> <version> <source>)',
+        ),
+        package_path=FacetDecl(
+            state=FacetState.NA,
+            reason="the inclusion graph that would give a dependency path is "
+            "hidden with --hide-inclusion-graph; no path is read",
+        ),
+        taxonomy_cve=FacetDecl(
+            state=FacetState.DROPPED,
+            native_field='"fields.advisory.aliases" (CVE-yyyy-nnnn and GHSA ids)',
+            reason="kept only as the raw aliases property, not mapped to the CVE "
+            "taxonomy",
+        ),
+        taxonomy_cwe=FacetDecl(
+            state=FacetState.NA,
+            reason="RustSec advisories in the captured output carry no CWE field",
+        ),
+        fingerprints=FacetDecl(
+            state=FacetState.NA,
+            reason="cargo-deny writes no fingerprint; ASH computes a "
+            "cargo-deny/v1 partial fingerprint from the rule, file, crate, "
+            "version and code",
+        ),
+        fix_available=FacetDecl(
+            state=FacetState.NA,
+            reason="the captured advisory object has no patched-versions field; "
+            "output not read for one, a sample run would settle it",
+        ),
+        remediation_text=FacetDecl(
+            state=FacetState.NA,
+            reason="the captured diagnostics carry no separate remediation text",
+        ),
+        snippet=FacetDecl(
+            state=FacetState.NA,
+            reason="a label span names a crate, not a source snippet",
+        ),
+        references=FacetDecl(
+            state=FacetState.DROPPED,
+            native_field='"fields.advisory.url" and "fields.advisory.references"',
+            reason="the url is appended to the message text only; no structured "
+            "references are written",
+        ),
+        tags=FacetDecl(
+            state=FacetState.DROPPED,
+            native_field='"fields.advisory.categories" and "keywords"',
+            reason="the adapter sets constant rule tags (cargo-deny, rust, "
+            "dependency) and discards the advisory's own",
+        ),
+        extras=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result properties "cargo_deny_code", "advisory_id", '
+            '"aliases", "advisory_kind", "advisory_date" and "issue_severity" '
+            "written by the adapter",
+        ),
+    )
+
+    #: The operational register row (base/scanner_operational_facets.py), checked
+    #: against the production declarations it mirrors by
+    #: tests/unit/plugin_modules/test_scanner_operational_facets_consistency.py.
+    operational_facets: ClassVar[opsf.ScannerOperationalFacets] = (
+        opsf.ScannerOperationalFacets(
+            scanner_name="cargo-deny",
+            network=opsf.NetworkFacet(
+                fetch_kind=opsf.FetchKind.CONTENT_FETCH,
+                fetches=(
+                    opsf.Fetched.ADVISORY_FEED,
+                    opsf.Fetched.PACKAGE_METADATA,
+                ),
+                prefetch=(),
+                offline_outcome=opsf.OfflineOutcome.NOT_RUN,
+                offline_reason=(
+                    "the RustSec advisory database is fetched when the scan runs "
+                    "and --offline with no cached database reads no advisories, so "
+                    "the scanner does not run offline and is reported as missing"
+                ),
+                offline_strategy=OfflineStrategy.SKIP_OFFLINE,
+                sandbox_network=opsf.SandboxNetwork.ONLINE,
+                source=(
+                    "cargo_deny_scanner.py offline_strategy, sandbox_requirements "
+                    "and validate_plugin_dependencies"
+                ),
+            ),
+            output=opsf.OutputFacet(
+                native_formats=(opsf.OutputFormat.TOOL_JSON,),
+                side_reports=(),
+                non_finding_artifacts=(),
+                note="newline-delimited JSON diagnostics on stderr "
+                "(--format=json); cargo-deny's SARIF writer is experimental and "
+                "is not used",
+            ),
+            targets=opsf.TargetsFacet(
+                kinds=(opsf.TargetKind.DEPENDENCY_LOCKFILES,),
+                tool_type=ScannerToolType.SCA,
+                selection="every Cargo.toml in the scan set with a Cargo.lock "
+                "beside it, skipping target/ directories (CargoDenyScanner._manifests)",
+                covers_note="declares covers as Rust (Cargo.lock)",
+            ),
+            runtime=opsf.RuntimeFacet(
+                kind=opsf.RuntimeKind.USER_INSTALLED_CLI,
+                external_programs=("cargo",),
+                invocations=opsf.Invocations.PER_TARGET,
+                invocation_note="one cargo-deny run per Cargo project, sharing one "
+                "scan_timeout budget",
+                python_only=False,
+                use_uv_tool=False,
+            ),
+            platforms=opsf.PlatformsFacet(
+                provisionable=(),
+                note="ASH registers no pinned cargo-deny download, so nothing is "
+                "provisioned; the user installs the binary",
+            ),
+            severity=opsf.SeverityFacet(
+                severity_class=opsf.SeverityClass.NATIVE,
+                note="the diagnostic's own severity, which says how the policy "
+                "treats the finding rather than its exploitability, so error is "
+                "HIGH and not CRITICAL",
+            ),
+            silencing=opsf.SilencingFacet(
+                tool_side=(
+                    opsf.SilencingLayer(
+                        layer=opsf.SilencingLayerKind.IGNORE_FILE,
+                        writer=opsf.SilencingWriter.OPERATOR,
+                        honored=opsf.Honored.YES,
+                        surface="deny.toml [advisories] ignore, read only from the "
+                        "operator's options.config_file; the scanned tree's "
+                        "deny.toml is never read",
+                        cite="cargo_deny_scanner.py _resolve_config_file",
+                    ),
+                ),
+            ),
+            identity=opsf.IdentityFacet(
+                fingerprint_class=opsf.FingerprintClass.STABLE_COMPUTED,
+                note="cargo-deny/v1 hash of rule, file, crate, version and code, "
+                "so a suppression survives edits to the lockfile elsewhere",
+            ),
+            extensibility=opsf.ExtensibilityFacet(
+                custom_rules=opsf.CustomRules.OPERATOR_PATHS,
+                env_prefixes=("CARGO_", "RUSTUP_"),
+                options_surface="options.checks (advisories, bans, licenses, "
+                "sources) and options.config_file (an operator deny.toml)",
+            ),
+            exit_codes=opsf.ExitCodesFacet(
+                success_exit_codes=tuple(sorted(COMPLETED_EXIT_CODES)),
+                semantics="a bitset of the checks that reported an error "
+                "(advisories 1, bans 2, licenses 4, sources 8); a run completed "
+                "only with such a code and a summary line, because a failed run "
+                "also exits 1",
+            ),
+            provenance=opsf.ProvenanceFacet(
+                tier=opsf.Tier.COMMUNITY_OPTIN,
+                source=opsf.ProvenanceSource.USER_INSTALLED,
+                selection_surfaces=("ash_cargo_deny_plugins in ash_plugin_modules",),
+                upstream_license="not read",
+            ),
+            prerequisites=opsf.PrerequisitesFacet(
+                kinds=(opsf.Prerequisite.LOCKFILE, opsf.Prerequisite.MANIFEST),
+                note="a Cargo.toml with a Cargo.lock beside it, and a Rust "
+                "toolchain on PATH (cargo metadata)",
+            ),
+        )
+    )
+
     # Any exit code that is a failing-check bitset; a summary line is also required.
     success_exit_codes: ClassVar[Set[int]] = set(COMPLETED_EXIT_CODES)
     sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements(
@@ -221,12 +443,6 @@ class CargoDenyScanner(ScannerPluginBase[CargoDenyScannerConfig]):
         # from the base resolver can add a token cargo-deny would misread.
         self.args = ToolArgs(extra_args=[])
         super().model_post_init(context)
-
-    @model_validator(mode="after")
-    def setup_custom_install_commands(self) -> "CargoDenyScanner":
-        """Install cargo-deny from its pinned release asset (see tool_downloads)."""
-        self.custom_install_commands.update(pinned_tool_install_commands("cargo-deny"))
-        return self
 
     def _execute_scan(
         self, target: Any, target_type: Any, global_ignore_paths: Any
@@ -486,11 +702,19 @@ class CargoDenyScanner(ScannerPluginBase[CargoDenyScannerConfig]):
             results: List[Result] = []
             final_args: List[str] = []
             failures: List[str] = []
+            run_codes: List[int] = []
             for manifest in manifests:
                 manifest_arg = self._argv_path(manifest)
                 final_args = self._argv(manifest_arg, config_file)
+                # _run_subprocess FOLDS each run's code into self.exit_code (the
+                # worst so far), so a failed run's code would otherwise be read
+                # as every later run's. Reset it, so what is read after the run
+                # is this run's own code.
+                self.exit_code = None
                 response = self._run_until(final_args, results_dir, deadline)
                 exit_code = self.exit_code
+                if exit_code is not None:
+                    run_codes.append(exit_code)
                 if response.get("timed_out"):
                     self._post_scan(target=target, target_type=target_type)
                     raise ScannerError(
@@ -512,6 +736,14 @@ class CargoDenyScanner(ScannerPluginBase[CargoDenyScannerConfig]):
                 rules.update(converted.rules)
                 results.extend(converted.results)
             self._post_scan(target=target, target_type=target_type)
+            # The scan's recorded code is the bitset of every run's failing checks
+            # (a code outside 0..15 is a failed run and kept as it is), so the
+            # last run's code does not stand for the scan.
+            if run_codes:
+                if all(code in COMPLETED_EXIT_CODES for code in run_codes):
+                    self.exit_code = functools.reduce(operator.or_, run_codes)
+                else:
+                    self.exit_code = max(run_codes)
 
             for failure in failures:
                 self.errors.append(failure)
@@ -602,10 +834,10 @@ class CargoDenyScanner(ScannerPluginBase[CargoDenyScannerConfig]):
         found = find_executable(self.command or "cargo-deny")
         if not found:
             ASH_LOGGER.warning(
-                "cargo-deny executable not found in PATH. Install it with "
-                "`ash dependencies install --config-overrides "
-                "'ash_plugin_modules+=[\"automated_security_helper.plugin_modules."
-                "ash_cargo_deny_plugins\"]' --tool cargo-deny`."
+                "cargo-deny executable not found in PATH. ASH does not install it "
+                "(no pinned release asset is registered for it); install it yourself, "
+                "for example `cargo install --locked cargo-deny`, or from "
+                "https://github.com/EmbarkStudios/cargo-deny/releases."
             )
             return False
         if not find_executable("cargo"):

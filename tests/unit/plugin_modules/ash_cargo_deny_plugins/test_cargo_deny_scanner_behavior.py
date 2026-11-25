@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Optional
 
 import pytest
 
+from automated_security_helper.base.plugin_base import _folded_exit_code
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.config.default_config import get_default_config
@@ -235,11 +236,15 @@ class FakeCargoDeny:
                 a.split("=", 1)[1] for a in command if a.startswith("--manifest-path=")
             )
             behavior = self.per_manifest.get(manifest, {})
+            # Like the real _run_subprocess, FOLD this run's code into the
+            # scanner's accumulator (the worst so far); assigning it would hide a
+            # scan() that reads the accumulator as the current run's code.
             if self.timed_out or behavior.get("timed_out"):
-                scanner.exit_code = -9
+                scanner.exit_code = _folded_exit_code(scanner, scanner.exit_code, -9)
                 return {"timed_out": True}
             code = behavior.get("exit_code", self.exit_code)
-            scanner.exit_code = code
+            if code is not None:
+                scanner.exit_code = _folded_exit_code(scanner, scanner.exit_code, code)
             return {
                 "returncode": code,
                 "stdout": "",
@@ -270,14 +275,6 @@ def _scanner(
             enabled=True, options=CargoDenyScannerConfigOptions(**options)
         ),
     )
-
-
-@pytest.fixture(autouse=True)
-def _no_download_table(monkeypatch, request):
-    """Construction does not need the pinned-download table; TestPinnedRelease does."""
-    if request.cls is not None and request.cls.__name__ == "TestPinnedRelease":
-        return
-    monkeypatch.setattr(cds, "pinned_tool_install_commands", lambda tool: {})
 
 
 @pytest.fixture
@@ -746,8 +743,8 @@ class TestDependencyCheck:
             cds.ASH_LOGGER, "warning", lambda msg, *a, **k: warnings.append(msg)
         )
         assert scanner.validate_plugin_dependencies() is False
-        assert "--tool cargo-deny" in warnings[0]
-        assert "ash_cargo_deny_plugins" in warnings[0]
+        assert "cargo install --locked cargo-deny" in warnings[0]
+        assert "does not install it" in warnings[0]
 
     def test_present_binary_and_toolchain_pass(self, tmp_path, on_path):
         scanner = _scanner(tmp_path, tmp_path)
@@ -779,62 +776,152 @@ class TestDependencyCheck:
         assert scanner.validate_plugin_dependencies() is False
 
 
-class TestPinnedRelease:
-    """Needs the integrator's rows in utils/tool_downloads.py (see the manifest).
+class TestUserInstalledTool:
+    """ASH registers no pinned cargo-deny asset, so the user installs the binary.
 
-    These fail until those rows land: they are the contract the rows must meet.
+    Nothing here patches the download table: construction has to work as it
+    ships.
     """
 
-    PLATFORMS = {
-        ("linux", "amd64"),
-        ("linux", "arm64"),
-        ("darwin", "arm64"),
-        ("windows", "amd64"),
-    }
+    def test_construction_needs_no_download_table(self, tmp_path):
+        scanner = _scanner(tmp_path, tmp_path)
+        assert scanner.command == "cargo-deny"
 
-    def test_install_commands_cover_every_published_platform(self):
-        scanner = CargoDenyScanner(
-            context=PluginContext(
-                source_dir=Path("."),
-                output_dir=Path("./out"),
-                work_dir=Path("./out/converted"),
-                config=get_default_config(),
-            ),
-            config=CargoDenyScannerConfig(),
+    def test_no_install_commands_are_declared(self, tmp_path):
+        scanner = _scanner(tmp_path, tmp_path)
+        assert not any(
+            commands
+            for arches in scanner.custom_install_commands.values()
+            for commands in arches.values()
         )
-        got = {
-            (plat, arch)
-            for plat, arches in scanner.custom_install_commands.items()
-            for arch, commands in arches.items()
-            if commands
-        }
-        assert got == self.PLATFORMS
 
-    def test_the_pin_is_a_stable_release(self):
-        from automated_security_helper.utils.tool_downloads import TOOL_VERSIONS
+    def test_the_module_does_not_use_the_download_table(self):
+        assert not hasattr(cds, "pinned_tool_install_commands")
 
-        # cargo-deny's release tags carry no "v"; the table may spell it either way.
-        version = TOOL_VERSIONS["cargo-deny"].lstrip("v")
-        assert version == "0.21.0"
-        assert all(part.isdigit() for part in version.split("."))
 
-    def test_each_platform_resolves_to_an_archive_with_the_executable_inside(self):
-        from automated_security_helper.utils.tool_downloads import get_tool_asset
+class TestExitCodeIsThisRunsOwn:
+    """_run_subprocess folds each run's code into the scanner's accumulator."""
 
-        for plat, arch in sorted(self.PLATFORMS):
-            asset = get_tool_asset("cargo-deny", plat, arch)
-            assert asset.archive is True
-            assert asset.url.endswith(".tar.gz")
-            assert "0.21.0" in asset.url
-            assert asset.member_name.rsplit("/", 1)[-1] in {
-                "cargo-deny",
-                "cargo-deny.exe",
+    def test_a_failed_first_project_does_not_fail_the_next(
+        self, tree, tmp_path, on_path, monkeypatch
+    ):
+        scanner = _scanner(tree, tmp_path)
+        # "." (the root) runs first and fails with 101; svc then completes with 1.
+        # Read from the folded accumulator, svc would read 101 and fail too.
+        fake = FakeCargoDeny(
+            per_manifest={"Cargo.toml": {"stderr": "", "exit_code": 101}}
+        )
+        report = _run(scanner, fake, monkeypatch)
+        assert scanner.targets_failed == 1
+        assert len(_findings(report)) == 4
+        assert any("Cargo.toml: cargo-deny exited 101" in e for e in scanner.errors)
+
+    def test_a_clean_first_project_does_not_hide_the_next_one_failing(
+        self, tree, tmp_path, on_path, monkeypatch
+    ):
+        scanner = _scanner(tree, tmp_path)
+        fake = FakeCargoDeny(
+            per_manifest={
+                "Cargo.toml": {"stderr": NEGATIVE_STDERR, "exit_code": 0},
+                "svc/Cargo.toml": {"stderr": NO_LOCK_STDERR, "exit_code": 1},
             }
-
-    def test_the_license_entry_is_permissive(self):
-        from automated_security_helper.utils.tool_downloads import (
-            THIRD_PARTY_LICENSES,
         )
+        _run(scanner, fake, monkeypatch)
+        assert scanner.targets_failed == 1
+        assert any("svc/Cargo.toml" in e for e in scanner.errors)
 
-        entry = THIRD_PARTY_LICENSES["cargo-deny"]
-        assert "MIT" in entry.license and "Apache" in entry.license
+    def test_the_recorded_code_is_the_bitset_of_every_runs_checks(
+        self, tree, tmp_path, on_path, monkeypatch
+    ):
+        scanner = _scanner(tree, tmp_path)
+        fake = FakeCargoDeny(
+            per_manifest={
+                "Cargo.toml": {"stderr": POSITIVE_STDERR, "exit_code": 1},
+                "svc/Cargo.toml": {"stderr": POSITIVE_STDERR, "exit_code": 4},
+            }
+        )
+        _run(scanner, fake, monkeypatch)
+        assert scanner.exit_code == 5
+
+
+_CAPTURED = (
+    Path(__file__).resolve().parents[3]
+    / "test_data"
+    / "scanners"
+    / "cargo-deny"
+    / "captured"
+)
+
+
+class TestCapturedFixtures:
+    """The committed capture files, read from disk and scanned end to end."""
+
+    def _text(self, name: str) -> str:
+        path = _CAPTURED / name
+        assert path.is_file(), path
+        return path.read_text(encoding="utf-8")
+
+    def test_the_positive_capture_is_the_inline_capture(self):
+        on_disk = [
+            json.loads(line) for line in self._text("positive.jsonl").splitlines()
+        ]
+        inline = [json.loads(line) for line in POSITIVE_STDERR.splitlines()]
+        assert [d["type"] for d in on_disk] == ["diagnostic"] * 4 + ["summary"]
+        assert [d["fields"].get("advisory", {}).get("id") for d in on_disk] == [
+            d["fields"].get("advisory", {}).get("id") for d in inline
+        ]
+
+    def test_the_positive_capture_maps_every_advisory(
+        self, tree, tmp_path, on_path, monkeypatch
+    ):
+        scanner = _scanner(tree, tmp_path)
+        fake = FakeCargoDeny(stderr=self._text("positive.jsonl"), exit_code=1)
+        report = _run(scanner, fake, monkeypatch)
+        rows = _findings(report)
+        assert len(rows) == 8
+        by_rule = {row[0]: row for row in rows}
+        assert set(by_rule) == {row[0] for row in POSITIVE_EXPECTED}
+        for expected in POSITIVE_EXPECTED:
+            assert by_rule[expected[0]][1:3] == expected[1:3]
+            assert by_rule[expected[0]][4:] == expected[4:]
+
+    def test_the_negative_capture_is_a_clean_scan(
+        self, tree, tmp_path, on_path, monkeypatch
+    ):
+        scanner = _scanner(tree, tmp_path)
+        fake = FakeCargoDeny(stderr=self._text("negative.jsonl"), exit_code=0)
+        report = _run(scanner, fake, monkeypatch)
+        assert _findings(report) == []
+        assert scanner.targets_failed == 0
+
+    def test_the_no_lock_capture_is_a_failed_run(
+        self, tree, tmp_path, on_path, monkeypatch
+    ):
+        scanner = _scanner(tree, tmp_path)
+        fake = FakeCargoDeny(stderr=self._text("no-lock.jsonl"), exit_code=1)
+        with pytest.raises(ScannerError, match="without a summary"):
+            _run(scanner, fake, monkeypatch)
+
+    @pytest.mark.parametrize(
+        "diagnostic_severity, ash_severity, sarif_level",
+        [
+            ("error", "HIGH", "error"),
+            ("warning", "MEDIUM", "warning"),
+            ("note", "LOW", "note"),
+            ("help", "INFO", "none"),
+            ("invented", "HIGH", "error"),
+        ],
+    )
+    def test_severity_mapping_over_the_captured_report(
+        self, diagnostic_severity, ash_severity, sarif_level
+    ):
+        """The captured advisory with only its severity changed, converted."""
+        lines = self._text("positive.jsonl").splitlines()
+        first = json.loads(lines[0])
+        first["fields"]["severity"] = diagnostic_severity
+        converted = convert_cargo_deny_output(
+            json.dumps(first), manifest_uri="Cargo.toml"
+        )
+        (result,) = converted.results
+        assert getattr(result.level, "value", result.level) == sarif_level
+        assert result.properties.issue_severity == ash_severity
