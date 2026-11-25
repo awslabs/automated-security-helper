@@ -30,7 +30,12 @@ ASH closes that gap in two rules, mature tools first:
    read them in the converted-target pass every scanner already runs, so the
    packages land in the SBOM and advisories against them are reported.
 
-Where both rules report a package, the SBOM merge deduplicates by purl.
+Where both rules report a package, the SBOM merge lists it once. The merge keys
+a component by its `bom-ref`, and syft's cargo refs end in a package-id hash that
+differs between runs, so a crate read in both passes has the same purl under two
+refs. A harvested component (one carrying the `ash:sbom-harvest` properties) whose
+purl is already listed is folded onto the listed component, and the dependency
+entries that named it follow the listed component's ref.
 
 The network statement, in one sentence: online mode only; a GET of the sdist
 your own lockfile pins by sha256, bounded by `max_sdist_mb` on the bytes

@@ -13,8 +13,11 @@ hash-pinned sdist the project's own ``uv.lock`` resolves ships the upstream
 workspace ``Cargo.lock`` at its root, and syft over that file reads the whole
 crate tree. Artifacts that DO carry audit data (cargo-auditable binaries, Go
 buildinfo) are already read by syft's own catalogers in its ordinary pass;
-nothing here runs for them, and the SBOM merge dedups by purl where both paths
-report a package.
+nothing here runs for them. Where both paths report a package, the SBOM merge
+keys a component by its ``bom-ref``, and syft's cargo refs end in a package-id
+hash that differs between runs, so the two reports name one crate under two
+refs. The merge folds a harvest-stamped component onto the one already listed
+with its ``purl`` (``utils/sbom_merge.py``) and redirects its dependency refs.
 
 This module holds the pieces shared by the two halves of the feature:
 
