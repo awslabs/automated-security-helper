@@ -111,6 +111,15 @@ def _module_source(package: int, module: int) -> str:
     return "\n".join(lines)
 
 
+def _write(path: Path, text: str) -> None:
+    """Write ``text`` as UTF-8 bytes with no newline translation.
+
+    ``Path.write_text`` turns ``\\n`` into ``\\r\\n`` on Windows, while
+    ``fixture_digest`` hashes the raw bytes, so the pinned digests would differ there.
+    """
+    path.write_bytes(text.encode("utf-8"))
+
+
 def build_fixture(dest: Path, kind: str) -> list[Path]:
     """Write fixture ``kind`` ("small" or "large") under ``dest``; return the .py files.
 
@@ -127,23 +136,24 @@ def build_fixture(dest: Path, kind: str) -> list[Path]:
     if kind == "small":
         package = dest / "pkg"
         package.mkdir()
-        (package / "__init__.py").write_text("", encoding="utf-8")
+        _write(package / "__init__.py", "")
         written.append(package / "__init__.py")
         for module in range(SMALL_FILES - 1):
             path = package / f"mod_{module:02d}.py"
-            path.write_text(_module_source(0, module), encoding="utf-8")
+            _write(path, _module_source(0, module))
             written.append(path)
         return written
-    (dest / "pyproject.toml").write_text(
-        '[project]\nname = "cost-fixture"\nversion = "0.0.0"\n', encoding="utf-8"
+    _write(
+        dest / "pyproject.toml",
+        '[project]\nname = "cost-fixture"\nversion = "0.0.0"\n',
     )
-    (dest / "README.md").write_text("# Cost fixture\n", encoding="utf-8")
+    _write(dest / "README.md", "# Cost fixture\n")
     for package_index in range(LARGE_PACKAGES):
         package = dest / f"pkg_{package_index:02d}"
         package.mkdir()
         for module in range(LARGE_MODULES_PER_PACKAGE):
             path = package / f"mod_{module:02d}.py"
-            path.write_text(_module_source(package_index, module), encoding="utf-8")
+            _write(path, _module_source(package_index, module))
             written.append(path)
     return written
 
