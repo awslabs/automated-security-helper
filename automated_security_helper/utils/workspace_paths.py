@@ -1075,6 +1075,12 @@ def _down_convert_literal_slash(text: str, prefix_parts: tuple) -> Optional[str]
     if converted is None or converted == _WHOLE_PROJECT:
         return None
     candidate = f"{converted}/"
+    # A glob-free candidate no longer keeps the slash literal: the
+    # bare-directory rule (issue #894) reads it as the directory, whose subtree
+    # this pattern -- a glob with a literal slash, which matches no file --
+    # never covered. Matching nothing is the contract, so it converts to None.
+    if not has_glob_syntax(candidate):
+        return None
     return candidate if _pattern_components(candidate)[-1] == "" else None
 
 
@@ -1177,4 +1183,28 @@ def to_project_pattern(
             converted = _down_convert_literal_slash(text, prefix_parts)
     else:
         converted = _down_convert(text, prefix_parts)
+        if (
+            converted is not None
+            and converted != _WHOLE_PROJECT
+            and not has_glob_syntax(converted)
+        ):
+            # Only a glob pattern gets here (a glob-free one is
+            # _down_convert_bare's), and a glob matches by its glob or
+            # exact-text reading alone. A glob-free rewrite would gain the
+            # bare-directory rule (issue #894) project-side and cover the
+            # subtree below the path it names, which the workspace pattern
+            # never covered; no project-side pattern spells "this exact path
+            # and nothing below it" for a plain name, so the safe answer is a
+            # refusal, never a widened pattern.
+            raise WorkspacePatternError(
+                _shown(
+                    f"pattern '{text}' cannot be rewritten for project "
+                    f"'{PurePosixPath(*prefix_parts).as_posix()}': what is left "
+                    f"after the project prefix, '{converted}', has no glob "
+                    "character, and project-side a glob-free pattern also "
+                    "covers the directory of that name (the bare-directory "
+                    "rule), which this pattern never matched. Name the "
+                    "project path explicitly in a project-level entry instead."
+                )
+            )
     return text_of_undecodable(converted) if converted is not None else None
