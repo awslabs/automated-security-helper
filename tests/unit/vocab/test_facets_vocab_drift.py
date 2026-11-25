@@ -82,7 +82,9 @@ VOCABULARIES: tuple[Vocabulary, ...] = (
     Vocabulary(
         FacetState,
         _MAPPING_HOME,
-        ambiguous=frozenset({"mapped", "n/a"}),
+        # "unconfirmed" is also a member of Honored and FingerprintClass, so a
+        # stray spelling of it cannot be told from theirs by value.
+        ambiguous=frozenset({"mapped", "n/a", "unconfirmed"}),
     ),
     Vocabulary(ops_register.FetchKind, _OPS_HOME, ambiguous=frozenset({"none"})),
     Vocabulary(ops_register.Fetched, _OPS_HOME),
