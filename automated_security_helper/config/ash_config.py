@@ -33,10 +33,10 @@ from typing import (
     Optional,
     Set,
     Tuple,
-    get_args,
 )
 
 import yaml
+from pydantic_core import PydanticCustomError
 from automated_security_helper.utils.redacted_model import (
     env_resolved_scalar,
     RedactedSection,
@@ -78,7 +78,7 @@ from automated_security_helper.utils.unknown_keys import (
     UNKNOWN_ENTRY_KEYS_ARE_FATAL_BY_DEFAULT,
 )
 from automated_security_helper.core.exceptions import ASHConfigUnsetVariableError
-from automated_security_helper.core.enums import ExportFormat
+from automated_security_helper.core.enums import ExportFormat, SandboxMode
 from automated_security_helper.utils.content_databases import StalenessPolicy
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.models.vocab import SeverityThresholdText
@@ -1705,7 +1705,7 @@ def sandbox_mode_from_yaml(value: Any) -> Any:
     if value is False:
         return "off"
     if value is True:
-        modes = get_args(SandboxConfig.model_fields["mode"].annotation)
+        modes = [mode.value for mode in SandboxMode]
         raise ValueError(
             "the value was read as a YAML boolean; write the mode in quotes "
             f"(the modes are {', '.join(modes)})"
@@ -1732,6 +1732,32 @@ def sandbox_mode_in_document(document: Any) -> Any:
     return document
 
 
+def _sandbox_mode_name(value: Any) -> Any:
+    """``sandbox.mode``: a name becomes its ``SandboxMode``.
+
+    Config files are validated with strict=True, which accepts only a
+    SandboxMode instance for a SandboxMode field, so a name read from YAML would
+    be refused; converting here keeps the enum type. Anything that is no mode,
+    a boolean included, is refused with the error the field's Literal gave
+    before it was an enum (type ``literal_error``, the same text), so a refusal
+    reads as it always has. A name read from an environment reference arrives as
+    the loader's carrier ``str`` subclass and leaves as the plain member.
+    """
+    if isinstance(value, SandboxMode):
+        return value
+    if isinstance(value, str):
+        try:
+            return SandboxMode(str(value))
+        except ValueError:
+            pass
+    names = [f"'{mode.value}'" for mode in SandboxMode]
+    raise PydanticCustomError(
+        "literal_error",
+        "Input should be {expected}",
+        {"expected": f"{', '.join(names[:-1])} or {names[-1]}"},
+    )
+
+
 class SandboxConfig(RedactedSection):
     """OS-level sandboxing of scanner subprocesses. Off by default.
 
@@ -1742,7 +1768,8 @@ class SandboxConfig(RedactedSection):
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
     mode: Annotated[
-        Literal["off", "auto", "bwrap", "firejail", "landlock", "sandbox-exec"],
+        SandboxMode,
+        BeforeValidator(_sandbox_mode_name),
         Field(
             description=(
                 "How scanner subprocesses are confined. 'off' runs them as plain "
@@ -1757,7 +1784,16 @@ class SandboxConfig(RedactedSection):
                 "ASH logs a warning when it is set there."
             )
         ),
-    ] = "off"
+    ] = SandboxMode.off
+
+    @field_serializer("mode")
+    def _sandbox_mode_value(self, v: SandboxMode) -> str:
+        # The name, not the member, in every dump mode, for the reason
+        # ``AshConfig._output_format_values`` gives: a Python-mode dump of a member
+        # is refused by yaml.safe_dump and written by yaml.dump as a tag no later
+        # load reads. Read through SandboxMode so a mode assigned as a plain str
+        # (the model does not validate assignment) is written the same way.
+        return SandboxMode(v).value
 
     network_scanners: Annotated[
         Optional[List[str]],

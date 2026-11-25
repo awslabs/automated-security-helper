@@ -1,5 +1,5 @@
 from enum import Enum, IntEnum
-from typing import Optional
+from typing import Iterable, Optional
 
 
 class AshExitCode(IntEnum):
@@ -91,12 +91,37 @@ class PackageManager(str, Enum):
 
 
 class ExecutionPhase(str, Enum):
-    """Phases of ASH execution."""
+    """Phases of ASH execution.
+
+    Member order is execution order: the engine runs the phases a caller asked for
+    in this order whatever order they were named in (see
+    ``ScanExecutionEngine.execute_phases``).
+    """
 
     CONVERT = "convert"
     SCAN = "scan"
     REPORT = "report"
     INSPECT = "inspect"
+
+
+#: The phases a run executes when the caller names none. ``inspect`` is opt-in.
+DEFAULT_EXECUTION_PHASES: tuple[ExecutionPhase, ...] = (
+    ExecutionPhase.CONVERT,
+    ExecutionPhase.SCAN,
+    ExecutionPhase.REPORT,
+)
+
+
+def phase_values(phases: Iterable[str]) -> list[str]:
+    """The wire spellings of phases given as members or as plain strings.
+
+    A caller of ``execute_scan`` (the SDK, a test) may still name phases as plain
+    strings, which compare equal to the members and select the same phases; an
+    unknown name selects nothing, as it always has. A log line or an event
+    payload carries this list, never the members: ``str()`` and f-string
+    interpolation of a member render ``ExecutionPhase.SCAN``.
+    """
+    return [p.value if isinstance(p, ExecutionPhase) else p for p in phases]
 
 
 class ExecutionStrategy(str, Enum):

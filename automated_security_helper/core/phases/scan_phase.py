@@ -574,9 +574,9 @@ class ScanPhase(EnginePhase):
         self._completed_scanners: List[ScannerPluginBase] = []
 
     @property
-    def phase_name(self) -> str:
+    def phase_name(self) -> ExecutionPhase:
         """Return the name of this phase."""
-        return "scan"
+        return ExecutionPhase.SCAN
 
     def _track_scanner_state(self, scanner_name: str, **state: Any) -> None:
         """``validation_manager.update_scanner_state``, for a scanner that is
@@ -2796,7 +2796,7 @@ class ScanPhase(EnginePhase):
                         AshEventType.WARNING,
                         message=f"Scanner tasks validation found {len(missing_scanners)} missing scanners",
                         missing_scanners=missing_scanners,
-                        phase="scan",
+                        phase=ExecutionPhase.SCAN.value,
                         validation_checkpoint="scanner_tasks_validation",
                     )
                 except Exception as event_error:
@@ -2855,7 +2855,7 @@ class ScanPhase(EnginePhase):
                         total_issues=total_issues,
                         discrepancies=validation_checkpoint.discrepancies,
                         errors=validation_checkpoint.errors,
-                        phase="scan",
+                        phase=ExecutionPhase.SCAN.value,
                         validation_checkpoint="scanner_tasks_validation",
                     )
                 except Exception as event_error:
@@ -2874,7 +2874,7 @@ class ScanPhase(EnginePhase):
                         message="Scanner tasks validation completed successfully",
                         expected_count=len(validation_checkpoint.expected_scanners),
                         actual_count=len(validation_checkpoint.actual_scanners),
-                        phase="scan",
+                        phase=ExecutionPhase.SCAN.value,
                         validation_checkpoint="scanner_tasks_validation",
                     )
                 except Exception as event_error:
@@ -2894,7 +2894,7 @@ class ScanPhase(EnginePhase):
                     AshEventType.ERROR,
                     message=error_msg,
                     exception=error_text(e),
-                    phase="scan",
+                    phase=ExecutionPhase.SCAN.value,
                     validation_checkpoint="scanner_tasks_validation",
                 )
             except Exception as event_error:
@@ -2975,7 +2975,7 @@ class ScanPhase(EnginePhase):
                         message=f"Execution completion validation found {total_discrepancies} discrepancies",
                         missing_scanners=missing_scanners,
                         unexpected_scanners=unexpected_scanners,
-                        phase="scan",
+                        phase=ExecutionPhase.SCAN.value,
                         validation_checkpoint="execution_completion_validation",
                     )
                 except Exception as event_error:
@@ -3081,7 +3081,7 @@ class ScanPhase(EnginePhase):
                         completion_rate=validation_checkpoint.metadata.get(
                             "completion_rate", 0.0
                         ),
-                        phase="scan",
+                        phase=ExecutionPhase.SCAN.value,
                         validation_checkpoint="execution_completion_validation",
                     )
                 except Exception as event_error:
@@ -3106,7 +3106,7 @@ class ScanPhase(EnginePhase):
                         expected_count=len(validation_checkpoint.expected_scanners),
                         completed_count=len(validation_checkpoint.actual_scanners),
                         completion_rate=completion_rate,
-                        phase="scan",
+                        phase=ExecutionPhase.SCAN.value,
                         validation_checkpoint="execution_completion_validation",
                     )
                 except Exception as event_error:
@@ -3126,7 +3126,7 @@ class ScanPhase(EnginePhase):
                     AshEventType.ERROR,
                     message=error_msg,
                     exception=error_text(e),
-                    phase="scan",
+                    phase=ExecutionPhase.SCAN.value,
                     validation_checkpoint="execution_completion_validation",
                 )
             except Exception as event_error:
@@ -3166,7 +3166,7 @@ class ScanPhase(EnginePhase):
                 "actual_scanners": [],
                 "discrepancies": [],
                 "errors": [],
-                "metadata": {"phase": "scan"},
+                "metadata": {"phase": ExecutionPhase.SCAN.value},
             }
         )
 
@@ -3232,7 +3232,7 @@ class ScanPhase(EnginePhase):
                             added_scanners=added_scanners,
                             unexpected_scanners=unexpected_scanners,
                             total_adjustments=total_adjustments,
-                            phase="scan",
+                            phase=ExecutionPhase.SCAN.value,
                             validation_checkpoint="result_completeness_validation",
                         )
                     except Exception as event_error:
@@ -3337,7 +3337,7 @@ class ScanPhase(EnginePhase):
                         completeness_rate=validation_checkpoint.metadata.get(
                             "completeness_rate", 0.0
                         ),
-                        phase="scan",
+                        phase=ExecutionPhase.SCAN.value,
                         validation_checkpoint="result_completeness_validation",
                     )
                 except Exception as event_error:
@@ -3362,7 +3362,7 @@ class ScanPhase(EnginePhase):
                         expected_count=len(validation_checkpoint.expected_scanners),
                         final_count=len(validation_checkpoint.actual_scanners),
                         completeness_rate=completeness_rate,
-                        phase="scan",
+                        phase=ExecutionPhase.SCAN.value,
                         validation_checkpoint="result_completeness_validation",
                     )
                 except Exception as event_error:
@@ -3391,7 +3391,7 @@ class ScanPhase(EnginePhase):
                     AshEventType.ERROR,
                     message=error_msg,
                     exception=error_text(e, environment_values),
-                    phase="scan",
+                    phase=ExecutionPhase.SCAN.value,
                     validation_checkpoint="result_completeness_validation",
                 )
             except Exception as event_error:

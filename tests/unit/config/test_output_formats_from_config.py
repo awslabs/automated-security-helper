@@ -403,7 +403,10 @@ def test_no_other_enum_typed_field_can_come_from_a_config_file():
 
     walk(AshConfig, "")
 
-    assert enum_fields == {"output_formats"}, (
+    # sandbox.mode is the second: its string dump is pinned in
+    # tests/unit/vocab/test_phase_mode_format_vocabularies.py.
+    tested = {"output_formats", "sandbox.mode"}
+    assert enum_fields == tested, (
         f"enum-typed config fields without a tested string dump: "
-        f"{sorted(enum_fields - {'output_formats'})}"
+        f"{sorted(enum_fields - tested)}"
     )

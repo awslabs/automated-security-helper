@@ -345,7 +345,12 @@ from automated_security_helper.core.cancellation import (
     raise_if_cancelled,
 )
 from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
-from automated_security_helper.core.enums import ThresholdSource
+from automated_security_helper.core.enums import (
+    DEFAULT_EXECUTION_PHASES,
+    ExecutionPhase,
+    ExecutionStrategy,
+    ThresholdSource,
+)
 from automated_security_helper.core.previous_results import holds_restored_results
 from automated_security_helper.core.scanner_selection import (
     SelectionLayers,
@@ -461,9 +466,6 @@ _STOP_GRACE_MARGIN_SECONDS = 1.0
 #: less than it named whenever other projects were finishing.
 _ABANDONED_STOP_GRACE_SECONDS = SANDBOX_STOP_GRACE_SECONDS + _STOP_GRACE_MARGIN_SECONDS
 
-#: The phase name that selects report generation, as ``run_ash_scan`` spells it.
-_REPORT_PHASE = "report"
-
 #: The subtree each project's own output lands in.
 PROJECTS_DIR_NAME = "projects"
 
@@ -486,7 +488,7 @@ class ProjectScanSettings:
     """
 
     output_dir: Path
-    phases: Tuple[str, ...] = ("convert", "scan", "report")
+    phases: Tuple[ExecutionPhase, ...] = DEFAULT_EXECUTION_PHASES
     enabled_scanners: Tuple[str, ...] = ()
     excluded_scanners: Tuple[str, ...] = ()
     #: Who gave the two selections above: "mcp" from the MCP workspace tool, whose
@@ -501,7 +503,7 @@ class ProjectScanSettings:
     #: ``resolve_config(client_overrides=)``.
     client_overrides: bool = False
     ash_plugin_modules: Tuple[str, ...] = ()
-    strategy: str = "parallel"
+    strategy: ExecutionStrategy = ExecutionStrategy.PARALLEL
     offline: bool = False
     python_based_plugins_only: bool = False
     ignore_suppressions: bool = False
@@ -1381,7 +1383,7 @@ def _scan_one_project(
             do not exist. The claim and the abandon are taken under one lock, so
             a project is either committed or abandoned, never both.
     """
-    from automated_security_helper.core.enums import ExecutionStrategy, ExportFormat
+    from automated_security_helper.core.enums import ExportFormat
 
     started = time.monotonic()
     project_output = _project_output_dir(settings, project)
@@ -1450,7 +1452,7 @@ def _scan_one_project(
             debug=settings.debug,
             strategy=(
                 ExecutionStrategy.PARALLEL
-                if settings.strategy == ExecutionStrategy.PARALLEL.value
+                if settings.strategy == ExecutionStrategy.PARALLEL
                 else ExecutionStrategy.SEQUENTIAL
             ),
             no_cleanup=not settings.cleanup,
@@ -3017,7 +3019,7 @@ def execute_workspace(
     settings = settled_scanner_selection(plan, settings)
     refuse_unresolvable_scanner_selection(plan, settings)
 
-    reports_requested = _REPORT_PHASE in settings.phases
+    reports_requested = ExecutionPhase.REPORT in settings.phases
     if reports_requested:
         # Before the scan, for two reasons. The operator learns immediately
         # rather than after paying for the whole workspace; and once

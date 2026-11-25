@@ -1707,13 +1707,8 @@ def run_ash_scan_cli_command(
     # one simple value here, before anything reads it: the gate below and the
     # run_ash_scan call receive the same flags, or a pre-commit run's gate
     # would sit at INFO while the scan's console sat at ERROR.
-    precommit_mode = mode == RunMode.precommit or str(mode).lower() == "precommit"
-    simple = (
-        simple
-        or precommit_mode
-        or log_level == AshLogLevel.SIMPLE
-        or str(log_level).lower() == "simple"
-    )
+    precommit_mode = mode == RunMode.precommit
+    simple = simple or precommit_mode or log_level == AshLogLevel.SIMPLE
 
     # The process-wide last-resort gate, set once at the command's start: the
     # level the one precedence rule resolves from the flags the scan receives.

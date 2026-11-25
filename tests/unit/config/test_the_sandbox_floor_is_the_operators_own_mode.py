@@ -23,6 +23,7 @@ import pytest
 import yaml
 
 from automated_security_helper.config.resolve_config import resolve_config
+from automated_security_helper.core.enums import SandboxMode
 from automated_security_helper.core.exceptions import (
     ASHConfigSourceError,
     ASHConfigValidationError,
@@ -710,7 +711,9 @@ def _assert_plain_str(*values) -> None:
     subclass has no SafeDumper representer and prints its class name where a
     message names the mode)."""
     for value in values:
-        assert type(value) is str, (type(value).__name__, value)
+        # The mode is a SandboxMode member once it passes through the validated
+        # field; what it must never be is the loader's carrier subclass.
+        assert type(value) in (str, SandboxMode), (type(value).__name__, value)
 
 
 def test_a_floor_mode_read_from_an_environment_reference_is_a_plain_str(

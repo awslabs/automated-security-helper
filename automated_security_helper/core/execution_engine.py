@@ -32,7 +32,12 @@ from automated_security_helper.core.cancellation import (
     raise_if_cancelled,
     shutdown_requested,
 )
-from automated_security_helper.core.enums import ExecutionPhase, ExecutionStrategy
+from automated_security_helper.core.enums import (
+    DEFAULT_EXECUTION_PHASES,
+    ExecutionPhase,
+    ExecutionStrategy,
+    phase_values,
+)
 from automated_security_helper.core.exceptions import ScannerSelectionError
 from automated_security_helper.core.scanner_selection import (
     community_scanner_refusal,
@@ -46,10 +51,7 @@ from automated_security_helper.utils.report_path_links import ensure_reports_dir
 from automated_security_helper.core.phases.scan_phase import ScanPhase
 from automated_security_helper.core.scanner_selection import SelectionOrigin
 from automated_security_helper.core.phases.inspect_phase import InspectPhase
-from automated_security_helper.core.progress import (
-    ExecutionPhaseType,
-    LiveProgressDisplay,
-)
+from automated_security_helper.core.progress import LiveProgressDisplay
 from automated_security_helper.plugins import ash_plugin_manager
 from automated_security_helper.plugins.discovery import discover_plugins
 from automated_security_helper.plugins.plugin_manager import (
@@ -1017,7 +1019,7 @@ class ScanExecutionEngine:
         self,
         scan_start_time: datetime,
         scan_end_time: datetime,
-        ordered_phases: Collection[str],
+        ordered_phases: Collection[ExecutionPhase],
     ) -> float:
         """Record this run's start, end and duration on the results; return the duration.
 
@@ -1052,7 +1054,7 @@ class ScanExecutionEngine:
             scan_end_time = stats.end
         scan_duration = (scan_end_time - scan_start_time).total_seconds()
         if (
-            "scan" in ordered_phases
+            ExecutionPhase.SCAN in ordered_phases
             or stats.start is None
             or getattr(self, "_run_stamped_timing", False)
         ):
@@ -1064,13 +1066,13 @@ class ScanExecutionEngine:
 
     def execute_phases(
         self,
-        phases: List[ExecutionPhaseType] | None = None,
+        phases: List[ExecutionPhase] | None = None,
     ) -> AshAggregatedResults:
         """Execute the specified phases in the correct order.
 
         Args:
-            phases (List[ExecutionPhaseType], optional): The phases to execute.
-                Defaults to ["convert", "scan", "report"].
+            phases (List[ExecutionPhase], optional): The phases to execute.
+                Defaults to DEFAULT_EXECUTION_PHASES: convert, scan and report.
             config (Optional[AshConfig], optional): An override configuration to be
                 provided at the start of execution.
                 Defaults to None.
@@ -1079,25 +1081,21 @@ class ScanExecutionEngine:
             AshAggregatedResults: The results of the scan.
         """
         if phases is None:
-            phases = ["convert", "scan", "report"]
-        ASH_LOGGER.debug(f"Entering: ScanExecutionEngine.execute_phases({phases})")
+            phases = list(DEFAULT_EXECUTION_PHASES)
+        ASH_LOGGER.debug(
+            f"Entering: ScanExecutionEngine.execute_phases({phase_values(phases)})"
+        )
 
-        # Always execute phases in the correct order, regardless of input order
-        ordered_phases = []
-        if "convert" in phases:
-            ordered_phases.append("convert")
-        if "scan" in phases:
-            ordered_phases.append("scan")
-        if "report" in phases:
-            ordered_phases.append("report")
-        if "inspect" in phases:
-            ordered_phases.append("inspect")
+        # Always execute phases in the correct order, regardless of input order:
+        # the order of ExecutionPhase's members. A phase named as a plain string
+        # selects its member; a name that is no phase selects nothing.
+        ordered_phases = [phase for phase in ExecutionPhase if phase in phases]
 
-        ASH_LOGGER.info(f"Executing phases: {ordered_phases}")
+        ASH_LOGGER.info(f"Executing phases: {phase_values(ordered_phases)}")
 
         # Log a message to show progress is happening
         ASH_LOGGER.info("===== ASH Security Scan Starting =====")
-        ASH_LOGGER.info(f"Executing phases: {', '.join(ordered_phases)}")
+        ASH_LOGGER.info(f"Executing phases: {', '.join(phase_values(ordered_phases))}")
 
         # Record the start time for calculating scan duration. The monotonic
         # mark beside it gives the pre-report stamp its elapsed time without a
@@ -1115,7 +1113,9 @@ class ScanExecutionEngine:
         hours = minutes = seconds = 0
         # If we're only running the report phase (likely with existing results),
         # we don't need to set up the work directory or clean anything up
-        report_only = len(ordered_phases) in [1, 2] and ordered_phases[0] == "report"
+        report_only = (
+            len(ordered_phases) in [1, 2] and ordered_phases[0] is ExecutionPhase.REPORT
+        )
 
         # Only create directories if we're not in report-only mode
         if not report_only:
@@ -1159,7 +1159,7 @@ class ScanExecutionEngine:
                     AshEventType.EXECUTION_START,
                     handler_filter=self._handler_filter,
                     phase="execution",
-                    phases=ordered_phases,
+                    phases=phase_values(ordered_phases),
                     plugin_context=self._context,
                     source_dir=self._context.source_dir,
                     output_dir=self._context.output_dir,
@@ -1167,7 +1167,7 @@ class ScanExecutionEngine:
                     excluded_scanners=self._init_excluded_scanners,
                     python_based_plugins_only=self._python_only,
                     strategy=self._strategy,
-                    message=f"Starting ASH execution with phases: {', '.join(ordered_phases)}",
+                    message=f"Starting ASH execution with phases: {', '.join(phase_values(ordered_phases))}",
                 )
             except (KeyboardInterrupt, ScanCancelled):
                 raise
@@ -1194,10 +1194,12 @@ class ScanExecutionEngine:
                 # cancel during the scan phase writes no reports. A no-op outside
                 # a cancellable scan; see core/cancellation.py.
                 raise_if_cancelled()
-                ASH_LOGGER.info(f"\n----- Starting phase: {phase_name.upper()} -----")
+                ASH_LOGGER.info(
+                    f"\n----- Starting phase: {phase_name.value.upper()} -----"
+                )
 
                 match phase_name:
-                    case "convert":
+                    case ExecutionPhase.CONVERT:
                         # Create and execute the Convert phase
                         convert_phase = ConvertPhase(
                             plugins=self.plugins["converter"],
@@ -1211,7 +1213,7 @@ class ScanExecutionEngine:
                             python_based_plugins_only=self._python_only,
                         )
 
-                    case "scan":
+                    case ExecutionPhase.SCAN:
                         # Create and execute the Scan phase
                         scan_phase = ScanPhase(
                             plugins=self.plugins["scanner"],
@@ -1274,10 +1276,10 @@ class ScanExecutionEngine:
                         # omit report wrote a results file and took an exit code
                         # that counted findings a full scan suppresses. A run
                         # that goes on to report takes the pass there, once.
-                        if "report" not in ordered_phases:
+                        if ExecutionPhase.REPORT not in ordered_phases:
                             self._apply_final_suppressions()
 
-                    case "report":
+                    case ExecutionPhase.REPORT:
                         # Before the counts and the reporters, so that every
                         # report, the summary and the verdict describe one set of
                         # findings. Also here, not only after "scan", for a report
@@ -1311,7 +1313,7 @@ class ScanExecutionEngine:
                         )
                         self._asharp_model = self._results
 
-                    case "inspect":
+                    case ExecutionPhase.INSPECT:
                         # Create and execute the Inspect phase
                         inspect_phase = InspectPhase(
                             plugins=[],  # No plugin support for the Inspect phase at this time.
@@ -1406,7 +1408,7 @@ class ScanExecutionEngine:
                         handler_filter=self._handler_filter,
                         phase="execution",
                         plugin_context=self._context,
-                        phases=ordered_phases,
+                        phases=phase_values(ordered_phases),
                         results=self._results,
                         duration=scan_duration,
                         succeeded=not failed,

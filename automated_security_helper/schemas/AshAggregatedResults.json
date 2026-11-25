@@ -19906,27 +19906,8 @@
           "type": "array"
         },
         "mode": {
-          "anyOf": [
-            {
-              "enum": [
-                "off",
-                "auto",
-                "bwrap",
-                "firejail",
-                "landlock",
-                "sandbox-exec"
-              ],
-              "type": "string"
-            },
-            {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
-              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
-              "type": "string"
-            }
-          ],
-          "default": "off",
           "description": "How scanner subprocesses are confined. 'off' runs them as plain subprocesses. 'auto' uses the best sandbox available (Linux: bwrap, then firejail, then landlock; macOS: sandbox-exec). Any other value requires that backend. A scanner that cannot be sandboxed as requested is recorded MISSING with the reason; it is never run unsandboxed. A mode that --sandbox, ASH_CONFIG or the operator's config file sets is a floor: a config file inside a git checkout or the scanned directory cannot turn it off or switch backends. Not applied in container mode, where the container is the boundary; ASH logs a warning when it is set there.",
-          "title": "Mode"
+          "type": "string"
         },
         "network_scanners": {
           "anyOf": [

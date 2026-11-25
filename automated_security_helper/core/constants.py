@@ -8,7 +8,7 @@ import threading
 from pathlib import Path, PurePath
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from automated_security_helper.core.enums import AshExitCode
+from automated_security_helper.core.enums import AshExitCode, ExportFormat
 from automated_security_helper.models.vocab import SEVERITY_VALUES, SeverityThreshold
 from automated_security_helper.utils.severity_ladder import (
     SEVERITY_THRESHOLDS,
@@ -502,8 +502,8 @@ PRECOMMIT_MODE_SCANNERS: Tuple[str, ...] = (
 # configures `reporters` at all each keep today's behavior
 # (run_ash_scan._precommit_output_formats applies this).
 PRECOMMIT_MODE_OUTPUT_FORMATS: Tuple[str, ...] = (
-    "text",
-    "sarif",
+    ExportFormat.TEXT.value,
+    ExportFormat.SARIF.value,
 )
 
 # The environment variable names an ASH config file may interpolate.
