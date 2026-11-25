@@ -195,12 +195,13 @@ def observed_counts(flats: Iterable[Any]) -> dict[str, tuple[int, int]]:
     rows = list(flats)
     counts: dict[str, tuple[int, int]] = {}
     for facet, observation in FACET_COLUMNS.items():
-        if observation.excluded is not None:
+        is_populated = observation.populated
+        if observation.excluded is not None or is_populated is None:
             continue
         populated = 0
         for flat in rows:
             values = [getattr(flat, column) for column in observation.columns]
-            if observation.populated(*values):  # type: ignore[misc]
+            if is_populated(*values):
                 populated += 1
         counts[facet] = (populated, len(rows))
     return counts

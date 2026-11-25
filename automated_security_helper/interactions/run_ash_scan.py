@@ -7264,6 +7264,10 @@ def _image_asset_or_refusal(
         if refusal is not None:
             _printed_refusal(ASH_EXIT_USAGE_ERROR, refusal, one_line=True)
         return Asset.for_image(ImageLocator(oci_archive=Path(image_archive).absolute()))
+    if image_layout is None:
+        # Unreachable: exactly one of the three was given and the other two
+        # are handled above.
+        return None
     refusal = image_layout_refusal(image_layout)
     if refusal is not None:
         _printed_refusal(ASH_EXIT_USAGE_ERROR, refusal, one_line=True)

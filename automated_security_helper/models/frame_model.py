@@ -281,8 +281,8 @@ def _field_column(model: type[BaseModel], name: str) -> ColumnInfo:
     )
 
 
-def _ranked_column(model: type, entry: Ranked) -> ColumnInfo:
-    info = model.model_fields.get(entry.name)  # type: ignore[attr-defined]
+def _ranked_column(model: type[BaseModel], entry: Ranked) -> ColumnInfo:
+    info = model.model_fields.get(entry.name)
     if info is None:
         raise FrameSpecError(f"{model.__name__}.{entry.name} is not a model field")
     if _marker(info.metadata, NotInFrame) is not None:

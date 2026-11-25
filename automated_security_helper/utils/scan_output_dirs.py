@@ -1754,7 +1754,7 @@ def map_back_converted_results(sarif_report: Any, context: Any) -> int:
                 region = getattr(root, "region", None)
                 artifact = getattr(root, "artifactLocation", None)
                 start_line = getattr(region, "startLine", None)
-                if artifact is None or not isinstance(start_line, int):
+                if root is None or artifact is None or not isinstance(start_line, int):
                     continue
                 candidates = _result_paths(
                     SimpleNamespace(locations=[location]), source

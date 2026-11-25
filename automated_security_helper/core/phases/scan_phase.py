@@ -983,9 +983,10 @@ class ScanPhase(EnginePhase):
             rows = [
                 aggregated_results.scanner_results.get(name) for name in image_capable
             ]
-            if any(row is None for row in rows):
+            present = [row for row in rows if row is not None]
+            if len(present) != len(rows):
                 return
-            if any(row.status != ScannerStatus.SKIPPED for row in rows):
+            if any(row.status != ScannerStatus.SKIPPED for row in present):
                 return
             reason = (
                 "every image-capable scanner declined it cleanly (typically "

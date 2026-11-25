@@ -8,7 +8,7 @@ CLI subcommand for inspecting and analyzing ASH plugins.
 import json
 import logging
 from pathlib import Path
-from typing import Annotated, List
+from typing import Annotated, List, Optional
 import typer
 from automated_security_helper.utils.ui_theme import rich_theme
 from rich.table import Table
@@ -660,7 +660,7 @@ but some row was not run, 2 for a usage error (an unknown plugin, no transcript 
 )
 def verify_plugins(
     names: Annotated[
-        List[str],
+        Optional[List[str]],
         typer.Argument(
             help="Scanner names to verify (as in `ash plugin list`). Omit with --all."
         ),
@@ -670,7 +670,7 @@ def verify_plugins(
         typer.Option("--all", help="Verify every scanner with a manifest."),
     ] = False,
     transcripts_root: Annotated[
-        Path,
+        Optional[Path],
         typer.Option(
             "--transcripts-root",
             help="The directory holding the committed fixture directories "
