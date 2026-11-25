@@ -176,7 +176,7 @@ introduced the set-aside, and is recorded for review.
 from __future__ import annotations
 
 from enum import Enum, IntEnum
-from typing import Annotated, Any, Dict, Iterable, List, Literal, Optional, Tuple
+from typing import Annotated, Any, Dict, Iterable, List, Optional, Tuple
 
 from pydantic import Field, PrivateAttr, computed_field
 
@@ -294,6 +294,18 @@ class ProjectRunStatus(str, Enum):
     COMPLETED = "completed"
     SKIPPED = "skipped"
     FAILED = "failed"
+
+
+class WorkspaceRunStatus(str, Enum):
+    """Whether a workspace run scanned projects at all.
+
+    The discriminator for the code-2 collision (see the module docstring). Distinct
+    from ``ProjectRunStatus`` (one project's outcome) and the MCP registry's scan
+    status, which share the word ``completed`` and stay separate vocabularies.
+    """
+
+    COMPLETED = "completed"
+    REFUSED = "refused"
 
 
 class ProjectInputNotScanned(RecordModel):
@@ -960,15 +972,15 @@ class WorkspaceResults(RecordModel):
         ),
     ]
     status: Annotated[
-        Literal["completed", "refused"],
+        WorkspaceRunStatus,
         Field(
-            "completed",
+            WorkspaceRunStatus.COMPLETED,
             description=(
                 "Whether projects were scanned at all. The discriminator for the "
                 "code-2 collision -- see the module docstring."
             ),
         ),
-    ] = "completed"
+    ] = WorkspaceRunStatus.COMPLETED
     exit_code: Annotated[
         int, Field(..., description="The process status this run exited with.")
     ]

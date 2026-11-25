@@ -2468,7 +2468,7 @@ async def mcp_scan_directory(
                 "success": True,
                 "operation": "scan_directory",
                 "scan_id": scan_id,
-                "status": "pending",
+                "status": MCScanStatus.PENDING.value,
                 "directory_path": str(directory_path_obj),
                 "output_directory": str(output_dir),
                 "severity_threshold": severity_threshold,
