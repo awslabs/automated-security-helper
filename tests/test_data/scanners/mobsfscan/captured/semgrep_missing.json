@@ -1,0 +1,92 @@
+{
+  "errors": [
+    "semgrep not found. Install with: pip install semgrep"
+  ],
+  "mobsfscan_version": "1.2.0",
+  "results": {
+    "android_certificate_pinning": {
+      "metadata": {
+        "cwe": "CWE-295: Improper Certificate Validation",
+        "description": "This app does not use a TLS/SSL certificate or public key pinning in code to detect or prevent MITM attacks in secure communication channel. Please verify if pinning is enabled in `network_security_config.xml`.",
+        "masvs": "MSTG-NETWORK-4",
+        "owasp-mobile": "M3: Insecure Communication",
+        "reference": "https://github.com/MobSF/owasp-mstg/blob/master/Document/0x05g-Testing-Network-Communication.md#testing-custom-certificate-stores-and-certificate-pinning-mstg-network-4",
+        "severity": "INFO"
+      }
+    },
+    "android_certificate_transparency": {
+      "metadata": {
+        "cwe": "CWE-295: Improper Certificate Validation",
+        "description": "This app does not enforce TLS Certificate Transparency that helps to detect SSL certificates that have been mistakenly issued by a certificate authority or maliciously acquired from an otherwise unimpeachable certificate authority.",
+        "masvs": "MSTG-NETWORK-4",
+        "owasp-mobile": "M3: Insecure Communication",
+        "reference": "https://github.com/MobSF/owasp-mstg/blob/master/Document/0x05g-Testing-Network-Communication.md#testing-custom-certificate-stores-and-certificate-pinning-mstg-network-4",
+        "severity": "INFO"
+      }
+    },
+    "android_detect_tapjacking": {
+      "metadata": {
+        "cwe": "CWE-200: Information Exposure",
+        "description": "This app does not have capabilities to prevent tapjacking attacks. An attacker can hijack the user's taps and tricks him into performing some critical operations that he did not intend to.",
+        "masvs": "MSTG-PLATFORM-9",
+        "owasp-mobile": "M1: Improper Platform Usage",
+        "reference": "https://github.com/MobSF/owasp-mstg/blob/master/Document/0x05h-Testing-Platform-Interaction.md#testing-for-overlay-attacks-mstg-platform-9",
+        "severity": "INFO"
+      }
+    },
+    "android_prevent_screenshot": {
+      "metadata": {
+        "cwe": "CWE-200: Information Exposure",
+        "description": "This app does not have capabilities to prevent against Screenshots from Recent Task History/ Now On Tap etc.",
+        "masvs": "MSTG-STORAGE-9",
+        "owasp-mobile": "M2: Insecure Data Storage",
+        "reference": "https://github.com/MobSF/owasp-mstg/blob/master/Document/0x05d-Testing-Data-Storage.md#finding-sensitive-information-in-auto-generated-screenshots-mstg-storage-9",
+        "severity": "INFO"
+      }
+    },
+    "android_root_detection": {
+      "metadata": {
+        "cwe": "CWE-919: Weaknesses in Mobile Applications",
+        "description": "This app does not have root detection capabilities. Running a sensitive application on a rooted device questions the device integrity and affects users data.",
+        "masvs": "MSTG-RESILIENCE-1",
+        "owasp-mobile": "M8: Code Tampering",
+        "reference": "https://github.com/MobSF/owasp-mstg/blob/master/Document/0x05j-Testing-Resiliency-Against-Reverse-Engineering.md#testing-root-detection-mstg-resilience-1",
+        "severity": "INFO"
+      }
+    },
+    "android_safetynet_api": {
+      "metadata": {
+        "cwe": "CWE-353: Missing Support for Integrity Check",
+        "description": "This app does not uses SafetyNet Attestation API that provides cryptographically-signed attestation, assessing the device's integrity. This check helps to ensure that the servers are interacting with the genuine app running on a genuine Android device. ",
+        "masvs": "MSTG-RESILIENCE-1",
+        "owasp-mobile": "M8: Code Tampering",
+        "reference": "https://github.com/MobSF/owasp-mstg/blob/master/Document/0x05j-Testing-Resiliency-Against-Reverse-Engineering.md#testing-root-detection-mstg-resilience-1",
+        "severity": "INFO"
+      }
+    },
+    "js_dynamic_code_execution": {
+      "files": [
+        {
+          "file_path": "app.js",
+          "match_lines": [
+            1,
+            1
+          ],
+          "match_position": [
+            13,
+            28
+          ],
+          "match_string": "eval(userInput)"
+        }
+      ],
+      "metadata": {
+        "cvss": 7.5,
+        "cwe": "CWE-95: Improper Neutralization of Directives in Dynamically Evaluated Code ('Eval Injection')",
+        "description": "Dynamic JavaScript code execution via eval(), new Function(), or setTimeout/setInterval with a string argument was detected. Executing dynamically constructed strings can lead to arbitrary code execution inside the application context.",
+        "masvs": "MSTG-CODE-4",
+        "owasp-mobile": "M7: Client Code Quality",
+        "severity": "WARNING"
+      }
+    }
+  }
+}
