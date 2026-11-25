@@ -102,9 +102,15 @@ from typing import (
 
 from pydantic import Field
 
+from automated_security_helper.base import scanner_operational_facets as opsf
 from automated_security_helper.base.options import (
     ScannerOptionsBase,
     tool_version_constraint,
+)
+from automated_security_helper.base.scanner_facets import (
+    FacetDecl,
+    FacetState,
+    ScannerFacets,
 )
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
@@ -306,6 +312,190 @@ class CredSweeperScanner(ScannerPluginBase[CredSweeperScannerConfig]):
 
     # The rules and the model ship in the package; a scan makes no network call.
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
+
+    #: The facets register row (base/scanner_facets.py). Native fields name
+    #: CredSweeper's own JSON report (fixture
+    #: tests/test_data/scanners/credsweeper/captured/positive.json).
+    facets: ClassVar[ScannerFacets] = ScannerFacets(
+        rule_id=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='finding "rule"',
+        ),
+        severity=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='finding "confidence" (strong, moderate, weak), mapped '
+            'by CONFIDENCE_MAP; the rule\'s own "severity" is kept in extras',
+        ),
+        file_path=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='finding "line_data_list"[0]."path"',
+        ),
+        line_range=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='finding "line_data_list"[0]."line_num" (start line only)',
+        ),
+        column=FacetDecl(
+            state=FacetState.DROPPED,
+            native_field='finding "line_data_list"[0]."value_start" / "value_end"',
+            reason="the report carries character offsets of the value in its line; "
+            "the converter writes no column into the SARIF region",
+        ),
+        message=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='finding "rule", "confidence" and "ml_probability", '
+            "composed into the message by the converter (the value is never included)",
+        ),
+        resource_id=FacetDecl(
+            state=FacetState.NA,
+            reason="credential findings name a file location, not a deployable "
+            "resource; the report carries a rule and a path only",
+        ),
+        resource_type=FacetDecl(
+            state=FacetState.NA,
+            reason="credential findings name a file location, not a deployable resource",
+        ),
+        package_name=FacetDecl(
+            state=FacetState.NA,
+            reason="credential findings carry no package",
+        ),
+        package_version=FacetDecl(
+            state=FacetState.NA,
+            reason="credential findings carry no package",
+        ),
+        package_path=FacetDecl(
+            state=FacetState.NA,
+            reason="credential findings carry no package",
+        ),
+        taxonomy_cve=FacetDecl(
+            state=FacetState.NA,
+            reason="credential findings carry no CVE taxonomy",
+        ),
+        taxonomy_cwe=FacetDecl(
+            state=FacetState.NA,
+            reason="the report carries no CWE taxonomy",
+        ),
+        fingerprints=FacetDecl(
+            state=FacetState.NA,
+            reason="the report carries no fingerprint; the converter computes a "
+            "partialFingerprints credsweeper/v1 digest of the rule, path and line, "
+            "which is adapter-made and not a native value",
+        ),
+        fix_available=FacetDecl(
+            state=FacetState.NA,
+            reason="credential findings carry no fix state",
+        ),
+        remediation_text=FacetDecl(
+            state=FacetState.NA,
+            reason="the report carries no remediation text",
+        ),
+        snippet=FacetDecl(
+            state=FacetState.NA,
+            reason="the report's line and value fields are never read: the SARIF "
+            "region snippet is the constant REDACTED, so no credential text enters "
+            "the report",
+        ),
+        references=FacetDecl(
+            state=FacetState.NA,
+            reason="the report carries no reference URLs",
+        ),
+        tags=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="(no native tags) the converter writes secret and security",
+        ),
+        extras=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='finding "severity" and "ml_probability", written as '
+            "properties credsweeper_rule_severity and credsweeper_ml_probability, "
+            'with "confidence" as credsweeper_confidence',
+        ),
+    )
+
+    #: The operational register row (base/scanner_operational_facets.py),
+    #: checked against the production declarations it mirrors by
+    #: tests/unit/plugin_modules/test_scanner_operational_facets_consistency.py.
+    operational_facets: ClassVar[opsf.ScannerOperationalFacets] = (
+        opsf.ScannerOperationalFacets(
+            scanner_name="credsweeper",
+            network=opsf.NetworkFacet(
+                fetch_kind=opsf.FetchKind.NONE,
+                fetches=(),
+                prefetch=(),
+                offline_outcome=opsf.OfflineOutcome.UNCHANGED,
+                offline_strategy=OfflineStrategy.BUNDLED,
+                sandbox_network=opsf.SandboxNetwork.NONE,
+                source=(
+                    "credsweeper_scanner.py offline_strategy, sandbox_requirements; "
+                    "module header: the rules and the ONNX model ship in the "
+                    "package and ASH never passes a validation option"
+                ),
+            ),
+            output=opsf.OutputFacet(
+                native_formats=(opsf.OutputFormat.TOOL_JSON,),
+                side_reports=(),
+                non_finding_artifacts=(),
+            ),
+            targets=opsf.TargetsFacet(
+                kinds=(opsf.TargetKind.SECRETS_CONTENTS,),
+                tool_type=ScannerToolType.SECRETS,
+                selection="`credsweeper --path=<target>` over the target's files; "
+                "contents, not history (module header: --git and --diff_path are "
+                "never passed)",
+                covers_note="a community scanner; it declares no covers display string",
+            ),
+            runtime=opsf.RuntimeFacet(
+                kind=opsf.RuntimeKind.UV_PYTHON,
+                external_programs=(),
+                invocations=opsf.Invocations.PER_TARGET,
+                invocation_note="one run per scan target (source, then converted)",
+                python_only=False,
+                use_uv_tool=True,
+            ),
+            platforms=opsf.PlatformsFacet(
+                provisionable=(),
+                note="a PyPI package run through uv; ASH provisions no binary for it",
+            ),
+            severity=opsf.SeverityFacet(
+                severity_class=opsf.SeverityClass.DERIVED,
+                note="HIGH, MEDIUM or LOW from the finding's confidence "
+                "(strong, moderate, weak); an unreadable confidence is HIGH",
+            ),
+            silencing=opsf.SilencingFacet(
+                tool_side=(),
+                none_reason="ASH passes no CredSweeper config, denylist or "
+                "skip_ignored option, and no tool-side silencing surface was "
+                "surveyed; ASH suppressions are the surface this register records",
+            ),
+            identity=opsf.IdentityFacet(
+                fingerprint_class=opsf.FingerprintClass.STABLE_COMPUTED,
+                note="a computed sha256 under credsweeper/v1 of rule, path and line",
+            ),
+            extensibility=opsf.ExtensibilityFacet(
+                custom_rules=opsf.CustomRules.NONE,
+                env_prefixes=(),
+                options_surface="typed options (tool_version, install_timeout); no "
+                "rules path, because the tool's --rules and --config read the tree",
+            ),
+            exit_codes=opsf.ExitCodesFacet(
+                success_exit_codes=(0,),
+                semantics="ASH passes --no-error, so a completed scan exits 0 whatever "
+                "it found; 1 means the scan failed or no input mode was given",
+            ),
+            provenance=opsf.ProvenanceFacet(
+                tier=opsf.Tier.COMMUNITY_OPTIN,
+                source=opsf.ProvenanceSource.PYPI_VIA_UV,
+                selection_surfaces=("ash_credsweeper_plugins in ash_plugin_modules",),
+                upstream_license=(
+                    "MIT (source: the LICENSE file in the credsweeper 1.19.7 wheel, "
+                    "Copyright (c) 2021 SAMSUNG; METADATA License: MIT)"
+                ),
+            ),
+            prerequisites=opsf.PrerequisitesFacet(
+                kinds=(opsf.Prerequisite.NONE,),
+                note="no git repository is required and no history is read",
+            ),
+        )
+    )
+
     success_exit_codes: ClassVar[Set[int]] = {0}
     # The strict default; see "Sandbox" in the module docstring.
     sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements()
