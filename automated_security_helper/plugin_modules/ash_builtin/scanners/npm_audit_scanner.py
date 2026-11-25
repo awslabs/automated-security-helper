@@ -1842,7 +1842,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                         "npm-audit",
                         severity,
                         f"tool_name::{self.config.name}",
-                        f"tool_type::{self.tool_type or 'UNKNOWN'}",
+                        self.tool_type_tag(),
                     ],
                 }
                 if score is not None:
@@ -2630,7 +2630,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                                 "npm-audit",
                                 via_severity,
                                 f"tool_name::{self.config.name}",
-                                f"tool_type::{self.tool_type or 'UNKNOWN'}",
+                                self.tool_type_tag(),
                             ],
                         }
                         # Only attach security-severity when npm reported a
@@ -2766,7 +2766,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                                     "npm-audit",
                                     severity,
                                     f"tool_name::{self.config.name}",
-                                    f"tool_type::{self.tool_type or 'UNKNOWN'}",
+                                    self.tool_type_tag(),
                                 ],
                                 # No security-severity: a transitive advisory carries no
                                 # CVSS score here, and a hardcoded 0 made the severity
