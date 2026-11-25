@@ -79,8 +79,14 @@ def symbols_extra_install_command() -> str:
     return extra_install_command(SYMBOLS_EXTRA)
 
 
-#: The docs section with the uvx form of the install.
-SYMBOLS_EXTRA_DOCS_URL = f"{ASH_DOCS_URL}/docs/suppressions/#installing-the-extra"
+#: The docs section with the uvx form of the install: the how-to page's own URL
+#: (docs/content/how-to/suppress-findings.md renders there; the anchor is the
+#: explicit ``{#installing-the-extra}`` on its heading). The earlier
+#: ``/docs/suppressions/`` spelling reached the same section only through two
+#: redirect hops.
+SYMBOLS_EXTRA_DOCS_URL = (
+    f"{ASH_DOCS_URL}/how-to/suppress-findings/#installing-the-extra"
+)
 
 
 def symbols_extra_install_hint() -> str:

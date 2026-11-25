@@ -691,14 +691,14 @@ class TestTheSymbolsHint:
             symbols_extra_install_hint,
         )
 
-        url = f"{ASH_DOCS_URL}/docs/suppressions/#installing-the-extra"
+        url = f"{ASH_DOCS_URL}/how-to/suppress-findings/#installing-the-extra"
         hint = symbols_extra_install_hint()
         assert url in hint, hint
         assert f"`{symbols_extra_install_command()}`" in hint, hint
         assert find_bare_installs(hint) == []
-        # The docs rewrite moved the suppressions page to how-to/suppress-findings.md;
-        # docs/redirects.yml sends the old URL in the hint to it, and the section's
-        # explicit anchor keeps the fragment working.
+        # The hint names the page's own URL (the old /docs/suppressions/ spelling
+        # reached it only through docs/redirects.yml), and the section's explicit
+        # anchor keeps the fragment working.
         page = REPO_ROOT / "docs" / "content" / "how-to" / "suppress-findings.md"
         assert "\n### Installing the extra {#installing-the-extra}\n" in page.read_text(
             encoding="utf-8"
