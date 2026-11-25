@@ -57,4 +57,4 @@ scanners:
 
 ## Documentation
 
-How it differs from gitleaks, suppressions, ignore files, offline use and every option: [the Betterleaks plugin page](https://awslabs.github.io/automated-security-helper/docs/plugins/community/betterleaks-plugin/).
+How it differs from gitleaks, suppressions, ignore files, offline use and every option: [the Betterleaks plugin page](https://awslabs.github.io/automated-security-helper/docs/plugins/alpha/betterleaks-plugin/).

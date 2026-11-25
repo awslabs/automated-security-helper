@@ -140,7 +140,7 @@ def recorded_install(tmp_path, monkeypatch):
                 "--bin-path",
                 str(tmp_path / "bin"),
                 *tool_args,
-                # guarddog is a community scanner: `ash dependencies install` knows
+                # guarddog is an alpha scanner: `ash dependencies install` knows
                 # it only once its module is loaded. Without this the run depended
                 # on an earlier test in the same worker having imported that module
                 # (plugin registration happens at import, once per process), and

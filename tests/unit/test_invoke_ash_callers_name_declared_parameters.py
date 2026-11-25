@@ -5,12 +5,12 @@
 
 Why this file exists
 --------------------
-The run-scan-test action's community-config leg called
-``Invoke-ASH ... -ConfigFile ".ash/.ash_community_plugins.yaml"``. ``Invoke-ASH``
+The run-scan-test action's alpha-config leg called
+``Invoke-ASH ... -ConfigFile ".ash/.ash_alpha_plugins.yaml"``. ``Invoke-ASH``
 (utils/ash_helpers.ps1) declares ``-Config``, not ``-ConfigFile``, and its last parameter
 takes the remaining arguments, so PowerShell raised no error: ``-ConfigFile`` and the
 path went into ``$AshArgs``, whose ``-c`` match also read as ``--no-color``, and the scan
-ran without the community config the leg is named for.
+ran without the alpha config the leg is named for.
 
 What this asserts
 -----------------
@@ -19,7 +19,7 @@ What this asserts
    name. PowerShell binds an unambiguous prefix of a declared name to that parameter, but
    this test does not accept one: a call spells the full name. A name that is not a
    declared one, and not a prefix of one, falls into ``$AshArgs``.
-2. The community-config leg passes ``-Config`` with a config file that exists.
+2. The alpha-config leg passes ``-Config`` with a config file that exists.
 """
 
 from __future__ import annotations
@@ -100,14 +100,14 @@ def test_every_call_names_only_declared_parameters():
     )
 
 
-def test_the_community_leg_passes_its_config_with_config():
+def test_the_alpha_leg_passes_its_config_with_config():
     action = str(RUN_SCAN_TEST.relative_to(REPO_ROOT))
     lines = [
         line
         for where, _, line in _calls()
-        if where == action and "ash_community_plugins" in line
+        if where == action and "ash_alpha_plugins" in line
     ]
-    assert lines, "the community-config leg's Invoke-ASH call was not found"
+    assert lines, "the alpha-config leg's Invoke-ASH call was not found"
     for line in lines:
         match = re.search(r"\s-Config\s+\"([^\"]+)\"", line)
         assert match, line

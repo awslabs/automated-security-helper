@@ -354,7 +354,7 @@ Interactive configuration wizard.
 
 Reads the existing config (the one a scan of --source-dir, or the current
 directory, would use, or --config), walks through scanner, reporter,
-offline-mode, and community-plugin settings interactively, then writes the
+offline-mode, and alpha-plugin settings interactively, then writes the
 result back. With no config yet, it creates .ashrc.yaml there.
 
 ```text

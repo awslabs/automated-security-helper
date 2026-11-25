@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""The CI check that a community scanner ran: each way it must fail, and its pass.
+"""The CI check that an alpha scanner ran: each way it must fail, and its pass.
 
 The script lives in .github/actions/run-scan-test, which is not an importable
 package, so it is loaded by path as test_scanner_error_counter_gate.py loads its
@@ -21,14 +21,12 @@ SCRIPT = (
     / ".github"
     / "actions"
     / "run-scan-test"
-    / "assert_community_scanner_ran.py"
+    / "assert_alpha_scanner_ran.py"
 )
 
 
 def _load():
-    spec = importlib.util.spec_from_file_location(
-        "assert_community_scanner_ran", SCRIPT
-    )
+    spec = importlib.util.spec_from_file_location("assert_alpha_scanner_ran", SCRIPT)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module

@@ -182,7 +182,7 @@ def _flag(argv: List[str], prefix: str) -> Optional[str]:
     return None
 
 
-class TestCommunityPlugin:
+class TestAlphaPlugin:
     def test_scanner_is_on_by_default_once_its_module_is_listed(self):
         assert BetterleaksScannerConfig().enabled is True
         assert BetterleaksScannerConfig().name == "betterleaks"

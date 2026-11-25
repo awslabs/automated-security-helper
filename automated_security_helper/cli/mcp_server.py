@@ -2521,10 +2521,10 @@ async def list_scanners() -> list:
     still fail on a given target, and a scan may skip a scanner for reasons of
     configuration rather than dependencies.
 
-    The list covers the built-in scanners and the community scanners ASH ships
-    (ferret-scan, snyk-code, trivy-repo). Listing a community scanner does not add
+    The list covers the built-in scanners and the alpha scanners ASH ships
+    (ferret-scan, snyk-code, trivy-repo). Listing an alpha scanner does not add
     it to any scan: a scan runs the built-in scanners plus those of the plugin
-    modules its own ash_plugin_modules names, so a community scanner runs only in a
+    modules its own ash_plugin_modules names, so an alpha scanner runs only in a
     scan whose config or --ash-plugin-modules names its module.
     """
     try:

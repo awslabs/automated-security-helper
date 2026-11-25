@@ -24,7 +24,7 @@ The Snyk plugin requires a `SNYK_TOKEN` to authenticate with Snyk's services. Th
 
 ### Verification
 
-The GitHub Actions workflow will automatically use the `SNYK_TOKEN` secret when running community plugin tests. You can verify the setup by:
+The GitHub Actions workflow will automatically use the `SNYK_TOKEN` secret when running alpha plugin tests. You can verify the setup by:
 
 1. Checking that the secret appears in your repository's Actions secrets list
 2. Running the workflow and ensuring Snyk CLI authentication succeeds
@@ -58,7 +58,7 @@ Snyk CLI will automatically check for credentials at `~/.config/configstore/snyk
 - Ensure the token is valid and hasn't expired
 - Check that the token has appropriate permissions for Snyk Code
 
-**Workflow Fails on Community Plugin Tests**:
+**Workflow Fails on Alpha Plugin Tests**:
 - The workflow will skip Snyk tests gracefully if `SNYK_TOKEN` is not available
 - Check the workflow logs for specific error messages
 - Ensure npm is available for Snyk CLI installation
@@ -72,7 +72,7 @@ Snyk CLI will automatically check for credentials at `~/.config/configstore/snyk
 
 To troubleshoot issues in the workflow, you can:
 
-1. Check the "Install Community Plugin Tools" step logs
+1. Check the "Install Alpha Plugin Tools" step logs
 2. Look for Snyk CLI version and authentication status
 3. Review the scan execution logs for detailed error messages
 
@@ -85,7 +85,7 @@ To troubleshoot issues in the workflow, you can:
 
 ## Integration Testing
 
-The community plugin legs scan with `.ash/.ash_community_plugins.yaml`. That file is
+The alpha plugin legs scan with `.ash/.ash_alpha_plugins.yaml`. That file is
 inside the scanned tree, and a config file there cannot load the Snyk plugin, so the
 legs pass it with
 `--ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins`

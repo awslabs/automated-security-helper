@@ -666,7 +666,20 @@ class ExitCodesFacet(_Frozen):
 
 class Tier(str, Enum):
     BUILTIN_DEFAULT = "builtin_default"
-    COMMUNITY_OPTIN = "community_optin"
+    ALPHA_OPTIN = "alpha_optin"
+
+    @classmethod
+    def _missing_(cls, value: object) -> "Tier | None":
+        """``"community_optin"``, this tier's spelling before the rename, is an
+        alias of ``alpha_optin`` for one release and warns when it is read."""
+        if value == "community_optin":
+            from automated_security_helper.core.alpha_scanners import (
+                warn_community_alias,
+            )
+
+            warn_community_alias("community_optin", cls.ALPHA_OPTIN.value)
+            return cls.ALPHA_OPTIN
+        return None
 
 
 class ProvenanceSource(str, Enum):

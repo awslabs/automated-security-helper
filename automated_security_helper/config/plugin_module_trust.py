@@ -18,7 +18,7 @@ code 3 (``plugins.loader.refuse_plugin_modules_outside_namespace``) as it would 
 any other config source.
 
 Packages named this way keep working, which is what ASH's own
-``.ash/.ash_community_plugins.yaml`` relies on: its entries live in the installed
+``.ash/.ash_alpha_plugins.yaml`` relies on: its entries live in the installed
 ``automated_security_helper`` package. A module inside the directory the running
 ``automated_security_helper`` package was imported from is ASH's own code and is
 kept even when that directory is in the tree, as it is for an editable install of

@@ -101,8 +101,7 @@ A layout whose layers are compressed any way but gzip is reported with the layer
 
 For a tag-only reference (`repo:tag`) ASH runs `crane digest <ref>` once at scan start, a
 registry request for the manifest's digest that needs no engine and fetches no layer.
-`crane` is a pinned tool like grype (`ash dependencies install --tool crane`, and the
-container image carries it). The digest it prints is recorded for the scan, so finding ids
+`crane` is a pinned tool like grype, and the container image carries it. The digest it prints is recorded for the scan, so finding ids
 key on it: they stay the same when the tag is moved to another name and change when the tag
 moves to a different image.
 

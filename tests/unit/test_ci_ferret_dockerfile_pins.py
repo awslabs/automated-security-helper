@@ -8,7 +8,7 @@ Why this exists
 ---------------
 ferret-scan's netrc_password detector reads the ``--disabled-password`` flag of the
 ``adduser`` command in the Dockerfile as a password token. The self-scan config
-(``.ash/.ash_community_plugins.yaml``) suppresses that false positive for the
+(``.ash/.ash_alpha_plugins.yaml``) suppresses that false positive for the
 Dockerfile and for its build-context copy. A whole-file entry would also hide a real
 finding anywhere else in those files, so each entry is pinned to a few lines around the
 command. A pin goes stale when the file changes above it: the entry then suppresses
@@ -39,7 +39,7 @@ from automated_security_helper.utils.suppression_matcher import should_suppress_
 pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SELF_SCAN = REPO_ROOT / ".ash" / ".ash_community_plugins.yaml"
+SELF_SCAN = REPO_ROOT / ".ash" / ".ash_alpha_plugins.yaml"
 RULE_ID = "API_KEY_OR_SECRET"
 FLAGGED_TEXT = "adduser --disabled-password"
 PINNED_FILES = ("Dockerfile", "automated_security_helper/assets/Dockerfile")

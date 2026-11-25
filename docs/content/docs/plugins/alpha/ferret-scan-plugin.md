@@ -79,9 +79,9 @@ Python interpreter that runs ASH, which is where `ash dependencies install` puts
 **ASH (Recommended)** — installs the version the plugin is tested against into
 the Python environment that runs ASH, with pip or uv, whichever owns that
 environment (a uv tool, uvx or `uv venv` install has no pip):
-<!-- doctest: illustrative reason="reads .ash/.ash_community_plugins.yaml, a file of the ASH repository that a project does not have until it adds one, and installs ferret-scan over the network" -->
+<!-- doctest: illustrative reason="reads .ash/.ash_alpha_plugins.yaml, a file of the ASH repository that a project does not have until it adds one, and installs ferret-scan over the network" -->
 ```bash
-ash dependencies install --config .ash/.ash_community_plugins.yaml
+ash dependencies install --config .ash/.ash_alpha_plugins.yaml
 ```
 
 **pip**: pass the supported range. A bare `pip install ferret-scan` resolves to
@@ -113,7 +113,7 @@ ferret-scan --help
 
 ### Enable the Plugin
 
-The ferret-scan plugin is a community plugin that must be explicitly enabled. There are two ways to do this:
+The ferret-scan plugin is an alpha plugin that must be explicitly enabled. There are two ways to do this:
 
 #### Option 1: Add to ASH Configuration File (Recommended)
 
@@ -589,7 +589,7 @@ Results are written to:
 which ferret-scan
 
 # Install if missing
-pip install ferret-scan
+pip install 'ferret-scan>=2.4.5,<2.7.0'
 ```
 
 **Unsupported option error**:
@@ -667,7 +667,7 @@ jobs:
           python-version: '3.11'
       - name: Install dependencies
         run: |
-          pip install ferret-scan "uv>=0.4"
+          pip install 'ferret-scan>=2.4.5,<2.7.0' "uv>=0.4"
       - name: Run ASH with Ferret Scan
         # Workflow commands are stopped around the scan, as the reusable scan
         # workflow does: tool output is untrusted, and a `::`-line in it would
@@ -702,7 +702,7 @@ ferret-security-scan:
   stage: test
   image: python:3.11
   before_script:
-    - pip install ferret-scan uv
+    - pip install 'ferret-scan>=2.4.5,<2.7.0' uv
   script:
     - |
       uv run ash --scanners ferret-scan \

@@ -1431,7 +1431,7 @@ def _mark_client_supplied(
 
     delivered = is_delivered or config_is_client_supplied
 
-    models = {
+    models: Dict[str, Any] = {
         "suppressions": AshSuppression,
         "ignore_paths": IgnorePathWithReason,
         "exclusions": AshExclusion,
