@@ -75,3 +75,20 @@ def test_the_policy_grants_the_network_online(layout):
 def test_the_policy_withholds_the_network_offline(layout):
     declared = DependencyCheckScanner.sandbox_requirements
     assert _policy(layout, declared, offline=True).network is False
+
+
+def test_the_nvd_key_reaches_the_tool_and_other_secrets_do_not(layout):
+    declared = DependencyCheckScanner.sandbox_requirements
+    env = {
+        NVD_API_KEY_ENV: "nvd-key-value",
+        "JAVA_HOME": "/opt/java",
+        "AWS_SECRET_ACCESS_KEY": "other-secret",
+        "SOME_API_TOKEN": "other-token",
+    }
+    kept = _policy(layout, declared).filter_env(env)
+    assert kept[NVD_API_KEY_ENV] == "nvd-key-value"
+    assert kept["JAVA_HOME"] == "/opt/java"
+    assert "AWS_SECRET_ACCESS_KEY" not in kept
+    assert "SOME_API_TOKEN" not in kept
+    # A scanner without the declaration does not receive the key.
+    assert NVD_API_KEY_ENV not in _policy(layout, SandboxRequirements()).filter_env(env)
