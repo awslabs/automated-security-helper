@@ -3,11 +3,12 @@
 
 """ScanCodeScanner: the invocation, the report conversion and the failure cases.
 
-The ScanCode documents below are built by hand from the fields ScanCode's own source
-documents for ``--json`` output (``headers``, ``files``, ``license_detections``,
-``matches``); they are not captures of a real run. ``scan()`` runs against a fake
-subprocess that writes them where the argv's ``--json=`` names, so the tests run on
-every platform without ScanCode installed.
+The ScanCode documents at the top are built by hand from the fields ScanCode's own
+source documents for ``--json`` output (``headers``, ``files``, ``license_detections``,
+``matches``); they probe the converter's edge cases. ``TestCapturedReports`` runs the
+converter, and ``scan()`` end to end, over real ScanCode 32.5.0 captures. ``scan()``
+runs against a fake subprocess that writes the document where the argv's ``--json=``
+names, so the tests run on every platform without ScanCode installed.
 """
 
 from __future__ import annotations
@@ -526,3 +527,62 @@ class TestCapturedReports:
         sarif = convert_scancode_result(document, strip_first_segment="pos")
         report = SarifReport.model_validate(sarif)
         assert len(report.get_all_results()) == 4
+
+    @pytest.mark.parametrize(
+        ("name", "dirname", "expected"),
+        [
+            (
+                "positive.json",
+                "pos",
+                [
+                    ("Apache-2.0", "none", "INFO", "src/app.py", 1),
+                    ("MIT", "none", "INFO", "LICENSE", 1),
+                    ("MIT", "none", "INFO", "LICENSE", 5),
+                    (
+                        "LicenseRef-scancode-warranty-disclaimer",
+                        "none",
+                        "INFO",
+                        "LICENSE",
+                        15,
+                    ),
+                ],
+            ),
+            ("negative.json", "neg", []),
+        ],
+    )
+    def test_scan_over_a_real_capture_anchors_paths_to_the_target(
+        self, name, dirname, expected, tmp_path, tool_present, monkeypatch
+    ):
+        # End to end through scan(): the capture's paths begin with the directory
+        # name ScanCode was given, and the scanner derives that name from the target
+        # itself (no hand-passed strip), so a wrong anchor reads as moved findings.
+        target = tmp_path / dirname
+        target.mkdir()
+        document = json.loads((CAPTURED / name).read_text(encoding="utf-8"))
+        scanner = _scanner(target, tmp_path)
+        report = _run(scanner, FakeScanCode(document=document), monkeypatch)
+        assert sorted(_findings(report)) == sorted(expected)
+
+    def test_a_capture_scanned_under_the_wrong_directory_name_is_not_silently_moved(
+        self, tmp_path, tool_present, monkeypatch
+    ):
+        # Planted control for the test above: with a target whose name differs from
+        # the capture's first segment, nothing is stripped and the URIs keep "pos/".
+        target = tmp_path / "other"
+        target.mkdir()
+        document = json.loads((CAPTURED / "positive.json").read_text(encoding="utf-8"))
+        report = _run(
+            _scanner(target, tmp_path), FakeScanCode(document=document), monkeypatch
+        )
+        assert {f[3] for f in _findings(report)} == {"pos/LICENSE", "pos/src/app.py"}
+
+
+class TestPinIsAStableRelease:
+    def test_the_default_pin_is_one_exact_final_release(self):
+        from automated_security_helper.plugin_modules.ash_scancode_plugins.scancode_scanner import (  # noqa: E501
+            SCANCODE_DEFAULT_VERSION_CONSTRAINT,
+        )
+
+        assert SCANCODE_DEFAULT_VERSION_CONSTRAINT.startswith("==")
+        version = SCANCODE_DEFAULT_VERSION_CONSTRAINT[2:]
+        assert version.replace(".", "").isdigit(), "a pre or dev release is not a pin"
