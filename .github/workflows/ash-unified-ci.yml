@@ -499,7 +499,7 @@ jobs:
         # run on it). All of it runs on the merge_group entry that
         # gates main and on the push to main, so nothing merges without the full matrix; a
         # pull request shows one Linux (arm64), one macOS and one Windows leg per tier on the
-        # lowest, the gated and the highest Python. It runs no x86_64 Linux leg of any tier,
+        # lowest, the middle and the highest Python. It runs no x86_64 Linux leg of any tier,
         # no Linux or macOS pre-commit hook run (the bundle's hook step keys on ubuntu-latest
         # and macos-latest) and no x86_64 Linux or macos-latest coverage data in the combined
         # unit-coverage figure; those are the merge-queue entry's and the push's. The container-runtime legs (docker, podman, finch, nerdctl)
@@ -1024,8 +1024,8 @@ jobs:
   # (/home/runner/work/... on Linux, /Users/runner/work/... on macOS, D:\a\... on Windows),
   # so the job runs on one Linux image and the `[paths]` section of .coveragerc folds all
   # three layouts into the checkout's own automated_security_helper/ during the combine.
-  # Without it one file would be counted once per operating system. A path that matched no
-  # alias would fail `coverage report` with "No source for code", not pass.
+  # A path that matched no alias would fail `coverage report` with "No source for code"
+  # (the macOS and Windows paths do not exist on this runner), not pass.
   #
   # `!cancelled()` and not the default `success()`: when a shard fails on a test, its
   # coverage data is still uploaded, and this job should still say whether the combination
