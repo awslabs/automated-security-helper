@@ -101,8 +101,10 @@ class TestTheSeverityCountRowIsZippedStrictly:
             "info",
         )
 
-    def test_a_longer_field_tuple_fails_instead_of_truncating(self):
-        longer = SEVERITY_COUNT_FIELDS + ("extra",)
-        with patch.object(calc, "SEVERITY_COUNT_FIELDS", longer):
+    def test_a_shorter_field_tuple_fails_instead_of_truncating(self):
+        # Shorter, not longer: other readers of the tuple take each field off a
+        # count object, so an extra name would fail there before the row is zipped.
+        shorter = SEVERITY_COUNT_FIELDS[:-1]
+        with patch.object(calc, "SEVERITY_COUNT_FIELDS", shorter):
             with pytest.raises(ValueError):
                 ScannerStatisticsCalculator.extract_scanner_statistics(_model())
