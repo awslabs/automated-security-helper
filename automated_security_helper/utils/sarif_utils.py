@@ -59,6 +59,7 @@ from automated_security_helper.utils.package_identity import (
 from automated_security_helper.models.asharp_model import ScannerSeverityCount
 from automated_security_helper.utils.secret_masking import mask_secret_in_text
 from automated_security_helper.utils.shared_finding_ids import shared_ids_by_position
+from automated_security_helper.utils.ash_lock import AshLock, AshLockError
 from automated_security_helper.utils.symbol_spans import SymbolResolver
 from automated_security_helper.utils.suppression_frame import (
     first_ignore_path,
@@ -1996,6 +1997,26 @@ def _suppression_scanner_identity(result, run, scanner_name):
     return run.tool.driver.name if run.tool and run.tool.driver else "unknown"
 
 
+def _symbol_resolver_for(
+    source_dir: Any, suppressions: Iterable[Any]
+) -> SymbolResolver | None:
+    """The resolver symbol suppressions are checked with, or None without any.
+
+    It carries the scan root's ``.ash/ash.lock``, so a symbol suppression whose
+    file changed since it was locked (or was never locked) does not apply. A
+    lock that cannot be read leaves every symbol suppression inert and says why
+    once: fail closed, as every other gap in a symbol check does.
+    """
+    if not any(getattr(s, "symbol", None) for s in suppressions):
+        return None
+    try:
+        lock = AshLock.load(source_dir)
+    except AshLockError as e:
+        ASH_LOGGER.warning(f"Symbol suppressions do not apply: {e}.", extra=NO_MARKUP)
+        lock = AshLock(source_dir=Path(source_dir))
+    return SymbolResolver(source_dir, lock=lock)
+
+
 def apply_suppressions_to_sarif(
     sarif_report: SarifReport,
     plugin_context: PluginContext,
@@ -2121,10 +2142,8 @@ def _apply_suppressions_within_budget(
     # Built only when an entry sets `symbol`, so a config without one never
     # touches tree-sitter. The resolver parses a file only when every other
     # field of a symbol-scoped entry already matches a finding in it.
-    _symbol_resolver: SymbolResolver | None = (
-        SymbolResolver(plugin_context.source_dir)
-        if any(getattr(s, "symbol", None) for s in suppressions)
-        else None
+    _symbol_resolver: SymbolResolver | None = _symbol_resolver_for(
+        plugin_context.source_dir, suppressions
     )
 
     # The files a repository committed to ASH's output directories, which the

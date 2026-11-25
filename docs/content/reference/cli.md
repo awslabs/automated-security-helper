@@ -48,6 +48,10 @@ The Environment variable column names the variable click reads for the option; a
 | [`ash plugin list`](#plugin-list) | The `plugin list` command lists what a scan with this configuration loads, on or off. |
 | [`ash report`](#report) | Generate a report from ASH scan results using the specified reporter plugin. |
 | [`ash scan`](#scan) | Scan code, infrastructure, secrets, and dependencies. |
+| [`ash suppress`](#suppress) | Create symbol suppressions and keep their content-hash lock (.ash/ash.lock) current. |
+| [`ash suppress add`](#suppress-add) | Add a symbol suppression and lock its file's content hash. |
+| [`ash suppress refresh`](#suppress-refresh) | Record a new review: re-hash locked files whose bytes changed. |
+| [`ash suppress verify`](#suppress-verify) | Check the lock against the tree. Exits 1 when anything is out of date. |
 | [`ash trend`](#trend) | Show new, carried and fixed findings over a series of saved ASH scans. |
 
 ## `ash`
@@ -68,7 +72,7 @@ Options that only `ash` itself accepts:
 | <a id="ash--install-completion"></a>`--install-completion` | flag | off |  | Install completion for the current shell. |
 | <a id="ash--show-completion"></a>`--show-completion` | flag | off |  | Show completion for the current shell, to copy it or customize the installation. |
 
-Subcommands: [`ash build-image`](#build-image), [`ash config`](#config), [`ash dependencies`](#dependencies), [`ash diff`](#diff), [`ash express`](#express), [`ash get-genai-guide`](#get-genai-guide), [`ash inspect`](#inspect), [`ash mcp`](#mcp), [`ash merge`](#merge), [`ash plugin`](#plugin), [`ash report`](#report), [`ash scan`](#scan), [`ash trend`](#trend).
+Subcommands: [`ash build-image`](#build-image), [`ash config`](#config), [`ash dependencies`](#dependencies), [`ash diff`](#diff), [`ash express`](#express), [`ash get-genai-guide`](#get-genai-guide), [`ash inspect`](#inspect), [`ash mcp`](#mcp), [`ash merge`](#merge), [`ash plugin`](#plugin), [`ash report`](#report), [`ash scan`](#scan), [`ash suppress`](#suppress), [`ash trend`](#trend).
 
 ## <a id="build-image"></a>`ash build-image`
 
@@ -775,6 +779,96 @@ ash scan [OPTIONS]
 | <a id="scan--baseline"></a>`--baseline` | text | not set | `ASH_BASELINE` | Leave out findings already present in this saved ash_aggregated_results.json from a full scan (for example the default branch's), so the reports, the summary and the exit code count only new findings. Matching tolerates findings that only moved lines. The file must be outside the scanned checkout and the output directory. Supported with --mode local and precommit only (exit 5 otherwise). |
 | <a id="scan--cli-json-input"></a>`--cli-json-input` | text | not set |  | Read parameter values from a JSON object: a path, a file:// URI, or '-' for stdin. Keys are parameter names (output_dir) or long flag spellings (--output-dir). Flags given on the command line override the file; the file overrides environment variables. Run with --generate-cli-skeleton for a template. |
 | <a id="scan--generate-cli-skeleton"></a>`--generate-cli-skeleton` | flag | off |  | Print a JSON template for --cli-json-input, listing every parameter of this command with its default, or null where it is required or an environment variable backs it, and exit. |
+
+## <a id="suppress"></a>`ash suppress`
+
+Create symbol suppressions and keep their content-hash lock (.ash/ash.lock) current.
+
+```text
+ash suppress [OPTIONS] COMMAND [ARGS]...
+```
+
+This command takes no options.
+
+Subcommands: [`ash suppress add`](#suppress-add), [`ash suppress refresh`](#suppress-refresh), [`ash suppress verify`](#suppress-verify).
+
+### <a id="suppress-add"></a>`ash suppress add`
+
+Add a symbol suppression and lock its file's content hash.
+
+Writes the suppression into the config and the hash of the file's bytes
+into .ash/ash.lock. While the file is unchanged the suppression applies;
+after any edit to the file its findings are reported again until the change
+is reviewed and `ash suppress refresh` records it.
+
+A suppression already in the config for the same rule, file and symbol is
+not written twice; the lock entry is still created or completed, which is
+how an existing suppression is brought under the lock.
+
+Example:
+
+```text
+ash suppress add B602 --symbol Handler.run --file src/app.py \
+    --reason "The command is a constant."
+```
+
+```text
+ash suppress add [OPTIONS] {rule_id}
+```
+
+<!-- doctest: options of=cli.suppress.add -->
+| Argument | Type | Default | Environment variable | Description |
+|----------|------|---------|----------------------|-------------|
+| <a id="suppress-add--arg-rule-id"></a>`rule_id` | text | required |  | The rule id the suppression covers, e.g. B602. |
+
+<!-- doctest: options of=cli.suppress.add -->
+| Option | Type | Default | Environment variable | Description |
+|--------|------|---------|----------------------|-------------|
+| <a id="suppress-add--symbol"></a>`--symbol` | text | required |  | The definition the suppression covers, as a dotted qualified name such as 'MyClass.my_method'. |
+| <a id="suppress-add--file"></a>`--file` | text | required |  | The file that holds the definition, relative to the source directory. Its content hash is recorded in the lock. |
+| <a id="suppress-add--reason"></a>`--reason` | text | required |  | Why the finding is safe to suppress. |
+| <a id="suppress-add--config"></a>`--config`, `-c` | text | not set |  | The YAML config file to write the suppression to. Defaults to the config a scan of the source directory uses. |
+| <a id="suppress-add--source-dir"></a>`--source-dir` | text | not set |  | The directory the scan covers, which holds .ash/ash.lock. Defaults to the current directory. |
+
+### <a id="suppress-refresh"></a>`ash suppress refresh`
+
+Record a new review: re-hash locked files whose bytes changed.
+
+Run it after reading what changed in a file and confirming its suppressions
+still hold. It prints each file whose hash changed. A locked file that no
+longer exists is reported and left as it was; exit code 1 then.
+
+```text
+ash suppress refresh [OPTIONS] [paths]...
+```
+
+<!-- doctest: options of=cli.suppress.refresh -->
+| Argument | Type | Default | Environment variable | Description |
+|----------|------|---------|----------------------|-------------|
+| <a id="suppress-refresh--arg-paths"></a>`paths` | text, any number | not set |  | Locked files to re-hash. Every locked file when none is named. |
+
+<!-- doctest: options of=cli.suppress.refresh -->
+| Option | Type | Default | Environment variable | Description |
+|--------|------|---------|----------------------|-------------|
+| <a id="suppress-refresh--source-dir"></a>`--source-dir` | text | not set |  | The directory the scan covers, which holds .ash/ash.lock. Defaults to the current directory. |
+
+### <a id="suppress-verify"></a>`ash suppress verify`
+
+Check the lock against the tree. Exits 1 when anything is out of date.
+
+Lists every locked file whose bytes changed or that is gone, and every
+symbol suppression in the named configs whose file has no lock entry. Exit
+code 0 means a scan applies every symbol suppression.
+
+```text
+ash suppress verify [OPTIONS]
+```
+
+<!-- doctest: options of=cli.suppress.verify -->
+| Option | Type | Default | Environment variable | Description |
+|--------|------|---------|----------------------|-------------|
+| <a id="suppress-verify--config"></a>`--config`, `-c` | text, repeatable | not set |  | A YAML config file whose symbol suppressions must each have a lock entry. Repeat it for several. Defaults to the config a scan of the source directory uses. |
+| <a id="suppress-verify--source-dir"></a>`--source-dir` | text | not set |  | The directory the scan covers, which holds .ash/ash.lock. Defaults to the current directory. |
 
 ## <a id="trend"></a>`ash trend`
 

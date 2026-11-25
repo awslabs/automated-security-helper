@@ -32,6 +32,7 @@ def test_subcommands():
         "build-image",
         "report",
         "diff",
+        "trend",
         "merge",
         "mcp",
         "get-genai-guide",
@@ -39,6 +40,7 @@ def test_subcommands():
         "dependencies",
         "inspect",
         "plugin",
+        "suppress",
         "express",
     )
 

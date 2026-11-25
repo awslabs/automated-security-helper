@@ -220,6 +220,7 @@ _LAZY_SUBCOMMANDS: dict[str, tuple[str, str]] = {
     ),
     "inspect": ("automated_security_helper.cli.inspect", "inspect_app"),
     "plugin": ("automated_security_helper.cli.plugin", "plugin_app"),
+    "suppress": ("automated_security_helper.cli.suppress", "suppress_app"),
     "express": ("automated_security_helper.cli.express", "express_app"),
 }
 
@@ -261,6 +262,7 @@ _COMMAND_ORDER: tuple[str, ...] = (
     "dependencies",
     "inspect",
     "plugin",
+    "suppress",
     "express",
 )
 

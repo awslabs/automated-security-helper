@@ -5694,7 +5694,9 @@ def _outputs_known_file_names() -> Set[str]:
     import automated_security_helper.plugin_modules as plugin_modules
     from automated_security_helper.core.constants import ASH_CONFIG_FILE_NAMES
 
-    known = {"ash.log", "ash.log.jsonl", "ash.txt", *ASH_CONFIG_FILE_NAMES}
+    # ash.lock is the committed suppression lock (utils/ash_lock.py), an input
+    # ASH reads and ``ash suppress`` writes under .ash/, not a report.
+    known = {"ash.log", "ash.log.jsonl", "ash.txt", "ash.lock", *ASH_CONFIG_FILE_NAMES}
     for module_info in pkgutil.iter_modules(plugin_modules.__path__):
         module = importlib.import_module(
             f"{plugin_modules.__name__}.{module_info.name}"

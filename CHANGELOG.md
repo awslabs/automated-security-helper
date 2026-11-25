@@ -75,6 +75,16 @@
 
 ### Features
 
+- **Symbol suppressions are bound to their file's content hash in `.ash/ash.lock`.**
+  A symbol-scoped suppression whose file has no lock entry is refused when the config is
+  validated (`ash scan`, `ash config validate`), with a message that names the command to
+  run. When a locked file's bytes change, its symbol suppressions stop applying, their
+  findings return, and the scan prints one notice naming the file, the suppressions and
+  `ash suppress refresh`. The new `ash suppress add`, `refresh` and `verify` commands
+  write the suppression and its lock entry together, record a reviewed change, and fail
+  CI when the lock is out of date. Line-range suppressions are unchanged. This
+  repository's own symbol suppressions are locked in the same change. See
+  [Lock a symbol suppression to its file](docs/content/how-to/suppress-findings.md#lock).
 - **`default_scanners` sets the default scanners in a trusted config.** `only`
   replaces a mode's default selection in every mode and `add` extends a fixed one such as
   precommit's; a repository config, an MCP client or a patch cannot set it. The command

@@ -57,6 +57,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
     ToolComponent,
 )
 from automated_security_helper.utils import symbol_spans
+from automated_security_helper.utils.ash_lock import AshLock, LockScope, lock_key
 from automated_security_helper.utils.sarif_utils import apply_suppressions_to_sarif
 from automated_security_helper.utils.get_ash_version import get_ash_version
 from automated_security_helper.utils.symbol_spans import (
@@ -917,9 +918,17 @@ def _sarif(uri: str, lines) -> SarifReport:
 
 
 def _context(root: Path, out: Path, suppressions) -> PluginContext:
-    config = AshConfig(
-        project_name="p", global_settings={"suppressions": list(suppressions)}
-    )
+    suppressions = list(suppressions)
+    # A scan applies a symbol suppression only to a file locked in
+    # .ash/ash.lock (utils/ash_lock.py); these tests are about the spans, so
+    # each file a suppression names is locked as it stands.
+    lock = AshLock(source_dir=root)
+    for s in suppressions:
+        if s.symbol and (root / s.path).is_file():
+            lock.bind(lock_key(s.path), LockScope(s.rule_id or "", s.symbol))
+    if lock.entries:
+        lock.save()
+    config = AshConfig(project_name="p", global_settings={"suppressions": suppressions})
     return PluginContext(source_dir=root, output_dir=out, config=config)
 
 

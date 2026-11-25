@@ -59,6 +59,9 @@ from automated_security_helper.core.execution_engine import (
 
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.models.core import ignore_paths_that_skip_scanning
+from automated_security_helper.utils.ash_lock import (
+    refuse_unlocked_symbol_suppressions,
+)
 from automated_security_helper.config.client_config_policy import ClientConfigRules
 from automated_security_helper.core.committed_output import (
     LOG_FILE_NAMES,
@@ -147,7 +150,7 @@ def resolve_scan_config(
     without them reads ``sandbox.mode`` from a file the scanned repository or an
     MCP client wrote, which the scan itself does not honor.
     """
-    return resolve_config(
+    config = resolve_config(
         config_path=config_path,
         source_dir=source_dir,
         config_overrides=list(config_overrides or []),
@@ -158,6 +161,14 @@ def resolve_scan_config(
         client_config_policy=client_config_policy,
         remote_client=remote_client,
     )
+    # A symbol-scoped suppression is bound to its file's content hash in
+    # .ash/ash.lock; one whose file has no entry is refused here, as any other
+    # invalid configuration is (utils/ash_lock.py).
+    global_settings = getattr(config, "global_settings", None)
+    refuse_unlocked_symbol_suppressions(
+        getattr(global_settings, "suppressions", None) or [], source_dir
+    )
+    return config
 
 
 def _refuse_a_named_config_that_is_not_a_file(
