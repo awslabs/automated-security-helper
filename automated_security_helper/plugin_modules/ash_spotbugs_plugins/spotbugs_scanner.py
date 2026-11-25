@@ -634,10 +634,12 @@ class SpotBugsScanner(ScannerPluginBase[SpotBugsScannerConfig]):
             "carry it onto the finding",
         ),
         tags=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field='rules[].properties "tags" (the SpotBugs category, '
-            "SECURITY among them); the adapter appends security and jvm to "
-            "each result",
+            state=FacetState.DROPPED,
+            native_field='rules[].properties "tags" (the SpotBugs category)',
+            reason="the category sits on the rule descriptor, not the result; "
+            "the adapter reads it only to keep SECURITY results and adds the "
+            "constant tags security and jvm, without copying the category onto "
+            "the finding",
         ),
         extras=FacetDecl(
             state=FacetState.MAPPED,
