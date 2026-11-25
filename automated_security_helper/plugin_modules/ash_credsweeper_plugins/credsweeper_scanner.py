@@ -375,10 +375,10 @@ class CredSweeperScanner(ScannerPluginBase[CredSweeperScannerConfig]):
             reason="the report carries no CWE taxonomy",
         ),
         fingerprints=FacetDecl(
-            state=FacetState.NA,
-            reason="the report carries no fingerprint; the converter computes a "
-            "partialFingerprints credsweeper/v1 digest of the rule, path and line, "
-            "which is adapter-made and not a native value",
+            state=FacetState.MAPPED,
+            native_field="(no native fingerprint) result partialFingerprints "
+            '"credsweeper/v1", a sha256 digest of rule, path and line computed by '
+            "the converter",
         ),
         fix_available=FacetDecl(
             state=FacetState.NA,
@@ -389,10 +389,9 @@ class CredSweeperScanner(ScannerPluginBase[CredSweeperScannerConfig]):
             reason="the report carries no remediation text",
         ),
         snippet=FacetDecl(
-            state=FacetState.NA,
-            reason="the report's line and value fields are never read: the SARIF "
-            "region snippet is the constant REDACTED, so no credential text enters "
-            "the report",
+            state=FacetState.MAPPED,
+            native_field="region.snippet.text, the constant REDACTED written by the "
+            'converter; the report\'s "line" and "value" are never read',
         ),
         references=FacetDecl(
             state=FacetState.NA,
