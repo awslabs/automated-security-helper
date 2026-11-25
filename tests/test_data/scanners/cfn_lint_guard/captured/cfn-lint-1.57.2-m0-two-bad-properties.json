@@ -1,0 +1,115 @@
+[
+  {
+    "Filename": "m0_two_bad_properties.yaml",
+    "Id": "c4a79ad9-33bc-94bf-08e0-5e30acd090cf",
+    "Level": "Warning",
+    "Location": {
+      "End": {
+        "ColumnNumber": 9,
+        "LineNumber": 8
+      },
+      "Path": [
+        "Parameters",
+        "Unused"
+      ],
+      "Start": {
+        "ColumnNumber": 3,
+        "LineNumber": 8
+      }
+    },
+    "Message": "Parameter Unused not used.",
+    "ParentId": null,
+    "Rule": {
+      "Description": "Making sure the parameters defined are used",
+      "Id": "W2001",
+      "ShortDescription": "Check if Parameters are Used",
+      "Source": "https://github.com/aws-cloudformation/cfn-lint"
+    }
+  },
+  {
+    "Filename": "m0_two_bad_properties.yaml",
+    "Id": "1106babe-c5a0-ff43-bc34-4118b6109f6c",
+    "Level": "Error",
+    "Location": {
+      "End": {
+        "ColumnNumber": 9,
+        "LineNumber": 9
+      },
+      "Path": [
+        "Parameters",
+        "Unused",
+        "Type"
+      ],
+      "Start": {
+        "ColumnNumber": 5,
+        "LineNumber": 9
+      }
+    },
+    "Message": "'Strin' is not one of ['AWS::EC2::AvailabilityZone::Name', 'AWS::EC2::Image::Id', 'AWS::EC2::Instance::Id', 'AWS::EC2::KeyPair::KeyName', 'AWS::EC2::SecurityGroup::GroupName', 'AWS::EC2::SecurityGroup::Id', 'AWS::EC2::Subnet::Id', 'AWS::EC2::VPC::Id', 'AWS::EC2::Volume::Id', 'AWS::Route53::HostedZone::Id', 'AWS::SSM::Parameter::Name', 'AWS::SSM::Parameter::Value<AWS::EC2::AvailabilityZone::Name>', 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>', 'AWS::SSM::Parameter::Value<AWS::EC2::Instance::Id>', 'AWS::SSM::Parameter::Value<AWS::EC2::KeyPair::KeyName>', 'AWS::SSM::Parameter::Value<AWS::EC2::SecurityGroup::GroupName>', 'AWS::SSM::Parameter::Value<AWS::EC2::SecurityGroup::Id>', 'AWS::SSM::Parameter::Value<AWS::EC2::Subnet::Id>', 'AWS::SSM::Parameter::Value<AWS::EC2::VPC::Id>', 'AWS::SSM::Parameter::Value<AWS::EC2::Volume::Id>', 'AWS::SSM::Parameter::Value<AWS::Route53::HostedZone::Id>', 'AWS::SSM::Parameter::Value<AWS::SSM::Parameter::Name>', 'AWS::SSM::Parameter::Value<CommaDelimitedList>', 'AWS::SSM::Parameter::Value<List<AWS::EC2::AvailabilityZone::Name>>', 'AWS::SSM::Parameter::Value<List<AWS::EC2::Image::Id>>', 'AWS::SSM::Parameter::Value<List<AWS::EC2::Instance::Id>>', 'AWS::SSM::Parameter::Value<List<AWS::EC2::SecurityGroup::GroupName>>', 'AWS::SSM::Parameter::Value<List<AWS::EC2::SecurityGroup::Id>>', 'AWS::SSM::Parameter::Value<List<AWS::EC2::Subnet::Id>>', 'AWS::SSM::Parameter::Value<List<AWS::EC2::VPC::Id>>', 'AWS::SSM::Parameter::Value<List<AWS::EC2::Volume::Id>>', 'AWS::SSM::Parameter::Value<List<AWS::Route53::HostedZone::Id>>', 'AWS::SSM::Parameter::Value<List<Number>>', 'AWS::SSM::Parameter::Value<List<String>>', 'AWS::SSM::Parameter::Value<Number>', 'AWS::SSM::Parameter::Value<String>', 'CommaDelimitedList', 'List<AWS::EC2::AvailabilityZone::Name>', 'List<AWS::EC2::Image::Id>', 'List<AWS::EC2::Instance::Id>', 'List<AWS::EC2::SecurityGroup::GroupName>', 'List<AWS::EC2::SecurityGroup::Id>', 'List<AWS::EC2::Subnet::Id>', 'List<AWS::EC2::VPC::Id>', 'List<AWS::EC2::Volume::Id>', 'List<AWS::Route53::HostedZone::Id>', 'List<Number>', 'List<String>', 'Number', 'String']",
+    "ParentId": null,
+    "Rule": {
+      "Description": "Making sure the parameters have a correct type",
+      "Id": "E2002",
+      "ShortDescription": "Parameters have appropriate type",
+      "Source": "https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/best-practices.html#parmtypes"
+    }
+  },
+  {
+    "Filename": "m0_two_bad_properties.yaml",
+    "Id": "312480e7-7175-f6e8-5354-3c37c017fbf8",
+    "Level": "Error",
+    "Location": {
+      "End": {
+        "ColumnNumber": 23,
+        "LineNumber": 14
+      },
+      "Path": [
+        "Resources",
+        "M0FixtureBucketA",
+        "Properties",
+        "NotARealProperty"
+      ],
+      "Start": {
+        "ColumnNumber": 7,
+        "LineNumber": 14
+      }
+    },
+    "Message": "Additional properties are not allowed ('NotARealProperty' was unexpected)",
+    "ParentId": null,
+    "Rule": {
+      "Description": "Making sure that resources properties are properly configured",
+      "Id": "E3002",
+      "ShortDescription": "Resource properties are invalid",
+      "Source": "https://github.com/aws-cloudformation/cfn-lint/blob/main/docs/cfn-schema-specification.md#properties"
+    }
+  },
+  {
+    "Filename": "m0_two_bad_properties.yaml",
+    "Id": "40b4fc4c-3271-68e7-f44f-7897d352c4ac",
+    "Level": "Error",
+    "Location": {
+      "End": {
+        "ColumnNumber": 23,
+        "LineNumber": 18
+      },
+      "Path": [
+        "Resources",
+        "M0FixtureBucketB",
+        "Properties",
+        "NotARealProperty"
+      ],
+      "Start": {
+        "ColumnNumber": 7,
+        "LineNumber": 18
+      }
+    },
+    "Message": "Additional properties are not allowed ('NotARealProperty' was unexpected)",
+    "ParentId": null,
+    "Rule": {
+      "Description": "Making sure that resources properties are properly configured",
+      "Id": "E3002",
+      "ShortDescription": "Resource properties are invalid",
+      "Source": "https://github.com/aws-cloudformation/cfn-lint/blob/main/docs/cfn-schema-specification.md#properties"
+    }
+  }
+]

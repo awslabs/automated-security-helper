@@ -27,24 +27,24 @@ The facet vocabulary, in declaration order: `rule_id`, `severity`, `file_path`, 
 | [`bandit`](#bandit) | 9 | 2 | 9 |
 | [`cdk-nag`](#cdk-nag) | 11 | 1 | 8 |
 | [`cfn-guard`](#cfn-guard) | 7 | 1 | 12 |
-| [`cfn-lint`](#cfn-lint) | 6 | 2 | 12 |
-| [`cfn-nag`](#cfn-nag) | 0 | 1 | 19 |
-| [`checkov`](#checkov) | 7 | 1 | 12 |
+| [`cfn-lint`](#cfn-lint) | 7 | 1 | 12 |
+| [`cfn-nag`](#cfn-nag) | 6 | 0 | 14 |
+| [`checkov`](#checkov) | 7 | 0 | 13 |
 | [`detect-secrets`](#detect-secrets) | 8 | 0 | 12 |
 | [`gitleaks`](#gitleaks) | 9 | 1 | 10 |
 | [`grype`](#grype) | 1 | 1 | 18 |
-| [`npm-audit`](#npm-audit) | 10 | 3 | 7 |
-| [`opengrep`](#opengrep) | 10 | 3 | 7 |
-| [`semgrep`](#semgrep) | 9 | 3 | 8 |
+| [`npm-audit`](#npm-audit) | 11 | 2 | 7 |
+| [`opengrep`](#opengrep) | 10 | 2 | 8 |
+| [`semgrep`](#semgrep) | 9 | 2 | 9 |
 | [`syft`](#syft) | 0 | 2 | 18 |
-| [`trivy`](#trivy) | 11 | 4 | 5 |
+| [`trivy`](#trivy) | 13 | 2 | 5 |
 | [`zizmor`](#zizmor) | 8 | 2 | 10 |
 | [`betterleaks`](#betterleaks) | 9 | 1 | 10 |
 | [`ferret-scan`](#ferret-scan) | 2 | 0 | 18 |
 | [`guarddog`](#guarddog) | 10 | 2 | 8 |
 | [`hadolint`](#hadolint) | 7 | 0 | 13 |
 | [`snyk-code`](#snyk-code) | 2 | 2 | 16 |
-| [`trivy-repo`](#trivy-repo) | 11 | 4 | 5 |
+| [`trivy-repo`](#trivy-repo) | 13 | 2 | 5 |
 
 ## `actionlint`
 
@@ -166,7 +166,7 @@ The facet vocabulary, in declaration order: `rule_id`, `severity`, `file_path`, 
 | `line_range` | `mapped` | result locations[].physicalLocation.region startLine/endLine |  |
 | `column` | `mapped` | result locations[].physicalLocation.region startColumn/endColumn |  |
 | `message` | `mapped` | result message.text |  |
-| `resource_id` | `mappable-dropped` | finding "Location.Path" (the --format json output format; Path[1] is the logical id, e.g. ["Resources", "M0FixtureBucket", ...]) | the SARIF format ASH requests carries the location only (artifactLocation.uri, region) and names the resource in message prose, so no id is written; the --format json output names it (M0 item c, fixture cfn-lint-1.61.0-m0-bad-property.json), the same dropped shape as cfn-nag and trivy |
+| `resource_id` | `mapped` | finding "Location.Path" (the --format json report; Path[1] is the logical id, e.g. ["Resources", "M0FixtureBucket", ...]), copied onto the SARIF result under ash_resource_id by attach_cfn_lint_resources from a second, unrecorded cfn-lint run | Example: `M0FixtureBucket` |
 | `resource_type` | `n/a` |  | no resource is named in the SARIF format ASH consumes, so no type is carried either |
 | `package_name` | `n/a` |  | findings are CloudFormation template checks; no package exists in cfn-lint output |
 | `package_version` | `n/a` |  | findings are CloudFormation template checks; no package exists in cfn-lint output |
@@ -187,24 +187,24 @@ The facet vocabulary, in declaration order: `rule_id`, `severity`, `file_path`, 
 
 | Facet | State | Native field | Reason |
 |-------|-------|--------------|--------|
-| `rule_id` | `n/a` |  | UNCONFIRMED: the JSON violation "id" (e.g. W51, the committed fixture) should render as the SARIF ruleId, but the SARIF the pipeline reads was never read to a real result (M0 item b FATALed); one cfn_nag_scan --output-format sarif run settles it |
-| `severity` | `n/a` |  | UNCONFIRMED: the JSON violation "type" (WARN or FAIL) should render as the SARIF result level, but the SARIF the pipeline reads was never read to a real result (M0 item b); one cfn_nag_scan --output-format sarif run settles it |
-| `file_path` | `n/a` |  | UNCONFIRMED: the JSON file result "filename" should render as the SARIF artifact uri (restored from the staged copy by \_restore_cfn_nag_uris), but the SARIF the pipeline reads was never read to a real result (M0 item b); one cfn_nag_scan --output-format sarif run settles it |
-| `line_range` | `n/a` |  | UNCONFIRMED: the JSON violation "line_numbers" should render as the SARIF region startLine, but the SARIF the pipeline reads was never read to a real result (M0 item b); one cfn_nag_scan --output-format sarif run settles it |
-| `column` | `n/a` |  | UNCONFIRMED: the tool's JSON carries line_numbers only and no cfn-nag SARIF golden is committed; one cfn_nag_scan --output-format sarif run settles whether a column is emitted |
-| `message` | `n/a` |  | UNCONFIRMED: the JSON violation "message" should render as the SARIF message text, but the SARIF the pipeline reads was never read to a real result (M0 item b); one cfn_nag_scan --output-format sarif run settles it |
-| `resource_id` | `mappable-dropped` | violation "logical_resource_ids" (the JSON output format) | UNCONFIRMED: no SARIF run is committed, so whether the id is a structured SARIF field or only one result per id is open (M0 item b FATALed); the unit that attaches it (M3a) picks its route after one cfn_nag_scan --output-format sarif run |
+| `rule_id` | `mapped` | violation "id" (e.g. W51), the SARIF ruleId |  |
+| `severity` | `mapped` | violation "type" (WARN or FAIL), rendered by the tool as the SARIF result level |  |
+| `file_path` | `mapped` | file result "filename", the SARIF artifact uri (restored from the staged copy by \_restore_cfn_nag_uris) |  |
+| `line_range` | `mapped` | violation "line_numbers", the SARIF region startLine |  |
+| `column` | `n/a` |  | the tool's SARIF region carries startLine only and its JSON carries line_numbers only (captured fixture, M0 item b) |
+| `message` | `mapped` | violation "message" |  |
+| `resource_id` | `mapped` | SARIF result locations[0].logicalLocations[0].name (one result per id; the JSON "logical_resource_ids" lists them), written under ash_resource_id by attach_cfn_nag_resources | Example: `M0FixtureBucketA` |
 | `resource_type` | `n/a` |  | the JSON "element_types" holds the element class ("resource"), not the CloudFormation Type; the Type would need a template read the adapter does not make |
 | `package_name` | `n/a` |  | findings are CloudFormation template resources; no package exists in cfn_nag output |
 | `package_version` | `n/a` |  | findings are CloudFormation template resources; no package exists in cfn_nag output |
 | `package_path` | `n/a` |  | findings are CloudFormation template resources; no package exists in cfn_nag output |
 | `taxonomy_cve` | `n/a` |  | cfn_nag publishes its own rule ids; no CVE taxonomy in the violations |
 | `taxonomy_cwe` | `n/a` |  | cfn_nag publishes its own rule ids; no CWE taxonomy in the violations |
-| `fingerprints` | `n/a` |  | UNCONFIRMED: the tool's JSON carries no fingerprint and no cfn-nag SARIF golden is committed; one SARIF run settles it |
+| `fingerprints` | `n/a` |  | the captured SARIF results carry no fingerprints and the JSON carries none (M0 item b) |
 | `fix_available` | `n/a` |  | cfn_nag violations carry no fix state or fixed version |
 | `remediation_text` | `n/a` |  | violation "message" states the finding, not a remediation; no remediation field exists |
-| `snippet` | `n/a` |  | UNCONFIRMED: the tool's JSON carries no source excerpt and no cfn-nag SARIF golden is committed; one SARIF run settles whether a region snippet is emitted |
-| `references` | `n/a` |  | UNCONFIRMED: the tool's JSON carries no URL and no cfn-nag SARIF golden is committed; one SARIF run settles whether the rule driver carries a helpUri |
+| `snippet` | `n/a` |  | the captured SARIF region carries startLine only, with no snippet, and the JSON carries no excerpt (M0 item b) |
+| `references` | `n/a` |  | the captured SARIF rules are {id, name, fullDescription} with no helpUri, and the JSON carries no URL (M0 item b) |
 | `tags` | `n/a` |  | the adapter adds no tags and the tool's JSON carries none |
 | `extras` | `n/a` |  | the adapter writes no result property bag (its only PropertyBag is on the Invocation) |
 
@@ -228,10 +228,10 @@ The facet vocabulary, in declaration order: `rule_id`, `severity`, `file_path`, 
 | `taxonomy_cve` | `n/a` |  | checkov publishes its own check ids; no CVE taxonomy in the policy-check results |
 | `taxonomy_cwe` | `n/a` |  | checkov publishes its own check ids; no CWE taxonomy in the policy-check results |
 | `fingerprints` | `n/a` |  | UNCONFIRMED: the side report carries no fingerprint and no checkov SARIF golden is committed; one SARIF run settles it |
-| `fix_available` | `n/a` |  | UNCONFIRMED: the side report has a fixed_definition key but it is null on every committed check, so whether a fixable check populates it is open; one run over a fixable check settles it |
+| `fix_available` | `n/a` |  | the side report has a fixed_definition key and it is null on every record read: 34 of 34 across terraform, cloudformation, kubernetes and dockerfile (checkov 3.4.5, an offline desk run beside the committed fixture), so no run ASH makes has shown a fix state to map; a populated record would redeclare it |
 | `remediation_text` | `n/a` |  | check_name states the finding, not a remediation; no remediation text field exists in the side report |
 | `snippet` | `mapped` | SARIF region.snippet.text (settled by the committed checkov-3.4.6 capture; the side report's "code_block" carries the same lines) |  |
-| `references` | `mappable-dropped` | check "guideline" (a policy documentation URL) | the side report carries a guideline URL per check; the adapter never reads it |
+| `references` | `n/a` |  | the side report has a "guideline" key and it is null on every record of the committed capture (9 of 9, checkov 3.4.6 insecure-s3), so no run ASH makes has shown a URL to map; attach_checkov_guidelines copies a non-null guideline onto the result as a related location, which the flat references read, so a capture whose records carry one redeclares this cell MAPPED |
 | `tags` | `n/a` |  | the adapter adds no tags and the side report's "entity_tags" is null in the committed record |
 | `extras` | `n/a` |  | UNCONFIRMED: no checkov SARIF golden is committed, so whether results carry a property bag is open; one SARIF run settles it |
 
@@ -334,7 +334,7 @@ The facet vocabulary, in declaration order: `rule_id`, `severity`, `file_path`, 
 | `package_version` | `mapped` | installed version read from the lockfile beside the manifest (npm audit's own report gives only a vulnerable range) |  |
 | `package_path` | `mapped` | vulnerabilities.&lt;name&gt;."nodes" resolved against the lockfile entry for the install path |  |
 | `taxonomy_cve` | `n/a` |  | npm audit names no CVE field: the advisory id carried as the ruleId is vulnerabilities.&lt;name&gt;.via[]."url" (a GHSA id), and the flat CVE column reads CVE-shaped rule ids only |
-| `taxonomy_cwe` | `mappable-dropped` | vulnerabilities.&lt;name&gt;.via[]."cwe" | written to the result property "cwe" only; the flat cwe_id reader reads tags, so the flat column stays empty |
+| `taxonomy_cwe` | `mapped` | vulnerabilities.&lt;name&gt;.via[]."cwe" (and the v1 advisory "cwe"), written as CWE-&lt;n&gt; rule tags by \_cwe_tags and kept in the result property "cwe" |  |
 | `fingerprints` | `n/a` |  | npm audit output carries no fingerprint; finding identity keys on scanner, rule and package |
 | `fix_available` | `mapped` | vulnerabilities.&lt;name&gt;."fixAvailable" |  |
 | `remediation_text` | `n/a` |  | UNCONFIRMED: not classified by the survey; the adapter writes a composed "recommendation" property, but the flat model has no remediation column to read it and npm audit's native fixAvailable is a flag or a fix object, not text |
@@ -363,7 +363,7 @@ The facet vocabulary, in declaration order: `rule_id`, `severity`, `file_path`, 
 | `taxonomy_cve` | `n/a` |  | code rules carry no CVE ids |
 | `taxonomy_cwe` | `mapped` | tool.driver.rules[].properties.tags (CWE entries) |  |
 | `fingerprints` | `mapped` | results[].fingerprints."matchBasedId/v1" |  |
-| `fix_available` | `mappable-dropped` | results[].fixes | SARIF fixes survive the report model and die at the flat reader, which reads only fix_available |
+| `fix_available` | `n/a` |  | opengrep 2.0.0's SARIF has no fixes key even for a rule that carries `fix:` (tests/test_data/scanners/opengrep/captured/opengrep-2.0.0-fix-rule.sarif: result keys are exactly fingerprints, locations, message, properties, ruleId), so there is nothing in the SARIF ASH reads to map |
 | `remediation_text` | `n/a` |  | rule help describes the rule, not a remediation; fixes are recorded under fix_available |
 | `snippet` | `mapped` | results[].locations[].physicalLocation.region.snippet.text |  |
 | `references` | `mappable-dropped` | tool.driver.rules[].help.markdown | rule-level only: the flat reader takes references from result relatedLocations, so the rule help is discarded today |
@@ -390,7 +390,7 @@ The facet vocabulary, in declaration order: `rule_id`, `severity`, `file_path`, 
 | `taxonomy_cve` | `n/a` |  | code rules carry no CVE ids |
 | `taxonomy_cwe` | `mapped` | tool.driver.rules[].properties.tags (CWE entries) |  |
 | `fingerprints` | `n/a` |  | semgrep OSS writes the placeholder 'requires login' as results[].fingerprints."matchBasedId/v1" (the committed capture shows it), which the finding-identity reader discards; a real match-based id needs semgrep's logged-in engine, and the opengrep fork is the build that emits one |
-| `fix_available` | `mappable-dropped` | results[].fixes | SARIF fixes survive the report model and die at the flat reader, which reads only fix_available |
+| `fix_available` | `n/a` |  | semgrep 1.187.0's SARIF has no fixes key even for a rule that carries `fix:` (tests/test_data/scanners/semgrep/captured/semgrep-1.187.0-fix-rule.sarif: result keys are exactly fingerprints, locations, message, properties, ruleId), so there is nothing in the SARIF ASH reads to map |
 | `remediation_text` | `n/a` |  | rule help describes the rule, not a remediation; fixes are recorded under fix_available |
 | `snippet` | `mapped` | results[].locations[].physicalLocation.region.snippet.text |  |
 | `references` | `mappable-dropped` | tool.driver.rules[].helpUri (registry rules; a local rule carries none) | rule-level only: the flat reader takes references from result relatedLocations, so the help link is discarded today |
@@ -436,7 +436,7 @@ The facet vocabulary, in declaration order: `rule_id`, `severity`, `file_path`, 
 | `line_range` | `mapped` | SARIF region.startLine / region.endLine |  |
 | `column` | `mapped` | SARIF region.startColumn |  |
 | `message` | `mapped` | SARIF result message.text |  |
-| `resource_id` | `mappable-dropped` | Results[].Misconfigurations[].CauseMetadata.Resource | misconfig only: the address (aws_s3_bucket.m0_fixture_bucket) exists in trivy's JSON format and is absent from the SARIF ASH reads (0 occurrences, M0 fixture); the vuln findings are packages, so no resource_id is ever written until a side-JSON attach lands |
+| `resource_id` | `mapped` | Results[].Misconfigurations[].CauseMetadata.Resource (trivy's JSON report, absent from its SARIF), copied onto the SARIF result under ash_resource_id by attach_trivy_resources for result type terraform only: cloudformation carries a file:line locator (t.yaml:3-4) and kubernetes and dockerfile carry none (trivy 0.76.2, M0-FINDINGS.md (a)) | Example: `aws_s3_bucket.m0_fixture_bucket` |
 | `resource_type` | `n/a` |  | trivy's CauseMetadata names Provider and Service (AWS, s3) and no resource type; the type is only the prefix of the dropped address, which would be a derivation |
 | `package_name` | `mapped` | result message line 1 "Package: &lt;name&gt;" (\_package_from_message) |  |
 | `package_version` | `mapped` | result message line 2 "Installed Version: &lt;version&gt;" (\_package_from_message) |  |
@@ -444,7 +444,7 @@ The facet vocabulary, in declaration order: `rule_id`, `severity`, `file_path`, 
 | `taxonomy_cve` | `mapped` | SARIF result ruleId (the CVE id) |  |
 | `taxonomy_cwe` | `n/a` |  | UNCONFIRMED: trivy's SARIF rules carry no CWE (tags are vulnerability, security, &lt;severity&gt;); the JSON format's CweIDs has no committed vulnerability fixture, and a `trivy fs --format json` run over a lockfile settles it |
 | `fingerprints` | `n/a` |  | trivy's SARIF results carry no fingerprints (result keys are level, locations, message, ruleId, ruleIndex) |
-| `fix_available` | `mappable-dropped` | message line "Fixed Version: &lt;version&gt;" | the fixed version sits in the message text and is never parsed into the fix_available property the flat model reads |
+| `fix_available` | `mapped` | message line "Fixed Version: &lt;version&gt;", written as fix_available=True when non-empty by TrivyScannerBase.\_fixed_version_from_message (an empty value writes nothing) |  |
 | `remediation_text` | `n/a` |  | UNCONFIRMED: not classified by the survey; the flat model has no remediation column, and the rule help text carries the fixed version already declared under fix_available |
 | `snippet` | `n/a` |  | trivy's SARIF results carry no code snippet |
 | `references` | `mappable-dropped` | SARIF rule helpUri | rule-level only: the flat reader takes references from result relatedLocations, so the help link is discarded today |
@@ -546,8 +546,8 @@ The facet vocabulary, in declaration order: `rule_id`, `severity`, `file_path`, 
 | `message` | `mapped` | match "message", assembled with the rule and match into the result text by the adapter |  |
 | `resource_id` | `n/a` |  | findings name a package and a file:line inside it, not a deployable resource; package identity is declared under the package facets |
 | `resource_type` | `n/a` |  | findings name a package and a file:line inside it, not a deployable resource |
-| `package_name` | `mapped` | the verified requirement's name (verify mode), written as the result property "package_name" | scan mode's root package identity is not read: the native top-level "package" is a scanned directory path |
-| `package_version` | `mapped` | the verified requirement's version (verify mode), written as the result property "package_version" | scan mode's root package version is not read |
+| `package_name` | `mapped` | the verified requirement's name (verify mode), written as the result property "package_name" | scan mode names no package to read: the native top-level "package" is the scanned directory path (&lt;scanned-dir&gt;/&lt;name&gt; in every captured scan\_\*.json), which holds neither a package name nor a version, so verify mode's requirement is the only source |
+| `package_version` | `mapped` | the verified requirement's version (verify mode), written as the result property "package_version" | scan mode names no version to read: its top-level keys are errors, issues, package (a directory path), results, risk_score and risks, none of them a version (every captured scan\_\*.json), so verify mode's requirement is the only source |
 | `package_path` | `n/a` |  | the adapter writes package_name and package_version only |
 | `taxonomy_cve` | `n/a` |  | malicious-package heuristics carry no CVE taxonomy |
 | `taxonomy_cwe` | `n/a` |  | malicious-package heuristics carry no CWE taxonomy |
@@ -625,7 +625,7 @@ The facet vocabulary, in declaration order: `rule_id`, `severity`, `file_path`, 
 | `line_range` | `mapped` | SARIF region.startLine / region.endLine |  |
 | `column` | `mapped` | SARIF region.startColumn |  |
 | `message` | `mapped` | SARIF result message.text |  |
-| `resource_id` | `mappable-dropped` | Results[].Misconfigurations[].CauseMetadata.Resource | misconfig only: the address (aws_s3_bucket.m0_fixture_bucket) exists in trivy's JSON format and is absent from the SARIF ASH reads (0 occurrences, M0 fixture); the vuln findings are packages, so no resource_id is ever written until a side-JSON attach lands |
+| `resource_id` | `mapped` | Results[].Misconfigurations[].CauseMetadata.Resource (trivy's JSON report, absent from its SARIF), copied onto the SARIF result under ash_resource_id by attach_trivy_resources for result type terraform only: cloudformation carries a file:line locator (t.yaml:3-4) and kubernetes and dockerfile carry none (trivy 0.76.2, M0-FINDINGS.md (a)) | Example: `aws_s3_bucket.m0_fixture_bucket` |
 | `resource_type` | `n/a` |  | trivy's CauseMetadata names Provider and Service (AWS, s3) and no resource type; the type is only the prefix of the dropped address, which would be a derivation |
 | `package_name` | `mapped` | result message line 1 "Package: &lt;name&gt;" (\_package_from_message) |  |
 | `package_version` | `mapped` | result message line 2 "Installed Version: &lt;version&gt;" (\_package_from_message) |  |
@@ -633,7 +633,7 @@ The facet vocabulary, in declaration order: `rule_id`, `severity`, `file_path`, 
 | `taxonomy_cve` | `mapped` | SARIF result ruleId (the CVE id) |  |
 | `taxonomy_cwe` | `n/a` |  | UNCONFIRMED: trivy's SARIF rules carry no CWE (tags are vulnerability, security, &lt;severity&gt;); the JSON format's CweIDs has no committed vulnerability fixture, and a `trivy fs --format json` run over a lockfile settles it |
 | `fingerprints` | `n/a` |  | trivy's SARIF results carry no fingerprints (result keys are level, locations, message, ruleId, ruleIndex) |
-| `fix_available` | `mappable-dropped` | message line "Fixed Version: &lt;version&gt;" | the fixed version sits in the message text and is never parsed into the fix_available property the flat model reads (and ignore_unfixed defaults to true, so the tool pre-filters unfixed findings) |
+| `fix_available` | `mapped` | message line "Fixed Version: &lt;version&gt;", written as fix_available=True when non-empty by TrivyScannerBase.\_fixed_version_from_message (an empty value writes nothing; ignore_unfixed defaults to true, so the tool pre-filters unfixed findings) |  |
 | `remediation_text` | `n/a` |  | UNCONFIRMED: not classified by the survey; the flat model has no remediation column, and the rule help text carries the fixed version already declared under fix_available |
 | `snippet` | `n/a` |  | trivy's SARIF results carry no code snippet |
 | `references` | `mappable-dropped` | SARIF rule helpUri | rule-level only: the flat reader takes references from result relatedLocations, so the help link is discarded today |

@@ -114,6 +114,15 @@ class RegionFaultCfnLint:
         self.calls: list = []
 
     def __call__(self, command, **kwargs):
+        if command[1:3] == ["--format", "json"]:
+            # the scanner's own second run that names each result's resource
+            # (_attach_resources): an empty report names none, and it is no
+            # invocation of the scan
+            output = next(
+                a.split("=", 1)[1] for a in command if a.startswith("--output-file=")
+            )
+            Path(output).write_text("[]", encoding="utf-8")
+            return {"stdout": "", "stderr": "", "returncode": 4}
         self.calls.append(list(command))
         files = command[command.index("--") + 1 :]
         if any(f.endswith(name) for f in files for name in self.faulty):
