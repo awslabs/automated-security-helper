@@ -112,7 +112,13 @@ from typing import (
 
 from pydantic import Field, model_validator
 
+from automated_security_helper.base import scanner_operational_facets as opsf
 from automated_security_helper.base.options import ScannerOptionsBase
+from automated_security_helper.base.scanner_facets import (
+    FacetDecl,
+    FacetState,
+    ScannerFacets,
+)
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
@@ -292,6 +298,171 @@ class DependencyCheckScanner(ScannerPluginBase[DependencyCheckScannerConfig]):
     # Without --failOnCVSS the tool exits 0 on a run that finished. 14 is a run an
     # analyzer did not finish.
     success_exit_codes: ClassVar[Set[int]] = {0}
+
+    #: The facets register row (base/scanner_facets.py). Declaration only. The
+    #: report shape is read from the tool's sarifReport.vsl template at v13.0.0,
+    #: not from a run (no Java host was available), so cells the template does not
+    #: settle are declared N/A as unread.
+    facets: ClassVar[ScannerFacets] = ScannerFacets(
+        rule_id=FacetDecl(
+            state=FacetState.MAPPED, native_field="result ruleId (the CVE id)"
+        ),
+        severity=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="rule properties security-severity (CVSS v3/v4 base score), "
+            "else cvssv2_severity; rated by the adapter because every native result "
+            "level is warning",
+        ),
+        file_path=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="locations[].physicalLocation.artifactLocation.uri",
+        ),
+        line_range=FacetDecl(
+            state=FacetState.NA,
+            reason="findings name an analyzed dependency file, not a line in it",
+        ),
+        column=FacetDecl(
+            state=FacetState.NA,
+            reason="findings name an analyzed dependency file, not a position",
+        ),
+        message=FacetDecl(state=FacetState.MAPPED, native_field="result message.text"),
+        resource_id=FacetDecl(
+            state=FacetState.NA,
+            reason="findings name a dependency, not a deployable resource",
+        ),
+        resource_type=FacetDecl(
+            state=FacetState.NA,
+            reason="findings name a dependency, not a deployable resource",
+        ),
+        package_name=FacetDecl(
+            state=FacetState.NA, reason="output not read; a sample run would settle it"
+        ),
+        package_version=FacetDecl(
+            state=FacetState.NA, reason="output not read; a sample run would settle it"
+        ),
+        package_path=FacetDecl(
+            state=FacetState.NA, reason="output not read; a sample run would settle it"
+        ),
+        taxonomy_cve=FacetDecl(
+            state=FacetState.DROPPED,
+            native_field="result ruleId (the CVE id)",
+            reason="the CVE id is the rule id; no taxa entry is written",
+        ),
+        taxonomy_cwe=FacetDecl(
+            state=FacetState.NA, reason="output not read; a sample run would settle it"
+        ),
+        fingerprints=FacetDecl(
+            state=FacetState.DROPPED,
+            native_field='partialFingerprints["vulnerabilityHash"]',
+            reason="the template writes it; ASH computes its own identity",
+        ),
+        fix_available=FacetDecl(
+            state=FacetState.NA, reason="output not read; a sample run would settle it"
+        ),
+        remediation_text=FacetDecl(
+            state=FacetState.NA, reason="output not read; a sample run would settle it"
+        ),
+        snippet=FacetDecl(
+            state=FacetState.NA,
+            reason="findings name a file, not a source region",
+        ),
+        references=FacetDecl(
+            state=FacetState.NA, reason="output not read; a sample run would settle it"
+        ),
+        tags=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="result PropertyBag tags sca, vulnerability and security, "
+            "written by the adapter",
+        ),
+        extras=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="result PropertyBag issue_severity, written by the adapter",
+        ),
+    )
+
+    #: The operational register row (base/scanner_operational_facets.py).
+    operational_facets: ClassVar[opsf.ScannerOperationalFacets] = (
+        opsf.ScannerOperationalFacets(
+            scanner_name="dependency-check",
+            network=opsf.NetworkFacet(
+                fetch_kind=opsf.FetchKind.CONTENT_FETCH,
+                fetches=(opsf.Fetched.VULN_DB, opsf.Fetched.PACKAGE_METADATA),
+                prefetch=(),
+                offline_outcome=opsf.OfflineOutcome.NOT_RUN,
+                offline_reason=(
+                    "the vulnerability database is downloaded from the NVD and ASH "
+                    "passes no --noupdate or --data, so the scanner is skipped"
+                ),
+                offline_strategy=OfflineStrategy.SKIP_OFFLINE,
+                sandbox_network=opsf.SandboxNetwork.ONLINE,
+                source="dependency_check_scanner.py offline_strategy, "
+                "sandbox_requirements; module header (Offline, Sandbox)",
+            ),
+            output=opsf.OutputFacet(
+                native_formats=(opsf.OutputFormat.SARIF,),
+                side_reports=(),
+                non_finding_artifacts=(),
+            ),
+            targets=opsf.TargetsFacet(
+                kinds=(opsf.TargetKind.DEPENDENCY_LOCKFILES,),
+                tool_type=ScannerToolType.SCA,
+                selection="--scan over the whole target; the tool's analyzers pick "
+                "the files that identify a dependency",
+                covers_note="a community scanner; it declares no covers display string",
+            ),
+            runtime=opsf.RuntimeFacet(
+                kind=opsf.RuntimeKind.USER_INSTALLED_CLI,
+                external_programs=("java",),
+                invocations=opsf.Invocations.ONE,
+                python_only=False,
+                use_uv_tool=False,
+            ),
+            platforms=opsf.PlatformsFacet(
+                provisionable=(),
+                note="a platform-independent release zip installed by a module-local "
+                "script on linux and darwin; not in tool_downloads, and Windows is "
+                "not installed",
+            ),
+            severity=opsf.SeverityFacet(
+                severity_class=opsf.SeverityClass.DERIVED,
+                note="rated from the rule's CVSS score; the native result level is "
+                "always warning",
+            ),
+            silencing=opsf.SilencingFacet(
+                tool_side=(),
+                none_reason="ASH passes no --suppression or --hints file; the tool's "
+                "own suppression surfaces were not surveyed",
+            ),
+            identity=opsf.IdentityFacet(
+                fingerprint_class=opsf.FingerprintClass.UNCONFIRMED,
+                note="the template writes partialFingerprints; not read from a real run",
+            ),
+            extensibility=opsf.ExtensibilityFacet(
+                custom_rules=opsf.CustomRules.NONE,
+                env_prefixes=("JAVA_",),
+                options_surface="base scanner options only; no rules path",
+            ),
+            exit_codes=opsf.ExitCodesFacet(
+                success_exit_codes=(0,),
+                semantics="0 when the run finished (no --failOnCVSS); 14 is a "
+                "non-fatal analysis error and is a failure here",
+            ),
+            provenance=opsf.ProvenanceFacet(
+                tier=opsf.Tier.COMMUNITY_OPTIN,
+                source=opsf.ProvenanceSource.USER_INSTALLED,
+                selection_surfaces=(
+                    "ash_dependency_check_plugins in ash_plugin_modules",
+                ),
+                upstream_license="Apache-2.0 (source: the scanner popularity "
+                "license check's dependency-check row)",
+            ),
+            prerequisites=opsf.PrerequisitesFacet(
+                kinds=(opsf.Prerequisite.NONE,),
+                note="the tool decides which files hold a dependency; a Java runtime "
+                "is required",
+            ),
+        )
+    )
 
     sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements(
         network=True,

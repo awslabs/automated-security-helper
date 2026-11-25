@@ -1,0 +1,61 @@
+{
+  "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "dependency-check",
+          "version": "13.0.0",
+          "informationUri": "https://dependency-check.github.io/DependencyCheck/",
+          "rules": [
+            {
+              "id": "CVE-2021-44228",
+              "shortDescription": {"text": "CVE-2021-44228"},
+              "fullDescription": {"text": "Remote code execution in log4j-core."},
+              "properties": {"cvssv3_baseScore": 10.0, "security-severity": "10.0", "source": "NVD"}
+            },
+            {
+              "id": "CVE-2019-12345",
+              "shortDescription": {"text": "CVE-2019-12345"},
+              "fullDescription": {"text": "A medium-rated issue."},
+              "properties": {"cvssv3_baseScore": 5.3, "security-severity": "5.3", "source": "NVD"}
+            },
+            {
+              "id": "CVE-2010-00001",
+              "shortDescription": {"text": "CVE-2010-00001"},
+              "fullDescription": {"text": "A v2-only entry."},
+              "properties": {"cvssv2_score": 9.3, "cvssv2_severity": "HIGH", "source": "NVD"}
+            }
+          ]
+        }
+      },
+      "artifacts": [
+        {"location": {"uri": "file:///src/lib/log4j-core-2.14.1.jar"}}
+      ],
+      "results": [
+        {
+          "ruleId": "CVE-2021-44228",
+          "level": "warning",
+          "message": {"text": "CVE-2021-44228 - Remote code execution in log4j-core."},
+          "partialFingerprints": {"vulnerabilityHash": "00000000000000000000000000000001"},
+          "locations": [{"physicalLocation": {"artifactLocation": {"uri": "file:///src/lib/log4j-core-2.14.1.jar", "index": 0}}}]
+        },
+        {
+          "ruleId": "CVE-2019-12345",
+          "level": "warning",
+          "message": {"text": "CVE-2019-12345 - A medium-rated issue."},
+          "partialFingerprints": {"vulnerabilityHash": "00000000000000000000000000000002"},
+          "locations": [{"physicalLocation": {"artifactLocation": {"uri": "file:///src/web/package-lock.json"}}}]
+        },
+        {
+          "ruleId": "CVE-2010-00001",
+          "level": "warning",
+          "message": {"text": "CVE-2010-00001 - A v2-only entry."},
+          "partialFingerprints": {"vulnerabilityHash": "00000000000000000000000000000003"},
+          "locations": [{"physicalLocation": {"artifactLocation": {"uri": "file:///src/requirements.txt"}}}]
+        }
+      ]
+    }
+  ]
+}
