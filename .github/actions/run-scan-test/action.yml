@@ -1046,8 +1046,13 @@ runs:
     # Last, so a snapshot diff never hides one of the scan's own diagnostics above. Runs
     # even when the self-scan failed: that verdict is about this repository's findings, and
     # these snapshots only need the image, which a failed build would fail here too.
+    #
+    # Not on sh-helper: utils/ash_helpers.sh forwards to ./ash, none of these modules
+    # sources it, and every sh-helper row has a bash row on the same OS and runner whose
+    # step compares the same output (tests/unit/test_ci_container_runtime_snapshots_skip_the_sh_helper_legs.py
+    # pins both).
     - name: Snapshot the container-runtime output
-      if: ${{ !cancelled() && inputs.method != 'python-local' }}
+      if: ${{ !cancelled() && inputs.method != 'python-local' && inputs.method != 'sh-helper' }}
       shell: bash
       env:
         ASH_BASE_OCI_LAYOUT: ${{ steps.prepull.outputs.oci-layout }}

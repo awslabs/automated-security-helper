@@ -43,6 +43,10 @@ What is masked, and why each is safe to mask
   A bare or bracketed date in a message survives.
 - Instants and durations, but only for a test that opts in; see "Time" below.
 - UUIDs, the ASH version, the Python version and the hostname.
+- The ``BUILD_DATE_EPOCH=<n>`` build argument (``<epoch>``: the day the wrapper ran)
+  and a whole ``COLUMNS=<n>`` or ``LINES=<n>`` argument (``<size>``: the console's size
+  is the machine's). Only that exact argument; a longer name or a value that is not a
+  number survives.
 - The pydantic minor version in its ``errors.pydantic.dev/<version>/`` help links, which
   a dependency bump changes in every config-error message.
 - The frames of a traceback, rich's panel or CPython's plain one, as ``<TRACEBACK>``.
@@ -140,6 +144,13 @@ _REPORT_ID = re.compile(r"\bASH-\d{8}(?:\d{6})?(?:-[0-9a-f]{12})?\b")
 # RichHandler's default log_time_format "[%x %X]" in the C locale: [10/05/26 17:22:49].
 # Masked before durations, which would otherwise take the HH:MM:SS half alone.
 _LOG_TIME = re.compile(r"\[\d{2}/\d{2}/\d{2} \d{2}:\d{2}:\d{2}\]")
+
+# The build argument the wrappers write: UTC midnight of the day they run.
+_BUILD_DATE_EPOCH = re.compile(r"(?<![\w])(BUILD_DATE_EPOCH=)\d+")
+
+# The console size a wrapper hands the container, as one whole COLUMNS=/LINES= argument
+# (a pinned terminal sets both, an unattached console sets them empty or -1).
+_CONSOLE_SIZE = re.compile(r"\A(COLUMNS|LINES)=(?:-?\d+)?\Z")
 
 # The MCP get_scan_results scan_id: "scan-" + the local date-time it was read at
 # (core/resource_management/scan_tracking.py mints it on every call).
@@ -403,6 +414,8 @@ class SnapshotNormalizer:
                 lambda m: m.group(1) + re.sub(r"\\\\|\\", "/", m.group(2)), out
             )
         out = _UUID.sub("<UUID>", out)
+        out = _BUILD_DATE_EPOCH.sub(r"\1<epoch>", out)
+        out = _CONSOLE_SIZE.sub(r"\1=<size>", out)
         # The log-time backstop runs whatever the switches say: the column is pinned
         # by conftest.py, so a stamp here is drawn some other way (see the docstring).
         out = _LOG_TIME.sub("[<LOG_TIME>]", out)
