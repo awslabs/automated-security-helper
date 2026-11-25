@@ -131,6 +131,11 @@ def fixture_wheel_bytes() -> bytes:
         for name in sorted(members):
             info = zipfile.ZipInfo(filename=name, date_time=(1980, 1, 1, 0, 0, 0))
             info.external_attr = 0o644 << 16
+            # ZipInfo defaults create_system to 0 on Windows and 3 elsewhere, so
+            # pin it; the compression= argument of ZipFile is a no-op when
+            # writestr is given a ZipInfo, which carries its own compress_type.
+            info.create_system = 3
+            info.compress_type = zipfile.ZIP_STORED
             bundle.writestr(info, members[name])
     return buffer.getvalue()
 

@@ -15,6 +15,7 @@ fails here. Regenerate with::
 
 from __future__ import annotations
 
+import gzip
 import tarfile
 import zipfile
 from pathlib import Path
@@ -36,7 +37,9 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 
 def test_committed_sdist_equals_generator_output() -> None:
     committed = REPO_ROOT.joinpath(FIXTURE_DATA_DIR, FIXTURE_SDIST_NAME).read_bytes()
-    assert committed == fixture_sdist_bytes()
+    # Compare the decompressed tar: the gzip stream's bytes vary with the zlib
+    # build (zlib-ng writes different deflate output), the tar inside does not.
+    assert gzip.decompress(committed) == gzip.decompress(fixture_sdist_bytes())
 
 
 def test_committed_wheel_equals_generator_output() -> None:

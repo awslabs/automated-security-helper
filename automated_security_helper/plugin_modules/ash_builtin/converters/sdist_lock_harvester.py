@@ -4,6 +4,7 @@
 """Module containing the SdistLockHarvester converter implementation."""
 
 import json
+import ntpath
 import shutil
 import tempfile
 from pathlib import Path
@@ -140,7 +141,10 @@ class SdistLockHarvester(ConverterPluginBase[SdistLockHarvesterConfig]):
                 None if workspace_output_dir is None else str(workspace_output_dir)
             ),
         )
-        return [f for f in files if f.rsplit("/", 1)[-1] in wanted]
+        # scan_set paths come from os.path.join, so on Windows they carry
+        # backslashes; ntpath.basename splits on either separator on every
+        # platform, so the match does not depend on where the run executes.
+        return [f for f in files if ntpath.basename(f) in wanted]
 
     def _ignore_paths_skipping_harvest(self) -> List[IgnorePathWithReason]:
         return ignore_paths_that_skip_scanning(

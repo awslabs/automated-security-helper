@@ -25,6 +25,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import ntpath
 from pathlib import Path
 from typing import Dict, List
 
@@ -34,6 +35,9 @@ from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.plugin_modules.ash_builtin.converters import (
     SdistLockHarvester,
+)
+from automated_security_helper.plugin_modules.ash_builtin.converters import (
+    sdist_lock_harvester as harvester_module,
 )
 from automated_security_helper.utils import download_utils
 from automated_security_helper.utils.sdist_harvest import (
@@ -295,6 +299,27 @@ def test_candidate_input_count_counts_configured_lockfiles(harvest_env) -> None:
     _source, _output, _opener, build = harvest_env
     converter = build()
     assert converter.candidate_input_count() == 1
+
+
+def test_lockfile_is_found_in_a_windows_shaped_scan_set(
+    harvest_env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Scan-set paths built with ``os.path.join`` carry backslashes on Windows.
+
+    The basename match must hold on every platform, so the paths here are
+    built with ``ntpath.join`` and fed through the same converter code path.
+    """
+    _source, _output, _opener, build = harvest_env
+    converter = build()
+    windows_lock = ntpath.join("C:\\", "work", "repo", "sub", "uv.lock")
+    windows_other = ntpath.join("C:\\", "work", "repo", "sub", "notes.txt")
+    monkeypatch.setattr(
+        harvester_module,
+        "scan_set",
+        lambda **_kwargs: [windows_lock, windows_other],
+    )
+
+    assert converter._lockfiles_in_scan_set(["uv.lock"]) == [windows_lock]
 
 
 def test_tree_shipped_cache_entry_is_never_served(
