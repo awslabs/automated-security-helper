@@ -53,10 +53,14 @@ GITHUB_DIR = REPO_ROOT / ".github"
 PREPULL = "prepull-base-image"
 TOOL_CACHE = "tool-download-cache"
 
-# A step that builds ASH's image, or may: `ash build-image`, `ash --mode container`
+# A step that builds ASH's image, or may: `ash container build` (and its 3.8 spelling
+# `ash build-image`), `ash --mode container`
 # and `ash scan --mode container` (both rebuild by default), the PowerShell wrapper,
 # and the bash wrapper `./ash`, which builds before it runs anything.
-BUILD_RE = re.compile(r"build-image|--mode container|Invoke-ASH|(?<![\w/.-])\./ash\b")
+BUILD_RE = re.compile(
+    r"build-image|ash\s+container\s+build\b|--mode container|Invoke-ASH"
+    r"|(?<![\w/.-])\./ash\b"
+)
 # A step that runs ASH on the host, which may download pinned tool release assets.
 ASH_RUN_RE = re.compile(r"(?<![\w./$-])ash\s|scripts/verify_\w+\.py")
 
@@ -201,7 +205,7 @@ def test_a_missing_mapping_is_reported() -> None:
             "uses": "./.github/actions/tool-download-cache",
             "with": {"mode": "restore"},
         },
-        {"name": "build", "run": "ash build-image --no-run"},
+        {"name": "build", "run": "ash container build --no-run"},
         {"name": "install", "run": "ash dependencies install"},
         {
             "name": "save",
