@@ -163,7 +163,6 @@ from automated_security_helper.utils.config_trust import (
     LEADS_OUT_OF_THE_TREE,
     operator_path,
     refusal_warning,
-    set_by_operator,
 )
 from automated_security_helper.utils.get_scan_set import honors_ignore_files, scan_set
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -715,10 +714,6 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
     # The inputs of the most recent invocation, which _post_process_sarif maps
     # zizmor's URIs back onto.
     _last_inputs: List[Path] = PrivateAttr(default_factory=list)
-    # Whether the tree-set online_audits refusal was already logged.
-    _online_refusal_logged: bool = PrivateAttr(default=False)
-    # Whether the tree-set honor_inline_ignores refusal was already logged.
-    _ignores_refusal_logged: bool = PrivateAttr(default=False)
     # The zizmor on PATH the version probe rejected in this dependency check,
     # so the uv route does not hand the same binary back as "available".
     _rejected_executable: Optional[str] = PrivateAttr(default=None)
@@ -1183,20 +1178,15 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
             return False
         # Online audits send the GitHub token in the environment to the GitHub
         # API, so only the operator can turn them on, as for config_file.
-        if not set_by_operator(
-            self._plugin_context.config,
+        if not self._operator_gated(
             "scanners.zizmor.options.online_audits",
             True,
+            False,
+            "scanners.zizmor.options.online_audits is true in a config inside "
+            "a git checkout or the scanned directory, or from an MCP client, "
+            "so it is ignored: zizmor runs with --offline and without the "
+            f"GitHub token variables. {KEEP_A_SETTING}",
         ):
-            if not self._online_refusal_logged:
-                self._online_refusal_logged = True
-                self._plugin_log(
-                    "scanners.zizmor.options.online_audits is true in a config inside "
-                    "a git checkout or the scanned directory, or from an MCP client, "
-                    "so it is ignored: zizmor runs with --offline and without the "
-                    f"GitHub token variables. {KEEP_A_SETTING}",
-                    level=logging.WARNING,
-                )
             return False
         # ASH's own offline mode, or this scanner's options.offline (read by the
         # base class as every scanner's is): either keeps zizmor offline. The
@@ -1220,23 +1210,16 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
         """
         if not self._options.honor_inline_ignores:
             return False
-        if set_by_operator(
-            self._plugin_context.config,
+        return self._operator_gated(
             "scanners.zizmor.options.honor_inline_ignores",
             True,
-        ):
-            return True
-        if not self._ignores_refusal_logged:
-            self._ignores_refusal_logged = True
-            self._plugin_log(
-                "scanners.zizmor.options.honor_inline_ignores is true in a config "
-                "inside a git checkout or the scanned directory, or from an MCP "
-                "client, so it is ignored: zizmor runs with --no-ignores and its "
-                "ignore comments do not apply; suppress findings with ASH "
-                f"suppressions. {KEEP_A_SETTING}",
-                level=logging.WARNING,
-            )
-        return False
+            False,
+            "scanners.zizmor.options.honor_inline_ignores is true in a config "
+            "inside a git checkout or the scanned directory, or from an MCP "
+            "client, so it is ignored: zizmor runs with --no-ignores and its "
+            "ignore comments do not apply; suppress findings with ASH "
+            f"suppressions. {KEEP_A_SETTING}",
+        )
 
     def _child_env(self, online: bool) -> Dict[str, str]:
         """The process environment minus what must not reach zizmor."""
