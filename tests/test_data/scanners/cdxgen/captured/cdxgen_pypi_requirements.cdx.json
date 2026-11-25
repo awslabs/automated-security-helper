@@ -1,0 +1,120 @@
+{
+  "annotations": [
+    {
+      "annotator": {
+        "component": {
+          "authors": [
+            {
+              "name": "OWASP Foundation"
+            }
+          ],
+          "bom-ref": "pkg:npm/@cyclonedx/cdxgen@12.9.2",
+          "group": "@cyclonedx",
+          "name": "cdxgen",
+          "publisher": "OWASP Foundation",
+          "purl": "pkg:npm/%40cyclonedx/cdxgen@12.9.2",
+          "type": "application",
+          "version": "12.9.2"
+        }
+      },
+      "bom-ref": "metadata-annotations",
+      "subjects": [
+        "pkg:pypi/proj@latest"
+      ],
+      "text": "This Software Bill-of-Materials (SBOM) document was created on Wednesday, November 25, 2026 with cdxgen. The data was captured during the pre-build lifecycle phase without building the application. The document describes an application named 'proj'.",
+      "timestamp": "2026-11-25T00:15:37Z"
+    }
+  ],
+  "bomFormat": "CycloneDX",
+  "components": [
+    {
+      "bom-ref": "pkg:pypi/requests@2.19.0",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "../proj/requirements.txt",
+            "confidence": 0.5,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.5,
+                "technique": "manifest-analysis",
+                "value": "../proj/requirements.txt"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "requests",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "../proj/requirements.txt"
+        }
+      ],
+      "purl": "pkg:pypi/requests@2.19.0",
+      "type": "library",
+      "version": "2.19.0"
+    }
+  ],
+  "dependencies": [
+    {
+      "dependsOn": [],
+      "ref": "pkg:pypi/proj@latest"
+    }
+  ],
+  "metadata": {
+    "authors": [
+      {
+        "name": "OWASP Foundation"
+      }
+    ],
+    "component": {
+      "bom-ref": "pkg:pypi/proj@latest",
+      "group": "",
+      "name": "proj",
+      "purl": "pkg:pypi/proj@latest",
+      "type": "application",
+      "version": "latest"
+    },
+    "lifecycles": [
+      {
+        "phase": "pre-build"
+      }
+    ],
+    "properties": [
+      {
+        "name": "cdx:bom:componentTypes",
+        "value": "pypi"
+      },
+      {
+        "name": "cdx:bom:componentSrcFiles",
+        "value": "../proj/requirements.txt"
+      }
+    ],
+    "timestamp": "2026-11-25T00:15:37Z",
+    "tools": {
+      "components": [
+        {
+          "authors": [
+            {
+              "name": "OWASP Foundation"
+            }
+          ],
+          "bom-ref": "pkg:npm/@cyclonedx/cdxgen@12.9.2",
+          "group": "@cyclonedx",
+          "name": "cdxgen",
+          "publisher": "OWASP Foundation",
+          "purl": "pkg:npm/%40cyclonedx/cdxgen@12.9.2",
+          "type": "application",
+          "version": "12.9.2"
+        }
+      ]
+    }
+  },
+  "serialNumber": "urn:uuid:8f77ae05-0181-4d05-b611-9a65b7db9038",
+  "services": [],
+  "specVersion": "1.6",
+  "version": 1
+}

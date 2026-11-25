@@ -119,8 +119,8 @@ class CdxgenScanner(ScannerPluginBase[CdxgenScannerConfig]):
     covers = ("SBOM generation",)
 
     #: The facets register row (base/scanner_facets.py). cdxgen writes a CycloneDX
-    #: document and no findings, so every finding facet is n/a and only the package
-    #: identity of the components is mapped (as for syft).
+    #: document and no findings, and the document bypasses the flat findings path, so
+    #: every facet is n/a (component name and version live in the document itself).
     facets: ClassVar[ScannerFacets] = ScannerFacets(
         rule_id=FacetDecl(
             state=FacetState.NA,
@@ -155,12 +155,16 @@ class CdxgenScanner(ScannerPluginBase[CdxgenScannerConfig]):
             reason="no findings exist; CycloneDX component types (library, application) are package kinds, not resource types",
         ),
         package_name=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="CycloneDX components[].name",
+            state=FacetState.NA,
+            reason="the CycloneDX components[].name values are returned in the "
+            "document, which bypasses the flat findings path; no Result carries "
+            "them, so there is nothing for the register to observe",
         ),
         package_version=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="CycloneDX components[].version",
+            state=FacetState.NA,
+            reason="the CycloneDX components[].version values are returned in the "
+            "document, which bypasses the flat findings path; no Result carries "
+            "them, so there is nothing for the register to observe",
         ),
         package_path=FacetDecl(
             state=FacetState.NA,
