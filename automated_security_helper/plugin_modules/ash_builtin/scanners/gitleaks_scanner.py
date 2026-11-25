@@ -202,6 +202,7 @@ from automated_security_helper.utils.config_trust import (
 )
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.process_env import snapshot_environ
+from automated_security_helper.utils.subprocess_utils import OutputPreference
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.utils.sandbox.scope import active_scope
@@ -1179,14 +1180,26 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
             )
         return data
 
-    def _run_subprocess(  # type: ignore[override]
+    def _run_subprocess(
         self,
         command: List[str],
         results_dir: str | Path | None = None,
-        **kwargs: Any,
-    ) -> Dict[str, str]:
+        stdout_preference: OutputPreference = "write",
+        stderr_preference: OutputPreference = "write",
+        cwd: Path | str | None = None,
+        env: Dict[str, str] | None = None,
+        timeout: float | None = None,
+    ) -> Dict[str, Any]:
         """Run gitleaks, then mask what its log quotes from ``.gitleaksignore``."""
-        response = super()._run_subprocess(command, results_dir=results_dir, **kwargs)
+        response = super()._run_subprocess(
+            command,
+            results_dir=results_dir,
+            stdout_preference=stdout_preference,
+            stderr_preference=stderr_preference,
+            cwd=cwd,
+            env=env,
+            timeout=timeout,
+        )
         if results_dir is not None:
             _mask_quoted_ignore_entries(
                 Path(results_dir) / f"{self.__class__.__name__}.stderr.log"

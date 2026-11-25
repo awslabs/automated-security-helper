@@ -9,7 +9,17 @@ import secrets
 import shutil
 import tempfile
 from pathlib import Path
-from typing import Annotated, ClassVar, Dict, List, Literal, Any, Sequence, Set
+from typing import (
+    Annotated,
+    ClassVar,
+    Dict,
+    List,
+    Literal,
+    Any,
+    Sequence,
+    Set,
+    TypeGuard,
+)
 
 from pydantic import Field, PrivateAttr, model_validator
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
@@ -171,7 +181,7 @@ def _shown_tool_text(text: Any, values: Sequence[str] | None) -> str:
     reached ScannerError and the persisted results with the user part shown.
     Every tool-text path goes through here.
     """
-    return _URL_USERINFO.sub(r"\1***@", shown_tool_stderr(str(text), values))
+    return _URL_USERINFO.sub(r"\1***@", shown_tool_stderr(str(text), values or ()))
 
 
 # One comparator of an npm advisory range: an operator, a version and an
@@ -749,10 +759,10 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                 self._source_manifests(), "source"
             )
             return False
-        if find_executable(self.command):
+        if find_executable(self._tool_command()):
             self._probe_npm_version()
             return True
-        needed = self._package_managers_needed() or {self.command}
+        needed = self._package_managers_needed() or {self._tool_command()}
         if not any(find_executable(binary) for binary in needed):
             names = ", ".join(sorted(needed))
             self.dependency_unavailable_reason = (
@@ -782,7 +792,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         for manifest in self._source_manifests():
             lock_file = self._lockfile_beside(manifest)
             if lock_file is not None:
-                needed.add(_LOCKFILE_BINARY.get(lock_file.name, self.command))
+                needed.add(_LOCKFILE_BINARY.get(lock_file.name, self._tool_command()))
         return needed
 
     def _probe_npm_version(self) -> None:
@@ -811,7 +821,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             probe_dir = None
         try:
             response = self._run_subprocess(
-                command=[self.command, "--version"],
+                command=[self._tool_command(), "--version"],
                 stderr_preference="return",
                 stdout_preference="return",
                 cwd=probe_dir,
@@ -1415,7 +1425,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         if not segments:
             return ""
 
-        texts = [piece for _, piece in segments]
+        texts = [piece or "" for _, piece in segments]
         # ONE redaction over the whole decoded text: the only spelling a
         # value spanning two segments has.
         spanning = _shown("".join(texts))
@@ -2443,8 +2453,12 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                 report = part
                 continue
             run, part_run = report.runs[0], part.runs[0]
+            if run.results is None:
+                run.results = []
             run.results.extend(part_run.results or [])
-            known = {rule.id: rule for rule in run.tool.driver.rules or []}
+            if run.tool.driver.rules is None:
+                run.tool.driver.rules = []
+            known = {rule.id: rule for rule in run.tool.driver.rules}
             for rule in part_run.tool.driver.rules or []:
                 kept = known.get(rule.id)
                 if kept is None:
@@ -3099,7 +3113,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             counts["total"] = sum(counted)
 
     @staticmethod
-    def _is_number(value: Any) -> bool:
+    def _is_number(value: Any) -> TypeGuard[int | float]:
         """An int or a float, and not a bool (a bool adds as 0 or 1)."""
         return isinstance(value, (int, float)) and not isinstance(value, bool)
 
@@ -3622,11 +3636,10 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                                 yarn_major, result, record_values
                             )
                         else:
-                            if result.get("stdout", None):
+                            stdout_text = result.get("stdout", None)
+                            if stdout_text:
                                 try:
-                                    audit_results = json.loads(
-                                        result.get("stdout", None)
-                                    )
+                                    audit_results = json.loads(stdout_text)
                                 except json.JSONDecodeError:
                                     ASH_LOGGER.warning(
                                         f"Failed to parse npm audit output for {package_dir}",
@@ -3837,7 +3850,7 @@ if __name__ == "__main__":
     )
     report = scanner.scan(target=scanner.context.source_dir, target_type="source")
 
-    if report:
+    if isinstance(report, SarifReport):
         from automated_security_helper.utils.command_safe_stream import (
             json_commands_broken,
         )

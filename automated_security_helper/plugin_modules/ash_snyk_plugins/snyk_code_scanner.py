@@ -39,6 +39,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
     SarifReport,
 )
 from automated_security_helper.utils.display_text import escape_controls
+from automated_security_helper.utils.log import VERBOSE_LEVEL
 from automated_security_helper.utils.get_scan_set import (
     file_links_leaving_tree,
     honors_ignore_files,
@@ -672,7 +673,7 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
         return super()._process_config_options()
 
     def _resolve_arguments(
-        self, target: Path, results_file: Path | None = None
+        self, target: str | Path, results_file: str | Path | None = None
     ) -> List[str]:
         """Resolve arguments for Snyk code test command.
 
@@ -687,7 +688,7 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
         self._process_config_options()
 
         # Start with base command and subcommands
-        args = [self.command, *self.subcommands]
+        args: List[str] = [self._tool_command(), *self.subcommands]
 
         # Add extra args. A value may be a number or a bool (ToolExtraArg), and
         # a spawn takes text only; a bool is spelled as a config file spells it,
@@ -1016,7 +1017,7 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
                     f"Running command: {shown_command} (the arguments are not "
                     f"shown: the plugin's values hook {read.failure()})",
                     target_type=target_type,
-                    level=logging.VERBOSE,
+                    level=VERBOSE_LEVEL,
                 )
             else:
                 recorded_command_line, recorded_arguments = redacted_command_record(
@@ -1027,7 +1028,7 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
                     "Running command: "
                     f"{text_without_values(' '.join(final_args), redact_values)}",
                     target_type=target_type,
-                    level=logging.VERBOSE,
+                    level=VERBOSE_LEVEL,
                 )
 
             # No environment modifications are currently needed for Snyk Code.

@@ -40,6 +40,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
 )
 from automated_security_helper.base.uv_tool_mixin import guarded_values_read
 from automated_security_helper.utils.error_text import text_without_values
+from automated_security_helper.utils.log import VERBOSE_LEVEL
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.config.confinement_remedy import SET_BY_THE_OPERATOR
 from automated_security_helper.utils.sarif_utils import attach_scanner_details
@@ -707,14 +708,14 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
                     f"Running command: {self.command} (the arguments are not "
                     f"shown: the plugin's values hook {read.failure()})",
                     target_type=target_type,
-                    level=logging.VERBOSE,
+                    level=VERBOSE_LEVEL,
                 )
             else:
                 self._plugin_log(
                     "Running command: "
                     f"{text_without_values(' '.join(final_args), redact_values)}",
                     target_type=target_type,
-                    level=logging.VERBOSE,
+                    level=VERBOSE_LEVEL,
                 )
 
             effective_timeout = self._effective_scan_timeout()
