@@ -418,7 +418,7 @@ def test_the_committed_journey_saves_the_file_its_prose_names() -> None:
         for index, segment in enumerate(journey["body"])
         if segment.get("block", {}).get("twin", {}).get("kind") == "save"
     ]
-    assert [path for _index, path in saves] == [".ashrc.yaml"]
+    assert [path for _index, path in saves] == [".ash.yaml"]
     index, path = saves[0]
     assert path in generator._intro_prose(journey["body"], index)
 

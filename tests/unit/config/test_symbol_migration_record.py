@@ -58,7 +58,7 @@ pytestmark = pytest.mark.unit
 
 REPO = Path(__file__).resolve().parents[3]
 RECORD = REPO / "tests" / "test_data" / "suppression_symbol_migration.yaml"
-CONFIGS = (".ash/.ash.yaml", ".ash/.ash_alpha_plugins.yaml")
+CONFIGS = (".ash.yaml",".ash/.ash_alpha_plugins.yaml")
 
 
 def _require_symbols_extra() -> None:

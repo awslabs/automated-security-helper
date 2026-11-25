@@ -232,7 +232,7 @@ class ArchiveConverterConfigOptions(ConverterOptionsBase):
     Each is an inclusive maximum, checked against what the archive declares, for
     every member, before anything is written. An archive over any of them is not
     extracted at all. The defaults are far above an ordinary source archive. Set
-    inside the scanned tree (``.ash/.ash.yaml``), by a config an MCP client
+    inside the scanned tree (``.ash.yaml``), by a config an MCP client
     supplied, or by a workspace project's own config, a value can only lower a
     limit; raise one with ``--config-overrides`` or a config file outside the tree.
     """

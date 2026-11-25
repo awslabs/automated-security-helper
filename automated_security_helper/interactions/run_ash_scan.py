@@ -6517,7 +6517,7 @@ def _compute_exit_code(
         #
         # Reachable without any sharding and without any operator error beyond a
         # single word. Measured on this tree with the repository's own
-        # .ash/.ash.yaml, which sets `semgrep: enabled: true`:
+        # .ash.yaml, which sets `semgrep: enabled: true`:
         # `ash scan --scanners semgrep` on Windows resolves semgrep against the
         # registered names, so ScannerSelectionError does not fire; semgrep then
         # declares the platform unsupported and is recorded SKIPPED; the other nine

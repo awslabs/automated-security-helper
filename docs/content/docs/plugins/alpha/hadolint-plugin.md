@@ -13,7 +13,7 @@ so on) and runs [ShellCheck](https://www.shellcheck.net/) over the shell in ever
 hadolint is an alpha plugin that ships with ASH. Its plugin module is loaded only when you list it, so an `ash scan` that does not list it is unchanged: no row in the results, the summary, the reports or the SARIF.
 
 ```yaml
-# .ash/.ash.yaml
+# .ash.yaml
 ash_plugin_modules:
   - automated_security_helper.plugin_modules.ash_hadolint_plugins
 ```

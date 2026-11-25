@@ -46,6 +46,23 @@
 
 ## Unreleased
 
+### Behavior changes
+
+- **`.ash.yaml` at the project root is the canonical config file.** A scan reads it
+  before any other config source, and `ash config init`, `ash config wizard` and
+  `ash inspect findings` create it when no config exists (they wrote `.ashrc.yaml`
+  before). Every location that worked before still loads: `.ash/.ash.yaml`, `.ash.yml`,
+  `ash.yaml` and the other names of the old list, each also under `.ash/`, and the
+  `ashrc` names. A scan that reads one of them prints one warning that names the file
+  as deprecated and gives the path to move it to, and ASH 4.0 stops reading them. When
+  `.ash.yaml` and an older file both exist, `.ash.yaml` is read and the warning names the
+  file it shadowed; for a project that has `.ash.yml` beside `.ash.yaml`, this reverses
+  which of the two is read. `--config` and `ASH_CONFIG` are unchanged and print no
+  warning, and a `pyproject.toml` with a `[tool.ash]` table is still read, after the file
+  names, with no warning. To move a config, run `git mv .ash/.ash.yaml .ash.yaml`
+  (or the same with the file's own name). This repository's own config moved the same
+  way.
+
 ### Maintenance
 
 - Removed the ASH v2 in-container scanner scripts `utils/common.sh`,

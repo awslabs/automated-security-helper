@@ -53,7 +53,7 @@ Decisions, and why
    without it, so an enabled integration is never skipped quietly either.
 
    Both options name the program actionlint pipes each ``run:`` script to, and
-   ASH's config usually comes from the scanned repository (``.ash/.ash.yaml``), so
+   ASH's config usually comes from the scanned repository (``.ash.yaml``), so
    ``shellcheck: sh`` there would execute the repository's scripts. From a config
    inside a git checkout or the scanned directory, each option accepts only its own
    name (``shellcheck``, ``pyflakes``), looked up on PATH and ASH's bin directory.

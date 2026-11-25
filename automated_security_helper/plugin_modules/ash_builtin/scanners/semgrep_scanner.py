@@ -665,7 +665,7 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
 
         The same fact also sets ``SemgrepScannerConfig.enabled`` to False on Windows by
         default, and that is not this method's substitute: a config default is
-        overridable, and this repository's own ``.ash/.ash.yaml`` does override it with
+        overridable, and this repository's own ``.ash.yaml`` does override it with
         ``semgrep: enabled: true``, which is how the MISSING classification was reached
         at all. An operator asking for semgrep on Windows should get a clear SKIPPED with
         a reason, not a silent config default and not a failed gate.

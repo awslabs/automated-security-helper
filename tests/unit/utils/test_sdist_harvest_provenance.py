@@ -178,7 +178,7 @@ def test_merged_sbom_carries_a_harvested_component_exactly_once(
 
 
 def test_suppression_glob_matches_the_harvest_layout() -> None:
-    """The ``.ash/.ash.yaml`` rustls entries glob over the harvest layout; this
+    """The ``.ash.yaml`` rustls entries glob over the harvest layout; this
     pins that the glob and the materialized path shape agree, so a polars bump
     (a new version segment) keeps matching (A6, carried limit 4)."""
     from automated_security_helper.utils.suppression_matcher import ignore_path_matches

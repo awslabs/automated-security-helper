@@ -1,7 +1,7 @@
 # Frequently asked questions
 
 Short answers, each with a link to the page that has the details. The config examples are
-keys to add to your ASH config file. `ash config init` writes one, `.ashrc.yaml`, in the
+keys to add to your ASH config file. `ash config init` writes one, `.ash.yaml`, in the
 current directory.
 
 ## Why does my first scan exit 1?

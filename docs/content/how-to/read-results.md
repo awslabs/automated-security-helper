@@ -349,7 +349,7 @@ The Severity column uses the same severity as the summary table (see
 
 `x` asks for a reason and an optional expiration date, then adds a suppression for that
 rule, file, and line to a config file: the one `--config` or `ASH_CONFIG` names, else the
-config file a scan of the current directory would use, else `.ashrc.yaml` in the current
+config file a scan of the current directory would use, else `.ash.yaml` in the current
 directory. It writes YAML, or JSON to a `.json` file. It refuses a TOML file, and a file
 that `extends` another and has no suppressions list of its own, because writing one there
 would replace the base file's list. If the file already has the same suppression, `x`

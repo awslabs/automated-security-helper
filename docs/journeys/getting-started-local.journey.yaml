@@ -309,9 +309,9 @@ body:
       ## 7. Suppress the false positive
 
       B324 is a false positive here, because the hash only names cache entries. In
-      `ash-tutorial`, create a file named `.ashrc.yaml` with this content:
+      `ash-tutorial`, create a file named `.ash.yaml` with this content:
   - block:
-      twin: {kind: save, path: .ashrc.yaml}
+      twin: {kind: save, path: .ash.yaml}
       lang: yaml
       body: |
         global_settings:

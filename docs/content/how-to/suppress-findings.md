@@ -75,7 +75,7 @@ global_settings:
         only a polars release built against rustls 0.23.45 or later removes it.
 ```
 
-ASH's own `.ash/.ash.yaml` carries the worked set of these entries (the rustls
+ASH's own `.ash.yaml` carries the worked set of these entries (the rustls
 advisories in polars' harvested `Cargo.lock`), one per scanner spelling of the
 same GHSA id, each with the evidence in its reason.
 
@@ -270,7 +270,7 @@ After a scan, `ash config lint --fix-unused` comments out the entries that the r
 
 ## Add a suppression while you review findings {#inspect}
 
-`ash inspect findings` opens the last scan's findings in your terminal. Select a finding and press `x` to suppress it: ASH asks for a reason and an optional expiration, and adds an entry with the finding's path and rule ID, and its line as `line_start` and `line_end`, to the config file (the `--config` file, else the config ASH discovers, else a new `.ashrc.yaml` in the current directory). It keeps the comments of a YAML file, except one whose `global_settings` is written inline (`global_settings: {...}`), which it rewrites in full, and it writes a JSON config back as JSON. If the file already has an identical entry, nothing is added, and the status bar says so; an entry for another line, reason, or expiration with the same rule ID and path is added. It does not edit TOML files, or a file that uses `extends` but has no suppressions list of its own.
+`ash inspect findings` opens the last scan's findings in your terminal. Select a finding and press `x` to suppress it: ASH asks for a reason and an optional expiration, and adds an entry with the finding's path and rule ID, and its line as `line_start` and `line_end`, to the config file (the `--config` file, else the config ASH discovers, else a new `.ash.yaml` in the current directory). It keeps the comments of a YAML file, except one whose `global_settings` is written inline (`global_settings: {...}`), which it rewrites in full, and it writes a JSON config back as JSON. If the file already has an identical entry, nothing is added, and the status bar says so; an entry for another line, reason, or expiration with the same rule ID and path is added. It does not edit TOML files, or a file that uses `extends` but has no suppressions list of its own.
 
 ## See every finding {#ignore-suppressions}
 

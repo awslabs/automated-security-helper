@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""The two time-boxed deepmerge suppressions in .ash/.ash.yaml cover their findings.
+"""The two time-boxed deepmerge suppressions in .ash.yaml cover their findings.
 
 Why this exists
 ---------------
@@ -15,7 +15,7 @@ the self-scan would stay red; an entry past its expiration matches nothing eithe
 
 What this checks
 ----------------
-The repository's own ``.ash/.ash.yaml``, loaded through the config model, holds two
+The repository's own ``.ash.yaml``, loaded through the config model, holds two
 GHSA-gcqx-w48m-w2h4 entries that match a finding shaped like each of npm-audit's
 rows, do not match a different installed version or a copy at another path, and
 have not expired.
@@ -33,7 +33,7 @@ from automated_security_helper.models.flat_vulnerability import FlatVulnerabilit
 pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-CONFIG = REPO_ROOT / ".ash" / ".ash.yaml"
+CONFIG = REPO_ROOT / ".ash.yaml"
 
 RULE = "GHSA-gcqx-w48m-w2h4"
 FILE_PATH = "node_modules/deepmerge/package.json"
@@ -107,7 +107,7 @@ def test_a_different_finding_is_not_covered(overrides: dict) -> None:
 
 def test_the_entries_have_not_expired() -> None:
     entries = _deepmerge_entries()
-    assert entries, "no GHSA-gcqx-w48m-w2h4 entries in .ash/.ash.yaml"
+    assert entries, "no GHSA-gcqx-w48m-w2h4 entries in .ash.yaml"
     for entry in entries:
         assert entry.expiration, f"{entry.package_path}: no expiration"
         assert not expiration_has_passed(entry.expiration), (

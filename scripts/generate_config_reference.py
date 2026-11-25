@@ -1213,6 +1213,18 @@ def generate() -> tuple[str, dict]:
     # against the constants, so a note inside an item would hide that item from it.
     lines += [f"{index}. {code(path)}" for index, path in enumerate(order, start=1)]
     lines += [""]
+    lines += [
+        (
+            f"The first, {code(order[0])} in the source directory, is the canonical "
+            "config file: `ash config init` and `ash config wizard` write it, and it "
+            "wins over every other file. Every other file name above is a deprecated "
+            "location. ASH still reads it, says so in a warning that names the file and "
+            "the path to move it to, and stops reading it in ASH 4.0. "
+            f"{code(ASH_PYPROJECT_FILE_NAME)} is a different kind of source and is not "
+            "deprecated."
+        ),
+        "",
+    ]
     if pyproject_needs_table():
         lines += [
             (

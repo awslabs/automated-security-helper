@@ -7,7 +7,7 @@ aws-security-hub's ``findings_scope`` decides which findings in the operator's
 account a scan updates and archives, and ``archive_resolved_findings`` whether it
 archives the ones the scan no longer reports. A config file inside the scanned
 tree was written by the repository under scan: a pull request that deletes files
-and sets ``archive_resolved_findings: true`` in ``.ash/.ash.yaml`` archived that
+and sets ``archive_resolved_findings: true`` in ``.ash.yaml`` archived that
 scope's findings in the operator's account, with the operator's credentials.
 
 So what a config file inside the scanned tree writes for one of these options
@@ -50,7 +50,7 @@ The same holds for every reporter that sends findings off the host
 (``ReporterPluginBase.sends_off_host``: the four AWS reporters, or any plugin's),
 and for its whole section: whether it runs, and where it sends (a bucket and key
 prefix, a log group and stream, a model, a Region, a profile). A repository's own
-``.ash/.ash.yaml`` that named the AWS plugins and enabled S3 with its own bucket
+``.ash.yaml`` that named the AWS plugins and enabled S3 with its own bucket
 made a scan of it upload the findings there with the host's credentials; so did a
 config an MCP client uploaded.
 

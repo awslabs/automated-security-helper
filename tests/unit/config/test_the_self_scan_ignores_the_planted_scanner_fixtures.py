@@ -25,7 +25,7 @@ pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SELF_SCAN_CONFIGS = (
-    REPO_ROOT / ".ash" / ".ash.yaml",
+    REPO_ROOT / ".ash.yaml",
     REPO_ROOT / ".ash" / ".ash_alpha_plugins.yaml",
 )
 PLANTED_FIXTURES = (
