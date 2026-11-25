@@ -17,7 +17,7 @@ What is held to what:
 - the crate the repository's suppressions are written for (``rustls`` 0.23.43,
   statically linked into the polars runtime wheel) is in the SBOM, and it
   carries the polars parent purl and the sdist's sha256 the harvest stamped;
-- the four ``global_settings.suppressions`` entries of ``.ash/.ash.yaml`` that
+- the four ``global_settings.suppressions`` entries of ``.ash.yaml`` that
   name the harvested lockfile each match a finding reported at the path
   syft gives the lockfile, so none of them reads as unused, and a finding for
   another crate or another rustls version is not suppressed (the control).

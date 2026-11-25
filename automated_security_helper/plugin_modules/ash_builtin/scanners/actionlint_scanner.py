@@ -53,7 +53,7 @@ Decisions, and why
    without it, so an enabled integration is never skipped quietly either.
 
    Both options name the program actionlint pipes each ``run:`` script to, and
-   ASH's config usually comes from the scanned repository (``.ash/.ash.yaml``), so
+   ASH's config usually comes from the scanned repository (``.ash.yaml``), so
    ``shellcheck: sh`` there would execute the repository's scripts. From a config
    inside a git checkout or the scanned directory, each option accepts only its own
    name (``shellcheck``, ``pyflakes``), looked up on PATH and ASH's bin directory.
@@ -1276,8 +1276,11 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
         rule_id=FacetDecl(state=FacetState.MAPPED, native_field="errors[].kind"),
         severity=FacetDecl(
             state=FacetState.MAPPED,
-            native_field="errors[].kind (ASH severity table; a message matching "
-            "the untrusted-input pattern raises it to HIGH)",
+            native_field="errors[].kind and errors[].message (ASH severity "
+            "table, severity_for; an expression finding whose message matches "
+            "the untrusted-input pattern is raised to HIGH, and a "
+            "deprecated-commands finding whose message names set-env or "
+            "add-path is raised to MEDIUM)",
         ),
         file_path=FacetDecl(state=FacetState.MAPPED, native_field="errors[].filepath"),
         line_range=FacetDecl(state=FacetState.MAPPED, native_field="errors[].line"),

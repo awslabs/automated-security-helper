@@ -126,7 +126,7 @@ By default the job fails when a scanner reports a finding at severity MEDIUM or 
 is not suppressed, when a scanner did not run, or when a vulnerability database is past its
 age bound.
 
-To fail only on HIGH and CRITICAL findings, add `.ashrc.yaml` at the root of the branch:
+To fail only on HIGH and CRITICAL findings, add `.ash.yaml` at the root of the branch:
 
 ```yaml
 global_settings:

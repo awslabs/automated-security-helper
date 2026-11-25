@@ -47,7 +47,7 @@ from textual.widgets.data_table import ColumnKey
 from automated_security_helper.config.ash_config import add_suppression_to_config
 from automated_security_helper.core.enums import AshExitCode
 from automated_security_helper.core.exceptions import ASHConfigSourceError
-from automated_security_helper.models.vocab import SEVERITY_BUCKETS
+from automated_security_helper.models.vocab import SEVERITY_BUCKETS, Severity
 from automated_security_helper.utils.console import echo, secho
 from automated_security_helper.config.resolve_config import find_config_file
 from automated_security_helper.core.constants import (
@@ -521,7 +521,10 @@ def _as_scanned(finding: dict) -> Optional[FlatVulnerability]:
         id="",
         title="",
         description="",
-        severity=str(finding.get("severity") or ""),
+        # The matcher keys on rule, file and line, never on severity. The field is a
+        # closed type, so a recorded word the ladder does not know (a hand-edited
+        # or older record) reads as MEDIUM, as a result with no level does.
+        severity=Severity.from_text(finding.get("severity")) or Severity.MEDIUM,
         scanner=str(finding.get("scanner") or ""),
         scanner_type="",
         rule_id=None if rule_id is None else str(rule_id),

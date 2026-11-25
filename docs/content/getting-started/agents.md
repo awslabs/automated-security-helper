@@ -271,10 +271,10 @@ The expiration date defaults to 90 days from today. From that date on, the suppr
 longer applies and the finding comes back. ASH sets `client_supplied` itself, so leave it out
 of your config. Add the entry to the project's config under `global_settings.suppressions`,
 and put in the date the agent gave you. The project has no config yet, so create
-`.ashrc.yaml`:
+`.ash.yaml`:
 
 ```bash
-cat > .ashrc.yaml <<'EOF'
+cat > .ash.yaml <<'EOF'
 global_settings:
   suppressions:
     - rule_id: "B324"
@@ -303,7 +303,7 @@ typo in a required key does the same, because the required field then goes missi
 
 <!-- doctest: run expect-exit=3 -->
 ```bash
-sed 's/reason:/reasn:/' .ashrc.yaml > typo.yaml
+sed 's/reason:/reasn:/' .ash.yaml > typo.yaml
 ash config validate --config typo.yaml
 ```
 

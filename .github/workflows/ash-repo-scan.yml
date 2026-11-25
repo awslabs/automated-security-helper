@@ -85,7 +85,7 @@ jobs:
       # previous entry's temporary merge commit, which carries that entry's
       # unmerged config and sits on a queue branch GitHub deletes. The trailing
       # `|| ''` keeps the input empty on workflow_dispatch.
-      config: .ash/.ash.yaml
+      config: .ash.yaml
       config-ref: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_ref || '' }}
       # The install steps come from the pull request's workflow files and the ASH
       # from its base commit, so a pull request that adds a scanner asks the base
@@ -111,7 +111,7 @@ jobs:
       install-grype: true
       install-syft: true
       install-opengrep: true
-      # .ash/.ash.yaml enables cfn-nag, so the runner has to carry it. Without
+      # .ash.yaml enables cfn-nag, so the runner has to carry it. Without
       # this the scanner resolves MISSING and the run reports an incomplete
       # scan -- correctly, because the CloudFormation in this repository was
       # never actually being checked.

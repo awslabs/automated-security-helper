@@ -67,7 +67,7 @@ every enabled reporter writes its report. In a workspace scan, a project's
 
 <!-- doctest: run expect-exit=2 -->
 ```bash
-cat > .ashrc.yaml <<'EOF'
+cat > .ash.yaml <<'EOF'
 output_formats:
   - sarif
 EOF

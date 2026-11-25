@@ -274,7 +274,7 @@ def _grep_scanners(enabled: bool) -> AshConfig:
 def _denials_of_ashs_own_config(trusted: AshConfig) -> list:
     from automated_security_helper.config.config_sources import read_config_file
 
-    own = Path(__file__).resolve().parents[3] / ".ash" / ".ash.yaml"
+    own = Path(__file__).resolve().parents[3] / ".ash.yaml"
     policy = RuntimeOverridesConfig()
     return config_document_denials(
         read_config_file(own),

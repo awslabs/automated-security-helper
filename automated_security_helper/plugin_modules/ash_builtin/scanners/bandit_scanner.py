@@ -900,6 +900,9 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
             state=FacetState.MAPPED,
             native_field="results[].locations[].physicalLocation.region."
             "snippet.text (settled by the M0 capture)",
+            reason="mask_secrets_in_sarif runs over the whole report, so a "
+            "snippet holding a secret-shaped value is masked in place; the "
+            "snippet still maps, with the masked text",
         ),
         references=FacetDecl(
             state=FacetState.MAPPED,

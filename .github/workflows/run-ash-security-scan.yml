@@ -321,7 +321,7 @@ env:
   # suppressions scoped by `symbol` (a qualified definition name instead of a
   # line pin). Resolution fails closed: without the extra every symbol-scoped
   # entry matches nothing and its findings come back as residuals, so a config
-  # that uses `symbol` -- this repository's own .ash/.ash.yaml does -- needs the
+  # that uses `symbol` -- this repository's own .ash.yaml does -- needs the
   # extra in the environment that runs the scan. The wheels cover the GitHub
   # hosted runners; the extra exists (rather than core deps) for platforms,
   # musllinux aarch64, that no wheel covers.
@@ -1087,7 +1087,7 @@ jobs:
             exit 1
           fi
           if [ -z "${CONFIG_PATH}" ]; then
-            echo "::error::config-ref is set but config is empty. Name the config file to read from $(one_line "${CONFIG_REF}"), for example 'config: .ash/.ash.yaml'."
+            echo "::error::config-ref is set but config is empty. Name the config file to read from $(one_line "${CONFIG_REF}"), for example 'config: .ash.yaml'."
             exit 1
           fi
           RELATIVE="${CONFIG_PATH#./}"

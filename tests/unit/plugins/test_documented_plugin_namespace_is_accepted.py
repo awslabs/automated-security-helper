@@ -8,7 +8,7 @@ The defect
 ``load_additional_plugin_modules`` validated ``ash_plugin_modules`` entries against
 a prefix list of ``automated_security_helper.``, ``ash_plugins.`` and
 ``ash_plugins``. Five documentation pages and
-``examples/ash_plugins_example/.ash/.ash.yaml`` all name ``my_ash_plugins``, which
+``examples/ash_plugins_example/.ash.yaml`` all name ``my_ash_plugins``, which
 starts with none of them -- so the loader logged "Skipping module with unexpected
 namespace" and every plugin in the package went unregistered.
 
@@ -46,7 +46,7 @@ from automated_security_helper.plugins.loader import (
 pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-EXAMPLE_CONFIG = REPO_ROOT / "examples" / "ash_plugins_example" / ".ash" / ".ash.yaml"
+EXAMPLE_CONFIG = REPO_ROOT / "examples" / "ash_plugins_example" / ".ash.yaml"
 
 
 def test_the_shipped_examples_own_namespace_is_accepted():

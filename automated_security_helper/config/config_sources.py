@@ -7,22 +7,32 @@ Discovery (#313)
 When no config path is given, ``discover_config_source`` picks exactly one
 source from the scan root. Sources are never merged with each other. In order:
 
-1. The dedicated file names in ``ASH_CONFIG_FILE_NAMES``, in that list's order,
-   each checked at the scan root and then in ``.ash/``. This is the order ASH
-   has always used, kept unchanged.
-2. ``ASH_RC_FILE_NAMES`` (``.ashrc.toml`` ... ``ashrc.json``) at the scan root.
-3. ``pyproject.toml`` at the scan root, only if it has a ``[tool.ash]`` table.
+1. ``.ash.yaml`` at the scan root, the canonical config file
+   (``ASH_CANONICAL_CONFIG_FILE_NAME``). It is read before everything else, and
+   it is the path every command that creates a config file writes.
+2. The dedicated file names in ``ASH_CONFIG_FILE_NAMES``, in that list's order,
+   each checked at the scan root and then in ``.ash/``, skipping the canonical
+   file. This is the order ASH has always used for them, kept unchanged.
+3. ``ASH_RC_FILE_NAMES`` (``.ashrc.toml`` ... ``ashrc.json``) at the scan root.
+4. ``pyproject.toml`` at the scan root, only if it has a ``[tool.ash]`` table.
    A ``pyproject.toml`` without one is not a config source at all.
 
-An explicit path (``--config`` or ``ASH_CONFIG``) skips discovery.
+An explicit path (``--config`` or ``ASH_CONFIG``) skips discovery, and warns
+nothing.
 
-The dedicated names win over the newer sources because #313 asks for
-``[tool.ash]`` to be read "when no .ash/.ash.yaml exists" and for an existing
-``.ash/.ash.yaml`` to keep working. Letting a newer source win would change the
-config of every repository that has ``.ash/.ash.yaml`` and then gains an
-unrelated ``[tool.ash]`` table. The source used is logged, every other source
-found is logged as ignored, and when a dedicated file shadows a newer source the
-warning says the dedicated names are deprecated.
+Every location in 2 and 3 is a legacy one: it keeps loading, and a scan that
+reads one says so once, in a warning that names the file as deprecated and the
+canonical path to move it to. They are removed in ASH 4.0. When the canonical
+file and a legacy one both exist, the canonical file is read and the warning
+names the legacy file it shadowed. A ``pyproject.toml`` table is a different
+kind of source, not a file location, and is not deprecated.
+
+The dedicated names win over the ashrc names and ``[tool.ash]`` because #313
+asks for ``[tool.ash]`` to be read "when no .ash/.ash.yaml exists" and for an
+existing ``.ash/.ash.yaml`` to keep working. Letting a newer source win would
+change the config of every repository that has ``.ash/.ash.yaml`` and then gains
+an unrelated ``[tool.ash]`` table. The source used is logged and every other
+source found is logged as ignored.
 
 Rejected: merging the sources found (two files each holding half a config is the
 confusion this is meant to remove, and pytest does not merge either), and
@@ -283,6 +293,7 @@ from automated_security_helper.config.environment_record import (
     written_without_tag,
 )
 from automated_security_helper.core.constants import (
+    ASH_CANONICAL_CONFIG_FILE_NAME,
     ASH_CONFIG_EXTENDS_MAX_DEPTH,
     ASH_CONFIG_EXTENDS_MAX_FILES,
     ASH_CONFIG_FILE_NAMES,
@@ -344,6 +355,11 @@ RefuseEnv = Callable[[Path], bool]
 AnchorPaths = Callable[[Path], bool]
 
 SOURCE_KIND_EXPLICIT = "explicit"
+#: ``.ash.yaml`` at the scan root, the canonical config file.
+SOURCE_KIND_CANONICAL = "canonical"
+#: A dedicated name at a legacy location (every name of
+#: ``ASH_CONFIG_FILE_NAMES`` at the root or in ``.ash/`` except the canonical
+#: file): deprecated, removed in ASH 4.0.
 SOURCE_KIND_DEDICATED = "dedicated"
 SOURCE_KIND_ASHRC = "ashrc"
 SOURCE_KIND_PYPROJECT = "pyproject"
@@ -1674,8 +1690,13 @@ def discovery_candidates(search_dir: Path) -> Iterator[Path]:
     search_dir = Path(search_dir)
     ash_dir = search_dir / ".ash"
     ash_dir_given = False
+    canonical = search_dir / ASH_CANONICAL_CONFIG_FILE_NAME
+    if os.path.lexists(canonical):
+        yield canonical
     for name in ASH_CONFIG_FILE_NAMES:
         for candidate in (search_dir / name, ash_dir / name):
+            if candidate == canonical:
+                continue
             if candidate.parent == ash_dir and not ash_dir_given:
                 ash_dir_given = True
                 # Not Path.is_symlink(), which is False for a Windows junction.
@@ -1903,9 +1924,12 @@ def _existing_candidates(
     if permit is not None and _name_exists(dot_ash) and not _permitted(dot_ash, permit):
         raise _not_permitted(dot_ash)
     candidates: List[ConfigSource] = []
+    canonical = search_dir / ASH_CANONICAL_CONFIG_FILE_NAME
+    if _name_exists(canonical):
+        candidates.append(ConfigSource(canonical, SOURCE_KIND_CANONICAL))
     for name in ASH_CONFIG_FILE_NAMES:
         for candidate in (search_dir / name, dot_ash / name):
-            if _name_exists(candidate):
+            if candidate != canonical and _name_exists(candidate):
                 candidates.append(ConfigSource(candidate, SOURCE_KIND_DEDICATED))
     for name in ASH_RC_FILE_NAMES:
         candidate = search_dir / name
@@ -2043,25 +2067,48 @@ def discovery_warnings(discovery: ConfigDiscovery) -> List[str]:
     if selected is None:
         return []
     warnings: List[str] = []
+    if _is_a_legacy_location(selected):
+        warnings.append(_legacy_location_warning(selected))
     for other in discovery.ignored:
         message = (
             f"Ignoring ASH configuration at {other.label}: {selected.label} takes "
             "precedence, and configuration sources are never merged."
         )
-        if selected.kind == SOURCE_KIND_DEDICATED and other.kind in (
-            SOURCE_KIND_ASHRC,
-            SOURCE_KIND_PYPROJECT,
-        ):
+        if selected.kind == SOURCE_KIND_CANONICAL and _is_a_legacy_location(other):
             message += (
-                f" The config file names {', '.join(ASH_CONFIG_FILE_NAMES)} (at the "
-                "repository root or in .ash/) are deprecated in favor of "
-                f"{', '.join(ASH_RC_FILE_NAMES)} or a [tool.ash] table in "
-                f"{ASH_PYPROJECT_FILE_NAME}. Move the settings into one source "
-                "and delete the other."
+                f" {other.label} is a deprecated location, removed in ASH 4.0: "
+                f"move any setting it holds into {selected.label} and delete it."
             )
         warnings.append(message)
     warnings.extend(discovery.notes)
     return warnings
+
+
+def _is_a_legacy_location(source: ConfigSource) -> bool:
+    """Whether ``source`` is a location ASH 4.0 stops reading: a dedicated name
+    other than the canonical file, or an ashrc name. A ``pyproject.toml`` table
+    is not a file location of that kind and is not deprecated."""
+    return source.kind in (SOURCE_KIND_DEDICATED, SOURCE_KIND_ASHRC)
+
+
+def canonical_path_for(source: ConfigSource) -> Path:
+    """The canonical config file of the scan root ``source`` was found in.
+
+    A file in ``.ash/`` belongs to the root above ``.ash/``; every other source
+    was found at the root itself.
+    """
+    parent = source.path.parent
+    root = parent.parent if parent.name == ".ash" else parent
+    return root / ASH_CANONICAL_CONFIG_FILE_NAME
+
+
+def _legacy_location_warning(source: ConfigSource) -> str:
+    return (
+        f"ASH is reading its configuration from {source.label}, a deprecated "
+        f"location that ASH 4.0 stops reading. The canonical config file is "
+        f"{ASH_CANONICAL_CONFIG_FILE_NAME} at the scan root: move this file to "
+        f"{describe_config_path(canonical_path_for(source))}."
+    )
 
 
 def log_config_discovery(
