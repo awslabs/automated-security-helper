@@ -58,7 +58,7 @@ which checks a pull request needs to merge.
 
 ## Set up and run the tests
 
-You need git, [uv](https://docs.astral.sh/uv/getting-started/installation/), and Python 3.10 to 3.14. From a clone of your
+You need git, [uv](https://docs.astral.sh/uv/getting-started/installation/), and Python 3.11 to 3.14. From a clone of your
 fork:
 
 <!-- doctest: illustrative reason="installs packages from the network and runs the full test suite" -->

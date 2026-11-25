@@ -804,7 +804,7 @@ jobs:
       max-parallel: 24
       matrix:
         os: [ubuntu-latest, ubuntu-24.04-arm]
-        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
         # The shard axis of integration-test-linux, verbatim (the note above this job).
         shard: [1of6, 2of6, 3of6, 4of6, 5of6, 6of6]
         # The pull-request cover (the note on ensure-cache): on a pull_request event these
@@ -886,7 +886,7 @@ jobs:
       max-parallel: 24
       matrix:
         os: [macos-latest, macos-15]
-        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
         # The shard axis of integration-test-macos, verbatim, as on unit-test-linux.
         shard: [1of8, 2of8, 3of8, 4of8, 5of8, 6of8, 7of8, 8of8]
         # The pull-request cover (the note on ensure-cache): macos-latest and Python 3.11 and
@@ -970,7 +970,7 @@ jobs:
       max-parallel: 24
       matrix:
         os: [windows-latest]
-        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
         # The shard axis of integration-test-windows, verbatim (the note above this job).
         shard: [1of8, 2of8, 3of8, 4of8, 5of8, 6of8, 7of8, 8of8]
         # The pull-request cover (the note on ensure-cache): Python 3.11 and 3.13 drop out
@@ -1073,7 +1073,7 @@ jobs:
         shell: bash
         env:
           UNIT_OS: ${{ github.event_name == 'pull_request' && 'ubuntu-24.04-arm macos-15 windows-latest' || 'ubuntu-latest ubuntu-24.04-arm macos-latest macos-15 windows-latest' }}
-          UNIT_PYTHON: ${{ github.event_name == 'pull_request' && '3.10 3.12 3.14' || '3.10 3.11 3.12 3.13 3.14' }}
+          UNIT_PYTHON: ${{ github.event_name == 'pull_request' && '3.12 3.14' || '3.11 3.12 3.13 3.14' }}
         run: |
           uv run python .github/scripts/combine-unit-coverage.py --self-test
           uv run python .github/scripts/combine-unit-coverage.py \
@@ -1144,7 +1144,7 @@ jobs:
       max-parallel: 24
       matrix:
         os: [ubuntu-latest, ubuntu-24.04-arm]
-        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
         shard: [1of6, 2of6, 3of6, 4of6, 5of6, 6of6]
         # The pull-request cover (the note on ensure-cache); the same entries as the unit
         # job of this pool.
@@ -1188,7 +1188,7 @@ jobs:
       max-parallel: 24
       matrix:
         os: [macos-latest, macos-15]
-        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
         shard: [1of8, 2of8, 3of8, 4of8, 5of8, 6of8, 7of8, 8of8]
         # The pull-request cover (the note on ensure-cache); the same entries as the unit
         # job of this pool.
@@ -1230,7 +1230,7 @@ jobs:
       max-parallel: 24
       matrix:
         os: [windows-latest]
-        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
         shard: [1of8, 2of8, 3of8, 4of8, 5of8, 6of8, 7of8, 8of8]
         # The pull-request cover (the note on ensure-cache); the same entries as the unit
         # job of this pool.
@@ -2798,7 +2798,7 @@ jobs:
       max-parallel: 20
       matrix:
         os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-15, windows-latest]
-        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
         # `bundle` is pip + pipx + uvx + pre-commit + mcp, as steps. homebrew and
         # the three container runtimes stay their own legs: they are already
         # trimmed to a single Python version and carry OS-specific excludes, so
@@ -2844,24 +2844,20 @@ jobs:
           - { os: macos-latest, method: nerdctl }
           - { os: macos-15, method: nerdctl }
           # nerdctl only needs Python 3.12
-          - { os: ubuntu-latest, python-version: "3.10", method: nerdctl }
           - { os: ubuntu-latest, python-version: "3.11", method: nerdctl }
           - { os: ubuntu-latest, python-version: "3.13", method: nerdctl }
           - { os: ubuntu-latest, python-version: "3.14", method: nerdctl }
 
           # Container runtimes only need Python 3.12
-          - { os: ubuntu-latest, python-version: "3.10", method: podman }
           - { os: ubuntu-latest, python-version: "3.11", method: podman }
           - { os: ubuntu-latest, python-version: "3.13", method: podman }
           - { os: ubuntu-latest, python-version: "3.14", method: podman }
-          - { os: ubuntu-24.04-arm, python-version: "3.10", method: podman }
           - { os: ubuntu-24.04-arm, python-version: "3.11", method: podman }
           - { os: ubuntu-24.04-arm, python-version: "3.13", method: podman }
           - { os: ubuntu-24.04-arm, python-version: "3.14", method: podman }
           # Podman/Finch not on macOS (no nested virtualization on hosted runners)
           - { os: macos-latest, method: podman }
           - { os: macos-15, method: podman }
-          - { os: ubuntu-latest, python-version: "3.10", method: finch }
           - { os: ubuntu-latest, python-version: "3.11", method: finch }
           - { os: ubuntu-latest, python-version: "3.13", method: finch }
           - { os: ubuntu-latest, python-version: "3.14", method: finch }
@@ -2869,15 +2865,12 @@ jobs:
           - { os: macos-15, method: finch }
 
           # Homebrew only needs Python 3.12 (the formula brings its own python@3.12)
-          - { os: ubuntu-latest, python-version: "3.10", method: homebrew }
           - { os: ubuntu-latest, python-version: "3.11", method: homebrew }
           - { os: ubuntu-latest, python-version: "3.13", method: homebrew }
           - { os: ubuntu-latest, python-version: "3.14", method: homebrew }
-          - { os: macos-latest, python-version: "3.10", method: homebrew }
           - { os: macos-latest, python-version: "3.11", method: homebrew }
           - { os: macos-latest, python-version: "3.13", method: homebrew }
           - { os: macos-latest, python-version: "3.14", method: homebrew }
-          - { os: macos-15, python-version: "3.10", method: homebrew }
           - { os: macos-15, python-version: "3.11", method: homebrew }
           - { os: macos-15, python-version: "3.13", method: homebrew }
           - { os: macos-15, python-version: "3.14", method: homebrew }

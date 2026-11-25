@@ -269,7 +269,7 @@ PR_COVER_IMAGES = {"ubuntu-24.04-arm", "macos-15", "windows-latest"}
 EVENT_LIST = re.compile(
     r"^\$\{\{ github\.event_name == 'pull_request' && '([^']*)' \|\| '([^']*)' \}\}$"
 )
-PR_COVER_PYTHONS = {"3.10", "3.12", "3.14"}
+PR_COVER_PYTHONS = {"3.12", "3.14"}
 TIER_JOB_IDS = [*UNIT_TEST_JOB_IDS, *INTEGRATION_TEST_JOB_IDS, *E2E_TEST_JOB_IDS]
 
 
