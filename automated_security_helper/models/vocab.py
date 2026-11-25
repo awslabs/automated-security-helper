@@ -10,8 +10,11 @@ files, stays in its owning module; enums that already exist elsewhere
 (``core/enums.py``, ``models/workspace.py``) stay where they are.
 
 Every member's value is the exact wire spelling, and every enum mixes in ``str``
-so a member serializes, compares and hashes as its value. Compare members by
-identity (``x is Severity.HIGH``) and take ``.value`` at every textual boundary:
+so a member serializes, compares and hashes as its value. Compare with ``==``
+(members equal their values, so the same test reads a member and plain text);
+use ``is`` only on a value already converted to a member, because a field that
+holds text (the config, scanner and container fields do) never ``is`` a member.
+Take ``.value`` at every textual boundary:
 ``str(member)`` and f-string interpolation render the qualified member name on
 some supported interpreters, so ``f"{member}"`` is never a spelling of the value
 unless the class itself pins the rendering (``PluginKind`` overrides ``__str__``

@@ -60,6 +60,18 @@
   `scripts/generate_wrapper_tables.py` into marked blocks, and the lint job and a unit
   test fail when a block is stale. The generated text is the text the wrappers already
   held, so no option, exit code or message changes.
+- Module-level string constants that spelled a wire vocabulary are replaced by enum
+  members, so a caller that imported one of them by name must import the member
+  instead. The `error_type` spellings of the MCP tools (`CONFIG_INPUT_NOT_PERMITTED`,
+  `CONFIG_ENV_NOT_RESOLVED`, `CLONE_TOO_LARGE`, `SESSION_WORKSPACE_BUSY` and the other
+  names that `cli/mcp_tools.py`, `cli/mcp/source_delivery.py`, `cli/mcp/sessions.py` and
+  `cli/mcp/session_identity.py` exported) are now `McpErrorType` members in
+  `automated_security_helper/cli/mcp/error_types.py`; use `McpErrorType.X.value` for the
+  text. `DEFAULT_TRANSPORT` in `cli/mcp/sandbox.py` is `core.enums.DEFAULT_TRANSPORT`, a
+  `Transport` member. `STALENESS_FAIL`, `STALENESS_WARN` and `STALENESS_POLICIES` in
+  `utils/content_databases.py` are `StalenessPolicy` members, and the three
+  `*_CHECKPOINT` constants of `utils/inner_run_outcome.py` are `InnerRunRecordType`
+  members. The wire spellings themselves do not change.
 
 ### Fixes
 

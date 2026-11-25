@@ -242,7 +242,10 @@ class ContentDbAgeRecord:
     @property
     def enforced(self) -> bool:
         """Whether this record fails the scan: stale, under the ``fail`` policy."""
-        return self.stale and self.policy is StalenessPolicy.FAIL
+        # ``==``, not ``is``: the policy is a mutable field, and a text assignment
+        # after construction ("fail") must still gate. The str mixin makes the
+        # member equal to its spelling.
+        return self.stale and self.policy == StalenessPolicy.FAIL
 
     def message(self) -> str:
         if self.absent:
@@ -294,7 +297,7 @@ class ContentDbAgeRecord:
                 f"{self.timestamp_label} {_iso(self.built)}, {format_age(self.age)} old, "
                 f"past its {bound} bound ({whose}); age read from {self.measured_by}."
             )
-        if self.policy is StalenessPolicy.FAIL:
+        if self.policy == StalenessPolicy.FAIL:
             consequence = (
                 "The scan fails: a clean result from a stale database is not evidence of a "
                 "clean target."
@@ -343,7 +346,7 @@ class ContentDbAgeRecord:
             "max_age": go_duration(self.max_age),
             "max_age_seconds": int(self.max_age.total_seconds()),
             "stale": self.stale,
-            "policy": self.policy.value,
+            "policy": StalenessPolicy(self.policy).value,
             "enforced": self.enforced,
             "measured_by": self.measured_by,
             "measured_at": _iso(self.measured_at),
@@ -891,7 +894,7 @@ def _notification(record: ContentDbAgeRecord) -> "Notification":
     )
 
     return Notification(
-        level=(Level.error if record.policy is StalenessPolicy.FAIL else Level.warning),
+        level=(Level.error if record.policy == StalenessPolicy.FAIL else Level.warning),
         message=Message(root=Message1(text=record.message())),
         descriptor=ReportingDescriptorReference(
             root=ReportingDescriptorReference3(id=STALE_NOTIFICATION_ID)
@@ -1027,7 +1030,7 @@ def assess_scanner(
         if record.stale:
             level = (
                 logging.ERROR
-                if record.policy is StalenessPolicy.FAIL
+                if record.policy == StalenessPolicy.FAIL
                 else logging.WARNING
             )
             ASH_LOGGER.log(level, record.message())

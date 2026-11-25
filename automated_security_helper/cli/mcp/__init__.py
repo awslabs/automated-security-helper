@@ -408,7 +408,7 @@ def _validate_auth_options(
         raise ASHValidationError(_AUTH_VALUE_NOT_LATIN_1)
 
 
-def _validate_stateless_http(transport: str, stateless_http: bool) -> None:
+def _validate_stateless_http(transport: Transport, stateless_http: bool) -> None:
     """Reject ``--stateless-http`` on a transport that has no sessions to skip.
 
     Refused rather than ignored. An operator who passes it expects a server that
@@ -433,7 +433,7 @@ def _validate_stateless_http(transport: str, stateless_http: bool) -> None:
 
 
 def _validate_trust_upstream_session_id(
-    transport: str, stateless_http: bool, trust_upstream_session_id: bool
+    transport: Transport, stateless_http: bool, trust_upstream_session_id: bool
 ) -> None:
     """Reject ``--trust-upstream-session-id`` where the server issues the session.
 

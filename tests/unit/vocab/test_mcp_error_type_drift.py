@@ -226,11 +226,27 @@ def test_the_wire_spellings_are_pinned_byte_for_byte():
 
 def test_each_value_is_one_member_and_a_plain_str():
     values = [m.value for m in McpErrorType]
+    # Iterating an Enum skips aliases, so the member count of the iteration can
+    # never differ from the distinct values; ``__members__`` lists the aliases.
+    assert len(McpErrorType.__members__) == len(values)
     assert len(values) == len(set(values)) == len(WIRE_SPELLINGS)
     for member in McpErrorType:
         assert isinstance(member, str)
         assert member == member.value
         assert type(member.value) is str
+
+
+def test_the_enum_refuses_an_alias_member():
+    # The control for the alias check above: the same declaration with a second
+    # name for one spelling must not construct.
+    import enum
+
+    planted = enum.Enum("_Planted", [("FIRST", "x"), ("SECOND", "x")], type=str)
+    with pytest.raises(ValueError):
+        enum.unique(planted)
+
+    source = ENUM_MODULE.read_text(encoding="utf-8")
+    assert "@unique\nclass McpErrorType" in source
 
 
 def test_a_member_value_serializes_as_the_bare_string():

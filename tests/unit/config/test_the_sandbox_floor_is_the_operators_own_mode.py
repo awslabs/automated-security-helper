@@ -716,6 +716,13 @@ def _assert_plain_str(*values) -> None:
         assert type(value) in (str, SandboxMode), (type(value).__name__, value)
 
 
+def _assert_floor_is_plain_str(*values) -> None:
+    """The floor's answer is annotated ``List[str]``: each entry is exactly a
+    ``str`` (the mode's wire spelling), not a ``SandboxMode`` member."""
+    for value in values:
+        assert type(value) is str, (type(value).__name__, value)
+
+
 def test_a_floor_mode_read_from_an_environment_reference_is_a_plain_str(
     tmp_path, monkeypatch
 ):
@@ -746,7 +753,8 @@ def test_a_floor_mode_read_from_an_environment_reference_is_a_plain_str(
     floor = _floor(tmp_path, src)
     if (local, floor) != ("firejail", ["firejail"]):
         raise RuntimeError(f"premise: the floor must answer, got {(local, floor)}")
-    _assert_plain_str(local, *floor)
+    _assert_plain_str(local)
+    _assert_floor_is_plain_str(*floor)
 
 
 def test_a_floor_mode_a_patch_sets_from_a_reference_is_a_plain_str(
@@ -785,7 +793,8 @@ def test_a_floor_mode_a_patch_sets_from_a_reference_is_a_plain_str(
     floor = _floor(tmp_path, src)
     if (local, floor) != ("firejail", ["firejail"]):
         raise RuntimeError(f"premise: the floor must answer, got {(local, floor)}")
-    _assert_plain_str(local, *floor)
+    _assert_plain_str(local)
+    _assert_floor_is_plain_str(*floor)
 
 
 def test_an_operators_own_patch_to_off_turns_the_floor_off(tmp_path, monkeypatch):

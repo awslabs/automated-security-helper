@@ -23,9 +23,10 @@ whatever JSON encoder serializes it. A reader compares against the member
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import Enum, unique
 
 
+@unique
 class McpErrorType(str, Enum):
     """A closed ``error_type`` of an MCP tool's refusal.
 
@@ -130,9 +131,9 @@ class McpErrorType(str, Enum):
     CLONE_TOO_LARGE = "clone_too_large"
     #: ``error_type`` the MCP tool returns for :class:`CloneTreeUnreadableError`.
     CLONE_TREE_UNREADABLE = "clone_tree_unreadable"
-    #: ``error_type`` values set_source_git returns, besides the scan-target refusal
-    #: of a local clone source (scan_target_not_permitted) and invalid_session_id.
-    #: A client branches on these, so they are stable; the message is for a person.
+    # The ``error_type`` values set_source_git returns, besides the refusal of a
+    # local clone source (LOCAL_CLONE_SOURCE_REFUSED above) and invalid_session_id.
+    # A client branches on these, so they are stable; the message is for a person.
     CLONE_URL_NOT_PERMITTED = "clone_url_not_permitted"
     CLONE_HOST_NOT_PERMITTED = "clone_host_not_permitted"
     CLONE_REF_NOT_PERMITTED = "clone_ref_not_permitted"

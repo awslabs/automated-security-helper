@@ -1948,7 +1948,7 @@ class FindingsExplorerApp(App):
 
         if self.current_sort == "severity":
             self.filtered_findings.sort(
-                key=lambda f: severity_order.get(f["severity"], 5),
+                key=lambda f: severity_order.get(f["severity"], len(severity_order)),
                 reverse=self.sort_reverse,
             )
         elif self.current_sort == "file":

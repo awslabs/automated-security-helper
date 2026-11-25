@@ -329,3 +329,17 @@ def test_an_error_beyond_the_rejected_databases_is_not_stale_only(report, stale_
     unevaluated target or a timeout (one more error line), and a scanner that
     could not be halted (its flag)."""
     assert staleness._error_only_for_a_stale_database(report) is stale_only
+
+
+def test_a_policy_assigned_as_text_after_construction_still_gates():
+    """The policy is a mutable field: ``__post_init__`` converts what the
+    constructor was given, but a later assignment of the text ("fail") must
+    neither defeat the stale-database gate nor make the record unserializable."""
+    record = _record(policy=StalenessPolicy.WARN)
+    assert record.enforced is False
+
+    record.policy = "fail"
+
+    assert record.enforced is True
+    assert record.to_dict()["policy"] == "fail"
+    assert "The scan fails" in record.message()

@@ -47,6 +47,31 @@ class EnablementStatus(str, Enum):
         return self.value
 
 
+#: The state fields that hold one of the two status vocabularies above, by name.
+_STATUS_FIELD_ENUMS: Dict[str, type] = {
+    "registration_status": RegistrationStatus,
+    "enablement_status": EnablementStatus,
+}
+
+
+def _status_member(field_name: str, value: Any) -> Enum:
+    """The member of *field_name*'s vocabulary that *value* names.
+
+    A member passes through and its wire spelling is looked up. Any other text
+    raises here, at the write, instead of being stored: a status outside the
+    vocabulary matches none of the members the state is compared against, so the
+    scanner would fall through to failed or missing instead of its real state.
+    """
+    vocabulary = _STATUS_FIELD_ENUMS[field_name]
+    try:
+        return vocabulary(value)
+    except ValueError:
+        allowed = ", ".join(member.value for member in vocabulary)
+        raise ValueError(
+            f"{field_name} takes one of {allowed}, not {value!r}"
+        ) from None
+
+
 class ValidationOutcome(str, Enum):
     """The execution outcome ``determine_scanner_status_from_execution_data`` reports.
 
@@ -91,13 +116,16 @@ class ScannerValidationState:
     plugin_class: Optional[type] = None
     """The scanner plugin class, if available"""
 
-    registration_status: Union[RegistrationStatus, str] = RegistrationStatus.UNKNOWN
+    registration_status: RegistrationStatus = RegistrationStatus.UNKNOWN
     """Status of scanner registration: a ``RegistrationStatus`` member
-    (``unknown``, ``registered``, ``untracked``)."""
+    (``unknown``, ``registered``, ``untracked``). ``update_scanner_state``
+    converts a spelling to its member and refuses one outside the vocabulary."""
 
-    enablement_status: Union[EnablementStatus, str] = EnablementStatus.UNKNOWN
+    enablement_status: EnablementStatus = EnablementStatus.UNKNOWN
     """Status of scanner enablement: an ``EnablementStatus`` member
-    (``unknown``, ``enabled``, ``disabled``, ``excluded``, ``missing_deps``)."""
+    (``unknown``, ``enabled``, ``disabled``, ``excluded``, ``missing_deps``).
+    ``update_scanner_state`` converts a spelling to its member and refuses one
+    outside the vocabulary."""
 
     enablement_reason: str = ""
     """Detailed reason for the enablement status"""
@@ -306,6 +334,10 @@ class ScannerStateTracker:
             Updated ScannerValidationState
         """
         self._validate_name(scanner_name, kwargs.get("plugin_class"))
+        kwargs = {
+            key: _status_member(key, value) if key in _STATUS_FIELD_ENUMS else value
+            for key, value in kwargs.items()
+        }
 
         is_new_scanner = scanner_name not in self.scanner_states
         if is_new_scanner:

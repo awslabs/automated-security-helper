@@ -3884,7 +3884,7 @@ def _sandbox_mode_without_the_config(opts: ScanOptions) -> List[str]:
         except Exception:
             # An override that does not apply fails the scan in the container instead.
             return []
-    return [floor.sandbox.mode]
+    return [SandboxMode(floor.sandbox.mode).value]
 
 
 def _config_as_the_scan_resolves_it(opts: ScanOptions):

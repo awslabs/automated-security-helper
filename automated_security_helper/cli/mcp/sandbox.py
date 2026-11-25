@@ -113,7 +113,7 @@ import errno
 import os
 from dataclasses import dataclass
 from pathlib import Path, PurePath
-from typing import Any, Callable, List, Optional, Tuple
+from typing import Any, Callable, List, Optional, Tuple, Union
 
 from automated_security_helper.core.enums import DEFAULT_TRANSPORT, Transport
 from automated_security_helper.core.resource_management.error_handling import (
@@ -193,19 +193,26 @@ KNOWN_TRANSPORTS = frozenset(Transport)
 #: different mechanism from them.
 ASH_MCP_TRANSPORT_ENV = "ASH_MCP_TRANSPORT"
 
-#: What an unset ``ASH_MCP_TRANSPORT`` means (``DEFAULT_TRANSPORT``, imported from
-#: ``core.enums``). stdio, deliberately, so that importing this module cannot
-#: tighten behavior for an in-process caller that is not a server at all -- a unit
-#: test, or a library consumer calling the tool functions directly.
+# What an unset ``ASH_MCP_TRANSPORT`` means is ``DEFAULT_TRANSPORT`` (imported from
+# ``core.enums``). stdio, deliberately, so that importing this module cannot
+# tighten behavior for an in-process caller that is not a server at all -- a unit
+# test, or a library consumer calling the tool functions directly.
 
 
-def set_server_transport(name: str) -> None:
+def set_server_transport(name: Union[Transport, str]) -> None:
     """Record which transport this process serves.
 
     Called once from ``mcp_command`` before the server starts serving.
+
+    Raises:
+        ValueError: when *name* is None. ``str(None)`` would be written as the
+            text ``"None"``, which names no transport and so reads as networked.
     """
 
-    set_environ(ASH_MCP_TRANSPORT_ENV, str(name))
+    if name is None:
+        raise ValueError("set_server_transport needs a transport, not None")
+    text = name.value if isinstance(name, Transport) else str(name)
+    set_environ(ASH_MCP_TRANSPORT_ENV, text)
 
 
 def get_server_transport() -> str:
@@ -231,7 +238,12 @@ def transport_is_networked() -> bool:
     (:func:`unknown_transport_override`).
     """
 
-    return Transport.parse(get_server_transport()) is not DEFAULT_TRANSPORT
+    transport = Transport.parse(get_server_transport())
+    # An unknown spelling (``None``) is networked, the stricter reading of a typo.
+    # Asked of the transport itself, not of "is it the default": the default is
+    # what an unset variable means, and a change of it must not change what
+    # counts as trusted.
+    return transport is None or transport.is_networked
 
 
 def unknown_transport_override() -> Optional[str]:

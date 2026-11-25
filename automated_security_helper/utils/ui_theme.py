@@ -49,7 +49,10 @@ def severity_color(severity: str) -> str:
     color and could not be read."""
     level = str(severity).lower()
     if level in SEVERITY_LEVELS:
-        return COLORS[level]
+        # ``.get``: a level added to the ladder before it has a palette entry
+        # reads muted here instead of raising, and ``rich_theme`` runs at CLI
+        # import time, where a KeyError would take every command down.
+        return COLORS.get(level, COLORS["muted"])
     return COLORS["muted"]
 
 

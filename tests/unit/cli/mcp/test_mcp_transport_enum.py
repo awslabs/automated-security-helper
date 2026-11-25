@@ -131,6 +131,28 @@ def test_set_server_transport_stores_the_spelling_for_a_member(monkeypatch) -> N
     assert os.environ[sandbox.ASH_MCP_TRANSPORT_ENV] == "sse"
 
 
+def test_set_server_transport_refuses_none(monkeypatch) -> None:
+    # ``str(None)`` was written as the text "None", which names no transport and
+    # so read as networked: a refused call is the clearer failure.
+    monkeypatch.setenv(sandbox.ASH_MCP_TRANSPORT_ENV, "stdio")
+
+    with pytest.raises(ValueError, match="not None"):
+        sandbox.set_server_transport(None)  # type: ignore[arg-type]
+
+    assert os.environ[sandbox.ASH_MCP_TRANSPORT_ENV] == "stdio"
+
+
+def test_networked_means_the_transport_is_networked_not_that_it_is_not_the_default(
+    monkeypatch,
+) -> None:
+    # Trust follows the transport's own answer. A default that is itself a
+    # networked transport must not read as local because it is "the default".
+    monkeypatch.delenv(sandbox.ASH_MCP_TRANSPORT_ENV, raising=False)
+    monkeypatch.setattr(sandbox, "DEFAULT_TRANSPORT", Transport.SSE)
+
+    assert sandbox.transport_is_networked() is True
+
+
 # -- the --help rendering ----------------------------------------------------------
 
 
