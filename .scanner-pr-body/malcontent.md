@@ -114,16 +114,18 @@ them:
 
 ### Desk validation
 
-dev-dsk-cbc4ff77, a repository extract of the branch tip with edits 1 to 4 applied in the
+dev-dsk-cbc4ff77, a repository extract of the branch tip with edits 1 to 5 applied in the
 extract only, `uv sync --frozen --all-extras --group dev`, `env -i`, `-n 4`:
 
 - Malcontent behavior tests, sandbox test, facets registry totality and resource-id
-  conformance, operational facets consistency, success exit codes, global-ignore-paths:
-  668 passed, 2 skipped, 0 failed in those families.
-- The link-handling registry test fails until edit 5 lands (listed above).
-- `test_declared_facets_agree_with_the_observed_corpus` fails for 20 existing scanners with
-  and without this branch (20 failed, 21 passed on `origin/main` content in that extract;
-  zizmor and trivy-repo columns read empty), so it is not caused by this change.
-- Whole-tree collect smoke (`pytest --collect-only -q tests/unit`): 72,847 tests collected
+  conformance, operational facets consistency, facets corpus consistency, link-handling
+  registry test: 578 passed, 2 skipped, 20 failed. The 20 are
+  `test_declared_facets_agree_with_the_observed_corpus` for the existing scanners, none
+  for malcontent (the same 20 fail on `origin/main` content; a `None` corpus row for
+  malcontent made it a 21st before the recorded reports and edit 4's prep).
+- The converter run over all eleven report files in upstream's `tests/` (kept outside the
+  repository): 440 behaviors in, 440 results out, no region on any, severities INFO 267,
+  MEDIUM 144, HIGH 15, CRITICAL 14.
+- Whole-tree collect smoke (`pytest --collect-only -q tests/unit`): 72,856 tests collected
   with edit 2 applied; without it the collection stops on the PACKAGE_DIRS check.
 - The extract was removed and its absence read back.
