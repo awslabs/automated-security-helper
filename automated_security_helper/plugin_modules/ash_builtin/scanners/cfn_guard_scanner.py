@@ -558,7 +558,6 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
                 semantics="19 means at least one rule failed (findings)",
             ),
             provenance=opsf.ProvenanceFacet(
-                tier=opsf.Tier.BUILTIN_DEFAULT,
                 source=opsf.ProvenanceSource.PINNED_RELEASE_BINARY,
                 selection_surfaces=("options.rule_sets", "options.rules_paths"),
                 upstream_license=(

@@ -18,8 +18,8 @@ from unittest.mock import MagicMock
 import pytest
 import yaml
 
-from automated_security_helper.base import scanner_operational_facets as opsf
-from automated_security_helper.core import alpha_scanners
+from automated_security_helper.base import plugin_manifest
+from automated_security_helper.base.plugin_manifest import PluginTier
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -33,7 +33,7 @@ def warnings_logged(monkeypatch):
 
     logger = MagicMock()
     monkeypatch.setattr(log_module, "ASH_LOGGER", logger)
-    monkeypatch.setattr(alpha_scanners, "_WARNED_COMMUNITY_ALIASES", set())
+    monkeypatch.setattr(plugin_manifest, "_WARNED_COMMUNITY_ALIASES", set())
     return logger
 
 
@@ -41,41 +41,43 @@ def _messages(logger: MagicMock) -> list[str]:
     return [call.args[0] for call in logger.warning.call_args_list]
 
 
-def test_the_old_tier_value_maps_to_the_alpha_tier_and_warns(warnings_logged):
-    assert opsf.Tier("community_optin") is opsf.Tier.ALPHA_OPTIN
+@pytest.mark.parametrize("old", ["community", "community_optin"])
+def test_the_old_tier_value_maps_to_the_alpha_tier_and_warns(warnings_logged, old):
+    assert PluginTier(old) is PluginTier.ALPHA
     messages = _messages(warnings_logged)
     assert len(messages) == 1
-    assert "'community_optin' is deprecated" in messages[0]
-    assert "'alpha_optin'" in messages[0]
-    assert alpha_scanners.COMMUNITY_ALIASES_DROPPED_IN in messages[0]
+    assert f"'{old}' is deprecated" in messages[0]
+    assert "'alpha'" in messages[0]
+    assert plugin_manifest.COMMUNITY_ALIASES_DROPPED_IN in messages[0]
 
 
 def test_the_old_tier_value_warns_once_per_process(warnings_logged):
-    opsf.Tier("community_optin")
-    opsf.Tier("community_optin")
+    PluginTier("community")
+    PluginTier("community")
     assert len(_messages(warnings_logged)) == 1
 
 
 def test_the_new_tier_value_does_not_warn(warnings_logged):
-    assert opsf.Tier("alpha_optin") is opsf.Tier.ALPHA_OPTIN
-    assert opsf.Tier("builtin_default") is opsf.Tier.BUILTIN_DEFAULT
+    assert PluginTier("alpha") is PluginTier.ALPHA
+    assert PluginTier("supported") is PluginTier.SUPPORTED
+    assert PluginTier("deprecated") is PluginTier.DEPRECATED
     assert _messages(warnings_logged) == []
 
 
 def test_an_unrelated_tier_value_is_still_refused(warnings_logged):
     with pytest.raises(ValueError):
-        opsf.Tier("community")
+        PluginTier("beta")
     assert _messages(warnings_logged) == []
 
 
-def test_the_register_model_accepts_the_old_tier_value(warnings_logged):
-    facet = opsf.ProvenanceFacet(
-        tier="community_optin",
-        source=opsf.ProvenanceSource.USER_INSTALLED,
-        selection_surfaces=(),
-        upstream_license=opsf.LICENSE_NOT_READ,
-    )
-    assert facet.tier is opsf.Tier.ALPHA_OPTIN
+def test_the_manifest_model_accepts_the_old_tier_value(warnings_logged):
+    from automated_security_helper.plugin_manifests import scanner_manifests
+
+    data = scanner_manifests()[0].model_dump(mode="json")
+    data["tier"] = "community"
+    data["superseded_by"] = None
+    manifest = plugin_manifest.parse_scanner_manifest(data)
+    assert manifest.tier is PluginTier.ALPHA
     assert len(_messages(warnings_logged)) == 1
 
 
@@ -139,7 +141,7 @@ def test_the_new_scanner_column_heading_does_not_warn(tmp_path, warnings_logged)
 
 
 def test_the_alias_window_names_the_next_release():
-    assert alpha_scanners.COMMUNITY_ALIASES_DROPPED_IN == "3.9.0"
+    assert plugin_manifest.COMMUNITY_ALIASES_DROPPED_IN == "3.9.0"
 
 
 def test_every_old_docs_page_redirects_to_its_alpha_page():

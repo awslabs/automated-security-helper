@@ -795,7 +795,6 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
                 semantics="the base default {0, 1}; a run-failure probe separates a failed run from findings",
             ),
             provenance=opsf.ProvenanceFacet(
-                tier=opsf.Tier.BUILTIN_DEFAULT,
                 source=opsf.ProvenanceSource.PYPI_VIA_UV,
                 selection_surfaces=(),
                 upstream_license=(

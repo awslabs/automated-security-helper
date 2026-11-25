@@ -584,7 +584,6 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
                 semantics="from the CLI's exit codes: 0 no issues, 1 issues found, 2 an error, 3 no supported project (read through the staged-refusal logic)",
             ),
             provenance=opsf.ProvenanceFacet(
-                tier=opsf.Tier.ALPHA_OPTIN,
                 source=opsf.ProvenanceSource.USER_INSTALLED,
                 selection_surfaces=("ash_snyk_plugins in ash_plugin_modules",),
                 upstream_license=opsf.LICENSE_NOT_READ,

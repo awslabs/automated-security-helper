@@ -68,11 +68,11 @@
   Snyk Code, Trivy and the rest of the `ash_*_plugins` modules) are alpha scanners:
   the name says maturity, not provenance. Behavior is unchanged. The plugin pages moved
   from `docs/plugins/community/` to `docs/plugins/alpha/` (the old URLs redirect), the
-  repository's own scan config is now `.ash/.ash_alpha_plugins.yaml`, the register's
-  tier value is `alpha_optin`, and the CI config variant is `alpha`. Two old spellings
-  are accepted for one release and warn: the register tier value `community_optin`
-  and the `Community plugins` / `Community scanners` column headings the docs checks
-  read. ASH 3.9.0 stops accepting them.
+  repository's own scan config is now `.ash/.ash_alpha_plugins.yaml`, each scanner's
+  tier is declared in its manifest as `alpha`, and the CI config variant is
+  `alpha`. Two old spellings are accepted for one release and warn: the manifest tier
+  value `community` and the `Community plugins` / `Community scanners` column headings
+  the docs checks read. ASH 3.9.0 stops accepting them.
 
 ### Fixes
 

@@ -365,7 +365,6 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
                 semantics="the base default {0, 1}; _grep_scanner_base.py notes it matches the tool",
             ),
             provenance=opsf.ProvenanceFacet(
-                tier=opsf.Tier.BUILTIN_DEFAULT,
                 source=opsf.ProvenanceSource.PYPI_VIA_UV,
                 selection_surfaces=("options.config",),
                 upstream_license=(

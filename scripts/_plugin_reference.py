@@ -32,9 +32,9 @@ built is still listed, with the instance-only columns marked as not determined.
 Built-in and alpha
 ------------------
 ``ash_builtin`` is the built-in package. A scanner from any other package under
-``plugin_modules/`` is an alpha scanner, which is how
-``core/alpha_scanners.py`` decides which module to suggest for a scanner
-that was not loaded. Reporters and converters outside ``ash_builtin`` (the AWS
+``plugin_modules/`` is an alpha scanner. The scan phase reads the tier from the
+manifests in ``plugin_manifests/`` to decide which module to suggest for a
+scanner that was not loaded. Reporters and converters outside ``ash_builtin`` (the AWS
 reporters) are not called alpha plugins; the pages name their module.
 
 Options tables

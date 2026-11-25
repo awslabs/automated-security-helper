@@ -621,7 +621,6 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                 semantics="the base default {0, 1}; Ruby stderr exception text is sniffed to tell a crash from findings",
             ),
             provenance=opsf.ProvenanceFacet(
-                tier=opsf.Tier.BUILTIN_DEFAULT,
                 source=opsf.ProvenanceSource.GEMFILE_LOCK,
                 selection_surfaces=(),
                 upstream_license=(

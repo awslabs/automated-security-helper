@@ -1670,7 +1670,7 @@ def install_dependencies(
             )
             # An alpha scanner that ships with ASH is not a typo when its module
             # is simply not loaded: say which module to add.
-            from automated_security_helper.core.alpha_scanners import (
+            from automated_security_helper.plugin_manifests import (
                 alpha_module_for,
             )
 

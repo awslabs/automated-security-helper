@@ -32,16 +32,16 @@ from automated_security_helper.base.scanner_plugin import (
     ScannerPluginConfigBase,
 )
 from automated_security_helper.config.default_config import get_default_config
-from automated_security_helper.core.alpha_scanners import (
-    alpha_module_for,
-    alpha_scanner_modules,
-)
 from automated_security_helper.core.exceptions import ScannerSelectionError
 from automated_security_helper.core.phases.scan_phase import ScanPhase
 from automated_security_helper.core.unified_metrics import (
     populate_metrics_from_unified_source,
 )
 from automated_security_helper.models.asharp_model import AshAggregatedResults
+from automated_security_helper.plugin_manifests import (
+    alpha_module_for,
+    alpha_scanner_modules,
+)
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 
 pytestmark = pytest.mark.unit

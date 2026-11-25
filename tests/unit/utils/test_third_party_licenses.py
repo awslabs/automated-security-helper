@@ -561,7 +561,7 @@ class TestThePythonTools:
             r'^ARG ASH_ALPHA_PLUGIN_MODULES="([^"]+)"$', text, re.MULTILINE
         )
         assert len(declared) == 2 and declared[0] == declared[1], declared
-        from automated_security_helper.core.alpha_scanners import (
+        from automated_security_helper.plugin_manifests import (
             alpha_scanner_modules,
         )
 

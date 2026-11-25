@@ -23,7 +23,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from automated_security_helper.core.alpha_scanners import alpha_module_for
+from automated_security_helper.plugin_manifests import alpha_module_for
 
 pytestmark = pytest.mark.unit
 

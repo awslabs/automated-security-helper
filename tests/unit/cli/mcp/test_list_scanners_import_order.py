@@ -144,7 +144,7 @@ def test_the_vendored_list_is_every_in_tree_alpha_module():
     from automated_security_helper.cli.mcp_tools import (
         _VENDORED_SCANNER_PLUGIN_PACKAGES,
     )
-    from automated_security_helper.core.alpha_scanners import (
+    from automated_security_helper.plugin_manifests import (
         alpha_scanner_modules,
     )
 

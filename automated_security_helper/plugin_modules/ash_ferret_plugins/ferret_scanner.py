@@ -1272,7 +1272,6 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
                 semantics="exit 3 is an accepted coverage-accounting outcome",
             ),
             provenance=opsf.ProvenanceFacet(
-                tier=opsf.Tier.ALPHA_OPTIN,
                 source=opsf.ProvenanceSource.PYPI_PINNED_DEPENDENCY,
                 selection_surfaces=("ash_ferret_plugins in ash_plugin_modules",),
                 upstream_license=(

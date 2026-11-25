@@ -8540,7 +8540,7 @@ def check_scanner_names(
             ]
             for heading in headers:
                 if heading in _DEPRECATED_SCANNER_HEADERS:
-                    from automated_security_helper.core.alpha_scanners import (
+                    from automated_security_helper.base.plugin_manifest import (
                         warn_community_alias,
                     )
 

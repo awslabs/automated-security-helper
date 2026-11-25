@@ -417,7 +417,6 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
                 semantics="trivy reports findings in the file, not through its exit code",
             ),
             provenance=opsf.ProvenanceFacet(
-                tier=opsf.Tier.ALPHA_OPTIN,
                 source=opsf.ProvenanceSource.PINNED_RELEASE_BINARY,
                 selection_surfaces=(
                     "ash_trivy_plugins in ash_plugin_modules",

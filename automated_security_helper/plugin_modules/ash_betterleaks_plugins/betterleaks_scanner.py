@@ -503,7 +503,6 @@ class BetterleaksScanner(ScannerPluginBase[BetterleaksScannerConfig]):
                 semantics="ASH passes --exit-code=2 because the tool's default 1 means both leaks and some errors",
             ),
             provenance=opsf.ProvenanceFacet(
-                tier=opsf.Tier.ALPHA_OPTIN,
                 source=opsf.ProvenanceSource.PINNED_RELEASE_BINARY,
                 selection_surfaces=(
                     "ash_betterleaks_plugins in ash_plugin_modules",

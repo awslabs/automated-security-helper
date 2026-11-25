@@ -253,7 +253,7 @@ def unloaded_alpha_scanners(
     """``{requested name: plugin module}`` for the names that resolve to nothing
     but name an alpha scanner ASH ships whose module this run did not load.
 
-    ``core.alpha_scanners`` maps each in-tree alpha scanner's name to
+    ``plugin_manifests`` maps each in-tree alpha scanner's name to
     its plugin module without importing it. "Not loaded" means no class in
     *scanner_classes* comes from the module: a module that did supply this
     run's scanners, but not the requested name, is not reported (the hint would
@@ -262,7 +262,7 @@ def unloaded_alpha_scanners(
     run did not list. Names are compared lower-cased and stripped, as ScanPhase
     compares them.
     """
-    from automated_security_helper.core.alpha_scanners import (
+    from automated_security_helper.plugin_manifests import (
         alpha_module_for,
     )
 
