@@ -64,8 +64,14 @@ Not edited here, by instruction:
 - `automated_security_helper/utils/scanner_names.py`: add `"cargo-deny": "SCA",` to
   `SCANNER_TOOL_TYPES` (the operational consistency test requires the register's
   scanner names and this table to agree).
+- `tests/unit/walked_package.py`: add `"plugin_modules/ash_cargo_deny_plugins"` to
+  `PACKAGE_DIRS` (the whole-tree collect smoke fails on "not named in PACKAGE_DIRS").
+- The facets corpus table in `tests/unit/plugin_modules/test_scanner_facets_corpus_consistency.py`
+  needs a `cargo-deny` row pointing at `tests/test_data/scanners/cargo-deny/captured/`
+  (the committed fixtures here), or the five mapped cells read "no committed fixture".
 - Shared tests that pin the scanner count (the "twenty-two shipped scanners" universe in
-  `tests/unit/plugin_modules/test_scanner_operational_facets_consistency.py`) move with
+  the registry totality and operational consistency tests, and the exact
+  `skip_offline` list `["npm-audit", "snyk-code"]`, which gains `cargo-deny`) move with
   the combined set.
 - Optional, later: a pinned `cargo-deny` entry in `utils/tool_downloads.py` (version,
   per-platform SHA256, license entry), after which the module can declare
@@ -73,5 +79,14 @@ Not edited here, by instruction:
 
 ### Desk validation
 
-See the counts in the branch report (module tests, facets register families, whole-tree
-collect smoke).
+Desk dev-dsk-cbc4ff77, repository extract, `uv sync --frozen --all-extras --group dev`,
+`env -i`, `-n 4`, Python 3.14:
+
+- Module tests (`tests/unit/plugin_modules/ash_cargo_deny_plugins`): 98 passed, 0 failed.
+- Module plus facets families (totality, resource-id conformance, corpus consistency,
+  operational consistency, both vocabulary tests): 605 passed, 26 failed. Every failure
+  is one of the central items above (scanner count, `SCANNER_TOOL_TYPES` key, corpus
+  table, `skip_offline` list) or its cascade through the corpus table; the module's own
+  families, including the prerequisites and nothing-to-scan test, pass.
+- Whole-tree collect smoke: 74361 of 74406 collected, one error: `PACKAGE_DIRS` (above).
+- ruff format --check and ruff check: green. Extract removed, absence read back.
