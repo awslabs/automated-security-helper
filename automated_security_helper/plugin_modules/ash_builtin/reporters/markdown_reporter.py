@@ -29,6 +29,7 @@ from automated_security_helper.utils.converter_refusals import (
 from automated_security_helper.plugin_modules.ash_builtin.reporters.report_content_emitter import (
     SUMMARY_BELOW_THRESHOLD,
     SUMMARY_POLICY_NOT_GATING,
+    OutcomeTone,
     ReportContentEmitter,
     coverage_shortfall_text,
     deduplicated_summary_text,
@@ -258,9 +259,7 @@ def _code_block(value: str, language: str = "") -> str:
 
 def outcome_markdown(summary: Dict[str, Any]) -> str:
     """The factual outcome shared by standard and generated Markdown reports."""
-    alert = {"danger": "CAUTION", "warning": "WARNING", "success": "TIP"}[
-        summary["tone"]
-    ]
+    alert = OutcomeTone(summary["tone"]).alert
     deduplicated = deduplicated_summary_text(summary)
     return "\n".join(
         [

@@ -35,10 +35,10 @@ PKG = REPO / "automated_security_helper"
 # nobody reads the gate as whole-tree): the scanner modules under plugin_modules/
 # (SCANNER_SCOPE below, a context-aware scan because "source" is an ordinary word
 # there), core/phases/scan_phase.py (task dicts) and
-# core/resource_management/scan_tracking.py. A file another change cures (for
-# example utils/finding_identity.py) is added to SCOPE by that change; this list
-# does not decide it.
+# core/resource_management/scan_tracking.py. A file a later change cures is added
+# to SCOPE by that change; this list does not decide it.
 SCOPE = (
+    "utils/finding_identity.py",
     "base/scanner_plugin.py",
     "base/plugin_base.py",
     "models/scan_results_container.py",

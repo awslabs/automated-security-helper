@@ -119,7 +119,7 @@ ash suppress refresh src/deploy.py   # or no path, for every locked file
 
 Commit `.ash.lock` with the change it belongs to, so a reviewer sees the new hash beside the edit it covers. The commands are the supported way to write the file; its keys are sorted, so the same tree always produces the same bytes.
 
-The lock was first written to `.ash/ash.lock`. ASH still reads that path when `.ash.lock` does not exist, with a deprecation warning, and `ash suppress add` or `refresh` writes `.ash.lock`; remove the old file with `git rm .ash/ash.lock`. Reading it is deprecated since v3.9 and ends in v4.0.
+The lock was first written inside the `.ash/` directory. ASH still reads that older file when `.ash.lock` does not exist, with a deprecation warning, and `ash suppress add` or `refresh` writes `.ash.lock` at the repository root; remove the old file with `git rm` on its path. Reading it is deprecated since v3.9 and ends in v4.0.
 
 ### Installing the extra {#installing-the-extra}
 

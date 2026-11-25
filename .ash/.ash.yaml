@@ -382,6 +382,9 @@ global_settings:
     - rule_id: generic-api-key
       path: tests/snapshot/container/test_snapshot_container_nix.py
       reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
+    - rule_id: zizmor/dangerous-triggers
+      path: .github/workflows/ash-dependabot-auto-merge.yml
+      reason: "Reviewed. The workflow_run trigger is the point of the file: it approves a dependabot bump only after every required check on the head is green. The header of the workflow, under THE SAFETY OF THE TRIGGER, names why nothing the audit warns about can happen there. ASH runs zizmor without its inline ignore comments, so the decision is recorded here."
     - rule_id: generic-api-key
       path: tests/unit/utils/test_finding_trend.py
       reason: "False positive. A report-id helper whose default argument is a made-up twelve-character token, so the generated ids are fixed. The provider-specific gitleaks rules still apply to this file."
@@ -3361,18 +3364,18 @@ global_settings:
       reason: "Decodes a nix SRI hash to hex to compare with the pinned table; nothing is executed."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/plugin_modules/ash_builtin/converters/archive_converter.py
-      line_start: 141
-      line_end: 141
+      line_start: 142
+      line_end: 142
       reason: "'.git-credentials' is an entry of SCANNABLE_MEMBER_NAMES, the archive member names the converter extracts so the secret scanners can read them; a name in a table, not a read."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/plugin_modules/ash_builtin/converters/archive_converter.py
-      line_start: 144
-      line_end: 144
+      line_start: 145
+      line_end: 145
       reason: "'.env' is an entry of SCANNABLE_MEMBER_NAMES, the archive member names the converter extracts so the secret scanners can read them; a name in a table, not a read."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/plugin_modules/ash_builtin/converters/archive_converter.py
-      line_start: 171
-      line_end: 171
+      line_start: 172
+      line_end: 172
       reason: "'.env' is the dotfile stem whose stage-suffixed variants (.env.local) the converter admits for scanning; a name in a table, not a read."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/plugin_modules/ash_builtin/scanners/npm_audit_scanner.py
