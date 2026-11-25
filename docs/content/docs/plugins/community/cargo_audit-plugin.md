@@ -25,13 +25,11 @@ With the module listed, `cargo-audit` runs by default. `scanners.cargo-audit.ena
 
 ## Installing cargo-audit
 
-- **Container mode:** the ASH image includes cargo-audit once the integrated release pins it.
-- **Local mode:** `ash dependencies install --tool cargo-audit`, with the module listed in `ash_plugin_modules`, downloads the pinned release binary and verifies its SHA256 digest before installing it.
-- Any `cargo-audit` already on `PATH` is also used.
+ASH does not install cargo-audit. Install it yourself with `cargo install cargo-audit --locked`; a `cargo-audit` on `PATH` is used. Without it the scanner is reported `MISSING`.
 
 ## What is scanned
 
-Every file named `Cargo.lock` in ASH's scan set (so `.gitignore`, `.ignore` and `global_settings.ignore_paths` apply). Lockfiles under a `target/` or `.git/` directory, ASH's own output directory, and links that resolve outside the source directory are skipped. cargo-audit runs once per lockfile, from the source directory, with `--file <lockfile>`, so it never generates a lockfile for the project. If there is no `Cargo.lock`, the tool is not run and the scanner reports `SKIPPED`.
+Every file named `Cargo.lock` in ASH's scan set (so `.gitignore`, `.ignore` and `global_settings.ignore_paths` apply). Lockfiles under a `target/` or `.git/` directory, ASH's own output directory, and links that resolve outside the source directory are skipped. cargo-audit runs once per lockfile, with `--file=<lockfile>`, so it never generates a lockfile for the project. The tool starts in a directory outside the scanned tree, because cargo-audit reads `./.cargo/audit.toml` from its working directory and a repository's own file could ignore advisories; your `~/.cargo/audit.toml` still applies. If there is no `Cargo.lock`, the tool is not run and the scanner reports `SKIPPED`.
 
 ## Configuration
 

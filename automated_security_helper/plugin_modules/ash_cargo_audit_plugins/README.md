@@ -19,16 +19,16 @@ turns it off. A tree with no `Cargo.lock` reports `SKIPPED`.
 
 ## Installing
 
-`ash dependencies install --tool cargo-audit` (with the module listed) downloads the
-pinned release binary and checks its SHA256 digest. A `cargo-audit` already on `PATH`
-is also used.
+ASH does not install cargo-audit. Run `cargo install cargo-audit --locked`; a
+`cargo-audit` on `PATH` is used.
 
 ## Network and offline use
 
 Online, cargo-audit fetches the advisory database from GitHub into
 `~/.cargo/advisory-db`. With `--offline`, ASH passes `--no-fetch`, and the database
-has to be on disk already. ASH always passes `--file`, so cargo-audit never generates
-a lockfile.
+has to be on disk already. ASH always passes `--file=<lockfile>`, so cargo-audit never
+generates a lockfile, and it runs the tool outside the scanned tree so a repository's
+`.cargo/audit.toml` cannot ignore advisories (`~/.cargo/audit.toml` still applies).
 
 ## Configuration
 
