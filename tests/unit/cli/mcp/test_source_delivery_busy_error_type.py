@@ -10,7 +10,7 @@ session's source while one of its scans runs (``source_delivery._no_scan_running
 ``error_type`` at all, so a client could not tell "try again after the scan" from
 a bad URL without reading the message. These tests call both tools as a client
 does, with the session's scan lock held, and check that each names the refusal
-the same way: ``source_delivery_busy`` (``source_delivery.SOURCE_DELIVERY_BUSY``).
+the same way: ``source_delivery_busy`` (``McpErrorType.SOURCE_DELIVERY_BUSY``).
 The clone host is one the operator allows, so the refusal is not the host
 allowlist's.
 """
