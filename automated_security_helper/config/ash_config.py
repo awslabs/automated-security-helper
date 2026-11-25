@@ -2336,7 +2336,11 @@ class ContentDbStalenessOverride(RedactedSection):
         ),
     ]
     policy: Annotated[
-        StalenessPolicy,
+        # A Literal, not StalenessPolicy: the config models validate strictly
+        # and the loader dumps them with yaml.safe_dump, which cannot write an
+        # enum member. The accepted set is pinned to the enum in
+        # tests/unit/vocab/test_vocab_drift_e7.py.
+        Literal["fail", "warn"],
         Field(
             description="The policy this database is held to while the entry is in effect."
         ),
@@ -2848,7 +2852,8 @@ class AshConfig(RedactedSection):
     ] = SandboxConfig()
 
     content_db_staleness: Annotated[
-        StalenessPolicy,
+        # A Literal for the reason given on ContentDbStalenessOverride.policy.
+        Literal["fail", "warn"],
         Field(
             description=(
                 "What a scan does when a scanner's content database (grype's or "
@@ -2863,7 +2868,7 @@ class AshConfig(RedactedSection):
                 "precedence over this value; --no-allow-stale-content-db sets 'fail'."
             )
         ),
-    ] = StalenessPolicy.FAIL
+    ] = StalenessPolicy.FAIL.value
 
     content_db_staleness_overrides: Annotated[
         List[ContentDbStalenessOverride],

@@ -31,8 +31,10 @@ class ThresholdSource(str, Enum):
     """Where a scanner's severity threshold came from.
 
     ``UNAVAILABLE`` is the source when the results record no configuration, so
-    the default applies. An unset source is ``None`` on the model that carries
-    it (core/unified_metrics.py), written as ``""`` on the wire.
+    the default applies. The calculator resolves a member; the metrics row
+    (core/unified_metrics.py) carries its text, ``""`` when unset, because a
+    results file read back can record any text there and the tables show a
+    recorded value as written.
     """
 
     GLOBAL = "global"

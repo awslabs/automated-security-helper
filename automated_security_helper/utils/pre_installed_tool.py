@@ -612,7 +612,7 @@ def _persist_verdict(
     Written beside its final name and renamed into place, so a reader never
     sees half a record; the write also sweeps records past their TTL.
     """
-    if verdict.status is not ToolInstallStatus.SATISFIED:
+    if verdict.status != ToolInstallStatus.SATISFIED:
         return
     named = _store_name(key)
     if named is None:
@@ -1610,7 +1610,7 @@ def _judge(
 ) -> PreInstalledToolVerdict:
     from_nix = target is not None  # --target is only ever a staged Nix closure
     status, output = _dry_run(uv, interpreter, requirement, target)
-    if status is not ToolInstallStatus.UNSATISFIED:
+    if status != ToolInstallStatus.UNSATISFIED:
         # The unverifiable arm's detail is uv's own output, never routed
         # through the cause extraction, and it reaches the dependency reason
         # and the through-uv log line. It takes the same uv redaction layer
@@ -1632,7 +1632,7 @@ def _judge(
             version=version,
             summary=(
                 ""
-                if status is ToolInstallStatus.SATISFIED
+                if status == ToolInstallStatus.SATISFIED
                 else "uv could not verify the requirement in its environment"
             ),
         )
@@ -1646,8 +1646,7 @@ def _judge(
     # the package's own absence) read as every requested extra missing, and the
     # real cause, the resolver's own, was suppressed below.
     package_resolves = not extras or (
-        _dry_run(uv, interpreter, package, target)[0]
-        is not ToolInstallStatus.UNSATISFIED
+        _dry_run(uv, interpreter, package, target)[0] != ToolInstallStatus.UNSATISFIED
     )
     missing = (
         tuple(
@@ -1656,7 +1655,7 @@ def _judge(
             if _dry_run(
                 uv, interpreter, build_requirement(package, [extra], None), target
             )[0]
-            is ToolInstallStatus.UNSATISFIED
+            == ToolInstallStatus.UNSATISFIED
         )
         if package_resolves
         else ()
@@ -1685,7 +1684,7 @@ def _judge(
             target,
             no_deps=True,
         )[0]
-        is ToolInstallStatus.UNSATISFIED
+        == ToolInstallStatus.UNSATISFIED
     ):
         reasons.append(f"installed {package} does not satisfy {version_constraint!r}")
         summary_parts.append(
