@@ -63,6 +63,7 @@ from automated_security_helper.models.frame_model import (
     to_frame,
 )
 from automated_security_helper.utils.finding_identity import canonical
+from automated_security_helper.utils.frame_ops import ordered_counts
 from automated_security_helper.utils.frame_text import unwire
 
 if TYPE_CHECKING:
@@ -150,9 +151,5 @@ def suppressed_by_scanner(frame: "pl.DataFrame") -> Dict[str, int]:
     appears. A scanner with none has no entry."""
     import polars as pl
 
-    counted = (
-        frame.filter(pl.col("is_suppressed"))
-        .group_by("scanner_key", maintain_order=True)
-        .agg(pl.len().alias("n"))
-    )
+    counted = ordered_counts(frame.filter(pl.col("is_suppressed")), "scanner_key")
     return {unwire(scanner): count for scanner, count in counted.iter_rows()}

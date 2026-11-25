@@ -1043,9 +1043,6 @@ _THIRD_PARTY_HASHES: dict[str, str] = {
     "pygit2 commit": "d88fa3dcbab21a7eb33ff354222c4ec8e5ff6ece",  # pragma: allowlist secret
     "pygit2/AUTHORS.md": "4ecad3164600b3c7a216cdd636288d1434afd6307737cfeba8fc1372dc04ba20",  # pragma: allowlist secret
     "pygit2/COPYING": "3f2a642de5f24ed216404873b875e9d1c5dd112a4e0ae27a42f7303583f69683",  # pragma: allowlist secret
-    "semgrep commit": "a5844e7c2d9d04548f86048f525d467a00742656",  # pragma: allowlist secret
-    "semgrep/COPYRIGHT": "0f90eaca8e598c6c67a6cda7beb4470518fb2dababc996b3898344d380769aca",  # pragma: allowlist secret
-    "semgrep/LICENSE": "20c17d8b8c48a600800dfd14f95d5cb9ff47066a9641ddeab48dc54aec96e331",  # pragma: allowlist secret
     "syft commit": "1a72047fd46c72e0a12ee77e24b23d2316753d08",  # pragma: allowlist secret
     "trivy commit": "3f6334d223b52188324af3b9923b4249cd206652",  # pragma: allowlist secret
     "trivy/NOTICE": "aed9bc6dab87c6f6567d20bf0f5c0433a8ccd3ad7873322cf79b9244eb720a1f",  # pragma: allowlist secret
@@ -1413,22 +1410,6 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
             "-c",
             "import pygit2; print(pygit2.__version__)",
         ),
-    ),
-    # The wheel's dist-info holds no license file, only METADATA's
-    # `License-Expression: LGPL-2.1-or-later`, so both files come from the
-    # repository. COPYRIGHT grants "version 2.1" with no "or later", the narrower
-    # of the two readings, and the one opengrep's entry takes from the same text.
-    "semgrep": ThirdPartyLicense(
-        tool="semgrep",
-        version="v1.186.0",
-        license="LGPL-2.1-only",
-        repository="https://github.com/semgrep/semgrep",
-        commit=_THIRD_PARTY_HASHES["semgrep commit"],
-        files=(
-            _from_source("semgrep", "https://github.com/semgrep/semgrep", "LICENSE"),
-            _from_source("semgrep", "https://github.com/semgrep/semgrep", "COPYRIGHT"),
-        ),
-        distribution="semgrep",
     ),
     "syft": ThirdPartyLicense(
         tool="syft",

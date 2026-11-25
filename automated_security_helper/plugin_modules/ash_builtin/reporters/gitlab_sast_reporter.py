@@ -72,6 +72,7 @@ from automated_security_helper.base.reporter_plugin import (
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 
 from automated_security_helper.utils.error_text import error_text
+from automated_security_helper.utils.frame_ops import ordinal_over
 from automated_security_helper.utils.frame_text import unwire, wire
 from automated_security_helper.utils.get_ash_version import get_ash_version
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -158,7 +159,7 @@ def _projection(drafts: List[_Draft]) -> "pl.DataFrame":
     )
     return frame.with_columns(
         pl.when(pl.col("legacy"))
-        .then(pl.int_range(pl.len()).over(["id", "legacy"]))
+        .then(ordinal_over("id", "legacy"))
         .otherwise(0)
         .cast(pl.Int64)
         .alias("occurrence"),

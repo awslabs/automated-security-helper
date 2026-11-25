@@ -1,5 +1,5 @@
 
- Usage: ash dependencies check [OPTIONS]
+ Usage: ashx dependencies check [OPTIONS]
 
  Check Grype and Trivy cache metadata without running or downloading tools.
 
@@ -18,6 +18,6 @@
 │ --allow-stale-content-db      --no-allow-stale-conte…                   Override the configured │
 │                                                                         age policy for all      │
 │                                                                         checked databases.      │
-│ --help                                                                  Show this message and   │
+│ --help                    -h                                            Show this message and   │
 │                                                                         exit.                   │
 └─────────────────────────────────────────────────────────────────────────────────────────────────┘

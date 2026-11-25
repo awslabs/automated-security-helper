@@ -348,10 +348,7 @@ CORPORA: Mapping[str, Optional[CorpusSpec]] = {
         "cfn_lint_guard", sarif=("captured/cfn-lint-*.sarif",), prep="cfn-lint"
     ),
     "cfn-nag": CorpusSpec(
-        "cfn_nag",
-        missing="cfn-nag's committed output is native JSON "
-        "(cfn_nag/src.test.yaml.json) and no SARIF capture is committed "
-        "(M0-FINDINGS.md (b): the tool could not be run to a real result)",
+        "cfn_nag", sarif=("captured/cfn_nag-0.8.10-*.sarif",), prep="cfn-nag"
     ),
     "checkov": CorpusSpec("checkov", sarif=("captured/*.sarif",), prep="checkov"),
     "detect-secrets": CorpusSpec("detect_secrets", prep="detect-secrets"),
@@ -371,7 +368,6 @@ CORPORA: Mapping[str, Optional[CorpusSpec]] = {
     "hadolint": CorpusSpec("hadolint", sarif=("captured/*.sarif",)),
     "npm-audit": CorpusSpec("npmaudit", prep="npm-audit"),
     "opengrep": CorpusSpec("opengrep", sarif=("captured/*.sarif",)),
-    "semgrep": CorpusSpec("semgrep", sarif=("captured/*.sarif",)),
     "snyk-code": None,
     "syft": CorpusSpec(
         "syft",
@@ -410,14 +406,39 @@ def _prep_cfn_guard(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result
 def _prep_cfn_lint(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]]]:
     from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_lint_scanner import (
         CfnLintScanner,
+        attach_cfn_lint_resources,
+        cfn_lint_resources,
     )
 
     for pattern in spec.sarif:
         for path in sorted((_FIXTURES / spec.directory).glob(pattern)):
             report = _load_sarif(path)
+            # The resource comes from the JSON run beside it, when one is
+            # committed. The scanner attaches it as each batch is read, before
+            # normalize_report relocates the results, so the keys still match.
+            companion = path.with_suffix(".json")
+            if companion.is_file():
+                attach_cfn_lint_resources(
+                    report,
+                    cfn_lint_resources(
+                        json.loads(companion.read_text(encoding="utf-8"))
+                    ),
+                )
             # normalize_report reads no instance state: it locates results,
             # maps severities and sorts rules in place.
             CfnLintScanner.normalize_report(None, report)  # type: ignore[arg-type]
+            yield report, [r for run in report.runs or [] for r in run.results or []]
+
+
+def _prep_cfn_nag(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]]]:
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_nag_scanner import (
+        attach_cfn_nag_resources,
+    )
+
+    for pattern in spec.sarif:
+        for path in sorted((_FIXTURES / spec.directory).glob(pattern)):
+            report = _load_sarif(path)
+            attach_cfn_nag_resources(report)
             yield report, [r for run in report.runs or [] for r in run.results or []]
 
 
@@ -460,7 +481,9 @@ def _prep_guarddog(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]
 
 def _prep_checkov(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]]]:
     from automated_security_helper.plugin_modules.ash_builtin.scanners.checkov_scanner import (
+        attach_checkov_guidelines,
         attach_checkov_resources,
+        checkov_guidelines,
         checkov_resources,
     )
 
@@ -469,6 +492,7 @@ def _prep_checkov(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]]
             sarif = json.loads(path.read_text(encoding="utf-8"))
             side = json.loads(path.with_suffix(".json").read_text(encoding="utf-8"))
             attach_checkov_resources(sarif, checkov_resources(side))
+            attach_checkov_guidelines(sarif, checkov_guidelines(side))
             report = SarifReport.model_validate(sarif)
             yield report, [r for run in report.runs or [] for r in run.results or []]
 
@@ -547,8 +571,18 @@ def _materialized(template: Path, scratch: Path) -> Path:
 
 
 def _prep_trivy(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]]]:
+    """The committed SARIF through the adapter's own pure steps.
+
+    Package identity and the fixed version read the message against the
+    materialized fixture lockfiles; a misconfiguration's resource comes from
+    the JSON capture beside its SARIF, when there is one.
+    """
     import tempfile
 
+    from automated_security_helper.plugin_modules.ash_builtin.scanners._trivy_scanner_base import (
+        attach_trivy_resources,
+        trivy_misconfig_resources,
+    )
     from automated_security_helper.plugin_modules.ash_builtin.scanners.trivy_scanner import (
         TrivyScanner,
     )
@@ -562,6 +596,14 @@ def _prep_trivy(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]]]:
                 report = TrivyScanner._attach_package_identity(
                     _load_sarif(path), target
                 )
+                companion = path.with_suffix(".json")
+                if companion.is_file():
+                    attach_trivy_resources(
+                        report,
+                        trivy_misconfig_resources(
+                            json.loads(companion.read_text(encoding="utf-8"))
+                        ),
+                    )
                 yield (
                     report,
                     [r for run in report.runs or [] for r in run.results or []],
@@ -652,6 +694,7 @@ _PREPS: Mapping[
     "cdk-nag": _prep_cdk_nag,
     "cfn-guard": _prep_cfn_guard,
     "cfn-lint": _prep_cfn_lint,
+    "cfn-nag": _prep_cfn_nag,
     "checkov": _prep_checkov,
     "detect-secrets": _prep_detect_secrets,
     "gitleaks": _prep_gitleaks,
@@ -752,7 +795,7 @@ def test_the_gate_carries_no_waiver_but_the_register() -> None:
 def test_the_registry_and_the_corpus_table_agree() -> None:
     assert not _REMAINING_LOAD_ERRORS, _REMAINING_LOAD_ERRORS
     names = {_name(cls) for cls in SCANNER_CLASSES}
-    assert len(SCANNER_CLASSES) == 22, sorted(c.__name__ for c in SCANNER_CLASSES)
+    assert len(SCANNER_CLASSES) == 21, sorted(c.__name__ for c in SCANNER_CLASSES)
     assert names == set(CORPORA) == set(SCANNER_TOOL_TYPES), (
         f"registry {sorted(names)} / corpus table {sorted(CORPORA)}: a scanner "
         "needs a CORPORA row (a corpus, or None with the fixture to author)"

@@ -1,5 +1,5 @@
 
- Usage: ash trend [OPTIONS] [files]...
+ Usage: ashx trend [OPTIONS] [files]...
 
  Show new, carried and fixed findings over a series of saved ASH scans.
 
@@ -8,10 +8,10 @@
 │                      order by report id. At least two.                                           │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --history        <path>       Read the run history recorded under this scan output directory     │
-│                               (global_settings.history.enabled) instead of results files.        │
-│ --format         <text|json>  Output format (text or json). [default: text]                      │
-│ --help                        Show this message and exit.                                        │
+│ --history          <path>       Read the run history recorded under this scan output directory   │
+│                                 (global_settings.history.enabled) instead of results files.      │
+│ --format           <text|json>  Output format (text or json). [default: text]                    │
+│ --help     -h                   Show this message and exit.                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Structured input ───────────────────────────────────────────────────────────────────────────────╮
 │ --cli-json-input               PATH  Read parameter values from a JSON object: a path, a file:// │

@@ -1,5 +1,5 @@
 
- Usage: ash diff [OPTIONS] {before} {after}
+ Usage: ashx diff [OPTIONS] {before} {after}
 
  Compare the findings in two saved ASH scans without running a scan.
 
@@ -8,8 +8,8 @@
 │ *    after       <path>  Current ASH scan results JSON file. [required]                          │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --format        <text|json>  Output format (text or json). [default: text]                       │
-│ --help                       Show this message and exit.                                         │
+│ --format          <text|json>  Output format (text or json). [default: text]                     │
+│ --help    -h                   Show this message and exit.                                       │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Structured input ───────────────────────────────────────────────────────────────────────────────╮
 │ --cli-json-input               PATH  Read parameter values from a JSON object: a path, a file:// │

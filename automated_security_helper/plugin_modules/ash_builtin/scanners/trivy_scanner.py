@@ -393,12 +393,14 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
             native_field="SARIF result message.text",
         ),
         resource_id=FacetDecl(
-            state=FacetState.DROPPED,
-            native_field="Results[].Misconfigurations[].CauseMetadata.Resource",
-            reason="misconfig only: the address (aws_s3_bucket.m0_fixture_bucket) "
-            "exists in trivy's JSON format and is absent from the SARIF ASH "
-            "reads (0 occurrences, M0 fixture); the vuln findings are packages, "
-            "so no resource_id is ever written until a side-JSON attach lands",
+            state=FacetState.MAPPED,
+            native_field="Results[].Misconfigurations[].CauseMetadata.Resource "
+            "(trivy's JSON report, absent from its SARIF), copied onto the "
+            "SARIF result under ash_resource_id by attach_trivy_resources "
+            "for result type terraform only: cloudformation carries a "
+            "file:line locator (t.yaml:3-4) and kubernetes and dockerfile "
+            "carry none (trivy 0.76.2, M0-FINDINGS.md (a))",
+            example="aws_s3_bucket.m0_fixture_bucket",
         ),
         resource_type=FacetDecl(
             state=FacetState.NA,
@@ -438,10 +440,11 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
             "are level, locations, message, ruleId, ruleIndex)",
         ),
         fix_available=FacetDecl(
-            state=FacetState.DROPPED,
-            native_field='message line "Fixed Version: <version>"',
-            reason="the fixed version sits in the message text and is never "
-            "parsed into the fix_available property the flat model reads",
+            state=FacetState.MAPPED,
+            native_field='message line "Fixed Version: <version>", written as '
+            "fix_available=True when non-empty by "
+            "TrivyScannerBase._fixed_version_from_message (an empty value "
+            "writes nothing)",
         ),
         remediation_text=FacetDecl(
             state=FacetState.NA,
@@ -799,4 +802,5 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         with trivy-repo; see "Severity" above for the rule.
         """
         sarif_report = self._attach_package_identity(sarif_report, target)
+        sarif_report = self._attach_misconfig_resources(sarif_report, final_args)
         return self._attach_trivy_severity(sarif_report)

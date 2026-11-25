@@ -36,13 +36,7 @@ from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactLocation,
     Invocation,
-    PropertyBag,
     SarifReport,
-)
-from automated_security_helper.utils.package_identity import (
-    NpmLockIndex,
-    identity_properties,
-    install_path,
 )
 from automated_security_helper.base.uv_tool_mixin import guarded_values_read
 from automated_security_helper.utils.error_text import text_without_values
@@ -228,12 +222,14 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
             native_field="SARIF result message.text",
         ),
         resource_id=FacetDecl(
-            state=FacetState.DROPPED,
-            native_field="Results[].Misconfigurations[].CauseMetadata.Resource",
-            reason="misconfig only: the address (aws_s3_bucket.m0_fixture_bucket) "
-            "exists in trivy's JSON format and is absent from the SARIF ASH "
-            "reads (0 occurrences, M0 fixture); the vuln findings are packages, "
-            "so no resource_id is ever written until a side-JSON attach lands",
+            state=FacetState.MAPPED,
+            native_field="Results[].Misconfigurations[].CauseMetadata.Resource "
+            "(trivy's JSON report, absent from its SARIF), copied onto the "
+            "SARIF result under ash_resource_id by attach_trivy_resources "
+            "for result type terraform only: cloudformation carries a "
+            "file:line locator (t.yaml:3-4) and kubernetes and dockerfile "
+            "carry none (trivy 0.76.2, M0-FINDINGS.md (a))",
+            example="aws_s3_bucket.m0_fixture_bucket",
         ),
         resource_type=FacetDecl(
             state=FacetState.NA,
@@ -273,12 +269,12 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
             "are level, locations, message, ruleId, ruleIndex)",
         ),
         fix_available=FacetDecl(
-            state=FacetState.DROPPED,
-            native_field='message line "Fixed Version: <version>"',
-            reason="the fixed version sits in the message text and is never "
-            "parsed into the fix_available property the flat model reads "
-            "(and ignore_unfixed defaults to true, so the tool pre-filters "
-            "unfixed findings)",
+            state=FacetState.MAPPED,
+            native_field='message line "Fixed Version: <version>", written as '
+            "fix_available=True when non-empty by "
+            "TrivyScannerBase._fixed_version_from_message (an empty value "
+            "writes nothing; ignore_unfixed defaults to true, so the tool "
+            "pre-filters unfixed findings)",
         ),
         remediation_text=FacetDecl(
             state=FacetState.NA,
@@ -527,111 +523,9 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
             f"--module-dir={module_dir.resolve().as_posix()}",
         ]
 
-    @staticmethod
-    def _package_from_message(message: str | None) -> tuple[str | None, str | None]:
-        """Name and version from trivy's vulnerability or license message.
-
-        A vulnerability message has ``Package: <name>`` and ``Installed
-        Version: <version>`` on their own lines. A license message has
-        ``PkgName: <name>`` and no version, for example::
-
-            Artifact: scripts/e2e/inspector/package-lock.json
-            License MPL-2.0
-            PkgName: lightningcss
-             Classification: reciprocal
-
-        Reading it gives license findings a ``package_name``, so a license
-        approval can name the package it covers rather than the whole file.
-        A message with neither line (a misconfiguration or secret finding) is
-        not about a package.
-        """
-        name = version = None
-        for line in (message or "").splitlines():
-            if line.startswith("Package: "):
-                name = line[len("Package: ") :].strip() or None
-            elif line.startswith("PkgName: "):
-                name = line[len("PkgName: ") :].strip() or None
-            elif line.startswith("Installed Version: "):
-                version = line[len("Installed Version: ") :].strip() or None
-        return name, version
-
-    def _attach_package_identity(
-        self, sarif_report: SarifReport, target: Path
-    ) -> SarifReport:
-        """Give each dependency result one package copy and say which it is.
-
-        trivy groups packages by name and version before matching, so the same
-        version installed at two places in one lockfile becomes ONE result with
-        one location per copy. No suppression can then cover one copy and not
-        the other. For npm lockfiles, each location's line is the line of that
-        copy's ``packages`` key, so such a result is split into one result per
-        location, each with ``package_path``. Results whose locations do not
-        all resolve to a lockfile entry are left whole.
-        """
-        lock_index = NpmLockIndex(target)
-        for run in sarif_report.runs or []:
-            new_results = []
-            for result in run.results or []:
-                message = result.message.root.text if result.message else None
-                name, version = self._package_from_message(message)
-                if name is None:
-                    new_results.append(result)
-                    continue
-
-                resolved = []
-                for location in result.locations or []:
-                    physical = location.physicalLocation
-                    root = physical.root if physical else None
-                    uri = (
-                        root.artifactLocation.uri
-                        if root and root.artifactLocation
-                        else None
-                    )
-                    line = root.region.startLine if root and root.region else None
-                    # Relativized the same way as grype's, so package_path is
-                    # POSIX and scan-root-relative whatever form trivy used.
-                    lock_rel = lock_index.relative(uri) if uri else None
-                    entry = (
-                        lock_index.by_line(lock_rel, line)
-                        if lock_rel and line
-                        else None
-                    )
-                    # The line is trivy's, and the lockfile may have moved since
-                    # the scan: the entry there counts only when it is the
-                    # package the message names. A license message states no
-                    # version, so it is held to the name alone.
-                    if entry is not None and (
-                        entry.name != name
-                        or (version is not None and entry.version != version)
-                    ):
-                        entry = None
-                    resolved.append(
-                        install_path(lock_rel, entry.key)
-                        if lock_rel and entry is not None
-                        else None
-                    )
-
-                if resolved and all(resolved):
-                    for location, path in zip(result.locations or [], resolved):
-                        copy = result.model_copy(deep=True)
-                        copy.locations = [location.model_copy(deep=True)]
-                        self._set_identity(copy, name, version, path)
-                        new_results.append(copy)
-                else:
-                    path = resolved[0] if len(resolved) == 1 else None
-                    self._set_identity(result, name, version, path)
-                    new_results.append(result)
-            run.results = new_results
-        return sarif_report
-
-    @staticmethod
-    def _set_identity(result, name, version, path) -> None:
-        identity = identity_properties(name, version, path)
-        if result.properties is None:
-            result.properties = PropertyBag.model_validate(identity)
-        else:
-            for key, value in identity.items():
-                setattr(result.properties, key, value)
+    # Package identity (including the license-message ``PkgName:`` read) and
+    # fix-availability attachment live on TrivyScannerBase._attach_package_identity;
+    # this class carries no local copy, so the base's fix-data handling serves.
 
     def content_databases_in_use(self) -> list:
         """trivy-db, unless the scan's effective scanners leave out ``vuln``.
@@ -868,6 +762,9 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
                         scanner_results
                     )
                     sarif_report = self._attach_package_identity(sarif_report, target)
+                    sarif_report = self._attach_misconfig_resources(
+                        sarif_report, final_args
+                    )
                     # trivy's own per-result severity, as the builtin trivy scanner
                     # reports it: without it ASH buckets the CVE rule's last CVSS
                     # score, which is another package's rating for the same CVE.

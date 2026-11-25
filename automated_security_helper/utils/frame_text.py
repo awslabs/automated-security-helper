@@ -11,7 +11,7 @@ bytes), and a line number is an unbounded Python int. Both used to flow through
 
 from __future__ import annotations
 
-from typing import Dict, Iterable, Optional
+from typing import Any, Dict, Iterable, Optional
 
 
 def wire(text: str | None) -> str | None:
@@ -28,6 +28,21 @@ def wire(text: str | None) -> str | None:
 def unwire(text: str) -> str:
     """The text :func:`wire` made *text* from."""
     return text.encode("latin-1").decode("utf-8", "surrogatepass")
+
+
+def wire_cell(value: Any) -> Optional[str]:
+    """*value* as a frame cell: null for None, else its text through :func:`wire`.
+
+    A value that is not a string is read as its ``str``.
+    """
+    return (
+        None if value is None else wire(value if isinstance(value, str) else str(value))
+    )
+
+
+def unwire_cell(text: Optional[str]) -> Optional[str]:
+    """The text :func:`wire_cell` made *text* from; null stays null."""
+    return None if text is None else unwire(text)
 
 
 def ranks(values: Iterable[Optional[int]]) -> Dict[int, int]:

@@ -167,8 +167,18 @@ class FakeCfnLint:
         self.extra = extra or {}
         self.calls: list = []
         self.cwds: list = []
+        #: The JSON runs the scanner makes to name each result's resource
+        #: (``_attach_resources``); a scan's own invocations are ``calls``.
+        self.resource_calls: list = []
 
     def __call__(self, command, **kwargs):
+        if command[1:3] == ["--format", "json"]:
+            self.resource_calls.append(list(command))
+            output = next(
+                a.split("=", 1)[1] for a in command if a.startswith("--output-file=")
+            )
+            Path(output).write_text("[]", encoding="utf-8")
+            return {"stdout": "", "stderr": "", "returncode": self.returncode}
         self.calls.append(list(command))
         self.cwds.append(kwargs.get("cwd"))
         output = next(
@@ -447,9 +457,13 @@ class TestScan:
 
         def cfn_lint(command, **kwargs):
             cwd = Path(kwargs["cwd"])
-            seen.append(
-                (cwd, cwd.is_dir() and not any(cwd.iterdir()), cwd.stat().st_mode)
-            )
+            # the scan's own runs; the resource run is checked with them below
+            if command[1:3] != ["--format", "json"]:
+                seen.append(
+                    (cwd, cwd.is_dir() and not any(cwd.iterdir()), cwd.stat().st_mode)
+                )
+            else:
+                assert cwd.is_dir() and not any(cwd.iterdir()), "private cwd reused"
             return fake(command, **kwargs)
 
         scanner = _scanner(repo)
@@ -1235,10 +1249,19 @@ def test_each_target_starts_from_a_clean_exit_code(repo, monkeypatch):
             FakeCfnLint({}, returncode=0),
         ]
     )
+    resource_runs = FakeCfnLint({}, returncode=0)
+
+    def route(command, **_):
+        # the scanner's second run (names each result's resource) is not one of
+        # the scan's own runs
+        if command[1:3] == ["--format", "json"]:
+            return resource_runs(command)
+        return next(runs)(command)
+
     monkeypatch.setattr(
         "automated_security_helper.utils.subprocess_utils."
         "run_command_with_output_handling",
-        lambda command, **_: next(runs)(command),
+        route,
     )
     scanner = _scanner(repo)
     scanner.use_uv_tool = False
