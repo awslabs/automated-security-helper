@@ -156,21 +156,26 @@ def fallback_key(finding: FlatVulnerability) -> tuple[Any, ...] | None:
     )
 
 
+# The canonical column vocabulary: a column that projects a model field bears the
+# field's pydantic name (is_suppressed, line_start, line_end), and a transformed
+# value never bears a field's bare name -- severity_uc is the uppercased severity
+# of the fallback key, identity_message the identity's message, not the model's
+# description.
 _SIDE_SCHEMA = {
     "i": pl.Int64,
     "id": pl.String,
     "has_identity": pl.Boolean,
     "fingerprinted": pl.Boolean,
-    "message": pl.String,
+    "identity_message": pl.String,
     "base": pl.String,
     "key_message": pl.String,
-    "severity": pl.String,
-    "suppressed": pl.Boolean,
+    "severity_uc": pl.String,
+    "is_suppressed": pl.Boolean,
     "line_start": pl.Int64,
     "line_end": pl.Int64,
 }
 _LOOSE = ["base", "key_message"]
-_FULL = [*_LOOSE, "severity"]
+_FULL = [*_LOOSE, "severity_uc"]
 #: How findings of one place are put in order: lines (-1 for none), then id, then
 #: where the scan listed them (the stable tie-break the old ``sorted`` gave).
 _PLACE = [
@@ -243,7 +248,7 @@ def match_findings(
                 pl.col("has_identity")
                 & pl.col("has_identity_a")
                 & ~(pl.col("fingerprinted") & pl.col("fingerprinted_a"))
-                & pl.col("message").ne_missing(pl.col("message_a"))
+                & pl.col("identity_message").ne_missing(pl.col("identity_message_a"))
             )
         )
     )
@@ -254,7 +259,9 @@ def match_findings(
     before_places = (
         old.filter(pl.col("base").is_not_null())
         .group_by(_LOOSE)
-        .agg(pl.len().alias("n"), (pl.col("suppressed").n_unique() > 1).alias("mixed"))
+        .agg(
+            pl.len().alias("n"), (pl.col("is_suppressed").n_unique() > 1).alias("mixed")
+        )
     )
     after_places = (
         new.filter(pl.col("base").is_not_null())
@@ -305,7 +312,9 @@ def match_findings(
     left_new = unmatched(new, exact["i_a"])
     moving = (
         left_old.group_by(_FULL)
-        .agg(pl.len().alias("n"), (pl.col("suppressed").n_unique() > 1).alias("mixed"))
+        .agg(
+            pl.len().alias("n"), (pl.col("is_suppressed").n_unique() > 1).alias("mixed")
+        )
         .join(left_new.group_by(_FULL).agg(pl.len().alias("n_a")), on=_FULL)
         .join(ambiguous, on=_LOOSE, how="anti")
         .filter(~pl.col("mixed") & (pl.col("n_a") <= pl.col("n")))

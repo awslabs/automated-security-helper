@@ -15,7 +15,9 @@ columns are:
                                      collision count
 ``legacy``                Boolean    whether the id is the legacy rule-file-line
                                      one, the only kind that is counted
-``suppressed``            Boolean    whether a suppression is in effect
+``is_suppressed``         Boolean    whether a suppression is in effect (the name
+                                     of the model field the value fills,
+                                     ``FlatVulnerability.is_suppressed``)
 ``severity``              String     the gate's grade, in GitLab's spelling; null
                                      when there is none
 ``occurrence``            Int64      how many drafts before this one, in the frame's
@@ -129,7 +131,8 @@ class _Draft:
     finding_id: str
     #: Whether *finding_id* is the legacy one, which collisions are counted on.
     legacy: bool
-    suppressed: bool
+    #: The value of ``FlatVulnerability.is_suppressed``, under its field's name.
+    is_suppressed: bool
     #: The gate's grade in GitLab's spelling; empty when there is none.
     severity: str
     #: The text for a suppressed finding's ``solution``.
@@ -146,14 +149,14 @@ def _projection(drafts: List[_Draft]) -> "pl.DataFrame":
             "i": list(range(len(drafts))),
             "id": [wire(draft.finding_id) for draft in drafts],
             "legacy": [draft.legacy for draft in drafts],
-            "suppressed": [draft.suppressed for draft in drafts],
+            "is_suppressed": [draft.is_suppressed for draft in drafts],
             "severity": [wire(draft.severity) or None for draft in drafts],
         },
         schema={
             "i": pl.Int64,
             "id": pl.String,
             "legacy": pl.Boolean,
-            "suppressed": pl.Boolean,
+            "is_suppressed": pl.Boolean,
             "severity": pl.String,
         },
     )
@@ -163,7 +166,7 @@ def _projection(drafts: List[_Draft]) -> "pl.DataFrame":
         .otherwise(0)
         .cast(pl.Int64)
         .alias("occurrence"),
-        pl.when(pl.col("suppressed"))
+        pl.when(pl.col("is_suppressed"))
         .then(pl.lit("Info"))
         .otherwise(pl.col("severity"))
         .alias("severity_out"),
@@ -664,7 +667,7 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
             vulnerability=vuln,
             finding_id=finding_id,
             legacy=shared_id is None,
-            suppressed=is_suppressed,
+            is_suppressed=is_suppressed,
             severity=severity,
             solution=suppression_solution,
         )

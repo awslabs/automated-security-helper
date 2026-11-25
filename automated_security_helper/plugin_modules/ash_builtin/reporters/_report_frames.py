@@ -30,18 +30,22 @@ from automated_security_helper.utils.frame_text import ranks, unwire, wire
 
 def graded_frame(
     levels: Sequence[str],
-    suppressed: Sequence[bool],
+    is_suppressed: Sequence[bool],
     left_out: Sequence[bool],
     actionable: Sequence[bool] | None = None,
 ) -> pl.DataFrame:
     """One row per finding: its severity bucket and its three yes/no gradings.
 
-    ``actionable`` is optional because deciding it costs a threshold lookup per
-    finding, and some summaries never need it.
+    ``is_suppressed`` bears the model field's name it carries
+    (``FlatVulnerability.is_suppressed``). ``actionable`` is optional because
+    deciding it costs a threshold lookup per finding, and some summaries never
+    need it.
     """
     columns: dict[str, Any] = {
         "level": pl.Series("level", list(levels), dtype=pl.String),
-        "suppressed": pl.Series("suppressed", list(suppressed), dtype=pl.Boolean),
+        "is_suppressed": pl.Series(
+            "is_suppressed", list(is_suppressed), dtype=pl.Boolean
+        ),
         "left_out": pl.Series("left_out", list(left_out), dtype=pl.Boolean),
     }
     if actionable is not None:
@@ -59,7 +63,9 @@ def flag_total(frame: pl.DataFrame, flag: str) -> int:
 def active_level_counts(frame: pl.DataFrame) -> List[tuple[str, int]]:
     """``(level, count)`` for the unsuppressed rows, levels in first-seen order."""
     counted = (
-        frame.filter(~pl.col("suppressed")).group_by("level", maintain_order=True).len()
+        frame.filter(~pl.col("is_suppressed"))
+        .group_by("level", maintain_order=True)
+        .len()
     )
     return [(level, int(count)) for level, count in counted.iter_rows()]
 
