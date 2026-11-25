@@ -382,6 +382,12 @@ global_settings:
       path: tests/snapshot/container/test_snapshot_container_nix.py
       reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
     - rule_id: generic-api-key
+      path: tests/unit/utils/test_finding_trend.py
+      reason: "False positive. A report-id helper whose default argument is a made-up twelve-character token, so the generated ids are fixed. The provider-specific gitleaks rules still apply to this file."
+    - rule_id: generic-api-key
+      path: tests/unit/utils/test_scan_history.py
+      reason: "False positive. A report-id helper whose default argument is a made-up twelve-character token, so the generated ids are fixed. The provider-specific gitleaks rules still apply to this file."
+    - rule_id: generic-api-key
       path: tests/unit/base/test_a_failure_after_the_tool_ran_keeps_its_exit_code.py
       reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
     - rule_id: generic-api-key
