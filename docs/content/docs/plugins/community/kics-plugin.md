@@ -26,8 +26,8 @@ KICS runs beside the builtin IaC scanners, not instead of them, so a misconfigur
 
 KICS publishes its binary and its queries separately: the release archive holds the `kics` executable only, and the queries and libraries it evaluates are a second download from the same release. ASH needs both.
 
-- **Container mode:** the ASH image includes KICS v2.1.20 and its queries.
-- **Local mode:** `ash dependencies install --tool kics`, with the module listed in `ash_plugin_modules` (or added with `--config-overrides 'ash_plugin_modules+=["automated_security_helper.plugin_modules.ash_kics_plugins"]'`), downloads the pinned release archive and the pinned queries, verifies each against the SHA256 digest pinned in ASH, and installs them. The queries go in an `assets` directory beside the `kics` executable (or in `../share/kics/assets`), which is where ASH looks. Linux, macOS and Windows on x86_64 and arm64 are supported.
+- **Container mode:** the ASH image does not include KICS yet; install it as in local mode, or bring a `kics` with its queries beside it.
+- **Local mode:** once the pinned download rows are added to ASH, `ash dependencies install --tool kics`, with the module listed in `ash_plugin_modules` (or added with `--config-overrides 'ash_plugin_modules+=["automated_security_helper.plugin_modules.ash_kics_plugins"]'`), downloads the pinned release archive and the pinned queries, verifies each against the SHA256 digest pinned in ASH, and installs them. The queries go in an `assets` directory beside the `kics` executable (or in `../share/kics/assets`), which is where ASH looks. Linux, macOS and Windows on x86_64 and arm64 are supported.
 - **Nix mode:** the flake does not supply KICS. Install it with `ash dependencies install`.
 - Any `kics` already on `PATH` is also used, provided its `assets/queries` and `assets/libraries` directories are in one of those two places. A `kics` binary with no queries beside it fails the scan with a message naming the directories ASH looked in.
 
@@ -103,9 +103,8 @@ Package-scoped and symbol-scoped suppressions do not apply: no KICS finding name
 
 ## Offline and air-gapped use
 
-The queries are installed with the binary and `kics scan` reads only the files it is given, so it behaves the same offline. Install it before going offline (the container image already has it). KICS' crash reporter can contact a Sentry endpoint; the scanner sandbox grants no network, so it cannot.
+The queries are installed with the binary and `kics scan` reads only the files it is given, so it behaves the same offline. Install it before going offline. KICS' crash reporter can contact a Sentry endpoint; the scanner sandbox grants no network, so it cannot.
 
 ## License
 
-KICS is Apache-2.0 licensed. The ASH container image includes the unmodified binary and queries, and the license is in the image at `/usr/share/doc/ash/third-party/kics/`, installed the same way as every other bundled tool's (see
-[Third-party license files](../../../how-to/run-in-a-container.md#third-party-licenses)).
+KICS is Apache-2.0 licensed. ASH installs the unmodified release binary and queries on request and does not redistribute them.

@@ -302,14 +302,17 @@ class KicsScanner(ScannerPluginBase[KicsScannerConfig]):
             "(captured positive.sarif and positive.json)",
         ),
         references=FacetDecl(
-            state=FacetState.MAPPED,
+            state=FacetState.DROPPED,
             native_field="SARIF rule helpUri (the provider documentation page "
             "for the resource the query checks)",
+            reason="the shared pipeline does not read a rule's helpUri into the "
+            "flat references column; observed 0 of 5 results over the captured "
+            "reports",
         ),
         tags=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="result property-bag tag 'iac', written by the adapter "
-            "(KICS writes no tags)",
+            state=FacetState.NA,
+            reason="KICS writes no tags in either report; the adapter adds the "
+            "'iac' tag after the read, so the raw output carries none",
         ),
         extras=FacetDecl(
             state=FacetState.MAPPED,

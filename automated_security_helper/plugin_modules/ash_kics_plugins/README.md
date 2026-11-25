@@ -52,7 +52,8 @@ This module touches nothing outside its directory and its tests. Until an integr
 - `utils/tool_downloads.py`: a `kics` entry in `TOOL_VERSIONS` (`v2.1.20`), `_ASSET_TABLES` (the six `kics_2.1.20_<os>_<arch>` archives; the release names them `linux_amd64`, `darwin_arm64`, `windows_amd64` and so on) and the digest tables, plus the pinned `assets` (queries and libraries) download that unpacks beside the binary, and a `THIRD_PARTY_LICENSES["kics"]` row (Apache-2.0).
 - `utils/scanner_names.py`: `"kics": "IAC"` in `SCANNER_TOOL_TYPES`.
 - `core/scanner_inventory.py`: the module in the community plugin list.
-- The shared register tests keep one row per scanner: `CORPORA["kics"]` in `test_scanner_facets_corpus_consistency.py` (`CorpusSpec("kics", sarif=("captured/*.sarif",))`) and `_NATIVE_FIXTURES["kics"]` in `test_scanner_operational_facets_consistency.py` (`("kics/captured/positive.sarif", opsf.OutputFormat.SARIF)`).
+- `tests/unit/walked_package.py`: `"plugin_modules/ash_kics_plugins"` in `PACKAGE_DIRS` (until it is there, whole-tree collection stops with "not named in PACKAGE_DIRS").
+- The shared register tests keep one row per scanner, and each fails until its row exists: `CORPORA["kics"]` in `test_scanner_facets_corpus_consistency.py` (`CorpusSpec("kics", sarif=("captured/*.sarif",))`); `_NATIVE_FIXTURES["kics"]` in `test_scanner_operational_facets_consistency.py` (`("kics/captured/positive.sarif", opsf.OutputFormat.SARIF)`); `_DROPPED_FIXTURES["KicsScanner"]` in `test_scanner_facets_resource_id_conformance.py` (`("kics/captured/positive.json", "search_key", "aws_s3_bucket[b].acl=public-read")`); and the scanner count, 22 to 23, in `test_scanner_facets_registry_totality.py` and `test_scanner_operational_facets_consistency.py`. With `CORPORA["kics"]` added, the corpus check reads every `kics` cell `ok` (measured over the committed captures).
 
 ## Documentation
 
