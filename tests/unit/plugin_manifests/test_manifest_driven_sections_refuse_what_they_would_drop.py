@@ -27,8 +27,12 @@ from automated_security_helper.plugin_manifests import (
 
 pytestmark = pytest.mark.unit
 
-#: Any importable class will do for a row: the checks run on the names.
-_SECTION = ConfigSection(model="pydantic:BaseModel", description="a section")
+#: Any importable class that builds with no arguments will do for a row: the
+#: checks run on the names.
+_SECTION = ConfigSection(
+    model="automated_security_helper.config.ash_config:AshConfig",
+    description="a section",
+)
 
 
 def _rows(monkeypatch, *names):
