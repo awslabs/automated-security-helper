@@ -12,7 +12,6 @@ import random
 
 import pytest
 
-from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 from automated_security_helper.utils.finding_clusters import (
     CLASS_IAC,
     CLASS_LOCATION,
@@ -20,16 +19,17 @@ from automated_security_helper.utils.finding_clusters import (
     assign_clusters,
     cluster_findings,
 )
+from tests.unit.models._flat_vulnerability_helpers import flat_with_severity
 
 pytestmark = pytest.mark.unit
 
 
 def row(fid, scanner="grype", severity="HIGH", fingerprinted=False, **fields):
-    flat = FlatVulnerability(
+    flat = flat_with_severity(
+        severity,
         id=fid,
         title="t",
         description="d",
-        severity=severity,
         scanner=scanner,
         scanner_type="SCA",
         **fields,

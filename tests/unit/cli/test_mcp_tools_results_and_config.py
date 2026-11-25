@@ -32,7 +32,7 @@ from automated_security_helper.cli.mcp_tools import (
     mcp_validate_config,
 )
 from automated_security_helper.plugins.enablement import modules_needing_naming
-from automated_security_helper.models.flat_vulnerability import FlatVulnerability
+from tests.unit.models._flat_vulnerability_helpers import flat_with_severity
 
 pytestmark = pytest.mark.unit
 
@@ -50,7 +50,8 @@ def _vuln(**overrides):
         "scanner_type": "SAST",
     }
     fields.update(overrides)
-    return FlatVulnerability(**fields)
+    severity = fields.pop("severity")
+    return flat_with_severity(severity, **fields)
 
 
 class TestLoadFlatVulnsForExplain:
