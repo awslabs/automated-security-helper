@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "transcripts": [],
+  "unrecorded": [
+    {
+      "reason": "no captured `snyk code test --sarif` result is committed; recording one needs a licensed Snyk run",
+      "scanner": "snyk-code"
+    }
+  ]
+}

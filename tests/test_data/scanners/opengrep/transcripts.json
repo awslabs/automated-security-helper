@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "transcripts": [
+    {
+      "adapter_prep": null,
+      "also_for": [],
+      "argv": [
+        "opengrep",
+        "scan",
+        "--config",
+        "m0_rule.yaml",
+        "--sarif",
+        "m0_flagged.py"
+      ],
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": {
+        "paths": [
+          "fixture_repo/m0_flagged.py",
+          "fixture_repo/m0_rule.yaml"
+        ],
+        "sha256": "1aebbcfdabe7686b888362b21aa5c32b9ed33333631d0979ae4c53255edd6684"
+      },
+      "id": "opengrep-2.0.0-m0",
+      "live_input": false,
+      "note": "one result; the rule and the flagged file are the fixture tree",
+      "observable": true,
+      "pin_stamp": {
+        "tool": "opengrep",
+        "version": "2.0.0"
+      },
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "sarif",
+          "path": "captured/opengrep-2.0.0-m0.sarif",
+          "sha256": "59fc28aa76f0761ac41fb40619077f75f5b10e2c3f47b82a3cb9b25b97bdf2ef"
+        }
+      ],
+      "retention": "current",
+      "scanner": "opengrep",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "opengrep",
+        "version": "2.0.0"
+      }
+    }
+  ],
+  "unrecorded": []
+}

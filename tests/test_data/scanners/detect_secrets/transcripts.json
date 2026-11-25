@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "transcripts": [],
+  "unrecorded": [
+    {
+      "reason": "no captured detect-secrets result is committed; record one over a tree with a fabricated secret and a clean tree",
+      "scanner": "detect-secrets"
+    }
+  ]
+}
