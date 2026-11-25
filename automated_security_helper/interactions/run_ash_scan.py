@@ -257,7 +257,7 @@ class ScanOptions(BaseModel):
     config_overrides: Optional[List[str]] = Field(default_factory=list)
     # A check every `extends` base of the config must also pass, applied by every
     # config read below. The MCP server passes the calling session's allowed
-    # config roots (cli/mcp/sandbox.config_base_gate); None keeps the CLI rule.
+    # config roots (config.mcp_sandbox.config_base_gate); None keeps the CLI rule.
     config_base_gate: Optional[Callable[[Path], bool]] = Field(
         default=None, exclude=True
     )
@@ -269,7 +269,7 @@ class ScanOptions(BaseModel):
     # config_overrides came from an MCP client (a workspace tool's), so a tool
     # config path they name is not the operator's (config/path_trust.py).
     client_overrides: bool = False
-    # The scan was started by a remote MCP client (cli/mcp/sandbox.caller_is_remote),
+    # The scan was started by a remote MCP client (config.mcp_sandbox.caller_is_remote),
     # so every config file the operator did not set aside resolves no !ENV; see
     # "Environment variables" in config/config_sources.py. Applied by every config
     # read below, and carried to each project in workspace mode.

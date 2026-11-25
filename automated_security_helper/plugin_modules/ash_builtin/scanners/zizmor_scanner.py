@@ -934,7 +934,6 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
                 semantics="exit 3 is the no-inputs code: success with nothing to scan",
             ),
             provenance=opsf.ProvenanceFacet(
-                tier=opsf.Tier.BUILTIN_DEFAULT,
                 source=opsf.ProvenanceSource.PYPI_VIA_UV,
                 selection_surfaces=("options.online_audits (off by default)",),
                 upstream_license=(

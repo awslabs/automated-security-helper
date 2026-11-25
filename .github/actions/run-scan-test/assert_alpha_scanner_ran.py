@@ -2,11 +2,11 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Assert that one community scanner ran in a scan that selected it.
+"""Assert that one alpha scanner ran in a scan that selected it.
 
-Community scanners are not loaded unless their module is listed, so the default-scan
+Alpha scanners are not loaded unless their module is listed, so the default-scan
 checks in this action say nothing about them. The step that calls this scans a
-fixture with known findings and only the community scanner selected, its module listed; this reads the
+fixture with known findings and only the alpha scanner selected, its module listed; this reads the
 aggregated results and fails unless the scanner is present, did not go MISSING
 or ERROR, and reported at least the expected number of findings. The scan's own
 exit status is checked too, so a click usage error (also exit 2) cannot pass

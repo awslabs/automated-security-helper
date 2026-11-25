@@ -429,7 +429,7 @@ def scan_plugin_filter(plugin_modules: Iterable[str]) -> Callable[[Any], bool]:
 
     The plugin registry and the event-handler lists are process-wide: a module
     stays registered after the scan that imported it, and ``list_scanners``
-    imports the community packages ASH ships so it can describe them. A scan
+    imports the alpha packages ASH ships so it can describe them. A scan
     therefore selects from them through this filter rather than taking everything
     registered, so it gets ASH's built-in plugins plus, for each module its own
     ``ash_plugin_modules`` names, the classes and handlers that are:

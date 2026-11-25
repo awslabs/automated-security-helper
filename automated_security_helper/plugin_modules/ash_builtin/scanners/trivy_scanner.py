@@ -5,7 +5,7 @@
 
 What it runs
 ------------
-``trivy fs`` over each scan target, SARIF out. ``fs`` rather than the community
+``trivy fs`` over each scan target, SARIF out. ``fs`` rather than the alpha
 plugin's ``repository``: ASH hands every scanner a directory, and ``fs`` is trivy's
 command for a local directory (the converted target, for one, is never a git
 checkout).
@@ -577,7 +577,6 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
                 semantics="trivy reports findings in the file, not through its exit code",
             ),
             provenance=opsf.ProvenanceFacet(
-                tier=opsf.Tier.BUILTIN_DEFAULT,
                 source=opsf.ProvenanceSource.PINNED_RELEASE_BINARY,
                 selection_surfaces=("options.scanners (non-vuln scanners are opt-in)",),
                 upstream_license=(

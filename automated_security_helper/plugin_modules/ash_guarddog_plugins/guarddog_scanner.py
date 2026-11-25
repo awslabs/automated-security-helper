@@ -960,7 +960,7 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
                     "github_action, rubygems and crates (GUARDDOG_ECOSYSTEMS); verify "
                     "mode reads dependency manifests such as requirements.txt"
                 ),
-                covers_note="a community scanner; it declares no covers display string",
+                covers_note="an alpha scanner; it declares no covers display string",
             ),
             runtime=opsf.RuntimeFacet(
                 kind=opsf.RuntimeKind.UV_PYTHON,
@@ -996,7 +996,6 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
                 semantics="the base default {0, 1}; the adapter notes a registry-lookup-failure exit",
             ),
             provenance=opsf.ProvenanceFacet(
-                tier=opsf.Tier.COMMUNITY_OPTIN,
                 source=opsf.ProvenanceSource.PYPI_VIA_UV,
                 selection_surfaces=(
                     "ash_guarddog_plugins in ash_plugin_modules",

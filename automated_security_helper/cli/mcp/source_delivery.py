@@ -75,7 +75,7 @@ from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, TypeVar
 from automated_security_helper.cli.mcp.session_identity import (
     UNIDENTIFIED_SESSION_ID,
 )
-from automated_security_helper.cli.mcp.session_paths import (
+from automated_security_helper.config.session_paths import (
     hidden_deleting_name,
     mark_session_workspace,
     session_directory,
@@ -335,25 +335,11 @@ def _drop_session_source_dir(session_id: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def resolve_workspace_root() -> Path:
-    """Resolve the configured MCP workspace root.
-
-    Resolution order:
-
-    1. ``$ASH_MCP_WORKSPACE_ROOT``
-    2. ``$XDG_CACHE_HOME/ash-mcp/``
-    3. ``~/.cache/ash-mcp/``
-    """
-
-    env_root = os.environ.get("ASH_MCP_WORKSPACE_ROOT")
-    if env_root:
-        return Path(env_root).expanduser()
-
-    xdg = os.environ.get("XDG_CACHE_HOME")
-    if xdg:
-        return Path(xdg).expanduser() / "ash-mcp"
-
-    return Path.home() / ".cache" / "ash-mcp"
+#: The workspace root resolution lives in ``config.mcp_sandbox`` (the config
+#: trust layer judges paths against it); it is re-exported here.
+from automated_security_helper.config.mcp_sandbox import (  # noqa: E402
+    resolve_workspace_root as resolve_workspace_root,
+)
 
 
 class InvalidSessionIdError(ValueError):
@@ -371,7 +357,7 @@ def _session_workspace(workspace_root: Path, session_id: str) -> Path:
 
     The session id is validated against an explicit allowlist and the joined path
     is confirmed to stay inside ``workspace_root``; see
-    ``cli/mcp/session_paths.py`` for both. That keeps the session sandbox flat, so
+    ``config/session_paths.py`` for both. That keeps the session sandbox flat, so
     one session's directory is a sibling of another's and never a parent of it.
 
     The return value is the unresolved join, unchanged from before, so a caller
@@ -869,7 +855,7 @@ def _created_session_dir(root: Path, session_id: str) -> Path:
             ``session_workspace_unavailable``.
     """
 
-    from automated_security_helper.cli.mcp.profile_registry import (
+    from automated_security_helper.config.session_profiles import (
         DEFAULT_SESSION_ID,
     )
 

@@ -18,7 +18,7 @@ scanners can run: ``installed`` (ASH plus at least one runnable scanner),
 ``undetermined_dependencies``.
 
 It asks only the scanners ASH ships in ash_builtin. list_scanners also imports
-the community plugin packages and any installed ash_*_plugins distribution; an
+the alpha plugin packages and any installed ash_*_plugins distribution; an
 installation check has no reason to run their code, so it does not.
 """
 
@@ -126,12 +126,12 @@ async def test_only_the_built_in_scanners_are_asked():
         seen["classes"] = provider()
         return []
 
-    def community_loader():
-        raise AssertionError("check_installation imported the community plugins")
+    def alpha_loader():
+        raise AssertionError("check_installation imported the alpha plugins")
 
     with (
         patch.object(mcp_tools, "list_scanner_inventory", side_effect=inventory),
-        patch.object(mcp_tools, "_loaded_scanner_classes", community_loader),
+        patch.object(mcp_tools, "_loaded_scanner_classes", alpha_loader),
     ):
         await mcp_tools.mcp_check_installation()
 

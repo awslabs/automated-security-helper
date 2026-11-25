@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""hadolint: a Dockerfile linter, as a community scanner plugin.
+"""hadolint: a Dockerfile linter, as an alpha scanner plugin.
 
 What it does
 ------------
@@ -12,7 +12,7 @@ Finds every Dockerfile in the scan set (``Dockerfile``, ``*.Dockerfile``,
 ASH results. hadolint runs its own DL rules and the ShellCheck (SC) rules over
 each ``RUN`` instruction.
 
-hadolint is a community plugin: it is loaded only when ``ash_hadolint_plugins`` is
+hadolint is an alpha plugin: it is loaded only when ``ash_hadolint_plugins`` is
 listed in ``ash_plugin_modules`` (or passed with ``--ash-plugin-modules``), so a
 scan that does not list the module is unchanged by its existence.
 
@@ -402,7 +402,7 @@ class HadolintScanner(ScannerPluginBase[HadolintScannerConfig]):
                 kinds=(opsf.TargetKind.DOCKERFILES,),
                 tool_type=ScannerToolType.IAC,
                 selection="its own discovery over the scan set: Dockerfile, *.Dockerfile, Dockerfile.* and Containerfile; unparseable files are failed targets, not skipped",
-                covers_note="a community scanner; it declares no covers display string",
+                covers_note="an alpha scanner; it declares no covers display string",
             ),
             runtime=opsf.RuntimeFacet(
                 kind=opsf.RuntimeKind.PINNED_BINARY,
@@ -446,7 +446,6 @@ class HadolintScanner(ScannerPluginBase[HadolintScannerConfig]):
                 semantics="with --no-fail, 0 is the only status a completed run gives; DL1000 unparseable files become target failures",
             ),
             provenance=opsf.ProvenanceFacet(
-                tier=opsf.Tier.COMMUNITY_OPTIN,
                 source=opsf.ProvenanceSource.PINNED_RELEASE_BINARY,
                 selection_surfaces=("ash_hadolint_plugins in ash_plugin_modules",),
                 upstream_license=(

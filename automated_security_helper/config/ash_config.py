@@ -19,6 +19,7 @@ from pydantic import (
     model_validator,
 )
 from typing import (
+    TYPE_CHECKING,
     Annotated,
     Any,
     ClassVar,
@@ -51,13 +52,8 @@ from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
 )
-from automated_security_helper.plugin_modules.ash_builtin.converters.archive_converter import (
-    EXTRACTION_LIMIT_OPTIONS,
-    ArchiveConverterConfig,
-)
-from automated_security_helper.plugin_modules.ash_builtin.converters.jupyter_converter import (
-    JupyterConverterConfig,
-)
+from automated_security_helper.base.extraction_limits import EXTRACTION_LIMIT_OPTIONS
+from automated_security_helper.config.plugin_sections import build_segment
 from automated_security_helper.core.constants import (
     ASH_CONFIG_ENV_VAR_ALLOWLIST,
     ASH_CONFIG_ENV_VAR_PREFIX,
@@ -84,102 +80,6 @@ from automated_security_helper.models.core import (
     IgnorePathWithReason,
     expiration_date_problem,
     refuse_an_expiration_that_is_not_text,
-)
-from automated_security_helper.plugin_modules.ash_builtin.reporters.csv_reporter import (
-    CSVReporterConfig,
-)
-from automated_security_helper.plugin_modules.ash_builtin.reporters.cyclonedx_reporter import (
-    CycloneDXReporterConfig,
-)
-from automated_security_helper.plugin_modules.ash_builtin.reporters.gitlab_cyclonedx_reporter import (
-    GitLabCycloneDXReporterConfig,
-)
-from automated_security_helper.plugin_modules.ash_builtin.reporters.gitlab_sast_reporter import (
-    GitLabSASTReporterConfig,
-)
-from automated_security_helper.plugin_modules.ash_builtin.reporters.html_reporter import (
-    HTMLReporterConfig,
-)
-from automated_security_helper.plugin_modules.ash_builtin.reporters.flatjson_reporter import (
-    FlatJSONReporterConfig,
-)
-from automated_security_helper.plugin_modules.ash_builtin.reporters.junitxml_reporter import (
-    JUnitXMLReporterConfig,
-)
-from automated_security_helper.plugin_modules.ash_builtin.reporters.markdown_reporter import (
-    MarkdownReporterConfig,
-)
-from automated_security_helper.plugin_modules.ash_builtin.reporters.asff_reporter import (
-    AsffReporterConfig,
-)
-from automated_security_helper.plugin_modules.ash_builtin.reporters.ocsf_reporter import (
-    OCSFReporterConfig,
-)
-from automated_security_helper.plugin_modules.ash_builtin.reporters.spdx_reporter import (
-    SPDXReporterConfig,
-)
-from automated_security_helper.plugin_modules.ash_builtin.reporters.text_reporter import (
-    TextReporterConfig,
-)
-from automated_security_helper.plugin_modules.ash_builtin.reporters.yaml_reporter import (
-    YAMLReporterConfig,
-)
-from automated_security_helper.plugin_modules.ash_builtin.reporters.sarif_reporter import (
-    SARIFReporterConfig,
-)
-from automated_security_helper.plugin_modules.ash_builtin.reporters.github_ghas_reporter import (
-    GHASReporterConfig,
-)
-from automated_security_helper.plugin_modules.ash_builtin.reporters.unused_suppressions_reporter import (
-    UnusedSuppressionsReporterConfig,
-)
-from automated_security_helper.plugin_modules.ash_builtin.scanners.actionlint_scanner import (
-    ActionlintScannerConfig,
-)
-from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_guard_scanner import (
-    CfnGuardScannerConfig,
-)
-from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_lint_scanner import (
-    CfnLintScannerConfig,
-)
-from automated_security_helper.plugin_modules.ash_builtin.scanners.gitleaks_scanner import (
-    GitleaksScannerConfig,
-)
-from automated_security_helper.plugin_modules.ash_builtin.scanners.trivy_scanner import (
-    TrivyScannerConfig,
-)
-from automated_security_helper.plugin_modules.ash_builtin.scanners.zizmor_scanner import (
-    ZizmorScannerConfig,
-)
-from automated_security_helper.plugin_modules.ash_builtin.scanners.bandit_scanner import (
-    BanditScannerConfig,
-)
-from automated_security_helper.plugin_modules.ash_builtin.scanners.cdk_nag_scanner import (
-    CdkNagScannerConfig,
-)
-from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_nag_scanner import (
-    CfnNagScannerConfig,
-)
-from automated_security_helper.plugin_modules.ash_builtin.scanners.checkov_scanner import (
-    CheckovScannerConfig,
-)
-from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secrets_scanner import (
-    DetectSecretsScannerConfig,
-)
-from automated_security_helper.plugin_modules.ash_builtin.scanners.grype_scanner import (
-    GrypeScannerConfig,
-)
-from automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_scanner import (
-    NpmAuditScannerConfig,
-)
-from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scanner import (
-    OpengrepScannerConfig,
-)
-from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner import (
-    SemgrepScannerConfig,
-)
-from automated_security_helper.plugin_modules.ash_builtin.scanners.syft_scanner import (
-    SyftScannerConfig,
 )
 from automated_security_helper.utils.config_trust import ConfigProvenance
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -878,7 +778,16 @@ class _PluginConfigSegment(RedactedSection):
         return data
 
 
-class ConverterConfigSegment(_PluginConfigSegment):
+# The three plugin segments hold one typed section per shipped plugin. The section
+# fields are not written here: each plugin's manifest (scanners) or option-section
+# row (reporters, converters) names its section's class and description, and
+# ``plugin_section_fields`` turns those rows into the field definitions, so this
+# layer names no plugin (see ``config/plugin_sections.py``). A static base holds
+# what is the same for every segment; type checkers see the segment as that base,
+# whose attributes are untyped.
+
+
+class _ConverterConfigSegmentBase(_PluginConfigSegment):
     model_config = ConfigDict(
         str_strip_whitespace=True,
         arbitrary_types_allowed=True,
@@ -888,17 +797,12 @@ class ConverterConfigSegment(_PluginConfigSegment):
 
     __pydantic_extra__: Dict[str, Any | ConverterPluginConfigBase] = {}
 
-    archive: Annotated[
-        ArchiveConverterConfig,
-        Field(description="Configure the options for the ArchiveConverter"),
-    ] = ArchiveConverterConfig()
-    jupyter: Annotated[
-        JupyterConverterConfig,
-        Field(description="Configure the options for the JupyterConverter"),
-    ] = JupyterConverterConfig()
+    if TYPE_CHECKING:
+
+        def __getattr__(self, name: str) -> Any: ...
 
 
-class ScannerConfigSegment(_PluginConfigSegment):
+class _ScannerConfigSegmentBase(_PluginConfigSegment):
     model_config = ConfigDict(
         str_strip_whitespace=True,
         arbitrary_types_allowed=True,
@@ -908,68 +812,12 @@ class ScannerConfigSegment(_PluginConfigSegment):
 
     __pydantic_extra__: Dict[str, Any | ScannerPluginConfigBase] = {}
 
-    actionlint: Annotated[
-        ActionlintScannerConfig,
-        Field(description="Configure the options for actionlint"),
-    ] = ActionlintScannerConfig()
-    bandit: Annotated[
-        BanditScannerConfig, Field(description="Configure the options for Bandit")
-    ] = BanditScannerConfig()
-    cdk_nag: Annotated[
-        CdkNagScannerConfig,
-        Field(description="Configure the options for CdkNag", alias="cdk-nag"),
-    ] = CdkNagScannerConfig()
-    cfn_guard: Annotated[
-        CfnGuardScannerConfig,
-        Field(description="Configure the options for cfn-guard", alias="cfn-guard"),
-    ] = CfnGuardScannerConfig()
-    cfn_lint: Annotated[
-        CfnLintScannerConfig,
-        Field(description="Configure the options for cfn-lint", alias="cfn-lint"),
-    ] = CfnLintScannerConfig()
-    cfn_nag: Annotated[
-        CfnNagScannerConfig,
-        Field(description="Configure the options for CfnNag", alias="cfn-nag"),
-    ] = CfnNagScannerConfig()
-    checkov: Annotated[
-        CheckovScannerConfig, Field(description="Configure the options for Checkov")
-    ] = CheckovScannerConfig()
-    detect_secrets: Annotated[
-        DetectSecretsScannerConfig,
-        Field(
-            description="Configure the options for DetectSecrets",
-            alias="detect-secrets",
-        ),
-    ] = DetectSecretsScannerConfig()
-    gitleaks: Annotated[
-        GitleaksScannerConfig, Field(description="Configure the options for Gitleaks")
-    ] = GitleaksScannerConfig()
-    grype: Annotated[
-        GrypeScannerConfig, Field(description="Configure the options for Grype")
-    ] = GrypeScannerConfig()
-    npm_audit: Annotated[
-        NpmAuditScannerConfig,
-        Field(description="Configure the options for NpmAudit", alias="npm-audit"),
-    ] = NpmAuditScannerConfig()
-    opengrep: Annotated[
-        OpengrepScannerConfig, Field(description="Configure the options for Opengrep")
-    ] = OpengrepScannerConfig()
-    semgrep: Annotated[
-        SemgrepScannerConfig, Field(description="Configure the options for Semgrep")
-    ] = SemgrepScannerConfig()
-    syft: Annotated[
-        SyftScannerConfig, Field(description="Configure the options for Syft")
-    ] = SyftScannerConfig()
-    trivy: Annotated[
-        TrivyScannerConfig,
-        Field(description="Configure the options for Trivy (trivy fs)"),
-    ] = TrivyScannerConfig()
-    zizmor: Annotated[
-        ZizmorScannerConfig, Field(description="Configure the options for zizmor")
-    ] = ZizmorScannerConfig()
+    if TYPE_CHECKING:
+
+        def __getattr__(self, name: str) -> Any: ...
 
 
-class ReporterConfigSegment(_PluginConfigSegment):
+class _ReporterConfigSegmentBase(_PluginConfigSegment):
     model_config = ConfigDict(
         str_strip_whitespace=True,
         arbitrary_types_allowed=True,
@@ -979,86 +827,37 @@ class ReporterConfigSegment(_PluginConfigSegment):
 
     __pydantic_extra__: Dict[str, Any | ReporterPluginConfigBase] = {}
 
-    csv: Annotated[
-        CSVReporterConfig,
-        Field(description="Configure the options for the CSV reporter"),
-    ] = CSVReporterConfig()
-    cyclonedx: Annotated[
-        CycloneDXReporterConfig,
-        Field(description="Configure the options for the CycloneDX reporter"),
-    ] = CycloneDXReporterConfig()
-    gitlab_cyclonedx: Annotated[
-        GitLabCycloneDXReporterConfig,
-        Field(
-            description="Configure the options for the GitLab CycloneDX dependency scanning reporter",
-            alias="gitlab-cyclonedx",
-        ),
-    ] = GitLabCycloneDXReporterConfig()
-    # Do the same for html, json, junitxml, ocsf, sarif, spdx, text, and yaml
-    html: Annotated[
-        HTMLReporterConfig,
-        Field(description="Configure the options for the HTML reporter"),
-    ] = HTMLReporterConfig()
-    flat_json: Annotated[
-        FlatJSONReporterConfig,
-        Field(
-            description="Configure the options for the Flat JSON reporter",
-            alias="flat-json",
-        ),
-    ] = FlatJSONReporterConfig()
-    gitlab_sast: Annotated[
-        GitLabSASTReporterConfig,
-        Field(
-            description="Configure the options for the GitLab SAST reporter",
-            alias="gitlab-sast",
-        ),
-    ] = GitLabSASTReporterConfig()
-    github_ghas: Annotated[
-        GHASReporterConfig,
-        Field(
-            description="Configure the options for the GitHub Advanced Security (GHAS) SARIF reporter",
-            alias="github-ghas",
-        ),
-    ] = GHASReporterConfig()
-    junitxml: Annotated[
-        JUnitXMLReporterConfig,
-        Field(description="Configure the options for the JUnit XML reporter"),
-    ] = JUnitXMLReporterConfig()
-    markdown: Annotated[
-        MarkdownReporterConfig,
-        Field(description="Configure the options for the Markdown reporter"),
-    ] = MarkdownReporterConfig()
-    asff: Annotated[
-        AsffReporterConfig,
-        Field(description="Configure the options for offline ASFF export"),
-    ] = AsffReporterConfig()
-    ocsf: Annotated[
-        OCSFReporterConfig,
-        Field(description="Configure the options for the OCSF reporter"),
-    ] = OCSFReporterConfig()
-    sarif: Annotated[
-        SARIFReporterConfig,
-        Field(description="Configure the options for the SARIF reporter"),
-    ] = SARIFReporterConfig()
-    spdx: Annotated[
-        SPDXReporterConfig,
-        Field(description="Configure the options for the SPDX reporter"),
-    ] = SPDXReporterConfig()
-    text: Annotated[
-        TextReporterConfig,
-        Field(description="Configure the options for the Text reporter"),
-    ] = TextReporterConfig()
-    unused_suppressions: Annotated[
-        UnusedSuppressionsReporterConfig,
-        Field(
-            description="Configure the options for the Unused Suppressions reporter",
-            alias="unused-suppressions",
-        ),
-    ] = UnusedSuppressionsReporterConfig()
-    yaml: Annotated[
-        YAMLReporterConfig,
-        Field(description="Configure the options for the YAML reporter"),
-    ] = YAMLReporterConfig()
+    if TYPE_CHECKING:
+
+        def __getattr__(self, name: str) -> Any: ...
+
+
+if TYPE_CHECKING:
+    ConverterConfigSegment = _ConverterConfigSegmentBase
+    ScannerConfigSegment = _ScannerConfigSegmentBase
+    ReporterConfigSegment = _ReporterConfigSegmentBase
+else:
+    ConverterConfigSegment = build_segment(
+        "ConverterConfigSegment",
+        _ConverterConfigSegmentBase,
+        ConverterPluginConfigBase,
+        "converters",
+        __name__,
+    )
+    ScannerConfigSegment = build_segment(
+        "ScannerConfigSegment",
+        _ScannerConfigSegmentBase,
+        ScannerPluginConfigBase,
+        "scanners",
+        __name__,
+    )
+    ReporterConfigSegment = build_segment(
+        "ReporterConfigSegment",
+        _ReporterConfigSegmentBase,
+        ReporterPluginConfigBase,
+        "reporters",
+        __name__,
+    )
 
 
 class MCPResourceManagementConfig(RedactedSection):

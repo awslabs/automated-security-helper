@@ -19,7 +19,7 @@ never fail. The distinction is DECLARED, and the registry totality test
 every registered scanner without a declaration of its own.
 
 Why production code and not a tests-side table: ``ScannerPluginBase`` is a
-public plugin API with out-of-tree community members, which a tests-side table
+public plugin API with out-of-tree members, which a tests-side table
 could never enumerate; and the declaration has runtime consumers (generated
 per-scanner docs rows; reporters that can say "this scanner cannot carry
 resource ids" instead of implying absence is a gap).

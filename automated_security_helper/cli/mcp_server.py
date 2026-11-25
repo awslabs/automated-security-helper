@@ -107,13 +107,13 @@ from automated_security_helper.core.resource_management.result_filters import (
     apply_content_filters,
     add_findings_list,
 )
-from automated_security_helper.cli.mcp.profile_registry import (
+from automated_security_helper.config.session_profiles import (
     ProfileRegistryError,
     resolve_session_config_path,
 )
 from automated_security_helper.cli.mcp.sessions import SessionWorkspaceBusyError
 from automated_security_helper.cli.mcp.progress_monitor import monitor_scan_progress
-from automated_security_helper.cli.mcp.sandbox import (
+from automated_security_helper.config.mcp_sandbox import (
     caller_is_remote,
     check_config_input,
 )
@@ -482,7 +482,7 @@ def _resolve_omitted_source_dir(session_id: str) -> _OmittedSourceResolution:
         structured refusal.
     """
 
-    from automated_security_helper.cli.mcp.profile_registry import (
+    from automated_security_helper.config.session_profiles import (
         DEFAULT_SESSION_ID,
     )
 
@@ -2440,10 +2440,10 @@ async def list_scanners() -> list:
     still fail on a given target, and a scan may skip a scanner for reasons of
     configuration rather than dependencies.
 
-    The list covers the built-in scanners and the community scanners ASH ships
-    (ferret-scan, snyk-code, trivy-repo). Listing a community scanner does not add
+    The list covers the built-in scanners and the alpha scanners ASH ships
+    (ferret-scan, snyk-code, trivy-repo). Listing an alpha scanner does not add
     it to any scan: a scan runs the built-in scanners plus those of the plugin
-    modules its own ash_plugin_modules names, so a community scanner runs only in a
+    modules its own ash_plugin_modules names, so an alpha scanner runs only in a
     scan whose config or --ash-plugin-modules names its module.
     """
     try:

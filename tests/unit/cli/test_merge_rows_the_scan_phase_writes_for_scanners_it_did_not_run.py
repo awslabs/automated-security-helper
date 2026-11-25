@@ -37,7 +37,7 @@ from tests.unit.cli.merge_shard_support import build_shards
 
 pytestmark = pytest.mark.unit
 
-DUPLICATE_ROW = "bandit (community_scanners.patched.BanditScanner)"
+DUPLICATE_ROW = "bandit (alpha_scanners.patched.BanditScanner)"
 BUILTIN_ROOT = "automated_security_helper.plugin_modules.ash_builtin"
 
 

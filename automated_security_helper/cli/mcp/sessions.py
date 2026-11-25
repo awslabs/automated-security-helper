@@ -73,7 +73,7 @@ from typing import (
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 from typing_extensions import Self
 
-from automated_security_helper.cli.mcp.session_paths import (
+from automated_security_helper.config.session_paths import (
     SESSION_MARKER,
     hidden_deleting_name,
     is_a_deleting_name,
@@ -421,7 +421,7 @@ def _session_holds_a_binding() -> Callable[[str], bool]:
     id. Returned as a function so the two imports happen once per caller and not
     once per session.
     """
-    from automated_security_helper.cli.mcp.profile_registry import (
+    from automated_security_helper.config.session_profiles import (
         session_has_binding,
     )
     from automated_security_helper.cli.mcp.source_delivery import (
@@ -506,7 +506,7 @@ class MCPSessionRegistry:
                 session's own id is admitted: its workspace is a session's. The
                 id names a directory that ``get_or_create`` creates and
                 ``disconnect`` removes, so it is validated here rather than
-                trusted from the caller; ``cli/mcp/session_paths.py`` holds the
+                trusted from the caller; ``config/session_paths.py`` holds the
                 component rule, shared with the other surfaces that build a
                 per-session path.
 
@@ -633,7 +633,7 @@ class MCPSessionRegistry:
         """
         # Lazy imports: both modules belong to this package's import web, and a
         # module-level import here would be a cycle.
-        from automated_security_helper.cli.mcp.profile_registry import (
+        from automated_security_helper.config.session_profiles import (
             clear_session_state,
         )
         from automated_security_helper.cli.mcp.source_delivery import (
@@ -792,7 +792,7 @@ def _remove_session_state(session_id: str) -> None:
     same id that built a fresh workspace during the delete keeps it. (``disconnect``
     would rename and delete whatever stands at the session's path.)
     """
-    from automated_security_helper.cli.mcp.profile_registry import (
+    from automated_security_helper.config.session_profiles import (
         clear_session_state,
     )
     from automated_security_helper.cli.mcp.source_delivery import (
@@ -841,7 +841,7 @@ def _set_session_state_aside(session_id: str, sandbox: Path) -> Optional[Path]:
     delete. The caller forgets the entry when it is done with it
     (``end_session`` right after this returns; the sweep after the delete).
     """
-    from automated_security_helper.cli.mcp.profile_registry import (
+    from automated_security_helper.config.session_profiles import (
         clear_session_state,
     )
     from automated_security_helper.cli.mcp.source_delivery import (
@@ -1100,7 +1100,7 @@ def _forget_session_in_memory(session_id: str) -> None:
     ``holds_binding`` read any later entry for the id as bound, so it would not
     be evicted.
     """
-    from automated_security_helper.cli.mcp.profile_registry import (
+    from automated_security_helper.config.session_profiles import (
         clear_session_state,
     )
     from automated_security_helper.cli.mcp.source_delivery import (
@@ -1157,7 +1157,7 @@ def finish_ended_session(
 
 
 def _is_the_stdio_session(session_id: str) -> bool:
-    from automated_security_helper.cli.mcp.profile_registry import (
+    from automated_security_helper.config.session_profiles import (
         DEFAULT_SESSION_ID,
     )
 
@@ -1233,7 +1233,7 @@ def writing_session_state(session_id: Optional[str]) -> Iterator[None]:
             is sent again from its first chunk. A clone or a finalize does
             not refuse a write.
     """
-    from automated_security_helper.cli.mcp.profile_registry import DEFAULT_SESSION_ID
+    from automated_security_helper.config.session_profiles import DEFAULT_SESSION_ID
 
     session: Optional[MCPSession]
     try:
@@ -1296,7 +1296,7 @@ def per_session_scan_limit(session_id: Optional[str]) -> Optional[int]:
     apart, and leaving them uncounted would let any of them start as many scans
     as it liked.
     """
-    from automated_security_helper.cli.mcp.sandbox import caller_is_remote
+    from automated_security_helper.config.mcp_sandbox import caller_is_remote
     from automated_security_helper.config.ash_config import (
         MCPResourceManagementConfig,
     )
@@ -1561,7 +1561,7 @@ class StdioServerPresence:
         return self
 
     def __exit__(self, *exc_info: object) -> None:
-        from automated_security_helper.cli.mcp.profile_registry import (
+        from automated_security_helper.config.session_profiles import (
             DEFAULT_SESSION_ID,
         )
 
@@ -2660,3 +2660,22 @@ __all__ = [
     "touch_session_workspace",
     "writing_session_state",
 ]
+
+
+def _register_write_hold() -> None:
+    """Hand the session write hold to the config layer's profile registry.
+
+    The profile registry (``config.session_profiles``) rewrites a session's
+    binding under this module's hold against the TTL sweep, but sits below this
+    module in the layer order, so it is given the hold here, once, at import.
+    """
+    from automated_security_helper.config.session_profiles import (
+        set_session_write_hold,
+    )
+
+    # Looked up by name when the hold is taken, so a replaced
+    # ``writing_session_state`` (a test's) is the one the registry takes.
+    set_session_write_hold(lambda session_id: writing_session_state(session_id))
+
+
+_register_write_hold()

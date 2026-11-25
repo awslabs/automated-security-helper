@@ -88,6 +88,9 @@ Known limitations
 from dataclasses import dataclass
 from typing import Optional
 
+from automated_security_helper.base.plugin_provisioning import (
+    tool_versions as _declared_tool_versions,
+)
 from automated_security_helper.core.exceptions import ToolNotProvisionableError
 
 # Platform/architecture pair, in the vocabulary cli/dependencies.py already uses:
@@ -151,30 +154,17 @@ class ToolAsset:
         return None
 
 
-# Versions are deliberately the same pins the container image already builds with
-# (see the ARG lines in Dockerfile), so a scan run from a container, from nix and
-# from a bare `ash dependencies install` all execute the same tool versions.
+# The release each tool is pinned to is DECLARED by the plugin that owns the tool (its
+# ``Provisioning.tool_pins`` in ``base/plugin_provisioning.py``, reachable as
+# ``scanner_manifests()[...].provisioning``), and by the engine for the tool no plugin owns
+# (uv). This is the table derived from those declarations; it lists no version itself, so
+# bumping a tool is an edit to its plugin's block. The asset filenames and digests below stay
+# here and are checked against it (``_DIGESTS_TAKEN_AT``, the filename-version check).
 #
-# opengrep is not in the Dockerfile's ARG lines: the image installs it through
-# `ash dependencies install`, which resolves it from this table. Its version is the
-# default of OpengrepScannerConfigOptions.version, which is also what nix/opengrep.nix
-# pins -- NOT the v1.1.5 default in get_opengrep_url's signature, which no caller
-# reaches because the scanner always passes its configured version.
-TOOL_VERSIONS: dict[str, str] = {
-    "actionlint": "v1.7.12",
-    # The v1 maintenance line. v2.0.0 is a release candidate (2.0.0-rc.9 on
-    # 2026-11-17), and ASH pins no prerelease.
-    "betterleaks": "v1.10.1",
-    "cfn-guard": "3.3.0",
-    "gitleaks": "v8.30.1",
-    "grype": "v0.122.1",
-    "hadolint": "v2.15.1",
-    "opengrep": "v2.0.0",
-    "syft": "v1.57.2",
-    "trivy": "v0.76.2",
-    # Tagged without a leading "v" upstream, so the release URL has none either.
-    "uv": "0.13.9",
-}
+# Versions are deliberately the same pins the container image already builds with (see the
+# ARG lines in Dockerfile), so a scan run from a container, from nix and from a bare
+# `ash dependencies install` all execute the same tool versions.
+TOOL_VERSIONS: dict[str, str] = _declared_tool_versions()
 
 # The gem version cfn-nag installs at, kept beside the binary pins so there is one
 # place to read ASH's external tool versions from. The authoritative pin for the
@@ -392,7 +382,7 @@ _TRIVY_ASSETS: dict[PlatformArch, str] = {
 # one asset that has any (opengrep's Windows zip).
 #
 # The four tables are adjacent so that one line-pinned suppression covers them (see
-# .ash/.ash_community_plugins.yaml); keep nothing but digests between them.
+# .ash/.ash_alpha_plugins.yaml); keep nothing but digests between them.
 # ---------------------------------------------------------------------------
 
 _DIGESTS: dict[str, str] = {
@@ -999,7 +989,7 @@ def _source_file(repository: str, commit: str, path: str) -> str:
 
 
 # Every hex value the entries below use, and nothing else, in one block: the
-# community config's ferret-scan suppression is pinned to exactly these lines, and
+# alpha config's ferret-scan suppression is pinned to exactly these lines, and
 # tests/unit/utils/test_third_party_licenses.py keeps the two in step.
 #
 # "<tool> commit" is the commit the release tag points to, from
@@ -1232,7 +1222,7 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
         commit=_THIRD_PARTY_HASHES["grype commit"],
         files=(LicenseFile("LICENSE"),),
     ),
-    # The GuardDog community scanner's uv tool. The wheel's dist-info carries
+    # The GuardDog alpha scanner's uv tool. The wheel's dist-info carries
     # licenses/LICENSE, licenses/NOTICE and licenses/LICENSE-3rdparty.csv.
     "guarddog": ThirdPartyLicense(
         tool="guarddog",

@@ -245,15 +245,15 @@ def refuse_selection_matching_no_scanner(
     )
 
 
-def unloaded_community_scanners(
+def unloaded_alpha_scanners(
     requested: Iterable[str],
     known_names: Iterable[str],
     scanner_classes: Iterable[type],
 ) -> Dict[str, str]:
     """``{requested name: plugin module}`` for the names that resolve to nothing
-    but name a community scanner ASH ships whose module this run did not load.
+    but name an alpha scanner ASH ships whose module this run did not load.
 
-    ``core.community_scanners`` maps each in-tree community scanner's name to
+    ``plugin_manifests`` maps each in-tree alpha scanner's name to
     its plugin module without importing it. "Not loaded" means no class in
     *scanner_classes* comes from the module: a module that did supply this
     run's scanners, but not the requested name, is not reported (the hint would
@@ -262,8 +262,8 @@ def unloaded_community_scanners(
     run did not list. Names are compared lower-cased and stripped, as ScanPhase
     compares them.
     """
-    from automated_security_helper.core.community_scanners import (
-        community_module_for,
+    from automated_security_helper.plugin_manifests import (
+        alpha_module_for,
     )
 
     known = {str(name).lower().strip() for name in known_names}
@@ -272,7 +272,7 @@ def unloaded_community_scanners(
     for name in requested:
         if name.lower().strip() in known:
             continue
-        module = community_module_for(name)
+        module = alpha_module_for(name)
         if module and not any(
             loaded_module == module or loaded_module.startswith(module + ".")
             for loaded_module in loaded
@@ -281,14 +281,14 @@ def unloaded_community_scanners(
     return unloaded
 
 
-def unloaded_community_hint(unloaded: Mapping[str, str]) -> str:
+def unloaded_alpha_hint(unloaded: Mapping[str, str]) -> str:
     """The sentence naming the module(s) to add for *unloaded*, or "" for none."""
     if not unloaded:
         return ""
     modules = sorted(set(unloaded.values()))
     return (
         f"{', '.join(sorted(unloaded))} "
-        f"{'is a community scanner' if len(unloaded) == 1 else 'are community scanners'}"
+        f"{'is an alpha scanner' if len(unloaded) == 1 else 'are alpha scanners'}"
         " whose plugin module is not loaded. Add "
         f"{', '.join(modules)} to ash_plugin_modules in the ASH config, or pass "
         + " ".join(f"--ash-plugin-modules {module}" for module in modules)
@@ -296,17 +296,17 @@ def unloaded_community_hint(unloaded: Mapping[str, str]) -> str:
     )
 
 
-def community_scanner_refusal(
+def alpha_scanner_refusal(
     requested: Sequence[str],
     known_names: Iterable[str],
     scanner_classes: Iterable[type],
 ) -> str:
     """The refusal text for an allowlist that resolves to nothing and names an
-    unloaded community scanner, or "" when this refusal does not apply.
+    unloaded alpha scanner, or "" when this refusal does not apply.
 
     One text for the engine's construction-time check and ScanPhase's backstop,
     so both refuse in the same words: the module to add, and beside it every
-    requested name that is neither registered nor a community scanner, so the
+    requested name that is neither registered nor an alpha scanner, so the
     operator is not sent to add a module and then refused again for the
     misspelling the first refusal dropped. Not when nothing is registered
     (*scanner_classes* empty): there is nothing to judge the names against, and
@@ -320,7 +320,7 @@ def community_scanner_refusal(
     known = {str(name).lower().strip() for name in known_names}
     if any(name.lower().strip() in known for name in requested):
         return ""
-    unloaded = unloaded_community_scanners(requested, known, scanner_classes)
+    unloaded = unloaded_alpha_scanners(requested, known, scanner_classes)
     if not unloaded:
         return ""
     misspelled = sorted(set(requested) - set(unloaded))
@@ -331,7 +331,7 @@ def community_scanner_refusal(
         if misspelled
         else ""
     )
-    return unloaded_community_hint(unloaded) + also
+    return unloaded_alpha_hint(unloaded) + also
 
 
 def exclusions_matching_no_scanner(

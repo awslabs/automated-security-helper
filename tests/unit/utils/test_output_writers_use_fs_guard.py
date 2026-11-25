@@ -484,7 +484,7 @@ WRITES_OUTSIDE_THE_OUTPUT_DIRECTORY: Dict[Site, Tuple[int, str]] = {
         1,
         "the MCP upload workspace, where a client's source is assembled",
     ),
-    (f"{_ASH}/cli/mcp/session_paths.py", "mark_session_workspace", "touch"): (
+    (f"{_ASH}/config/session_paths.py", "mark_session_workspace", "touch"): (
         1,
         _MCP_SESSIONS,
     ),
@@ -512,7 +512,7 @@ WRITES_OUTSIDE_THE_OUTPUT_DIRECTORY: Dict[Site, Tuple[int, str]] = {
     ): (1, _MCP_SESSIONS),
     (f"{_ASH}/cli/mcp/sessions.py", "_a_scan_holds", "open"): (1, _MCP_SESSIONS),
     (
-        f"{_ASH}/cli/mcp/profile_registry.py",
+        f"{_ASH}/config/session_profiles.py",
         "_replace_staged",
         "os.replace",
     ): (1, _MCP_PROFILE_COPY),

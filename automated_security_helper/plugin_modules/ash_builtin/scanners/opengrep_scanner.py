@@ -486,7 +486,6 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
                 semantics="the base default {0, 1}; an exit 2 on a failed registry fetch is rerun once locally",
             ),
             provenance=opsf.ProvenanceFacet(
-                tier=opsf.Tier.BUILTIN_DEFAULT,
                 source=opsf.ProvenanceSource.PINNED_RELEASE_BINARY,
                 selection_surfaces=("options.config",),
                 upstream_license=(

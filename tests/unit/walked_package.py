@@ -42,6 +42,7 @@ PACKAGE_DIRS = frozenset(
         "express",
         "interactions",
         "models",
+        "plugin_manifests",
         "plugin_modules",
         "plugin_modules/ash_aws_plugins",
         "plugin_modules/ash_betterleaks_plugins",

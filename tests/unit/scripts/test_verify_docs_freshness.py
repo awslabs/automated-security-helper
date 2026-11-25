@@ -572,7 +572,7 @@ class TestUnsupportedOptionTablesAreNotOptionTables:
         "rel",
         [
             "automated_security_helper/plugin_modules/ash_ferret_plugins/README.md",
-            "docs/content/docs/plugins/community/ferret-scan-plugin.md",
+            "docs/content/docs/plugins/alpha/ferret-scan-plugin.md",
         ],
     )
     def test_ferret_unsupported_option_tables_need_no_section_marker(

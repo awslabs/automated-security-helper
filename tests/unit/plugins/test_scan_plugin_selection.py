@@ -231,7 +231,7 @@ def _reports(output_dir: Path, extension: str) -> List[str]:
 #: argv[1] is a JSON list of steps. A scan is ``{"source_dir", "output_dir",
 #: "modules"}``, or ``{"workspace_file", "output_dir"}`` for a workspace scan;
 #: ``{"list": true}`` calls the MCP ``list_scanners`` tool function, which imports the
-#: community scanner packages; ``{"subscribe": true}`` subscribes a handler defined in
+#: alpha scanner packages; ``{"subscribe": true}`` subscribes a handler defined in
 #: this program to EXECUTION_START, the way embedding code calls
 #: ``ash_plugin_manager.subscribe``, which writes ``embedded-<tree name>``. Prints one
 #: report line: per scan, the exit code, each scanner row's status, and the scan's

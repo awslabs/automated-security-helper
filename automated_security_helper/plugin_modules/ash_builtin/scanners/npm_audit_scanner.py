@@ -637,7 +637,6 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                 semantics="the base default {0, 1}; the adapter owns the audit-failure handling",
             ),
             provenance=opsf.ProvenanceFacet(
-                tier=opsf.Tier.BUILTIN_DEFAULT,
                 source=opsf.ProvenanceSource.USER_INSTALLED,
                 selection_surfaces=(),
                 upstream_license=opsf.LICENSE_NOT_READ,

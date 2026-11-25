@@ -1,11 +1,11 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""What the builtin ``trivy`` scanner and the community ``trivy-repo`` scanner share.
+"""What the builtin ``trivy`` scanner and the alpha ``trivy-repo`` scanner share.
 
 Why this module exists
 ----------------------
-trivy reached ASH first as the community plugin ``trivy-repo``
+trivy reached ASH first as the alpha plugin ``trivy-repo``
 (``plugin_modules/ash_trivy_plugins``), which users enable through
 ``ash_plugin_modules``. The builtin ``trivy`` scanner runs the same binary, so the
 logic that turns options into trivy flags, installs the pinned binary, and ties a

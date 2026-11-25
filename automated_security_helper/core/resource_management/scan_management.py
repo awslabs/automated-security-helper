@@ -191,7 +191,7 @@ def session_holds_scan(scan_id: str, session_id: Optional[str]) -> bool:
     exactly like an id that was never issued, and ``None`` names the stdio
     session (``DEFAULT_SCAN_SESSION``), not every session. Synchronous, for a
     caller that decides whether a file belongs to a running scan of the session
-    (``cli.mcp.sandbox``).
+    (``config.mcp_sandbox``).
     """
     entry = get_scan_registry().get_scan(scan_id, session_id or DEFAULT_SCAN_SESSION)
     return entry is not None

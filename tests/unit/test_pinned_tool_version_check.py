@@ -664,7 +664,10 @@ class TestBumpGuidance:
     def test_a_release_binary_names_every_table(self, pins):
         steps = self._steps(pins, "grype", "v9.0.0")
         for needle in (
-            'TOOL_VERSIONS["grype"] -> v9.0.0',
+            (
+                'ToolPin("grype") in '
+                "automated_security_helper/base/plugin_provisioning.py -> v9.0.0"
+            ),
             "_DIGESTS:",
             "_EXECUTABLE_DIGESTS:",
             'THIRD_PARTY_LICENSES["grype"].version -> v9.0.0',
@@ -874,7 +877,7 @@ def _needles(pins: Any, tool: str, version: str) -> list[str]:
         needles.append(_GEM_PINS[tool])
         needles += _gem_copies(tool, version)
     if kind == "release-binary":
-        needles.append(f'TOOL_VERSIONS["{tool}"]')
+        needles.append(f'ToolPin("{tool}")')
         table = pins._ASSET_TABLES[tool]
         if all(bare in name for name in table.values()):
             # The module-level name of the tool's asset table: its file names move.
@@ -1227,7 +1230,7 @@ class TestBundledLibrariesAreListedButNotLookedUp:
     wheel's), so comparing it with its project's latest release would make the
     scheduled check red with a bump nobody can make. It is listed as held instead.
 
-    The shipped inventory carries these entries again with the GuardDog community
+    The shipped inventory carries these entries again with the GuardDog alpha
     plugin: pygit2 and the libraries its wheel bundles (libgit2, libssh2, OpenSSL
     and PCRE), and the yara yara-python bundles. Each test still plants an entry
     of the shape it checks into its own copy of the pins module, and reads the

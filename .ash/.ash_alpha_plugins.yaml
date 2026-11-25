@@ -614,8 +614,8 @@ global_settings:
     # look like high-entropy secrets because a SHA256 is high-entropy.
     - path: automated_security_helper/utils/tool_downloads.py
       rule_id: API_KEY_OR_SECRET
-      line_start: 398
-      line_end: 538
+      line_start: 388
+      line_end: 528
       reason: >-
         False positive — every string in this range is a published SHA256 release
         checksum or the SHA256 of what one of those verified archives extracts to.
@@ -640,8 +640,8 @@ global_settings:
         would silently swallow a real secret added here later.
     - path: automated_security_helper/utils/tool_downloads.py
       rule_id: API_KEY_OR_SECRET
-      line_start: 1012
-      line_end: 1057
+      line_start: 1002
+      line_end: 1047
       reason: >-
         False positive, the same shape as the entry above, over _THIRD_PARTY_HASHES:
         the commit SHA each bundled tool's release tag points to, and the SHA256 of
@@ -876,7 +876,7 @@ global_settings:
       path: "**"
       reason: "Python Software Foundation License is an approved license"
     # =====================================================================
-    # Community-plugin mode: bandit, ferret-scan, trivy-repo
+    # Alpha-plugin mode: bandit, ferret-scan, trivy-repo
     # =====================================================================
     #
     # This file enables a different scanner set from .ash/.ash.yaml -- bandit,
@@ -1503,18 +1503,18 @@ global_settings:
     # needs its line updated, which is the point of not using a range or a glob.
     - rule_id: threat-process-download-exec
       path: automated_security_helper/assets/install-pinned-tool.py
-      line_start: 1030
-      line_end: 1030
+      line_start: 1041
+      line_end: 1041
       reason: "subprocess.run of `uv tool dir`; it runs nothing this script downloaded."
     - rule_id: threat-process-download-exec
       path: automated_security_helper/assets/install-pinned-tool.py
-      line_start: 1518
-      line_end: 1518
+      line_start: 1529
+      line_end: 1529
       reason: "subprocess.run of `<tool> --version` on an installed binary in a throwaway HOME; nothing downloaded is executed."
     - rule_id: threat-process-download-exec
       path: automated_security_helper/assets/install-pinned-tool.py
-      line_start: 1612
-      line_end: 1612
+      line_start: 1623
+      line_end: 1623
       reason: "subprocess.run of `uv tool dir`; it runs nothing this script downloaded."
     - rule_id: threat-process-download-exec
       path: automated_security_helper/utils/python_installer.py
@@ -1528,7 +1528,7 @@ global_settings:
       reason: "The container.env file ASH writes, under a temporary directory it has checked is outside the source and output trees, to hand its own variables to the container runner; a write of ASH's file, not a read of a dotenv."
     # === GuardDog: hits the self-scan reports with max_hits: 0 ===
     # Measured with GuardDog 3.2.0 over the tree the plugin stages, with no hit limit
-    # (scanners.guarddog.options.max_hits: 0 in .ash/.ash_community_plugins.yaml, the
+    # (scanners.guarddog.options.max_hits: 0 in .ash/.ash_alpha_plugins.yaml, the
     # config the self-scan runs GuardDog under). Each is code whose text is what the
     # rule describes: an input a check must reject, a file planted under a test's
     # temporary directory, a command string a test inspects, or one variable read by
@@ -1689,7 +1689,7 @@ global_settings:
         confirmed from the SPDX license page. The package is minimatch 10.2.5,
         vendored under aws-cdk-lib; the separate top-level minimatch 3.1.5 is ISC and
         is covered by the entry above.
-    # === Test fixtures the community-plugins legs read as credentials (expires 2027-05-06) ===
+    # === Test fixtures the alpha-plugins legs read as credentials (expires 2027-05-06) ===
     # Each entry is per file and per rule, with no line range, because the lines move
     # whenever a test is edited. The tests hold made-up values on purpose, to check
     # that ASH hides, refuses or confines them. The key is expires, the canonical
@@ -1962,7 +1962,7 @@ global_settings:
     # their tracked paths, so every finding here is a duplicate of one already
     # accounted for -- and assets/tool_downloads.py in particular reproduced all
     # 16 release checksums outside the line range the suppression above covers,
-    # which failed the community-plugins legs with 16 CRITICAL
+    # which failed the alpha-plugins legs with 16 CRITICAL
     # API_KEY_OR_SECRET findings on a file nobody edits.
     #
     # Ignored by exact path rather than by an assets/*.py glob, so a genuinely
@@ -1981,6 +1981,11 @@ global_settings:
         Build-generated copy of automated_security_helper/core/exceptions.py, which
         is scanned at its tracked path. Staged into assets/ by hatch_build.py
         because tool_downloads.py imports it.
+    - path: "automated_security_helper/assets/plugin_provisioning.py"
+      reason: >-
+        Build-generated copy of automated_security_helper/base/plugin_provisioning.py,
+        which is scanned at its tracked path. Staged into assets/ by hatch_build.py
+        because tool_downloads.py derives its pins from it.
     # `/**` is load-bearing: without it this pattern matches the directory entry
     # and nothing inside it, so the ignore did nothing. `ash config validate`
     # rejects it, but only where the directory exists -- tests/pytest-temp/ is
@@ -2006,7 +2011,7 @@ global_settings:
     - path: "**/automated_security_helper/schemas/AshConfig.json"
       reason: This file is generated by a corresponding Pydantic model and does not contain any secrets or sensitive information. Findings on this file are false positives and should be addressed on the related Pydantic models, not on this JSON file.
     # The same entry as in .ash/.ash.yaml, where the default mode already made
-    # this call. Without it here, the community scanners report the docs'
+    # this call. Without it here, the alpha scanners report the docs'
     # illustrative DATABASE_PASSWORD example (gitleaks and ferret-scan, on
     # platform-teams.md, its .template and reference/coverage.md) and the docs
     # UI suite's browser assertions (guarddog, on docs/ui-tests/specs), none of

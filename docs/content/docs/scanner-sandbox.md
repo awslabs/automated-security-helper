@@ -346,10 +346,10 @@ it needs.
 | gitleaks | no | none | single binary |
 | zizmor | no; `online_audits` gets neither a network nor a GitHub token yet | uv cache | uv-managed binary |
 
-### Community and third-party plugin scanners
+### Alpha and third-party plugin scanners
 
-The sandbox applies to every scanner, whatever module it comes from. A scanner from a
-community module (snyk-code, ferret-scan, trivy-repo) or your own plugin package gets
+The sandbox applies to every scanner, whatever module it comes from. A scanner from an
+alpha module (snyk-code, ferret-scan, trivy-repo) or your own plugin package gets
 its policy from its `sandbox_requirements` class attribute. A scanner that declares
 none gets the strictest default: no network, the source tree read-only, its own
 results directory as the only writable place, a private empty `$HOME` and `/tmp`, and
@@ -405,7 +405,7 @@ class MyScanner(ScannerPluginBase[MyScannerConfig]):
     )
 ```
 
-The community scanners declare theirs:
+The alpha scanners declare theirs:
 
 - snyk-code asks for a network, its `SNYK_` variables and `SNYK_TOKEN`, and read
   access to its token file.

@@ -973,7 +973,6 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
                 semantics="0 clean, 1 findings: the native-tool convention",
             ),
             provenance=opsf.ProvenanceFacet(
-                tier=opsf.Tier.BUILTIN_DEFAULT,
                 source=opsf.ProvenanceSource.PYPI_VIA_UV,
                 selection_surfaces=("options.ignore_nosec",),
                 upstream_license=(

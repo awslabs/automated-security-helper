@@ -184,7 +184,7 @@ class TestFerretScanScannerUnsupportedOptions:
         self, mock_plugin_context
     ):
         """Regression test for Bug 3: unsupported options must be rejected even when
-        config arrives as a raw dict (the get_plugin_config code path for community plugins)."""
+        config arrives as a raw dict (the get_plugin_config code path for alpha plugins)."""
         raw_config = {
             "name": "ferret-scan",
             "enabled": True,

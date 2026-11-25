@@ -61,6 +61,19 @@
   test fail when a block is stale. The generated text is the text the wrappers already
   held, so no option, exit code or message changes.
 
+### Deprecations
+
+- **The "community" scanner tier is now called "alpha".** The opt-in scanners ASH ships
+  but does not yet promote as supported (Betterleaks, Ferret Scan, GuardDog, hadolint,
+  Snyk Code, Trivy and the rest of the `ash_*_plugins` modules) are alpha scanners:
+  the name says maturity, not provenance. Behavior is unchanged. The plugin pages moved
+  from `docs/plugins/community/` to `docs/plugins/alpha/` (the old URLs redirect), the
+  repository's own scan config is now `.ash/.ash_alpha_plugins.yaml`, each scanner's
+  tier is declared in its manifest as `alpha`, and the CI config variant is
+  `alpha`. Two old spellings are accepted for one release and warn: the manifest tier
+  value `community` and the `Community plugins` / `Community scanners` column headings
+  the docs checks read. ASH 3.9.0 stops accepting them.
+
 ### Fixes
 
 - **`Invoke-ASH` now matches `./ash` and the `ash` CLI on two container-run details.**

@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Betterleaks: a secret scanner by gitleaks' author, as a community scanner plugin.
+"""Betterleaks: a secret scanner by gitleaks' author, as an alpha scanner plugin.
 
 What it runs
 ------------
@@ -12,7 +12,7 @@ author is shifting focus to it), takes the same flags for everything this plugin
 uses, and runs the same kind of rules (regular expressions with keyword prefilters)
 plus entropy, token-efficiency and expression filters.
 
-Betterleaks is a community plugin: it is loaded only when
+Betterleaks is an alpha plugin: it is loaded only when
 ``ash_betterleaks_plugins`` is listed in ``ash_plugin_modules`` (or passed with
 ``--ash-plugin-modules``), so a scan that does not list the module is unchanged by its
 existence. It runs beside the builtin gitleaks scanner, not instead of it, so a secret
@@ -451,7 +451,7 @@ class BetterleaksScanner(ScannerPluginBase[BetterleaksScannerConfig]):
                 tool_type=ScannerToolType.SECRETS,
                 selection="`betterleaks dir` over the target; contents, not history (module header)",
                 covers_note=(
-                    "the community scanners declare no covers display string; no scanner "
+                    "the alpha scanners declare no covers display string; no scanner "
                     "claims git-history secrets (UNCLAIMED_TARGET_KINDS)"
                 ),
             ),
@@ -503,7 +503,6 @@ class BetterleaksScanner(ScannerPluginBase[BetterleaksScannerConfig]):
                 semantics="ASH passes --exit-code=2 because the tool's default 1 means both leaks and some errors",
             ),
             provenance=opsf.ProvenanceFacet(
-                tier=opsf.Tier.COMMUNITY_OPTIN,
                 source=opsf.ProvenanceSource.PINNED_RELEASE_BINARY,
                 selection_surfaces=(
                     "ash_betterleaks_plugins in ash_plugin_modules",

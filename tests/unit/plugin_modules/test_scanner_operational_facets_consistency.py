@@ -493,17 +493,13 @@ _SOURCE_FOR_RUNTIME = {
 
 
 @pytest.mark.parametrize("cls", SCANNER_CLASSES, ids=lambda c: c.__name__)
-def test_provenance_and_tier_agree_with_the_runtime_and_the_package(cls) -> None:
+def test_provenance_agrees_with_the_runtime(cls) -> None:
+    """The tier is the manifest's (tests/unit/plugin_manifests binds it to the
+    package); the provenance source must still fit the runtime kind."""
     facets = _ops(cls)
     assert facets.provenance.source in _SOURCE_FOR_RUNTIME[facets.runtime.kind], (
         f"{facets.scanner_name}: a {facets.runtime.kind.value} runtime cannot "
         f"have provenance {facets.provenance.source.value}"
-    )
-    builtin = ".plugin_modules.ash_builtin." in f".{cls.__module__}."
-    expected = opsf.Tier.BUILTIN_DEFAULT if builtin else opsf.Tier.COMMUNITY_OPTIN
-    assert facets.provenance.tier is expected, (
-        f"{cls.__module__} implies {expected.value}, the register says "
-        f"{facets.provenance.tier.value}"
     )
 
 

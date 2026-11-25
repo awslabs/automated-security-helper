@@ -119,7 +119,7 @@ ENDED = frozenset(
 
 #: The session a scan belongs to when its registrar named none: stdio's single
 #: client and in-process callers. The same value as
-#: ``cli.mcp.profile_registry.DEFAULT_SESSION_ID``, spelled here rather than
+#: ``config.session_profiles.DEFAULT_SESSION_ID``, spelled here rather than
 #: imported because this module sits below the MCP CLI package.
 DEFAULT_SCAN_SESSION = "__default__"
 
