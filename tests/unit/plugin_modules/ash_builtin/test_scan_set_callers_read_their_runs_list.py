@@ -184,10 +184,12 @@ def _mcp_config_converter(context: PluginContext) -> Callable[[], object]:
 def _sdist_lock_harvester(context: PluginContext) -> Callable[[], object]:
     from automated_security_helper.plugin_modules.ash_builtin.converters.sdist_lock_harvester import (
         SdistLockHarvester,
-        SdistLockHarvesterConfig,
+        SdistLockHarvesterConverterConfig,
     )
 
-    harvester = SdistLockHarvester(context=context, config=SdistLockHarvesterConfig())
+    harvester = SdistLockHarvester(
+        context=context, config=SdistLockHarvesterConverterConfig()
+    )
     return lambda: harvester._lockfiles_in_scan_set(["uv.lock"])
 
 
