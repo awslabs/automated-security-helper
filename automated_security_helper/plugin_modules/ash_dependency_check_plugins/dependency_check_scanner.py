@@ -344,17 +344,15 @@ class DependencyCheckScanner(ScannerPluginBase[DependencyCheckScannerConfig]):
             state=FacetState.NA, reason="output not read; a sample run would settle it"
         ),
         taxonomy_cve=FacetDecl(
-            state=FacetState.DROPPED,
+            state=FacetState.MAPPED,
             native_field="result ruleId (the CVE id)",
-            reason="the CVE id is the rule id; no taxa entry is written",
         ),
         taxonomy_cwe=FacetDecl(
             state=FacetState.NA, reason="output not read; a sample run would settle it"
         ),
         fingerprints=FacetDecl(
-            state=FacetState.DROPPED,
+            state=FacetState.MAPPED,
             native_field='partialFingerprints["vulnerabilityHash"]',
-            reason="the template writes it; ASH computes its own identity",
         ),
         fix_available=FacetDecl(
             state=FacetState.NA, reason="output not read; a sample run would settle it"
@@ -370,9 +368,10 @@ class DependencyCheckScanner(ScannerPluginBase[DependencyCheckScannerConfig]):
             state=FacetState.NA, reason="output not read; a sample run would settle it"
         ),
         tags=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="result PropertyBag tags sca, vulnerability and security, "
-            "written by the adapter",
+            state=FacetState.NA,
+            reason="the template writes no tags; the adapter adds sca, "
+            "vulnerability and security while rating the report, after the "
+            "native read this register describes",
         ),
         extras=FacetDecl(
             state=FacetState.MAPPED,
