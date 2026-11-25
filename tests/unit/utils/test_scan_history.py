@@ -17,7 +17,7 @@ pytestmark = pytest.mark.unit
 
 
 def report_id(second, token="0123456789ab"):
-    return f"ASH-202601010000{second:02d}-{token}"
+    return f"ASH-202601010000{second:02d}-{token}"  # gitleaks:allow
 
 
 def finding(rule, *, severity="HIGH", line=10, path="src/app.py", fingerprint=None):

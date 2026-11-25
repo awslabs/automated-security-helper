@@ -145,7 +145,11 @@ class TestContainerLeg:
         text = CONTAINER.read_text()
         # Assembled at run time so this file never holds the contiguous token
         # shape (the github-pat pattern) that the action must not hold either.
-        fixture_secret = "ghp" + "_" + "x7Kq9ZmP2vLw4RtYb8NcD3sFh6JgA1eUoW5i"
+        fixture_secret = (
+            "ghp"
+            "_"
+            "x7Kq9ZmP2vLw4RtYb8NcD3sFh6JgA1eUoW5i"  # pragma: allowlist secret
+        )
         assert fixture_secret not in text
         assert not re.search(r"ghp_[0-9a-zA-Z]{36}", text)
         assert not re.search(r"AKIA[A-Z2-7]{16}", text)
