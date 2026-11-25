@@ -4023,7 +4023,7 @@ def suite_env_names(code: Path) -> dict[str, str]:
     found: dict[str, str] = {}
     tests = code / TEST_SOURCES
     if tests.is_dir():
-        for path, tree, constants in package_modules(tests):
+        for path, tree, constants in _parse_modules(tests):
             label = rel_path(path, code)
             names, _dynamic = env_lookups(tree, label, constants)
             for name in sorted(names):
@@ -4202,19 +4202,27 @@ def _package_sources(package: Path) -> list[Path]:
 
 @functools.lru_cache(maxsize=None)
 def package_modules(package: Path) -> list[tuple[Path, ast.AST, dict[str, str]]]:
-    """(path, syntax tree, string constants in scope) for every module in the package.
+    """``_parse_modules`` of the ASH package, cached per path.
+
+    Four callers (build_argument_names, the env-var fallback, file_name_constants,
+    check_code_links) each walked and re-parsed the whole package, which was most
+    of the report-files check's time. The returned list, its trees and its
+    constants are shared -- callers iterate them and never mutate -- and a caller
+    that rewrites files under a path it already asked about in the same process
+    would read the first parse, which no caller does. The tests/ tree is read once
+    per env read set, so suite_env_names calls ``_parse_modules`` and the suite's
+    syntax trees are not kept for the life of the process.
+    """
+    return _parse_modules(package)
+
+
+def _parse_modules(package: Path) -> list[tuple[Path, ast.AST, dict[str, str]]]:
+    """(path, syntax tree, string constants in scope) for every module under a path.
 
     The constants are the module's own ``NAME = "literal"`` assignments plus those it
     imports from other modules of the package, by ``from x import NAME`` or as
     ``x.NAME`` after ``import x``. Both the env-var fallback and the code-links check
     use them to resolve a key or a URL that the source spells as a constant.
-
-    Cached per path: five callers (build_argument_names, suite_env_names, the env-var
-    fallback, file_name_constants, check_code_links) each walked and re-parsed the
-    whole package, which was most of the report-files check's time. The returned
-    list, its trees and its constants are shared -- callers iterate them and never
-    mutate -- and a caller that rewrites files under a path it already asked about
-    in the same process would read the first parse, which no caller does.
     """
     trees: dict[str, tuple[Path, ast.AST]] = {}
     for path in _package_sources(package):
