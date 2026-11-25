@@ -36,10 +36,31 @@ import socket
 import struct
 import sys
 import time
+from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Mapping, MutableMapping, Optional
 
 from automated_security_helper.utils.process_env import snapshot_environ
+
+
+class ExpressOp(str, Enum):
+    """The verbs of the express daemon's socket protocol (an ``"op"`` frame key).
+
+    One definition for every half that speaks the protocol: the daemon (which
+    reads them), the client library and the ``ash express`` command (which
+    write them). The enum types what this process EMITS and compares; it does
+    not close what the daemon accepts. Client and daemon can be different
+    versions, so the daemon keeps reading ``op`` tolerantly and answers an
+    unknown verb from a newer peer with its ``unknown op`` refusal, never a
+    raise.
+    """
+
+    SCAN = "scan"
+    STATUS = "status"
+    STOP = "stop"
+    GO = "go"
+    SIGNAL = "signal"
+
 
 #: Bumped when a frame's shape changes incompatibly. The daemon refuses a
 #: request whose protocol differs, and the client reads that refusal as a stale

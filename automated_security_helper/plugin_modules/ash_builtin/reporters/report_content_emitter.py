@@ -268,7 +268,11 @@ class ReportContentEmitter:
                     "total": metrics.total,
                     "passed": metrics.passed,
                     "threshold": metrics.threshold,
-                    "threshold_source": metrics.threshold_source,
+                    "threshold_source": (
+                        metrics.threshold_source.value
+                        if metrics.threshold_source
+                        else ""
+                    ),
                     "actionable": metrics.actionable,
                     "status": metrics.status,
                     "excluded": metrics.excluded,

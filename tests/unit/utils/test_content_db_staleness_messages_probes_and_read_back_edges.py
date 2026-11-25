@@ -36,7 +36,7 @@ import pytest
 
 from automated_security_helper.utils import content_db_staleness as staleness
 from automated_security_helper.utils.content_databases import (
-    STALENESS_FAIL,
+    StalenessPolicy,
     get,
 )
 
@@ -57,7 +57,7 @@ def _record(**overrides) -> staleness.ContentDbAgeRecord:
         "measured_by": "a probe",
         "max_age": timedelta(hours=120),
         "measured_at": NOW,
-        "policy": STALENESS_FAIL,
+        "policy": StalenessPolicy.FAIL,
         "bound_source": "the test",
         "bound_is_tool_default": True,
         "refresh": "run the refresh",
@@ -95,7 +95,7 @@ def test_an_overrides_reason_is_cleaned_before_it_is_logged(caplog):
     )
     with caplog.at_level(logging.INFO):
         chosen, _ = staleness._policy_for(
-            get("grype-db"), STALENESS_FAIL, [override], NOW
+            get("grype-db"), StalenessPolicy.FAIL, [override], NOW
         )
     assert chosen == "warn"
     logged = "\n".join(record.getMessage() for record in caplog.records)
@@ -197,7 +197,7 @@ def test_a_probe_context_of_none_is_named_in_the_record():
         content_database_probe_context=lambda: None,
     )
     report = SimpleNamespace(runs=[])
-    records = staleness.assess_scanner(scanner, report, STALENESS_FAIL, now=NOW)
+    records = staleness.assess_scanner(scanner, report, StalenessPolicy.FAIL, now=NOW)
     assert len(records) == 1
     assert records[0].stale is True
     assert "returned None" in (records[0].error or "")

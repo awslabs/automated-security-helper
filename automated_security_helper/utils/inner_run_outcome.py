@@ -65,6 +65,7 @@ import re
 import stat
 import uuid
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 
@@ -81,25 +82,36 @@ class ExistingResultsRefused(ASHValidationError):
 #: The environment variable that carries the outer process's run ID to the inner run.
 OUTER_RUN_ID_ENV = "ASH_OUTER_RUN_ID"
 
-#: ``type`` of the checkpoint that records that the inner run completed.
-RUN_COMPLETED_CHECKPOINT = "run_completed"
 
-#: ``type`` of the record that says the inner run's reports were refused.
-REPORT_PATH_REFUSED_CHECKPOINT = "report_path_refused"
+class InnerRunRecordType(str, Enum):
+    """The ``type`` of a record that crosses the container boundary.
+
+    These are the checkpoint ``type`` spellings the inner run writes into its
+    results (or, for a refusal, into ``ash_inner_run_outcome.json``) and the
+    outer run reads back, so the values are the serialized bytes.
+    """
+
+    #: The checkpoint that records that the inner run completed.
+    RUN_COMPLETED = "run_completed"
+    #: The record that says the inner run's reports were refused.
+    REPORT_PATH_REFUSED = "report_path_refused"
+    #: The checkpoint in which the report phase lists the report files it
+    #: wrote, each with its reporter's format, so the exit code is counted only
+    #: from the file this run's SARIF reporter wrote (``report_file_written_as``).
+    REPORTS_WRITTEN = "reports_written"
+
 
 #: Where the inner run records a refusal, in its output directory beside the
 #: results file: never in the results file, which would then read as a scan.
 INNER_RUN_OUTCOME_FILE = "ash_inner_run_outcome.json"
 
-#: ``type`` of the checkpoint in which the report phase lists the report files it
-#: wrote, each with its reporter's format, so the exit code is counted only from
-#: the file this run's SARIF reporter wrote (``report_file_written_as``).
-REPORTS_WRITTEN_CHECKPOINT = "reports_written"
-
 #: The records that say how one run ended: replaced when the run ends.
-_OUTCOME_TYPES = (RUN_COMPLETED_CHECKPOINT, REPORT_PATH_REFUSED_CHECKPOINT)
+_OUTCOME_TYPES = (
+    InnerRunRecordType.RUN_COMPLETED,
+    InnerRunRecordType.REPORT_PATH_REFUSED,
+)
 #: Every record about one run: dropped when another run reads the results back.
-_RUN_RECORD_TYPES = (*_OUTCOME_TYPES, REPORTS_WRITTEN_CHECKPOINT)
+_RUN_RECORD_TYPES = (*_OUTCOME_TYPES, InnerRunRecordType.REPORTS_WRITTEN)
 _RUN_ID = re.compile(r"[0-9a-f]{32}")
 
 #: Names this process. The ``reports_written`` record it writes carries it, and
@@ -236,12 +248,12 @@ def record_reports_written(
         for checkpoint in getattr(results, "validation_checkpoints", None) or []
         if not (
             isinstance(checkpoint, dict)
-            and checkpoint.get("type") == REPORTS_WRITTEN_CHECKPOINT
+            and checkpoint.get("type") == InnerRunRecordType.REPORTS_WRITTEN
         )
     ]
     checkpoints.append(
         {
-            "type": REPORTS_WRITTEN_CHECKPOINT,
+            "type": InnerRunRecordType.REPORTS_WRITTEN.value,
             "severity": "info",
             "message": "The report files this run wrote.",
             "metadata": {
@@ -259,7 +271,7 @@ def _reports_written(results: object) -> Optional[Dict[str, Any]]:
     for checkpoint in getattr(results, "validation_checkpoints", None) or []:
         if (
             isinstance(checkpoint, dict)
-            and checkpoint.get("type") == REPORTS_WRITTEN_CHECKPOINT
+            and checkpoint.get("type") == InnerRunRecordType.REPORTS_WRITTEN
         ):
             metadata = checkpoint.get("metadata")
             return metadata if isinstance(metadata, dict) else {}
@@ -295,7 +307,7 @@ def report_file_written_as(results: object, format_name: str) -> Optional[str]:
 def completion_marker(run_id: str) -> Dict[str, Any]:
     """The checkpoint that records that the run with ``run_id`` completed."""
     return {
-        "type": RUN_COMPLETED_CHECKPOINT,
+        "type": InnerRunRecordType.RUN_COMPLETED.value,
         "severity": "info",
         "message": "The run completed.",
         "metadata": {"run_id": run_id},
@@ -326,7 +338,7 @@ def refusal_record(message: str, run_id: str, output_dir: PathLike) -> Dict[str,
     can give the paths in ``message`` as it sees them.
     """
     return {
-        "type": REPORT_PATH_REFUSED_CHECKPOINT,
+        "type": InnerRunRecordType.REPORT_PATH_REFUSED.value,
         "severity": "error",
         "message": message,
         "metadata": {
@@ -430,7 +442,7 @@ def read_refusal_outcome(
         return None
     if not (
         isinstance(record, dict)
-        and record.get("type") == REPORT_PATH_REFUSED_CHECKPOINT
+        and record.get("type") == InnerRunRecordType.REPORT_PATH_REFUSED
         and _run_id_of(record) == run_id
     ):
         return None
@@ -452,7 +464,7 @@ def existing_results_problem(results: object) -> Optional[str]:
     for checkpoint in getattr(results, "validation_checkpoints", None) or []:
         if (
             isinstance(checkpoint, dict)
-            and checkpoint.get("type") == REPORT_PATH_REFUSED_CHECKPOINT
+            and checkpoint.get("type") == InnerRunRecordType.REPORT_PATH_REFUSED
         ):
             return (
                 "records that the run that wrote it was refused "
@@ -498,7 +510,7 @@ def read_back_outcome(results: object, run_id: str) -> InnerRunOutcome:
     for checkpoint in getattr(results, "validation_checkpoints", None) or []:
         if not (
             isinstance(checkpoint, dict)
-            and checkpoint.get("type") == RUN_COMPLETED_CHECKPOINT
+            and checkpoint.get("type") == InnerRunRecordType.RUN_COMPLETED
         ):
             continue
         recorded_id = _run_id_of(checkpoint)

@@ -9,6 +9,7 @@ import yaml
 
 from automated_security_helper.config.resolve_config import resolve_config
 from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
+from automated_security_helper.core.enums import AshExitCode
 from automated_security_helper.utils.console import echo
 from automated_security_helper.utils.content_databases import (
     content_db_staleness_flag_overrides,
@@ -75,7 +76,7 @@ def check_dependencies(
             "Error: could not load the ASH configuration. Run ash config validate for details.",
             err=True,
         )
-        raise typer.Exit(3) from None
+        raise typer.Exit(AshExitCode.INVALID_CONFIG) from None
 
     blocked = False
     for name in dict.fromkeys(tool or list(OfflineCacheTool)):
@@ -94,4 +95,4 @@ def check_dependencies(
             echo(shown_on_one_line(f"  {result.detail}"))
         blocked |= result.blocks
     if blocked:
-        raise typer.Exit(1)
+        raise typer.Exit(AshExitCode.SCAN_ERRORS)

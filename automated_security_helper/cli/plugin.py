@@ -10,6 +10,7 @@ import logging
 from pathlib import Path
 from typing import Annotated, List
 import typer
+from automated_security_helper.core.enums import AshExitCode
 from automated_security_helper.utils.ui_theme import rich_theme
 from rich.table import Table
 
@@ -345,7 +346,7 @@ def list_plugins(
             err=True,
             fg=typer.colors.RED if color else None,
         )
-        raise typer.Exit(3)
+        raise typer.Exit(AshExitCode.INVALID_CONFIG)
     except PluginModuleError as e:
         # In the listing's own closing words: the default closing speaks of a
         # scan this command does not make and of option spellings it does not
@@ -364,7 +365,7 @@ def list_plugins(
             err=True,
             fg=typer.colors.RED if color else None,
         )
-        raise typer.Exit(3)
+        raise typer.Exit(AshExitCode.INVALID_CONFIG)
     except ASHConfigValidationError as e:
         # Exit 3, the code every ASH command uses for an unusable configuration:
         # listing the plugins of the default config instead would describe a
@@ -382,13 +383,13 @@ def list_plugins(
                 err=True,
                 fg=typer.colors.RED if color else None,
             )
-        raise typer.Exit(3)
+        raise typer.Exit(AshExitCode.INVALID_CONFIG)
     except Exception as e:
         secho(
             f"Error: {error_text(e)}",
             err=True,
         )
-        raise typer.Exit(1)
+        raise typer.Exit(AshExitCode.SCAN_ERRORS)
 
 
 def _print_tables(
