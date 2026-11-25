@@ -210,9 +210,17 @@ class TestAnImageAssetSkipsUnservingScanners:
         assert len(_informational_results(result)) == 1
 
 
+def _reached(scanner) -> bool:
+    """Whether the scan phase asked the scanner anything: it got past routing."""
+    return bool(
+        scanner.validate_plugin_dependencies.called
+        or scanner.validate_plugin_dependencies_once.called
+    )
+
+
 class TestTheFilesystemControl:
     def test_no_asset_adds_no_row_and_no_note(self, scan_phase):
-        scanner_cls, _ = _scanner("bandit")
+        scanner_cls, scanner = _scanner("bandit")
         scan_phase.plugins = [scanner_cls]
         scan_phase.plugin_context.asset = None
 
@@ -221,14 +229,15 @@ class TestTheFilesystemControl:
             parallel=False,
         )
 
+        assert _reached(scanner)
         row = result.scanner_results.get("bandit")
         # Whatever the mock executor recorded, it is not the asset-kind skip.
         if row is not None and row.skipped_reason:
-            assert "does not declare container_image" not in row.skipped_reason
+            assert "container_image" not in row.skipped_reason
         assert _informational_results(result) == []
 
     def test_a_filesystem_asset_adds_no_row_and_no_note(self, scan_phase):
-        scanner_cls, _ = _scanner("bandit")
+        scanner_cls, scanner = _scanner("bandit")
         scan_phase.plugins = [scanner_cls]
         scan_phase.plugin_context.asset = Asset.for_filesystem(
             scan_phase.plugin_context.source_dir
@@ -239,7 +248,118 @@ class TestTheFilesystemControl:
             parallel=False,
         )
 
+        assert _reached(scanner)
         row = result.scanner_results.get("bandit")
         if row is not None and row.skipped_reason:
-            assert "does not declare container_image" not in row.skipped_reason
+            assert "container_image" not in row.skipped_reason
+        assert _informational_results(result) == []
+
+    def test_the_source_tree_is_still_walked(self, scan_phase):
+        scanner_cls, _ = _scanner("bandit")
+        scan_phase.plugins = [scanner_cls]
+
+        scan_phase._execute_phase(
+            aggregated_results=AshAggregatedResults(), parallel=False
+        )
+
+        walked = scan_phase.plugin_context.cached_source_files
+        assert any(str(path).endswith("app.py") for path in walked)
+
+
+def _serving(monkeypatch):
+    """Make the scan phase read every scanner as one that serves images."""
+    monkeypatch.setattr(
+        "automated_security_helper.core.phases.scan_phase.serves_asset_kind",
+        lambda *_args, **_kwargs: True,
+    )
+
+
+class TestAnImageScanReadsOnlyTheImage:
+    def test_the_anchoring_directory_is_not_walked(self, scan_phase):
+        scanner_cls, _ = _scanner("bandit")
+        scan_phase.plugins = [scanner_cls]
+        scan_phase.plugin_context.asset = Asset.for_image(ImageLocator(ref=IMAGE_REF))
+
+        scan_phase._execute_phase(
+            aggregated_results=AshAggregatedResults(), parallel=False
+        )
+
+        assert scan_phase.plugin_context.cached_source_files == []
+
+
+class TestAConstructorFailureIsRoutedLikeAnyOtherRow:
+    def _failing(self, name="bandit"):
+        scanner_cls, scanner = _scanner(name)
+        scanner_cls.side_effect = RuntimeError("constructor broke")
+        return scanner_cls
+
+    def test_a_filesystem_only_scanner_that_cannot_be_built_is_skipped(
+        self, scan_phase
+    ):
+        scan_phase.plugins = [self._failing()]
+        scan_phase.plugin_context.asset = Asset.for_image(ImageLocator(ref=IMAGE_REF))
+
+        result = scan_phase._execute_phase(
+            aggregated_results=AshAggregatedResults(), parallel=False
+        )
+
+        row = result.scanner_results["bandit"]
+        assert row.status == ScannerStatus.SKIPPED
+        assert "container_image" in (row.skipped_reason or "")
+
+    def test_an_image_capable_scanner_that_cannot_be_built_is_an_error(
+        self, scan_phase, monkeypatch
+    ):
+        _serving(monkeypatch)
+        scan_phase.plugins = [self._failing()]
+        scan_phase.plugin_context.asset = Asset.for_image(ImageLocator(ref=IMAGE_REF))
+
+        result = scan_phase._execute_phase(
+            aggregated_results=AshAggregatedResults(), parallel=False
+        )
+
+        assert result.scanner_results["bandit"].status == ScannerStatus.ERROR
+
+    def test_the_control_a_filesystem_scan_still_records_the_error(self, scan_phase):
+        scan_phase.plugins = [self._failing()]
+        scan_phase.plugin_context.asset = None
+
+        result = scan_phase._execute_phase(
+            aggregated_results=AshAggregatedResults(), parallel=False
+        )
+
+        assert result.scanner_results["bandit"].status == ScannerStatus.ERROR
+
+
+class TestTheNotScannedNoteStaysTrue:
+    def test_the_note_never_points_at_rows_of_a_report(self, scan_phase):
+        scanner_cls, _ = _scanner("bandit")
+        scan_phase.plugins = [scanner_cls]
+        scan_phase.plugin_context.asset = Asset.for_image(ImageLocator(ref=IMAGE_REF))
+
+        result = scan_phase._execute_phase(
+            aggregated_results=AshAggregatedResults(), parallel=False
+        )
+
+        (note,) = _informational_results(result)
+        text = note.message.root.text
+        assert "rows above" not in text
+        assert "SKIPPED for the same reason" not in text
+        assert "no scanner that was selected and able to run" in text
+
+    def test_no_note_when_an_image_capable_scanner_is_queued(
+        self, scan_phase, monkeypatch
+    ):
+        _serving(monkeypatch)
+        scanner_cls, scanner = _scanner("trivy")
+        scan_phase.plugins = [scanner_cls]
+        scan_phase.plugin_context.asset = Asset.for_image(ImageLocator(ref=IMAGE_REF))
+
+        result = scan_phase._execute_phase(
+            aggregated_results=AshAggregatedResults(), parallel=False
+        )
+
+        assert _reached(scanner)
+        row = result.scanner_results.get("trivy")
+        assert row is None or row.status != ScannerStatus.SKIPPED
         assert _informational_results(result) == []

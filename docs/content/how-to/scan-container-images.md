@@ -25,8 +25,13 @@ ash scan --image-layout ./app-layout/
 ```
 
 Prefer a digest-pinned reference (`repo@sha256:...`): two scans of the same pinned
-image then agree across machines. A tag-only reference is accepted and resolved to a
-digest at scan start where an engine is present.
+image then agree across machines. A tag-only reference is accepted and handed to the
+tool as written; ASH does not resolve it to a digest.
+
+**Current status.** grype, syft and trivy are the scanners that read images; every other
+scanner is filesystem-only and is reported SKIPPED. ASH detects an engine (below) to pick
+how the tools reach the image, but it does not ask the engine for a digest, and an image
+scan is only as complete as those three tools' own coverage.
 
 The two payload shapes are checked at the stat level before anything uses them, the way
 a source directory is: the archive must exist, be readable and carry tar magic (a
@@ -36,9 +41,12 @@ what `docker save` writes); the layout must be an enterable directory holding th
 malformed images themselves.
 
 Image options run in local mode, single-directory, on a fresh scan: they cannot be
-combined with `--mode container`, a workspace scan, `--use-existing` or
-`--changed-files-only`, and the convert phase does not run (converters read source
-files, which an image presents none of).
+combined with any other `--mode` (container, nix and precommit are refused), a workspace
+scan, `--use-existing`, `--changed-files-only` or a shard (`--shard-index`,
+`--shard-count`). The convert phase does not run (converters read source files, which an
+image presents none of), so asking for the convert phase alone is refused. The scan
+records the image, not the directory it was started from, as its scan source, and does
+not walk that directory.
 
 ## Which scanners look at the image
 
@@ -46,8 +54,11 @@ Capability lives in one place: a scanner's operational-facets register row. A sc
 serves container images exactly when its row declares the `container_image` target
 kind; every other scanner -- and every third-party plugin that predates the register --
 is reported **SKIPPED** for an image scan, with a row naming the declaration, before
-its tool or dependencies are ever probed. An image scan's report therefore says which
-scanners did not look, rather than looking clean.
+its tool or dependencies are ever probed. A filesystem-only scanner whose constructor
+raises is SKIPPED the same way. A module that fails to import is still reported as an
+error, because without the class ASH cannot tell whether it would have read the image.
+An image scan's report therefore says which scanners did not look, rather than looking
+clean.
 
 When *nothing* scanned the image -- no selected scanner declares the kind, or
 no engine is present on an offline host -- the report carries one

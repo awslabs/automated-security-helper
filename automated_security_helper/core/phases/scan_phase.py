@@ -971,9 +971,12 @@ class ScanPhase(EnginePhase):
         ]
         shown = asset.image.shown() if asset.image is not None else "<unknown>"
         if not image_capable:
+            # What is known here is that nothing queued reads images; why is not:
+            # no selected scanner declares the kind, or the ones that do were
+            # excluded, could not run on this host, or are not installed. The
+            # sentence says only what holds in every one of those cases.
             reason = (
-                "no selected scanner declares container_image targets in its "
-                "operational facets"
+                "no scanner that was selected and able to run reads container images"
             )
         else:
             # Queued image scanners exist; the note is owed only when every
@@ -988,14 +991,12 @@ class ScanPhase(EnginePhase):
             if any(row.status != ScannerStatus.SKIPPED for row in rows):
                 return
             reason = (
-                "every image-capable scanner declined it cleanly (their "
-                "SKIPPED rows say why: typically no container engine was "
-                "detected and network fetching is unavailable, or the "
-                "locator shape is one the tool cannot read)"
+                "every image-capable scanner declined it cleanly (typically "
+                "no container engine was detected and network fetching is "
+                "unavailable, or the locator shape is one the tool cannot read)"
             )
         text = (
-            f"container image {shown} was not scanned: {reason}. The "
-            "per-scanner rows say SKIPPED for the same reason; this scan "
+            f"container image {shown} was not scanned: {reason}. This scan "
             "is complete by contract and has not looked at the image."
         )
         sarif = aggregated_results.sarif
@@ -1137,7 +1138,18 @@ class ScanPhase(EnginePhase):
 
         # Compute the source file list once so scanners don't each re-glob. The
         # walk skips an entry it cannot stat instead of aborting the scan.
-        source_files = list(_regular_files_under(self.plugin_context.source_dir))
+        # An image scan's source directory only anchors it (the working directory
+        # unless the caller named one) and is not its subject: walking it listed
+        # unrelated files, and from a large directory cost a full walk for nothing.
+        subject = getattr(self.plugin_context, "asset", None)
+        image_subject = (
+            isinstance(subject, Asset) and subject.kind == AssetKind.CONTAINER_IMAGE
+        )
+        source_files = (
+            []
+            if image_subject
+            else list(_regular_files_under(self.plugin_context.source_dir))
+        )
         if self._include_work_dir:
             # Each file once: a work directory inside the source tree (an output
             # directory under the project) was walked by both listings.
@@ -1178,6 +1190,10 @@ class ScanPhase(EnginePhase):
             # validation. Started here, before construction, so a scanner the run
             # did not select whose constructor raised is counted with the others.
             excluded_scanner_names: List[str] = []
+            # Scanners whose tool is absent and that have nothing to scan, or that
+            # do not scan this asset's kind; SKIPPED. Started here, as the list
+            # above is, because the construction loop records the second kind.
+            nothing_to_scan_names: List[str] = []
             # The operator's names, compared as everywhere in this phase.
             operator_allowlist = {name.lower().strip() for name in enabled_scanners}
             if scanner_classes:
@@ -1297,6 +1313,31 @@ class ScanPhase(EnginePhase):
                                 ", ".join(not_selected_reasons),
                                 aggregated_results,
                                 excluded_scanner_names,
+                            )
+                            continue
+                        # Asset routing, as the filter loop does it: a scanner
+                        # that does not scan this asset's kind was never going to
+                        # look at the image, so its constructor raising is not a
+                        # failure of this scan either. The class is in hand and
+                        # needs no instance to be asked.
+                        constructing_for = getattr(self.plugin_context, "asset", None)
+                        if (
+                            isinstance(constructing_for, Asset)
+                            and constructing_for.kind == AssetKind.CONTAINER_IMAGE
+                            and not serves_asset_kind(
+                                plugin_class, AssetKind.CONTAINER_IMAGE
+                            )
+                        ):
+                            ASH_LOGGER.debug(
+                                f"Scanner {failed_name} could not be constructed "
+                                f"({type(e).__name__}), and does not scan this "
+                                "asset's kind"
+                            )
+                            aggregated_results = self._record_asset_kind_not_served(
+                                failed_name,
+                                constructing_for,
+                                nothing_to_scan_names,
+                                aggregated_results,
                             )
                             continue
                         # With the config's environment values: a constructor's
@@ -1735,8 +1776,6 @@ class ScanPhase(EnginePhase):
 
             # Initialize lists to track scanner states for validation.
             # excluded_scanner_names was started above the construction loop.
-            # Scanners whose tool is absent and that have nothing to scan; SKIPPED.
-            nothing_to_scan_names: List[str] = []
             dependency_error_scanners = {}
             # Scanners this run INTENDED to execute, recorded for the shard
             # provenance below. Collected here rather than derived from
