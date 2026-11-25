@@ -12,6 +12,7 @@ from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
 from automated_security_helper.models.core import IgnorePathWithReason
+from automated_security_helper.models.vocab import SEVERITY_VALUES, Severity
 from automated_security_helper.schemas.sarif_schema_model import (
     SarifReport,
     Tool,
@@ -25,7 +26,6 @@ from automated_security_helper.utils.log import (
     escape_markup,
 )
 from automated_security_helper.utils.severity_ladder import (
-    SEVERITIES,
     component_labels,
     resolve_missing_levels,
     result_scanner_labels,
@@ -69,6 +69,7 @@ from automated_security_helper.utils.package_identity import (
 from automated_security_helper.models.asharp_model import ScannerSeverityCount
 from automated_security_helper.utils.secret_masking import mask_secret_in_text
 from automated_security_helper.utils.shared_finding_ids import shared_ids_by_position
+from automated_security_helper.utils.ash_lock import AshLock, AshLockError
 from automated_security_helper.utils.symbol_spans import SymbolResolver
 from automated_security_helper.utils.suppression_frame import (
     first_ignore_path,
@@ -518,13 +519,13 @@ def _severity_from_security_score(value: object) -> str | None:
     if not math.isfinite(score) or not 0 <= score <= 10:
         return None
     if score >= 9:
-        return "CRITICAL"
+        return Severity.CRITICAL.value
     if score >= 7:
-        return "HIGH"
+        return Severity.HIGH.value
     if score >= 4:
-        return "MEDIUM"
+        return Severity.MEDIUM.value
     if score > 0:
-        return "LOW"
+        return Severity.LOW.value
     # A score of exactly 0 is treated as "no usable score", not as INFO, so it
     # is skipped by normalize_sarif_result_severities and the result keeps its
     # SARIF level fallback. npm-audit defaults its rule security-severity to 0
@@ -538,7 +539,7 @@ def _severity_from_security_score(value: object) -> str | None:
 #: The severity bands _resolve_result_severity honors from ``issue_severity``.
 #: Kept as one constant so the normalizer's skip test and the resolver's read
 #: cannot drift apart.
-_CANONICAL_SEVERITIES = SEVERITIES
+_CANONICAL_SEVERITIES = SEVERITY_VALUES
 
 
 def _rule_for_result(
@@ -2060,6 +2061,26 @@ def _suppression_scanner_identity(result, run, scanner_name):
     return run.tool.driver.name if run.tool and run.tool.driver else "unknown"
 
 
+def _symbol_resolver_for(
+    source_dir: Any, suppressions: Iterable[Any]
+) -> SymbolResolver | None:
+    """The resolver symbol suppressions are checked with, or None without any.
+
+    It carries the scan root's ``.ash.lock``, so a symbol suppression whose
+    file changed since it was locked (or was never locked) does not apply. A
+    lock that cannot be read leaves every symbol suppression inert and says why
+    once: fail closed, as every other gap in a symbol check does.
+    """
+    if not any(getattr(s, "symbol", None) for s in suppressions):
+        return None
+    try:
+        lock = AshLock.load(source_dir)
+    except AshLockError as e:
+        ASH_LOGGER.warning(f"Symbol suppressions do not apply: {e}.", extra=NO_MARKUP)
+        lock = AshLock(source_dir=Path(source_dir))
+    return SymbolResolver(source_dir, lock=lock)
+
+
 def apply_suppressions_to_sarif(
     sarif_report: SarifReport,
     plugin_context: PluginContext,
@@ -2192,10 +2213,8 @@ def _apply_suppressions_within_budget(
     # Built only when an entry sets `symbol`, so a config without one never
     # touches tree-sitter. The resolver parses a file only when every other
     # field of a symbol-scoped entry already matches a finding in it.
-    _symbol_resolver: SymbolResolver | None = (
-        SymbolResolver(plugin_context.source_dir)
-        if any(getattr(s, "symbol", None) for s in suppressions)
-        else None
+    _symbol_resolver: SymbolResolver | None = _symbol_resolver_for(
+        plugin_context.source_dir, suppressions
     )
 
     # The files a repository committed to ASH's output directories, which the
@@ -2474,7 +2493,7 @@ def _apply_suppressions_within_budget(
                         id=get_finding_id(result.ruleId, uri, line_start, line_end),
                         title=message_text or "Unknown Issue",
                         description=message_text or "No description available",
-                        severity="MEDIUM",
+                        severity=Severity.MEDIUM.value,
                         scanner=_suppression_scanner_identity(
                             result, run, scanner_name
                         ),

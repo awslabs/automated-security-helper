@@ -35,6 +35,7 @@ from automated_security_helper.base.uv_tool_mixin import (
     guarded_values_read,
 )
 from automated_security_helper.core.enums import PackageManager
+from automated_security_helper.models.vocab import TargetType
 from automated_security_helper.core.exceptions import (
     ScannerError,
     ToolNotProvisionableError,
@@ -956,7 +957,6 @@ class PluginBase(UVToolMixin, BaseModel):
     model_config = ConfigDict(
         extra="allow",
         arbitrary_types_allowed=True,
-        use_enum_values=True,
         # A phase builds a plugin from its config section, which a config model
         # may not type (a plugin module's section), so the plugin's own error is
         # the one raised. A refused value can be a secret read from the
@@ -1255,7 +1255,7 @@ class PluginBase(UVToolMixin, BaseModel):
         self,
         *msg: str,
         level: int = 15,
-        target_type: str | None = "source",
+        target_type: TargetType | None = TargetType.SOURCE,
         append_to_stream: Literal["stderr", "stdout", "none"] = "none",
     ):
         """Log a message to the plugin's log file.

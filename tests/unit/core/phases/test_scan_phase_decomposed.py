@@ -9,6 +9,7 @@ import pytest
 
 from automated_security_helper.base.engine_phase import EnginePhase
 from automated_security_helper.config.ash_config import AshConfig
+from automated_security_helper.core.enums import ExecutionPhase
 from automated_security_helper.core.phases.scanner_executor import ScannerExecutor
 from automated_security_helper.core.phases.scan_result_processor import (
     ScanResultProcessor,
@@ -94,8 +95,8 @@ class _ConcretePhase(EnginePhase):
     """Minimal concrete subclass to test EnginePhase helpers."""
 
     @property
-    def phase_name(self) -> str:
-        return "test"
+    def phase_name(self) -> ExecutionPhase:
+        return ExecutionPhase.SCAN
 
     def _execute_phase(self, aggregated_results, **kwargs):  # type: ignore[override]
         return aggregated_results

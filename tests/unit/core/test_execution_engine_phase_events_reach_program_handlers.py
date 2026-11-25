@@ -23,6 +23,7 @@ import pytest
 from automated_security_helper.base.engine_phase import EnginePhase
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.ash_config import AshConfig
+from automated_security_helper.core.enums import ExecutionPhase
 from automated_security_helper.core.execution_engine import ScanExecutionEngine
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.plugins.events import AshEventType
@@ -41,8 +42,8 @@ class _ConvertLikePhase(EnginePhase):
     """A real EnginePhase in the convert slot: it notifies its phase events."""
 
     @property
-    def phase_name(self) -> str:
-        return "convert"
+    def phase_name(self) -> ExecutionPhase:
+        return ExecutionPhase.CONVERT
 
     def _execute_phase(
         self, aggregated_results, python_based_plugins_only=False, **kwargs

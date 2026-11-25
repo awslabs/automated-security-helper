@@ -17,12 +17,12 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 
+from automated_security_helper.cli.mcp.error_types import McpErrorType
 import pytest
 from mcp.server.mcpserver import Context
 
 from automated_security_helper.cli.mcp.profile_registry import DEFAULT_SESSION_ID
 from automated_security_helper.cli.mcp.session_identity import (
-    SESSION_IDENTITY_REQUIRED,
     UNIDENTIFIED_SESSION_ID,
     resolve_caller_session_id,
 )
@@ -68,4 +68,6 @@ def test_an_in_memory_client_not_marked_local_has_no_session() -> None:
 
     payload = result.structured_content["result"]
     assert payload.get("success") is False, payload
-    assert payload.get("error_type") == SESSION_IDENTITY_REQUIRED, payload
+    assert payload.get("error_type") == McpErrorType.SESSION_IDENTITY_REQUIRED.value, (
+        payload
+    )

@@ -176,11 +176,11 @@ introduced the set-aside, and is recorded for review.
 from __future__ import annotations
 
 from enum import Enum, IntEnum
-from typing import Annotated, Any, Dict, Iterable, List, Literal, Optional, Tuple
+from typing import Annotated, Any, Dict, Iterable, List, Optional, Tuple
 
 from pydantic import Field, PrivateAttr, computed_field
 
-from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
+from automated_security_helper.core.enums import AshExitCode
 from automated_security_helper.utils.undecodable_text import RecordModel
 
 from automated_security_helper.models.core import IgnoreFileExclusions
@@ -203,15 +203,15 @@ class WorkspaceExitCode(IntEnum):
     table assigned.
     """
 
-    SUCCESS = 0
-    INTERNAL_ERROR = 1
-    ACTIONABLE_FINDINGS = 2
-    INVALID_PROJECT_CONFIG = 3
-    WORKSPACE_ERROR = 4
+    SUCCESS = AshExitCode.SUCCESS.value
+    INTERNAL_ERROR = AshExitCode.SCAN_ERRORS.value
+    ACTIONABLE_FINDINGS = AshExitCode.ACTIONABLE_FINDINGS.value
+    INVALID_PROJECT_CONFIG = AshExitCode.INVALID_CONFIG.value
+    WORKSPACE_ERROR = AshExitCode.WORKSPACE_ERROR.value
     # Not a verdict over projects either: the command line was refused before any
     # workspace was resolved. Taken from ASH_EXIT_CODES' own name, so the number
     # is defined once.
-    USAGE_ERROR = ASH_EXIT_USAGE_ERROR
+    USAGE_ERROR = AshExitCode.USAGE_ERROR.value
 
 
 # Descriptions keyed by code, mirroring the shape of ASH_EXIT_CODES so the MCP
@@ -294,6 +294,18 @@ class ProjectRunStatus(str, Enum):
     COMPLETED = "completed"
     SKIPPED = "skipped"
     FAILED = "failed"
+
+
+class WorkspaceRunStatus(str, Enum):
+    """Whether a workspace run scanned projects at all.
+
+    The discriminator for the code-2 collision (see the module docstring). Distinct
+    from ``ProjectRunStatus`` (one project's outcome) and the MCP registry's scan
+    status, which share the word ``completed`` and stay separate vocabularies.
+    """
+
+    COMPLETED = "completed"
+    REFUSED = "refused"
 
 
 class ProjectInputNotScanned(RecordModel):
@@ -960,15 +972,15 @@ class WorkspaceResults(RecordModel):
         ),
     ]
     status: Annotated[
-        Literal["completed", "refused"],
+        WorkspaceRunStatus,
         Field(
-            "completed",
+            WorkspaceRunStatus.COMPLETED,
             description=(
                 "Whether projects were scanned at all. The discriminator for the "
                 "code-2 collision -- see the module docstring."
             ),
         ),
-    ] = "completed"
+    ] = WorkspaceRunStatus.COMPLETED
     exit_code: Annotated[
         int, Field(..., description="The process status this run exited with.")
     ]

@@ -40,6 +40,7 @@ def test_subcommands():
         "dependencies",
         "inspect",
         "plugin",
+        "suppress",
         "express",
     )
 
