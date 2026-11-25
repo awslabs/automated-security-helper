@@ -150,7 +150,9 @@ def is_supported_executable(path: Path) -> bool:
     """Whether *path* starts with a PE or ELF header."""
     try:
         with open(path, "rb") as handle:
-            head = handle.read(4)
+            # peek returns at most one buffer's worth without consuming it; the
+            # first four bytes are all that is compared.
+            head = handle.peek(4)[:4]
     except OSError:
         return False
     return head.startswith((PE_MAGIC, ELF_MAGIC))
@@ -448,8 +450,8 @@ class CapaScanner(ScannerPluginBase[CapaScannerConfig]):
                 tier=opsf.Tier.COMMUNITY_OPTIN,
                 source=opsf.ProvenanceSource.USER_INSTALLED,
                 selection_surfaces=("ash_capa_plugins in ash_plugin_modules",),
-                upstream_license="Apache-2.0 (capa's repository LICENSE.txt; not in "
-                "THIRD_PARTY_LICENSES until the pin lands)",
+                # No pin, so no pinned LICENSE read to cite; the pin's row carries it.
+                upstream_license=opsf.LICENSE_NOT_READ,
             ),
             prerequisites=opsf.PrerequisitesFacet(
                 kinds=(opsf.Prerequisite.NONE,),

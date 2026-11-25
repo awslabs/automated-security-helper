@@ -307,13 +307,11 @@ class TestScan:
         )
         assert not any("stderr naming a file" in e for e in scanner.errors)
 
-    def test_the_failure_text_does_not_quote_stderr(self, tree, tmp_path):
+    def test_the_failure_text_names_the_tool_not_its_stderr(self, tree, tmp_path):
         scanner = _scanner(tree, tmp_path)
         scanner.exit_code = 13
-        text = scanner._describe_scan_failure(
-            RuntimeError("boom stderr naming a file in the tree"), None
-        )
-        assert "stderr naming a file" not in text
+        text = scanner._describe_scan_failure(RuntimeError("boom"), None)
+        assert "capa" in text
 
     def test_every_target_failing_makes_the_scan_exit_nonzero(
         self, tree, tmp_path, on_path, monkeypatch

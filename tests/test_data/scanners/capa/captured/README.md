@@ -14,9 +14,9 @@ the matching rules tarball were used; the document is the same `ResultDocument`)
 capa -q -j -r <capa-rules-10.0.0> -- <file>
 ```
 
-The only edit is a path substitution: the capture host's work directory in
-`meta.argv`, `meta.sample.path` and `meta.analysis.rules` was replaced with `/work`.
-Nothing else was changed.
+Two edits only: the capture host's work directory in `meta.argv`, `meta.sample.path`
+and `meta.analysis.rules` was replaced with `/work`, and the repository's JSON hook
+pretty-printed the files. Nothing else was changed.
 
 What the captures show, and the scanner relies on:
 
