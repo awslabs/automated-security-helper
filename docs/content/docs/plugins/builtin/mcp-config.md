@@ -21,7 +21,7 @@ A file is read when its repo-relative path is exactly one of these. A file that 
 | Devin | `.devin/mcp_config.json` | `mcpServers` |
 | Codex CLI | `.codex/config.toml` | `mcp_servers` (TOML) |
 
-Each entry is read into one normalized form: the server name, whether it starts a local command (stdio) or connects to a URL (remote), the command and arguments, the `env` table, the URL and headers, and the fields that approve tool calls without asking. A file that does not parse, or is larger than the size limit, is reported in the scan's notes and skipped; no finding quotes its content.
+Each entry is read into one normalized form: the server name, whether it starts a local command (stdio) or connects to a URL (remote), the command and arguments, the `env` table, the URL and headers, and the fields that approve tool calls without asking. An entry that spells both a command and a URL gets both treatments: its command goes through the command checks and the converter, and its URL through the URL checks, so a stray or decoy `url` key beside a command exempts nothing. A file that does not parse, or is larger than the size limit, is reported in the scan's notes and skipped; no finding quotes its content.
 
 `.claude/settings.json` is not read. It is a policy file for Claude Code, and an `mcpServers` block in it is not a documented way to define servers. Zed's project-level `context_servers` file is not read either, because its project-file support is not confirmed.
 
@@ -50,12 +50,12 @@ scanners:
 <!-- doctest: options of=scanners.mcp-config -->
 | Option | Default | Severity | What it flags |
 | --- | --- | --- | --- |
-| `forbid_privilege_escalation` | `true` | HIGH | `sudo`, `doas`, `su` or `pkexec` as the command, or as a whole argument, of a stdio entry. A word of a shell string handed to `-c` counts. `pseudo` does not. |
+| `forbid_privilege_escalation` | `true` | HIGH | `sudo`, `doas`, `su` or `pkexec` as the command, or as a whole argument, of any entry that declares a command. A word of a shell string handed to `-c` counts. `pseudo` does not. |
 | `forbid_auto_approval` | `true` | HIGH | A setting that approves tool calls without asking: Gemini `trust: true`, a non-empty Kiro `autoApprove`, a non-empty Roo `alwaysAllow`, Codex `approval_mode` of `auto` or `full-auto`. |
 | `forbid_unpinned_runners` | `true` | MEDIUM | `npx`, `bunx`, `pnpm dlx`, `pnpx` or `uvx` started with a package that has no exact version. `pkg@1.2.3` and `pkg==1.2.3` are pinned; `pkg`, `pkg@latest` and ranges are not. |
 | `require_local` | `false` | MEDIUM | A remote entry (`url`, `httpUrl` or `serverUrl`) whose host is not loopback. `localhost`, `127.0.0.0/8` and `::1` count as local, however the IPv6 address is written. |
 | `remote_url_prefixes` | `[]` | MEDIUM | With a list: a remote URL that does not start with a listed prefix, and a remote URL that is not loopback and is not `https`. An empty list turns both checks off. |
-| `allowed_command_prefixes` | `[]` | MEDIUM | With a list: a stdio command that is not a path starting with a listed prefix. A bare name such as `npx` is flagged. An empty list turns the check off. |
+| `allowed_command_prefixes` | `[]` | MEDIUM | With a list: a declared command that is not a path starting with a listed prefix. A bare name such as `npx` is flagged. An empty list turns the check off. |
 | `flag_env_secrets` | `true` | LOW | A literal value in an `env` entry whose name says key, token, secret or password. A reference such as `${NAME}` is fine. The value is never written into the finding. |
 
 The three `forbid_*` checks are on by default because each is a hazard the MCP specification and the clients' own documentation name, and each fires on an exact whole-word or exact-flag match, so a clean repository stays quiet. The prefix policies depend on the site, so they stay off until configured. An unknown option name is refused, and an error message never repeats a configured value.
@@ -82,7 +82,7 @@ With this, a remote server must live under `https://mcp.example.com/` and be rea
 
 ## What the converter writes
 
-For each stdio entry the converter writes one script and one sidecar into its work directory, under a directory named for the config file (`.cursor/mcp.json` becomes `cursor__mcp.json`):
+For each entry that declares a command the converter writes one script and one sidecar into its work directory, under a directory named for the config file (`.cursor/mcp.json` becomes `cursor__mcp.json`):
 
 ```sh
 #!/bin/sh
@@ -91,7 +91,7 @@ exec 'sudo' '/usr/local/bin/mcp-files' '--root' '/srv/data'
 ```
 
 - The command line is one logical line: the `env` assignments, then `exec`, then the command and each argument. Every value is single-quoted, and an embedded single quote is written with the `'"'"'` idiom. A newline or other control character is written as an ANSI-C `$'...'` word, so one config token is always one script token.
-- A remote entry writes no script. There is no command in it to scan; the policy scanner covers it.
+- An entry with no command writes no script: there is nothing in it to run, and the policy scanner covers its URL. An entry with both a command and a URL writes its script like any other.
 - `<script>.spanmap.json` sits beside each script. It has one row for every script line, with the original file, the JSON pointer of the entry, and the entry's start and end line and column.
 - ASH scans the converted directory with the same scanners it runs on the source tree, so semgrep and opengrep read the scripts. The bundled stargrep rule `sudo-in-shell-script` flags a whole-word `sudo` in a shell script outside a comment, which is how a server started through sudo is reported by those two scanners as well as by the policy scanner.
 

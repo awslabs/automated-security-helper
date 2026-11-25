@@ -3,12 +3,13 @@
 
 """Module containing the McpConfigConverter implementation.
 
-Turns each stdio server entry of a repo-local MCP config file (``.mcp.json``,
-``.cursor/mcp.json``, ``.codex/config.toml`` and the other formats listed in
-``utils/mcp_config/readers.py``) into one shell script, so the script scanners that
-already run over the converted tree (semgrep, opengrep) read the command a config
-would launch. Each script has a ``.spanmap.json`` sidecar beside it that maps every
-script line back to the entry's place in the config file.
+Turns each command-declaring server entry of a repo-local MCP config file
+(``.mcp.json``, ``.cursor/mcp.json``, ``.codex/config.toml`` and the other formats
+listed in ``utils/mcp_config/readers.py``) into one shell script, so the script
+scanners that already run over the converted tree (semgrep, opengrep) read the
+command a config would launch — whether or not the entry also spells a url. Each
+script has a ``.spanmap.json`` sidecar beside it that maps every script line back
+to the entry's place in the config file.
 
 The converter only writes text. It never executes, resolves or fetches anything a
 config names, and it starts no process.
@@ -148,7 +149,7 @@ class McpConfigConverter(ConverterPluginBase[McpConfigConverterConfig]):
             return []
 
     def convert(self) -> List[Path]:
-        """Write one script and one span sidecar per stdio entry of each MCP config file.
+        """Write one script and one sidecar per command-declaring entry of each config.
 
         Returns:
             List[Path]: The scripts written, sorted by path.
@@ -188,12 +189,16 @@ class McpConfigConverter(ConverterPluginBase[McpConfigConverterConfig]):
         # Sorted, so the same tree always gets the same names.
         for display in sorted(targets):
             entries = self._read_entries(targets[display], display)
-            stdio = [entry for entry in entries if entry.kind == "stdio"]
-            if not stdio:
+            # Every entry that declares a command, never the classed kind: an
+            # entry spelling both a command and a url is classed remote, and a
+            # kind gate would let one decoy url key keep its command out of the
+            # scripts the script scanners read.
+            with_command = [entry for entry in entries if entry.command]
+            if not with_command:
                 continue
             directory = self.results_dir / source_slug(display, taken_directories)
             taken_names: Set[str] = set()
-            for entry in stdio:
+            for entry in with_command:
                 emitted = emit_script(entry)
                 if emitted is None:
                     ASH_LOGGER.debug(

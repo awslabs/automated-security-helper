@@ -27,7 +27,8 @@ option                         default  severity    what it flags
 =============================  =======  ==========  =================================
 ``forbid_privilege_escalation``  true   HIGH        ``sudo``, ``doas``, ``su``,
                                                     ``pkexec`` as the command or as a
-                                                    whole argument of a stdio entry.
+                                                    whole argument of any entry that
+                                                    declares a command.
 ``forbid_auto_approval``         true   HIGH        a field that approves tool calls
                                                     without asking: gemini
                                                     ``trust: true``, kiro
@@ -46,9 +47,9 @@ option                         default  severity    what it flags
                                                     not start with a listed prefix,
                                                     and a non-loopback URL that is not
                                                     ``https``.
-``allowed_command_prefixes``     []     MEDIUM      with a list: a stdio command that
-                                                    does not start with a listed path
-                                                    prefix.
+``allowed_command_prefixes``     []     MEDIUM      with a list: a declared command
+                                                    that does not start with a listed
+                                                    path prefix.
 ``flag_env_secrets``             true   LOW         a literal value in an ``env`` entry
                                                     whose name says key, token, secret
                                                     or password. A reference
@@ -554,8 +555,8 @@ def check_remote(
     require_local: bool,
     prefixes: List[str],
 ) -> List[PolicyFinding]:
-    """Remote entries: locality, URL prefix and scheme."""
-    if entry.kind != "remote" or entry.url is None:
+    """Entries that declare a URL: locality, URL prefix and scheme."""
+    if entry.url is None:
         return []
     pointer = entry.url_pointer or entry.pointer
     parsed = _split_url(entry.url)
@@ -616,8 +617,8 @@ def _path_prefix_matches(path: str, prefix: str) -> bool:
 def check_command_prefix(
     entry: McpServerEntry, prefixes: List[str]
 ) -> List[PolicyFinding]:
-    """Stdio commands must live under an allowed path prefix."""
-    if not prefixes or entry.kind != "stdio" or entry.command is None:
+    """Declared commands must live under an allowed path prefix."""
+    if not prefixes or entry.command is None:
         return []
     path = _normalized_command_path(entry.command)
     if any(_path_prefix_matches(path, prefix) for prefix in prefixes):
@@ -678,9 +679,17 @@ def _pointer_token(token: str) -> str:
 def evaluate_entry(
     entry: McpServerEntry, options: McpConfigScannerConfigOptions
 ) -> List[PolicyFinding]:
-    """Every policy finding for one entry under ``options``."""
+    """Every policy finding for one entry under ``options``.
+
+    The command checks run for every entry that declares a ``command`` and the
+    URL checks for every entry that declares a URL, never by the entry's classed
+    ``kind``: an entry spelling both a command and a url is classed remote (the
+    url decides the kind), and gating on the kind would let one decoy ``url`` key
+    hide a ``sudo`` command from every command check. Which field such a client
+    acts on is the vendor's call, so both sides are checked.
+    """
     found: List[PolicyFinding] = []
-    if entry.kind == "stdio":
+    if entry.command is not None:
         if options.forbid_privilege_escalation:
             found.extend(check_privilege_escalation(entry))
         if options.forbid_unpinned_runners:

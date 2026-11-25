@@ -3,6 +3,7 @@
 
 """Per-format parse rows: entry fields and span positions for each fixture pair."""
 
+import json
 from pathlib import Path
 
 import pytest
@@ -255,6 +256,33 @@ def test_a_gemini_entry_with_both_url_fields_prefers_http_url():
     )
     assert entries[0].url == "https://a/http"
     assert entries[0].transport == "http"
+
+
+def test_an_entry_with_both_a_command_and_a_url_keeps_both_fields():
+    """The url decides the classed kind; the declared command is kept with it, so
+    the policy checks and the converter (which gate on the fields, not the kind)
+    see the command a decoy url would otherwise hide."""
+    entries = parse_mcp_config_text(
+        json.dumps(
+            {
+                "mcpServers": {
+                    "both": {
+                        "type": "stdio",
+                        "command": "sudo",
+                        "args": ["/usr/local/bin/mcp-files"],
+                        "url": "http://127.0.0.1:1/",
+                    }
+                }
+            }
+        ),
+        ".mcp.json",
+    )
+    (entry,) = entries
+    assert entry.kind == "remote"
+    assert entry.command == "sudo"
+    assert entry.args == ["/usr/local/bin/mcp-files"]
+    assert entry.url == "http://127.0.0.1:1/"
+    assert entry.transport == "stdio"
 
 
 def test_roo_and_kiro_auto_approve_lists_are_kept_raw_with_spans():

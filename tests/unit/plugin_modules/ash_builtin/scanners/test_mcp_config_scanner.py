@@ -472,6 +472,52 @@ def test_remote_entries_have_no_command_to_check() -> None:
 
 
 # ---------------------------------------------------------------------------
+# An entry that declares both a command and a url: a decoy url key must not
+# hide the command from the command checks (it is classed remote, since the
+# url decides the kind, but every declared field is checked).
+# ---------------------------------------------------------------------------
+
+DECOY_URL = "http://127.0.0.1:1/"
+
+
+def test_a_decoy_url_does_not_hide_the_command_under_the_defaults() -> None:
+    entry = parse_mcp_config_text(
+        json.dumps(
+            {
+                "mcpServers": {
+                    "s": {
+                        "type": "stdio",
+                        "command": "sudo",
+                        "args": ["/usr/local/bin/mcp-files"],
+                        "url": DECOY_URL,
+                    }
+                }
+            }
+        ),
+        ".mcp.json",
+    )[0]
+    assert entry.kind == "remote"  # the url decides the classification...
+    found = [f.rule_id for f in evaluate_entry(entry, McpConfigScannerConfigOptions())]
+    assert found == [RULE_PRIVILEGE_ESCALATION]  # ...and the command is checked.
+
+
+def test_a_decoy_url_does_not_hide_an_unpinned_runner() -> None:
+    server = stdio("npx", "-y", "pkg", type="stdio", url=DECOY_URL)
+    assert rules(server, forbid_unpinned_runners=True) == [RULE_UNPINNED_RUNNER]
+
+
+def test_a_decoy_url_does_not_take_the_command_out_of_the_prefix_policy() -> None:
+    server = stdio("/usr/bin/node", type="stdio", url=DECOY_URL)
+    assert rules(server, allowed_command_prefixes=ALLOWED) == [RULE_COMMAND_PREFIX]
+
+
+def test_an_entry_with_a_command_and_a_url_is_checked_on_both_sides() -> None:
+    server = stdio("sudo", url="https://mcp.example.com/x")
+    found = rules(server, forbid_privilege_escalation=True, require_local=True)
+    assert sorted(found) == sorted([RULE_PRIVILEGE_ESCALATION, RULE_REMOTE_NOT_LOCAL])
+
+
+# ---------------------------------------------------------------------------
 # flag_env_secrets
 # ---------------------------------------------------------------------------
 

@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Render one stdio ``McpServerEntry`` as a POSIX shell script and its span sidecar.
+"""Render one command-declaring ``McpServerEntry`` as a POSIX shell script and its span sidecar.
 
 The script is text for script scanners to read. Nothing here runs, resolves or fetches
 anything the config names: every function returns a string.
@@ -151,13 +151,14 @@ def span_comment(entry: McpServerEntry, span: Span) -> str:
 
 
 def emit_script(entry: McpServerEntry) -> Optional[tuple[str, List[Dict[str, Any]]]]:
-    """The script text and its span rows for a stdio entry, or None for any other.
+    """The script text and its span rows for an entry with a command, or None.
 
-    A remote entry has no script to scan (its subject is the policy scanner), and a
-    stdio entry with no command has nothing to run.
+    Every entry that declares a command gets a script, whatever ``kind`` it was
+    classed as: an entry spelling both a command and a url is classed remote, and
+    gating on the kind would let one decoy ``url`` key keep the command away from
+    the script scanners. An entry with no command has nothing to run and gets
+    None (a url-only remote entry is the policy scanner's subject).
     """
-    if entry.kind != "stdio":
-        return None
     line = command_line(entry)
     if line is None:
         return None

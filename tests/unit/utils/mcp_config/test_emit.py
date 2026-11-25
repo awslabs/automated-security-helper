@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""The shell text one stdio MCP server entry is rendered as.
+"""The shell text one command-declaring MCP server entry is rendered as.
 
 The rows pin three things: one config token stays one script token (the shlex
 round trip, with the ANSI-C words a newline needs decoded first), the script is
@@ -200,10 +200,27 @@ def test_an_entry_with_no_command_has_no_line_and_no_script():
     assert emit_script(entry) is None
 
 
-def test_a_remote_entry_emits_no_script():
+def test_a_url_only_remote_entry_emits_no_script():
     entry = make_entry(kind="remote", command=None, url="https://example.com/mcp")
 
     assert emit_script(entry) is None
+
+
+def test_a_remote_classed_entry_with_a_command_still_emits_its_script():
+    """A decoy url key classes the entry remote and must not hide the command."""
+    entry = make_entry(
+        kind="remote",
+        command="sudo",
+        args=["/usr/local/bin/mcp-files"],
+        url="http://127.0.0.1:1/",
+    )
+
+    emitted = emit_script(entry)
+
+    assert emitted is not None
+    text, rows = emitted
+    assert text.split("\n")[2] == "exec 'sudo' '/usr/local/bin/mcp-files'"
+    assert [row["script_line"] for row in rows] == [1, 2, 3]
 
 
 def test_the_script_is_three_lines_and_every_line_has_a_span_row():

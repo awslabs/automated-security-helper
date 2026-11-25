@@ -1,15 +1,15 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""The MCP config converter: one script and one span sidecar per stdio server.
+"""The MCP config converter: one script and one span sidecar per command-declaring server.
 
 The goldens under ``tests/test_data/mcp_config_converted`` are the whole output tree
 (scripts, sidecars and the converted-sources record) for each of the twenty
 fixtures under ``tests/test_data/mcp_config``. The other rows pin what the goldens
 cannot: the sidecar's spans land on the entry in the config file, a config can
 choose no path outside the converter's directory, a config that does not parse is a
-recorded failed input that never quotes the file, a remote entry writes nothing, and
-the converter starts no process.
+recorded failed input that never quotes the file, a url-only remote entry writes
+nothing (one with a command writes its script), and the converter starts no process.
 """
 
 import json
@@ -215,6 +215,39 @@ def test_a_remote_entry_writes_no_script(test_plugin_context, monkeypatch):
     assert results == []
     assert not Path(converter.results_dir).exists()
     assert not converter.failed_inputs
+
+
+def test_a_decoy_url_beside_a_command_still_writes_the_script(
+    test_plugin_context, monkeypatch
+):
+    """An entry with both a command and a url is classed remote; the script scanners
+    must still read its command, so the decoy url key does not suppress the script."""
+    stage(
+        test_plugin_context,
+        monkeypatch,
+        {
+            ".mcp.json": json.dumps(
+                {
+                    "mcpServers": {
+                        "both": {
+                            "type": "stdio",
+                            "command": "sudo",
+                            "args": ["/usr/local/bin/mcp-files"],
+                            "url": "http://127.0.0.1:1/",
+                        }
+                    }
+                }
+            )
+        },
+    )
+    converter = make_converter(test_plugin_context)
+
+    results = converter.convert()
+
+    assert [p.name for p in results] == ["both.sh"]
+    text = results[0].read_text(encoding="utf-8")
+    assert "exec 'sudo' '/usr/local/bin/mcp-files'" in text
+    assert results[0].with_name("both.sh" + SPANMAP_SUFFIX).is_file()
 
 
 def test_a_tree_with_no_mcp_config_writes_nothing(test_plugin_context, monkeypatch):

@@ -58,7 +58,15 @@ class McpServerEntry(BaseModel):
     pointer: str = Field(
         description="JSON pointer of the server entry inside the source file."
     )
-    kind: Literal["stdio", "remote"]
+    kind: Literal["stdio", "remote"] = Field(
+        description=(
+            "Classification by url presence alone: remote when a url field is set, "
+            "stdio otherwise. The policy checks and the script conversion gate on "
+            "the declared command and url fields themselves, never on this, so an "
+            "entry that spells both a command and a url gets both treatments and a "
+            "decoy url cannot hide a command."
+        )
+    )
     command: Optional[str] = None
     args: List[str] = Field(default_factory=list)
     env: Dict[str, str] = Field(default_factory=dict)
