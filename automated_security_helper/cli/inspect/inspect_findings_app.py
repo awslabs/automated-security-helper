@@ -45,6 +45,7 @@ from textual.widgets import (
 from textual.widgets.data_table import ColumnKey
 
 from automated_security_helper.config.ash_config import add_suppression_to_config
+from automated_security_helper.core.enums import AshExitCode
 from automated_security_helper.core.exceptions import ASHConfigSourceError
 from automated_security_helper.models.vocab import SEVERITY_BUCKETS
 from automated_security_helper.utils.console import echo, secho
@@ -2289,14 +2290,14 @@ def findings_command(
             echo(
                 "No model or report file available. Please run a scan first or provide a report file."
             )
-            raise typer.Exit(1)
+            raise typer.Exit(AshExitCode.SCAN_ERRORS)
 
         model = AshAggregatedResults.load_model(Path(report_file_actual))
         if model is None:
             echo(
                 "No model or report file available. Please run a scan first or provide a report file."
             )
-            raise typer.Exit(1)
+            raise typer.Exit(AshExitCode.SCAN_ERRORS)
 
         # Extract findings from the model
         findings = extract_findings(model)
@@ -2322,4 +2323,4 @@ def findings_command(
         # A record that does not load is described by field, not by its input
         # (utils/error_text.py).
         secho(f"Error loading model or report: {error_text(e)}", fg="red")
-        raise typer.Exit(1) from None
+        raise typer.Exit(AshExitCode.SCAN_ERRORS) from None

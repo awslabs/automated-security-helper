@@ -8,6 +8,7 @@ import threading
 from pathlib import Path, PurePath
 from typing import Any, Dict, List, Optional, Set, Tuple
 
+from automated_security_helper.core.enums import AshExitCode
 from automated_security_helper.models.vocab import SEVERITY_VALUES, SeverityThreshold
 from automated_security_helper.utils.severity_ladder import (
     SEVERITY_THRESHOLDS,
@@ -1137,19 +1138,19 @@ VALID_SEVERITY_VALUES = frozenset(SEVERITY_VALUES)
 #: flag as a scan that found problems. Every command reaches it through this name:
 #: click's errors are mapped in cli/main.py, and ASH's own refusals of an invocation
 #: exit with it directly.
-ASH_EXIT_USAGE_ERROR = 5
+ASH_EXIT_USAGE_ERROR = AshExitCode.USAGE_ERROR.value
 
 #: A scan stopped by Ctrl-C, in any mode: 128 + SIGINT, the shell's convention. Not in
 #: ASH_EXIT_CODES below, which lists the outcomes a scan reports; an interrupted scan
 #: reports none.
-ASH_EXIT_INTERRUPTED = 130
+ASH_EXIT_INTERRUPTED = AshExitCode.INTERRUPTED.value
 
 #: A scan stopped by SIGTERM: 128 + SIGTERM, the code the default disposition would
 #: have exited with, so a supervisor that sent the signal reads the same verdict it
 #: always has -- the difference is that the scan's own stop path ran first
 #: (core/cancellation.py, "SIGTERM on the CLI"). Not in ASH_EXIT_CODES, for
 #: ASH_EXIT_INTERRUPTED's reason: a terminated scan reports no outcome.
-ASH_EXIT_TERMINATED = 143
+ASH_EXIT_TERMINATED = AshExitCode.TERMINATED.value
 
 #: The code one command, `ash dependencies install`, exits with for a --tool it cannot
 #: select (a name no plugin has, or a plugin of a type --plugin-type leaves out), and
@@ -1168,18 +1169,20 @@ ASH_EXIT_BAD_SELECTION_MEANING = (
 )
 
 ASH_EXIT_CODES: Dict[int, str] = {
-    0: "success",
-    1: "scan errors / scanner failures",
-    2: "actionable findings at or above threshold",
+    AshExitCode.SUCCESS.value: "success",
+    AshExitCode.SCAN_ERRORS.value: "scan errors / scanner failures",
+    AshExitCode.ACTIONABLE_FINDINGS.value: (
+        "actionable findings at or above threshold"
+    ),
     # A config ASH cannot use, or an input it refuses before it scans, such as a
     # linked output directory or a container mount path the runner cannot take.
-    3: "invalid config or refused input",
+    AshExitCode.INVALID_CONFIG.value: "invalid config or refused input",
     # 4 is workspace-mode only. It is deliberately NOT an overload of 2: a
     # workspace definition error means nothing was scanned, whereas 2 means a
     # scan completed and found something. See models/workspace.py for why the
     # RFC's original assignment of 2 was not used.
-    4: "workspace definition or policy error",
-    ASH_EXIT_USAGE_ERROR: "usage error",
+    AshExitCode.WORKSPACE_ERROR.value: "workspace definition or policy error",
+    AshExitCode.USAGE_ERROR.value: "usage error",
 }
 
 

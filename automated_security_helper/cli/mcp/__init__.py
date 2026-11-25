@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Annotated, Callable, Dict, List, Optional
 import typer
 
+from automated_security_helper.core.enums import AshExitCode
 from automated_security_helper.cli.mcp.http_sessions import (
     DEFAULT_SESSION_WORKSPACE_TTL_SECONDS,
     MODE_SSE,
@@ -1539,7 +1540,7 @@ def mcp_command(
         _stderr.print(
             "If the issue persists, check your Python environment and ASH installation."
         )
-        raise typer.Exit(1)
+        raise typer.Exit(AshExitCode.SCAN_ERRORS)
 
     # If we reach here, MCP dependencies are available
     if not quiet:
@@ -1616,7 +1617,7 @@ def mcp_command(
             f"with the built-in default.[/red]",
             highlight=False,
         )
-        raise typer.Exit(3)
+        raise typer.Exit(AshExitCode.INVALID_CONFIG)
 
     # After the transport check, not with the auth options above: an unknown
     # transport combined with --stateless-http should be reported as an unknown
@@ -1675,7 +1676,7 @@ def mcp_command(
             _stderr.print(
                 f"[red]Validation Error: {escape_markup(error_text(e))}[/red]"
             )
-            raise typer.Exit(3)
+            raise typer.Exit(AshExitCode.INVALID_CONFIG)
         if not quiet:
             _stderr.print(
                 f"[green]Registered {len(profile)} config profile(s).[/green]"
@@ -1804,7 +1805,7 @@ def mcp_command(
         # the reason the process stopped.
         _logger.error(error_text(e))
         _stderr.print(f"[red]{escape_markup(error_text(e))}[/red]", highlight=False)
-        raise typer.Exit(3)
+        raise typer.Exit(AshExitCode.INVALID_CONFIG)
     except PresenceLockError as e:
         # The error's own message carries the fix (set ASH_MCP_WORKSPACE_ROOT),
         # so print it alone: a traceback and a "check system resources" hint
@@ -1812,7 +1813,7 @@ def mcp_command(
         _logger.error(str(e))
         if not quiet:
             _stderr.print(f"[red]{escape_markup(str(e))}[/red]", highlight=False)
-        raise typer.Exit(3)
+        raise typer.Exit(AshExitCode.INVALID_CONFIG)
     except Exception as e:
         # Also what run_mcp_server raises when the stdio server fails while it
         # serves. The line naming the error is printed even with --quiet, which
@@ -1826,7 +1827,7 @@ def mcp_command(
             _stderr.print(
                 "[yellow]Please check system resources and ASH installation.[/yellow]"
             )
-        raise typer.Exit(1)
+        raise typer.Exit(AshExitCode.SCAN_ERRORS)
     finally:
         if listen_socket is not None:
             listen_socket.close()

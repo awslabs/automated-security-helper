@@ -1,4 +1,45 @@
-from enum import Enum
+from enum import Enum, IntEnum
+
+
+class AshExitCode(IntEnum):
+    """The process exit statuses ASH commands report.
+
+    An IntEnum because the values are genuinely numeric and members are handed
+    straight to ``typer.Exit`` and ``sys.exit``. The meaning text for each scan
+    outcome stays a parallel ``Dict[int, str]`` keyed by ``.value``
+    (``core.constants.ASH_EXIT_CODES``), the shape ``WorkspaceExitCode`` uses
+    (models/workspace.py), so the two tables take their numbers from one place.
+
+    ``ACTIONABLE_FINDINGS`` is 2 and so is the one command-specific code
+    ``ASH_EXIT_BAD_SELECTION`` (`ash dependencies install`), which stays a plain
+    constant: a second member with the same value would be an alias, not a code.
+    """
+
+    SUCCESS = 0
+    SCAN_ERRORS = 1
+    ACTIONABLE_FINDINGS = 2
+    INVALID_CONFIG = 3
+    WORKSPACE_ERROR = 4
+    USAGE_ERROR = 5
+    #: 128 + SIGINT, the shell's convention for a Ctrl-C stop.
+    INTERRUPTED = 130
+    #: 128 + SIGTERM.
+    TERMINATED = 143
+
+
+class ThresholdSource(str, Enum):
+    """Where a scanner's severity threshold came from.
+
+    ``UNAVAILABLE`` is the source when the results record no configuration, so
+    the default applies. The calculator resolves a member; the metrics row
+    (core/unified_metrics.py) carries its text, ``""`` when unset, because a
+    results file read back can record any text there and the tables show a
+    recorded value as written.
+    """
+
+    GLOBAL = "global"
+    CONFIG = "config"
+    UNAVAILABLE = "unavailable"
 
 
 class ScannerToolType(str, Enum):

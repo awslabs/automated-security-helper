@@ -184,6 +184,20 @@ class TargetType(str, Enum):
         return self.value
 
 
+class FailureKind(str, Enum):
+    """What failed when a converter could not convert an input.
+
+    ``INPUT`` is the file not being one the converter could hand to its tool;
+    ``TOOL`` is the tool, or the run, failing. The kind decides who may waive
+    the completeness gate: only an ``INPUT`` failure can be accepted by an
+    ``ash-unconverted-input`` suppression. Any value this version does not know
+    reads as ``TOOL``, the side that is never accepted.
+    """
+
+    INPUT = "input"
+    TOOL = "tool"
+
+
 #: The gate vocabulary as a static type, for the fields that must stay text.
 #:
 #: A pydantic field typed ``SeverityThreshold`` validates differently from this

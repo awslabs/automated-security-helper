@@ -71,6 +71,7 @@ from automated_security_helper.core.scanner_selection import (
     selection_marker,
 )
 from automated_security_helper.core.enums import (
+    AshExitCode,
     AshLogLevel,
     BuildTarget,
     ExecutionPhase,
@@ -970,7 +971,7 @@ def _resolve_fail_on_incomplete_scanners(
 
 
 class ScanIncompleteExit(SystemExit):
-    """``sys.exit(1)`` for a scan that finished with partial coverage.
+    """``sys.exit(AshExitCode.SCAN_ERRORS)`` for a scan that finished with partial coverage.
 
     A ``SystemExit`` with code 1, so the CLI's exit code and every caller that
     catches ``SystemExit`` see what they saw before. It adds the structured reason.
@@ -993,7 +994,7 @@ class ScanIncompleteExit(SystemExit):
 
 
 class ReportPathRefusedExit(SystemExit):
-    """``sys.exit(1)`` for a run whose reports were refused, with the reason.
+    """``sys.exit(AshExitCode.SCAN_ERRORS)`` for a run whose reports were refused, with the reason.
 
     Raised when a report path is a link, when a file name a reporter would write is
     not a file in the reports directory, and in container and nix mode when the
@@ -1083,7 +1084,7 @@ def _read_back_inner_results(
         # run set, a device that fails the read) is the same exit, worded, not a
         # traceback.
         logger.error(f"Could not read results file {output_file}: {error_text(e)}")
-    sys.exit(1)
+    sys.exit(AshExitCode.SCAN_ERRORS)
 
 
 def _refuse_an_inner_run_that_was_refused(opts: ScanOptions, run_id: str) -> None:
@@ -1183,7 +1184,7 @@ def _refuse_an_inner_run_that_did_not_complete(
         f"{output_file} {found}. The run's own output above says what stopped it."
         f"{older}"
     )
-    sys.exit(1)
+    sys.exit(AshExitCode.SCAN_ERRORS)
 
 
 def _refuse_links_left_in_reports(opts: ScanOptions) -> None:
@@ -3106,7 +3107,7 @@ def _refuse_a_source_dir_that_is_not_utf8(opts: ScanOptions) -> None:
             style="bold red",
         )
     )
-    sys.exit(1)
+    sys.exit(AshExitCode.SCAN_ERRORS)
 
 
 def _is_utf8_text(text: str) -> bool:
@@ -3168,7 +3169,7 @@ def _refuse_a_container_mount_that_is_not_utf8(opts: ScanOptions) -> None:
                 style="bold red",
             )
         )
-        sys.exit(3)
+        sys.exit(AshExitCode.INVALID_CONFIG)
 
 
 def _refuse_a_container_mount_the_runner_cannot_carry(opts: ScanOptions) -> None:
@@ -3187,7 +3188,7 @@ def _refuse_a_container_mount_the_runner_cannot_carry(opts: ScanOptions) -> None
         _require_mountable_directories(opts.source_dir, opts.output_dir)
     except ContainerInputError as error:
         print(Text(str(error), style="bold red"))
-        sys.exit(3)
+        sys.exit(AshExitCode.INVALID_CONFIG)
 
 
 # ---------------------------------------------------------------------------
@@ -3214,7 +3215,7 @@ OUTPUT_DIR_REFUSED_EXIT_CODE = 3
 
 
 class OutputDirRefusedExit(SystemExit):
-    """``sys.exit(3)`` for an output directory ASH will not use, with the reason.
+    """``sys.exit(AshExitCode.INVALID_CONFIG)`` for an output directory ASH will not use, with the reason.
 
     A ``SystemExit`` with OUTPUT_DIR_REFUSED_EXIT_CODE. ``found`` names the link and
     ``reason`` adds the command-line remedy; an in-process caller (the MCP scan
@@ -4192,7 +4193,7 @@ def _refuse_container_inputs(
         # It can name a path inside the scanned tree: the whole raw message is
         # shown once, on one line.
         echo(shown_on_one_line(refusal), err=True)
-        sys.exit(3)
+        sys.exit(AshExitCode.INVALID_CONFIG)
 
 
 def _workspace_policy_for_the_container(opts: ScanOptions) -> Optional[str]:
@@ -4574,7 +4575,7 @@ def _run_container_mode(
     if not opts.run:
         if hasattr(container_result, "returncode") and container_result.returncode != 0:
             sys.exit(container_result.returncode)
-        sys.exit(0)
+        sys.exit(AshExitCode.SUCCESS)
 
     # A status that is not a verdict did not come from a results file, so there is no
     # verdict for the host to re-derive and nothing below should try.
@@ -4672,7 +4673,7 @@ def _run_container_mode(
             "Rebuild the image from this ASH (run without --no-build, or rebuild the "
             "image ASH_IMAGE_NAME names)."
         )
-        sys.exit(3)
+        sys.exit(AshExitCode.INVALID_CONFIG)
     results = _read_back_inner_results(output_file, logger)
     if results is not None:
         _refuse_an_inner_run_that_did_not_complete(
@@ -4688,7 +4689,7 @@ def _run_container_mode(
             f"Results file not found at {output_file}. The container exited with "
             f"code {container_returncode}."
         )
-        sys.exit(1)
+        sys.exit(AshExitCode.SCAN_ERRORS)
 
 
 # ---------------------------------------------------------------------------
@@ -4957,7 +4958,7 @@ def _run_nix_mode(
         # stderr via echo, shown not obeyed: the message names a URL and flags,
         # not Rich markup.
         echo(str(e), err=True)
-        sys.exit(1)
+        sys.exit(AshExitCode.SCAN_ERRORS)
 
     if nix_result.returncode != 0:
         # Reported rather than fatal. A scan that finds something exits non-zero by design,
@@ -5027,7 +5028,7 @@ def _run_nix_mode(
             f"Results file not found at {output_file}. The Nix shell exited with "
             f"code {shell_code}."
         )
-        sys.exit(1)
+        sys.exit(AshExitCode.SCAN_ERRORS)
 
 
 # ---------------------------------------------------------------------------
@@ -5548,7 +5549,7 @@ def _run_local_mode(
                 echo(
                     "--staged: nothing is staged inside the scanned directory, so there is nothing to scan. Exiting clean."
                 )
-                sys.exit(0)
+                sys.exit(AshExitCode.SUCCESS)
 
         orchestrator = ASHScanOrchestrator.create(
             source_dir=opts.source_dir,
@@ -5758,7 +5759,7 @@ def _run_local_mode(
             raise
         # The shared printer escapes the text, which names fields and a path.
         _print_invalid_config(e)
-        sys.exit(3)
+        sys.exit(AshExitCode.INVALID_CONFIG)
     except BaselineRefused as e:
         refuse_baseline(e)
     except ASHConfigValidationError as e:
@@ -5778,7 +5779,7 @@ def _run_local_mode(
         # exit 3; not a fault, so no traceback. The message names the file and
         # quotes nothing from it.
         print(f"[bold red]ERROR (3) {escape_markup(str(e))}[/bold red]")
-        sys.exit(3)
+        sys.exit(AshExitCode.INVALID_CONFIG)
     except ReportPathRefused as e:
         # A report path was refused: by the report phase before any reporter wrote
         # (a link at the reports directory or at a report file, a report file name

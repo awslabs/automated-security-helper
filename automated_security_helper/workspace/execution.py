@@ -345,6 +345,7 @@ from automated_security_helper.core.cancellation import (
     raise_if_cancelled,
 )
 from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
+from automated_security_helper.core.enums import ThresholdSource
 from automated_security_helper.core.previous_results import holds_restored_results
 from automated_security_helper.core.scanner_selection import (
     SelectionLayers,
@@ -1261,7 +1262,7 @@ def _scanner_threshold_resolver(
                     )
                 )
             except Exception as error:  # noqa: BLE001 -- an unreadable config grades as the project does
-                value, source, from_env = None, "unavailable", False
+                value, source, from_env = None, ThresholdSource.UNAVAILABLE, False
                 ASH_LOGGER.debug(
                     f"Project '{project.key}': the threshold of scanner "
                     f"'{scanner_name}' could not be read from the recorded "
@@ -1269,7 +1270,7 @@ def _scanner_threshold_resolver(
                     f"at the project's threshold",
                     extra=NO_MARKUP,
                 )
-            if source == "config" and isinstance(value, str) and value:
+            if source == ThresholdSource.CONFIG and isinstance(value, str) and value:
                 own = value.upper()
                 if project.severity_ceiling:
                     own = stricter_of(own, project.severity_ceiling)

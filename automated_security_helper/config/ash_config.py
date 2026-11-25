@@ -79,6 +79,7 @@ from automated_security_helper.utils.unknown_keys import (
 )
 from automated_security_helper.core.exceptions import ASHConfigUnsetVariableError
 from automated_security_helper.core.enums import ExportFormat
+from automated_security_helper.utils.content_databases import StalenessPolicy
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.models.vocab import SeverityThresholdText
 from automated_security_helper.models.core import (
@@ -2337,6 +2338,10 @@ class ContentDbStalenessOverride(RedactedSection):
         ),
     ]
     policy: Annotated[
+        # A Literal, not StalenessPolicy: the config models validate strictly
+        # and the loader dumps them with yaml.safe_dump, which cannot write an
+        # enum member. The accepted set is pinned to the enum in
+        # tests/unit/vocab/test_vocab_drift_e7.py.
         Literal["fail", "warn"],
         Field(
             description="The policy this database is held to while the entry is in effect."
@@ -2849,6 +2854,7 @@ class AshConfig(RedactedSection):
     ] = SandboxConfig()
 
     content_db_staleness: Annotated[
+        # A Literal for the reason given on ContentDbStalenessOverride.policy.
         Literal["fail", "warn"],
         Field(
             description=(
@@ -2864,7 +2870,7 @@ class AshConfig(RedactedSection):
                 "precedence over this value; --no-allow-stale-content-db sets 'fail'."
             )
         ),
-    ] = "fail"
+    ] = StalenessPolicy.FAIL.value
 
     content_db_staleness_overrides: Annotated[
         List[ContentDbStalenessOverride],
