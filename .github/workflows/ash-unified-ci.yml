@@ -157,7 +157,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - id: setup-uv
-        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
         with:
           enable-cache: true
           # Restore everywhere, save only from main. This setup-uv major defaults
@@ -324,7 +324,8 @@ jobs:
           uv run --group dev --extra cdk mypy --version
           uv run --group dev --extra cdk mypy automated_security_helper/
 
-      # INFORMATIONAL ONLY. THIS STEP CANNOT BLOCK A MERGE, AND THAT IS ON PURPOSE.
+      # THIS STEP GATES (zero diagnostics). It was informational while ty reported
+      # 1308; the history below is why it was, and why its version is pinned.
       #
       # ty is Astral's type checker: 4-5x faster than mypy here, with native pydantic
       # support rather than a plugin, and its findings on this tree look substantive
@@ -341,22 +342,32 @@ jobs:
       # a real gate once ty reaches a stable release; until then the value is the
       # signal in the log, not a verdict.
       #
-      # THE ONE REMAINING continue-on-error IN THIS WORKFLOW. The version is pinned
-      # exactly, so an upstream release cannot move the result; the reason it stays is
-      # that `ty check automated_security_helper/` exits 1 today (1304 diagnostics at
-      # ty 0.0.84) and `lint` is in required-checks' `needs`, so dropping the flag turns
-      # the required lint check red on every PR until those diagnostics are fixed in
-      # the source. The way to remove it is to clear the diagnostics, then delete it.
+      # This step is now a gate: the ty cure branches cleared every diagnostic, so
+      # `continue-on-error` is gone. The version is pinned exactly, so an upstream
+      # release cannot move the result. THIS CHANGE LANDS ONLY FOLDED WITH THE THREE
+      # CURES: before them `ty check automated_security_helper/` exits 1 (1308
+      # diagnostics at ty 0.0.84) and `lint` is in required-checks' `needs`.
       #
-      # The step name says informational so nobody reads this job's green tick as ty
-      # having passed -- it exits 1 today. It runs through the project environment,
+      # It runs through the project environment,
       # not standalone, so ty resolves first- and third-party imports the way mypy
       # does; standalone it cannot see pydantic and the diagnostics change meaning.
-      - name: "ty (informational only -- does not gate)"
-        continue-on-error: true
+      - name: "ty (gate: zero diagnostics)"
         run: |
           uv run --group dev --with 'ty==0.0.84' ty --version
           uv run --group dev --with 'ty==0.0.84' ty check automated_security_helper/
+
+      # COUNT RATCHET for the step above. No continue-on-error here: this step can
+      # always pass at the ceiling, and it fails when ty's total exceeds the integer
+      # in scripts/ty_ceiling.txt, so new diagnostics cannot land while the old ones
+      # wait for cure PRs, which lower the ceiling. ty's own exit status is ignored
+      # (it is 1 today); a run that prints no total fails the script, not passes it.
+      # Flag-delete condition: at a count of 0, delete the informational step's
+      # continue-on-error and this step.
+      - name: "ty count ratchet (fails above scripts/ty_ceiling.txt)"
+        run: |
+          uv run --group dev --with 'ty==0.0.84' ty check automated_security_helper/ \
+            > "${RUNNER_TEMP}/ty-output.txt" 2>&1 || true
+          python3 scripts/check_ty_ratchet.py "${RUNNER_TEMP}/ty-output.txt"
 
       # scripts/verify_workspace_policy.py runs four real scans of a generated
       # workspace and asserts that a workspace policy's severity ceiling and its
@@ -499,7 +510,7 @@ jobs:
         # run on it). All of it runs on the merge_group entry that
         # gates main and on the push to main, so nothing merges without the full matrix; a
         # pull request shows one Linux (arm64), one macOS and one Windows leg per tier on the
-        # lowest, the gated and the highest Python. It runs no x86_64 Linux leg of any tier,
+        # lowest, the middle and the highest Python. It runs no x86_64 Linux leg of any tier,
         # no Linux or macOS pre-commit hook run (the bundle's hook step keys on ubuntu-latest
         # and macos-latest) and no x86_64 Linux or macos-latest coverage data in the combined
         # unit-coverage figure; those are the merge-queue entry's and the push's. The container-runtime legs (docker, podman, finch, nerdctl)
@@ -1024,8 +1035,8 @@ jobs:
   # (/home/runner/work/... on Linux, /Users/runner/work/... on macOS, D:\a\... on Windows),
   # so the job runs on one Linux image and the `[paths]` section of .coveragerc folds all
   # three layouts into the checkout's own automated_security_helper/ during the combine.
-  # Without it one file would be counted once per operating system. A path that matched no
-  # alias would fail `coverage report` with "No source for code", not pass.
+  # A path that matched no alias would fail `coverage report` with "No source for code"
+  # (the macOS and Windows paths do not exist on this runner), not pass.
   #
   # `!cancelled()` and not the default `success()`: when a shard fails on a test, its
   # coverage data is still uploaded, and this job should still say whether the combination
@@ -1530,7 +1541,7 @@ jobs:
           ASH_BASE_IMAGE_OVERRIDE: ${{ steps.prepull.outputs.base-image-override }}
         run: |
           start=$(date +%s)
-          ash build-image --oci-runner docker --build-target ci --ash-revision-to-install LOCAL --no-run --verbose 2>&1 | tee "${RUNNER_TEMP}/ash-container-build.log"
+          ash container build --oci-runner docker --build-target ci --ash-revision-to-install LOCAL --no-run --verbose 2>&1 | tee "${RUNNER_TEMP}/ash-container-build.log"
           echo "image build took $(( $(date +%s) - start ))s" | tee -a "$GITHUB_STEP_SUMMARY"
       - name: "Cache report: image-layers"
         if: ${{ !cancelled() }}
@@ -1693,7 +1704,7 @@ jobs:
   # ---------------------------------------------------------------------------
   # The default image stage's permissions.
   #
-  # `ash build-image` and `ash --mode container` build the `non-root` stage when no
+  # `ash container build` and `ash --mode container` build the `non-root` stage when no
   # --build-target is given, and that is the image an operator runs. Every scan leg
   # above builds `ci` (validate-container and run-scan-test pass --build-target ci),
   # so the steps only `non-root` has -- its user's home, the grype cache handed to
@@ -1731,7 +1742,7 @@ jobs:
         env:
           ASH_BASE_OCI_LAYOUT: ${{ steps.prepull.outputs.oci-layout }}
           ASH_BASE_IMAGE_OVERRIDE: ${{ steps.prepull.outputs.base-image-override }}
-        run: ash build-image --oci-runner docker --ash-revision-to-install LOCAL --no-run --verbose
+        run: ash container build --oci-runner docker --ash-revision-to-install LOCAL --no-run --verbose
       - name: Check who can write to the image
         shell: bash
         env:
@@ -1973,11 +1984,13 @@ jobs:
         include:
           - os: ubuntu-latest
             sandbox: bwrap
+            betterleaks: "true"
           # sandbox-exec has no throwaway overlay and runs programs only from tool
           # paths, so on macOS each scanner's cache and unpack locations are
           # declared per scanner; this leg is what proves the declarations right.
           - os: macos-latest
             sandbox: sandbox-exec
+            betterleaks: "true"
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -1989,7 +2002,7 @@ jobs:
           python-version: "3.12"
           install-ash: "false"
       - name: Set up Ruby for cfn-nag
-        uses: ruby/setup-ruby@b3aaceaef7e0ee231b499e7b5f49c03fc1d32199 # v1.338.0
+        uses: ruby/setup-ruby@20eb24b0d509e2b9ed9b6d42ddfeb992915e0564 # v1.341.0
         with:
           ruby-version: "3.3"
       - name: Install bubblewrap
@@ -2006,6 +2019,8 @@ jobs:
             bwrap --unshare-all --ro-bind / / --proc /proc --dev /dev true
           fi
       - name: Install ASH with the cdk extra, and every scanner
+        env:
+          BETTERLEAKS: ${{ matrix.betterleaks }}
         run: |
           pip install ".[cdk]"
           ash dependencies install
@@ -2013,6 +2028,13 @@ jobs:
           # once their module is loaded, hence the alpha config.
           ash dependencies install --config .ash/.ash_alpha_plugins.yaml \
             --tool hadolint --tool guarddog
+          # betterleaks is an alpha scanner too, and its module is not in that
+          # file, so its install loads the module with an override as trivy-repo's
+          # does below. Only the legs that compare it install it.
+          if [ "$BETTERLEAKS" = "true" ]; then
+            ash dependencies install --tool betterleaks \
+              --config-overrides "ash_plugin_modules+=[automated_security_helper.plugin_modules.ash_betterleaks_plugins]"
+          fi
       # trivy-repo is a plugin scanner, so ASH knows its name only once its module is
       # loaded (`ash dependencies install --tool trivy-repo` without it exits 2,
       # "Unknown tool(s)"): the install loads it with an override, and the config
@@ -2020,19 +2042,25 @@ jobs:
       # then fetched into
       # trivy's own default cache, so that the offline pair has them: offline, ASH
       # updates nothing, and under sandbox-exec the cache is read-only, which an
-      # offline trivy-repo scan must survive. The hadolint and GuardDog alpha
+      # offline trivy-repo scan must survive. The hadolint, GuardDog and betterleaks alpha
       # modules join the config so the parity runs load their scanners too.
       - name: Install trivy-repo, enable it, and seed trivy's cache
         env:
           TMPDIR: ${{ runner.temp }}
           PARITY_CONFIG: ${{ runner.temp }}/parity-ash.yaml
           EMPTY_TARGET: ${{ runner.temp }}/trivy-empty-target
+          BETTERLEAKS: ${{ matrix.betterleaks }}
         run: |
+          betterleaks_module=''
+          if [ "$BETTERLEAKS" = "true" ]; then
+            betterleaks_module='  - automated_security_helper.plugin_modules.ash_betterleaks_plugins'
+          fi
           printf '%s\n' \
             'ash_plugin_modules:' \
             '  - automated_security_helper.plugin_modules.ash_trivy_plugins' \
             '  - automated_security_helper.plugin_modules.ash_hadolint_plugins' \
             '  - automated_security_helper.plugin_modules.ash_guarddog_plugins' \
+            "$betterleaks_module" \
             'scanners:' \
             '  trivy-repo:' \
             '    enabled: true' > "$PARITY_CONFIG"
@@ -2068,7 +2096,7 @@ jobs:
       # is MISSING in both runs cannot pass parity by being absent; --require-offline
       # holds trivy-repo to that in the offline pair too. The config loads the Trivy
       # alpha module, so trivy-repo, which shares the builtin trivy's code, is
-      # compared too, and the hadolint and GuardDog modules for their scanners.
+      # compared too, and the hadolint, GuardDog and betterleaks modules for their scanners.
       - name: Compare every scanner with and without the sandbox
         # The report path through the environment, not interpolated into the script,
         # which is this repository's convention for every context value a shell reads.
@@ -2077,11 +2105,16 @@ jobs:
           PARITY_REPORT: ${{ runner.temp }}/sandbox-parity.json
           PARITY_CONFIG: ${{ runner.temp }}/parity-ash.yaml
           SANDBOX: ${{ matrix.sandbox }}
+          BETTERLEAKS: ${{ matrix.betterleaks }}
         run: |
+          required=bandit,cdk-nag,cfn-nag,checkov,detect-secrets,grype,npm-audit,opengrep,semgrep,syft,actionlint,cfn-lint,cfn-guard,gitleaks,zizmor,trivy,trivy-repo,hadolint,guarddog
+          if [ "$BETTERLEAKS" = "true" ]; then
+            required="$required,betterleaks"
+          fi
           python scripts/verify_sandbox_scanner_parity.py \
             --sandbox "$SANDBOX" --online --ash ash \
             --config "$PARITY_CONFIG" \
-            --require bandit,cdk-nag,cfn-nag,checkov,detect-secrets,grype,npm-audit,opengrep,semgrep,syft,actionlint,cfn-lint,cfn-guard,gitleaks,zizmor,trivy,trivy-repo,hadolint,guarddog \
+            --require "$required" \
             --require-offline trivy-repo \
             --report "$PARITY_REPORT"
       # What a sandboxed scanner was refused, from the unified log, and the end of
@@ -2093,7 +2126,7 @@ jobs:
           WORK: ${{ runner.temp }}
         run: |
           sudo log show --last 60m --predicate 'sender == "Sandbox"' --style compact \
-            | grep -E 'Sandbox: (Python|python3?[.0-9]*|uv|node|npm|grype|syft|trivy|semgrep-core|pysemgrep|opengrep|opengrep\.bin|opengrep-core|ruby|bash|sh|git|security|env)\([0-9]+\) deny' \
+            | grep -E 'Sandbox: (Python|python3?[.0-9]*|uv|node|npm|grype|syft|trivy|semgrep-core|pysemgrep|opengrep|opengrep\.bin|opengrep-core|ruby|bash|sh|git|security|env|betterleaks)\([0-9]+\) deny' \
             | sed -E 's/^.*Sandbox: //; s/\([0-9]+\) / /' | sort | uniq -c | sort -rn | head -n 150 || true
           for log in "$WORK"/ash-sandbox-parity-*/out-*-sandbox-exec/ash.log; do
             echo "::group::$log (errors and warnings)"
@@ -2656,6 +2689,14 @@ jobs:
         run: uv sync
       - name: Build the documentation site
         run: uv run mkdocs build --clean --strict
+      # Every URL the site ever served must keep landing on the right page:
+      # scripts/validate_url_history.py holds docs/url-history/ (the historical URL
+      # ledger and the dead-URL map) and docs/redirects.yml in agreement, with no
+      # redirect chains or loops, and resolves each URL in the tree the step above
+      # just built. The docs deploy workflow runs the same validation again on every
+      # publish, main and release tags alike.
+      - name: Validate the URL history mapping
+        run: uv run python -I -B scripts/validate_url_history.py --site-dir public
       - name: Check the versioned site
         run: uv run python scripts/docs_versions.py check
 

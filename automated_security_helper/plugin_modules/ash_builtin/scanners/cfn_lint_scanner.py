@@ -93,6 +93,7 @@ from typing import (
 from urllib.parse import unquote
 
 import yaml
+from yaml.composer import ComposerError
 from pydantic import AnyUrl, Field, PrivateAttr, field_validator
 
 from automated_security_helper.base.options import (
@@ -110,6 +111,7 @@ from automated_security_helper.base.scanner_facets import (
     FacetState,
     ScannerFacets,
 )
+from automated_security_helper.models.vocab import Severity, TargetType
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
@@ -146,6 +148,7 @@ from automated_security_helper.utils.config_trust import (
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.error_text import text_without_values
 from automated_security_helper.utils.output_excerpt import tool_output_excerpt
+from automated_security_helper.utils.package_identity import ASH_RESOURCE_ID_KEY
 from automated_security_helper.utils.process_env import snapshot_environ
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
@@ -175,9 +178,9 @@ from automated_security_helper.utils.uv_tool_runner import get_uv_tool_command
 #: code-scanning output) consistent with the rest. cfn-lint's own letter is never lost:
 #: it is the first character of the rule id.
 SEVERITY_BY_RULE_LETTER: Dict[str, Tuple[str, str]] = {
-    "E": ("MEDIUM", "warning"),
-    "W": ("LOW", "note"),
-    "I": ("INFO", "none"),
+    "E": (Severity.MEDIUM.value, Level.warning.value),
+    "W": (Severity.LOW.value, Level.note.value),
+    "I": (Severity.INFO.value, Level.none.value),
 }
 
 #: Rule id cfn-lint uses for its own configuration errors, which includes a template
@@ -236,6 +239,109 @@ _CONFIG_KEY_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 #: (cfnlint/config.py, ``RuleConfigurationAction``), so a value holding one cannot
 #: be passed whole.
 _CONFIGURE_RULE_SEPARATORS = frozenset(",:=")
+
+
+#: What identifies a finding in both of cfn-lint's reports: the rule, the file as
+#: the report spells it, the span, and the message. cfn-lint writes the SARIF and
+#: the JSON from the same matches, spelled alike (measured with cfn-lint 1.57.2).
+_FindingKey = Tuple[str, str, int, int, int, int, str]
+
+
+def cfn_lint_resources(report: Any) -> Dict[_FindingKey, Set[Optional[str]]]:
+    """The logical resource each finding of cfn-lint's JSON report is in, by key.
+
+    A finding's ``Location.Path`` is the path into the template: the logical id is
+    its second element when the first is ``Resources`` (M0 item c, fixture
+    cfn-lint-1.61.0-m0-bad-property.json: ``["Resources", "M0FixtureBucket",
+    "Properties", "NotARealProperty"]``). A finding under any other section
+    (Parameters, Outputs, Conditions, Mappings, Metadata) or at the template's
+    root is in no resource and is recorded as None. A key holds every value its
+    findings gave, so two findings the report cannot tell apart that name two
+    resources leave the key ambiguous.
+    """
+    found: Dict[_FindingKey, Set[Optional[str]]] = {}
+    for entry in report if isinstance(report, list) else []:
+        if not isinstance(entry, dict):
+            continue
+        rule = entry.get("Rule")
+        location = entry.get("Location")
+        rule_id = rule.get("Id") if isinstance(rule, dict) else None
+        if not (isinstance(location, dict) and isinstance(rule_id, str)):
+            continue
+        start, end = location.get("Start"), location.get("End")
+        spans = (
+            start.get("LineNumber") if isinstance(start, dict) else None,
+            start.get("ColumnNumber") if isinstance(start, dict) else None,
+            end.get("LineNumber") if isinstance(end, dict) else None,
+            end.get("ColumnNumber") if isinstance(end, dict) else None,
+        )
+        filename, message = entry.get("Filename"), entry.get("Message")
+        if not (isinstance(filename, str) and isinstance(message, str)):
+            continue
+        if any(type(number) is not int for number in spans):
+            continue
+        path = location.get("Path")
+        resource = (
+            path[1]
+            if isinstance(path, list)
+            and len(path) >= 2
+            and path[0] == "Resources"
+            and isinstance(path[1], str)
+            and path[1]
+            else None
+        )
+        key = (rule_id, filename, *spans, message)
+        # ``spans`` is a variable-length run of line/column numbers, which a
+        # fixed-shape key type cannot describe.
+        found.setdefault(key, set()).add(resource)  # type: ignore[arg-type]  # ty: ignore[no-matching-overload]
+    return found
+
+
+def attach_cfn_lint_resources(
+    report: SarifReport, resources: Dict[_FindingKey, Set[Optional[str]]]
+) -> int:
+    """Write each result's logical resource under ``ash_resource_id``.
+
+    cfn-lint's SARIF names the rule, the file and the span, and the resource
+    only inside the message prose, so two buckets with the same finding give
+    results a resource-scoped suppression cannot tell apart. A result is given
+    the resource its JSON finding names only when every finding of its key names
+    that one resource: a key that is also in no resource, or in two, gets
+    nothing, because a wrong id would bind a suppression to a finding it was not
+    written for and a missing one only fails closed. Returns how many results
+    were set.
+    """
+    attached = 0
+    for run in report.runs or []:
+        for result in run.results or []:
+            locations = result.locations or []
+            physical = locations[0].physicalLocation if len(locations) == 1 else None
+            root = physical.root if physical is not None else None
+            artifact = getattr(root, "artifactLocation", None)
+            region = getattr(root, "region", None)
+            uri = getattr(artifact, "uri", None)
+            message = result.message.root.text if result.message else None
+            spans = tuple(
+                getattr(region, name, None)
+                for name in ("startLine", "startColumn", "endLine", "endColumn")
+            )
+            if not (
+                result.ruleId and isinstance(uri, str) and isinstance(message, str)
+            ):
+                continue
+            if any(type(number) is not int for number in spans):
+                continue
+            named = resources.get((result.ruleId, uri, *spans, message))  # type: ignore[arg-type]
+            if not named or len(named) != 1:
+                continue
+            (resource,) = named
+            if resource is None:
+                continue
+            if result.properties is None:
+                result.properties = PropertyBag()
+            setattr(result.properties, ASH_RESOURCE_ID_KEY, resource)  # noqa: B010
+            attached += 1
+    return attached
 
 
 def severity_for_rule(rule_id: Optional[str]) -> Tuple[str, str]:
@@ -436,9 +542,9 @@ def _names_a_template(text: str, names: List[str]) -> bool:
     return False
 
 
-def _successful_exit(code: object) -> bool:
+def _successful_exit(code: Any) -> bool:
     try:
-        value = int(code)  # type: ignore[call-overload]
+        value = int(code)
     except (TypeError, ValueError):
         return False
     return 0 <= value <= 14 and value % 2 == 0
@@ -613,15 +719,14 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
     # package. An operator's config_file outside the tree needs extra_read_paths.
     sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements()
 
-    #: The facets register row (base/scanner_facets.py), declaration only. The
-    #: native fields are those of the SARIF format ASH consumes (committed
-    #: fixture tests/test_data/scanners/cfn_lint_guard/captured/
+    #: The facets register row (base/scanner_facets.py). The native fields are
+    #: those of the SARIF format ASH consumes (committed fixture
+    #: tests/test_data/scanners/cfn_lint_guard/captured/
     #: cfn-lint-1.57.1-insecure.sarif: result keys exactly ruleId, message,
     #: locations; driver rules carry id, shortDescription, fullDescription,
     #: helpUri). The JSON format names the resource (M0 item c, fixture
-    #: cfn-lint-1.61.0-m0-bad-property.json) but ASH never requests it, so
-    #: resource_id is MAPPABLE-BUT-DROPPED: the same state cfn-nag and trivy
-    #: carry for the same fact pattern.
+    #: cfn-lint-1.61.0-m0-bad-property.json), so resource_id is written from a
+    #: second cfn-lint run in that format (``_attach_resources``).
     facets: ClassVar[ScannerFacets] = ScannerFacets(
         rule_id=FacetDecl(
             state=FacetState.MAPPED,
@@ -650,15 +755,12 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
             native_field="result message.text",
         ),
         resource_id=FacetDecl(
-            state=FacetState.DROPPED,
-            native_field='finding "Location.Path" (the --format json output '
-            'format; Path[1] is the logical id, e.g. ["Resources", '
-            '"M0FixtureBucket", ...])',
-            reason="the SARIF format ASH requests carries the location only "
-            "(artifactLocation.uri, region) and names the resource in "
-            "message prose, so no id is written; the --format json output "
-            "names it (M0 item c, fixture cfn-lint-1.61.0-m0-bad-property"
-            ".json), the same dropped shape as cfn-nag and trivy",
+            state=FacetState.MAPPED,
+            native_field='finding "Location.Path" (the --format json report; '
+            'Path[1] is the logical id, e.g. ["Resources", "M0FixtureBucket", '
+            "...]), copied onto the SARIF result under ash_resource_id by "
+            "attach_cfn_lint_resources from a second, unrecorded cfn-lint run",
+            example="M0FixtureBucket",
         ),
         resource_type=FacetDecl(
             state=FacetState.NA,
@@ -709,10 +811,9 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
             reason="the SARIF regions carry line and column only, no snippet",
         ),
         references=FacetDecl(
-            state=FacetState.DROPPED,
-            native_field="driver rules[].helpUri",
-            reason="rule-level only: the flat reader takes references from "
-            "result relatedLocations, so the help link is discarded today",
+            state=FacetState.MAPPED,
+            native_field="driver rules[].helpUri, read into the flat "
+            "references when the result carries no relatedLocations",
         ),
         tags=FacetDecl(
             state=FacetState.NA,
@@ -758,6 +859,7 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
                 python_only=True,
                 use_uv_tool=True,
             ),
+            runtime_compat=opsf.RuntimeCompatFacet(rows=()),
             platforms=opsf.PlatformsFacet(
                 provisionable=(),
                 note="a PyPI package run through uv; platform support is the package's and was not read here",
@@ -813,6 +915,10 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
     # warned about once per scanner.
     _refused_options: Set[str] = PrivateAttr(default_factory=set)
 
+    # The reasons the resources report was skipped that were already warned
+    # about, once per scanner (``_warn_side_report_skipped``).
+    _side_report_warnings: Set[str] = PrivateAttr(default_factory=set)
+
     def model_post_init(self, context: Any) -> None:
         if self.config is None:
             self.config = CfnLintScannerConfig()
@@ -842,7 +948,7 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
         For the options that decide what cfn-lint reports: ``ignore_checks`` drops
         findings before ASH sees them, so they are neither reported nor counted as
         suppressed (measured: ``ignore_checks: [E, W]`` in the scanned tree's
-        ``.ash/.ash.yaml`` turned 3 findings into a PASSED scan). A value from a
+        ``.ash.yaml`` turned 3 findings into a PASSED scan). A value from a
         config inside a git checkout or the scanned directory, or from an MCP client,
         is replaced by the operator's own value (the trusted base with the
         operator's overrides replayed, ``config_trust.operator_value``), or by
@@ -1181,24 +1287,17 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
         """
         if not self._options().honor_inline_ignores:
             return False
-        if set_by_operator(
-            self.context.config if self.context is not None else None,
+        return self._operator_gated(
             "scanners.cfn-lint.options.honor_inline_ignores",
             True,
-        ):
-            return True
-        if "honor_inline_ignores" not in self._refused_options:
-            self._refused_options.add("honor_inline_ignores")
-            self._plugin_log(
-                refusal_warning(
-                    "Ignoring scanners.cfn-lint.options.honor_inline_ignores: "
-                    f"{NOT_THE_OPERATORS}. A template's own ignore_checks do not "
-                    "apply; suppress findings with ASH suppressions.",
-                    NOT_THE_OPERATORS,
-                ),
-                level=logging.WARNING,
-            )
-        return False
+            False,
+            refusal_warning(
+                "Ignoring scanners.cfn-lint.options.honor_inline_ignores: "
+                f"{NOT_THE_OPERATORS}. A template's own ignore_checks do not "
+                "apply; suppress findings with ASH suppressions.",
+                NOT_THE_OPERATORS,
+            ),
+        )
 
     def _config_file_settings(self, config_file: Path) -> Dict[str, Any]:
         """The operator's ``.cfnlintrc`` as a mapping; a file ASH cannot read stops the scan.
@@ -1219,7 +1318,7 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
 
         try:
             parsed = load_config_yaml(Path(config_file).read_text(encoding="utf-8"))
-        except yaml.composer.ComposerError as exc:
+        except ComposerError as exc:
             line = exc.problem_mark.line + 1 if exc.problem_mark else "?"
             raise ScannerError(
                 f"ASH could not read {Path(config_file).as_posix()}: {exc.problem} "
@@ -1533,7 +1632,7 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
     def _execute_scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason],
     ) -> Tuple[List[str], Path, Optional[Dict[str, Any]]]:
         """Abstract stub; cfn-lint overrides scan() to batch templates."""
@@ -1563,7 +1662,7 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
     def scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason] | None = None,
         config: ScannerPluginConfigBase | None = None,
         *args: Any,
@@ -1977,7 +2076,124 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
             if config_errors:
                 texts = "; ".join((r.message.root.text or "") for r in config_errors)
                 failure = f"cfn-lint reported a configuration error: {texts}"
+        if failure is None and batch_report is not None:
+            self._attach_resources(
+                batch_report,
+                arguments,
+                batch_file,
+                option_args,
+                results_dir,
+                cwd,
+                child_env,
+            )
         return failure, batch_report, response if isinstance(response, dict) else {}
+
+    def _attach_resources(
+        self,
+        report: SarifReport,
+        arguments: List[str],
+        batch_file: Path,
+        option_args: List[str],
+        results_dir: Path,
+        cwd: Path,
+        child_env: Dict[str, str],
+    ) -> None:
+        """Name the logical resource of each result, from cfn-lint's JSON report.
+
+        Guarded as a whole: whatever the second run or the matching raises other
+        than a cancellation (which is not an ``Exception`` and propagates) leaves
+        the report as it came, so it cannot reach ``scan()``'s catch-all and fail
+        a scan whose lint already succeeded.
+        """
+        try:
+            self._attach_resources_unguarded(
+                report, arguments, batch_file, option_args, results_dir, cwd, child_env
+            )
+        except Exception as error:  # noqa: BLE001 -- best-effort enrichment
+            self._warn_side_report_skipped(type(error).__name__)
+
+    def _warn_side_report_skipped(self, reason: str) -> None:
+        """Say once per scanner that the resources report was not obtained.
+
+        A scan that passes with this behind it carries no resource ids, so a
+        suppression scoped to a resource never matches and nothing else in the run
+        says why. ``reason`` names an exit code or the kind of failure, never the
+        text of an error.
+        """
+        warning = f"cfn-lint's resources report was skipped: {reason}"
+        if warning in self._side_report_warnings:
+            return
+        self._side_report_warnings.add(warning)
+        self._plugin_log(
+            f"{warning}. Results carry no resource id for this scan, so a "
+            "suppression scoped to a resource does not match them.",
+            level=logging.WARNING,
+        )
+
+    def _attach_resources_unguarded(
+        self,
+        report: SarifReport,
+        arguments: List[str],
+        batch_file: Path,
+        option_args: List[str],
+        results_dir: Path,
+        cwd: Path,
+        child_env: Dict[str, str],
+    ) -> None:
+        """The body of :meth:`_attach_resources`.
+
+        The SARIF cfn-lint writes carries no resource; ``--format json`` does
+        (``Location.Path``). One more cfn-lint run over the same templates with
+        the same options writes it, and :func:`attach_cfn_lint_resources` matches
+        it to the results. The run leaves no trace on the scan's record
+        (``_run_unrecorded``): one that fails attaches nothing, and the scan
+        reports as it would have, because a missing resource only fails closed.
+        Run only when the report has a result to name.
+        """
+        if not any(run.results for run in report.runs or []):
+            return
+        json_file = batch_file.with_name(f"{batch_file.stem}.resources.json")
+        json_file.unlink(missing_ok=True)
+        command = [
+            _COMMAND,
+            "--format",
+            "json",
+            f"--output-file={json_file.as_posix()}",
+            *option_args,
+            "--",
+            *[glob.escape(argument) for argument in arguments],
+        ]
+        try:
+            response = self._run_unrecorded(
+                self._run_subprocess,
+                command,
+                results_dir=results_dir,
+                stdout_preference="none",
+                stderr_preference="none",
+                cwd=cwd,
+                env=child_env,
+                timeout=self._effective_scan_timeout(),
+            )
+            # cfn-lint exits with a bit set per finding class, so a non-zero exit
+            # is expected; the report's presence is what says it ran.
+            if not isinstance(response, dict) or not json_file.is_file():
+                self._warn_side_report_skipped(
+                    f"the second run exited {response.get('returncode')} and wrote no report"
+                    if isinstance(response, dict)
+                    else "the second run gave no response"
+                )
+                return
+            document = json.loads(json_file.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as error:
+            self._plugin_log(
+                f"cfn-lint's JSON report was not read, so no resource is named: {error}",
+                level=logging.DEBUG,
+            )
+            self._warn_side_report_skipped("the report could not be read")
+            return
+        finally:
+            json_file.unlink(missing_ok=True)
+        attach_cfn_lint_resources(report, cfn_lint_resources(document))
 
     def _probe_run_wide_failure(
         self,

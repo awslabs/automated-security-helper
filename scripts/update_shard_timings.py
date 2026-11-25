@@ -284,7 +284,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     existing = shard_plan.load_timings(args.out)
     document = merge(existing, fresh, args.source)
     shard_plan.validate(document)
-    args.out.write_text(json.dumps(document, indent=1) + "\n", encoding="utf-8")
+    # Written the way the repository's pretty-format-json hook writes JSON (sorted keys,
+    # two-space indent), so committing the file does not make the hook rewrite all of it.
+    args.out.write_text(
+        json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
     print(f"wrote {args.out}", file=sys.stderr)
     return 0
 

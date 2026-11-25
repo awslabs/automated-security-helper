@@ -12,7 +12,7 @@ workspace tools' ``config_overrides``. A client can also hand the server a whole
 config file: an upload named as a scan's ``config_path``, the ``.ash.yaml`` of a
 tree it delivered, or a project config inside a delivered workspace. Before this,
 such a file set those fields freely. Now every file of a config's chain that a
-client delivered (``cli/mcp/sandbox.config_is_client_supplied``) is checked
+client delivered (``config.mcp_sandbox.config_is_client_supplied``) is checked
 against the same rules with the same matcher,
 ``runtime_patch.config_document_denials``.
 
@@ -90,6 +90,7 @@ from automated_security_helper.config.ash_config import (
     RuntimeOverridesConfig,
 )
 from automated_security_helper.plugin_manifests import scanner_manifests
+from automated_security_helper.core.enums import SandboxMode
 from automated_security_helper.utils.import_caches import invalidate_import_caches
 from automated_security_helper.utils.log import ASH_LOGGER
 
@@ -126,11 +127,18 @@ RESTRICT_ONLY_PATHS: Tuple[str, ...] = (
 )
 
 #: Exempt from the default ``denied_paths`` when ``HONOR_DELIVERED_SUPPRESSIONS``.
+#: Exclusions ride with suppressions and ignore paths: a delivered entry is
+#: honored and marked ``client_supplied``, which for an exclusion means the
+#: result is kept marked suppressed rather than dropped
+#: (``sarif_utils._matching_exclusion``), so the results still show what the
+#: client chose to hide.
 SUPPRESSION_PATHS: Tuple[str, ...] = (
     "/global_settings/suppressions",
     "/global_settings/suppressions/**",
     "/global_settings/ignore_paths",
     "/global_settings/ignore_paths/**",
+    "/global_settings/exclusions",
+    "/global_settings/exclusions/**",
 )
 
 #: No effect in a client-delivered file: the policy never comes from one, and
@@ -469,6 +477,45 @@ SHIPPED_DEFAULT_DENIED_PATHS: Tuple[FrozenSet[str], ...] = tuple(
         ),
     )
 )
+# The default after `/global_settings/exclusions` joined it
+# (issue #894; an exclusion drops findings outright, so a runtime patch must
+# not install one). Derived rather than written out because it differs from
+# the shipped v3.8.0 list by that one entry; the next default change after a
+# release that ships this one appends its own list the same way.
+SHIPPED_DEFAULT_DENIED_PATHS = SHIPPED_DEFAULT_DENIED_PATHS + (
+    SHIPPED_DEFAULT_DENIED_PATHS[-1] | {"/global_settings/exclusions"},
+)
+#: The default after the sdist harvest's options joined it: they decide whether
+#: ASH fetches the sdists a lockfile pins, which adds the packages those sdists
+#: embed to the SBOM and the findings read from it, so they are the operator's.
+SHIPPED_DEFAULT_DENIED_PATHS = (
+    *SHIPPED_DEFAULT_DENIED_PATHS,
+    SHIPPED_DEFAULT_DENIED_PATHS[-1] | {"/scanners/syft/options/sdist_harvest/**"},
+)
+
+
+class _OptionDefaults(Mapping[Tuple[str, str], Any]):
+    """The ``(scanner, option) -> default`` table, which cannot be changed in place.
+
+    The answer to "is this delivered value the default?" decides whether a
+    client-delivered option is allowed, so a list default must not be reachable
+    as a live object: one ``sort`` or ``append`` on it would change that answer
+    for the whole process. The table keeps its own deep copies and hands out a
+    fresh copy on every read. The values stay lists, not tuples, because the
+    comparison with a delivered value is ``==`` over JSON values.
+    """
+
+    def __init__(self, rows: Mapping[Tuple[str, str], Any]) -> None:
+        self._rows = {key: copy.deepcopy(value) for key, value in rows.items()}
+
+    def __getitem__(self, key: Tuple[str, str]) -> Any:
+        return copy.deepcopy(self._rows[key])
+
+    def __iter__(self):
+        return iter(self._rows)
+
+    def __len__(self) -> int:
+        return len(self._rows)
 
 
 #: Defaults of the denied options of scanners that come from a plugin package
@@ -490,11 +537,13 @@ SHIPPED_DEFAULT_DENIED_PATHS: Tuple[FrozenSet[str], ...] = tuple(
 #: values sit beside the plugin that owns them, and read here by scanner name and
 #: option. A scanner whose plugin loads by default (``default_enabled``) declares
 #: none: the trusted config carries its section.
-PLUGIN_OPTION_DEFAULTS: Mapping[Tuple[str, str], Any] = {
-    (manifest.name, option): default
-    for manifest in scanner_manifests()
-    for option, default in manifest.denied_option_defaults.items()
-}
+PLUGIN_OPTION_DEFAULTS: Mapping[Tuple[str, str], Any] = _OptionDefaults(
+    {
+        (manifest.name, option): default
+        for manifest in scanner_manifests()
+        for option, default in manifest.denied_option_defaults.items()
+    }
+)
 
 
 class ClientConfigRules(BaseModel):
@@ -513,7 +562,7 @@ class ClientConfigRules(BaseModel):
     unreadable: Optional[str] = None
     #: The MCP session the rules were built for, or None. Its ``config/``
     #: directory, and no other session's, holds files the operator set aside for
-    #: it (``cli/mcp/sandbox.client_named_config_is_untrusted``).
+    #: it (``config.mcp_sandbox.client_named_config_is_untrusted``).
     session_id: Optional[str] = None
 
 
@@ -1170,11 +1219,12 @@ def _widenings(
                     )
                 )
         listed, mode = _walk(section, ["mode"])
-        if listed and trusted.mode != "off" and mode != trusted.mode:
+        if listed and trusted.mode != SandboxMode.off and mode != trusted.mode:
             # The server's mode can be a value its config read from the
-            # environment, and this reason is returned to the client.
+            # environment, and this reason is returned to the client. Named by
+            # its value: the repr of a member is not the mode's spelling.
             server_mode = redact_values(
-                repr(trusted.mode), config_environment_values(base)
+                repr(SandboxMode(trusted.mode).value), config_environment_values(base)
             )
             found.append(
                 DocumentDenial(
@@ -1368,13 +1418,18 @@ def _mark_client_supplied(
     from automated_security_helper.config.mcp_sandbox import config_is_client_supplied
     from automated_security_helper.config.runtime_patch import _walk
     from automated_security_helper.models.core import (
+        AshExclusion,
         AshSuppression,
         IgnorePathWithReason,
     )
 
     delivered = is_delivered or config_is_client_supplied
 
-    models = {"suppressions": AshSuppression, "ignore_paths": IgnorePathWithReason}
+    models: Dict[str, Any] = {
+        "suppressions": AshSuppression,
+        "ignore_paths": IgnorePathWithReason,
+        "exclusions": AshExclusion,
+    }
     operators: Dict[str, List[Dict[str, Any]]] = {field: [] for field in models}
     sources: List[Any] = [
         _with_own_patch(document, base)

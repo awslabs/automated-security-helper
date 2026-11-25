@@ -3,7 +3,7 @@ import fnmatch
 import json
 import os
 from pathlib import Path
-from typing import Annotated, Dict, Any
+from typing import Annotated, Dict, Any, Optional
 
 import typer
 from rich.table import Table
@@ -66,7 +66,7 @@ def _flatten_object(
     obj: Any,
     prefix: str,
     result: Dict[str, bool],
-    excluded_result: Dict[str, bool] = None,
+    excluded_result: Optional[Dict[str, bool]] = None,
 ) -> None:
     """
     Recursively flatten an object into a dictionary with path keys.
@@ -239,13 +239,13 @@ def _find_sarif_files(
 
 def analyze_sarif_fields(
     sarif_dir: Annotated[
-        str,
+        Optional[str],
         typer.Option(
             help="Directory containing SARIF files to analyze",
         ),
     ] = None,
     output_dir: Annotated[
-        str,
+        Optional[str],
         typer.Option(
             help="Directory to write output files",
         ),
@@ -268,10 +268,10 @@ def analyze_sarif_fields(
 
     # Set default directories if not provided
     if sarif_dir is None:
-        sarif_dir = Path.cwd().joinpath(".ash", "ash_output")
+        sarif_dir = str(Path.cwd().joinpath(".ash", "ash_output"))
 
     if output_dir is None:
-        output_dir = Path.cwd().joinpath(".ash", "ash_output", "inspect")
+        output_dir = str(Path.cwd().joinpath(".ash", "ash_output", "inspect"))
 
     Path(output_dir).mkdir(parents=True, exist_ok=True)
 
@@ -320,7 +320,7 @@ def analyze_sarif_fields(
     # "reports", every file matched both lists.
     def _relative_parts(file_path: str) -> tuple[str, ...]:
         try:
-            return Path(file_path).relative_to(sarif_dir).parts
+            return Path(file_path).relative_to(str(sarif_dir)).parts
         except ValueError:
             return Path(file_path).parts
 

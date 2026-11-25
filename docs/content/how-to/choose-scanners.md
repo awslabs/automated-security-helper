@@ -1,6 +1,6 @@
 # Choose scanners
 
-ASH runs every enabled scanner it has, and all 16 built-in scanners are enabled by default (on Windows, semgrep and opengrep are off by default). This page shows how to see which scanners a scan will run, turn some off, add alpha scanners, and set a scanner's options. The [scanner reference](../reference/scanners.md) lists each scanner with its tool and options.
+ASH runs every enabled scanner it has, and all 17 built-in scanners are enabled by default (on Windows, semgrep and opengrep are off by default). This page shows how to see which scanners a scan will run, turn some off, add alpha scanners, and set a scanner's options. The [scanner reference](../reference/scanners.md) lists each scanner with its tool and options.
 
 ## See which scanners will run
 
@@ -59,6 +59,8 @@ A scanner that is turned off, not selected, or excluded is recorded SKIPPED and 
 ### Run only Python-based scanners
 
 `--python-only` keeps the scanners that need nothing but Python: bandit, cfn-lint, checkov, detect-secrets, semgrep, and zizmor. ASH applies it before it checks the scanners' tools, so every other scanner is recorded SKIPPED whether or not its tool is installed, and does not affect the exit code. When the run selects no Python-only scanner, as with `--python-only --scanners grype`, no scanner runs and the scan exits 1.
+
+<a id="alpha"></a>
 
 ## Add alpha scanners {#alpha}
 

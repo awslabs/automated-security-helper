@@ -72,6 +72,15 @@ from automated_security_helper.config.environment_record import (
     ENVIRONMENT_VALUE_SHOWN,
     with_environment_values_shown,
 )
+from automated_security_helper.config.patch_ops import (
+    DOCUMENT_CHANGING_OPS,
+    FORBIDDEN_RUNTIME_OPS,
+    INSERT_OR_DELETE_OPS,
+    JSON_PATCH_OPS,
+    NODE_EDITING_OPS,
+    VALUE_WRITING_OPS,
+)
+from automated_security_helper.models.vocab import PluginKind
 from automated_security_helper.utils.error_text import error_text
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
 
@@ -88,7 +97,7 @@ SECTION_FLOOR_ENTRIES: FrozenSet[str] = frozenset(
 
 
 _MAX_PATCH_BYTES = 64 * 1024
-_FORBIDDEN_OPS = {"move", "copy"}
+_FORBIDDEN_OPS = FORBIDDEN_RUNTIME_OPS
 
 #: Where a configuration holds the policy these rules enforce.
 _POLICY_PLACE = ("global_settings", "mcp", "runtime_overrides")
@@ -354,7 +363,7 @@ def _fold_separators(pointer: str) -> str:
     return pointer.replace("-", "_")
 
 
-_PLUGIN_SECTIONS = frozenset({"scanners", "reporters", "converters"})
+_PLUGIN_SECTIONS = frozenset(PluginKind.sections())
 _GLOB_CHARS = frozenset("*?[")
 #: Config keys of the plugins in the packages under
 #: ``automated_security_helper.plugin_modules``, per section. A table rather than
@@ -364,7 +373,7 @@ _GLOB_CHARS = frozenset("*?[")
 #: ``tests/unit/config/test_runtime_patch.py`` imports the packages in a
 #: subprocess and checks this table against them.
 _SHIPPED_PLUGIN_KEYS: Dict[str, FrozenSet[str]] = {
-    "scanners": frozenset(
+    PluginKind.SCANNER.section: frozenset(
         {
             "actionlint",
             "bandit",
@@ -390,7 +399,7 @@ _SHIPPED_PLUGIN_KEYS: Dict[str, FrozenSet[str]] = {
             "zizmor",
         }
     ),
-    "reporters": frozenset(
+    PluginKind.REPORTER.section: frozenset(
         {
             "asff",
             "aws-security-hub",
@@ -414,7 +423,7 @@ _SHIPPED_PLUGIN_KEYS: Dict[str, FrozenSet[str]] = {
             "yaml",
         }
     ),
-    "converters": frozenset({"archive", "jupyter"}),
+    PluginKind.CONVERTER.section: frozenset({"archive", "jupyter"}),
 }
 
 #: Config keys of known plugins, per plugin section.
@@ -446,9 +455,9 @@ def known_plugin_keys(config: AshConfig | None = None) -> PluginKeys:
         section: set(found) for section, found in _SHIPPED_PLUGIN_KEYS.items()
     }
     for section, model in (
-        ("scanners", ScannerConfigSegment),
-        ("reporters", ReporterConfigSegment),
-        ("converters", ConverterConfigSegment),
+        (PluginKind.SCANNER.section, ScannerConfigSegment),
+        (PluginKind.REPORTER.section, ReporterConfigSegment),
+        (PluginKind.CONVERTER.section, ConverterConfigSegment),
     ):
         for name, field in model.model_fields.items():
             keys[section].add(name)
@@ -585,7 +594,7 @@ def _writes_a_moved_exclusion(op: Dict[str, Any]) -> bool:
         moves_all_of,
     )
 
-    if op.get("op") not in {"add", "replace"} or "value" not in op:
+    if op.get("op") not in VALUE_WRITING_OPS or "value" not in op:
         return False
     located = exclusion_option_at(_path_segments(op.get("path", "")))
     if located is None:
@@ -665,7 +674,7 @@ def _check_value_pattern(
     # `test` is read-only — it neither leaks data nor mutates state, so the
     # value-pattern denylist (which exists to block writing forbidden values)
     # does not apply.
-    if op.get("op") not in {"add", "replace"}:
+    if op.get("op") not in VALUE_WRITING_OPS:
         return
     path = op.get("path", "")
     # Distinguish "value key missing" from "value: null". A missing key is
@@ -787,11 +796,7 @@ def _document_writes(document: Any) -> List[Tuple[str, Dict[str, Any], str]]:
     return writes
 
 
-_PLUGIN_TYPES = {
-    "scanners": "scanner",
-    "reporters": "reporter",
-    "converters": "converter",
-}
+_PLUGIN_TYPES = {kind.section: kind for kind in PluginKind}
 
 
 def _walk(value: Any, segments: Sequence[str]) -> Tuple[bool, Any]:
@@ -839,7 +844,7 @@ def _trusted_value(
         )
     found = []
     for plugin in plugins:
-        read = config.get_plugin_config(_PLUGIN_TYPES[section], plugin)  # type: ignore[arg-type]
+        read = config.get_plugin_config(_PLUGIN_TYPES[section], plugin)
         found.append(_walk(_as_json(read) if read is not None else None, segments[2:]))
     if not found or not all(present_ for present_, _ in found):
         return False, None
@@ -1173,7 +1178,7 @@ def _turns_an_off_host_reporter_off(
 
     if config is None:
         return False
-    if op.get("op") not in {"add", "replace"} or "value" not in op:
+    if op.get("op") not in VALUE_WRITING_OPS or "value" not in op:
         return False
     segments = _path_segments(op.get("path", ""))
     if len(segments) not in (2, 3) or segments[0] != "reporters":
@@ -1439,7 +1444,7 @@ def apply_runtime_patch(
 MALFORMED_OP_REFUSAL = "patch apply failed: InvalidJsonPatch"
 
 #: RFC 6902's ops, as it spells them.
-_JSON_PATCH_OPS = frozenset({"add", "remove", "replace", "move", "copy", "test"})
+_JSON_PATCH_OPS = JSON_PATCH_OPS
 
 
 def _refuse_a_malformed_op(patch_ops: List[Dict[str, Any]]) -> None:
@@ -1603,7 +1608,7 @@ class _ReferencesThroughPatch:
         """
         if not self._strict or not self._typed:
             return
-        if op.get("op") not in ("add", "replace", "remove", "move", "copy"):
+        if op.get("op") not in DOCUMENT_CHANGING_OPS:
             return
         pointers = [op.get("path", "")]
         if op.get("op") == "move":
@@ -1708,7 +1713,7 @@ class _ReferencesThroughPatch:
         return tuple(followed)
 
     def follow(self, op: Dict[str, Any], document: Any) -> None:
-        if self.rewrites is None or op.get("op") not in ("add", "remove"):
+        if self.rewrites is None or op.get("op") not in INSERT_OR_DELETE_OPS:
             return
         segments = _path_segments(op.get("path", ""))
         if not segments or not _LIST_INDEX.fullmatch(segments[-1]):
@@ -1817,7 +1822,9 @@ def _mappings_holding_a_key_read_from_the_environment(
     """
     from automated_security_helper.config.config_validator import dumped_place
 
-    written = list(getattr(base, "_written_key_mappings", None) or ())
+    written: List[Tuple[Any, FrozenSet[Any]]] = list(
+        getattr(base, "_written_key_mappings", None) or ()
+    )
     written += [
         (rewrite.path, frozenset())
         for rewrite in getattr(base, "_written_references", None) or []
@@ -1946,7 +1953,7 @@ def _refuse_a_key_read_from_the_environment(
                     raise RuntimePatchDeniedError(
                         None, KEY_READ_FROM_THE_ENVIRONMENT_REFUSAL
                     )
-                if op.get("op") in ("add", "replace", "remove"):
+                if op.get("op") in NODE_EDITING_OPS:
                     # The mapping itself, or what holds it, is replaced: its
                     # keys are now the client's.
                     del known[mapping]

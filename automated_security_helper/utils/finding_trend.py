@@ -450,7 +450,7 @@ def _streaks(
     last = len(runs) - 1
     open_now = spans.filter((pl.col("last") == last) & (pl.col("runs") > 1))
     by_track = {track: (n, first) for track, n, first, _ in open_now.iter_rows()}
-    out = []
+    out: list[dict[str, Any]] = []
     for row in rows[last]:
         found = by_track.get(track_of[last][row.index])
         if found is None:

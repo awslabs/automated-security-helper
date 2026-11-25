@@ -1,0 +1,115 @@
+{
+  "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "SnykCode",
+          "semanticVersion": "1.0.0",
+          "version": "1.0.0",
+          "rules": [
+            {
+              "id": "python/HardcodedSecret",
+              "name": "HardcodedSecret",
+              "shortDescription": {"text": "HardcodedSecret"},
+              "defaultConfiguration": {"level": "error"},
+              "help": {
+                "markdown": "## Details\n\nA credential written into source can be read by anyone with the source.\n\n## Best practices\n\nRead the credential from the environment or a secret store.",
+                "text": ""
+              },
+              "properties": {
+                "tags": ["python", "Security", "InTest"],
+                "categories": ["Security"],
+                "exampleCommitFixes": [],
+                "exampleCommitDescriptions": [],
+                "precision": "very-high",
+                "repoDatasetSize": 0,
+                "cwe": ["CWE-798"]
+              }
+            },
+            {
+              "id": "python/PT",
+              "name": "PT",
+              "shortDescription": {"text": "PathTraversal"},
+              "defaultConfiguration": {"level": "warning"},
+              "help": {
+                "markdown": "## Details\n\nA path built from input can leave the intended directory.",
+                "text": ""
+              },
+              "properties": {
+                "tags": ["python", "Security"],
+                "categories": ["Security"],
+                "exampleCommitFixes": [],
+                "exampleCommitDescriptions": [],
+                "precision": "very-high",
+                "repoDatasetSize": 0,
+                "cwe": ["CWE-23", "CWE-36"]
+              }
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "python/HardcodedSecret",
+          "ruleIndex": 0,
+          "level": "error",
+          "message": {
+            "text": "Avoid hardcoding values that are meant to be secret. Found a hardcoded string used in here.",
+            "markdown": "Avoid hardcoding values that are meant to be secret. Found a hardcoded string used in {0}.",
+            "arguments": ["[here](0)"]
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {"uri": "app.py", "uriBaseId": "%SRCROOT%"},
+                "region": {"startLine": 1, "endLine": 1, "startColumn": 13, "endColumn": 28}
+              }
+            }
+          ],
+          "fingerprints": {
+            "0": "00000000000000000000000000000000000000000000000000000000000000a1",
+            "1": "00000000-0000-4000-8000-0000000000a1"
+          },
+          "properties": {
+            "priorityScore": 600,
+            "priorityScoreFactors": [
+              {"label": true, "type": "multi", "description": "Fixable"}
+            ],
+            "isAutofixable": false
+          }
+        },
+        {
+          "ruleId": "python/PT",
+          "ruleIndex": 1,
+          "level": "warning",
+          "message": {
+            "text": "Unsanitized input from a command line argument flows into open, where it is used as a path.",
+            "markdown": "Unsanitized input from {0} {1} {2} {3} {4}, where it is used as a path.",
+            "arguments": ["a command line argument", "[flows](0)", "into", "open", "[here](1)"]
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {"uri": "tools/reader.py", "uriBaseId": "%SRCROOT%"},
+                "region": {"startLine": 12, "endLine": 12, "startColumn": 10, "endColumn": 24}
+              }
+            }
+          ],
+          "fingerprints": {
+            "0": "00000000000000000000000000000000000000000000000000000000000000b2",
+            "1": "00000000-0000-4000-8000-0000000000b2"
+          },
+          "properties": {
+            "priorityScore": 450,
+            "priorityScoreFactors": [
+              {"label": true, "type": "multi", "description": "Fixable"}
+            ],
+            "isAutofixable": true
+          }
+        }
+      ]
+    }
+  ]
+}

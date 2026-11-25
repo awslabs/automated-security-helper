@@ -73,6 +73,7 @@ from typing import (
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 from typing_extensions import Self
 
+from automated_security_helper.cli.mcp.error_types import McpErrorType
 from automated_security_helper.config.session_paths import (
     SESSION_MARKER,
     hidden_deleting_name,
@@ -425,12 +426,15 @@ def _session_holds_a_binding() -> Callable[[str], bool]:
         session_has_binding,
     )
     from automated_security_helper.cli.mcp.source_delivery import (
+        get_session_image_locator,
         get_session_source_dir,
     )
 
     def holds_binding(session_id: str) -> bool:
-        return get_session_source_dir(session_id) is not None or session_has_binding(
-            session_id
+        return (
+            get_session_source_dir(session_id) is not None
+            or get_session_image_locator(session_id) is not None
+            or session_has_binding(session_id)
         )
 
     return holds_binding
@@ -506,7 +510,7 @@ class MCPSessionRegistry:
                 session's own id is admitted: its workspace is a session's. The
                 id names a directory that ``get_or_create`` creates and
                 ``disconnect`` removes, so it is validated here rather than
-                trusted from the caller; ``cli/mcp/session_paths.py`` holds the
+                trusted from the caller; ``config/session_paths.py`` holds the
                 component rule, shared with the other surfaces that build a
                 per-session path.
 
@@ -1184,13 +1188,6 @@ def _publishes_scan_presence(session_id: Optional[str]) -> TypeGuard[str]:
     return _is_the_stdio_session(session_id) or not is_reserved_session_id(session_id)
 
 
-#: ``error_type`` the MCP tools return for :class:`SessionWorkspaceBusyError`.
-SESSION_WORKSPACE_BUSY = "session_workspace_busy"
-
-#: ``error_type`` the MCP tools return for :class:`SessionChangeInProgressError`.
-SESSION_CHANGE_IN_PROGRESS = "session_change_in_progress"
-
-
 class SessionWorkspaceBusyError(RuntimeError):
     """A write to a session's state was refused: the TTL sweep is removing it.
 
@@ -1198,7 +1195,7 @@ class SessionWorkspaceBusyError(RuntimeError):
     again from the start, an upload from its first chunk.
     """
 
-    error_type = SESSION_WORKSPACE_BUSY
+    error_type = McpErrorType.SESSION_WORKSPACE_BUSY.value
 
 
 class SessionChangeInProgressError(SessionWorkspaceBusyError):
@@ -1210,7 +1207,7 @@ class SessionChangeInProgressError(SessionWorkspaceBusyError):
     removed, and the upload is sent again from its first chunk.
     """
 
-    error_type = SESSION_CHANGE_IN_PROGRESS
+    error_type = McpErrorType.SESSION_CHANGE_IN_PROGRESS.value
 
 
 @contextlib.contextmanager
@@ -1261,10 +1258,6 @@ def writing_session_state(session_id: Optional[str]) -> Iterator[None]:
         # A session that ended while this write ran was left in place by
         # end_session; it is removed now that nothing writes.
         finish_ended_session(session_id or DEFAULT_SESSION_ID)
-
-
-#: ``error_type`` of a scan refused because its session is at the per-session limit.
-SESSION_SCAN_LIMIT = "session_scan_limit"
 
 
 def per_session_scan_limit(session_id: Optional[str]) -> Optional[int]:
@@ -1345,7 +1338,7 @@ def session_scan_limit_refusal(
     return {
         "success": False,
         "operation": operation,
-        "error_type": SESSION_SCAN_LIMIT,
+        "error_type": McpErrorType.SESSION_SCAN_LIMIT.value,
         "error": raw_controls_on_one_line(error),
     }
 
@@ -2641,9 +2634,6 @@ __all__ = [
     "MCPSessionRegistry",
     "PRESENCE_LOCK_NAME",
     "PresenceLockError",
-    "SESSION_SCAN_LIMIT",
-    "SESSION_CHANGE_IN_PROGRESS",
-    "SESSION_WORKSPACE_BUSY",
     "SessionChangeInProgressError",
     "ScanCount",
     "SessionWorkspaceBusyError",

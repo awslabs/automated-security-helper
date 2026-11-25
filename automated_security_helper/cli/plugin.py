@@ -8,8 +8,9 @@ CLI subcommand for inspecting and analyzing ASH plugins.
 import json
 import logging
 from pathlib import Path
-from typing import Annotated, List
+from typing import Annotated, List, Optional
 import typer
+from automated_security_helper.core.enums import AshExitCode
 from automated_security_helper.utils.ui_theme import rich_theme
 from rich.table import Table
 
@@ -47,6 +48,7 @@ from automated_security_helper.utils.console import (
     secho,
 )
 from automated_security_helper.utils.error_text import error_text, text_without_values
+from automated_security_helper.models.vocab import PluginKind
 from automated_security_helper.utils.log import (
     escape_markup,
     get_logger,
@@ -56,10 +58,9 @@ from automated_security_helper.utils.terminal_text import shown_on_one_line
 from automated_security_helper.utils.uv_tool_runner import checking_only
 
 #: The table titles, by the plugin type the registry and a scan use.
-_PLUGIN_TYPES = (
-    ("scanner", "scanners"),
-    ("converter", "converters"),
-    ("reporter", "reporters"),
+_PLUGIN_TYPES = tuple(
+    (kind, kind.section)
+    for kind in (PluginKind.SCANNER, PluginKind.CONVERTER, PluginKind.REPORTER)
 )
 
 
@@ -117,7 +118,7 @@ def list_plugins(
         ),
     ] = [],
     config: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--config",
             "-c",
@@ -299,7 +300,7 @@ def list_plugins(
                 list_scanner_inventory,
             )
 
-            scanner_classes = list(plugin_types["scanners"])
+            scanner_classes = list(plugin_types[PluginKind.SCANNER.section])
             try:
                 inventory = list_scanner_inventory(
                     scanner_classes_provider=lambda: scanner_classes
@@ -355,7 +356,7 @@ def list_plugins(
             err=True,
             fg=typer.colors.RED if color else None,
         )
-        raise typer.Exit(3)
+        raise typer.Exit(AshExitCode.INVALID_CONFIG)
     except PluginModuleError as e:
         # In the listing's own closing words: the default closing speaks of a
         # scan this command does not make and of option spellings it does not
@@ -374,7 +375,7 @@ def list_plugins(
             err=True,
             fg=typer.colors.RED if color else None,
         )
-        raise typer.Exit(3)
+        raise typer.Exit(AshExitCode.INVALID_CONFIG)
     except ASHConfigValidationError as e:
         # Exit 3, the code every ASH command uses for an unusable configuration:
         # listing the plugins of the default config instead would describe a
@@ -392,13 +393,13 @@ def list_plugins(
                 err=True,
                 fg=typer.colors.RED if color else None,
             )
-        raise typer.Exit(3)
+        raise typer.Exit(AshExitCode.INVALID_CONFIG)
     except Exception as e:
         secho(
             f"Error: {error_text(e)}",
             err=True,
         )
-        raise typer.Exit(1)
+        raise typer.Exit(AshExitCode.SCAN_ERRORS)
 
 
 def _print_tables(
@@ -414,7 +415,7 @@ def _print_tables(
 ) -> None:
     """Print one table per plugin type, a row per plugin, as list_plugins lays them out."""
     for plugin_type, plugin_list in plugin_types.items():
-        show_version_cols = show_versions and plugin_type == "scanners"
+        show_version_cols = show_versions and plugin_type == PluginKind.SCANNER.section
 
         columns = ["Name", "Enabled", "Class", "Module"]
         if show_version_cols:
@@ -440,8 +441,9 @@ def _print_tables(
 
                 # Build the plugin from its section, as a scan builds it
                 try:
-                    kind = plugin_type.rstrip("s")  # Remove 's' from end
-                    if kind == "reporter":
+                    # ``plugin_type`` is the section key here (the table title).
+                    kind = PluginKind.from_section(plugin_type)
+                    if kind is PluginKind.REPORTER:
                         # The section a scan builds the reporter from: for a
                         # reporter that sends findings off the host, the
                         # operator's when the scanned repository's file wrote
@@ -459,7 +461,7 @@ def _print_tables(
                     # (base/reporter_plugin.off_host_reporter_refused); the
                     # report phase builds a refused one turned off, so the
                     # listing shows it turned off.
-                    refused = kind == "reporter" and off_host_reporter_refused(
+                    refused = kind is PluginKind.REPORTER and off_host_reporter_refused(
                         plugin_class, plugin_config
                     )
                     if refused and isinstance(plugin_config, dict):
@@ -581,7 +583,12 @@ def _print_tables(
 
 def _default_transcripts_root() -> Path:
     """The committed fixture corpus of a source checkout (absent from a wheel)."""
-    return Path(__file__).resolve().parents[2] / "tests" / "test_data" / "scanners"
+    return (
+        Path(__file__).resolve().parents[2]
+        / "tests"
+        / "test_data"
+        / PluginKind.SCANNER.section
+    )
 
 
 def _live_results_by_scanner(
@@ -660,7 +667,7 @@ but some row was not run, 2 for a usage error (an unknown plugin, no transcript 
 )
 def verify_plugins(
     names: Annotated[
-        List[str],
+        Optional[List[str]],
         typer.Argument(
             help="Scanner names to verify (as in `ash plugin list`). Omit with --all."
         ),
@@ -670,7 +677,7 @@ def verify_plugins(
         typer.Option("--all", help="Verify every scanner with a manifest."),
     ] = False,
     transcripts_root: Annotated[
-        Path,
+        Optional[Path],
         typer.Option(
             "--transcripts-root",
             help="The directory holding the committed fixture directories "
@@ -751,7 +758,7 @@ def verify_plugins(
                 )
             )
         except PluginLoadError as error:
-            secho(f"Error: {shown_on_one_line(str(error))}", err=True)
+            secho(f"Error: {error}", err=True)
             raise typer.Exit(2)
     if as_json:
         echo_raw(json.dumps([r.as_dict() for r in reports], indent=2))
@@ -761,7 +768,7 @@ def verify_plugins(
             for row in report.rows:
                 echo(f"  {row.number}. [{row.status.value}] {row.name}")
                 for detail in row.details:
-                    echo(f"       - {shown_on_one_line(detail)}")
+                    echo(f"       - {detail}")
     codes = {r.exit_code for r in reports}
     raise typer.Exit(
         EXIT_FAIL if EXIT_FAIL in codes else EXIT_INCOMPLETE if codes - {0} else 0

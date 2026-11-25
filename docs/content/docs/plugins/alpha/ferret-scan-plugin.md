@@ -117,7 +117,7 @@ The ferret-scan plugin is an alpha plugin that must be explicitly enabled. There
 
 #### Option 1: Add to ASH Configuration File (Recommended)
 
-Include the plugin module in your ASH config file (`.ashrc.yaml` in a new project):
+Include the plugin module in your ASH config file (`.ash.yaml` at the project root):
 
 ```yaml
 ash_plugin_modules:
@@ -153,7 +153,7 @@ You should see `ferret-scan` in the list of scanners.
 
 ### Basic Configuration
 
-Add scanner configuration to your ASH config file (`.ashrc.yaml` in a new project):
+Add scanner configuration to your ASH config file (`.ash.yaml` at the project root):
 
 ```yaml
 scanners:
@@ -589,7 +589,7 @@ Results are written to:
 which ferret-scan
 
 # Install if missing
-pip install ferret-scan
+pip install 'ferret-scan>=2.4.5,<2.7.0'
 ```
 
 **Unsupported option error**:
@@ -667,7 +667,7 @@ jobs:
           python-version: '3.11'
       - name: Install dependencies
         run: |
-          pip install ferret-scan "uv>=0.4"
+          pip install 'ferret-scan>=2.4.5,<2.7.0' "uv>=0.4"
       - name: Run ASH with Ferret Scan
         # Workflow commands are stopped around the scan, as the reusable scan
         # workflow does: tool output is untrusted, and a `::`-line in it would
@@ -702,7 +702,7 @@ ferret-security-scan:
   stage: test
   image: python:3.11
   before_script:
-    - pip install ferret-scan uv
+    - pip install 'ferret-scan>=2.4.5,<2.7.0' uv
   script:
     - |
       uv run ash --scanners ferret-scan \

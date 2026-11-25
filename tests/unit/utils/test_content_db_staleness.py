@@ -386,7 +386,7 @@ class TestEachDatabaseType:
     ):
         scanner = CASES[name](tmp_path, _over(name))
         sarif = _sarif(scanner.config.name)
-        staleness.assess_scanner(scanner, sarif, cdb.STALENESS_WARN)
+        staleness.assess_scanner(scanner, sarif, cdb.StalenessPolicy.WARN)
         model = _model(sarif)
         assert _exit_code(tmp_path, model) == 0
 
@@ -430,7 +430,7 @@ class TestMeasurement:
         record = staleness.measure(
             cdb.get("grype-db"),
             staleness.ProbeContext(env=dict(os.environ), executable=str(exe)),
-            cdb.STALENESS_FAIL,
+            cdb.StalenessPolicy.FAIL,
         )
         assert record.error is None
         assert record.built == built.replace(microsecond=0)
@@ -443,7 +443,7 @@ class TestMeasurement:
         record = staleness.measure(
             cdb.get("trivy-db"),
             staleness.ProbeContext(env=dict(os.environ), executable=str(exe)),
-            cdb.STALENESS_FAIL,
+            cdb.StalenessPolicy.FAIL,
         )
         assert record.built is None and record.stale and record.enforced
         assert record.absent
@@ -466,7 +466,7 @@ class TestMeasurement:
         record = staleness.measure(
             cdb.get("grype-db"),
             staleness.ProbeContext(env=dict(os.environ), executable=str(exe)),
-            cdb.STALENESS_WARN,
+            cdb.StalenessPolicy.WARN,
         )
         assert record.absent and record.stale
         assert "does not exist" in record.message()
@@ -491,7 +491,7 @@ class TestMeasurement:
         record = staleness.measure(
             cdb.get("grype-db"),
             staleness.ProbeContext(env=dict(os.environ), executable=str(exe)),
-            cdb.STALENESS_WARN,
+            cdb.StalenessPolicy.WARN,
         )
         assert record.stale and not record.absent
         assert "absent" not in record.to_dict()
@@ -501,7 +501,7 @@ class TestMeasurement:
         record = staleness.measure(
             cdb.get("grype-db"),
             staleness.ProbeContext(env={}, executable=None),
-            cdb.STALENESS_FAIL,
+            cdb.StalenessPolicy.FAIL,
         )
         assert record.stale and "not found" in (record.error or "")
 
@@ -524,7 +524,7 @@ class TestMeasurement:
         record = staleness.measure(
             cdb.get("grype-db"),
             staleness.ProbeContext(env=dict(os.environ), executable=str(exe)),
-            cdb.STALENESS_WARN,
+            cdb.StalenessPolicy.WARN,
         )
         assert record.absent, record.error
 
@@ -534,7 +534,7 @@ class TestMeasurement:
     )
     def test_a_ruleset_with_no_directory_configured_is_absent(self, name):
         record = staleness.measure(
-            cdb.get(name), staleness.ProbeContext(env={}), cdb.STALENESS_WARN
+            cdb.get(name), staleness.ProbeContext(env={}), cdb.StalenessPolicy.WARN
         )
         assert record.absent and "no offline rules cache directory" in record.error
 
@@ -549,7 +549,7 @@ class TestMeasurement:
         record = staleness.measure(
             cdb.get(name),
             staleness.ProbeContext(env={}, cache_dir=str(cache)),
-            cdb.STALENESS_WARN,
+            cdb.StalenessPolicy.WARN,
         )
         assert record.absent and "no rules files found" in record.error
 
@@ -561,7 +561,7 @@ class TestMeasurement:
         record = staleness.measure(
             cdb.get("semgrep-offline-rules"),
             staleness.ProbeContext(env={}, cache_dir=str(cache)),
-            cdb.STALENESS_FAIL,
+            cdb.StalenessPolicy.FAIL,
         )
         assert record.stale
         assert cdb.RULESET_FETCHED_AT_FILE in record.measured_by
@@ -573,7 +573,7 @@ class TestMeasurement:
         record = staleness.measure(
             cdb.get("opengrep-offline-rules"),
             staleness.ProbeContext(env={}, cache_dir=str(cache)),
-            cdb.STALENESS_FAIL,
+            cdb.StalenessPolicy.FAIL,
         )
         assert record.stale
         assert "mtime" in record.measured_by and "weaker" in record.measured_by
@@ -586,7 +586,9 @@ class TestMeasurement:
 
         sarif = _sarif("grype")
         records = staleness.assess_scanner(
-            Broken("grype", staleness.ProbeContext(env={})), sarif, cdb.STALENESS_FAIL
+            Broken("grype", staleness.ProbeContext(env={})),
+            sarif,
+            cdb.StalenessPolicy.FAIL,
         )
         assert len(records) == 1 and records[0].enforced
         assert "boom" in (records[0].error or "")
@@ -597,7 +599,7 @@ class TestMeasurement:
         """merge_sarif_report drops a runless report, so the record must create a run."""
         scanner = _grype_case(tmp_path, timedelta(days=10))
         sarif = SarifReport(version="2.1.0", runs=[])
-        staleness.assess_scanner(scanner, sarif, cdb.STALENESS_FAIL)
+        staleness.assess_scanner(scanner, sarif, cdb.StalenessPolicy.FAIL)
         assert staleness.stale_content_databases(_aggregate(sarif), enforced_only=True)
 
 
@@ -614,7 +616,7 @@ class TestTheRecordTravelsWithTheResults:
         first.runs[0].invocations = [Invocation(executionSuccessful=True)]
         second = _sarif("grype")
         staleness.assess_scanner(
-            _grype_case(tmp_path, timedelta(days=10)), second, cdb.STALENESS_FAIL
+            _grype_case(tmp_path, timedelta(days=10)), second, cdb.StalenessPolicy.FAIL
         )
         model = _aggregate(first, second)
         stale = staleness.stale_content_databases(model, enforced_only=True)
@@ -625,7 +627,7 @@ class TestTheRecordTravelsWithTheResults:
         """Container mode's host reads ash_aggregated_results.json, not the live model."""
         sarif = _sarif("grype")
         staleness.assess_scanner(
-            _grype_case(tmp_path, timedelta(days=10)), sarif, cdb.STALENESS_FAIL
+            _grype_case(tmp_path, timedelta(days=10)), sarif, cdb.StalenessPolicy.FAIL
         )
         reloaded = AshAggregatedResults.model_validate_json(
             _model(sarif).model_dump_json()
@@ -635,7 +637,7 @@ class TestTheRecordTravelsWithTheResults:
     def test_it_is_not_mistaken_for_an_unevaluated_rule(self, tmp_path):
         sarif = _sarif("grype")
         staleness.assess_scanner(
-            _grype_case(tmp_path, timedelta(days=10)), sarif, cdb.STALENESS_FAIL
+            _grype_case(tmp_path, timedelta(days=10)), sarif, cdb.StalenessPolicy.FAIL
         )
         assert unevaluated_rules(_model(sarif)) == []
 
@@ -645,7 +647,10 @@ class TestTheRecordTravelsWithTheResults:
         from automated_security_helper.core.unified_metrics import ScannerMetrics
 
         metric = ScannerMetrics(scanner_name="grype", status="PASSED")
-        for policy, listed in ((cdb.STALENESS_FAIL, True), (cdb.STALENESS_WARN, False)):
+        for policy, listed in (
+            (cdb.StalenessPolicy.FAIL, True),
+            (cdb.StalenessPolicy.WARN, False),
+        ):
             sarif = _sarif("grype")
             staleness.assess_scanner(
                 _grype_case(tmp_path, timedelta(days=10)), sarif, policy
@@ -740,7 +745,7 @@ class TestOfflineGrypeTenDaysOld:
     def test_with_the_opt_out_it_passes_and_says_so(
         self, tmp_path, offline_grype, test_plugin_context
     ):
-        scanner = offline_grype(timedelta(days=10), cdb.STALENESS_WARN)
+        scanner = offline_grype(timedelta(days=10), cdb.StalenessPolicy.WARN)
         model = _run_through_executor(scanner, test_plugin_context)
         assert _exit_code(tmp_path, model) == 0
         assert "### Stale content databases" in _reports(model)["markdown"]
@@ -765,7 +770,9 @@ class TestTheFlag:
 
     def test_the_config_field_accepts_exactly_the_declared_policies(self):
         annotation = AshConfig.model_fields["content_db_staleness"].annotation
-        assert set(typing.get_args(annotation)) == set(cdb.STALENESS_POLICIES)
+        assert set(typing.get_args(annotation)) == {
+            m.value for m in cdb.StalenessPolicy
+        }
 
     def test_config_warn_is_honoured(self):
         config = AshConfig(project_name="x", content_db_staleness="warn")
@@ -883,10 +890,10 @@ class TestPerDatabaseOverrides:
         grype = _grype_case(tmp_path, _over("grype-db"))
         trivy_sarif, grype_sarif = _sarif("trivy-repo"), _sarif("grype")
         (trivy_record,) = staleness.assess_scanner(
-            trivy, trivy_sarif, cdb.STALENESS_FAIL, overrides=overrides
+            trivy, trivy_sarif, cdb.StalenessPolicy.FAIL, overrides=overrides
         )
         (grype_record,) = staleness.assess_scanner(
-            grype, grype_sarif, cdb.STALENESS_FAIL, overrides=overrides
+            grype, grype_sarif, cdb.StalenessPolicy.FAIL, overrides=overrides
         )
 
         assert trivy_record.stale and not trivy_record.enforced
@@ -920,7 +927,7 @@ class TestPerDatabaseOverrides:
         sarif = _sarif(scanner.config.name)
         with caplog.at_level("WARNING"):
             (record,) = staleness.assess_scanner(
-                scanner, sarif, cdb.STALENESS_FAIL, overrides=overrides
+                scanner, sarif, cdb.StalenessPolicy.FAIL, overrides=overrides
             )
         assert record.enforced and record.policy_source is None
         assert _exit_code(tmp_path, _model(sarif)) == 1
@@ -943,7 +950,7 @@ class TestPerDatabaseOverrides:
         scanner = _trivy_case(tmp_path, _over("trivy-db"))
         sarif = _sarif(scanner.config.name)
         (record,) = staleness.assess_scanner(
-            scanner, sarif, cdb.STALENESS_WARN, overrides=overrides
+            scanner, sarif, cdb.StalenessPolicy.WARN, overrides=overrides
         )
         assert record.enforced
         assert _exit_code(tmp_path, _model(sarif)) == 1
@@ -1047,7 +1054,9 @@ class TestTheOfflineImageDefault:
 
     @pytest.mark.unit
     def test_it_names_exactly_trivy_db(self):
-        assert dict(cdb.OFFLINE_IMAGE_POLICIES) == {"trivy-db": cdb.STALENESS_WARN}
+        assert dict(cdb.OFFLINE_IMAGE_POLICIES) == {
+            "trivy-db": cdb.StalenessPolicy.WARN
+        }
         assert cdb.OFFLINE_IMAGE_ENV == "ASH_OFFLINE_AT_BUILD_TIME"
 
     @pytest.mark.integration
@@ -1055,13 +1064,13 @@ class TestTheOfflineImageDefault:
         scanner = _trivy_case(tmp_path, _over("trivy-db"))
         sarif = _sarif(scanner.config.name)
         (record,) = staleness.assess_scanner(
-            scanner, sarif, cdb.STALENESS_FAIL, offline_image=True
+            scanner, sarif, cdb.StalenessPolicy.FAIL, offline_image=True
         )
         assert record.stale and not record.enforced
-        assert record.policy == cdb.STALENESS_WARN
+        assert record.policy == cdb.StalenessPolicy.WARN
         assert "OFFLINE=YES" in (record.policy_source or "")
         assert "OFFLINE=YES" in record.message()
-        assert "ash build-image --offline" in record.message()
+        assert "ash container build --offline" in record.message()
 
         model = _model(sarif)
         assert _exit_code(tmp_path, model) == 0
@@ -1085,7 +1094,7 @@ class TestTheOfflineImageDefault:
         scanner = CASES[name](tmp_path, _over(name))
         sarif = _sarif(scanner.config.name)
         (record,) = staleness.assess_scanner(
-            scanner, sarif, cdb.STALENESS_FAIL, offline_image=True
+            scanner, sarif, cdb.StalenessPolicy.FAIL, offline_image=True
         )
         assert record.enforced and record.policy_source is None
         assert _exit_code(tmp_path, _model(sarif)) == 1
@@ -1094,7 +1103,7 @@ class TestTheOfflineImageDefault:
     def test_outside_an_offline_image_trivy_db_still_fails(self, tmp_path):
         scanner = _trivy_case(tmp_path, _over("trivy-db"))
         sarif = _sarif(scanner.config.name)
-        (record,) = staleness.assess_scanner(scanner, sarif, cdb.STALENESS_FAIL)
+        (record,) = staleness.assess_scanner(scanner, sarif, cdb.StalenessPolicy.FAIL)
         assert record.enforced and record.policy_source is None
         assert _exit_code(tmp_path, _model(sarif)) == 1
 
@@ -1103,7 +1112,7 @@ class TestTheOfflineImageDefault:
         scanner = _trivy_case(tmp_path, _under("trivy-db"))
         sarif = _sarif(scanner.config.name)
         (record,) = staleness.assess_scanner(
-            scanner, sarif, cdb.STALENESS_FAIL, offline_image=True
+            scanner, sarif, cdb.StalenessPolicy.FAIL, offline_image=True
         )
         assert not record.stale
         assert staleness.stale_content_databases(_model(sarif)) == []
@@ -1116,7 +1125,7 @@ class TestTheOfflineImageDefault:
         (record,) = staleness.assess_scanner(
             scanner,
             sarif,
-            cdb.STALENESS_FAIL,
+            cdb.StalenessPolicy.FAIL,
             overrides=overrides,
             offline_image=True,
         )
@@ -1134,7 +1143,7 @@ class TestTheOfflineImageDefault:
             (record,) = staleness.assess_scanner(
                 scanner,
                 sarif,
-                cdb.STALENESS_FAIL,
+                cdb.StalenessPolicy.FAIL,
                 overrides=overrides,
                 offline_image=True,
             )
@@ -1148,9 +1157,11 @@ class TestTheOfflineImageDefault:
         scanner = _trivy_case(tmp_path, _over("trivy-db"))
         sarif = _sarif(scanner.config.name)
         (record,) = staleness.assess_scanner(
-            scanner, sarif, cdb.STALENESS_WARN, offline_image=True
+            scanner, sarif, cdb.StalenessPolicy.WARN, offline_image=True
         )
-        assert record.policy == cdb.STALENESS_WARN and record.policy_source is None
+        assert (
+            record.policy == cdb.StalenessPolicy.WARN and record.policy_source is None
+        )
 
     @pytest.mark.unit
     @pytest.mark.parametrize(
@@ -1402,7 +1413,7 @@ class TestAStaleDatabaseIsOneConditionWithTheGateOnOrOff:
     """
 
     @staticmethod
-    def _stale_model(tmp_path, policy=cdb.STALENESS_FAIL):
+    def _stale_model(tmp_path, policy=cdb.StalenessPolicy.FAIL):
         sarif = _sarif("grype")
         staleness.assess_scanner(
             _grype_case(tmp_path, timedelta(days=10)), sarif, policy
@@ -1462,7 +1473,7 @@ class TestAStaleDatabaseIsOneConditionWithTheGateOnOrOff:
             scan_incompleteness,
         )
 
-        model = self._stale_model(tmp_path, cdb.STALENESS_WARN)
+        model = self._stale_model(tmp_path, cdb.StalenessPolicy.WARN)
         assert _exit_code(tmp_path, model, fail_on_incomplete_scanners=gate) == 0
         with patch(f"{_MODULE}.get_unified_scanner_metrics", return_value=[]):
             assert not scan_incompleteness(model, gate=gate)
@@ -1504,7 +1515,7 @@ class TestEveryScannerThatReadAStaleDatabaseIsNamed:
     when both read a stale one, only one scanner was named in every report."""
 
     @staticmethod
-    def _both(tmp_path, trivy_age, repo_age, policy=cdb.STALENESS_FAIL):
+    def _both(tmp_path, trivy_age, repo_age, policy=cdb.StalenessPolicy.FAIL):
         reports = []
         for name, age in (("trivy", trivy_age), ("trivy-repo", repo_age)):
             (tmp_path / name).mkdir()
@@ -1572,7 +1583,7 @@ class TestEveryScannerThatReadAStaleDatabaseIsNamed:
                 staleness.ProbeContext(env=dict(os.environ), executable=str(exe)),
             )
             sarif = _sarif("trivy")
-            staleness.assess_scanner(scanner, sarif, cdb.STALENESS_FAIL)
+            staleness.assess_scanner(scanner, sarif, cdb.StalenessPolicy.FAIL)
             reports.append(sarif)
         model = _aggregate(*reports)
         (record,) = staleness.content_db_records(model)
@@ -1827,7 +1838,7 @@ class TestTheProbeReadsNothingTheRepositoryWrote:
         record = staleness.measure(
             cdb.get("trivy-db"),
             scanner.content_database_probe_context(),
-            cdb.STALENESS_FAIL,
+            cdb.StalenessPolicy.FAIL,
         )
         self._assert_fresh(record, fresh)
 
@@ -1855,7 +1866,7 @@ class TestTheProbeReadsNothingTheRepositoryWrote:
         record = staleness.measure(
             cdb.get("grype-db"),
             scanner.content_database_probe_context(),
-            cdb.STALENESS_FAIL,
+            cdb.StalenessPolicy.FAIL,
         )
         self._assert_fresh(record, fresh)
 

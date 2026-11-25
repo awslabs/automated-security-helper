@@ -291,12 +291,57 @@ def _prep_cfn_guard(
 def _prep_cfn_lint(
     transcript: ToolTranscript, base: Path, file: Path
 ) -> Iterator[tuple[SarifReport, list[Result]]]:
-    cls = resolve_ref(f"{_BUILTIN_SCANNERS}.cfn_lint_scanner:CfnLintScanner")
+    module = f"{_BUILTIN_SCANNERS}.cfn_lint_scanner"
+    cls = resolve_ref(f"{module}:CfnLintScanner")
     report = _load_sarif(file)
+    # The resource comes from the JSON run beside the SARIF, when one is
+    # committed. The scanner attaches it as each batch is read, before
+    # normalize_report relocates the results, so the keys still match.
+    companion = file.with_suffix(".json")
+    if companion.is_file():
+        resolve_ref(f"{module}:attach_cfn_lint_resources")(
+            report,
+            resolve_ref(f"{module}:cfn_lint_resources")(
+                json.loads(companion.read_text(encoding="utf-8"))
+            ),
+        )
     # normalize_report reads no instance state: it locates results, maps
     # severities and sorts rules in place.
     cls.normalize_report(None, report)
     yield report, [r for run in report.runs or [] for r in run.results or []]
+
+
+def _prep_cfn_nag(
+    transcript: ToolTranscript, base: Path, file: Path
+) -> Iterator[tuple[SarifReport, list[Result]]]:
+    report = _load_sarif(file)
+    resolve_ref(f"{_BUILTIN_SCANNERS}.cfn_nag_scanner:attach_cfn_nag_resources")(report)
+    yield report, [r for run in report.runs or [] for r in run.results or []]
+
+
+def _report_with_rules(tool_name: str, rules: Sequence[Any]) -> SarifReport:
+    """A report whose one run declares *rules* on its driver and holds no results:
+    the results are yielded beside it, and the rule-level facets (help link, tags)
+    are read from the run."""
+    return SarifReport.model_validate(
+        {
+            "version": "2.1.0",
+            "runs": [
+                {
+                    "tool": {
+                        "driver": {
+                            "name": tool_name,
+                            "rules": [
+                                rule.model_dump(mode="json", exclude_none=True)
+                                for rule in rules
+                            ],
+                        }
+                    },
+                    "results": [],
+                }
+            ],
+        }
+    )
 
 
 def _prep_guarddog(
@@ -334,15 +379,19 @@ def _prep_guarddog(
                 manifest_uri=manifest.name,
                 manifest_line=manifest_line_for(manifest_text, entry["dependency"]),
             )
-            report = SarifReport.model_validate({"version": "2.1.0", "runs": []})
-            yield report, list(converted.results)
+            yield (
+                _report_with_rules("guarddog", list(converted.rules.values())),
+                list(converted.results),
+            )
         return
     document = json.loads(file.read_text(encoding="utf-8"))
     converted = convert(
         document, uri_prefix="", ecosystem=ecosystem, include_capabilities=True
     )
-    report = SarifReport.model_validate({"version": "2.1.0", "runs": []})
-    yield report, list(converted.results)
+    yield (
+        _report_with_rules("guarddog", list(converted.rules.values())),
+        list(converted.results),
+    )
 
 
 def _prep_actionlint(
@@ -434,6 +483,17 @@ def _prep_trivy(
     with tempfile.TemporaryDirectory(prefix="conformance-trivy-") as scratch:
         target = _materialized(base / "fixture_repo", Path(scratch))
         report = cls._attach_package_identity(_load_sarif(file), target)
+        # A misconfiguration's resource comes from the JSON capture beside its
+        # SARIF, when there is one.
+        companion = file.with_suffix(".json")
+        if companion.is_file():
+            base_module = f"{_BUILTIN_SCANNERS}._trivy_scanner_base"
+            resolve_ref(f"{base_module}:attach_trivy_resources")(
+                report,
+                resolve_ref(f"{base_module}:trivy_misconfig_resources")(
+                    json.loads(companion.read_text(encoding="utf-8"))
+                ),
+            )
         yield report, [r for run in report.runs or [] for r in run.results or []]
 
 
@@ -505,8 +565,77 @@ def _prep_cdk_nag(
         template_path,
         template_text.splitlines(),
     )
-    report = SarifReport.model_validate({"version": "2.1.0", "runs": []})
-    yield report, [r for results in per_pack.values() for r in results]
+    nag_results = [r for results in per_pack.values() for r in results]
+    # The run the scanner writes carries one descriptor per rule, which is where
+    # the rule's help link lives; build it the way scan() does.
+    descriptor_for = resolve_ref(
+        f"{_BUILTIN_SCANNERS}.cdk_nag_scanner:_reporting_descriptor_for"
+    )
+    representatives: dict[Any, Result] = {}
+    for result in nag_results:
+        representatives.setdefault(result.ruleId, result)
+    rules = [
+        descriptor_for(rep, tool_name="cdk-nag", tool_type="IAC")
+        for rep in representatives.values()
+    ]
+    yield _report_with_rules("ash-cdk-nag-wrapper", rules), nag_results
+
+
+def _prep_ferret_scan(
+    transcript: ToolTranscript, base: Path, file: Path
+) -> Iterator[tuple[SarifReport, list[Result]]]:
+    """The recorded ``ferret-scan --format sarif`` output through the adapter's own
+    base-relative URI resolution, the step it applies before the report is built."""
+    resolve_uri_base_ids = resolve_ref(
+        "automated_security_helper.plugin_modules.ash_ferret_plugins."
+        "ferret_scanner:_resolve_sarif_uri_base_ids"
+    )
+    document = json.loads(file.read_text(encoding="utf-8"))
+    resolve_uri_base_ids(document)
+    report = SarifReport.model_validate(document)
+    yield report, [r for run in report.runs or [] for r in run.results or []]
+
+
+def _prep_grype(
+    transcript: ToolTranscript, base: Path, file: Path
+) -> Iterator[tuple[SarifReport, list[Result]]]:
+    """The recorded ``grype -o sarif`` output through the adapter's own
+    post-processing (URIs, package identity, fix state). The scan target is an empty
+    directory: the recording was taken over an SBOM, so no lockfile sits beside it
+    for the package-path lookup."""
+    import tempfile
+
+    from automated_security_helper.base.plugin_context import PluginContext
+    from automated_security_helper.config.ash_config import AshConfig
+
+    cls = resolve_ref(f"{_BUILTIN_SCANNERS}.grype_scanner:GrypeScanner")
+    # The scanner's model carries forward references to AshConfig; resolve them the
+    # way the npm-audit prep does.
+    AshConfig.model_rebuild()
+    with tempfile.TemporaryDirectory(prefix="conformance-grype-") as scratch:
+        target = Path(scratch) / "src"
+        target.mkdir()
+        scanner = cls(
+            context=PluginContext(
+                source_dir=target, output_dir=Path(scratch) / "output"
+            )
+        )
+        report = scanner._post_process_sarif(_load_sarif(file), [], target)
+        yield report, [r for run in report.runs or [] for r in run.results or []]
+
+
+def _prep_snyk_code(
+    transcript: ToolTranscript, base: Path, file: Path
+) -> Iterator[tuple[SarifReport, list[Result]]]:
+    """The SARIF through the adapter's own rule-CWE normalization, the one step the
+    scanner applies before it builds the report."""
+    normalize = resolve_ref(
+        "automated_security_helper.plugin_modules.ash_snyk_plugins."
+        "snyk_code_scanner:normalize_rule_cwe_into_tags"
+    )
+    document = normalize(json.loads(file.read_text(encoding="utf-8")))
+    report = SarifReport.model_validate(document)
+    yield report, [r for run in report.runs or [] for r in run.results or []]
 
 
 #: Registered adapter preps: native or adapter-normalized bytes through the adapter's
@@ -518,11 +647,15 @@ PREPS: Mapping[str, Prep] = {
     "cdk-nag": _prep_cdk_nag,
     "cfn-guard": _prep_cfn_guard,
     "cfn-lint": _prep_cfn_lint,
+    "cfn-nag": _prep_cfn_nag,
     "checkov": _prep_checkov,
     "detect-secrets": _prep_detect_secrets,
+    "ferret-scan": _prep_ferret_scan,
     "gitleaks": _prep_gitleaks,
+    "grype": _prep_grype,
     "guarddog": _prep_guarddog,
     "npm-audit": _prep_npm_audit,
+    "snyk-code": _prep_snyk_code,
     "trivy": _prep_trivy,
 }
 

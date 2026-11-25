@@ -191,11 +191,8 @@ from pydantic import Field
 
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base import scanner_operational_facets as opsf
-from automated_security_helper.base.scanner_facets import (
-    FacetDecl,
-    FacetState,
-    ScannerFacets,
-)
+from automated_security_helper.base.scanner_facets import ScannerFacets
+from automated_security_helper.models.vocab import TargetType
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.config.confinement_remedy import SET_BY_THE_OPERATOR
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
@@ -204,17 +201,18 @@ from automated_security_helper.models.core import IgnorePathWithReason, ToolArgs
 from automated_security_helper.config.tool_config_trust import empty_tool_directory
 from automated_security_helper.plugin_modules.ash_builtin.scanners._trivy_scanner_base import (  # noqa: F401 -- TRIVY_SEVERITIES, _SARIF_LEVEL, UNBOUNDED_TRIVY_TIMEOUT and trivy_timeout are kept importable from here
     _SARIF_LEVEL,
+    TRIVY_SARIF_FACETS,
     TRIVY_SEVERITIES,
     UNBOUNDED_TRIVY_TIMEOUT,
     TrivyScannerBase,
     skip_dirs_value,
+    skip_files_glob_value,
     trivy_timeout,
 )
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.utils.config_trust import (
     NOT_THE_OPERATORS,
     refusal_warning,
-    set_by_operator,
 )
 from automated_security_helper.utils.process_env import snapshot_environ
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
@@ -366,113 +364,7 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
     #: (tests/test_data/scanners/trivy/trivy-0.69.3.vuln.sarif) and from the
     #: M0 misconfig capture (tests/test_data/scanners/trivy/captured/
     #: trivy-0.76.2-misconfig-terraform.{json,sarif}, M0-FINDINGS.md (a)).
-    facets: ClassVar[ScannerFacets] = ScannerFacets(
-        rule_id=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="SARIF result ruleId",
-        ),
-        severity=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field='result message line "Severity: <level>", checked '
-            "against the result level and the rule tags (issue_severity)",
-        ),
-        file_path=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="SARIF locations[].physicalLocation.artifactLocation.uri",
-        ),
-        line_range=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="SARIF region.startLine / region.endLine",
-        ),
-        column=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="SARIF region.startColumn",
-        ),
-        message=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="SARIF result message.text",
-        ),
-        resource_id=FacetDecl(
-            state=FacetState.DROPPED,
-            native_field="Results[].Misconfigurations[].CauseMetadata.Resource",
-            reason="misconfig only: the address (aws_s3_bucket.m0_fixture_bucket) "
-            "exists in trivy's JSON format and is absent from the SARIF ASH "
-            "reads (0 occurrences, M0 fixture); the vuln findings are packages, "
-            "so no resource_id is ever written until a side-JSON attach lands",
-        ),
-        resource_type=FacetDecl(
-            state=FacetState.NA,
-            reason="trivy's CauseMetadata names Provider and Service (AWS, "
-            "s3) and no resource type; the type is only the prefix of the "
-            "dropped address, which would be a derivation",
-        ),
-        package_name=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field='result message line 1 "Package: <name>" '
-            "(_package_from_message)",
-        ),
-        package_version=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field='result message line 2 "Installed Version: <version>" '
-            "(_package_from_message)",
-        ),
-        package_path=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="npm lockfile entry at the SARIF region.startLine of "
-            "the result's location (one result per installed copy)",
-        ),
-        taxonomy_cve=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="SARIF result ruleId (the CVE id)",
-        ),
-        taxonomy_cwe=FacetDecl(
-            state=FacetState.NA,
-            reason="UNCONFIRMED: trivy's SARIF rules carry no CWE (tags are "
-            "vulnerability, security, <severity>); the JSON format's CweIDs "
-            "has no committed vulnerability fixture, and a `trivy fs --format "
-            "json` run over a lockfile settles it",
-        ),
-        fingerprints=FacetDecl(
-            state=FacetState.NA,
-            reason="trivy's SARIF results carry no fingerprints (result keys "
-            "are level, locations, message, ruleId, ruleIndex)",
-        ),
-        fix_available=FacetDecl(
-            state=FacetState.DROPPED,
-            native_field='message line "Fixed Version: <version>"',
-            reason="the fixed version sits in the message text and is never "
-            "parsed into the fix_available property the flat model reads",
-        ),
-        remediation_text=FacetDecl(
-            state=FacetState.NA,
-            reason="UNCONFIRMED: not classified by the survey; the flat "
-            "model has no remediation column, and the rule help text carries "
-            "the fixed version already declared under fix_available",
-        ),
-        snippet=FacetDecl(
-            state=FacetState.NA,
-            reason="trivy's SARIF results carry no code snippet",
-        ),
-        references=FacetDecl(
-            state=FacetState.DROPPED,
-            native_field="SARIF rule helpUri",
-            reason="rule-level only: the flat reader takes references from "
-            "result relatedLocations, so the help link is discarded today",
-        ),
-        tags=FacetDecl(
-            state=FacetState.DROPPED,
-            native_field="SARIF rule properties.tags",
-            reason="rule-level only: the flat reader takes tags from result "
-            "properties, so the rule tags are discarded today (the severity "
-            "word among them still feeds issue_severity)",
-        ),
-        extras=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="result properties bag (issue_severity and the "
-            "package identity keys this adapter writes) passed through to "
-            "the flat properties",
-        ),
-    )
+    facets: ClassVar[ScannerFacets] = TRIVY_SARIF_FACETS.model_copy()
 
     #: The operational register row (base/scanner_operational_facets.py),
     #: checked against the production declarations it mirrors by
@@ -515,11 +407,21 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
                 non_finding_artifacts=(),
             ),
             targets=opsf.TargetsFacet(
-                kinds=(opsf.TargetKind.DEPENDENCY_LOCKFILES,),
+                kinds=(
+                    opsf.TargetKind.DEPENDENCY_LOCKFILES,
+                    opsf.TargetKind.CONTAINER_IMAGE,
+                ),
                 tool_type=ScannerToolType.SCA,
                 selection=(
                     "`trivy fs` over the target; the default scanner is vuln only, and "
-                    "secret, misconfig and license are opt-in (options.scanners)"
+                    "secret, misconfig and license are opt-in (options.scanners); a "
+                    "container-image asset through `trivy image` "
+                    "(_execute_image_scan: a reference by --image-src from the "
+                    "detected engine, --input for a saved archive; an OCI layout "
+                    "directory is re-packed as a docker-archive first, "
+                    "utils/oci_layout_archive.py, which trivy reads through --input), "
+                    "with the ignore paths as --skip-files globs and the layer "
+                    "of each result read from a second, JSON pass"
                 ),
             ),
             runtime=opsf.RuntimeFacet(
@@ -530,6 +432,7 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
                 python_only=False,
                 use_uv_tool=False,
             ),
+            runtime_compat=opsf.RuntimeCompatFacet(rows=()),
             platforms=opsf.PlatformsFacet(
                 provisionable=opsf.PLATFORMS_NO_WINDOWS_ARM64,
                 note="no windows/arm64 and no 32-bit macOS asset (tool_downloads.py docstring)",
@@ -645,17 +548,18 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         chosen = list(options.scanners)
         if chosen == default:
             return
-        config = self.context.config if self.context is not None else None
-        if set_by_operator(config, "scanners.trivy.options.scanners", chosen):
-            return
-        self._plugin_log(
+        granted = self._operator_gated(
+            "scanners.trivy.options.scanners",
+            chosen,
+            default,
             refusal_warning(
                 f"Ignoring scanners.trivy.options.scanners ({chosen}): "
                 f"{NOT_THE_OPERATORS}. trivy runs the default set, {default}.",
                 NOT_THE_OPERATORS,
             ),
-            level=logging.WARNING,
         )
+        if granted is chosen:
+            return
         if self.config is not None:
             self.config.options = options.model_copy(update={"scanners": default})
 
@@ -671,7 +575,7 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
     def scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason] | None = None,
         config: Any = None,
         *args: Any,
@@ -692,7 +596,7 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
     def _execute_scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason],
     ) -> Tuple[List[str], Path, Optional[Dict[str, str]]]:
         """Resolve the argv, results path and environment for one trivy run.
@@ -777,6 +681,97 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         )
         return final_args, results_file, subprocess_env
 
+    def _unsupported_image_shape_reason(self, image) -> Optional[str]:
+        """trivy reads a reference or a saved archive; an OCI layout is neither.
+
+        ``trivy image`` takes a reference (resolved through its --image-src
+        order) or ``--input`` with a saved tarball; it has no input mode for an
+        image-layout directory. The scan is then a reported clean skip, and
+        grype and syft, whose stereoscope reads ``oci-dir:``, still scan it.
+        """
+        if image.oci_layout is not None:
+            return (
+                f"container image at {image.shown()} was not scanned by trivy: "
+                "trivy image reads a reference or a saved archive (--input), "
+                "not an OCI image-layout directory"
+            )
+        return None
+
+    def _execute_image_scan(
+        self, image
+    ) -> Tuple[List[str], Path, Optional[Dict[str, str]]]:
+        """Resolve the argv, results path and environment for one image run.
+
+        The fs scan's resolution with the image differences and nothing else:
+        the subcommand token is ``image`` for this resolution only, the target
+        slot carries the reference (with ``--image-src`` naming the detected
+        engine, else ``remote``) or ``--input=<tar>`` for a saved archive, and
+        none of the fs-shaped plumbing applies -- no skip-dirs budget (nothing
+        of the source tree is walked), while ASH's own trivy.yaml, module-dir,
+        ignorefile and secret-config neutralizations carry over, because they
+        exist to keep repository-written files from silencing findings and an
+        image scan still runs from a working directory that may hold them.
+        """
+        from automated_security_helper.core.container_engine import (
+            ContainerEngine,
+            detect_container_engine,
+        )
+
+        if self.results_dir is None:
+            raise ScannerError("TrivyScanner has no results directory")
+        results_file = self.results_dir.joinpath("image", "results_sarif.sarif")
+        results_file.parent.mkdir(exist_ok=True, parents=True)
+        results_file.unlink(missing_ok=True)
+        # Where this run's layer pass writes trivy's JSON report
+        # (_attach_image_layers). Set per image run, and read only for one.
+        self._image_layers_json = results_file.parent / "results_layers.json"
+        self._image_layers_json.unlink(missing_ok=True)
+
+        extra: List[str] = []
+        extra.append(f"--timeout={trivy_timeout(self._effective_scan_timeout())}")
+        config_token = f"--config={self._trivy_config_file()}"
+        extra.append(config_token)
+        modules = empty_tool_directory("trivy-modules", context=self.context)
+        extra.append(f"--module-dir={modules.as_posix()}")
+        extra.append(f"--ignorefile={self._ignore_file()}")
+        extra.append(f"--secret-config={self._secret_config_file([config_token])}")
+        # The ignore paths the tool can be told to leave unread. --skip-files
+        # carries them all: measured on trivy 0.76.2, --skip-dirs removes
+        # nothing from an image scan, while --skip-files globs do (a directory
+        # is its "/**" glob; utils/image_ignore_paths).
+        extra.extend(
+            f"--skip-files={skip_files_glob_value(glob)}"
+            for glob in self._image_exclude_globs()
+        )
+
+        if image.oci_archive is not None:
+            target_token = f"--input={Path(image.oci_archive).absolute().as_posix()}"
+        else:
+            engine = detect_container_engine()
+            if engine == ContainerEngine.NONE:
+                extra.append("--image-src=remote")
+            else:
+                extra.append(f"--image-src={engine.value}")
+            target_token = image.ref
+
+        original_subcommands = self.subcommands
+        try:
+            # For this resolution only, exactly as the extra-args swaps are
+            # scoped: the next fs target must not inherit the image subcommand.
+            self.subcommands = ["image"]
+            final_args = self._resolve_arguments(
+                target=target_token, results_file=results_file
+            )
+        finally:
+            self.subcommands = original_subcommands
+        target_index = len(final_args) - 1 - final_args[::-1].index(target_token)
+        final_args[target_index:target_index] = extra
+
+        subprocess_env = (
+            {**snapshot_environ(), **self.extra_env} if self.extra_env else None
+        )
+        return final_args, results_file, subprocess_env
+
     def _read_results_file(self, results_file: Path) -> Optional[Dict[str, Any]]:
         """Refuse the report of a run trivy did not finish (any exit but 0)."""
         if self.exit_code not in self.success_exit_codes:
@@ -797,5 +792,70 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         The severity step is ``TrivyScannerBase._attach_trivy_severity``, shared
         with trivy-repo; see "Severity" above for the rule.
         """
+        if len(final_args) > 1 and final_args[1] == "image":
+            self._attach_image_layers(sarif_report, final_args)
         sarif_report = self._attach_package_identity(sarif_report, target)
+        sarif_report = self._attach_misconfig_resources(sarif_report, final_args)
         return self._attach_trivy_severity(sarif_report)
+
+    def _attach_image_layers(
+        self, sarif_report: SarifReport, final_args: List[str]
+    ) -> int:
+        """Write each image result's ``layerDigest`` from trivy's JSON report.
+
+        trivy's SARIF names no layer, its JSON does, so the same invocation runs
+        once more with ``--format json`` and the two reports are joined
+        (``utils/image_layer_digests``). The extra pass is an attribution
+        read: any way it fails (no JSON option to translate, the tool failing,
+        a report that cannot be read) leaves the column empty, says so once,
+        and never fails or changes the scan. The pass reads the image the way
+        the scan did, so the layers it names are the ones the findings came
+        from. Returns the number of results given a layer digest.
+        """
+        from automated_security_helper.utils.image_layer_digests import (
+            attach_layer_digests,
+            json_argv,
+            read_layer_index,
+        )
+        from automated_security_helper.utils.offline_tool_env import (
+            with_offline_tool_environment,
+        )
+        from automated_security_helper.utils.subprocess_utils import spawn_run
+
+        json_path = getattr(self, "_image_layers_json", None)
+        argv = json_argv(final_args, json_path) if json_path is not None else None
+        if argv is None:
+            self._plugin_log(
+                "The image scan's layer attribution is skipped: the invocation "
+                "names no --format and --output to ask for trivy's JSON report.",
+                level=logging.WARNING,
+            )
+            return 0
+        env = {**snapshot_environ(), **self.extra_env} if self.extra_env else None
+        env = with_offline_tool_environment(env, self._scanner_offline())
+        try:
+            completed = spawn_run(
+                argv,
+                capture_output=True,
+                text=True,
+                timeout=self._effective_scan_timeout(),
+                check=False,
+                cwd=self._subprocess_cwd(json_path.parent),
+                env=env,
+            )
+            if completed.returncode != 0:
+                raise ScannerError(f"trivy exited {completed.returncode}")
+            index = read_layer_index(json_path)
+        except Exception as error:  # noqa: BLE001 - attribution never fails a scan
+            self._plugin_log(
+                "The image scan's layer attribution could not be read "
+                f"({type(error).__name__}); results carry no layer digest.",
+                level=logging.WARNING,
+            )
+            return 0
+        return attach_layer_digests(sarif_report, index, self._package_name)
+
+    @classmethod
+    def _package_name(cls, message: Optional[str]) -> Optional[str]:
+        """The package a trivy vulnerability message is about, or None."""
+        return cls._package_from_message(message)[0]

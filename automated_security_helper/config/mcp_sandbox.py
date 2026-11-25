@@ -114,8 +114,9 @@ import os
 import platform
 from dataclasses import dataclass
 from pathlib import Path, PurePath
-from typing import Any, Callable, List, Optional, Tuple
+from typing import Any, Callable, List, Optional, Tuple, Union
 
+from automated_security_helper.core.enums import DEFAULT_TRANSPORT, Transport
 from automated_security_helper.core.resource_management.error_handling import (
     ErrorCategory,
 )
@@ -170,17 +171,19 @@ CONFIG_DIR_NAME = "config"
 CLIENT_CONFIG_DIR_NAME = "client-config"
 
 #: Transports that carry callers the server does not otherwise trust.
-_NETWORKED_TRANSPORTS = frozenset({"streamable-http", "sse"})
+_NETWORKED_TRANSPORTS = frozenset(t for t in Transport if t.is_networked)
 
 #: Every value ``ASH_MCP_TRANSPORT`` may hold, once stripped and lower-cased.
-KNOWN_TRANSPORTS = frozenset({"stdio"}) | _NETWORKED_TRANSPORTS
+KNOWN_TRANSPORTS = frozenset(Transport)
 
-#: Which transport this process serves. Held in the environment rather than in a
-#: module global, for two reasons that a global got wrong.
+#: Which transport this process serves. The operator sets it in the environment
+#: before launching the server (``mcp_command`` only reads it); it is held there
+#: rather than in a module global, for two reasons that a global got wrong.
 #:
-#: A module global leaks. ``mcp_command`` sets the transport once, and a process
-#: that builds a streamable-HTTP app and then does something else -- which is
-#: exactly what the test suite does -- would leave every later call evaluated as
+#: A module global leaks. A global set once by the server's start-up would outlive
+#: the server object, and a process that builds a streamable-HTTP app and then
+#: does something else -- which is exactly what the test suite does -- would leave
+#: every later call evaluated as
 #: though it came from the network. The failure direction is deny, so it surfaces
 #: as an unrelated refusal rather than as an unsafe accept, but it is still wrong:
 #: ``test_mcp_get_scan_results`` started failing on a path it had every right to
@@ -193,20 +196,31 @@ KNOWN_TRANSPORTS = frozenset({"stdio"}) | _NETWORKED_TRANSPORTS
 #: different mechanism from them.
 ASH_MCP_TRANSPORT_ENV = "ASH_MCP_TRANSPORT"
 
-#: What an unset ``ASH_MCP_TRANSPORT`` means. stdio, deliberately, so that
-#: importing this module cannot tighten behavior for an in-process caller that is
-#: not a server at all -- a unit test, or a library consumer calling the tool
-#: functions directly.
-DEFAULT_TRANSPORT = "stdio"
+# What an unset ``ASH_MCP_TRANSPORT`` means is ``DEFAULT_TRANSPORT`` (imported from
+# ``core.enums``). stdio, deliberately, so that importing this module cannot
+# tighten behavior for an in-process caller that is not a server at all -- a unit
+# test, or a library consumer calling the tool functions directly.
 
 
-def set_server_transport(name: str) -> None:
-    """Record which transport this process serves.
+def set_server_transport(name: Union[Transport, str]) -> None:
+    """Record which transport this process serves, for a test or an operator tool.
 
-    Called once from ``mcp_command`` before the server starts serving.
+    Nothing in the server calls it: ``mcp_command`` only reads
+    ``ASH_MCP_TRANSPORT`` (a test pins that it never writes it), so the
+    transport is whatever the operator set in the environment before launch. It
+    sets the variable and nothing else, so a process that calls it leaves every
+    later call evaluated under that transport; a test undoes it with its own
+    environment fixture.
+
+    Raises:
+        ValueError: when *name* is None. ``str(None)`` would be written as the
+            text ``"None"``, which names no transport and so reads as networked.
     """
 
-    set_environ(ASH_MCP_TRANSPORT_ENV, name)
+    if name is None:
+        raise ValueError("set_server_transport needs a transport, not None")
+    text = name.value if isinstance(name, Transport) else str(name)
+    set_environ(ASH_MCP_TRANSPORT_ENV, text)
 
 
 def get_server_transport() -> str:
@@ -217,7 +231,7 @@ def get_server_transport() -> str:
     """
 
     return (os.environ.get(ASH_MCP_TRANSPORT_ENV) or "").strip().lower() or (
-        DEFAULT_TRANSPORT
+        DEFAULT_TRANSPORT.value
     )
 
 
@@ -232,13 +246,18 @@ def transport_is_networked() -> bool:
     (:func:`unknown_transport_override`).
     """
 
-    return get_server_transport() != DEFAULT_TRANSPORT
+    transport = Transport.parse(get_server_transport())
+    # An unknown spelling (``None``) is networked, the stricter reading of a typo.
+    # Asked of the transport itself, not of "is it the default": the default is
+    # what an unset variable means, and a change of it must not change what
+    # counts as trusted.
+    return transport is None or transport.is_networked
 
 
 def unknown_transport_override() -> Optional[str]:
     """The raw ``ASH_MCP_TRANSPORT`` value when it names no known transport."""
 
-    if get_server_transport() in KNOWN_TRANSPORTS:
+    if Transport.parse(get_server_transport()) in KNOWN_TRANSPORTS:
         return None
     return os.environ.get(ASH_MCP_TRANSPORT_ENV)
 
@@ -255,7 +274,7 @@ def caller_is_remote(session_id: Optional[str]) -> bool:
     no id at all -- means the launching process is the caller.
 
     Why not the transport alone. It was, and process-wide state turned out to be
-    the wrong shape for it: ``mcp_command`` sets the transport once and it outlives
+    the wrong shape for it: the transport was set once at start-up and outlived
     the server object, so a process that built a streamable-HTTP app and then did
     anything else evaluated every later call as remote. That is fail-closed, so it
     surfaced as an unrelated refusal rather than an unsafe accept --
@@ -295,6 +314,14 @@ def _parse_roots(raw: Optional[str]) -> Tuple[Path, ...]:
     ``[""]`` rather than ``[]``, and ``Path("").resolve()`` is the process
     working directory, so a trailing or doubled separator would quietly grant the
     cwd and everything beneath it.
+
+    An entry that cannot be resolved grants nothing and is left out, with a
+    warning that names no path: ``Path.resolve`` raises ``RuntimeError`` for a
+    symbolic link that leads back to itself on Python 3.12 and older, and
+    ``expanduser`` raises it for a ``~`` entry when no home directory can be found
+    (an ``OSError`` for what the file system refuses). Raised from here it would
+    escape every gate that reads a grant, the refusals included, over one bad
+    entry. Leaving it out narrows the grant, which is the safe side.
     """
 
     if not raw:
@@ -305,7 +332,14 @@ def _parse_roots(raw: Optional[str]) -> Tuple[Path, ...]:
         entry = entry.strip()
         if not entry:
             continue
-        roots.append(Path(entry).expanduser().resolve())
+        try:
+            roots.append(Path(entry).expanduser().resolve())
+        except (OSError, RuntimeError) as exc:
+            _logger.warning(
+                "MCP sandbox: a grant entry could not be resolved and grants "
+                "nothing (%s)",
+                type(exc).__name__,
+            )
     return tuple(roots)
 
 
@@ -423,7 +457,7 @@ def _server_written_config_names() -> Tuple[str, ...]:
     Read from ``profile_registry``, which writes them
     (``materialize_session_config``): the bound profile, and the name a workspace
     tool's per-call profile had before each profile got a file of its own. The
-    per-profile names are matched by ``profile_registry.is_call_profile_filename``.
+    per-profile names are matched by ``session_profiles.is_call_profile_filename``.
     """
     from automated_security_helper.config.session_profiles import (
         CALL_PROFILE_FILENAME,
@@ -864,9 +898,19 @@ def _shown_path(path: object) -> object:
 
 
 def _refusal_context(path: object, resolved: Path) -> dict[str, str]:
-    """The context every refusal in this module carries; see ``_refusal``."""
+    """The context every refusal in this module carries; see ``_refusal``.
+
+    The working directory is read with a fallback: ``os.getcwd`` raises
+    ``FileNotFoundError`` once the server's directory has been deleted, and a
+    refusal that raised for that would turn the one answer the caller is owed
+    (an ``INVALID_PATH`` refusal) into an internal error.
+    """
+    try:
+        cwd = str(Path.cwd())
+    except OSError:
+        cwd = "<unavailable>"
     return {
-        "cwd": str(Path.cwd()),
+        "cwd": cwd,
         "directory_path": str(path),
         "resolved_path": str(resolved),
         "error_category": ErrorCategory.INVALID_PATH.value,
@@ -1305,10 +1349,40 @@ def validate_config_chain(
         source_dir: The scan target the config will be resolved against, if any.
 
     Returns:
-        None if permitted, otherwise an :class:`MCPResourceError`.
+        None if permitted, otherwise an :class:`MCPResourceError`. A file this
+        caller may not read with ``!ENV`` that uses it is refused too, as
+        :func:`_env_refusal` says, so a caller that stops at this answer does not
+        start a scan that fails on the same file.
     """
 
-    return check_config_input(config_path, session_id, source_dir).refusal
+    checked = check_config_input(config_path, session_id, source_dir)
+    if checked.env_error is not None:
+        return _env_refusal(config_path, checked.env_error)
+    return checked.refusal
+
+
+def _env_refusal(config_path: object, error: Exception) -> MCPResourceError:
+    """The error for a config file a remote caller may not read with ``!ENV`` and does.
+
+    The same refusal ``check_config_input`` reports as ``env_error`` and the MCP
+    tools answer as ``config_env_not_resolved``; here it is an
+    :class:`MCPResourceError` for the two wrappers whose answer has no other place
+    for it. The error's text names the file and where it uses ``!ENV``, never a
+    value (``error_text`` describes it as every client-facing error here is).
+    """
+
+    from automated_security_helper.utils.error_text import error_text
+
+    return MCPResourceError(
+        f"Configuration file {config_path} cannot be loaded: {error_text(error)}",
+        context={
+            "config_path": str(config_path),
+            "error_category": ErrorCategory.INVALID_FORMAT.value,
+            # The tools' ``CONFIG_ENV_NOT_RESOLVED`` (cli/mcp_tools.py), spelled
+            # out because this layer does not import the one above it.
+            "error_type": "config_env_not_resolved",
+        },
+    )
 
 
 @dataclass(frozen=True)
@@ -1347,6 +1421,7 @@ def check_config_input(
     """
 
     from automated_security_helper.config.config_sources import (
+        ABSENT_FILE,
         default_confinement_root,
         env_refused_for,
         is_config_parse_error,
@@ -1366,9 +1441,19 @@ def check_config_input(
         ASHConfigValidationError,
     )
 
-    refusal = validate_config_input(config_path, session_id=session_id)
+    # The identity of the file the check approved is kept, and the read below is
+    # held to it (``read_config_document(expect=)``): the check judged the file
+    # the name led to, and a name read again later can lead to another, which
+    # would be parsed here without ever having been judged. A path that led
+    # nowhere is held to the identity no file has (``ABSENT_FILE``), so a link
+    # made at the name after the check is refused as well.
+    approved: List[Optional[Tuple[int, int]]] = []
+    refusal = validate_config_input(
+        config_path, session_id=session_id, identity_out=approved
+    )
     if refusal is not None:
         return ConfigInputCheck(refusal=refusal)
+    held = approved[0] if approved and approved[0] is not None else ABSENT_FILE
     path = Path(config_path)
     # Its values go back to the client, so only an operator's file has them
     # repeated: not a file the client named outside the config roots or
@@ -1401,6 +1486,7 @@ def check_config_input(
             refuse_env=env_refused_for(caller_is_remote(session_id), session_id),
             unquoted=named_by_client
             or bool(repository_written([path], scan_root, [path])),
+            expect=held,
         )
         if named_by_client or _has_a_client_file(document):
             unquoted: Optional[str] = CLIENT_FILE
@@ -1481,7 +1567,9 @@ def validate_discovered_config(
     discovery reads to learn whether it configures ASH, and a link to a missing
     target, which discovery skips, so that it is refused as a link to a present
     file is and the answer does not say whether the target exists. The file
-    discovery selects then goes through :func:`validate_config_chain`. A
+    discovery selects then goes through the chain check
+    (:func:`check_config_input`, its refusal as :func:`validate_config_chain`
+    answers it). A
     discovery that fails is left to the scan, which reports it as it always has.
 
     Args:
@@ -1518,9 +1606,10 @@ def validate_discovered_config(
         return None
     if selected is None:
         return None
-    return validate_config_chain(
-        selected.path, session_id=session_id, source_dir=source_dir
-    )
+    # The refusal only: a file refused for !ENV is reported by the callers that
+    # read this chain for themselves, as config_env_not_resolved, and not as a
+    # refusal of the path (validate_config_chain answers it as an error).
+    return check_config_input(selected.path, session_id, source_dir).refusal
 
 
 def config_chain_refusal(config_path: object, exc: Exception) -> MCPResourceError:
@@ -1566,10 +1655,14 @@ def config_load_error(
 
     Returns:
         None if the config loads and validates, otherwise an
-        :class:`MCPResourceError`.
+        :class:`MCPResourceError`. A file refused for ``!ENV`` is a config that
+        does not load, and is answered so (:func:`_env_refusal`).
     """
 
-    return check_config_input(config_path, session_id, source_dir).load_error
+    checked = check_config_input(config_path, session_id, source_dir)
+    if checked.env_error is not None:
+        return _env_refusal(config_path, checked.env_error)
+    return checked.load_error
 
 
 # ---------------------------------------------------------------------------
@@ -1647,7 +1740,9 @@ def _denied_roots() -> List[Path]:
     for value in _denied_root_values():
         try:
             roots.append(Path(value).resolve())
-        except OSError:
+        except (OSError, RuntimeError):
+            # RuntimeError: a symbolic link that leads back to itself, on
+            # Python 3.12 and older. A refused root stays refused as spelled.
             roots.append(Path(value))
     return roots
 

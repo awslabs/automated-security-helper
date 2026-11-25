@@ -3,7 +3,7 @@
 
 """Alias dispatch and the manifest tier scan.
 
-Her decision rows 5 and 7. The semgrep retirement is manifest DATA: opengrep
+Design decisions 5 and 7. The semgrep retirement is manifest DATA: opengrep
 declares ``aliases: ["semgrep"]`` and semgrep's manifest is ``deprecated`` and
 ``superseded_by`` opengrep, and these rows prove the data dispatches. They also
 prove the declaration changes no run: semgrep stays a manifest of its own, still
@@ -28,10 +28,10 @@ from automated_security_helper.base.plugin_manifest import (
 from automated_security_helper.plugin_manifests import (
     ManifestRegistryError,
     _check,
-    alpha_module_for,
-    alpha_scanner_modules,
     dispatch_target,
     manifest_for,
+    opt_in_module_for,
+    opt_in_scanner_modules,
     scanner_manifests,
 )
 
@@ -103,20 +103,27 @@ def test_only_one_scanner_is_deprecated_and_only_one_alias_exists() -> None:
 )
 def test_each_alpha_scanner_maps_to_its_plugin_module(scanner, package) -> None:
     expected = f"automated_security_helper.plugin_modules.{package}"
-    assert alpha_module_for(scanner) == expected
-    assert alpha_module_for(f"  {scanner.upper()} ") == expected
+    assert opt_in_module_for(scanner) == expected
+    assert opt_in_module_for(f"  {scanner.upper()} ") == expected
 
 
-def test_the_tier_scan_lists_exactly_the_alpha_scanners() -> None:
-    assert set(alpha_scanner_modules()) == {
-        m.name for m in scanner_manifests() if m.tier is PluginTier.ALPHA
+def test_the_opt_in_scan_lists_exactly_the_scanners_that_do_not_load_by_default() -> (
+    None
+):
+    assert set(opt_in_scanner_modules()) == {
+        m.name for m in scanner_manifests() if not m.default_enabled
     }
-    assert len(alpha_scanner_modules()) == 6
+    assert len(opt_in_scanner_modules()) == 6
+    # Today the opt-in scanners are the alpha ones; that is the data, not the
+    # rule (test_a_promoted_optin_scanner_keeps_its_hint covers the difference).
+    assert {m.name for m in scanner_manifests() if m.tier is PluginTier.ALPHA} == set(
+        opt_in_scanner_modules()
+    )
 
 
 @pytest.mark.parametrize("builtin", ["bandit", "semgrep", "opengrep", "trivy", "grype"])
-def test_builtin_scanners_are_not_alpha_scanners(builtin) -> None:
-    assert alpha_module_for(builtin) is None
+def test_builtin_scanners_are_not_opt_in_scanners(builtin) -> None:
+    assert opt_in_module_for(builtin) is None
 
 
 # --------------------------------------------------------------------------- #

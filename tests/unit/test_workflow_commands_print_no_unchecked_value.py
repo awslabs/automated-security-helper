@@ -190,6 +190,11 @@ ALLOWED: dict[tuple[str, str, str], dict[str, str]] = {
     (
         ".github/actions/validate-container/action.yml",
         _COMPOSITE,
+        "Scan with the image's betterleaks (alpha plugin)",
+    ): {"rc": NUMBER},
+    (
+        ".github/actions/validate-container/action.yml",
+        _COMPOSITE,
         "container: zizmor runs and reports",
     ): {"rc": NUMBER},
     (

@@ -5,10 +5,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Any, Optional, Set, Tuple
 
-from automated_security_helper.base.converter_plugin import ConverterPluginBase
 from automated_security_helper.base.engine_phase import EnginePhase
 from automated_security_helper.base.plugin_context import PluginContext
-from automated_security_helper.base.reporter_plugin import ReporterPluginBase
 from automated_security_helper.base.plugin_config import (
     plugin_config_key,
     section_enabled,
@@ -17,17 +15,23 @@ from automated_security_helper.core.constants import (
     PYTHON_ONLY_SKIPPED_REASON,
     SHARD_SPLIT_REASON_PREFIX,
 )
+from automated_security_helper.base.scanner_operational_facets import (
+    serves_asset_kind,
+)
+from automated_security_helper.core.asset import Asset, AssetKind
 from automated_security_helper.core.enums import ExecutionPhase, ScannerStatus
 from automated_security_helper.core.exceptions import ScannerSelectionError
 from automated_security_helper.core.scanner_selection import (
     SelectionOrigin,
-    alpha_scanner_refusal,
     exclusions_matching_no_scanner,
     refuse_selection_matching_no_scanner,
     selection_after_exclusions,
-    unloaded_alpha_hint,
-    unloaded_alpha_scanners,
     selection_names,
+)
+from automated_security_helper.plugins.enablement import (
+    unloaded_opt_in_hint,
+    unloaded_opt_in_refusal,
+    unloaded_opt_in_scanners,
 )
 from automated_security_helper.models.asharp_model import (
     AshAggregatedResults,
@@ -63,6 +67,8 @@ from automated_security_helper.utils.sarif_utils import (
     get_severity_metrics_from_sarif,
 )
 from automated_security_helper.models.scanner_validation import (
+    EnablementStatus,
+    RegistrationStatus,
     ScannerValidationManager,
     scanner_display_name,
 )
@@ -536,8 +542,7 @@ class ScanPhase(EnginePhase):
     def __init__(
         self,
         plugin_context: PluginContext,
-        plugins: List[ConverterPluginBase | ScannerPluginBase | ReporterPluginBase]
-        | None = None,
+        plugins: List[type] | None = None,
         progress_display: Optional[Any] = None,
         asharp_model: Optional[AshAggregatedResults] = None,
         plugin_filter: Optional[Callable[[Any], bool]] = None,
@@ -572,9 +577,9 @@ class ScanPhase(EnginePhase):
         self._completed_scanners: List[ScannerPluginBase] = []
 
     @property
-    def phase_name(self) -> str:
+    def phase_name(self) -> ExecutionPhase:
         """Return the name of this phase."""
-        return "scan"
+        return ExecutionPhase.SCAN
 
     def _track_scanner_state(self, scanner_name: str, **state: Any) -> None:
         """``validation_manager.update_scanner_state``, for a scanner that is
@@ -782,8 +787,8 @@ class ScanPhase(EnginePhase):
 
         self._track_scanner_state(
             display_name,
-            registration_status="registered",
-            enablement_status="excluded",
+            registration_status=RegistrationStatus.REGISTERED,
+            enablement_status=EnablementStatus.EXCLUDED,
             enablement_reason=f"Scanner excluded during filtering: {reason}",
             queued_for_execution=False,
             execution_completed=False,
@@ -835,8 +840,8 @@ class ScanPhase(EnginePhase):
         stored_nothing_reason = home_as_tilde(nothing_reason)
         self.validation_manager.update_scanner_state(
             display_name,
-            registration_status="registered",
-            enablement_status="excluded",
+            registration_status=RegistrationStatus.REGISTERED,
+            enablement_status=EnablementStatus.EXCLUDED,
             enablement_reason=(f"Nothing to scan: {stored_nothing_reason}"),
             queued_for_execution=False,
             execution_completed=False,
@@ -863,6 +868,172 @@ class ScanPhase(EnginePhase):
             skipped_reason=stored_nothing_reason,
         )
         return aggregated_results
+
+    def _record_asset_kind_not_served(
+        self,
+        display_name: str,
+        asset: Asset,
+        nothing_to_scan_names: List[str],
+        aggregated_results: AshAggregatedResults,
+    ) -> AshAggregatedResults:
+        """Record *display_name* as SKIPPED: it does not scan this asset's kind.
+
+        The mirror of :meth:`_record_nothing_to_scan` for the asset routing
+        decision: the scanner was selected, but the scan's subject is an asset
+        kind its operational-facets row does not declare (today, a container
+        image offered to a filesystem scanner), so it has nothing it scans
+        here. A sibling method rather than a third caller of
+        ``_record_nothing_to_scan`` because that method's docstring names the
+        two decisions it records, and this is a different decision: not "its
+        own selection found no files" but "the subject is not files at all".
+
+        The bookkeeping is byte-for-byte the nothing-to-scan shape -- SKIPPED,
+        ``excluded=False`` (nothing deselected it), ``dependencies_satisfied=
+        True`` (the tool was never needed), ``targets_attempted=0`` -- so the
+        completeness gate, the unified metrics and a sharded merge read the
+        row exactly as they read a nothing-to-scan row. The reason names the
+        asset kind and the register, so an image scan's report says which
+        scanners did not look rather than looking clean.
+        """
+        reason = (
+            f"does not declare {asset.kind.value} targets in its operational "
+            "facets, so it cannot scan this asset"
+        )
+        ASH_LOGGER.info(
+            f"Scanner {display_name} skipped: {reason}",
+            extra=NO_MARKUP,
+        )
+        nothing_to_scan_names.append(display_name)
+        self.validation_manager.update_scanner_state(
+            display_name,
+            registration_status=RegistrationStatus.REGISTERED,
+            enablement_status=EnablementStatus.EXCLUDED,
+            enablement_reason=f"Asset kind not served: {reason}",
+            queued_for_execution=False,
+            execution_completed=False,
+        )
+        aggregated_results = self._write_results_guarded(
+            display_name,
+            ScanResultsContainer(
+                scanner_name=display_name,
+                status=ScannerStatus.SKIPPED,
+                duration=None,
+                targets_attempted=0,
+                targets_failed=0,
+                skipped_reason=reason,
+            ),
+            aggregated_results,
+        )
+        aggregated_results.scanner_results[display_name] = ScannerTargetStatusInfo(
+            status=ScannerStatus.SKIPPED,
+            dependencies_satisfied=True,
+            excluded=False,
+            skipped_reason=reason,
+        )
+        return aggregated_results
+
+    #: The SARIF rule id of the one informational result an image scan gets when
+    #: nothing scanned its image. Stable, so a reader or a suppression can key
+    #: on it; the "ASH-" prefix says ASH itself, not a tool, wrote it.
+    IMAGE_NOT_SCANNED_RULE_ID = "ASH-container-image-not-scanned"
+
+    def _record_unscanned_image_asset(
+        self,
+        aggregated_results: AshAggregatedResults,
+    ) -> None:
+        """One informational SARIF result when the image asset was not scanned.
+
+        An image scan on which no queued scanner serves CONTAINER_IMAGE -- every
+        scanner before the first image-capable one is wired, or an offline host
+        with no engine once wiring lands -- would otherwise end green and read
+        exactly like a clean scan of the image. The per-scanner SKIPPED rows say
+        which scanners did not look; this is the one line that says the IMAGE
+        was not looked at, on the report itself.
+
+        ``kind=informational`` with ``level=note``, which SARIF 3.27.9 defines
+        as information only: every reporter reads it as not-a-finding
+        (utils/sarif_utils.NON_FINDING_KINDS), so it can never grade, never
+        fail a threshold and never put a vulnerability row in a SIEM -- the
+        green-by-contract half -- while it stays in ash.sarif and the
+        aggregated results for any reader -- the visibly-incomplete half.
+
+        Appended to the model's own ASH run (the default ``sarif`` skeleton's
+        one run); when a caller supplied a model with no SARIF or no runs,
+        nothing is appended, because inventing a report to carry a note into
+        is not this method's call to make.
+        """
+        asset = getattr(self.plugin_context, "asset", None)
+        if not isinstance(asset, Asset) or asset.kind != AssetKind.CONTAINER_IMAGE:
+            return
+        image_capable = [
+            name
+            for (name, instance, _tasks) in self._scanner_tasks
+            if serves_asset_kind(instance.__class__, AssetKind.CONTAINER_IMAGE)
+        ]
+        shown = asset.image.shown() if asset.image is not None else "<unknown>"
+        if not image_capable:
+            # What is known here is that nothing queued reads images; why is not:
+            # no selected scanner declares the kind, or the ones that do were
+            # excluded, could not run on this host, or are not installed. The
+            # sentence says only what holds in every one of those cases.
+            reason = (
+                "no scanner that was selected and able to run reads container images"
+            )
+        else:
+            # Queued image scanners exist; the note is owed only when every
+            # one of them ended SKIPPED (each cleanly declined the image: an
+            # offline host with no engine, an unreadable locator shape), which
+            # is known only after the executor ran -- the second call site.
+            rows = [
+                aggregated_results.scanner_results.get(name) for name in image_capable
+            ]
+            present = [row for row in rows if row is not None]
+            if len(present) != len(rows):
+                return
+            if any(row.status != ScannerStatus.SKIPPED for row in present):
+                return
+            reason = (
+                "every image-capable scanner declined it cleanly (typically "
+                "no container engine was detected and network fetching is "
+                "unavailable, or the locator shape is one the tool cannot read)"
+            )
+        text = (
+            f"container image {shown} was not scanned: {reason}. This scan "
+            "is complete by contract and has not looked at the image."
+        )
+        sarif = aggregated_results.sarif
+        if sarif is None or not sarif.runs:
+            ASH_LOGGER.warning(text, extra=NO_MARKUP)
+            return
+        for run in sarif.runs:
+            for result in run.results or []:
+                if result.ruleId == self.IMAGE_NOT_SCANNED_RULE_ID:
+                    # One note per scan: the method runs before the executor
+                    # (nothing queued) and after it (everything skipped), and
+                    # the second call must not double the first's note.
+                    return
+        ASH_LOGGER.warning(text, extra=NO_MARKUP)
+        from automated_security_helper.schemas.sarif_schema_model import (
+            Kind,
+            Level,
+            Message,
+            Message1,
+            PropertyBag,
+            Result,
+        )
+
+        run = sarif.runs[0]
+        if run.results is None:
+            run.results = []
+        run.results.append(
+            Result(
+                ruleId=self.IMAGE_NOT_SCANNED_RULE_ID,
+                kind=Kind.informational,
+                level=Level.note,
+                message=Message(root=Message1(text=text)),
+                properties=PropertyBag.model_validate({"image": shown}),
+            )
+        )
 
     def _execute_phase(
         self,
@@ -969,7 +1140,42 @@ class ScanPhase(EnginePhase):
 
         # Compute the source file list once so scanners don't each re-glob. The
         # walk skips an entry it cannot stat instead of aborting the scan.
-        source_files = list(_regular_files_under(self.plugin_context.source_dir))
+        # An image scan's source directory only anchors it (the working directory
+        # unless the caller named one) and is not its subject: walking it listed
+        # unrelated files, and from a large directory cost a full walk for nothing.
+        subject = getattr(self.plugin_context, "asset", None)
+        image_subject = (
+            isinstance(subject, Asset) and subject.kind == AssetKind.CONTAINER_IMAGE
+        )
+        if image_subject and subject.image is not None:
+            # A tag-only reference gets the digest the registry says it points
+            # at, so its finding ids key on that digest (utils/image_digest_resolver).
+            # Once per scan, before any scanner is built; a failure or offline
+            # mode leaves the locator as submitted and logs one notice.
+            from automated_security_helper.core.constants import is_offline_mode
+            from automated_security_helper.utils.image_digest_resolver import (
+                resolve_image_locator,
+            )
+
+            resolved = resolve_image_locator(subject.image, offline=is_offline_mode())
+            if resolved is not subject.image:
+                self.plugin_context.asset = Asset.for_image(resolved)
+                # The scope a reporter that archives resolved findings compares
+                # now names the image by this digest, not by the tag it was
+                # asked for (utils/image_attribution.image_scan_source).
+                from automated_security_helper.utils.image_attribution import (
+                    image_scan_source,
+                )
+
+                metadata = getattr(aggregated_results, "metadata", None)
+                recorded = getattr(metadata, "scan_source", None)
+                if isinstance(recorded, str) and recorded.startswith("image:"):
+                    metadata.scan_source = image_scan_source(resolved)
+        source_files = (
+            []
+            if image_subject
+            else list(_regular_files_under(self.plugin_context.source_dir))
+        )
         if self._include_work_dir:
             # Each file once: a work directory inside the source tree (an output
             # directory under the project) was walked by both listings.
@@ -1010,6 +1216,10 @@ class ScanPhase(EnginePhase):
             # validation. Started here, before construction, so a scanner the run
             # did not select whose constructor raised is counted with the others.
             excluded_scanner_names: List[str] = []
+            # Scanners whose tool is absent and that have nothing to scan, or that
+            # do not scan this asset's kind; SKIPPED. Started here, as the list
+            # above is, because the construction loop records the second kind.
+            nothing_to_scan_names: List[str] = []
             # The operator's names, compared as everywhere in this phase.
             operator_allowlist = {name.lower().strip() for name in enabled_scanners}
             if scanner_classes:
@@ -1131,13 +1341,36 @@ class ScanPhase(EnginePhase):
                                 excluded_scanner_names,
                             )
                             continue
+                        # No asset routing here. A scanner that does not scan
+                        # the image's kind was once recorded SKIPPED for a
+                        # constructor that raised, while a module that failed to
+                        # import was an ERROR row on the same scan, so one kind
+                        # of loss was visible to the completeness gate and its
+                        # sibling was not. Both are a scanner ASH could not
+                        # bring up, on any scan kind, and both are ERROR rows
+                        # with the reason; the text says when the scanner would
+                        # not have read the image anyway, so an operator is not
+                        # sent looking for lost image coverage.
+                        constructing_for = getattr(self.plugin_context, "asset", None)
+                        image_note = ""
+                        if (
+                            isinstance(constructing_for, Asset)
+                            and constructing_for.kind == AssetKind.CONTAINER_IMAGE
+                            and not serves_asset_kind(
+                                plugin_class, AssetKind.CONTAINER_IMAGE
+                            )
+                        ):
+                            image_note = (
+                                " (it does not scan container images, so this "
+                                "image scan lost none of its image coverage)"
+                            )
                         # With the config's environment values: a constructor's
                         # error can name an option the config read from the
                         # environment, and this text goes to the report, ash.log,
                         # the results files and scanner_reasons.
                         construction_error = (
                             f"Scanner {failed_name} could not be constructed, so it "
-                            f"did not run: {type(e).__name__}: "
+                            f"did not run{image_note}: {type(e).__name__}: "
                             + error_text(
                                 e,
                                 config_environment_values(
@@ -1184,7 +1417,7 @@ class ScanPhase(EnginePhase):
                         # scanner's state would then go untracked.
                         self._track_scanner_state(
                             failed_name,
-                            registration_status="registered",
+                            registration_status=RegistrationStatus.REGISTERED,
                             plugin_class=plugin_class,
                             queued_for_execution=False,
                             execution_completed=False,
@@ -1277,7 +1510,7 @@ class ScanPhase(EnginePhase):
                     try:
                         self.validation_manager.update_scanner_state(
                             display_name,
-                            registration_status="registered",
+                            registration_status=RegistrationStatus.REGISTERED,
                             plugin_class=plugin_instance.__class__,
                         )
                     except ValueError as e:
@@ -1365,7 +1598,7 @@ class ScanPhase(EnginePhase):
             # resolve, so it is not the silent-zero case, and a CI matrix whose
             # runners load different plugin modules can produce that shape
             # legitimately. The unresolved name is named either way, and a name
-            # that belongs to an alpha module ASH ships but that this run did
+            # that belongs to a plugin module ASH ships but that this run did
             # not import is named with the module to add, in the warning and in
             # the refusal alike.
             #
@@ -1382,11 +1615,11 @@ class ScanPhase(EnginePhase):
                 requested = [(name, name.lower().strip()) for name in enabled_scanners]
                 unresolved = [name for name, key in requested if key not in known_names]
                 # The module hint and the refusal text are the engine's too
-                # (core.scanner_selection): one text for the construction-time
+                # (plugins.enablement): one text for the construction-time
                 # check and this backstop. "Not loaded" is judged from the
                 # classes handed to this phase, not sys.modules.
-                hint = unloaded_alpha_hint(
-                    unloaded_alpha_scanners(unresolved, known_names, scanner_classes)
+                hint = unloaded_opt_in_hint(
+                    unloaded_opt_in_scanners(unresolved, known_names, scanner_classes)
                 )
                 if unresolved:
                     ASH_LOGGER.warning(
@@ -1395,10 +1628,10 @@ class ScanPhase(EnginePhase):
                         f"{', '.join(sorted(registered_names))}"
                         + (f". {hint}" if hint else "")
                     )
-                # A refusal whose requested names are all unresolved and at least one
-                # is an alpha scanner from an unloaded module names the module to
-                # add, not spelling, and the misspelled names beside it.
-                refusal = alpha_scanner_refusal(
+                # A refusal whose requested names are all unresolved and at least
+                # one is a shipped scanner from an unloaded module names the
+                # module to add, not spelling, and the misspelled names beside it.
+                refusal = unloaded_opt_in_refusal(
                     list(enabled_scanners), known_names, scanner_classes
                 )
                 if refusal:
@@ -1507,7 +1740,7 @@ class ScanPhase(EnginePhase):
             # nothing still ran as shard i of n, and with no record of that its
             # results read as an unsharded scan, which `ash merge` would not hold
             # to the split the other shards made.
-            if shard_count is not None:
+            if shard_count is not None and shard_index is not None:
                 all_scanner_names = [
                     _scanner_display_name(instance) for instance in scanner_instances
                 ]
@@ -1565,8 +1798,6 @@ class ScanPhase(EnginePhase):
 
             # Initialize lists to track scanner states for validation.
             # excluded_scanner_names was started above the construction loop.
-            # Scanners whose tool is absent and that have nothing to scan; SKIPPED.
-            nothing_to_scan_names: List[str] = []
             dependency_error_scanners = {}
             # Scanners this run INTENDED to execute, recorded for the shard
             # provenance below. Collected here rather than derived from
@@ -1761,6 +1992,43 @@ class ScanPhase(EnginePhase):
                         # merge-time question "did any shard ask for this"
                         # indistinguishable from "could any shard run it".
                         selected_scanner_names.append(display_name)
+
+                        # ASSET ROUTING, right after selection and before every
+                        # diagnosis, for the selection-before-diagnosis reason
+                        # above: a scanner that does not scan this asset's KIND
+                        # does not need its dependencies, its platform or its
+                        # tool, and asking any of those first would give two
+                        # scanners in the identical position different statuses
+                        # by tool presence. The register row is the one place
+                        # capability lives (base/scanner_operational_facets),
+                        # so routing asks the declaration: an undeclared or
+                        # filesystem-only scanner offered a container image is
+                        # SKIPPED with a row naming why, the reported sibling
+                        # of the log-only empty-target skip, rather than run
+                        # against a directory that is not the scan's subject.
+                        # A FILESYSTEM asset (or none, which is every caller
+                        # that predates assets) changes nothing: every scanner
+                        # serves it, by declaration or by default.
+                        scan_asset = getattr(self.plugin_context, "asset", None)
+                        if (
+                            isinstance(scan_asset, Asset)
+                            and scan_asset.kind == AssetKind.CONTAINER_IMAGE
+                            and not serves_asset_kind(
+                                # __class__, not type(): it is the class the
+                                # rest of this loop records (see
+                                # enabled_scanner_classes below), and the one
+                                # a test double assigns.
+                                plugin_instance.__class__,
+                                AssetKind.CONTAINER_IMAGE,
+                            )
+                        ):
+                            aggregated_results = self._record_asset_kind_not_served(
+                                display_name,
+                                scan_asset,
+                                nothing_to_scan_names,
+                                aggregated_results,
+                            )
+                            continue
 
                         # A scanner that declares this PLATFORM unsupported is SKIPPED,
                         # not MISSING, and this has to be asked before the dependency
@@ -2071,20 +2339,37 @@ class ScanPhase(EnginePhase):
 
                         # Every selection filter and the dependency check have passed.
                         # Add a single task per scanner that will handle both source
-                        # and converted directories.
-                        task_list = [
-                            {
-                                "path": self.plugin_context.source_dir,
-                                "type": "source",
-                            },
-                        ]
-                        if self._include_work_dir:
-                            task_list.append(
+                        # and converted directories -- or, for a container-image
+                        # asset, ONE image task: the routing above let only a
+                        # scanner that serves the kind reach this line, and an
+                        # image presents no source or converted directory to
+                        # scan beside itself. The task's path is the anchoring
+                        # source directory, which exists (the executor's
+                        # existence probe reads it) and is never the subject.
+                        if (
+                            isinstance(scan_asset, Asset)
+                            and scan_asset.kind == AssetKind.CONTAINER_IMAGE
+                        ):
+                            task_list = [
                                 {
-                                    "path": self.plugin_context.work_dir,
-                                    "type": "converted",
-                                }
-                            )
+                                    "path": self.plugin_context.source_dir,
+                                    "type": "image",
+                                },
+                            ]
+                        else:
+                            task_list = [
+                                {
+                                    "path": self.plugin_context.source_dir,
+                                    "type": "source",
+                                },
+                            ]
+                            if self._include_work_dir:
+                                task_list.append(
+                                    {
+                                        "path": self.plugin_context.work_dir,
+                                        "type": "converted",
+                                    }
+                                )
                         self._scanner_tasks.append(
                             (
                                 display_name,
@@ -2101,8 +2386,8 @@ class ScanPhase(EnginePhase):
                         # CRITICAL: Update validation manager state for queued scanners
                         self.validation_manager.update_scanner_state(
                             display_name,
-                            registration_status="registered",
-                            enablement_status="enabled",
+                            registration_status=RegistrationStatus.REGISTERED,
+                            enablement_status=EnablementStatus.ENABLED,
                             enablement_reason="Scanner passed all checks and was queued for execution",
                             queued_for_execution=True,
                             execution_completed=False,
@@ -2271,11 +2556,17 @@ class ScanPhase(EnginePhase):
                     )
                     self.validation_manager.update_scanner_state(
                         display_name,
-                        registration_status="registered",
+                        registration_status=RegistrationStatus.REGISTERED,
                         queued_for_execution=False,
                         execution_completed=False,
                         failure_reason=unclassified_reason,
                     )
+
+            # The one informational result an image scan gets when nothing was
+            # queued that scans images: after the filter loop, because "nothing"
+            # is not known before it, and before the executor, so the note is on
+            # the model whether or not any scanner runs.
+            self._record_unscanned_image_asset(aggregated_results)
 
             # Record the completeness denominator, and the plugins that never
             # arrived to be counted in it.
@@ -2514,6 +2805,12 @@ class ScanPhase(EnginePhase):
 
             # Validate execution completion after scanner execution
             self._validate_execution_completion(aggregated_results)
+
+            # The second call site of the image note: queued image scanners
+            # that ALL declined cleanly (offline with no engine, a locator
+            # shape a tool cannot read) are known only now. The method emits
+            # one note per scan whichever call site owes it.
+            self._record_unscanned_image_asset(aggregated_results)
 
             self.progress_display.update_task(
                 phase=ExecutionPhase.SCAN,
@@ -2792,7 +3089,7 @@ class ScanPhase(EnginePhase):
                         AshEventType.WARNING,
                         message=f"Scanner tasks validation found {len(missing_scanners)} missing scanners",
                         missing_scanners=missing_scanners,
-                        phase="scan",
+                        phase=ExecutionPhase.SCAN.value,
                         validation_checkpoint="scanner_tasks_validation",
                     )
                 except Exception as event_error:
@@ -2808,7 +3105,7 @@ class ScanPhase(EnginePhase):
 
             # Add validation results to aggregated results for debugging
             checkpoint_dict = {
-                "checkpoint_name": validation_checkpoint.checkpoint_name,
+                "checkpoint_name": str(validation_checkpoint.checkpoint_name),
                 "timestamp": validation_checkpoint.timestamp.isoformat(),
                 "expected_scanners": validation_checkpoint.expected_scanners,
                 "actual_scanners": validation_checkpoint.actual_scanners,
@@ -2851,7 +3148,7 @@ class ScanPhase(EnginePhase):
                         total_issues=total_issues,
                         discrepancies=validation_checkpoint.discrepancies,
                         errors=validation_checkpoint.errors,
-                        phase="scan",
+                        phase=ExecutionPhase.SCAN.value,
                         validation_checkpoint="scanner_tasks_validation",
                     )
                 except Exception as event_error:
@@ -2870,7 +3167,7 @@ class ScanPhase(EnginePhase):
                         message="Scanner tasks validation completed successfully",
                         expected_count=len(validation_checkpoint.expected_scanners),
                         actual_count=len(validation_checkpoint.actual_scanners),
-                        phase="scan",
+                        phase=ExecutionPhase.SCAN.value,
                         validation_checkpoint="scanner_tasks_validation",
                     )
                 except Exception as event_error:
@@ -2890,7 +3187,7 @@ class ScanPhase(EnginePhase):
                     AshEventType.ERROR,
                     message=error_msg,
                     exception=error_text(e),
-                    phase="scan",
+                    phase=ExecutionPhase.SCAN.value,
                     validation_checkpoint="scanner_tasks_validation",
                 )
             except Exception as event_error:
@@ -2971,7 +3268,7 @@ class ScanPhase(EnginePhase):
                         message=f"Execution completion validation found {total_discrepancies} discrepancies",
                         missing_scanners=missing_scanners,
                         unexpected_scanners=unexpected_scanners,
-                        phase="scan",
+                        phase=ExecutionPhase.SCAN.value,
                         validation_checkpoint="execution_completion_validation",
                     )
                 except Exception as event_error:
@@ -3027,7 +3324,7 @@ class ScanPhase(EnginePhase):
 
             # Add validation results to aggregated results for debugging
             checkpoint_dict = {
-                "checkpoint_name": validation_checkpoint.checkpoint_name,
+                "checkpoint_name": str(validation_checkpoint.checkpoint_name),
                 "timestamp": validation_checkpoint.timestamp.isoformat(),
                 "expected_scanners": validation_checkpoint.expected_scanners,
                 "actual_scanners": validation_checkpoint.actual_scanners,
@@ -3077,7 +3374,7 @@ class ScanPhase(EnginePhase):
                         completion_rate=validation_checkpoint.metadata.get(
                             "completion_rate", 0.0
                         ),
-                        phase="scan",
+                        phase=ExecutionPhase.SCAN.value,
                         validation_checkpoint="execution_completion_validation",
                     )
                 except Exception as event_error:
@@ -3102,7 +3399,7 @@ class ScanPhase(EnginePhase):
                         expected_count=len(validation_checkpoint.expected_scanners),
                         completed_count=len(validation_checkpoint.actual_scanners),
                         completion_rate=completion_rate,
-                        phase="scan",
+                        phase=ExecutionPhase.SCAN.value,
                         validation_checkpoint="execution_completion_validation",
                     )
                 except Exception as event_error:
@@ -3122,7 +3419,7 @@ class ScanPhase(EnginePhase):
                     AshEventType.ERROR,
                     message=error_msg,
                     exception=error_text(e),
-                    phase="scan",
+                    phase=ExecutionPhase.SCAN.value,
                     validation_checkpoint="execution_completion_validation",
                 )
             except Exception as event_error:
@@ -3162,7 +3459,7 @@ class ScanPhase(EnginePhase):
                 "actual_scanners": [],
                 "discrepancies": [],
                 "errors": [],
-                "metadata": {"phase": "scan"},
+                "metadata": {"phase": ExecutionPhase.SCAN.value},
             }
         )
 
@@ -3228,7 +3525,7 @@ class ScanPhase(EnginePhase):
                             added_scanners=added_scanners,
                             unexpected_scanners=unexpected_scanners,
                             total_adjustments=total_adjustments,
-                            phase="scan",
+                            phase=ExecutionPhase.SCAN.value,
                             validation_checkpoint="result_completeness_validation",
                         )
                     except Exception as event_error:
@@ -3283,7 +3580,7 @@ class ScanPhase(EnginePhase):
 
             # Add validation results to aggregated results for debugging
             checkpoint_dict = {
-                "checkpoint_name": validation_checkpoint.checkpoint_name,
+                "checkpoint_name": str(validation_checkpoint.checkpoint_name),
                 "timestamp": validation_checkpoint.timestamp.isoformat(),
                 "expected_scanners": validation_checkpoint.expected_scanners,
                 "actual_scanners": validation_checkpoint.actual_scanners,
@@ -3333,7 +3630,7 @@ class ScanPhase(EnginePhase):
                         completeness_rate=validation_checkpoint.metadata.get(
                             "completeness_rate", 0.0
                         ),
-                        phase="scan",
+                        phase=ExecutionPhase.SCAN.value,
                         validation_checkpoint="result_completeness_validation",
                     )
                 except Exception as event_error:
@@ -3358,7 +3655,7 @@ class ScanPhase(EnginePhase):
                         expected_count=len(validation_checkpoint.expected_scanners),
                         final_count=len(validation_checkpoint.actual_scanners),
                         completeness_rate=completeness_rate,
-                        phase="scan",
+                        phase=ExecutionPhase.SCAN.value,
                         validation_checkpoint="result_completeness_validation",
                     )
                 except Exception as event_error:
@@ -3387,7 +3684,7 @@ class ScanPhase(EnginePhase):
                     AshEventType.ERROR,
                     message=error_msg,
                     exception=error_text(e, environment_values),
-                    phase="scan",
+                    phase=ExecutionPhase.SCAN.value,
                     validation_checkpoint="result_completeness_validation",
                 )
             except Exception as event_error:

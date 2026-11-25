@@ -31,12 +31,14 @@ choice, so a trivy/trivy-repo misconfig attach is a side-`--format json` read,
 the same two-report pattern as checkov's #1024. This applies to trivy-repo's
 default run (misconfig is in its default scanner set).
 
-## (b) cfn-nag: UNCONFIRMED — the tool could not be run to a real result
+## (b) cfn-nag: the logical id is a structured SARIF field, one result per id — SETTLED (recapture)
+
+### The first M0 run FATALed
 
 cfn-nag 0.8.10 is a Ruby gem. The run host has no system
-Ruby; the gem installed cleanly on a portable Ruby 3.4.5 in the lane, but every
-scan of the valid template `cfn_nag/m0_fixture_bucket.yaml` failed before
-producing findings. The JSON output, verbatim:
+Ruby; the gem installed cleanly on a Homebrew portable-ruby 3.4.5 in the lane,
+but every scan of the valid template `cfn_nag/m0_fixture_bucket.yaml` failed
+before producing findings. The JSON output, verbatim:
 
 ```text
 "violations": [
@@ -52,16 +54,80 @@ producing findings. The JSON output, verbatim:
 ]
 ```
 
-The SARIF output for the same run parses but carries 0 results. The failure is
-a cfn-nag 0.8.10 incompatibility with Ruby 3.4's Psych, not a template problem
-(the same template lints clean apart from the deliberate cfn-lint error cases).
-So the question — is the logical id a structured SARIF field or only
-one-result-per-id multiplicity? — remains open, and no cfn-nag golden is
-committed: a FATAL-error output must not become the fixture later conformance
-rows read. Settling it needs a Ruby at or below the versions cfn-nag 0.8.10
-supports (the project's container image installs it with Bundler against
-`assets/Gemfile.lock`; a rerun inside that image, or on a host with an older
-Ruby, is the route). M3a's route choice stays open until then.
+The SARIF output for the same run parses but carries 0 results, exits 1 and
+writes nothing to stderr (`captured/cfn_nag-0.8.10-fatal-psych-portable-ruby-*`).
+The first reading was a cfn-nag incompatibility with Ruby 3.4's Psych. The
+recapture below shows that reading was wrong.
+
+### Recapture (2026-11-24, a Linux x86_64 dev host, a disposable lane removed after the pull)
+
+The user's fix was a Ruby version constraint ("we can just put a ruby version
+constraint when running cfn-nag"). Measured, the constraint is not the cause:
+
+| Ruby | Build | cfn-nag 0.8.10 on `m0_fixture_bucket.yaml` |
+|---|---|---|
+| 3.4.5 | Homebrew portable-ruby bottle (sha256 `5ea0e3a3...705f5`) | FATAL, exit 1 |
+| 3.3.8 | Homebrew portable-ruby bottle (sha256 `2449f1f4...35fd9a`) | FATAL, exit 1, same message in Ruby 3.3's quoting (`` `parse' ``) |
+| 3.3.8 | built from the ruby-lang.org source tarball | 3 warnings, exit 0 |
+| 3.4.5 | built from the ruby-lang.org source tarball | 3 warnings, exit 0 |
+| 3.1.7 | built from the ruby-lang.org source tarball (the Ruby 3.1 line the container image installs) | 3 warnings, exit 0 |
+
+The source-built SARIF and JSON outputs are byte-identical across the three
+Rubies (sha256 `f805db7e...596b` and `11220284...ad6b`). What differs is the
+build: cfn-nag pins `psych ~> 3`, so the gem-installed psych 3.3.4 loads next
+to the Ruby's own Psych. On a portable-ruby bottle the interpreter's Psych is
+linked into the `ruby` binary, its `Psych::Parser` (which defines
+`_native_parse`) is already loaded, and psych 3.3.4's `parser.rb` expects the C
+extension to define a public `parse`. Observed in the lane: the loaded
+`Psych::Parser` had public methods `[:external_encoding=, :handler, :handler=,
+:mark]` and private `[:_native_parse, :initialize]`, and `strings`-level grep of
+the gem's `psych.so` found 0 occurrences of `_native_parse`. That mechanism is
+this lane's reading of the evidence; the measured fact is the table above.
+
+Lane details: gems were fetched from rubygems.org by exact version (the 18
+versions `gem install cfn-nag -v 0.8.10` resolved) and installed with
+`gem install --local` in dependency order, `GEM_HOME` per Ruby, `env -i`. Ruby
+3.1.7 took `multi_json` 1.15.0 because 1.21.2 requires Ruby 3.2 or later. Ruby
+3.4.5 needed its own gem directory on `GEM_PATH` for `bigdecimal` (a bundled gem
+there). The source builds used libyaml 0.2.5 and OpenSSL 3.0.15 built into the
+lane.
+
+Answer to question (b), quoted from `captured/cfn_nag-0.8.10-m0.sarif`
+(`cfn_nag_scan --output-format sarif`), first of three results:
+
+```text
+"ruleId": "CFN_NAG_W51",
+"level": "warning",
+"message": {"text": "S3 bucket should likely have a bucket policy"},
+"locations": [{
+  "physicalLocation": {
+    "artifactLocation": {"uri": "in/m0_fixture_bucket.yaml", "uriBaseId": "%SRCROOT%"},
+    "region": {"startLine": 5}},
+  "logicalLocations": [{"name": "M0FixtureBucket"}]}]
+```
+
+- The logical resource id is a structured SARIF field:
+  `locations[0].logicalLocations[0].name` (`M0FixtureBucket`).
+- It is one result per id, not a plural field. The two-resource fixture
+  (`m0_fixture_two_buckets.yaml`, `captured/cfn_nag-0.8.10-two-buckets.*`) gives
+  6 SARIF results for 3 rules over 2 buckets, each with a one-element
+  `logicalLocations` (`M0FixtureBucketA` at line 8, `M0FixtureBucketB` at line
+  12). The JSON format keeps one violation per rule with the plural
+  `"logical_resource_ids": ["M0FixtureBucketA", "M0FixtureBucketB"]`,
+  `"line_numbers": [8, 12]`, `"element_types": ["resource", "resource"]`.
+- So SARIF is the route for resource identity (no second JSON read is needed):
+  the id rides in the SARIF result the adapter already parses.
+- Other cells the SARIF settles for this fixture: `region` carries `startLine`
+  only (no column, no snippet); results carry no `fingerprints` and no
+  `properties` bag; the driver is `{name, informationUri, semanticVersion}` and
+  each rule is `{id, name, fullDescription}` (no `helpUri`, no tags). The
+  `id` is `CFN_NAG_<rule>` in SARIF and `<rule>` in JSON.
+- The exit status is the failing-violation count (`failure_count`); the three
+  warnings exit 0.
+
+A FATAL output is committed only as a named failure fixture
+(`cfn_nag-0.8.10-fatal-psych-portable-ruby-*`), never as a golden the
+conformance rows read. M3a can pick the SARIF route now.
 
 ## (c) cfn-lint: JSON `Location.Path` names the resource — SETTLED
 
@@ -122,3 +188,43 @@ So any test that exercises the snyk double today would fail at fixture
 resolution until `tests/unit/characterization/fixtures/snyk/results.sarif` is
 committed; whether such a test is collected at all, and the committed tool
 fixture itself, both remain to be produced by a rerun of this item.
+
+## (f) Cells read at the bytes by the facet-mapping sweep (2026-11-25)
+
+Run in a disposable lane on a Linux x86_64 dev host, removed after the pull. Tool versions as
+named; every tool ran offline over the one-file inputs described.
+
+- **trivy 0.76.2, `fs --scanners misconfig` in JSON and SARIF over four inputs**
+  (sha256 of the release asset checked against the pin in `tool_downloads.py`).
+  `Results[].Type` and `CauseMetadata.Resource`:
+
+  | input | Type | Resource |
+  |---|---|---|
+  | `main.tf` (one `aws_s3_bucket`) | `terraform` | `aws_s3_bucket.m0_fixture_bucket` |
+  | `t.yaml` (CloudFormation, one bucket) | `cloudformation` | `t.yaml:3-4` (a file and line range) |
+  | `deploy.yaml` (a Deployment) | `kubernetes` | absent |
+  | `Dockerfile` | `dockerfile` | absent |
+
+  The failed records match the SARIF results one for one on (check id, file,
+  start line, end line) for Terraform, CloudFormation and Kubernetes (8, 8 and
+  17 keys, no orphan either way); the Dockerfile's JSON has a null line range
+  on two records where its SARIF writes line 1. So only a `terraform` result is
+  given a resource id: the CloudFormation value is a position, not the logical
+  id.
+- **semgrep 1.187.0 and opengrep 2.0.0 (the pinned release, sha256 checked), a
+  rule with `fix: $X is None` over `if x == None:`**: the SARIF result keys are
+  exactly `fingerprints, locations, message, properties, ruleId` in both. Neither
+  writes `fixes`, so there is nothing for `fix_available` to map.
+- **checkov 3.4.5 over the same four inputs, JSON**: `fixed_definition` is null
+  on 34 of 34 records (terraform 7, cloudformation 6, kubernetes 19, dockerfile
+  2). `code_block` spans the whole `file_line_range` (20 lines for the
+  Deployment), and `guideline` is a policy-page URL on every record.
+- **cfn-lint 1.57.2, `--format sarif` and `--format json` over
+  `m0_sources/m0_two_bad_properties.yaml`**: the two reports are spelled alike
+  (same file string, spans and message), so a finding is matched on rule, file,
+  span and message. The JSON `Location.Path` is `["Resources", "<id>", ...]` for
+  the two bucket findings and `["Parameters", "Unused", ...]` for the two
+  parameter findings, which are in no resource.
+- **guarddog scan output** (every committed `scan_*.json`): top-level keys are
+  `errors, issues, package, results, risk_score, risks`, and `package` is the
+  scanned directory path, so scan mode names no package or version.

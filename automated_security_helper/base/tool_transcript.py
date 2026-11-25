@@ -74,7 +74,7 @@ class TranscriptRestampError(ValueError):
 
 
 class _Frozen(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", hide_input_in_errors=True)
 
 
 def _relative_posix(value: str) -> str:

@@ -24,6 +24,7 @@ import ast
 from pathlib import Path
 from typing import Dict, List, Tuple
 
+from automated_security_helper.cli.mcp.error_types import McpErrorType
 import pytest
 
 from automated_security_helper.cli import mcp_server, mcp_tools
@@ -154,7 +155,7 @@ def test_the_env_refusal_run_ash_scan_forwards_carries_its_exit_code():
 
     assert refusal["success"] is False, refusal
     assert refusal["operation"] == "scan_directory", refusal
-    assert refusal["error_type"] == mcp_tools.CONFIG_ENV_NOT_RESOLVED, refusal
+    assert refusal["error_type"] == McpErrorType.CONFIG_ENV_NOT_RESOLVED.value, refusal
     assert refusal["exit_code"] == mcp_tools.REFUSED_CONFIG_EXIT_CODE, refusal
     assert refusal["exit_code_meaning"], refusal
     assert "\n" not in refusal["error"], refusal

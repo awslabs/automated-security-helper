@@ -26,8 +26,21 @@ from automated_security_helper.base.scanner_facets import FacetState
 
 
 def text_present(value: Any) -> bool:
-    """Whether a text column holds a value (not blank, ``[]``, ``{}`` or ``null``)."""
-    return isinstance(value, str) and value.strip() not in ("", "[]", "{}", "null")
+    """Whether a text column holds a value (not blank, ``[]``, ``{}`` or ``null``).
+
+    A text column holds a string or nothing. Any other type is a column whose
+    type changed under the gate, and reading it as "empty" would let an N/A or
+    DROPPED cell pass over a populated column (the contamination direction),
+    so it raises instead.
+    """
+    if value is None:
+        return False
+    if not isinstance(value, str):
+        raise TypeError(
+            f"a text facet column holds {type(value).__name__}, not str or None: "
+            "the flat row's column type changed, so the observation is unreadable"
+        )
+    return value.strip() not in ("", "[]", "{}", "null")
 
 
 def _present(value: Any) -> bool:
@@ -102,7 +115,7 @@ class Verdict:
     state: str
     non_null: Optional[int]
     total: Optional[int]
-    outcome: str  # "ok" | "FAIL" | "excluded"
+    outcome: str  # "ok" | "FAIL" | "excluded" | "owed"
     detail: str
 
     def row(self) -> str:
@@ -133,6 +146,25 @@ def judge(
     non_null, total = observed if observed is not None else (None, None)
     populated = bool(non_null)
     cell = f"{scanner}.{facet} declared {state.value}"
+    if state is FacetState.UNCONFIRMED:
+        # Neither contamination nor proof: nobody has read a real run for this
+        # cell, so whatever the corpus holds proves nothing yet. It is a fixture
+        # owed, listed in the table and never failed.
+        return Verdict(
+            scanner,
+            facet,
+            state.value,
+            non_null,
+            total,
+            "owed",
+            "fixture owed: author or capture the real run that settles the cell, "
+            "then redeclare it MAPPED or N/A with the evidence",
+        )
+    if state not in (FacetState.MAPPED, FacetState.NA, FacetState.DROPPED):
+        # A new FacetState member must be judged on purpose. Without this the
+        # chain below ends in an "ok" return that every unhandled state reaches,
+        # so the next state would pass the gate silently over any column.
+        raise AssertionError(f"facet state {state!r} has no judgment in judge()")
     if state is FacetState.MAPPED:
         if observed is None or not total:
             why = (
@@ -195,12 +227,13 @@ def observed_counts(flats: Iterable[Any]) -> dict[str, tuple[int, int]]:
     rows = list(flats)
     counts: dict[str, tuple[int, int]] = {}
     for facet, observation in FACET_COLUMNS.items():
-        if observation.excluded is not None:
+        is_populated = observation.populated
+        if observation.excluded is not None or is_populated is None:
             continue
         populated = 0
         for flat in rows:
             values = [getattr(flat, column) for column in observation.columns]
-            if observation.populated(*values):  # type: ignore[misc]
+            if is_populated(*values):
                 populated += 1
         counts[facet] = (populated, len(rows))
     return counts

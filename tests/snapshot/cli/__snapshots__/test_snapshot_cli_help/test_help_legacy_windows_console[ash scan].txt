@@ -110,10 +110,12 @@
 │                                                              file. By default, ASH looks for    │
 │                                                              the following config file names in │
 │                                                              the source directory of a scan:    │
-│                                                              ['.ash.yml', '.ash.yaml',          │
-│                                                              '.ash.json', 'ash.yml',            │
-│                                                              'ash.yaml', 'ash.json'] (each at   │
-│                                                              the root, then in .ash/), then     │
+│                                                              .ash.yaml at the root, then the    │
+│                                                              deprecated ['.ash.yml',            │
+│                                                              '.ash.yaml', '.ash.json',          │
+│                                                              'ash.yml', 'ash.yaml', 'ash.json'] │
+│                                                              (each at the root, then in .ash/;  │
+│                                                              .ash.yaml only in .ash/), then     │
 │                                                              ['.ashrc.toml', '.ashrc.yaml',     │
 │                                                              '.ashrc.yml', '.ashrc.json',       │
 │                                                              'ashrc.toml', 'ashrc.yaml',        │
@@ -151,6 +153,32 @@
 │                                                              Planned to become the precommit    │
 │                                                              default in ASH v4.                 │
 │                                                              [env var: ASH_STAGED]              │
+│ --image                     <str>                            Scan a container image named by    │
+│                                                              reference (registry/repo[:tag])    │
+│                                                              instead of a source directory. ASH │
+│                                                              fetches nothing itself: the image  │
+│                                                              is prepared by a container engine  │
+│                                                              or the scanner tools' own registry │
+│                                                              clients. Exclusive with            │
+│                                                              --source-dir, --image-archive and  │
+│                                                              --image-layout; scanners that do   │
+│                                                              not declare container_image        │
+│                                                              targets are reported SKIPPED.      │
+│ --image-archive             <str>                            Scan a saved container image (an   │
+│                                                              uncompressed docker save / OCI     │
+│                                                              archive tarball) instead of a      │
+│                                                              source directory. Needs no         │
+│                                                              container engine. Exclusive with   │
+│                                                              --source-dir, --image and          │
+│                                                              --image-layout.                    │
+│ --image-layout              <str>                            Scan a container image from an OCI │
+│                                                              image-layout directory (the        │
+│                                                              directory holding the oci-layout   │
+│                                                              marker file) instead of a source   │
+│                                                              directory. Needs no container      │
+│                                                              engine. Exclusive with             │
+│                                                              --source-dir, --image and          │
+│                                                              --image-archive.                   │
 └─────────────────────────────────────────────────────────────────────────────────────────────────┘
 ┌─ Reports ───────────────────────────────────────────────────────────────────────────────────────┐
 │ --output-dir                                              <str>  The directory to output        │

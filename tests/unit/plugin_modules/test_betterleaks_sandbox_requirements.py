@@ -63,9 +63,9 @@ def _real(paths):
     return {p.resolve() for p in paths}
 
 
-def test_betterleaks_declares_the_strict_default(layout):
+def test_betterleaks_declares_the_strict_default_and_a_private_macos_home(layout):
     declared = BetterleaksScanner.sandbox_requirements
-    assert declared == SandboxRequirements()
+    assert declared == SandboxRequirements(sandbox_exec_cache_env=("HOME",))
     policy = _policy(layout, declared)
     default = _policy(layout, SandboxRequirements())
     assert policy.network is False

@@ -107,10 +107,12 @@
 │                                                              file. By default, ASH looks for    │
 │                                                              the following config file names in │
 │                                                              the source directory of a scan:    │
-│                                                              ['.ash.yml', '.ash.yaml',          │
-│                                                              '.ash.json', 'ash.yml',            │
-│                                                              'ash.yaml', 'ash.json'] (each at   │
-│                                                              the root, then in .ash/), then     │
+│                                                              .ash.yaml at the root, then the    │
+│                                                              deprecated ['.ash.yml',            │
+│                                                              '.ash.yaml', '.ash.json',          │
+│                                                              'ash.yml', 'ash.yaml', 'ash.json'] │
+│                                                              (each at the root, then in .ash/;  │
+│                                                              .ash.yaml only in .ash/), then     │
 │                                                              ['.ashrc.toml', '.ashrc.yaml',     │
 │                                                              '.ashrc.yml', '.ashrc.json',       │
 │                                                              'ashrc.toml', 'ashrc.yaml',        │
@@ -148,6 +150,32 @@
 │                                                              Planned to become the precommit    │
 │                                                              default in ASH v4.                 │
 │                                                              [env var: ASH_STAGED]              │
+│ --image                     <str>                            Scan a container image named by    │
+│                                                              reference (registry/repo[:tag])    │
+│                                                              instead of a source directory. ASH │
+│                                                              fetches nothing itself: the image  │
+│                                                              is prepared by a container engine  │
+│                                                              or the scanner tools' own registry │
+│                                                              clients. Exclusive with            │
+│                                                              --source-dir, --image-archive and  │
+│                                                              --image-layout; scanners that do   │
+│                                                              not declare container_image        │
+│                                                              targets are reported SKIPPED.      │
+│ --image-archive             <str>                            Scan a saved container image (an   │
+│                                                              uncompressed docker save / OCI     │
+│                                                              archive tarball) instead of a      │
+│                                                              source directory. Needs no         │
+│                                                              container engine. Exclusive with   │
+│                                                              --source-dir, --image and          │
+│                                                              --image-layout.                    │
+│ --image-layout              <str>                            Scan a container image from an OCI │
+│                                                              image-layout directory (the        │
+│                                                              directory holding the oci-layout   │
+│                                                              marker file) instead of a source   │
+│                                                              directory. Needs no container      │
+│                                                              engine. Exclusive with             │
+│                                                              --source-dir, --image and          │
+│                                                              --image-archive.                   │
 └─────────────────────────────────────────────────────────────────────────────────────────────────┘
 ┌─ Reports ───────────────────────────────────────────────────────────────────────────────────────┐
 │ --output-dir                                              <str>  The directory to output        │
@@ -638,18 +666,16 @@
 └─────────────────────────────────────────────────────────────────────────────────────────────────┘
 ┌─ Commands ──────────────────────────────────────────────────────────────────────────────────────┐
 │ scan             Scan code, infrastructure, secrets, and dependencies.                          │
-│ build-image      Builds the ASH container image, then scans the current directory with it       │
-│                  unless --no-run is given.                                                      │
-│ report           Generate a report from ASH scan results using the specified reporter plugin.   │
-│ diff             Compare the findings in two saved ASH scans without running a scan.            │
-│ trend            Show new, carried and fixed findings over a series of saved ASH scans.         │
-│ merge            Merges the results of a sharded scan into one unified report.                  │
+│ results          Read, compare and combine the results of saved ASH scans: report, diff, trend, │
+│                  merge and inspect. None of them runs a scan.                                   │
 │ mcp              Start the ASH MCP server (Model Context Protocol)                              │
 │ get-genai-guide  Write the ASH GenAI Integration Guide for AI assistants and LLMs to a file.    │
+│ container        Work with the ASH container image.                                             │
 │ config           ASH configuration management                                                   │
 │ dependencies     Check or install dependencies for ASH plugins                                  │
-│ inspect          Inspect and analyze ASH outputs and reports                                    │
 │ plugin           Manage ASH plugins                                                             │
+│ suppress         Create symbol suppressions and keep their content-hash lock (.ash.lock)        │
+│                  current.                                                                       │
 │ express          Manage the express daemon: a resident warm ASH process that removes startup    │
 │                  cost from every scan. Unix only; scans fall back to ordinary cold runs         │
 │                  wherever the daemon is unavailable.                                            │

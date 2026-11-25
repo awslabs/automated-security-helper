@@ -190,6 +190,7 @@ from automated_security_helper.base.plugin_manifest import (
     ExclusionOption,
     resolve_ref,
 )
+from automated_security_helper.config.patch_ops import VALUE_WRITING_OPS
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.plugin_manifests import exclusion_options
 
@@ -294,7 +295,13 @@ class ClientScannerExclusion(BaseModel):
                 ``scan_timeout`` (``checkov_skips``).
         """
         if self.kind == "bandit":
-            return bandit_would_skip(self.pattern, relative=relative, absolute=absolute)
+            return bandit_would_skip(
+                self.pattern,
+                relative=relative,
+                absolute=absolute,
+                scanner=self.scanner,
+                option=self.option,
+            )
         # The path is placed once, and every matcher reads the placed form: a
         # matcher handed the spelling (``x/../vendor/a.py``) would take its
         # ``x`` and ``..`` for directories of the file.
@@ -399,7 +406,14 @@ def _placed_in_tree(relative: str) -> Optional[str]:
     return below
 
 
-def bandit_would_skip(pattern: str, *, relative: str, absolute: str) -> bool:
+def bandit_would_skip(
+    pattern: str,
+    *,
+    relative: str,
+    absolute: str,
+    scanner: Optional[str] = None,
+    option: Optional[str] = None,
+) -> bool:
     """Whether bandit, given ``excluded_paths`` entry ``pattern``, skips the file at ``absolute``.
 
     The entry's ``--exclude`` globs come from the builder the scanner uses
@@ -419,11 +433,39 @@ def bandit_would_skip(pattern: str, *, relative: str, absolute: str) -> bool:
     """
     # The builder the scanner that declares this kind passes its tool; named by
     # its manifest, so this layer does not import the plugin.
-    builder_ref = next(
-        declared.glob_builder
-        for _, declared in exclusion_options()
-        if declared.kind == "bandit" and declared.glob_builder is not None
+    #
+    # The builder is the one declared on this entry's own option (``scanner`` and
+    # ``option``, which the exclusion carries), so two scanners that share the
+    # kind with different builders are each matched by their own. A caller that
+    # names no option gets the first bandit-kind builder in manifest order.
+    #
+    # ``next`` with no default would let a manifest set that declares no bandit
+    # builder end this call as a bare ``StopIteration``: PEP 479 turns that into
+    # a ``RuntimeError`` inside a generator, and a ``map`` callback or a custom
+    # ``__next__`` ends its iteration silently, which drops findings with no
+    # error. A missing declaration is a configuration fault, named as one.
+    own = (
+        _declared_option(scanner, option)
+        if scanner is not None and option is not None
+        else None
     )
+    if own is not None and own.kind == "bandit" and own.glob_builder is not None:
+        builder_ref: Optional[str] = own.glob_builder
+    else:
+        builder_ref = next(
+            (
+                declared.glob_builder
+                for _, declared in exclusion_options()
+                if declared.kind == "bandit" and declared.glob_builder is not None
+            ),
+            None,
+        )
+    if builder_ref is None:
+        raise ScannerError(
+            "no scanner manifest declares a glob_builder for an exclusion option "
+            "of kind 'bandit', so a client-supplied bandit exclusion cannot be "
+            "matched. Declare one on the option (ExclusionOption.glob_builder)."
+        )
     bandit_excluded_path_globs = resolve_ref(builder_ref)
 
     below = _placed_in_tree(relative)
@@ -2138,7 +2180,7 @@ def _document_writes(
     for op in ops if isinstance(ops, list) else []:
         if not isinstance(op, dict) or "value" not in op:
             continue
-        if op.get("op") not in ("add", "replace"):
+        if op.get("op") not in VALUE_WRITING_OPS:
             continue
         pointer = op.get("path")
         if not isinstance(pointer, str) or not pointer.startswith("/"):

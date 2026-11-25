@@ -35,6 +35,18 @@ def test_a_palette_role_is_no_severity_and_takes_the_muted_color(text):
     assert severity_color(text) == COLORS["muted"]
 
 
+def test_a_ladder_level_with_no_palette_entry_takes_the_muted_color(monkeypatch):
+    # A level added to the ladder before the palette has a color for it must not
+    # raise: rich_theme() runs at CLI import time.
+    from automated_security_helper.utils import ui_theme
+
+    monkeypatch.setattr(ui_theme, "SEVERITY_LEVELS", (*SEVERITY_LEVELS, "urgent"))
+
+    assert "urgent" not in COLORS
+    assert severity_color("urgent") == COLORS["muted"]
+    assert "ash.urgent" in ui_theme.rich_theme().styles
+
+
 def test_unknown_text_takes_the_muted_color():
     assert severity_color("unknown") == COLORS["muted"]
     assert severity_color(None) == COLORS["muted"]

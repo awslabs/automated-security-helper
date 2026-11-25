@@ -112,7 +112,7 @@ A plugin that renders the aggregated results in one format and writes it to the 
 
 ## Repository config
 
-An ASH config file inside a git checkout or inside the scanned directory, such as the `.ash/.ash.yaml` ASH discovers in the repository, or a config kept in an ops repository of its own. It cannot grant sandbox access, load ASH's off-host plugin packages, or choose where ASH's AWS reporters send results. See [Configuration trust model](trust-model.md).
+An ASH config file inside a git checkout or inside the scanned directory, such as the `.ash.yaml` ASH discovers in the repository, or a config kept in an ops repository of its own. It cannot grant sandbox access, load ASH's off-host plugin packages, or choose where ASH's AWS reporters send results. See [Configuration trust model](trust-model.md).
 
 ## Run mode
 

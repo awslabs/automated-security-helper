@@ -8,9 +8,12 @@ Each module here is pure data: a ``MANIFESTS`` tuple of
 from literals, for one plugin package under ``plugin_modules``. Nothing here
 imports a plugin, so reading a manifest never fires a plugin's
 ``@ash_scanner_plugin`` registration. That is what lets the scan phase say
-"``snyk-code`` is an alpha scanner; add this module" without loading the scanner
-it is reporting as not loaded, and it is what replaces the earlier reader that
-parsed plugin sources as text to get the same answer.
+"``snyk-code`` is provided by this module, which this run did not load" without
+loading the scanner it is reporting as not loaded, and it is what replaces the
+earlier reader that parsed plugin sources as text to get the same answer. The
+manifest is also the one source of which plugin modules load without being named
+(``default_enabled``); ``plugins.enablement`` reads it there and nowhere else
+re-derives it.
 
 The modules are discovered by walking this package (``pkgutil``), so a new
 plugin's manifest needs no edit here. The totality tests
@@ -149,6 +152,14 @@ def plugin_config_sections(
         return tuple(option_sections.REPORTER_SECTIONS)
     if kind == "converters":
         return tuple(option_sections.CONVERTER_SECTIONS)
+    if kind != "scanners":
+        # ``Literal`` is not checked at run time: a misspelled kind ("scanner",
+        # "Reporters") would otherwise be answered with the scanner rows, and
+        # the config root would be built from the wrong sections.
+        raise ValueError(
+            f"{kind!r} is not a plugin kind with config sections; expected "
+            "'scanners', 'reporters' or 'converters'"
+        )
     rows = [
         (manifest.name, manifest.config_section)
         for manifest in scanner_manifests()
@@ -171,20 +182,24 @@ def exclusion_options() -> tuple[tuple[str, ExclusionOption], ...]:
 
 
 @functools.lru_cache(maxsize=1)
-def alpha_scanner_modules() -> Dict[str, str]:
-    """``{scanner name or alias: dotted plugin module}`` for every alpha scanner.
+def opt_in_scanner_modules() -> Dict[str, str]:
+    """``{scanner name or alias: dotted plugin module}`` for every scanner that
+    ships but is not loaded unless its module is named.
 
-    The manifest tier scan. Keys are lower-case.
+    Keyed on ``default_enabled``, not on ``tier``: the callers (the "add this
+    module" hint, ``dependencies install``, the MCP inventory's shipped-module
+    list) all ask about loading, and a maintained scanner that stays opt-in is
+    ``supported`` and still needs naming. Keys are lower-case.
     """
     mapping: Dict[str, str] = {}
     for manifest in scanner_manifests():
-        if manifest.tier is not PluginTier.ALPHA:
+        if manifest.default_enabled:
             continue
         for name in (manifest.name, *manifest.aliases):
             mapping.setdefault(name, manifest.plugin_module)
     return mapping
 
 
-def alpha_module_for(scanner_name: str) -> Optional[str]:
-    """The module that provides *scanner_name*, or None if no alpha one does."""
-    return alpha_scanner_modules().get(str(scanner_name).lower().strip())
+def opt_in_module_for(scanner_name: str) -> Optional[str]:
+    """The module that provides *scanner_name*, or None if no opt-in one does."""
+    return opt_in_scanner_modules().get(str(scanner_name).lower().strip())

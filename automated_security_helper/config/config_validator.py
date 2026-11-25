@@ -33,6 +33,7 @@ from typing import (
 )
 
 import yaml
+from pydantic import BaseModel
 from pydantic_core import core_schema as _core_schema
 
 from automated_security_helper.config.ash_config import (
@@ -55,6 +56,7 @@ from automated_security_helper.config.plugin_section_names import (
     fold_known_plugin_sections,
     folded_section_name,
 )
+from automated_security_helper.models.vocab import PluginKind
 from automated_security_helper.config.config_sources import (
     EXTENDS_KEY,
     PATCH_KEY,
@@ -105,8 +107,11 @@ def directory_path_advice(path_pattern: str, *, ignore_path: bool) -> str:
     """The warning for a path that names an existing directory and no file in it.
 
     Shared by ``ash config validate`` and ``ash config lint``, and spelled as
-    ``path_matching.directory_spelling`` spells it, as the warning after the scan
-    does: ``<dir>/`` for an ignore path, ``<dir>/**/*`` for a suppression path.
+    ``path_matching.directory_spelling`` spells it: ``<dir>/`` for an ignore
+    path, ``<dir>/**/*`` for a suppression path. Since the bare-directory rule
+    (issue #894) a glob-free pattern matches the files below the directory it
+    names, so only a ``**`` pattern whose last component names a directory gets
+    this advice.
     """
     spelling = directory_spelling(path_pattern, ignore_path=ignore_path)
     action = (
@@ -333,9 +338,6 @@ def path_pattern_advice(
             )
         return f"Path '{shown}' matches '{spelled}' {CASE_ONLY_PROBLEM}."
 
-    # An ignore path ending in / names the directory and what is in it.
-    if ignore_path and form.endswith("/"):
-        return None
     clean_path = form.rstrip("/")
     # A glob in the last component matches files.
     from pathlib import PurePosixPath
@@ -347,12 +349,12 @@ def path_pattern_advice(
         # '**' matches any run of directories, and the last component then
         # names a path exactly: '**/node_modules' is a file of that name, and
         # the files inside a directory of that name do not match. Advised only
-        # for a directory the tree holds somewhere, by a bounded walk.
+        # for a directory the tree holds somewhere, by a bounded walk. A
+        # glob-free pattern gets no such advice: under the bare-directory rule
+        # (issue #894) it names the directory and matches the files below it,
+        # in ignore paths and suppressions alike.
         if basename != "**" and _names_a_directory_below(basename, project_root):
             return directory_path_advice(shown, ignore_path=ignore_path)
-        return None
-    if _names_a_directory(project_root / clean_path):
-        return directory_path_advice(shown, ignore_path=ignore_path)
     return None
 
 
@@ -2053,7 +2055,8 @@ def _shown_at(
     the path leaves ``data``.
     """
     steps: List[Any] = []
-    node, shown_node = data, shown
+    node: Any = data
+    shown_node: Any = shown
     for step in location:
         if isinstance(node, dict) and step in node:
             index = list(node).index(step)
@@ -2062,9 +2065,13 @@ def _shown_at(
             continue
         if isinstance(node, list) and isinstance(step, int) and 0 <= step < len(node):
             steps.append(step)
-            aligned = isinstance(shown_node, list) and len(shown_node) == len(node)
+            shown_items = (
+                shown_node
+                if isinstance(shown_node, list) and len(shown_node) == len(node)
+                else None
+            )
             node = node[step]
-            shown_node = shown_node[step] if aligned else _ALL_SHOWN
+            shown_node = shown_items[step] if shown_items is not None else _ALL_SHOWN
             continue
         steps.append(step)
     return steps, node, shown_node
@@ -2093,12 +2100,16 @@ def _strings_read_from_the_environment(item: Any, shown: Any) -> List[str]:
             found += _strings_read_from_the_environment(value, shown_value)
         return found
     if isinstance(item, (list, tuple)):
-        aligned = isinstance(shown, (list, tuple)) and len(shown) == len(item)
+        shown_items = (
+            shown
+            if isinstance(shown, (list, tuple)) and len(shown) == len(item)
+            else None
+        )
         return [
             text
             for index, value in enumerate(item)
             for text in _strings_read_from_the_environment(
-                value, shown[index] if aligned else _ALL_SHOWN
+                value, shown_items[index] if shown_items is not None else _ALL_SHOWN
             )
         ]
     if isinstance(item, str) and shown != item:
@@ -3603,7 +3614,7 @@ _MISSING_OPTION: Any = object()
 
 
 @functools.lru_cache(maxsize=None)
-def _built_in_section_classes(segment_name: str) -> Dict[str, type]:
+def _built_in_section_classes(segment_name: str) -> Dict[str, type[BaseModel]]:
     """Each built-in plugin's config class in a segment, by the keys the model reads.
 
     The field name and its alias (``cdk_nag`` and ``cdk-nag``): the spellings the
@@ -3620,12 +3631,12 @@ def _built_in_section_classes(segment_name: str) -> Dict[str, type]:
     )
 
     segments: Dict[str, type[BaseModel]] = {
-        "scanners": ScannerConfigSegment,
-        "reporters": ReporterConfigSegment,
-        "converters": ConverterConfigSegment,
+        PluginKind.SCANNER.section: ScannerConfigSegment,
+        PluginKind.REPORTER.section: ReporterConfigSegment,
+        PluginKind.CONVERTER.section: ConverterConfigSegment,
     }
     segment_cls = segments[segment_name]
-    classes: Dict[str, type] = {}
+    classes: Dict[str, type[BaseModel]] = {}
     for field_name, info in segment_cls.model_fields.items():
         config_class = next(
             (
@@ -3819,11 +3830,13 @@ class ConfigValidator:
 
     # Fields that should NOT appear in user configs (internal-only). The model
     # refuses those a section does not declare (utils/unknown_keys.py).
-    INTERNAL_SCANNER_FIELDS = set(INTERNAL_SECTION_FIELDS["scanners"])
+    INTERNAL_SCANNER_FIELDS = set(INTERNAL_SECTION_FIELDS[PluginKind.SCANNER.section])
 
-    INTERNAL_REPORTER_FIELDS = set(INTERNAL_SECTION_FIELDS["reporters"])
+    INTERNAL_REPORTER_FIELDS = set(INTERNAL_SECTION_FIELDS[PluginKind.REPORTER.section])
 
-    INTERNAL_CONVERTER_FIELDS = set(INTERNAL_SECTION_FIELDS["converters"])
+    INTERNAL_CONVERTER_FIELDS = set(
+        INTERNAL_SECTION_FIELDS[PluginKind.CONVERTER.section]
+    )
 
     # Top-level fields that should NOT appear in user configs
     INVALID_TOP_LEVEL_FIELDS = {
@@ -3851,10 +3864,9 @@ class ConfigValidator:
         "ash_plugin_modules",
         "external_reports_to_include",
         "global_settings",
-        "scanners",
-        "reporters",
+        # The three plugin sections: scanners, reporters and converters.
+        *PluginKind.sections(),
         "output_formats",
-        "converters",
         # The alias, and the field name, which a scan reads as the alias.
         "mcp-resource-management",
         "mcp_resource_management",
@@ -4327,6 +4339,28 @@ class ConfigValidator:
             result.errors.extend(result.redact(m) for m in module_errors)
             if module_check_failure is not None:
                 result.warnings.append(module_check_failure)
+
+        # A symbol-scoped suppression needs a file entry in .ash.lock, as a
+        # scan requires (core/orchestrator.resolve_scan_config). Judged on the
+        # config the model built, relative to the directory a scan would scan.
+        if refused is None and built is not None and source_dir is not None:
+            from automated_security_helper.core.exceptions import (
+                ASHConfigValidationError as _LockRefusal,
+            )
+            from automated_security_helper.utils.ash_lock import (
+                refuse_unlocked_symbol_suppressions,
+            )
+
+            try:
+                refuse_unlocked_symbol_suppressions(
+                    getattr(
+                        getattr(built, "global_settings", None), "suppressions", None
+                    )
+                    or [],
+                    source_dir,
+                )
+            except _LockRefusal as e:
+                result.errors.append(result.redact(str(e)))
 
         # The checks that read the merged result read it as the scan builds
         # it: with --config-overrides applied. A missing project_name an
@@ -4967,9 +5001,9 @@ class ConfigValidator:
             shown = config_data
         found: List[Tuple[Tuple[str, str, str], Tuple[str, str, str]]] = []
         for segment_name, internal in (
-            ("scanners", cls.INTERNAL_SCANNER_FIELDS),
-            ("reporters", cls.INTERNAL_REPORTER_FIELDS),
-            ("converters", cls.INTERNAL_CONVERTER_FIELDS),
+            (PluginKind.SCANNER.section, cls.INTERNAL_SCANNER_FIELDS),
+            (PluginKind.REPORTER.section, cls.INTERNAL_REPORTER_FIELDS),
+            (PluginKind.CONVERTER.section, cls.INTERNAL_CONVERTER_FIELDS),
         ):
             segment = config_data.get(segment_name)
             if not isinstance(segment, dict):

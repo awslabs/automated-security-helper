@@ -58,6 +58,7 @@ PACKAGE_DIRS = frozenset(
         "plugin_modules/ash_trivy_plugins",
         "plugins",
         "schemas",
+        "utils/mcp_config",
         "schemas/cyclonedx_bom_1_6_schema",
         "schemas/gitlab",
         "schemas/ocsf",

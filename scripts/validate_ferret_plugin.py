@@ -5,7 +5,7 @@
 
 Checks for known CI failure patterns before pushing. Also verifies that
 any SECRET-SECRET-KEYWORD hits in documentation have matching suppressions
-in .ash/.ash_alpha_plugins.yaml or .ash/.ash.yaml.
+in .ash/.ash_alpha_plugins.yaml or .ash.yaml.
 
 Usage:
     uv run python scripts/validate_ferret_plugin.py
@@ -45,10 +45,10 @@ ALL_FILES = [f for f in PLUGIN_FILES + TEST_FILES + SCRIPT_FILES if f.is_file()]
 
 #: The config files whose suppressions apply to this repository's scans. The
 #: validator used to read the alpha-plugins file alone, while the
-#: repository keeps SECRET-SECRET-KEYWORD suppressions in .ash/.ash.yaml too.
+#: repository keeps SECRET-SECRET-KEYWORD suppressions in .ash.yaml too.
 SUPPRESSION_CONFIG_FILES = (
     PROJECT_ROOT / ".ash" / ".ash_alpha_plugins.yaml",
-    PROJECT_ROOT / ".ash" / ".ash.yaml",
+    PROJECT_ROOT / ".ash.yaml",
 )
 
 #: Suppression keys that narrow an entry to a symbol or a package rather than a
@@ -120,7 +120,7 @@ def parse_suppressions(text: str, source: str = "") -> List[Dict[str, Any]]:
     return suppressions
 
 
-def load_alpha_suppressions(
+def load_repo_suppressions(
     config_files: Iterable[Path] = SUPPRESSION_CONFIG_FILES,
 ) -> List[Dict[str, Any]]:
     """The suppression entries of every config file this repository scans with."""
@@ -231,7 +231,7 @@ def has_matching_suppression(rel_path, line_num, rule_id, suppressions):
     return any(suppression_covers(s, rel_path, line_num, rule_id) for s in suppressions)
 
 
-ALPHA_SUPPRESSIONS = load_alpha_suppressions()
+REPO_SUPPRESSIONS = load_repo_suppressions()
 
 
 # ============================================================================
@@ -368,7 +368,7 @@ def check_secret_keywords():
                 continue
             # Skip hits that have a matching suppression with line number
             if has_matching_suppression(
-                rel, i, "SECRET-SECRET-KEYWORD", ALPHA_SUPPRESSIONS
+                rel, i, "SECRET-SECRET-KEYWORD", REPO_SUPPRESSIONS
             ):
                 continue
             fail(
@@ -570,7 +570,7 @@ def exclude_glob_hits(lines: List[str]) -> List[Tuple[int, str]]:
 def check_exclude_glob_syntax():
     config_files = [
         PROJECT_ROOT / ".ash" / ".ash_alpha_plugins.yaml",
-        PROJECT_ROOT / ".ash" / ".ash.yaml",
+        PROJECT_ROOT / ".ash.yaml",
     ]
     for filepath in config_files:
         if not filepath.exists():
@@ -813,10 +813,10 @@ def ferret_in_ash_yaml_hits(lines: List[str]) -> List[int]:
 
 
 @check(
-    "FERRET-IN-ASH-YAML: ferret-scan should not be in .ash/.ash.yaml (use alpha plugins config)"
+    "FERRET-IN-ASH-YAML: ferret-scan should not be in .ash.yaml (use alpha plugins config)"
 )
 def check_ferret_not_in_ash_yaml():
-    ash_yaml = PROJECT_ROOT / ".ash" / ".ash.yaml"
+    ash_yaml = PROJECT_ROOT / ".ash.yaml"
     if not ash_yaml.exists():
         return
     lines = _read_lines(ash_yaml)
@@ -877,7 +877,7 @@ def check_suppression_coverage():
             # whole file, which also hides every later hit there.
             covering = [
                 s
-                for s in ALPHA_SUPPRESSIONS
+                for s in REPO_SUPPRESSIONS
                 if suppression_covers(s, rel, i, "SECRET-SECRET-KEYWORD")
             ]
             if covering and all(s.get("line_start") is None for s in covering):

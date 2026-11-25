@@ -898,6 +898,8 @@ def test_a_planted_credential_becomes_a_sarif_result(scanner):
     assert "detect-secrets" in tags
     assert "secret" in tags
     assert "tool_name::detect-secrets" in tags
+    # The enum's value, never "ScannerToolType.SECRETS" (what str() of it reads).
+    assert "tool_type::SECRETS" in tags
 
 
 @pytest.mark.integration

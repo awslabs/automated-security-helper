@@ -36,7 +36,7 @@ Why per app and not process-wide
 State lives on the middleware instance, so it belongs to the app that served the
 request and ends with it. Process-wide transport state would outlive the server
 and change the answer for every later call in the process; see
-``cli/mcp/sandbox.py``.
+``config/mcp_sandbox.py``.
 
 Failure modes and limits
 ------------------------
@@ -69,6 +69,8 @@ from typing import (
     Tuple,
 )
 
+from automated_security_helper.core.enums import Transport
+
 if TYPE_CHECKING:
     from automated_security_helper.utils.log import ASHLogger
 
@@ -76,9 +78,9 @@ if TYPE_CHECKING:
 #: can collide with it.
 CALLER_SCOPE_KEY = "ash.mcp.caller"
 
-#: ``HttpCaller.transport`` values.
-SSE = "sse"
-STREAMABLE_HTTP = "streamable-http"
+#: ``HttpCaller.transport`` values: the two networked members of :class:`Transport`.
+SSE = Transport.SSE
+STREAMABLE_HTTP = Transport.STREAMABLE_HTTP
 
 #: The app shapes :class:`SessionBoundary` serves.
 MODE_SSE = "sse"
@@ -124,7 +126,7 @@ class HttpCaller:
             client cannot learn from "not issued".
     """
 
-    transport: str
+    transport: Transport
     session_id: Optional[str]
     protocol_version_is_cause: bool = False
     server_mode: Optional[str] = None
@@ -439,6 +441,7 @@ class SessionBoundary:
         asked for again: by the client's next ``DELETE``, or at shutdown.
         """
         import anyio
+        from anyio import to_thread
 
         from automated_security_helper.cli.mcp.sessions import end_session
 
@@ -446,7 +449,7 @@ class SessionBoundary:
             # Shielded: an sse stream ends by being cancelled, and the removal
             # has to complete anyway.
             with anyio.CancelScope(shield=True):
-                await anyio.to_thread.run_sync(end_session, session_id)
+                await to_thread.run_sync(end_session, session_id)
         except Exception as exc:
             _logger().warning(f"MCP session {session_id}: could not remove: {exc}")
             return False
@@ -512,6 +515,7 @@ class SessionBoundary:
         import time
 
         import anyio
+        from anyio import to_thread
 
         if time.monotonic() < self._next_sweep:
             return
@@ -535,7 +539,7 @@ class SessionBoundary:
             # names it refreshes its workspace instead, and the TTL covers it.
             open_streams = frozenset(self._open_streams)
             try:
-                removed = await anyio.to_thread.run_sync(
+                removed = await to_thread.run_sync(
                     functools.partial(
                         _sweep_keeping_open_streams,
                         self.session_workspace_ttl,

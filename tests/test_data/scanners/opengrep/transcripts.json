@@ -81,6 +81,40 @@
         "name": "opengrep",
         "version": "2.0.0"
       }
+    },
+    {
+      "adapter_prep": null,
+      "also_for": [],
+      "argv": null,
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": null,
+      "id": "opengrep-2.0.0-fix-rule",
+      "live_input": false,
+      "note": "one result from a rule that carries an autofix, so the SARIF result holds a fix",
+      "observable": true,
+      "pin_stamp": {
+        "tool": "opengrep",
+        "version": "2.0.0"
+      },
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "sarif",
+          "path": "captured/opengrep-2.0.0-fix-rule.sarif",
+          "sha256": "b30b0bf91a42fd85f928bf6c37de93518b3bef388eb71c89cf8fe093e470d3fb"
+        }
+      ],
+      "retention": "current",
+      "scanner": "opengrep",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "opengrep",
+        "version": "2.0.0"
+      }
     }
   ],
   "unrecorded": []

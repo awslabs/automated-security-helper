@@ -1337,7 +1337,7 @@ def _open_regular(
             raise OSError(errno.EINVAL, f"not a regular file: {name}")
         if status.st_nlink != 1:
             raise OutputHardLinkRefused(target, status.st_nlink)
-        if _NONBLOCK:
+        if _NONBLOCK and fcntl is not None:
             current = fcntl.fcntl(fd, fcntl.F_GETFL)
             fcntl.fcntl(fd, fcntl.F_SETFL, current & ~_NONBLOCK)
         if not append:

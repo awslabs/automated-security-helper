@@ -55,6 +55,7 @@ SCANNER_SECTION_FIELDS = {
     "detect_secrets": "detect-secrets",
     "gitleaks": None,
     "grype": None,
+    "mcp_config": "mcp-config",
     "npm_audit": "npm-audit",
     "opengrep": None,
     "semgrep": None,
@@ -80,7 +81,7 @@ REPORTER_SECTION_FIELDS = {
     "unused_suppressions": "unused-suppressions",
     "yaml": None,
 }
-CONVERTER_SECTION_FIELDS = {"archive": None, "jupyter": None}
+CONVERTER_SECTION_FIELDS = {"archive": None, "jupyter": None, "mcp_config": None}
 
 
 def _fields_and_aliases(segment) -> dict:
@@ -141,7 +142,7 @@ def test_only_the_builtin_scanners_have_typed_sections():
     with_section = {m.name for m in scanner_manifests() if m.config_section}
     builtin = {m.name for m in scanner_manifests() if m.default_enabled}
     assert with_section == builtin, "an alpha scanner is configured through extras"
-    assert len(builtin) == 16, "control: the builtin set shrank"
+    assert len(builtin) == 17, "control: the builtin set shrank"
 
 
 def test_the_section_class_is_built_into_the_default_config():
@@ -174,7 +175,32 @@ def test_the_exclusion_table_is_what_the_manifests_declare():
         ("trivy-repo", "ignore_file", "trivy-ignore-file", ()),
         ("trivy", "ignore_file", "trivy-ignore-file", ()),
     }
-    assert len(SCANNER_EXCLUSION_OPTIONS) == len(exclusion_options())
+    # A number, not ``len(exclusion_options())``: the table is built one-to-one from
+    # that function, so comparing the two could not fail.
+    assert len(SCANNER_EXCLUSION_OPTIONS) == 9
+
+
+def test_a_manifest_listing_an_exclusion_option_twice_is_refused():
+    manifest = next(m for m in scanner_manifests() if m.name == "bandit")
+    data = manifest.model_dump()
+    data["exclusion_options"] = list(data["exclusion_options"]) * 2
+
+    with pytest.raises(ValidationError, match="lists an option twice"):
+        type(manifest).model_validate(data)
+
+
+def test_a_glob_builder_outside_the_plugin_module_is_refused():
+    manifest = next(m for m in scanner_manifests() if m.name == "bandit")
+    data = manifest.model_dump()
+    data["exclusion_options"] = [
+        {
+            **dict(data["exclusion_options"][0]),
+            "glob_builder": "automated_security_helper.config.ash_config:AshConfig",
+        }
+    ]
+
+    with pytest.raises(ValidationError, match="lies outside plugin_module"):
+        type(manifest).model_validate(data)
 
 
 def test_an_exclusion_option_is_an_option_of_its_scanners_model():

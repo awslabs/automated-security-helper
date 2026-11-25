@@ -13,6 +13,7 @@ from contextlib import contextmanager
 from typing import (
     Any,
     Callable,
+    cast,
     Dict,
     Iterator,
     Literal,
@@ -102,8 +103,8 @@ def addLoggingLevel(levelName, levelNum, methodName=None):
     # take level 99 and every file handler stay empty.
     if hasattr(logging, levelName):
         existing = getattr(logging, levelName)
-        if isinstance(existing, int) and not isinstance(
-            logging.getLevelName(levelName), int
+        if isinstance(existing, int) and levelName not in (
+            logging.getLevelNamesMapping()
         ):
             logging.addLevelName(existing, levelName)
         return
@@ -1256,7 +1257,8 @@ class JsonFormatter(logging.Formatter):
         """
         return "asctime" in self.fmt_dict.values()
 
-    def formatMessage(self, record) -> dict:
+    # The JSON formatter builds a dict per record; Formatter's version returns str.
+    def formatMessage(self, record) -> dict:  # ty: ignore[invalid-method-override]
         """
         Overwritten to return a dictionary of the relevant LogRecord attributes instead of a string.
         KeyError is raised if an unknown attribute is provided in the fmt_dict.
@@ -1360,8 +1362,10 @@ def configure_windows_safe_logging():
             and hasattr(sys.stderr, "reconfigure")
         ):
             try:
-                sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-                sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+                # hasattr(..., "reconfigure") above: a TextIOWrapper, not a
+                # bare TextIO, which is all sys.stdout is typed as.
+                cast(Any, sys.stdout).reconfigure(encoding="utf-8", errors="replace")
+                cast(Any, sys.stderr).reconfigure(encoding="utf-8", errors="replace")
             except (AttributeError, OSError, ValueError):
                 # Fallback: wrap stdout/stderr with UTF-8 codec. ValueError is
                 # a closed or detached stream's answer to reconfigure and to
@@ -1982,7 +1986,8 @@ def get_logger(
     # is adopted (adopt_early_ash_loggers); the setup below relies on ASHLogger's
     # verbose() and callHandlers().
     adopt_early_ash_loggers()
-    logger: ASHLogger = logging.getLogger(name)  # type: ignore[assignment]
+    # adopt_early_ash_loggers above makes the logger an ASHLogger.
+    logger: ASHLogger = logging.getLogger(name)  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
 
     # Attach the Windows-safe filter if not already present
     if not any(isinstance(f, WindowsSafeFilter) for f in logger.filters):
@@ -2005,7 +2010,7 @@ def get_logger(
     # Explicit set the logger level to TRACE/5
     # (root logger sets the lowest level depth for all attached handlers)
     logger.setLevel(logging._nameToLevel.get("TRACE", 5))  # type: ignore[attr-defined]
-    level_param = {}
+    level_param: dict[str, Any] = {}
     if level is not None:
         level_param = {"level": level}
     # The process-wide last-resort gate is NOT set here: the MCP server runs
@@ -2026,7 +2031,7 @@ def get_logger(
     # a process whose configured gate admits INFO wrote them to stderr for
     # every logger setup, a hosted scan's included.
     # Configure console parameters with Windows-safe settings
-    console_base_params = {
+    console_base_params: dict[str, Any] = {
         "theme": Theme(
             {
                 "logging.level.verbose": "magenta",
@@ -2077,7 +2082,7 @@ def get_logger(
         "TRUE",
     ]
 
-    custom_console_params = {
+    custom_console_params: dict[str, Any] = {
         "console": ash_console(stderr=log_to_stderr, **console_base_params)
     }
     show_locals = show_debug_locals()
@@ -2361,6 +2366,7 @@ if logging.lastResort is not None:
 
 
 adopt_early_ash_loggers()
-ASH_LOGGER: ASHLogger = logging.getLogger("ash")  # type: ignore[assignment]
+# The ASHLogger class is registered as the logger class before this line runs.
+ASH_LOGGER: ASHLogger = logging.getLogger("ash")  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
 ASH_LOGGER.propagate = False
 ASH_LOGGER.addFilter(WindowsSafeFilter())

@@ -26,6 +26,7 @@ from automated_security_helper.base.scanner_facets import (
     FacetState,
     ScannerFacets,
 )
+from automated_security_helper.models.vocab import SeverityThresholdText, TargetType
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.core.constants import SHIPPED_SEVERITY_LEVEL
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
@@ -278,7 +279,7 @@ class GrypeScannerConfigOptions(ScannerOptionsBase):
         ),
     ] = None
     severity_threshold: Annotated[
-        Literal["ALL", "LOW", "MEDIUM", "HIGH", "CRITICAL"] | None,
+        SeverityThresholdText | None,
         Field(
             description=f"Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of {SHIPPED_SEVERITY_LEVEL}."
         ),
@@ -412,46 +413,32 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
     #: reading of grype's SARIF in this module (``_GRYPE_PACKAGE_MESSAGE``).
     facets: ClassVar[ScannerFacets] = ScannerFacets(
         rule_id=FacetDecl(
-            state=FacetState.NA,
-            reason="UNCONFIRMED: the survey reads the SARIF result ruleId (the "
-            "vulnerability id) off the conformance tests' presenter shape; no "
-            "grype SARIF fixture from a real run is committed, so a "
-            "`grype -o sarif` capture settles it",
+            state=FacetState.MAPPED,
+            native_field="SARIF result ruleId (the vulnerability id plus the "
+            "package name)",
         ),
         severity=FacetDecl(
-            state=FacetState.NA,
-            reason="UNCONFIRMED: the survey reads the SARIF rule properties "
-            '"security-severity" (CVSS), else the result "level", off the '
-            "conformance tests' presenter shape; no grype SARIF fixture from "
-            "a real run is committed, so a `grype -o sarif` capture settles it",
+            state=FacetState.MAPPED,
+            native_field='SARIF rule properties "security-severity" (CVSS), '
+            'else the result "level"',
         ),
         file_path=FacetDecl(
-            state=FacetState.NA,
-            reason="UNCONFIRMED: the survey reads SARIF locations[]."
-            "physicalLocation.artifactLocation.uri (the manifest or lockfile) "
-            "off the conformance tests' presenter shape; no grype SARIF "
-            "fixture from a real run is committed, so a `grype -o sarif` "
-            "capture settles it",
+            state=FacetState.MAPPED,
+            native_field="SARIF locations[].physicalLocation.artifactLocation."
+            "uri (the manifest or lockfile)",
         ),
         line_range=FacetDecl(
-            state=FacetState.NA,
-            reason="UNCONFIRMED: the survey reads SARIF region.startLine "
-            "(grype always writes line 1 of the manifest) off the conformance "
-            "tests' presenter shape; no grype SARIF fixture from a real run "
-            "is committed, so a `grype -o sarif` capture settles it",
+            state=FacetState.MAPPED,
+            native_field="SARIF region.startLine (grype writes line 1 of the manifest)",
         ),
         column=FacetDecl(
-            state=FacetState.NA,
-            reason="UNCONFIRMED: no grype SARIF fixture in-repo; a "
-            "`grype -o sarif` run settles whether results carry a "
-            "startColumn",
+            state=FacetState.MAPPED,
+            native_field="SARIF region.startColumn / region.endColumn (always "
+            "1 in the capture, as the finding is the manifest's line 1)",
         ),
         message=FacetDecl(
-            state=FacetState.NA,
-            reason="UNCONFIRMED: the survey reads SARIF result message.text "
-            "off the conformance tests' presenter shape; no grype SARIF "
-            "fixture from a real run is committed, so a `grype -o sarif` "
-            "capture settles it",
+            state=FacetState.MAPPED,
+            native_field="SARIF result message.text",
         ),
         resource_id=FacetDecl(
             state=FacetState.NA,
@@ -465,23 +452,17 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
             "package ecosystem (gem, npm), not a resource type",
         ),
         package_name=FacetDecl(
-            state=FacetState.NA,
-            reason="UNCONFIRMED: the adapter parses the SARIF message "
-            '"package: <name>, version <version> was found at:" '
-            "(_GRYPE_PACKAGE_MESSAGE), pinned over the conformance tests' "
-            "presenter shape only; no grype SARIF fixture from a real run is "
-            "committed, so a `grype -o sarif` capture settles it",
+            state=FacetState.MAPPED,
+            native_field='SARIF message "package: <name>, version <version> '
+            'was found at:" parsed by _GRYPE_PACKAGE_MESSAGE',
         ),
         package_version=FacetDecl(
-            state=FacetState.NA,
-            reason="UNCONFIRMED: the adapter parses the SARIF message "
-            '"package: <name>, version <version> was found at:" '
-            "(_GRYPE_PACKAGE_MESSAGE), pinned over the conformance tests' "
-            "presenter shape only; no grype SARIF fixture from a real run is "
-            "committed, so a `grype -o sarif` capture settles it",
+            state=FacetState.MAPPED,
+            native_field='SARIF message "package: <name>, version <version> '
+            'was found at:" parsed by _GRYPE_PACKAGE_MESSAGE',
         ),
         package_path=FacetDecl(
-            state=FacetState.NA,
+            state=FacetState.UNCONFIRMED,
             reason="UNCONFIRMED: the adapter resolves an npm lockfile entry "
             "by name and version beside the manifest (set only when exactly "
             "one copy matches), pinned over the conformance tests' presenter "
@@ -490,7 +471,7 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
             "settles it",
         ),
         taxonomy_cve=FacetDecl(
-            state=FacetState.NA,
+            state=FacetState.UNCONFIRMED,
             reason="UNCONFIRMED: the SARIF result ruleId is the vulnerability "
             "id (matches[].vulnerability.id, a CVE or GHSA id; the committed "
             "native JSON's eight matches are all GHSA ids, which the flat CVE "
@@ -500,30 +481,28 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
         ),
         taxonomy_cwe=FacetDecl(
             state=FacetState.NA,
-            reason="UNCONFIRMED: the committed native grype JSON "
-            "(vulnerability keys advisories, cvss, dataSource, description, "
-            "epss, fix, id, namespace, severity, urls) carries no CWE; a "
-            "`grype -o sarif` run settles whether rule properties do",
+            reason="the committed native grype JSON (vulnerability keys "
+            "advisories, cvss, dataSource, description, epss, fix, id, "
+            "namespace, severity, urls) carries no CWE, and the captured SARIF "
+            "rule properties hold only purls and security-severity",
         ),
         fingerprints=FacetDecl(
-            state=FacetState.NA,
-            reason="UNCONFIRMED: no grype SARIF fixture in-repo; a "
-            "`grype -o sarif` run settles whether results carry "
-            "fingerprints or partialFingerprints",
+            state=FacetState.MAPPED,
+            native_field="SARIF result partialFingerprints."
+            "primaryLocationLineHash (a hash of the manifest line, so findings "
+            "at one manifest line share a value; 6 distinct values over 21 "
+            "results in the capture)",
         ),
         fix_available=FacetDecl(
-            state=FacetState.NA,
-            reason="UNCONFIRMED: the adapter reads the SARIF rule help.text "
-            'line "Fix Version: <versions>" (grype\'s rendering of '
-            "matches[].vulnerability.fix.versions) and writes "
-            "fix_available=True only for a non-empty list on a uniquely named "
-            "rule whose Package and Version lines match the result's own "
-            "message, pinned over the conformance tests' presenter shape "
-            "only; no grype SARIF fixture from a real run is committed, so a "
-            "`grype -o sarif` capture settles it",
+            state=FacetState.MAPPED,
+            native_field='the SARIF rule help.text line "Fix Version: '
+            "<versions>\" (grype's rendering of "
+            "matches[].vulnerability.fix.versions); fix_available=True is "
+            "written only for a non-empty list on a uniquely named rule whose "
+            "Package and Version lines match the result's own message",
         ),
         remediation_text=FacetDecl(
-            state=FacetState.NA,
+            state=FacetState.UNCONFIRMED,
             reason="UNCONFIRMED: not classified by the survey; the flat "
             "model has no remediation column, and matchDetails[].fix."
             "suggestedVersion is a version, not text",
@@ -533,13 +512,16 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
             reason="a package match has no source code snippet",
         ),
         references=FacetDecl(
-            state=FacetState.DROPPED,
-            native_field="matches[].vulnerability.urls",
-            reason="the native urls (and relatedVulnerabilities[].urls, "
-            "dataSource) are never read into references",
+            state=FacetState.MAPPED,
+            native_field="tool.driver.rules[].helpUri, read into the flat "
+            "references by the shared rule read when the result carries "
+            "none of its own",
+            reason="grype writes the advisory dataSource as the rule helpUri; "
+            "the native match urls (matches[].vulnerability.urls, "
+            "relatedVulnerabilities[].urls) are still never read",
         ),
         tags=FacetDecl(
-            state=FacetState.NA,
+            state=FacetState.UNCONFIRMED,
             reason="UNCONFIRMED: the survey reads SARIF rule properties.tags "
             "off the conformance tests' presenter shape (rule-level, which "
             "the flat reader never takes as the tags column anyway); no grype "
@@ -591,14 +573,21 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
                 kinds=(
                     opsf.TargetKind.PACKAGE_INVENTORY,
                     opsf.TargetKind.DEPENDENCY_LOCKFILES,
+                    opsf.TargetKind.CONTAINER_IMAGE,
                 ),
                 tool_type=ScannerToolType.SCA,
-                selection="a dir: scan of the source tree, with a lockfile join for locations",
+                selection=(
+                    "a dir: scan of the source tree, with a lockfile join for "
+                    "locations; a container-image asset through a stereoscope "
+                    "target (_execute_image_scan: docker-archive:/oci-archive:/"
+                    "oci-dir: for a payload, docker:/podman:/registry: for a "
+                    "reference by the detected engine), with the ignore paths "
+                    "as --exclude globs"
+                ),
                 covers_note=(
-                    "covers said 'Packages and container images', but only a dir: scan "
-                    "is wired and no SBOM document or image is consumed; the display "
-                    "string now reads 'Packages and dependency files' and the register "
-                    "declares the wired truth (UNCLAIMED_TARGET_KINDS names the rest)"
+                    "the display string reads 'Packages and dependency files'; "
+                    "container images are scanned when the submission names one "
+                    "(the asset routing), which the display string understates"
                 ),
             ),
             runtime=opsf.RuntimeFacet(
@@ -609,6 +598,7 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
                 python_only=False,
                 use_uv_tool=False,
             ),
+            runtime_compat=opsf.RuntimeCompatFacet(rows=()),
             platforms=opsf.PlatformsFacet(
                 provisionable=opsf.PLATFORMS_NO_WINDOWS_ARM64,
                 note="no windows/arm64 asset (tool_downloads.py docstring)",
@@ -633,8 +623,11 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
                 ),
             ),
             identity=opsf.IdentityFacet(
-                fingerprint_class=opsf.FingerprintClass.UNCONFIRMED,
-                note="no fixture read classifies grype's fingerprints; reads as positional-only until one does",
+                fingerprint_class=opsf.FingerprintClass.STABLE_NATIVE,
+                note="read at tests/test_data/scanners/grype/captured/grype-0.122.1-from-syft-sbom.sarif: "
+                "every result carries partialFingerprints.primaryLocationLineHash, which grype writes "
+                "per manifest line (6 distinct values over 21 results), so findings at one line share "
+                "a value; it is not a per-finding hash",
             ),
             extensibility=opsf.ExtensibilityFacet(
                 custom_rules=opsf.CustomRules.NONE,
@@ -1110,7 +1103,7 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
     def _execute_scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason],
     ):
         """Resolve final argv, results path, and subprocess env for Grype."""
@@ -1183,6 +1176,69 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
                 # The operator's config, outside the scanned tree, when there is
                 # one (_process_config_options): its database settings reach the
                 # update as they reach the scan. None keeps the empty config.
+                config_file=getattr(self, "_content_db_operator_config", None),
+                values=self._values_to_redact(),
+            )
+            scan_env.update(GRYPE_PREPARED_ENV)
+        return final_args, results_file, scan_env
+
+    def _execute_image_scan(self, image):
+        """Resolve argv, results path and env for a container-image scan.
+
+        The dir: scan's resolution with the image differences and nothing
+        else: the target is a stereoscope string built from the locator and
+        the detected engine (utils/image_tool_targets.py: a payload needs no
+        engine; a reference prefers the daemon's content store, else the
+        tool's own registry client), there are no ``--exclude`` patterns
+        because nothing of the source tree is scanned, and the empty config
+        and the database cache are exactly the dir: scan's, so the offline
+        database posture carries over unchanged.
+        """
+        from automated_security_helper.utils.image_tool_targets import (
+            stereoscope_target,
+        )
+
+        target_results_dir = Path(os.path.abspath(self.results_dir)).joinpath("image")
+        results_file = target_results_dir.joinpath("results_sarif.sarif")
+        results_file.parent.mkdir(exist_ok=True, parents=True)
+
+        original_extra_args = self.args.extra_args
+        try:
+            self.args.extra_args = list(original_extra_args)
+            if not any(arg.key == "--config" for arg in self.args.extra_args):
+                empty = empty_tool_config(
+                    "grype-empty.yaml", "{}\n", context=self.context
+                )
+                self.args.extra_args.append(
+                    ToolExtraArg(key="--config", value=empty.as_posix())
+                )
+            # The ignore paths grype can be told to leave uncataloged (measured
+            # on grype 0.122.1: an absolute in-image glob is honored on an
+            # image source; utils/image_ignore_paths).
+            self.args.extra_args.extend(
+                ToolExtraArg(key="--exclude", value=glob)
+                for glob in self._image_exclude_globs()
+            )
+            final_args = self._resolve_arguments(
+                target=stereoscope_target(image),
+                results_file=results_file,
+            )
+        finally:
+            self.args.extra_args = original_extra_args
+
+        scan_env = {**snapshot_environ(), **self.extra_env}
+        cache = default_cache_dir("grype", scan_env)
+        scan_env["GRYPE_DB_CACHE_DIR"] = cache.as_posix()
+        self._content_db_cache_dir = cache
+        if sandboxed_online(self._scanner_offline()):
+            prepare_content_db(
+                "grype",
+                cache,
+                offline=False,
+                source_dir=self.context.source_dir,
+                results_dir=self.results_dir or results_file.parent,
+                config=getattr(self.context, "config", None),
+                scan_id=scan_id_for(self.context),
                 config_file=getattr(self, "_content_db_operator_config", None),
                 values=self._values_to_redact(),
             )

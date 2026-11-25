@@ -9,6 +9,7 @@ from typing import Annotated, Any, NoReturn
 import typer
 from rich.table import Table
 
+from automated_security_helper.core.enums import AshExitCode
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 from automated_security_helper.utils.command_safe_stream import json_commands_broken
@@ -38,7 +39,7 @@ class DiffFormat(str, Enum):
 def _refuse(reason: str, path: Path | None = None) -> NoReturn:
     source = f" in {path}" if path is not None else ""
     echo(shown_on_one_line(f"Error comparing scan results{source}: {reason}"), err=True)
-    raise typer.Exit(1)
+    raise typer.Exit(AshExitCode.SCAN_ERRORS)
 
 
 def _load_results(path: Path) -> AshAggregatedResults:

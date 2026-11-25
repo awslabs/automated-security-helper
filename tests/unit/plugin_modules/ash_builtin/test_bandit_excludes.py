@@ -201,12 +201,13 @@ ANCHOR = "/work/repo"
         ("**/generated/**", ["/work/repo/generated/*", "/work/repo/*/generated/*"]),
         ("**/generated/", ["/work/repo/generated/*", "/work/repo/*/generated/*"]),
         ("src/*.py", ["/work/repo/src/*.py"]),
-        # A literal names that path only. As plain text "/work/repo/vendor"
-        # would also skip vendor/ and vendored.py, so one character is a class:
-        # the glob matches the path itself, and the text occurs in no ordinary
-        # path. (These were left to the SARIF step.)
-        ("vendor", ["/work/repo/vendo[r]"]),
-        ("src/app.py", ["/work/repo/src/app.p[y]"]),
+        # A literal names that path and the directory of that name (the
+        # bare-directory rule, issue #894). As plain text "/work/repo/vendor"
+        # would also skip vendored.py, so one character is a class: the glob
+        # matches the path itself, and the text occurs in no ordinary path; the
+        # subtree gets the same glob a "vendor/**" entry gets.
+        ("vendor", ["/work/repo/vendo[r]", "/work/repo/vendor/*"]),
+        ("src/app.py", ["/work/repo/src/app.p[y]", "/work/repo/src/app.py/*"]),
         ("/src/app.py", []),
         ("src/./app.py", []),
         # ** in a shape without an exact bandit glob.
@@ -913,7 +914,8 @@ def test_an_excluded_path_skips_what_it_names(context, excluded, expected):
         ("src/*.py", True),
         ("*.pyx.py", True),
         ("tests/*", True),
-        # A bare directory name covers nothing in it, so bandit skips nothing.
+        # A bare directory name covers the directory's subtree (the
+        # bare-directory rule, issue #894), which bandit skips exactly.
         ("vendor", True),
         # Left to the SARIF step.
         ("src/**/v.py", False),

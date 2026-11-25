@@ -255,7 +255,11 @@ scanners need more:
 - npm-audit needs Node.js and npm, and yarn or pnpm to audit a `yarn.lock` or a
   `pnpm-lock.yaml`. ASH installs none of them.
 - cfn-nag is a Ruby gem. It needs RubyGems and a C compiler (on Windows, a Ruby
-  DevKit) before `ash dependencies install --tool cfn-nag` can install it.
+  DevKit) before `ash dependencies install --tool cfn-nag` can install it. Run it
+  on a Ruby built from source or from your distribution's package (3.1, 3.3 and
+  3.4 were tried). On a Homebrew portable-ruby build (3.3.8 and 3.4.5 were tried)
+  cfn-nag 0.8.10 cannot load its YAML parser, so every template is reported as one
+  ASH could not evaluate.
 
 If you do not need a scanner, leave it out, as in `ash --exclude-scanners npm-audit`.
 It is then recorded SKIPPED, which does not make the scan incomplete.
@@ -345,7 +349,7 @@ For air-gapped environments:
 <!-- doctest: illustrative reason="needs a container runtime" -->
 ```bash
 # Build an offline image
-ash build-image --offline --offline-semgrep-rulesets p/ci
+ash container build --offline --offline-semgrep-rulesets p/ci
 
 # Run in offline mode
 ash --mode container --offline
@@ -363,7 +367,7 @@ rest of that day, so the first build on a new day needs network access. With
 An offline image's databases are frozen at build time, and ASH fails a scan whose
 database is past its bound: grype's 5 days (120h) after it was built, the offline
 semgrep and opengrep rulesets 30 days after they were downloaded. Rebuild the image
-(`ash build-image --offline`) at least that often. To scan with an older image
+(`ash container build --offline`) at least that often. To scan with an older image
 anyway, pass `--allow-stale-content-db` or set `content_db_staleness: warn`; the scan
 then passes and every report names the stale database. See
 [What happens when a database is stale](../concepts/content-databases.md#what-happens-when-a-database-is-stale).
@@ -373,7 +377,7 @@ then passes and every report names the stale database. See
 Offline mode is decided when each scanner runs, from these sources in order:
 
 1. ASH's offline mode: `--offline` on `ash scan`, `ASH_OFFLINE=true` in the
-   environment, or an image built with `ash build-image --offline`. It applies to
+   environment, or an image built with `ash container build --offline`. It applies to
    every scanner, and no scanner option turns it off.
 2. A scanner's own `options.offline: true` (checkov, grype, opengrep, semgrep, syft,
    trivy, trivy-repo). It runs that one scanner offline while the rest of the scan
@@ -455,7 +459,7 @@ in `--offline-semgrep-rulesets` (space-separated, default `p/ci`) into
 
 <!-- doctest: illustrative reason="needs a container runtime" -->
 ```bash
-ash build-image --offline --offline-semgrep-rulesets "p/ci p/python"
+ash container build --offline --offline-semgrep-rulesets "p/ci p/python"
 ```
 
 For a local scan, download the rulesets yourself while online, using the same URL the
@@ -570,7 +574,7 @@ ash --mode container
 <!-- doctest: illustrative reason="needs a container runtime" -->
 ```bash
 # Build a custom image
-ash build-image --build-target ci --custom-containerfile ./my-dockerfile
+ash container build --build-target ci --custom-containerfile ./my-dockerfile
 ```
 
 ## Advanced Configuration Overrides

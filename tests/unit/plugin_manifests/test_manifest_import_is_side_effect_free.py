@@ -22,6 +22,8 @@ import sys
 
 import pytest
 
+from tests.utils.helpers import importing_this_checkout
+
 pytestmark = pytest.mark.unit
 
 _PROBE = """
@@ -37,7 +39,13 @@ print(json.dumps({{"plugin_modules": loaded}}))
 
 def _run(imports: str) -> list[str]:
     result = subprocess.run(
-        [sys.executable, "-I", "-B", "-c", _PROBE.format(imports=imports)],
+        [
+            sys.executable,
+            "-I",
+            "-B",
+            "-c",
+            importing_this_checkout(_PROBE.format(imports=imports)),
+        ],
         capture_output=True,
         text=True,
         check=False,
@@ -56,12 +64,27 @@ def test_the_probe_sees_a_plugin_load() -> None:
 def test_importing_every_manifest_loads_no_plugin_module() -> None:
     loaded = _run(
         "from automated_security_helper.plugin_manifests import ("
-        "scanner_manifests, alpha_scanner_modules, dispatch_target)\n"
-        "assert len(scanner_manifests()) == 22\n"
-        "assert alpha_scanner_modules()\n"
+        "scanner_manifests, opt_in_scanner_modules, dispatch_target)\n"
+        "assert len(scanner_manifests()) == 23\n"
+        "assert opt_in_scanner_modules()\n"
         "assert dispatch_target('semgrep') == 'opengrep'\n"
     )
     assert loaded == [], f"reading manifests imported plugin modules: {loaded}"
+
+
+def test_the_enablement_policy_loads_no_plugin_module() -> None:
+    """The loader's enable-default read and the hint's module read are manifest
+    reads: asking which module a scanner needs must not load the scanner."""
+    loaded = _run(
+        "from automated_security_helper.plugins.enablement import (\n"
+        "    loads_unnamed, modules_loading_unnamed, modules_needing_naming,\n"
+        "    unloaded_opt_in_hint, unloaded_opt_in_scanners)\n"
+        "assert modules_loading_unnamed() and modules_needing_naming()\n"
+        "assert loads_unnamed(modules_loading_unnamed()[0] + '.scanners.x')\n"
+        "assert unloaded_opt_in_hint(\n"
+        "    unloaded_opt_in_scanners(['snyk-code'], ['bandit'], [])) != ''\n"
+    )
+    assert loaded == [], f"the enablement policy imported plugin modules: {loaded}"
 
 
 def test_the_model_module_loads_no_plugin_module() -> None:

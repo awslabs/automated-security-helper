@@ -1,0 +1,255 @@
+{
+  "files": {
+    "automated_security_helper/assets/install-pinned-tool.py": {
+      "created": "2026-11-25T17:02:49Z",
+      "scopes": [
+        {
+          "rule_id": "threat-process-download-exec",
+          "symbol": "_uv_tool_dir"
+        },
+        {
+          "rule_id": "threat-process-download-exec",
+          "symbol": "uv_tool_dir"
+        },
+        {
+          "rule_id": "threat-process-download-exec",
+          "symbol": "version_output"
+        }
+      ],
+      "sha256": "df54c8f38f22b4fc7ddb70b71e40a6034753a1dc6e91d7f11c1ec21e4530ee36"
+    },
+    "automated_security_helper/cli/dependencies.py": {
+      "created": "2026-11-25T17:03:21Z",
+      "scopes": [
+        {
+          "rule_id": "B604",
+          "symbol": "_run_declared_install_command"
+        }
+      ],
+      "sha256": "5cbb9bbd42377748d45c6d76e0d8cf284100e2e7ed45f9e0bfabb8083f12802a"
+    },
+    "automated_security_helper/cli/mcp/__init__.py": {
+      "created": "2026-11-25T17:03:33Z",
+      "scopes": [
+        {
+          "rule_id": "B104",
+          "symbol": "_log_where_the_server_listens"
+        }
+      ],
+      "sha256": "66710ab8eeec9b1851a66620e0bd7529ae0474a780a5cef45f77346e0ad6f73c"
+    },
+    "automated_security_helper/cli/mcp/source_delivery.py": {
+      "created": "2026-11-25T17:02:52Z",
+      "scopes": [
+        {
+          "rule_id": "threat-filesystem-read",
+          "symbol": "_validate_zip_member"
+        }
+      ],
+      "sha256": "b0b5c6e44e6a661b1d1d8f61abd39faa07b374ff68be48ea1e6e19cad1dfbd4e"
+    },
+    "automated_security_helper/interactions/run_ash_container.py": {
+      "created": "2026-11-25T17:02:59Z",
+      "scopes": [
+        {
+          "rule_id": "threat-filesystem-read",
+          "symbol": "_write_env_file"
+        }
+      ],
+      "sha256": "6ce5751245caf8eaff0d5e10ef425cde3e2ef7177fb9850597a2981a89bbe6e4"
+    },
+    "automated_security_helper/interactions/run_ash_nix.py": {
+      "created": "2026-11-25T17:03:24Z",
+      "scopes": [
+        {
+          "rule_id": "SECRET-BASIC-AUTH-CREDENTIALS",
+          "symbol": "shown_flake_ref"
+        }
+      ],
+      "sha256": "60acdaf18deb0a27bad439a016e1d23fecb5704c98354a92ee3b6185ae719ec9"
+    },
+    "automated_security_helper/plugin_modules/ash_builtin/scanners/npm_audit_scanner.py": {
+      "created": "2026-11-25T17:03:12Z",
+      "scopes": [
+        {
+          "rule_id": "threat-filesystem-read",
+          "symbol": "NpmAuditScanner._probe_npm_version"
+        }
+      ],
+      "sha256": "c335468d4ea9691659a9bc6db95dbb047f361f3f6c390a9280a6e8f905a89a78"
+    },
+    "automated_security_helper/utils/content_db_refresh.py": {
+      "created": "2026-11-25T17:03:23Z",
+      "scopes": [
+        {
+          "rule_id": "B608",
+          "symbol": "_say_grype_auto_update_once"
+        }
+      ],
+      "sha256": "46a840f4102ad57aae6fda132ee27fab1c3485a1238ed1a44df8fb71f54c078f"
+    },
+    "automated_security_helper/utils/detect_secrets_worker.py": {
+      "created": "2026-11-25T17:03:29Z",
+      "scopes": [
+        {
+          "rule_id": "SECRET-SECRET-KEYWORD",
+          "symbol": "_names_a_key"
+        }
+      ],
+      "sha256": "cfa0566279c5f1d5691c35e00dc2fab74175d4f968ae53ece73534d0f3a39064"
+    },
+    "automated_security_helper/utils/package_manager_child.py": {
+      "created": "2026-11-25T17:03:13Z",
+      "scopes": [
+        {
+          "rule_id": "threat-filesystem-read",
+          "symbol": "_nearest_real_directory"
+        },
+        {
+          "rule_id": "threat-filesystem-read",
+          "symbol": "_pnpm_workspace_copy"
+        },
+        {
+          "rule_id": "threat-filesystem-read",
+          "symbol": "_settings_file_ancestor"
+        },
+        {
+          "rule_id": "threat-filesystem-read",
+          "symbol": "_untrusted_ancestor"
+        },
+        {
+          "rule_id": "threat-filesystem-read",
+          "symbol": "_yarn_copy_parent"
+        }
+      ],
+      "sha256": "466164a097dbc2215ff3f73b61e0a8f38e65266acc5262b5a26423e3b6928b7d"
+    },
+    "automated_security_helper/utils/path_matching.py": {
+      "created": "2026-11-25T17:02:54Z",
+      "scopes": [
+        {
+          "rule_id": "threat-filesystem-read",
+          "symbol": "ignore_path_pattern"
+        }
+      ],
+      "sha256": "0cbe22a1d0f95a09dd8951c77fc4a5929b338d88947c8203f13034ee1486e9ab"
+    },
+    "automated_security_helper/utils/python_installer.py": {
+      "created": "2026-11-25T17:02:57Z",
+      "scopes": [
+        {
+          "rule_id": "threat-process-download-exec",
+          "symbol": "python_package_install_command"
+        }
+      ],
+      "sha256": "60b5652df7eadb240141fcd97924d6ac1c45ca83c260027762924c0262cffd0d"
+    },
+    "automated_security_helper/utils/secret_masking.py": {
+      "created": "2026-11-25T17:03:26Z",
+      "scopes": [
+        {
+          "rule_id": "SECRET-BASIC-AUTH-CREDENTIALS",
+          "symbol": "_exposed_values"
+        },
+        {
+          "rule_id": "SECRET-BASIC-AUTH-CREDENTIALS",
+          "symbol": "mask_secrets_in_sarif_report"
+        }
+      ],
+      "sha256": "6585f8d5439168a9f1c6d8535979c75cbce83dbf8c142290d9c5843bc9a071e9"
+    },
+    "tests/integration/scanners/test_trivy_real_binary.py": {
+      "created": "2026-11-25T17:02:48Z",
+      "scopes": [
+        {
+          "rule_id": "threat-filesystem-read",
+          "symbol": "test_the_scanned_repos_secret_config_cannot_disable_rules"
+        }
+      ],
+      "sha256": "f533592788a8603ca60dbf12e3b9497326518735595219461e6636588b4ef9ea"
+    },
+    "tests/snapshot/test_snapshot_normalizer.py": {
+      "created": "2026-11-25T17:03:00Z",
+      "scopes": [
+        {
+          "rule_id": "threat-filesystem-destruction",
+          "symbol": "TestSurvives.test_markdown_table_padding_after_a_masked_value"
+        },
+        {
+          "rule_id": "threat-filesystem-destruction",
+          "symbol": "TestSurvives.test_panel_width_on_a_masked_line"
+        }
+      ],
+      "sha256": "b898d9f6c3ae71b6ab1b618bbbbc0a6d5a8ac182736f6db61426e4d008d398d9"
+    },
+    "tests/unit/test_artifact_contents_gate.py": {
+      "created": "2026-11-25T17:03:04Z",
+      "scopes": [
+        {
+          "rule_id": "threat-filesystem-read",
+          "symbol": "TestArchiveReading.test_an_escaping_symlink_in_a_real_tar_fails_the_gate"
+        },
+        {
+          "rule_id": "threat-filesystem-read",
+          "symbol": "TestPlantedPayload.test_link_whose_target_escapes_the_artifact_is_rejected"
+        }
+      ],
+      "sha256": "25accaee4851d1a27f198df4b86a770f2ba6e4f4a348389ed66587c2d47ece01"
+    },
+    "tests/unit/test_defense_in_depth.py": {
+      "created": "2026-11-25T17:03:07Z",
+      "scopes": [
+        {
+          "rule_id": "threat-filesystem-read",
+          "symbol": "TestDockerBuildArgRevisionValidation.test_rejects_shell_metacharacters"
+        }
+      ],
+      "sha256": "14d0c12cf41cc9c9e63e90ed69de2373747d0100cb13dd212e5fdd5b2a74721e"
+    },
+    "tests/unit/test_pinned_tool_version_check.py": {
+      "created": "2026-11-25T17:03:08Z",
+      "scopes": [
+        {
+          "rule_id": "threat-filesystem-read",
+          "symbol": "TestOnlyAllowlistedHttpsUrlsAreFetched.test_a_url_outside_the_allowlist_is_refused_unopened"
+        }
+      ],
+      "sha256": "489753523d3df6299649fb8b016fc41ff909bbc4f171eaee4a5fba415ef6f9c0"
+    },
+    "tests/unit/utils/test_opengrep_pinned_download.py": {
+      "created": "2026-11-25T17:03:10Z",
+      "scopes": [
+        {
+          "rule_id": "threat-runtime-obfuscation-base64exec",
+          "symbol": "TestNixPinsTheSameBytes._nix_pins"
+        }
+      ],
+      "sha256": "7ebb55bdc7430c42c3e0e2bef8abd6b71db7cb34d136c28459d1ba04367f1498"
+    },
+    "tests/unit/utils/test_secret_masking_regression.py": {
+      "created": "2026-11-25T17:03:39Z",
+      "scopes": [
+        {
+          "rule_id": "API_KEY_OR_SECRET",
+          "symbol": "TestSecretMasking.test_b106_rule_masks_secret"
+        },
+        {
+          "rule_id": "API_KEY_OR_SECRET",
+          "symbol": "TestSecretMasking.test_b107_rule_masks_secret"
+        }
+      ],
+      "sha256": "e1cf48761916d87106f15feffeb3497346f6247b7859cb590569fab41896911d"
+    },
+    "tests/unit/utils/test_secret_masking_shapes_in_text.py": {
+      "created": "2026-11-25T17:03:37Z",
+      "scopes": [
+        {
+          "rule_id": "API_KEY_OR_SECRET",
+          "symbol": "test_a_token_of_a_recorded_shape_is_masked"
+        }
+      ],
+      "sha256": "0365dd7b02e4c2bfdab8d46b88ff486db5af277a76b147e2074ae81fcbd2a772"
+    }
+  },
+  "version": 1
+}

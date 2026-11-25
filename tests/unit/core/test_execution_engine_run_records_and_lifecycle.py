@@ -141,10 +141,6 @@ def _run(engine, phases, manager, scan_phase=_StubPhase, report_phase=_StubPhase
             f"{_SARIF_UTILS}.apply_suppressions_to_sarif",
             side_effect=lambda sarif_report, **kwargs: sarif_report,
         ),
-        patch(
-            "automated_security_helper.utils.suppression_matcher."
-            "warn_unmatched_directory_suppressions"
-        ),
     ):
         return engine.execute_phases(phases=phases)
 
@@ -612,10 +608,6 @@ def test_suppressions_are_applied_before_the_changed_files_narrowing(tmp_path):
         ),
         patch(f"{_SARIF_UTILS}.apply_suppressions_to_sarif", side_effect=suppress),
         patch(f"{_CHANGED_FILES}.filter_results_to_changed_files", side_effect=narrow),
-        patch(
-            "automated_security_helper.utils.suppression_matcher."
-            "warn_unmatched_directory_suppressions"
-        ),
     ):
         engine.execute_phases(phases=["scan"])
 

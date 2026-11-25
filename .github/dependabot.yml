@@ -175,6 +175,15 @@ updates:
     # number is a decision rather than a default nobody chose. Security updates are exempt
     # from the limit and do not count toward it, so this does not gate advisories.
     open-pull-requests-limit: 10
+    # polars stays below 2. pyproject.toml carries `polars>=1.33,<2.0` on purpose: polars 2.x is
+    # a major release and raising the cap is a separate, deliberate change, never an automated
+    # one. Without this entry the engine-major-upgrade group below rewrites the requirement to
+    # `>=2.1.0,<3.0` (#1071). `ignore` with no `update-types` covers every update type, so
+    # polars is not bumped at all. It also suppresses security updates for polars; a patched
+    # release inside the cap is taken by hand. tests/unit/deploy/test_polars_stays_below_two.py
+    # fails if this entry or the upper bound goes away.
+    ignore:
+      - dependency-name: "polars"
     # aws-cdk-lib publishes a minor most days -- 2.269.0 to 2.270.0 was one of them, and it
     # arrived as a pull request of its own because it was the only member of scanner-minor
     # that run. CDK v2 minors are additive, so the ones worth a human are the majors, which
@@ -225,15 +234,21 @@ updates:
           - "minor"
           - "patch"
 
+      # polars is excluded from both engine groups as well as ignored above, so a group pull
+      # request that was already open regenerates without it.
       engine-major-upgrade:
         patterns:
           - "*"
+        exclude-patterns:
+          - "polars"
         update-types:
           - "major"
 
       engine-minor:
         patterns:
           - "*"
+        exclude-patterns:
+          - "polars"
         update-types:
           - "minor"
           - "patch"

@@ -3813,6 +3813,10 @@ class EnvReadSet:
     defaults: dict[str, list[str]] | None = None
     #: The generator module the read set came from, which supplies the defaults.
     generator: Any = None
+    #: The generator's whole EnvScan when the read set came from collect_env_reads,
+    #: kept so known_defaults can reuse that sweep. Without it, default_entries
+    #: walked the package's AST a second time for the same tree.
+    scan: Any = None
 
     def known_build_args(self) -> dict[str, str]:
         if self.build_args is None:
@@ -3823,7 +3827,13 @@ class EnvReadSet:
     def known_defaults(self) -> dict[str, list[str]]:
         if self.defaults is None:
             supply = getattr(self.generator, "default_entries", None)
-            self.defaults = supply(self.code) if supply and self.code else {}
+            if supply and self.code:
+                kwargs: dict[str, Any] = {}
+                if self.scan is not None and _takes_scan(supply):
+                    kwargs["scan"] = self.scan
+                self.defaults = supply(self.code, **kwargs)
+            else:
+                self.defaults = {}
         return self.defaults
 
     def known_test_only(self) -> dict[str, str]:
@@ -3836,6 +3846,21 @@ class EnvReadSet:
                 if n not in self.names and n not in build_args
             }
         return self.test_only
+
+
+def _takes_scan(supply: Any) -> bool:
+    """Whether a generator's ``default_entries`` accepts a precomputed ``scan``.
+
+    load_env_read_set prefers the code tree's own generator, which with --docs-root
+    can be an older copy than this module, so the sweep is reused only when that
+    generator's signature takes it; an older one just sweeps again, as it always did.
+    """
+    import inspect
+
+    try:
+        return "scan" in inspect.signature(supply).parameters
+    except (TypeError, ValueError):
+        return False
 
 
 def _load_by_path(name: str, path: Path) -> Any:
@@ -3864,11 +3889,21 @@ def load_env_read_set(root_str: str = str(REPO_ROOT)) -> EnvReadSet:
     for generator in (root / ENV_VAR_GENERATOR, REPO_ROOT / ENV_VAR_GENERATOR):
         if generator.is_file():
             module = _load_by_path("_ash_env_var_reference", generator)
-            names, dynamic = module.read_env_names(root)
+            scan = None
+            collect = getattr(module, "collect_env_reads", None)
+            if collect is not None:
+                # One sweep serves both the read set and known_defaults: calling
+                # read_env_names here and default_entries later walked the whole
+                # package's AST twice for the same answer.
+                scan = collect(root)
+                names, dynamic = {r.name for r in scan.reads}, list(scan.dynamic)
+            else:
+                names, dynamic = module.read_env_names(root)
             read = EnvReadSet(
                 set(names), list(dynamic), f"{ENV_VAR_GENERATOR} over {root}"
             )
             read.generator = module
+            read.scan = scan
             break
     if read is None:
         names, dynamic = _collect_package_env_names(root / ASH_MODULE, root)
@@ -3988,7 +4023,7 @@ def suite_env_names(code: Path) -> dict[str, str]:
     found: dict[str, str] = {}
     tests = code / TEST_SOURCES
     if tests.is_dir():
-        for path, tree, constants in package_modules(tests):
+        for path, tree, constants in _parse_modules(tests):
             label = rel_path(path, code)
             names, _dynamic = env_lookups(tree, label, constants)
             for name in sorted(names):
@@ -4165,8 +4200,24 @@ def _package_sources(package: Path) -> list[Path]:
     return listed_files(package, ["**/*.py"])
 
 
+@functools.lru_cache(maxsize=None)
 def package_modules(package: Path) -> list[tuple[Path, ast.AST, dict[str, str]]]:
-    """(path, syntax tree, string constants in scope) for every module in the package.
+    """``_parse_modules`` of the ASH package, cached per path.
+
+    Four callers (build_argument_names, the env-var fallback, file_name_constants,
+    check_code_links) each walked and re-parsed the whole package, which was most
+    of the report-files check's time. The returned list, its trees and its
+    constants are shared -- callers iterate them and never mutate -- and a caller
+    that rewrites files under a path it already asked about in the same process
+    would read the first parse, which no caller does. The tests/ tree is read once
+    per env read set, so suite_env_names calls ``_parse_modules`` and the suite's
+    syntax trees are not kept for the life of the process.
+    """
+    return _parse_modules(package)
+
+
+def _parse_modules(package: Path) -> list[tuple[Path, ast.AST, dict[str, str]]]:
+    """(path, syntax tree, string constants in scope) for every module under a path.
 
     The constants are the module's own ``NAME = "literal"`` assignments plus those it
     imports from other modules of the package, by ``from x import NAME`` or as

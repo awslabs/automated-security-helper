@@ -25,12 +25,12 @@ Entry points and the options model are therefore dotted ``module:Class``
 STRINGS, resolved by the tests (and by a kernel, later) and never by the
 manifest.
 
-Two axes, not one (her decision row 5): ``tier`` is maturity (``supported``,
+Two axes, not one (design decision 5): ``tier`` is maturity (``supported``,
 ``alpha``, ``deprecated``) and ``default_enabled`` is loading. A maintained
 integration that is opt-in is ``supported`` and not default-enabled; calling it
 alpha would misstate its maturity to express that it is opt-in.
 
-``deprecated`` is the retirement shape (her decision row 7): the manifest names
+``deprecated`` is the retirement shape (design decision 7): the manifest names
 its target in ``superseded_by``, and the target lists the deprecated name among
 its ``aliases``. The manifest only DECLARES the retirement; whether and when a
 scanner is actually retired stays a separate decision, so no code here changes
@@ -44,6 +44,7 @@ match.
 
 from __future__ import annotations
 
+import copy
 import importlib
 import re
 from enum import Enum
@@ -117,7 +118,7 @@ class PluginTier(str, Enum):
 
 
 class _Frozen(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", hide_input_in_errors=True)
 
 
 class EntryPoints(_Frozen):
@@ -291,6 +292,20 @@ class ScannerManifest(_Frozen):
     #: (which changes nothing) is told from a changed one by this row. A test
     #: binds each row to the options model's own default.
     denied_option_defaults: dict[str, Any] = {}
+
+    @field_validator("denied_option_defaults")
+    @classmethod
+    def _denied_option_defaults_are_the_manifests_own(
+        cls, value: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Deep-copied, so the values are this manifest's own objects.
+
+        Validating a ``dict[str, Any]`` builds a new outer dict and keeps the
+        value objects it was given, so a list default here would be the very list
+        a module-level constant holds, and an in-place change to either would
+        change what "the default" means for the whole process.
+        """
+        return copy.deepcopy(value)
 
     @field_validator("name")
     @classmethod

@@ -16,10 +16,11 @@ directories or something beneath it, and everything else is refused.
 Where the decision now lives
 ----------------------------
 :func:`validate_scan_target` is the entry point every MCP tool calls, and it
-still is -- but the decision moved to ``cli/mcp/sandbox.py``, which resolves a
-per-session :class:`~automated_security_helper.cli.mcp.sandbox.SessionSandbox`
-and asks that. This module keeps the name, the signature, and the system-
-directory denylist that the sandbox falls back to on a local transport.
+still is -- but the decision moved to ``config/mcp_sandbox.py``, which resolves a
+per-session :class:`~automated_security_helper.config.mcp_sandbox.SessionSandbox`
+and asks that. This module keeps the name and the signature; the system-directory
+denylist the sandbox falls back to on a local transport is the sandbox's own
+(``_denied_roots`` and the helpers re-exported below).
 
 The move fixed a hole this docstring used to describe as though it were closed.
 The claim was that only one session's own directory is allowed and never the
@@ -74,7 +75,6 @@ zip member handling in ``source_delivery`` makes for symlink entries.
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
@@ -111,73 +111,8 @@ from automated_security_helper.config.mcp_sandbox import (  # noqa: E402
     _WINDOWS_DENIED_ROOT_ENV_VARS as _WINDOWS_DENIED_ROOT_ENV_VARS,
     _denied_root_values as _denied_root_values,
     _denied_roots as _denied_roots,
+    _is_filesystem_root as _is_filesystem_root,
 )
-
-
-def _is_filesystem_root(path: Path) -> bool:
-    """Return True if ``path`` is the top of a filesystem.
-
-    Only a filesystem root is its own parent, which makes this true for ``/``
-    on POSIX and for a bare drive or UNC share root on Windows without having
-    to enumerate drive letters.
-
-    The filesystem root has to be treated as an equality case rather than a
-    containment one. Every path is beneath ``/``, so folding the root into the
-    containment list below would refuse the entire filesystem.
-    """
-
-    return path.parent == path
-
-
-def _allowed_roots() -> List[Path]:
-    """Parse ``ASH_MCP_ALLOWED_ROOTS`` into resolved directories.
-
-    An empty list means the variable is unset or held nothing usable, which
-    selects the default refusal set rather than allowing everything.
-    """
-
-    raw = os.environ.get(ASH_MCP_ALLOWED_ROOTS_ENV)
-    if not raw:
-        return []
-
-    roots: List[Path] = []
-    # os.pathsep, not a literal ":". On Windows the separator is ";" and a colon
-    # appears inside ordinary paths, so splitting on ":" would cut "C:\src" in
-    # half and yield a root of "C".
-    for entry in raw.split(os.pathsep):
-        entry = entry.strip()
-        if not entry:
-            # A trailing or doubled separator produces an empty entry, and
-            # "".split(os.pathsep) is [""] rather than []. Path("").resolve() is
-            # the process working directory, so resolving an empty entry would
-            # quietly allow the cwd and everything under it.
-            continue
-        roots.append(Path(entry).expanduser().resolve())
-    return roots
-
-
-def _refusal(directory_path: object, resolved: Path) -> MCPResourceError:
-    remedy = (
-        f"Set {ASH_MCP_ALLOWED_ROOTS_ENV} to the directories the MCP server may scan."
-    )
-    if _is_filesystem_root(resolved):
-        # Reached most often by omitting the directory entirely: the tool falls
-        # back to the process working directory, and a server launched by an
-        # editor or agent frequently has "/" for a cwd. Telling that caller to
-        # configure an allowlist points at the wrong lever.
-        remedy = (
-            "Pass the directory to scan explicitly; the default is the server's "
-            f"working directory, which here is the filesystem root. {remedy}"
-        )
-    return MCPResourceError(
-        f"Scan target is outside the permitted roots: {directory_path}. {remedy}",
-        context={
-            "cwd": str(Path.cwd()),
-            "directory_path": str(directory_path),
-            "resolved_path": str(resolved),
-            "error_category": ErrorCategory.INVALID_PATH.value,
-        },
-    )
 
 
 @dataclass(frozen=True)
@@ -224,7 +159,7 @@ def resolve_scan_target(
         directory_path: Caller-supplied scan target, absolute or relative.
         session_id: MCP session id, when the call is made on behalf of one. The
             sandbox permits that session's own workspace directory and refuses
-            sibling sessions' workspaces; see ``cli/mcp/sandbox.py``.
+            sibling sessions' workspaces; see ``config/mcp_sandbox.py``.
 
     Returns:
         A :class:`ScanTargetResolution` carrying the canonical target on success

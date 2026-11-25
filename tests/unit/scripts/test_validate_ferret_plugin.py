@@ -126,7 +126,7 @@ class TestParser:
             "global_settings:\n  suppressions:\n    - path: b.md\n      rule_id: Y\n",
             encoding="utf-8",
         )
-        entries = validator.load_alpha_suppressions([alpha, ash])
+        entries = validator.load_repo_suppressions([alpha, ash])
         assert [(e["path"], e["source"]) for e in entries] == [
             ("a.md", "alpha.yaml"),
             ("b.md", "ash.yaml"),

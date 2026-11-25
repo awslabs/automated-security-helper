@@ -26,7 +26,7 @@ from automated_security_helper.utils.finding_clusters import (
     annotation_values,
     assign_clusters_by_project,
 )
-from automated_security_helper.utils.frame_text import unwire, wire
+from automated_security_helper.utils.frame_text import unwire, wire, wire_cell
 from automated_security_helper.utils.terminal_text import commands_broken
 
 #: The workspace-mode column header. First rather than appended, because a
@@ -135,7 +135,7 @@ def cell_frame(
                 other_cells.append(None)
             else:
                 text_cells.append(None)
-                other_cells.append(None if value is None else wire(str(value)))
+                other_cells.append(wire_cell(value))
         texts[f"t{index}"] = text_cells
         others[f"o{index}"] = other_cells
     frame = pl.DataFrame(
@@ -391,10 +391,18 @@ class CsvReporter(ReporterPluginBase[CSVReporterConfig]):
         and not the other depending on whether the scan found anything.
         """
         from automated_security_helper.models.flat_vulnerability import (
+            IMAGE_ATTRIBUTION_FIELDS,
             FlatVulnerability,
         )
 
-        fields = list(FlatVulnerability.model_fields)
+        # Left out as the populated form leaves them out of a row with no image
+        # attribution (FlatVulnerability's serializer), so a scan that found
+        # nothing writes the header every other filesystem scan writes.
+        fields = [
+            field
+            for field in FlatVulnerability.model_fields
+            if field not in IMAGE_ATTRIBUTION_FIELDS
+        ]
         if annotated:
             fields.extend(ANNOTATION_COLUMNS)
         return CsvReporter._order(fields, is_workspace)

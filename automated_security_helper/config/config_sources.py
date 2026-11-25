@@ -7,22 +7,32 @@ Discovery (#313)
 When no config path is given, ``discover_config_source`` picks exactly one
 source from the scan root. Sources are never merged with each other. In order:
 
-1. The dedicated file names in ``ASH_CONFIG_FILE_NAMES``, in that list's order,
-   each checked at the scan root and then in ``.ash/``. This is the order ASH
-   has always used, kept unchanged.
-2. ``ASH_RC_FILE_NAMES`` (``.ashrc.toml`` ... ``ashrc.json``) at the scan root.
-3. ``pyproject.toml`` at the scan root, only if it has a ``[tool.ash]`` table.
+1. ``.ash.yaml`` at the scan root, the canonical config file
+   (``ASH_CANONICAL_CONFIG_FILE_NAME``). It is read before everything else, and
+   it is the path every command that creates a config file writes.
+2. The dedicated file names in ``ASH_CONFIG_FILE_NAMES``, in that list's order,
+   each checked at the scan root and then in ``.ash/``, skipping the canonical
+   file. This is the order ASH has always used for them, kept unchanged.
+3. ``ASH_RC_FILE_NAMES`` (``.ashrc.toml`` ... ``ashrc.json``) at the scan root.
+4. ``pyproject.toml`` at the scan root, only if it has a ``[tool.ash]`` table.
    A ``pyproject.toml`` without one is not a config source at all.
 
-An explicit path (``--config`` or ``ASH_CONFIG``) skips discovery.
+An explicit path (``--config`` or ``ASH_CONFIG``) skips discovery, and warns
+nothing.
 
-The dedicated names win over the newer sources because #313 asks for
-``[tool.ash]`` to be read "when no .ash/.ash.yaml exists" and for an existing
-``.ash/.ash.yaml`` to keep working. Letting a newer source win would change the
-config of every repository that has ``.ash/.ash.yaml`` and then gains an
-unrelated ``[tool.ash]`` table. The source used is logged, every other source
-found is logged as ignored, and when a dedicated file shadows a newer source the
-warning says the dedicated names are deprecated.
+Every location in 2 and 3 is a legacy one: it keeps loading, and a scan that
+reads one says so once, in a warning that names the file as deprecated and the
+canonical path to move it to. They are removed in ASH 4.0. When the canonical
+file and a legacy one both exist, the canonical file is read and the warning
+names the legacy file it shadowed. A ``pyproject.toml`` table is a different
+kind of source, not a file location, and is not deprecated.
+
+The dedicated names win over the ashrc names and ``[tool.ash]`` because #313
+asks for ``[tool.ash]`` to be read "when no .ash/.ash.yaml exists" and for an
+existing ``.ash/.ash.yaml`` to keep working. Letting a newer source win would
+change the config of every repository that has ``.ash/.ash.yaml`` and then gains
+an unrelated ``[tool.ash]`` table. The source used is logged and every other
+source found is logged as ignored.
 
 Rejected: merging the sources found (two files each holding half a config is the
 confusion this is meant to remove, and pytest does not merge either), and
@@ -107,7 +117,7 @@ is.
 A caller can narrow that further with ``permit_base``, a predicate every base
 must also pass after its symlinks are resolved. The MCP server passes one built
 from the calling session's allowed config roots
-(``cli/mcp/sandbox.config_base_gate``), so a grant naming a ``.ash/`` directory
+(``config.mcp_sandbox.config_base_gate``), so a grant naming a ``.ash/`` directory
 confines the chain to that directory rather than to its parent. The predicate is
 consulted before the confinement root, and its refusal,
 ``ASHConfigInputNotPermittedError``, names the ``extends`` entry as written and
@@ -159,15 +169,15 @@ the line or key. Which files is a ``RefuseEnv`` predicate the caller passes to
 ``read_config_file`` and ``resolve_config_document``; ``env_refused_for`` gives
 the MCP server's two:
 
-* For a remote caller (``cli/mcp/sandbox.caller_is_remote``), every file the
+* For a remote caller (``config.mcp_sandbox.caller_is_remote``), every file the
   operator did not set aside: anything outside ``ASH_MCP_ALLOWED_CONFIG_ROOTS``
   except the profile files the server writes in the calling session's
-  ``config/`` directory (``cli/mcp/sandbox.client_named_config_is_untrusted``).
+  ``config/`` directory (``config.mcp_sandbox.client_named_config_is_untrusted``).
   That covers a path the
   client names, a file discovered in a directory it names, and a scan target's
   own config, as well as anything it delivered.
 * For any other caller, the CLI included, and the default when none is passed:
-  a file an MCP client delivered (``cli/mcp/sandbox.config_is_client_supplied``),
+  a file an MCP client delivered (``config.mcp_sandbox.config_is_client_supplied``),
   that is anything under the MCP workspace root except the profile files the
   server writes in the sessions' ``config/`` directories, judged on the path as
   named and on the file it resolves to. A local stdio caller launched the server and holds its
@@ -262,6 +272,10 @@ from automated_security_helper.config.ash_config import (
     resolve_env_references,
     sandbox_mode_in_document,
 )
+from automated_security_helper.config.patch_ops import (
+    CONFIG_SOURCE_OPS,
+    VALUE_WRITING_OPS,
+)
 from automated_security_helper.config.plugin_section_names import (
     PLUGIN_SEGMENT_KEYS,
     AmbiguousPluginSpellings,
@@ -279,6 +293,7 @@ from automated_security_helper.config.environment_record import (
     written_without_tag,
 )
 from automated_security_helper.core.constants import (
+    ASH_CANONICAL_CONFIG_FILE_NAME,
     ASH_CONFIG_EXTENDS_MAX_DEPTH,
     ASH_CONFIG_EXTENDS_MAX_FILES,
     ASH_CONFIG_FILE_NAMES,
@@ -340,11 +355,16 @@ RefuseEnv = Callable[[Path], bool]
 AnchorPaths = Callable[[Path], bool]
 
 SOURCE_KIND_EXPLICIT = "explicit"
+#: ``.ash.yaml`` at the scan root, the canonical config file.
+SOURCE_KIND_CANONICAL = "canonical"
+#: A dedicated name at a legacy location (every name of
+#: ``ASH_CONFIG_FILE_NAMES`` at the root or in ``.ash/`` except the canonical
+#: file): deprecated, removed in ASH 4.0.
 SOURCE_KIND_DEDICATED = "dedicated"
 SOURCE_KIND_ASHRC = "ashrc"
 SOURCE_KIND_PYPROJECT = "pyproject"
 
-_PATCH_OPS = {"add", "remove", "replace", "test"}
+_PATCH_OPS = CONFIG_SOURCE_OPS
 _URL_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*://")
 # The `tool` and `ash` keys as TOML lets them be written: bare, or as a basic or
 # a literal string (`"tool"`, `'ash'`), which name the same key.
@@ -1670,8 +1690,13 @@ def discovery_candidates(search_dir: Path) -> Iterator[Path]:
     search_dir = Path(search_dir)
     ash_dir = search_dir / ".ash"
     ash_dir_given = False
+    canonical = search_dir / ASH_CANONICAL_CONFIG_FILE_NAME
+    if os.path.lexists(canonical):
+        yield canonical
     for name in ASH_CONFIG_FILE_NAMES:
         for candidate in (search_dir / name, ash_dir / name):
+            if candidate == canonical:
+                continue
             if candidate.parent == ash_dir and not ash_dir_given:
                 ash_dir_given = True
                 # Not Path.is_symlink(), which is False for a Windows junction.
@@ -1899,9 +1924,12 @@ def _existing_candidates(
     if permit is not None and _name_exists(dot_ash) and not _permitted(dot_ash, permit):
         raise _not_permitted(dot_ash)
     candidates: List[ConfigSource] = []
+    canonical = search_dir / ASH_CANONICAL_CONFIG_FILE_NAME
+    if _name_exists(canonical):
+        candidates.append(ConfigSource(canonical, SOURCE_KIND_CANONICAL))
     for name in ASH_CONFIG_FILE_NAMES:
         for candidate in (search_dir / name, dot_ash / name):
-            if _name_exists(candidate):
+            if candidate != canonical and _name_exists(candidate):
                 candidates.append(ConfigSource(candidate, SOURCE_KIND_DEDICATED))
     for name in ASH_RC_FILE_NAMES:
         candidate = search_dir / name
@@ -2039,25 +2067,48 @@ def discovery_warnings(discovery: ConfigDiscovery) -> List[str]:
     if selected is None:
         return []
     warnings: List[str] = []
+    if _is_a_legacy_location(selected):
+        warnings.append(_legacy_location_warning(selected))
     for other in discovery.ignored:
         message = (
             f"Ignoring ASH configuration at {other.label}: {selected.label} takes "
             "precedence, and configuration sources are never merged."
         )
-        if selected.kind == SOURCE_KIND_DEDICATED and other.kind in (
-            SOURCE_KIND_ASHRC,
-            SOURCE_KIND_PYPROJECT,
-        ):
+        if selected.kind == SOURCE_KIND_CANONICAL and _is_a_legacy_location(other):
             message += (
-                f" The config file names {', '.join(ASH_CONFIG_FILE_NAMES)} (at the "
-                "repository root or in .ash/) are deprecated in favor of "
-                f"{', '.join(ASH_RC_FILE_NAMES)} or a [tool.ash] table in "
-                f"{ASH_PYPROJECT_FILE_NAME}. Move the settings into one source "
-                "and delete the other."
+                f" {other.label} is a deprecated location, removed in ASH 4.0: "
+                f"move any setting it holds into {selected.label} and delete it."
             )
         warnings.append(message)
     warnings.extend(discovery.notes)
     return warnings
+
+
+def _is_a_legacy_location(source: ConfigSource) -> bool:
+    """Whether ``source`` is a location ASH 4.0 stops reading: a dedicated name
+    other than the canonical file, or an ashrc name. A ``pyproject.toml`` table
+    is not a file location of that kind and is not deprecated."""
+    return source.kind in (SOURCE_KIND_DEDICATED, SOURCE_KIND_ASHRC)
+
+
+def canonical_path_for(source: ConfigSource) -> Path:
+    """The canonical config file of the scan root ``source`` was found in.
+
+    A file in ``.ash/`` belongs to the root above ``.ash/``; every other source
+    was found at the root itself.
+    """
+    parent = source.path.parent
+    root = parent.parent if parent.name == ".ash" else parent
+    return root / ASH_CANONICAL_CONFIG_FILE_NAME
+
+
+def _legacy_location_warning(source: ConfigSource) -> str:
+    return (
+        f"ASH is reading its configuration from {source.label}, a deprecated "
+        f"location that ASH 4.0 stops reading. The canonical config file is "
+        f"{ASH_CANONICAL_CONFIG_FILE_NAME} at the scan root: move this file to "
+        f"{describe_config_path(canonical_path_for(source))}."
+    )
 
 
 def log_config_discovery(
@@ -2116,8 +2167,9 @@ def config_is_client_delivered(path: Path) -> bool:
     ``config.mcp_sandbox.config_is_client_supplied``, imported when called. The
     ``RefuseEnv`` every caller gets unless it passes another.
     """
-    # Imported here, as config/path_trust.py does: importing cli.mcp runs its
-    # __init__, which imports profile_registry and through it ash_config.
+    # Imported when called, as config/path_trust.py does: the sandbox reads this
+    # module's helpers (file_identity, the chain walkers) from inside its own
+    # functions, so neither module imports the other while it is being loaded.
     from automated_security_helper.config.mcp_sandbox import config_is_client_supplied
 
     return config_is_client_supplied(path)
@@ -2998,7 +3050,7 @@ def by_every_name(
 
     The names are the file's resolved path and each path in ``names`` it was
     reached by. ``judge`` takes one path, as named; the checks it is used with
-    (``cli/mcp/sandbox.config_is_client_supplied`` and
+    (``config.mcp_sandbox.config_is_client_supplied`` and
     ``client_named_config_is_untrusted``) also judge each symlink on the way.
     """
     known = names or {}
@@ -3240,7 +3292,10 @@ def _base_permitted(permit_base: PermitBase, path: Path) -> bool:
     except (TypeError, ValueError):
         takes_resolved = False
     if takes_resolved:
-        return permit_base(path, resolved=path)  # type: ignore[call-arg]
+        # The gate declares ``resolved``, which PermitBase's one-argument shape
+        # does not name.
+        gate_with_resolved: Callable[..., bool] = permit_base
+        return gate_with_resolved(path, resolved=path)
     return permit_base(path)
 
 
@@ -4460,7 +4515,7 @@ def _split_references(
             and 0 <= index < len(ops)
             and reference.path[2] == "value"
             and isinstance(ops[index], dict)
-            and ops[index].get("op") in ("add", "replace")
+            and ops[index].get("op") in VALUE_WRITING_OPS
         ):
             from_ops.append((index, tuple(reference.path[3:]), reference))
     return own, from_ops

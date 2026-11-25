@@ -29,6 +29,7 @@ from typing import (
     Iterable,
     Iterator,
     List,
+    Literal,
     NamedTuple,
     Optional,
     Tuple,
@@ -42,8 +43,10 @@ from typing import (
 from automated_security_helper.utils.error_text import ESCAPE_CODES as _ANSI_ESCAPE
 from automated_security_helper.utils.error_text import error_text, text_without_values
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
+from automated_security_helper.utils.pre_installed_tool import ToolInstallStatus
 from automated_security_helper.utils.subprocess_utils import (
     RESPONSE_FLAGS,
+    OutputPreference,
     TIMEOUT_RETURNCODE,
     StartWatch,
     could_not_stop_default,
@@ -276,6 +279,18 @@ def _without_whitespace(requirement: str) -> str:
         return requirement
 
 
+def _tool_name(plugin: Any) -> str:
+    """The tool's executable name, ``""`` for a plugin that sets none.
+
+    ``command`` is ``None`` on a plugin that has no tool to run; every uv arm
+    in this module is reached only for a plugin that names one, so the empty
+    string is the type-level stand-in, never a name that gets looked up. A
+    function rather than a method because the arms are also run against
+    duck-typed stand-ins that carry only the plugin's fields.
+    """
+    return plugin.command or ""
+
+
 class UVToolMixin:
     """UV tool management methods extracted from PluginBase.
 
@@ -305,6 +320,26 @@ class UVToolMixin:
         # assign them. exit_code is None until the plugin starts a tool.
         exit_code: Optional[int]
         uv_tool_install_commands: List[str]
+        # Also PluginBase's: the tool's executable name and the package that
+        # provides it (None means "named like the command"), and the error
+        # stream the install and run arms append to.
+        command: Optional[str]
+        uv_tool_package_name: Optional[str]
+        errors: List[str]
+
+        def _plugin_log(
+            self,
+            *msg: str,
+            level: int = 15,
+            target_type: Optional[str] = "source",
+            append_to_stream: Literal["stderr", "stdout", "none"] = "none",
+        ) -> None: ...
+
+        def _process_command_response(self, response: dict) -> None: ...
+
+    def _tool_command(self) -> str:
+        """The tool's executable name, ``""`` for a plugin that sets none."""
+        return _tool_name(self)
 
     # ------------------------------------------------------------------
     # Version detection
@@ -346,7 +381,7 @@ class UVToolMixin:
         built around, and the ``package`` the runner's requirement check holds
         each spec to, so a constraint glued onto the name cannot name another
         package (``checked_requirement``)."""
-        return self.uv_tool_package_name or self.command
+        return self.uv_tool_package_name or _tool_name(self)
 
     def _uv_probe_from_spec(self) -> Optional[str]:
         """:meth:`_uv_from_spec` as the dependency check hands it to the probe.
@@ -449,7 +484,7 @@ class UVToolMixin:
         ``uv_tool_runner.uv_install_inputs``, instead of this one.
         """
         return (
-            self._uv_from_spec() or self.command,
+            self._uv_from_spec() or _tool_name(self),
             *(self._get_tool_with_dependencies() or []),
         )
 
@@ -649,8 +684,8 @@ class UVToolMixin:
         command: List[str],
         working_dir: Path,
         results_dir: Optional[Path] = None,
-        stdout_preference: str = "write",
-        stderr_preference: str = "write",
+        stdout_preference: OutputPreference = "write",
+        stderr_preference: OutputPreference = "write",
         env: Optional[Dict[str, str]] = None,
         timeout: Optional[float] = None,
         values: Iterable[str] = (),
@@ -763,7 +798,7 @@ class UVToolMixin:
                     f"Executing {self.command} via UV tool run with args: {tool_args}",
                     record_values,
                     plugin_inputs=record_inputs,
-                    tool_name=self.command,
+                    tool_name=_tool_name(self),
                     limit=None,
                 ),
                 level=logging.DEBUG,
@@ -787,10 +822,10 @@ class UVToolMixin:
             # is.
             with (
                 launch.watching(),
-                uv_record_inputs(record_values, record_inputs, self.command),
+                uv_record_inputs(record_values, record_inputs, _tool_name(self)),
             ):
                 result = uv_runner.run_tool(
-                    tool_name=self.command,
+                    tool_name=_tool_name(self),
                     # The package that provides the command, when it is named
                     # apart from it: the --from spec is built on it, so the
                     # run resolves the package the install named, not one
@@ -934,7 +969,7 @@ class UVToolMixin:
             text,
             record_values,
             plugin_inputs=record_inputs,
-            tool_name=self.command,
+            tool_name=_tool_name(self),
             limit=None,
         )
 
@@ -942,7 +977,7 @@ class UVToolMixin:
         self,
         launch: StartWatch,
         error: BaseException,
-        stdout_preference: str = "write",
+        stdout_preference: OutputPreference = "write",
         *,
         record_values: Tuple[str, ...],
     ) -> Optional[Dict[str, Any]]:
@@ -1378,7 +1413,7 @@ class UVToolMixin:
             repr(requirement),
             values,
             plugin_inputs=inputs,
-            tool_name=self.command,
+            tool_name=_tool_name(self),
             limit=None,
         )
         # Stripped only AFTER the redaction: a whole-text strip first eats
@@ -1388,7 +1423,7 @@ class UVToolMixin:
             stderr,
             values,
             plugin_inputs=inputs,
-            tool_name=self.command,
+            tool_name=_tool_name(self),
             limit=None,
         ).strip()
         head_keep, tail_keep = 500, 300
@@ -1672,7 +1707,7 @@ class UVToolMixin:
             return True
 
         executable = installation_info.get("pre_installed_path") or find_executable(
-            self.command
+            _tool_name(self)
         )
         if executable is None:
             # Only reachable for source == "uv" offline with nothing on PATH.
@@ -1687,7 +1722,7 @@ class UVToolMixin:
         # The package that provides the command, when named apart from it: the
         # requirement verified against the copy's environment is the one the
         # scan runs under, not one named after the executable.
-        package = self.uv_tool_package_name or self.command
+        package = self.uv_tool_package_name or _tool_name(self)
         requirement = build_requirement(package, extras, constraint)
         # The values hook is read ONCE, guarded, for the verify and every
         # record below: it is overridable, two reads can disagree with each
@@ -1729,11 +1764,11 @@ class UVToolMixin:
                 text,
                 values,
                 plugin_inputs=self._uv_run_inputs_for_records(),
-                tool_name=self.command,
+                tool_name=_tool_name(self),
                 limit=None,
             )
 
-        if verdict.status == "satisfied":
+        if verdict.status == ToolInstallStatus.SATISFIED:
             self._plugin_log(
                 _shown(
                     f"Using pre-installed {self.command} at {executable} directly; "
@@ -1754,9 +1789,14 @@ class UVToolMixin:
             # (SARIF scanner_version) is its own, not the one the uv probe read
             # from uv's environment. Read with a default: a verifier stand-in
             # that carries only status and detail is a verdict without one.
-            verified_version = getattr(verdict, "version", None)
-            if verified_version:
-                self.tool_version = verified_version
+            # A copy that answered no version leaves the record empty: the
+            # value an earlier uv probe wrote names an environment the scan
+            # does not run (#955, the probe resolved 3.4.5 while the PATH copy
+            # was 3.3.15), and the uv probe is no longer owed on this route.
+            # mypy reads this mixin's tool_version as the str the first assignment above
+            # gave it; PluginBase declares it ``str | None``, which is what this holds.
+            self.tool_version = getattr(verdict, "version", None) or None  # type: ignore[assignment]
+            self._deferred_tool_version_probe = None
             return True
 
         # A tool from the Nix store is the pinned one `--mode nix` exists to run.
@@ -1775,8 +1815,8 @@ class UVToolMixin:
             offline
             and source == "pre_installed"
             and (
-                verdict.status == "unsatisfied"
-                or (verdict.status == "unverifiable" and from_nix)
+                verdict.status == ToolInstallStatus.UNSATISFIED
+                or (verdict.status == ToolInstallStatus.UNVERIFIABLE and from_nix)
             )
         ):
             if from_nix:
@@ -1790,11 +1830,11 @@ class UVToolMixin:
                 remedy = (
                     "uv cannot fetch what is missing while offline. Install it "
                     f"before going offline, e.g. `uv tool install '{requirement}'`, "
-                    "or rebuild the image with `ash build-image --offline`."
+                    "or rebuild the image with `ash container build --offline`."
                 )
             cannot = (
                 "cannot be used"
-                if verdict.status == "unsatisfied"
+                if verdict.status == ToolInstallStatus.UNSATISFIED
                 else "could not be verified"
             )
             # The log gets the full story: the copy's path and the verdict's
@@ -1829,7 +1869,7 @@ class UVToolMixin:
                     f"not directly: {verdict.detail}"
                 ),
                 level=logging.WARNING
-                if verdict.status == "unsatisfied"
+                if verdict.status == ToolInstallStatus.UNSATISFIED
                 else logging.INFO,
             )
         self.dependencies_satisfied = True
@@ -2859,18 +2899,39 @@ class UVToolMixin:
     def _get_tool_python_request(self) -> Optional[str]:
         """Interpreter request for ``uv tool install/run --python``, or None.
 
-        None, the default, leaves the interpreter to uv, which is how every
-        uv-backed plugin behaved before this hook existed. Override it for a tool
-        whose dependencies publish no wheels for the newest interpreter uv may
-        pick: uv then builds those dependencies from source, which needs a C
-        toolchain and system headers, and the install fails. GuardDog is the
-        case that added this (pygit2 and yara-python have no CPython 3.14 wheels
-        at the pinned version). A version specifier such as ``">=3.10,<3.14"``
-        lets uv choose, or download, any interpreter that satisfies it.
+        Derived from the scanner's runtime-compatibility facet
+        (``operational_facets.runtime_compat``,
+        ``base/scanner_operational_facets.py``): the PIN rows that apply at the
+        scanner's effective tool version constraint, combined. None, when no
+        row applies or the class declares no register row (a third-party plugin
+        predating the register), leaves the interpreter to uv, which is how
+        every uv-backed plugin behaved before this hook existed. A tool whose
+        dependencies publish no wheels for the newest interpreter uv may pick,
+        or whose own code breaks on it, declares a row instead of overriding
+        this method: GuardDog (pygit2 and yara-python have no CPython 3.14
+        wheels) and checkov (CPython 3.15 breaks its JSON decoder) are the
+        rows. A request such as ``">=3.10,<3.14"`` lets uv choose, or
+        download, any interpreter that satisfies it.
 
-        The value must carry no whitespace; see ``_setup_uv_tool_install_commands``.
+        This is the one derivation point: the stored install command, the
+        runner calls, the version probes and ``ash dependencies install`` all
+        read it. A plugin may still override the method, and then the override
+        answers for every one of them.
+
+        The value carries no whitespace by construction (the row refuses one);
+        see ``_setup_uv_tool_install_commands``.
         """
-        return None
+        from automated_security_helper.base.scanner_operational_facets import (
+            RuntimeName,
+            declared_runtime_compat,
+        )
+
+        compat = declared_runtime_compat(type(self))
+        if compat is None:
+            return None
+        return compat.pin_request(
+            RuntimeName.PYTHON, self._get_tool_version_constraint()
+        )
 
     def _uv_python_kwargs(self) -> Dict[str, Any]:
         """``{"python_request": ...}`` for the runner calls, or ``{}`` when unset.

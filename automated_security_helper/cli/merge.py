@@ -235,6 +235,7 @@ from rich.text import Text
 from automated_security_helper.utils.console import print  # noqa: A004
 
 from automated_security_helper.base.plugin_config import plugin_config_key
+from automated_security_helper.core.enums import AshExitCode
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
@@ -3340,7 +3341,7 @@ def merge_command(
             operator_config = resolve_operator_config(config)
         except ASHConfigValidationError as exc:
             print(_invalid_config_text(exc))
-            raise typer.Exit(3)
+            raise typer.Exit(AshExitCode.INVALID_CONFIG)
 
     # With the other operator-config refusals, before any shard is read:
     # load_plugins imports these modules further down (before anything is
@@ -3364,7 +3365,7 @@ def merge_command(
             "file."
         )
         print(f"[red]Refusing to merge: {escape_markup(message)}[/red]")
-        raise typer.Exit(3)
+        raise typer.Exit(AshExitCode.INVALID_CONFIG)
 
     try:
         # The operator's trusted base: the --config read above, or the defaults
@@ -3417,13 +3418,13 @@ def merge_command(
         # On its lines: the shard-disagreement refusal is deliberately
         # multi-line, and the one-line form wrote its breaks as \x0a.
         print(_invalid_config_lines(exc))
-        raise typer.Exit(3)
+        raise typer.Exit(AshExitCode.INVALID_CONFIG)
     except ASHConfigValidationError as exc:
         # On one line: every other refusal here can quote a value the operator
         # typed (a --config-overrides entry), and a newline in it must not start
         # a log line of its own.
         print(_invalid_config_text(exc))
-        raise typer.Exit(3)
+        raise typer.Exit(AshExitCode.INVALID_CONFIG)
     except ResultsPathError as exc:
         # As Text: the message quotes the operator's path, which can read as
         # markup, and its values are already shown (_refusal_text).
@@ -3436,7 +3437,7 @@ def merge_command(
         # execution" code, which is the honest verdict -- the scan's findings are
         # unknown, which is not the same as "no findings".
         print(_refusal_text(exc))
-        raise typer.Exit(1)
+        raise typer.Exit(AshExitCode.SCAN_ERRORS)
 
     # The values the operator's config read from the environment join the
     # shards': the merge redacts its lines and its output with the merged
@@ -3463,7 +3464,7 @@ def merge_command(
         # Escaped: the message quotes the configured name, which may hold markup
         # characters.
         print(f"[red]Invalid configuration: {escape_markup(str(exc))}[/red]")
-        raise typer.Exit(3)
+        raise typer.Exit(AshExitCode.INVALID_CONFIG)
 
     # Before the directory is resolved below: a path the OS cannot take at all
     # (an embedded NUL, which a --cli-json-input document can carry and a command
@@ -3501,7 +3502,7 @@ def merge_command(
     except OutputDirLinkRefused as refusal:
         print(f"[red]{escape_markup(str(refusal))}[/red]")
         # 3, as a scan exits for the same refusal (OUTPUT_DIR_REFUSED_EXIT_CODE).
-        raise typer.Exit(3)
+        raise typer.Exit(AshExitCode.INVALID_CONFIG)
     # Not created yet: the plugin modules are loaded below, and a module that
     # fails to import refuses the merge, which must leave no output directory
     # either, as the namespace refusal above leaves none. The directory is
@@ -3542,7 +3543,7 @@ def merge_command(
             "--config file."
         )
         print(f"[red]Refusing to merge: {escape_markup(message)}[/red]")
-        raise typer.Exit(3)
+        raise typer.Exit(AshExitCode.INVALID_CONFIG)
     # Only this merge's reporters: ASH's built-ins and the modules the merged
     # config names (the operator's, confined above). The registry is
     # process-wide, so it can also hold another run's reporters
@@ -3562,7 +3563,7 @@ def merge_command(
     except ASHConfigValidationError as exc:
         message = f"{exc} Nothing was merged and no merged results file was written."
         print(f"[red]Refusing to merge: {escape_markup(message)}[/red]")
-        raise typer.Exit(3)
+        raise typer.Exit(AshExitCode.INVALID_CONFIG)
     # The plugin modules are loaded, so the destination options each reporter
     # declares are known. Before the merged results are written, so they record
     # these as confined too.
@@ -3761,7 +3762,7 @@ def merge_command(
             f"[red]Refusing to write reports: {escape_markup(str(exc))} No merged "
             f"{RESULTS_FILE_NAME} was written.{escape_markup(earlier)}[/red]"
         )
-        raise typer.Exit(1)
+        raise typer.Exit(AshExitCode.SCAN_ERRORS)
 
     write_text_atomically(merged_file, merged.model_dump_json(indent=2))
     logger.info(f"Wrote merged results to {merged_file}")

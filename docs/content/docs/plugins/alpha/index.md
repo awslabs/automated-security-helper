@@ -81,7 +81,7 @@ pip install <my-plugin-package-name>
 
 <!-- doctest: config kind=other reason="a template for a plugin page, whose plugin name and options are placeholders" -->
 ```yaml
-# Example configuration in your ASH config file (.ashrc.yaml in a new project)
+# Example configuration in your ASH config file (.ash.yaml in a new project)
 plugins:
   my-plugin:
     enabled: true

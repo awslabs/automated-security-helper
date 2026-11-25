@@ -130,9 +130,10 @@ def test_every_scanner_that_pins_its_tool_has_a_stamped_current_recording_or_non
             t.retention == "current" and scanner in t.scanners for _b, t in _TRANSCRIPTS
         )
     )
-    # grype and syft: their only committed recordings predate the pins (grype 0.91.0,
-    # syft 1.22.0) and are kept as historical until re-recorded at the pin.
-    assert without_current == ["grype", "syft"]
+    # syft: its only committed recording predates the pin (syft 1.22.0) and is kept as
+    # historical until re-recorded at the pin. grype has a current recording at its pin
+    # (0.122.1) beside its historical 0.91.0 one.
+    assert without_current == ["syft"]
 
 
 def test_the_freshness_control_planted_pin_bump_names_every_current_transcript() -> (

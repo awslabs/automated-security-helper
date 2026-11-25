@@ -14,9 +14,9 @@ the scanner:
 - the manifest's ``name`` is the ``name`` default of the scanner's config
   class, and its ``options_model`` is the model that config's ``options`` field
   is typed with;
-- the tier and ``default_enabled`` fields agree with where the plugin lives:
-  a builtin scanner loads by default and is supported (or deprecated, the
-  retirement shape); an alpha scanner does not load by default and is alpha;
+- the ``default_enabled`` field agrees with where the plugin lives: a builtin
+  scanner loads by default and any other one does not (``tier`` is the
+  manifest's own, with no tie to the package);
 - ``plugin_module`` is the package that provides the scanner, and the package
   is the one ``ash_plugin_modules`` would name;
 - ``file_ownership`` paths exist and no path is owned twice.
@@ -35,7 +35,6 @@ from pathlib import Path
 import pytest
 
 from automated_security_helper import plugin_modules
-from automated_security_helper.base.plugin_manifest import PluginTier
 from automated_security_helper.plugin_manifests import (
     manifest_for,
     scanner_manifests,
@@ -98,8 +97,8 @@ def _resolve(ref: str) -> typing.Any:
 def test_the_enumeration_holds_every_shipped_scanner_and_manifest() -> None:
     """Planted controls: a shrunken universe fails here, not silently."""
     assert not _REMAINING_LOAD_ERRORS, _REMAINING_LOAD_ERRORS
-    assert len(SCANNER_CLASSES) == 22, sorted(c.__name__ for c in SCANNER_CLASSES)
-    assert len(MANIFESTS) == 22, sorted(m.name for m in MANIFESTS)
+    assert len(SCANNER_CLASSES) == 23, sorted(c.__name__ for c in SCANNER_CLASSES)
+    assert len(MANIFESTS) == 23, sorted(m.name for m in MANIFESTS)
     names = {m.name for m in MANIFESTS}
     assert {"cdk-nag", "semgrep", "opengrep", "trivy-repo", "snyk-code"} <= names
 
@@ -137,16 +136,17 @@ def test_the_name_and_options_model_are_the_scanners_own(manifest) -> None:
 
 
 @pytest.mark.parametrize("manifest", MANIFESTS, ids=lambda m: m.name)
-def test_tier_and_default_enabled_agree_with_where_the_plugin_lives(manifest) -> None:
+def test_default_enabled_agrees_with_where_the_plugin_lives(manifest) -> None:
+    """Loading is a fact of where the plugin lives; maturity (``tier``) is not.
+
+    ``tier`` is read from the manifest alone, so promoting an opt-in scanner to
+    ``supported`` is the one-line manifest edit and needs no change here.
+    """
     builtin = manifest.plugin_module == BUILTIN_PACKAGE
     assert manifest.default_enabled is builtin, (
         f"{manifest.name}: only the builtin package loads without being listed "
         "in ash_plugin_modules, so default_enabled must say exactly that"
     )
-    if builtin:
-        assert manifest.tier in (PluginTier.SUPPORTED, PluginTier.DEPRECATED)
-    else:
-        assert manifest.tier is PluginTier.ALPHA
 
 
 @pytest.mark.parametrize("manifest", MANIFESTS, ids=lambda m: m.name)

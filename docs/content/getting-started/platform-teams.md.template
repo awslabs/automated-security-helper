@@ -19,7 +19,7 @@ and push it:
 <!-- doctest: illustrative reason="needs a container runtime, network access, and a registry" -->
 ```bash
 export ASH_IMAGE_NAME=registry.example.com/security/ash:{{VERSION}}
-ash build-image --no-run --oci-runner docker --ash-revision-to-install v{{VERSION}} \
+ash container build --no-run --oci-runner docker --ash-revision-to-install v{{VERSION}} \
   --container-uid 1001 --container-gid 1001
 docker push "$ASH_IMAGE_NAME"
 ```
@@ -114,7 +114,7 @@ config:
 
 <!-- doctest: run fixture=empty expect-exit=0 -->
 ```bash
-printf 'fail_on_findings: false\n' > .ashrc.yaml
+printf 'fail_on_findings: false\n' > .ash.yaml
 ash scan --scanners detect-secrets
 ```
 
@@ -123,7 +123,7 @@ path, with every symbolic link followed, so the check uses `pwd -P`:
 
 <!-- doctest: run fixture=empty -->
 ```bash
-grep -F "Using ASH configuration from $(pwd -P)/.ashrc.yaml" .ash/ash_output/ash.log
+grep -F "Using ASH configuration from $(pwd -P)/.ash.yaml" .ash/ash_output/ash.log
 ```
 
 The scan exits 0 although the finding is still there. Scan again with your config:
@@ -248,7 +248,7 @@ rebuild the image on a schedule with it:
 
 <!-- doctest: illustrative reason="needs a container runtime, network access, and a registry" -->
 ```bash
-ash build-image --no-run --force --oci-runner docker --ash-revision-to-install v{{VERSION}} \
+ash container build --no-run --force --oci-runner docker --ash-revision-to-install v{{VERSION}} \
   --container-uid 1001 --container-gid 1001
 docker push "$ASH_IMAGE_NAME"
 ```

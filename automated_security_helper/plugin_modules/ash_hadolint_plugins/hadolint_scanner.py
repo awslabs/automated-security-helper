@@ -150,6 +150,7 @@ from automated_security_helper.base.scanner_facets import (
     FacetState,
     ScannerFacets,
 )
+from automated_security_helper.models.vocab import Severity, TargetType
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
@@ -180,20 +181,20 @@ from automated_security_helper.utils.process_env import snapshot_environ
 
 #: hadolint level -> (ASH severity, SARIF level). See the module docstring.
 HADOLINT_LEVEL_MAP: Dict[str, Tuple[str, Level]] = {
-    "error": ("HIGH", Level.error),
-    "warning": ("MEDIUM", Level.warning),
-    "info": ("LOW", Level.note),
-    "style": ("INFO", Level.none),
+    "error": (Severity.HIGH.value, Level.error),
+    "warning": (Severity.MEDIUM.value, Level.warning),
+    "info": (Severity.LOW.value, Level.note),
+    "style": (Severity.INFO.value, Level.none),
 }
 
 #: What a SARIF level means when the JSON pass cannot refine it. ``note`` is
 #: ``info`` here, not ``style``: of the two levels hadolint writes as ``note``,
 #: info is the more severe, so an unrefined note is never under-reported.
 _SARIF_LEVEL_TO_HADOLINT: Dict[str, str] = {
-    "error": "error",
-    "warning": "warning",
-    "note": "info",
-    "none": "style",
+    Level.error.value: "error",
+    Level.warning.value: "warning",
+    Level.note.value: "info",
+    Level.none.value: "style",
 }
 
 #: The rule hadolint reports a Dockerfile it could not parse under. It is not a
@@ -413,6 +414,7 @@ class HadolintScanner(ScannerPluginBase[HadolintScannerConfig]):
                 python_only=False,
                 use_uv_tool=False,
             ),
+            runtime_compat=opsf.RuntimeCompatFacet(rows=()),
             platforms=opsf.PlatformsFacet(
                 provisionable=opsf.PLATFORMS_NO_WINDOWS_ARM64,
                 note="no windows/arm64 asset (tool_downloads.py docstring)",
@@ -489,7 +491,7 @@ class HadolintScanner(ScannerPluginBase[HadolintScannerConfig]):
         return self
 
     def _execute_scan(
-        self, target: Any, target_type: Any, global_ignore_paths: Any
+        self, target: Any, target_type: TargetType, global_ignore_paths: Any
     ) -> Any:
         """Abstract stub: hadolint overrides scan() directly."""
         raise NotImplementedError(
@@ -576,7 +578,7 @@ class HadolintScanner(ScannerPluginBase[HadolintScannerConfig]):
     def _dockerfiles(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason],
     ) -> List[Path]:
         """The Dockerfiles under *target* to pass to hadolint, sorted.
@@ -594,7 +596,7 @@ class HadolintScanner(ScannerPluginBase[HadolintScannerConfig]):
         """
         from automated_security_helper.utils.scan_output_dirs import scan_set_of
 
-        if target_type == "converted":
+        if target_type == TargetType.CONVERTED:
             candidates = list(Path(self._ctx.work_dir).rglob("*"))
         else:
             candidates = [Path(p) for p in scan_set_of(self._ctx)]
@@ -607,7 +609,7 @@ class HadolintScanner(ScannerPluginBase[HadolintScannerConfig]):
         for path in candidates:
             if not is_dockerfile_name(path.name):
                 continue
-            if target_type == "source" and path.absolute().is_relative_to(
+            if target_type == TargetType.SOURCE and path.absolute().is_relative_to(
                 absolute_output_dir
             ):
                 continue
@@ -709,7 +711,7 @@ class HadolintScanner(ScannerPluginBase[HadolintScannerConfig]):
     def scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason] | None = None,
         config: HadolintScannerConfig | ScannerPluginConfigBase | None = None,
         *args: Any,
@@ -827,7 +829,8 @@ class HadolintScanner(ScannerPluginBase[HadolintScannerConfig]):
 
             levels = None
             if any(
-                _level_name(r.level) == "note" for r in sarif_report.get_all_results()
+                _level_name(r.level) == Level.note.value
+                for r in sarif_report.get_all_results()
             ):
                 levels = self._hadolint_levels(base_args, chunks, results_dir, deadline)
             self.apply_severity_mapping(sarif_report, levels)
@@ -976,9 +979,9 @@ class HadolintScanner(ScannerPluginBase[HadolintScannerConfig]):
             # for Result.level (warning, SARIF 2.1.0's own), so it is MEDIUM. A
             # level the model could not hold (None) or a name the table lacks is
             # read as error, so nothing is under-reported.
-            sarif_level = _level_name(result.level) or "error"
+            sarif_level = _level_name(result.level) or Level.error.value
             hadolint_level = _SARIF_LEVEL_TO_HADOLINT.get(sarif_level, "error")
-            if sarif_level == "note" and levels:
+            if sarif_level == Level.note.value and levels:
                 refined = levels.get(result.ruleId or "")
                 if refined in ("info", "style"):
                     hadolint_level = refined

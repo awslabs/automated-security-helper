@@ -117,6 +117,8 @@ from __future__ import annotations
 
 from typing import FrozenSet, Mapping
 
+from automated_security_helper.core.enums import ScannerToolType
+
 #: The tool type (a ``ScannerToolType`` value) of every scanner ASH ships, by
 #: config name. A scanner sets its ``tool_type`` in ``model_post_init``, so the
 #: class does not carry it, and instantiating a scanner probes its tool version;
@@ -124,28 +126,29 @@ from typing import FrozenSet, Mapping
 #: tests/unit/utils/test_scanner_tool_types.py checks each entry against the
 #: scanner's own ``tool_type``. Kept sorted so a diff adding one is a single line.
 SCANNER_TOOL_TYPES: Mapping[str, str] = {
-    "actionlint": "IAC",
-    "bandit": "SAST",
-    "cdk-nag": "IAC",
-    "cfn-guard": "IAC",
-    "cfn-lint": "IAC",
-    "cfn-nag": "IAC",
-    "checkov": "IAC",
-    "detect-secrets": "SECRETS",  # pragma: allowlist secret
-    "betterleaks": "SECRETS",
-    "ferret-scan": "SECRETS",
-    "gitleaks": "SECRETS",
-    "grype": "SCA",
-    "guarddog": "SCA",
-    "hadolint": "IAC",
-    "npm-audit": "SCA",
-    "opengrep": "SAST",
-    "semgrep": "SAST",
-    "snyk-code": "SAST",
-    "syft": "SBOM",
-    "trivy": "SCA",
-    "trivy-repo": "SCA",
-    "zizmor": "SAST",
+    "actionlint": ScannerToolType.IAC.value,
+    "bandit": ScannerToolType.SAST.value,
+    "cdk-nag": ScannerToolType.IAC.value,
+    "cfn-guard": ScannerToolType.IAC.value,
+    "cfn-lint": ScannerToolType.IAC.value,
+    "cfn-nag": ScannerToolType.IAC.value,
+    "checkov": ScannerToolType.IAC.value,
+    "detect-secrets": ScannerToolType.SECRETS.value,
+    "betterleaks": ScannerToolType.SECRETS.value,
+    "ferret-scan": ScannerToolType.SECRETS.value,
+    "gitleaks": ScannerToolType.SECRETS.value,
+    "grype": ScannerToolType.SCA.value,
+    "guarddog": ScannerToolType.SCA.value,
+    "hadolint": ScannerToolType.IAC.value,
+    "mcp-config": ScannerToolType.SAST.value,
+    "npm-audit": ScannerToolType.SCA.value,
+    "opengrep": ScannerToolType.SAST.value,
+    "semgrep": ScannerToolType.SAST.value,
+    "snyk-code": ScannerToolType.SAST.value,
+    "syft": ScannerToolType.SBOM.value,
+    "trivy": ScannerToolType.SCA.value,
+    "trivy-repo": ScannerToolType.SCA.value,
+    "zizmor": ScannerToolType.SAST.value,
 }
 
 #: Scanner config names for every scanner ASH ships, as they appear in SARIF

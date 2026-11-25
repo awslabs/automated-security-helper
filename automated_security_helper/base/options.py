@@ -1,12 +1,13 @@
 import re
 import threading
-from typing import Annotated, Any, ClassVar, FrozenSet, Literal, Set, Tuple
+from typing import Annotated, Any, ClassVar, FrozenSet, Set, Tuple
 
 from pydantic import ConfigDict, Field, ValidatorFunctionWrapHandler
 from pydantic import ValidationError, ValidationInfo, WrapValidator, model_validator
 from pydantic_core import PydanticUseDefault
 
 from automated_security_helper.core.constants import SHIPPED_SEVERITY_LEVEL
+from automated_security_helper.models.vocab import SeverityThresholdText
 from automated_security_helper.utils.redacted_model import RedactedSection
 from automated_security_helper.utils.unknown_keys import (
     refuse_unknown_keys,
@@ -209,7 +210,7 @@ class ScannerOptionsBase(PluginOptionsBase):
     _env_scalar_typed_fields: ClassVar[FrozenSet[str]] = frozenset({"scan_timeout"})
 
     severity_threshold: Annotated[
-        Literal["ALL", "LOW", "MEDIUM", "HIGH", "CRITICAL"] | None,
+        SeverityThresholdText | None,
         Field(
             description=f"Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of {SHIPPED_SEVERITY_LEVEL}."
         ),
