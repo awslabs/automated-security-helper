@@ -298,8 +298,8 @@ global_settings:
     # server. One entry per finding, pinned to its line.
     - rule_id: threat-filesystem-read
       path: automated_security_helper/cli/mcp/source_delivery.py
-      line_start: 2501
-      line_end: 2501
+      line_start: 2704
+      line_end: 2704
       reason: "A docstring bullet naming /etc/passwd as an example of the absolute archive paths delivery REJECTS; prose, not a read."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/utils/path_matching.py
@@ -550,15 +550,15 @@ global_settings:
         for the trade_secret keywords, pattern text and not a value.
     - path: .ash/.ash.yaml
       rule_id: API_KEY_OR_SECRET
-      line_start: 764
-      line_end: 764
+      line_start: 770
+      line_end: 770
       reason: >-
         False positive. A suppression reason that quotes a placeholder fixture
         literal; the text explains why another finding is a false positive.
     - path: .ash/.ash.yaml
       rule_id: API_KEY_OR_SECRET
-      line_start: 1011
-      line_end: 1011
+      line_start: 1017
+      line_end: 1017
       reason: >-
         False positive. A suppression reason that quotes a placeholder fixture
         literal; the text explains why another finding is a false positive.
@@ -581,8 +581,8 @@ global_settings:
     # self-scan runs it. Each was read at the reported line and is pinned to it.
     - path: automated_security_helper/base/scanner_operational_facets.py
       rule_id: API_KEY_OR_SECRET
-      line_start: 715
-      line_end: 715
+      line_start: 725
+      line_end: 725
       reason: >-
         False positive. An enum member whose name is a token word and whose value is a
         lowercase label of the same word; no credential is held.
