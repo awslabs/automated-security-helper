@@ -359,16 +359,16 @@ def _derived(prepared: list[dict[str, Any]]) -> list[dict[str, str]]:
     frame = pl.DataFrame(
         {
             "severity": [wire(entry["severity"]) for entry in prepared],
-            "suppressed": [bool(entry["flat"].is_suppressed) for entry in prepared],
+            "is_suppressed": [bool(entry["flat"].is_suppressed) for entry in prepared],
             "is_cve": [entry["is_cve"] for entry in prepared],
         },
         schema={
             "severity": pl.String,
-            "suppressed": pl.Boolean,
+            "is_suppressed": pl.Boolean,
             "is_cve": pl.Boolean,
         },
     )
-    suppressed = pl.col("suppressed")
+    suppressed = pl.col("is_suppressed")
     return frame.select(
         # A severity the table does not name is informational.
         pl.col("severity")
