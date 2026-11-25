@@ -48,6 +48,7 @@ from typing import (
     Dict,
     FrozenSet,
     List,
+    Literal,
     Mapping,
     NamedTuple,
     Optional,
@@ -787,7 +788,7 @@ def _document_writes(document: Any) -> List[Tuple[str, Dict[str, Any], str]]:
     return writes
 
 
-_PLUGIN_TYPES = {
+_PLUGIN_TYPES: Dict[str, Literal["converter", "scanner", "reporter"]] = {
     "scanners": "scanner",
     "reporters": "reporter",
     "converters": "converter",
@@ -839,7 +840,7 @@ def _trusted_value(
         )
     found = []
     for plugin in plugins:
-        read = config.get_plugin_config(_PLUGIN_TYPES[section], plugin)  # type: ignore[arg-type]
+        read = config.get_plugin_config(_PLUGIN_TYPES[section], plugin)
         found.append(_walk(_as_json(read) if read is not None else None, segments[2:]))
     if not found or not all(present_ for present_, _ in found):
         return False, None
@@ -1817,7 +1818,9 @@ def _mappings_holding_a_key_read_from_the_environment(
     """
     from automated_security_helper.config.config_validator import dumped_place
 
-    written = list(getattr(base, "_written_key_mappings", None) or ())
+    written: List[Tuple[Any, FrozenSet[Any]]] = list(
+        getattr(base, "_written_key_mappings", None) or ()
+    )
     written += [
         (rewrite.path, frozenset())
         for rewrite in getattr(base, "_written_references", None) or []

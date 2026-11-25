@@ -1546,7 +1546,7 @@ def _resolve_build_target(
         return (
             BuildTarget.CI.value if _host_is_windows() else BuildTarget.NON_ROOT.value
         )
-    name = build_target.value if hasattr(build_target, "value") else str(build_target)
+    name = str(getattr(build_target, "value", build_target))
     return name.lower()
 
 
@@ -1983,7 +1983,7 @@ def _custom_containerfile_stage(
     """
     if custom_containerfile is None or build_target is None:
         return None
-    name = build_target.value if hasattr(build_target, "value") else str(build_target)
+    name = str(getattr(build_target, "value", build_target))
     return BuildTarget.NON_ROOT.value if name.lower() == "non-root" else None
 
 
@@ -5280,14 +5280,16 @@ def _execute_container(cmd: List[str], debug: bool, env: Dict[str, str] | None =
         result = run_cmd_direct(cmd, debug=debug, env=env)
         result.stdout = hidden(result.stdout)
         result.stderr = hidden(result.stderr)
-        result.shown_command = shown
+        # The command as it may be shown, carried on the result for the caller;
+        # CompletedProcess declares no such attribute.
+        setattr(result, "shown_command", shown)
         if debug:
             echo(f"Container execution completed with return code: {result.returncode}")
         return result
     except CalledProcessError as e:
         e.output = hidden(e.output)
         e.stderr = hidden(e.stderr)
-        e.shown_command = shown
+        setattr(e, "shown_command", shown)
         if debug:
             # The command as it may be shown (each --config-overrides value as its
             # key): str(e) quotes the raw argv, override values included.
@@ -5334,7 +5336,7 @@ def run_ash_container(
     config: str | None = None,
     config_overrides: List[str] | None = None,
     offline: bool = False,
-    strategy: ExecutionStrategy = ExecutionStrategy.PARALLEL.value,
+    strategy: ExecutionStrategy = ExecutionStrategy.PARALLEL,
     scanners: List[str] | None = None,
     exclude_scanners: List[str] | None = None,
     progress: bool = True,
@@ -5796,6 +5798,7 @@ def run_ash_container(
         if not source_dir:
             source_dir = Path.cwd()
             ASH_LOGGER.info(f"Using current directory as source: {source_dir}")
+        source_dir = Path(source_dir)
 
         # The link rule once more, on the paths as given, right before the
         # directory is made: the check ahead of the build judged the paths as

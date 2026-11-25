@@ -15,6 +15,7 @@ from typing import (
     Any,
     Callable,
     Collection,
+    cast,
     Dict,
     FrozenSet,
     Iterable,
@@ -36,6 +37,7 @@ import yaml
 from automated_security_helper.config.ash_config import (
     AshConfig,
     SandboxConfig,
+    SandboxModeName,
     plugin_key_lookup_names,
     reduced_plugin_name,
     sandbox_mode_in_document,
@@ -1546,7 +1548,11 @@ def load_config_file(
         raise ConfigFileRefused(
             redact_values(str(e), document.environment_values),
             document=document,
-            validation_error=e.validation_error,
+            validation_error=(
+                e.validation_error
+                if isinstance(e.validation_error, ValidationError)
+                else None
+            ),
             after_overrides=True,
         ) from None
 
@@ -1784,7 +1790,7 @@ def resolve_config(
     config_path: Path | str | None = None,
     source_dir: Path | str | None = None,
     fallback_to_default: bool = True,
-    config_overrides: List[str] = None,
+    config_overrides: Optional[List[str]] = None,
     permit_base: Optional[Callable[[Path], bool]] = None,
     scanned_root: Path | str | None = None,
     trusted_config_path: Path | str | None = None,
@@ -2054,6 +2060,9 @@ def resolve_config(
         )
     overlay: Optional[ResolvedConfigDocument] = None
     if overlay_config_path is not None:
+        if refuse_env is None:
+            # Computed above whenever an overlay is named.
+            raise RuntimeError("no refuse_env was computed for the overlay")
         overlay = _load_overlay(
             overlay_config_path,
             source_dir,
@@ -4866,7 +4875,8 @@ def trusted_base_config(
             )
     if trusted.sandbox.mode == "off":
         if owned_mode is not None:
-            trusted.sandbox.mode = owned_mode
+            # _owned_sandbox_mode answers only a mode the model accepts.
+            trusted.sandbox.mode = cast(SandboxModeName, owned_mode)
         elif merged_fallback:
             trusted.sandbox.mode = merged_mode
     return trusted
@@ -5046,10 +5056,14 @@ def _resolve_config(
 
     def overlaid_fallback(
         default_config_value: Optional[AshConfig],
-    ) -> Optional[AshConfig]:
+    ) -> AshConfig:
         # The overlay alone in place of the default config: falling back to
         # the defaults would drop the fields the overlay makes final.
-        if overlay is None or default_config_value is None:
+        if default_config_value is None:
+            # Every caller falls back to the default only when
+            # fallback_to_default loaded one above.
+            raise RuntimeError("the default configuration was not loaded")
+        if overlay is None:
             return default_config_value
         chain.extend(overlay.chain)
         if named is not None:
@@ -5321,6 +5335,7 @@ def _resolve_config(
             if (
                 discovered_label is None
                 and confinement_source_dir is not None
+                and source_dir is not None
                 and not no_discovery
             ):
                 ignored_sources = _warnings_when_discovered(
@@ -5420,7 +5435,7 @@ def _resolve_config(
             if is_config_parse_error(e):
                 # The parser's own words can quote the file
                 # (unparsed_config_reason).
-                unparsed = unparsed_config_reason(config_path, e)
+                unparsed = unparsed_config_reason(Path(config_path), e)
             else:
                 if not isinstance(e, OSError):
                     # The one guard for every excluded ValueError: ASH's own
@@ -5449,7 +5464,7 @@ def _resolve_config(
                 # report success. The defaults apply only when there is no
                 # config file (above).
                 raise ASHConfigSourceError(
-                    f"could not read {describe_config_path(config_path)}: "
+                    f"could not read {describe_config_path(Path(config_path))}: "
                     f"{os_error_without_named_file(e, config_path)}"
                 ) from e
         if unparsed is not None:
@@ -7643,7 +7658,9 @@ def _load_overlay(
     try:
         document = resolve_config_document(
             path,
-            confine_to=default_confinement_root(path, source_dir),
+            confine_to=default_confinement_root(
+                path, Path(source_dir) if source_dir is not None else None
+            ),
             permit_base=permit_base,
             refuse_env=refuse_env,
             anchor_relative_paths=anchor_paths,

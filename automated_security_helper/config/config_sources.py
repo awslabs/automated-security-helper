@@ -3240,7 +3240,10 @@ def _base_permitted(permit_base: PermitBase, path: Path) -> bool:
     except (TypeError, ValueError):
         takes_resolved = False
     if takes_resolved:
-        return permit_base(path, resolved=path)  # type: ignore[call-arg]
+        # The gate declares ``resolved``, which PermitBase's one-argument shape
+        # does not name.
+        gate_with_resolved: Callable[..., bool] = permit_base
+        return gate_with_resolved(path, resolved=path)
     return permit_base(path)
 
 

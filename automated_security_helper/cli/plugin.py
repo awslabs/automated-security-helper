@@ -107,7 +107,7 @@ def list_plugins(
         ),
     ] = [],
     config: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--config",
             "-c",

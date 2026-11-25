@@ -457,9 +457,12 @@ def _extra_scanner_groups(config: AshConfig) -> List[_ExtraScanners]:
         remaining = names
         while remaining:
             claimed = plugin_section_claims(remaining)
-            read = plugin_section_key(remaining, folded, claimed)
-            if read not in remaining:
-                read = remaining[0]
+            chosen = plugin_section_key(remaining, folded, claimed)
+            read = (
+                chosen
+                if isinstance(chosen, str) and chosen in remaining
+                else remaining[0]
+            )
             peers = plugin_section_peers(claimed, read, folded)
             members = [n for n in remaining if n == read or n in peers]
             unresolved = [
@@ -767,7 +770,7 @@ def _validate_containment(
                 f"({type(exc).__name__} from the filesystem layer)"
             )
             continue
-        if not result.ok:
+        if result.error is not None:
             # Parentheses, not brackets: these messages are echoed by callers
             # that may render Rich markup, where '[outside-root]' would be read
             # as a style name and fail at render time.
@@ -781,6 +784,9 @@ def _validate_containment(
             problems.append(f"{result.error.message} ({result.error.violation.value})")
             continue
         resolved = result.resolved
+        if resolved is None:
+            # Exactly one of error and resolved is set, so this is not reached.
+            raise RuntimeError("path containment returned neither a path nor an error")
         relative = resolved.relative_to(definition.root)
         if not relative.parts:
             # The entry names the workspace root. See the module docstring.

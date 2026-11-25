@@ -1166,7 +1166,7 @@ def run_ash_scan_cli_command(
             rich_help_panel="Execution",
             help="Whether to run scanners in parallel or sequential",
         ),
-    ] = ExecutionStrategy.PARALLEL.value,
+    ] = ExecutionStrategy.PARALLEL,
     progress: Annotated[
         bool,
         typer.Option(
@@ -2097,7 +2097,7 @@ def run_ash_scan_cli_command(
         _fail_usage(shown_on_one_line(source_refusal))
     # The output directory's default, the collision adjustment, its refusals and
     # --use-existing, in one place for the real run and the workspace dry run.
-    output_dir, existing_results = _settle_output_dir(
+    settled_output_dir, existing_results = _settle_output_dir(
         source_dir,
         output_dir,
         use_existing,
@@ -2105,6 +2105,7 @@ def run_ash_scan_cli_command(
         mode=mode,
         workspace=workspace_plan is not None,
     )
+    output_dir = os.fspath(settled_output_dir)
     baseline_data = None
     if baseline is not None:
         from automated_security_helper.utils.scan_baseline import (
