@@ -651,6 +651,70 @@ global_settings:
         deploy/cdk-constructs/package-lock.json. No patched version exists. Dev dependency
         of the constructs package's build tooling only, not shipped in the wheel or the
         container image. Revisit when a fix ships; see the block comment above.
+    # === Time-boxed: rustls advisories in polars' harvested Cargo.lock (expires 2026-12-27) ===
+    # The sdist lockfile harvest (the sdist-lock-harvester converter) autodetects
+    # polars-runtime-32, the compiled wheel uv.lock pins, as a dependency whose
+    # artifacts carry no audit data, fetches the sdist uv.lock pins by sha256, and
+    # materializes the upstream workspace Cargo.lock into the converted target at
+    # sdist-locks/polars-runtime-32/<version>/Cargo.lock, so the SBOM covers the Rust
+    # crates the wheel statically links (the harvest-manifest.json beside it carries
+    # the provenance). The crates are compiled into polars_runtime_32's extension
+    # module; only a polars release built against a fixed rustls removes them, never
+    # an edit here. rustls 0.23.43 is really linked, not only locked: the shipped
+    # manylinux x86-64 wheel embeds 23 crate source paths naming rustls-0.23.43.
+    # grype v0.122.1 and trivy v0.76.2 both report the same four GHSA ids against the
+    # harvested lockfile (no CVE aliases), two Medium suppressed below and two Low
+    # (GHSA-h2v8-394m-p7vv, GHSA-w44r-93j7-qv28) that sit under the MEDIUM threshold
+    # and are not. One entry per scanner spelling, as for minimatch above: trivy
+    # reports the bare GHSA id, grype the id with the package name appended. The path
+    # is a glob over the harvest layout so the entries survive polars version bumps;
+    # the expires date and the rustls version pin still force the revisit. Revisit
+    # when uv.lock resolves a polars release whose lockfile carries rustls 0.23.46 or
+    # later (fixed versions per the advisories: 0.23.45 and 0.23.46).
+    - rule_id: "GHSA-2mjx-qc3c-rqvc"
+      path: "**/sdist-locks/polars-runtime-32/*/Cargo.lock"
+      package_name: "rustls"
+      package_version: "0.23.43"
+      expires: "2026-12-27"
+      reason: >-
+        GHSA-2mjx-qc3c-rqvc (RUSTSEC-2026-0285, trivy spelling): rustls 0.23.43, statically
+        linked into the polars-runtime-32 1.44.2 wheel, accepts TLS 1.3 handshake messages
+        across encryption-state changes; fixed in rustls 0.23.45. The crate is compiled
+        into the upstream wheel, so no local pin or override can replace it; only a polars
+        release built against the fixed rustls does. Revisit on the next polars bump; see
+        the block comment above.
+    - rule_id: "GHSA-2mjx-qc3c-rqvc-rustls"
+      path: "**/sdist-locks/polars-runtime-32/*/Cargo.lock"
+      package_name: "rustls"
+      package_version: "0.23.43"
+      expires: "2026-12-27"
+      reason: >-
+        GHSA-2mjx-qc3c-rqvc (grype spelling): the same rustls 0.23.43 TLS 1.3 handshake
+        finding as the trivy entry above, in the harvested lockfile of the compiled polars
+        wheel. Removable only by a polars release built against rustls 0.23.45 or later.
+        Revisit on the next polars bump; see the block comment above.
+    - rule_id: "GHSA-c8m5-c952-6cm4"
+      path: "**/sdist-locks/polars-runtime-32/*/Cargo.lock"
+      package_name: "rustls"
+      package_version: "0.23.43"
+      expires: "2026-12-27"
+      reason: >-
+        GHSA-c8m5-c952-6cm4 (RUSTSEC-2026-0346, trivy spelling): rustls 0.23.43 Debug
+        formatting of Session values can expose TLS master secrets in logs; fixed in rustls
+        0.23.46. Statically linked into the polars-runtime-32 1.44.2 wheel; polars does not
+        log rustls Session debug output on ASH's read paths, and only a polars release
+        built against the fixed rustls removes the code. Revisit on the next polars bump;
+        see the block comment above.
+    - rule_id: "GHSA-c8m5-c952-6cm4-rustls"
+      path: "**/sdist-locks/polars-runtime-32/*/Cargo.lock"
+      package_name: "rustls"
+      package_version: "0.23.43"
+      expires: "2026-12-27"
+      reason: >-
+        GHSA-c8m5-c952-6cm4 (grype spelling): the same rustls 0.23.43 Session Debug
+        formatting finding as the trivy entry above, in the harvested lockfile of the
+        compiled polars wheel. Removable only by a polars release built against rustls
+        0.23.46 or later. Revisit on the next polars bump; see the block comment above.
     # === detect-secrets: broad patterns by path ===
     #
     # detect-secrets does support an inline marker: `# pragma: allowlist secret` on

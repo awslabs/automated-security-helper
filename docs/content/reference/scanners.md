@@ -397,6 +397,7 @@ Options, under `scanners.semgrep.options`. An option not listed here refuses the
 
 ## `syft`
 
+- Scanner page: [`syft` scanner page](../docs/plugins/builtin/syft.md)
 - Class: `automated_security_helper.plugin_modules.ash_builtin.scanners.syft_scanner.SyftScanner`
 - Provided by: built in, loaded on every scan
 - Enabled by default: yes
@@ -419,6 +420,7 @@ Options, under `scanners.syft.options`. An option not listed here refuses the co
 | <a id="scanners.syft.options.config_file"></a>`config_file` | path, string, or null | `null` | Path to Syft configuration file. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. ASH does not look for one by name. Without one, syft gets an empty config, so it does not read `.syft.yaml` from the scanned tree. |
 | <a id="scanners.syft.options.exclude"></a>`exclude` | list of mapping | `[]` | Paths (files or directories) to skip, each a glob relative to the scanned directory and passed to syft as one --exclude. A glob must start with "./", "\*/" or "\*\*/", and syft fails the scan on any other. "\*" does not match across "/" and "\*\*" does: "./dir1/\*\*" skips the top-level "dir1", and "\*\*/dir1/\*\*" skips every directory named "dir1". |
 | <a id="scanners.syft.options.additional_outputs"></a>`additional_outputs` | list of one of `cyclonedx-json`, `cyclonedx-xml`, `github-json`, `spdx-json`, `spdx-tag-value`, `syft-json`, `syft-table`, `syft-text` | `["syft-table"]` | List of additional formats to output. Defaults to syft-table. |
+| <a id="scanners.syft.options.sdist_harvest"></a>`sdist_harvest` | mapping | see the section | Configure the cross-toolchain sdist lockfile harvest, which completes the SBOM for compiled dependencies whose artifacts carry no audit data. The harvest runs in the convert phase; offline mode disables its fetches whatever these options say. |
 
 ## `trivy`
 

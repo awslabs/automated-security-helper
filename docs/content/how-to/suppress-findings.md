@@ -49,6 +49,35 @@ ash --source-dir . --scanners detect-secrets --offline --no-progress \
 
 With `rule_id` misspelled, the entry suppresses nothing instead of suppressing every rule in `app.py`: the run warns, naming the key, and fails on the finding the entry was meant to suppress (exit 2). Set `fail_on_unknown_keys: true` to refuse the config outright (exit 3); ASH v4 makes that the default.
 
+### Suppress a finding in a harvested lockfile {#harvested}
+
+A finding can sit in a file the scan materialized rather than one in your tree:
+the [sdist lockfile harvest](../docs/plugins/builtin/syft.md#the-sdist-lockfile-harvest)
+writes a compiled dependency's embedded lockfiles into the converted target at
+`sdist-locks/<package>/<version>/<lockfile>`, and grype and trivy report
+advisories against them. Such a finding is fixed by upgrading the parent
+package, never by an edit, so while no fixed release exists the honest
+disposition is a time-boxed suppression whose `path` globs over the harvest
+layout -- the version segment is a `*` so the entry survives a version bump,
+and `expires` plus the pinned package version force the revisit:
+
+```yaml
+global_settings:
+  suppressions:
+    - rule_id: "GHSA-2mjx-qc3c-rqvc"
+      path: "**/sdist-locks/polars-runtime-32/*/Cargo.lock"
+      package_name: "rustls"
+      package_version: "0.23.43"
+      expires: "2026-12-27"
+      reason: >-
+        rustls 0.23.43 is statically linked into the polars-runtime-32 wheel;
+        only a polars release built against rustls 0.23.45 or later removes it.
+```
+
+ASH's own `.ash/.ash.yaml` carries the worked set of these entries (the rustls
+advisories in polars' harvested `Cargo.lock`), one per scanner spelling of the
+same GHSA id, each with the evidence in its reason.
+
 <!-- doctest: run expect-exit=2 -->
 ```bash
 ash --source-dir . --scanners detect-secrets --offline --no-progress \

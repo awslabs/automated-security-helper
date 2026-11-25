@@ -1154,6 +1154,19 @@
                 "exclude": [],
                 "offline": false,
                 "scan_timeout": 1800,
+                "sdist_harvest": {
+                  "cache_dir": null,
+                  "ecosystems": [
+                    "cargo",
+                    "gomod",
+                    "npm"
+                  ],
+                  "enabled": true,
+                  "lockfiles": [
+                    "uv.lock"
+                  ],
+                  "max_sdist_mb": 100
+                },
                 "severity_threshold": null
               }
             },
@@ -6653,6 +6666,19 @@
               "exclude": [],
               "offline": false,
               "scan_timeout": 1800,
+              "sdist_harvest": {
+                "cache_dir": null,
+                "ecosystems": [
+                  "cargo",
+                  "gomod",
+                  "npm"
+                ],
+                "enabled": true,
+                "lockfiles": [
+                  "uv.lock"
+                ],
+                "max_sdist_mb": 100
+              },
               "severity_threshold": null
             }
           },
@@ -7116,6 +7142,109 @@
       "description": "Type of scanner tool.",
       "title": "ScannerToolType"
     },
+    "SdistHarvestOptions": {
+      "description": "Options for the cross-toolchain sdist lockfile harvest.\n\nThe harvest itself runs in the convert phase (the ``sdist-lock-harvester``\nconverter), because the syft subprocess's declared sandbox allows it no\nnetwork and the harvested lockfiles must sit where grype and trivy also\nread; the OPTIONS live here because this is the surface where the operator\nconfigures SBOM behavior. See ``utils/sdist_harvest.py`` for the mechanism.",
+      "properties": {
+        "cache_dir": {
+          "anyOf": [
+            {
+              "format": "path",
+              "type": "string"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Where verified harvests are cached, keyed by each sdist's sha256 so an entry can never serve different bytes than the lock pins; a warmed cache serves entries offline with no network. Defaults to sdist-harvest under the scan's output directory. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it.",
+          "title": "Cache Dir"
+        },
+        "ecosystems": {
+          "default": [
+            "cargo",
+            "gomod",
+            "npm"
+          ],
+          "description": "Which embedded lockfiles are harvested from a pinned sdist: cargo reads Cargo.lock, gomod reads go.sum, npm reads package-lock.json. The vocabulary is the GitLab CycloneDX reporter's existing ecosystem mapping.",
+          "items": {
+            "anyOf": [
+              {
+                "enum": [
+                  "cargo",
+                  "gomod",
+                  "npm"
+                ],
+                "type": "string"
+              },
+              {
+                "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+                "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+                "type": "string"
+              }
+            ]
+          },
+          "title": "Ecosystems",
+          "type": "array"
+        },
+        "enabled": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
+          "default": true,
+          "description": "Harvest embedded lockfiles from the hash-pinned sdists of resolved dependencies whose wheels carry a platform tag (compiled native extensions with no artifact audit data), so the SBOM covers cross-toolchain packages such as a compiled wheel's statically linked Rust crates. On by default in online mode; inert in offline mode, where each skipped package is a visible informational record. The only network it adds is a GET of bytes the project's own lockfile already pins by sha256, verified before extraction; nothing fetched is executed.",
+          "title": "Enabled"
+        },
+        "lockfiles": {
+          "default": [
+            "uv.lock"
+          ],
+          "description": "The Python lockfiles walked for resolved packages to flag. uv.lock only today: it pins each sdist by URL and sha256, which is what authorizes a fetch. The list exists so other hash-and-URL-pinned formats can be added without a schema change.",
+          "items": {
+            "anyOf": [
+              {
+                "const": "uv.lock",
+                "type": "string"
+              },
+              {
+                "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+                "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+                "type": "string"
+              }
+            ]
+          },
+          "title": "Lockfiles",
+          "type": "array"
+        },
+        "max_sdist_mb": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
+          "default": 100,
+          "description": "The largest sdist, in megabytes by the lockfile's own recorded size, the harvest will fetch. A larger one is skipped with an informational record rather than stalling the scan.",
+          "title": "Max Sdist Mb"
+        }
+      },
+      "title": "SdistHarvestOptions",
+      "type": "object"
+    },
     "SemgrepScannerConfig": {
       "additionalProperties": false,
       "properties": {
@@ -7428,6 +7557,19 @@
             "exclude": [],
             "offline": false,
             "scan_timeout": 1800,
+            "sdist_harvest": {
+              "cache_dir": null,
+              "ecosystems": [
+                "cargo",
+                "gomod",
+                "npm"
+              ],
+              "enabled": true,
+              "lockfiles": [
+                "uv.lock"
+              ],
+              "max_sdist_mb": 100
+            },
             "severity_threshold": null
           },
           "description": "Configure Syft scanner"
@@ -7528,6 +7670,23 @@
           "default": 1800,
           "description": "Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes.",
           "title": "Scan Timeout"
+        },
+        "sdist_harvest": {
+          "$ref": "#/$defs/SdistHarvestOptions",
+          "default": {
+            "cache_dir": null,
+            "ecosystems": [
+              "cargo",
+              "gomod",
+              "npm"
+            ],
+            "enabled": true,
+            "lockfiles": [
+              "uv.lock"
+            ],
+            "max_sdist_mb": 100
+          },
+          "description": "Configure the cross-toolchain sdist lockfile harvest, which completes the SBOM for compiled dependencies whose artifacts carry no audit data. The harvest runs in the convert phase; offline mode disables its fetches whatever these options say."
         },
         "severity_threshold": {
           "anyOf": [
