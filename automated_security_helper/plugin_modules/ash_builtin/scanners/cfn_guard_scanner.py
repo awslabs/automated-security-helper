@@ -96,6 +96,7 @@ from automated_security_helper.base.scanner_facets import (
     FacetState,
     ScannerFacets,
 )
+from automated_security_helper.models.vocab import Severity, TargetType
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
@@ -180,8 +181,8 @@ DEFAULT_RULE_SET = "wa-Security-Pillar"
 #: level is ``error`` to match, and ``issue_severity`` is set as well, because ASH's
 #: two severity readers disagree on a bare ``error`` (the gate reads CRITICAL, the
 #: flat reporters HIGH) and both honor ``issue_severity``, so every reader says HIGH.
-VIOLATION_SEVERITY = "HIGH"
-VIOLATION_LEVEL = "error"
+VIOLATION_SEVERITY = Severity.HIGH.value
+VIOLATION_LEVEL = Level.error.value
 
 _SUCCESS_EXIT_CODES = frozenset({0, 19})
 
@@ -1006,7 +1007,7 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
     def _execute_scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason],
     ) -> Tuple[List[str], Path, Optional[Dict[str, Any]]]:
         """Abstract stub; cfn-guard overrides scan() to run once per template."""
@@ -1114,7 +1115,7 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
     def scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason] | None = None,
         config: ScannerPluginConfigBase | None = None,
         *args: Any,

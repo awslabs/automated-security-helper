@@ -15,6 +15,7 @@ from automated_security_helper.base.scanner_facets import (
     FacetState,
     ScannerFacets,
 )
+from automated_security_helper.models.vocab import TargetType
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.config.tool_config_trust import empty_tool_directory
 from automated_security_helper.models.core import ToolArgs
@@ -545,7 +546,7 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
     def scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[Any] | None = None,
         config: Any | None = None,
         *args,

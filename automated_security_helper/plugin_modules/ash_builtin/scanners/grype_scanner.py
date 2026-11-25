@@ -26,6 +26,7 @@ from automated_security_helper.base.scanner_facets import (
     FacetState,
     ScannerFacets,
 )
+from automated_security_helper.models.vocab import SeverityThresholdText, TargetType
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.core.constants import SHIPPED_SEVERITY_LEVEL
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
@@ -278,7 +279,7 @@ class GrypeScannerConfigOptions(ScannerOptionsBase):
         ),
     ] = None
     severity_threshold: Annotated[
-        Literal["ALL", "LOW", "MEDIUM", "HIGH", "CRITICAL"] | None,
+        SeverityThresholdText | None,
         Field(
             description=f"Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of {SHIPPED_SEVERITY_LEVEL}."
         ),
@@ -1095,7 +1096,7 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
     def _execute_scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason],
     ):
         """Resolve final argv, results path, and subprocess env for Grype."""

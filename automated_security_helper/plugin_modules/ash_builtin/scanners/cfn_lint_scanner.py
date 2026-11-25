@@ -110,6 +110,7 @@ from automated_security_helper.base.scanner_facets import (
     FacetState,
     ScannerFacets,
 )
+from automated_security_helper.models.vocab import Severity, TargetType
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
@@ -176,9 +177,9 @@ from automated_security_helper.utils.uv_tool_runner import get_uv_tool_command
 #: code-scanning output) consistent with the rest. cfn-lint's own letter is never lost:
 #: it is the first character of the rule id.
 SEVERITY_BY_RULE_LETTER: Dict[str, Tuple[str, str]] = {
-    "E": ("MEDIUM", "warning"),
-    "W": ("LOW", "note"),
-    "I": ("INFO", "none"),
+    "E": (Severity.MEDIUM.value, Level.warning.value),
+    "W": (Severity.LOW.value, Level.note.value),
+    "I": (Severity.INFO.value, Level.none.value),
 }
 
 #: Rule id cfn-lint uses for its own configuration errors, which includes a template
@@ -1628,7 +1629,7 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
     def _execute_scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason],
     ) -> Tuple[List[str], Path, Optional[Dict[str, Any]]]:
         """Abstract stub; cfn-lint overrides scan() to batch templates."""
@@ -1658,7 +1659,7 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
     def scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason] | None = None,
         config: ScannerPluginConfigBase | None = None,
         *args: Any,

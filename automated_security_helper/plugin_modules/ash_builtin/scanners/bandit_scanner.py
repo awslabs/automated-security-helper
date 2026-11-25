@@ -46,6 +46,7 @@ from automated_security_helper.base.scanner_plugin import (
     ScannerPluginConfigBase,
 )
 from automated_security_helper.core.exceptions import ScannerError
+from automated_security_helper.models.vocab import SeverityThreshold, TargetType
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
 )
@@ -714,6 +715,12 @@ def _spelled_absolute(path: str) -> bool:
     )
 
 
+#: bandit's own ``--confidence-level`` choices, mirrored from its command line
+#: (``all`` plus its three confidence words). A ``Literal`` and not an enum: the set
+#: is bandit's vocabulary, never ASH's, and the option stays text in the config.
+BanditConfidenceLevel = Literal["all", "low", "medium", "high"]
+
+
 class BanditScannerConfigOptions(ScannerOptionsBase):
     config_file: Annotated[
         Path | str | None,
@@ -724,10 +731,9 @@ class BanditScannerConfigOptions(ScannerOptionsBase):
         ),
     ] = None
     confidence_level: Annotated[
-        str,
+        BanditConfidenceLevel,
         Field(
             description="Confidence level for bandit scan (all, low, medium, high)",
-            pattern="^(all|low|medium|high)$",
         ),
     ] = "all"
     ignore_nosec: Annotated[
@@ -1112,7 +1118,7 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
     def _pre_scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         config: Any = None,
         *args,
         **kwargs,
@@ -1864,7 +1870,7 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
     def scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason] | None = None,
         config: Any = None,
         *args,
@@ -1884,7 +1890,7 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
     def _execute_scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason],
     ):
         """Resolve final argv and results path for Bandit.
@@ -2310,14 +2316,14 @@ if __name__ == "__main__":
         config=BanditScannerConfig(
             options=BanditScannerConfigOptions(
                 confidence_level="all",
-                severity_threshold="ALL",
+                severity_threshold=SeverityThreshold.ALL.value,
                 ignore_nosec=False,
                 excluded_paths=[],
                 additional_formats=[],
             )
         ),
     )
-    report = scanner.scan(target=Path("."), target_type="source")
+    report = scanner.scan(target=Path("."), target_type=TargetType.SOURCE)
 
     if isinstance(report, SarifReport):
         from automated_security_helper.utils.command_safe_stream import (

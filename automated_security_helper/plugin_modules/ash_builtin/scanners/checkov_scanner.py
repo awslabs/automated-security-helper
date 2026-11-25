@@ -39,6 +39,7 @@ from automated_security_helper.base.options import (
     ScannerOptionsBase,
     tool_version_constraint,
 )
+from automated_security_helper.models.vocab import TargetType
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.core.constants import KNOWN_IGNORE_PATHS
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
@@ -1627,7 +1628,7 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
     def _execute_scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason],
     ):
         """Resolve final argv and results path for Checkov.
