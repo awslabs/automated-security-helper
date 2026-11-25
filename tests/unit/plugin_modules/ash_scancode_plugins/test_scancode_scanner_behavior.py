@@ -586,3 +586,26 @@ class TestPinIsAStableRelease:
         assert SCANCODE_DEFAULT_VERSION_CONSTRAINT.startswith("==")
         version = SCANCODE_DEFAULT_VERSION_CONSTRAINT[2:]
         assert version.replace(".", "").isdigit(), "a pre or dev release is not a pin"
+
+
+class TestToolTypeIsServedByTheDeclaredKinds:
+    """The register's tool type must be served by a declared target kind (the central
+    one-story test reads this too, but only once the integration overlay lands)."""
+
+    def test_the_sca_type_intersects_the_declared_kinds(self):
+        from automated_security_helper.base import scanner_operational_facets as opsf
+
+        targets = ScanCodeScanner.operational_facets.targets
+        served = opsf.TOOL_TYPE_SERVED_BY[targets.tool_type]
+        assert set(targets.kinds) & served
+        assert (targets.tool_type_note or "").strip()
+
+    def test_the_check_can_fail(self):
+        from automated_security_helper.base import scanner_operational_facets as opsf
+
+        served = opsf.TOOL_TYPE_SERVED_BY[
+            ScanCodeScanner.operational_facets.targets.tool_type
+        ]
+        assert not ({opsf.TargetKind.SOURCE_CODE} & served), (
+            "source_code alone is not an SCA kind; that was the original mismatch"
+        )

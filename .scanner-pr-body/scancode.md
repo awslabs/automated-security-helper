@@ -73,3 +73,13 @@ facets registry, corpus, resource-id, operational and vocabulary families: 580 c
 and read identically with this module removed (baseline). The other 5 are the central
 registration rows above. Whole-tree collect: 74311 tests collected, 1 error (row 4).
 Module tests: all pass. ruff format and check green.
+
+### Round 2 notes
+
+- HIGH, facets-vs-register mismatch: fixed in this branch. `TargetsFacet.kinds` now declares
+  `source_code` and `package_sources` (the SCA-served kind guarddog also uses), with a
+  `tool_type_note`; pinned by `TestToolTypeIsServedByTheDeclaredKinds`. The central
+  `SCANNER_TOOL_TYPES` entry (`"scancode": "SCA"`) stays owed to the integration lane.
+- Final review, SHOULD (held, licensing): `provenance.upstream_license` reads
+  `LICENSE_NOT_READ` while the docs page states Apache-2.0 code and CC-BY-4.0 data. Recording
+  a license determination in the register needs explicit approval, so it is left as is.

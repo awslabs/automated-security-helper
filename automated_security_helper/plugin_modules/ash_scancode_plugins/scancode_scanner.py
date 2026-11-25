@@ -441,11 +441,22 @@ class ScanCodeScanner(ScannerPluginBase[ScanCodeScannerConfig]):
                 non_finding_artifacts=(),
             ),
             targets=opsf.TargetsFacet(
-                kinds=(opsf.TargetKind.SOURCE_CODE,),
+                kinds=(
+                    opsf.TargetKind.SOURCE_CODE,
+                    opsf.TargetKind.PACKAGE_SOURCES,
+                ),
                 tool_type=ScannerToolType.SCA,
                 selection="`scancode --license` over the whole target directory; "
                 "every file is read (module header)",
                 covers_note="a community scanner; it declares no covers display string",
+                tool_type_note=(
+                    "SCA because it inventories the licenses the tree's files carry, "
+                    "not code weaknesses; the register's SCA type is served by "
+                    "package kinds, so the scanned tree is declared as package "
+                    "sources (the files a package ships, license text included) "
+                    "beside source code, the same nearest-kind choice trivy-repo "
+                    "and clamav record"
+                ),
             ),
             runtime=opsf.RuntimeFacet(
                 kind=opsf.RuntimeKind.UV_PYTHON,
