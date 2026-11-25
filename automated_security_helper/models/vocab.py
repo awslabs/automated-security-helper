@@ -15,7 +15,8 @@ identity (``x is Severity.HIGH``) and take ``.value`` at every textual boundary:
 ``str(member)`` and f-string interpolation render the qualified member name on
 some supported interpreters, so ``f"{member}"`` is never a spelling of the value
 unless the class itself pins the rendering (``PluginKind`` overrides ``__str__``
-and ``__format__`` to the value; the others do not).
+and ``__format__`` to the value, ``TargetType`` overrides ``__str__``; the
+others do not).
 
 Severity stays an OPEN vocabulary for now: a scanner may emit a word that is not
 on the ladder, and the ingest helpers here return ``None`` for it instead of
@@ -159,6 +160,28 @@ class PluginKind(str, Enum):
     def values(cls) -> Tuple[str, ...]:
         """The singular spellings of every kind, in member order."""
         return tuple(kind.value for kind in cls)
+
+
+class TargetType(str, Enum):
+    """Which tree a scanner is asked to scan: the source tree or the converted one.
+
+    ``SOURCE`` is the directory the user pointed ASH at. ``CONVERTED`` is the work
+    directory holding what converters produced from archives and notebooks. The
+    wire spellings (``"source"`` / ``"converted"``) are in result files, identity
+    keys and log lines and never change.
+
+    ``__str__`` returns the value so ``f"{target_type}"`` and ``str(target_type)``
+    render ``source`` on every supported interpreter. Without it the rendering of a
+    mixed-in ``str`` enum differs across 3.10, 3.11 and 3.12 (``TargetType.SOURCE``
+    on some), and scanner modules that interpolate the label into messages and
+    paths would change with the interpreter.
+    """
+
+    SOURCE = "source"
+    CONVERTED = "converted"
+
+    def __str__(self) -> str:
+        return self.value
 
 
 #: The gate vocabulary as a static type, for the fields that must stay text.

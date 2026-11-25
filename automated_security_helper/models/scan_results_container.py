@@ -10,6 +10,7 @@ from typing import Annotated, Any, Dict, Iterable, Literal, List, Optional
 from pydantic import BaseModel, Field, field_validator
 
 from automated_security_helper.core.enums import ScannerStatus
+from automated_security_helper.models.vocab import TargetType
 
 # InputNotScanned is defined beside ReportMetadata, which records the scan-level ones;
 # imported here, where each scanner's own are recorded, under the name it always had.
@@ -51,7 +52,7 @@ class ScanResultsContainer(BaseModel):
         ),
     ] = None
     target: Path | None = None
-    target_type: str | None = None
+    target_type: TargetType | None = None
     # The tool's own exit code, or None for a scanner whose tool never ran: a
     # MISSING row, or one whose scan started no tool. The executor assigns it
     # only for a tool that did start, so a default of 0 would make every row
