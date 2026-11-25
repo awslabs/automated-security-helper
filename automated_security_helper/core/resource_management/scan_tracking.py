@@ -18,6 +18,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple, Set, cast
 
+from automated_security_helper.core.enums import ScannerStatus
 from automated_security_helper.core.resource_management.error_handling import (
     _NotARegularFile,
     _read_regular_file_text,
@@ -75,7 +76,7 @@ def empty_severity_counts() -> Dict[str, int]:
     return counts
 
 
-class MCScannerStatus(Enum):
+class MCScannerStatus(str, Enum):
     """Status of an individual scanner."""
 
     PENDING = "pending"
@@ -86,16 +87,15 @@ class MCScannerStatus(Enum):
 
 
 #: ``core.enums.ScannerStatus`` value -> the ``MCScannerStatus`` it means here.
-#: Keyed on the string rather than on the enum member, matching
-#: :func:`summarize_scanner_statuses`, which reads the same field out of the same
-#: document and also compares strings -- the value arrives from JSON, so it is a
-#: string by the time either function sees it.
+#: Keyed on the enum members; the value arrives from JSON as a string, so
+#: :func:`scanner_status_from_results` is the ingest that turns the text into a
+#: member before the lookup.
 _SCANNER_STATUS_MAP = {
-    "PASSED": MCScannerStatus.COMPLETED,
-    "FAILED": MCScannerStatus.FAILED,
-    "ERROR": MCScannerStatus.FAILED,
-    "MISSING": MCScannerStatus.SKIPPED,
-    "SKIPPED": MCScannerStatus.SKIPPED,
+    ScannerStatus.PASSED: MCScannerStatus.COMPLETED,
+    ScannerStatus.FAILED: MCScannerStatus.FAILED,
+    ScannerStatus.ERROR: MCScannerStatus.FAILED,
+    ScannerStatus.MISSING: MCScannerStatus.SKIPPED,
+    ScannerStatus.SKIPPED: MCScannerStatus.SKIPPED,
 }
 
 
@@ -121,7 +121,10 @@ def scanner_status_from_results(status: Any) -> MCScannerStatus:
     rather than as a routine skip.
     """
     if isinstance(status, str):
-        return _SCANNER_STATUS_MAP.get(status.upper(), MCScannerStatus.FAILED)
+        try:
+            return _SCANNER_STATUS_MAP[ScannerStatus(status.upper())]
+        except ValueError:
+            return MCScannerStatus.FAILED
     return MCScannerStatus.FAILED
 
 
@@ -1155,7 +1158,10 @@ def summarize_scanner_statuses(
 
         # FAILED and ERROR are deliberately not included. Those scanners ran;
         # reporting them as skipped would send a user looking for a missing tool.
-        if recorded_status not in ("MISSING", "SKIPPED"):
+        if recorded_status not in (
+            ScannerStatus.MISSING.value,
+            ScannerStatus.SKIPPED.value,
+        ):
             continue
 
         if not dependencies_satisfied:
@@ -1433,7 +1439,7 @@ def _add_aggregated_scanner_progress(
         # document recorded rather than assuming success. The results model reads a
         # status that is absent as PASSED, and so does this.
         mapped_status = scanner_status_from_results(
-            scanner_info.get("status", "PASSED")
+            scanner_info.get("status", ScannerStatus.PASSED.value)
         )
         source_progress = ScannerProgress(
             scanner_name=scanner_name,
@@ -1829,8 +1835,10 @@ def get_scan_progress_info(
                     scanner_results if isinstance(scanner_results, dict) else {}
                 ).items()
                 if isinstance(info, dict)
-                and _recorded_status_word(info.get("status", "PASSED"))
-                in ("PASSED", "FAILED")
+                and _recorded_status_word(
+                    info.get("status", ScannerStatus.PASSED.value)
+                )
+                in (ScannerStatus.PASSED.value, ScannerStatus.FAILED.value)
             ]
 
             metadata = results.get("metadata")
@@ -2229,7 +2237,10 @@ def get_scan_results(
         for scanner_name, scanner_results in results_dict.get(
             "scanner_results", {}
         ).items():
-            if scanner_results.get("status", "UNKNOWN") in ["PASSED", "FAILED"]:
+            if scanner_results.get("status", "UNKNOWN") in (
+                ScannerStatus.PASSED.value,
+                ScannerStatus.FAILED.value,
+            ):
                 scanners_completed.append(scanner_name)
 
         # Minted unconditionally. This used to read

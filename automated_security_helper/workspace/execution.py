@@ -357,6 +357,7 @@ from automated_security_helper.core.exceptions import (
     ScannerSelectionError,
     WorkspaceDefinitionError,
 )
+from automated_security_helper.core.enums import ScannerStatus
 from automated_security_helper.core.unified_metrics import recorded_error
 from automated_security_helper.models.core import IgnoreFileExclusions
 from automated_security_helper.models.workspace import (
@@ -366,6 +367,7 @@ from automated_security_helper.models.workspace import (
     WorkspaceExitCode,
     WorkspaceProjectResult,
     WorkspaceResults,
+    WorkspaceRunStatus,
     workspace_exit_code,
 )
 from automated_security_helper.utils.get_scan_set import (
@@ -2610,7 +2612,7 @@ def _scanner_exit_codes(results: Any) -> Dict[str, Optional[int]]:
         was_set = "exit_code" in getattr(info, "model_fields_set", ())
         if was_set and isinstance(recorded, int) and not isinstance(recorded, bool):
             codes[str(name)] = recorded
-        elif statuses.get(str(name)) == "SKIPPED":
+        elif statuses.get(str(name)) == ScannerStatus.SKIPPED.value:
             codes[str(name)] = None
         else:
             codes[str(name)] = SCANNER_EXIT_CODE_UNRECORDED
@@ -2711,11 +2713,11 @@ def _scanner_reasons(results: Any, values: Iterable[str] = ()) -> Dict[str, str]
     for name, info in (getattr(results, "scanner_results", None) or {}).items():
         status = getattr(info, "status", None)
         value = str(getattr(status, "value", status))
-        if value == "SKIPPED":
+        if value == ScannerStatus.SKIPPED.value:
             reason = getattr(info, "skipped_reason", None)
-        elif value == "MISSING":
+        elif value == ScannerStatus.MISSING.value:
             reason = getattr(info, "missing_reason", None)
-        elif value == "ERROR":
+        elif value == ScannerStatus.ERROR.value:
             reason = recorded_error(results, str(name), values)
         else:
             continue
@@ -3618,7 +3620,7 @@ def refused_results(plan: WorkspacePlan, detail: str) -> WorkspaceResults:
     return WorkspaceResults(
         workspace_file=plan.workspace_file,
         workspace_root=plan.workspace_root,
-        status="refused",
+        status=WorkspaceRunStatus.REFUSED,
         exit_code=int(WorkspaceExitCode.WORKSPACE_ERROR),
         projects=[],
         unconvertible_finding_paths=0,

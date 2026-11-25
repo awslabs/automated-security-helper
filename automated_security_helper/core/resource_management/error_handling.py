@@ -94,7 +94,7 @@ def _read_regular_file_text(path_obj: Path) -> str:
     raise AssertionError("unreachable: the last attempt returns or raises")
 
 
-class ErrorCategory(Enum):
+class ErrorCategory(str, Enum):
     """Categories of errors for better error handling and reporting."""
 
     FILE_NOT_FOUND = "file_not_found"

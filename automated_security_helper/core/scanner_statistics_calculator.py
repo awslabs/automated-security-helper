@@ -1282,12 +1282,18 @@ class ScannerStatisticsCalculator:
         dependencies_missing = False
         error = False
 
-        match report.get("status"):
-            case "MISSING":
+        # The ingest point for the row's status text: a member, or None for text that
+        # is no ScannerStatus (the ``case _`` arm).
+        try:
+            recorded = ScannerStatus(report.get("status"))
+        except ValueError:
+            recorded = None
+        match recorded:
+            case ScannerStatus.MISSING:
                 dependencies_missing = True
-            case "ERROR":
+            case ScannerStatus.ERROR:
                 error = True
-            case "SKIPPED" | "FAILED" | "PASSED":
+            case ScannerStatus.SKIPPED | ScannerStatus.FAILED | ScannerStatus.PASSED:
                 # All three are verdicts the scanner reached about its own run, and none of
                 # them says anything about configuration. SKIPPED is in this list rather than
                 # setting ``excluded`` because it reports a fact about the input -- there was
@@ -1943,7 +1949,7 @@ class ScannerStatisticsCalculator:
         )
 
         if error:
-            return "ERROR"
+            return ScannerStatus.ERROR.value
 
         # The same rule get_unified_scanner_metrics applies: stored target counters
         # that cannot be read (a string, a bool, a negative, a failure count with
@@ -1957,7 +1963,7 @@ class ScannerStatisticsCalculator:
         )
 
         if counters_unusable(*target_counts(asharp_model, scanner_name)):
-            return "ERROR"
+            return ScannerStatus.ERROR.value
 
         # Counted before the excluded and dependencies_missing branches, matching the precedence
         # in ``unified_metrics.get_unified_scanner_metrics``. Two functions that answer "what is
@@ -1979,20 +1985,20 @@ class ScannerStatisticsCalculator:
         )
 
         if actionable > 0:
-            return "FAILED"
+            return ScannerStatus.FAILED.value
 
         if excluded:
-            return "SKIPPED"
+            return ScannerStatus.SKIPPED.value
 
         if dependencies_missing:
-            return "MISSING"
+            return ScannerStatus.MISSING.value
 
         if ScannerStatisticsCalculator.scanner_evaluated_nothing(
             asharp_model, scanner_name
         ):
-            return "SKIPPED"
+            return ScannerStatus.SKIPPED.value
 
-        return "PASSED"
+        return ScannerStatus.PASSED.value
 
     @staticmethod
     def get_summary_statistics(asharp_model: AshAggregatedResults) -> Dict[str, Any]:

@@ -90,6 +90,7 @@ from automated_security_helper.core.resource_management.error_handling import (
 from automated_security_helper.models.workspace import WorkspaceExitCode
 
 from automated_security_helper.core.resource_management.scan_registry import (
+    MCScanStatus,
     get_scan_registry,
 )
 from automated_security_helper.core.resource_management.scan_tracking import (
@@ -1068,7 +1069,7 @@ async def run_ash_scan(
 
         return {
             "success": True,
-            "status": "running",
+            "status": MCScanStatus.RUNNING.value,
             "scan_id": scan_id,
             "progress": 0.0,
             "message": "Scan started, initializing scanners. Use get_scan_progress to track progress.",
@@ -1585,7 +1586,7 @@ async def get_scan_progress(ctx: Context, scan_id: str) -> Dict[str, Any]:
         # own set-up, has written nothing there, and what is there is not its.
         previous_only = (
             bool(progress_info.get("output_holds_previous_results"))
-            or progress_info.get("status") == "pending"
+            or progress_info.get("status") == MCScanStatus.PENDING.value
         )
 
         # The scanners directory, each scanner's and each target's are read only

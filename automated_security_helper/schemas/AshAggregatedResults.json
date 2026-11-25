@@ -27297,14 +27297,9 @@
           "type": "array"
         },
         "status": {
+          "$ref": "#/$defs/WorkspaceRunStatus",
           "default": "completed",
-          "description": "Whether projects were scanned at all. The discriminator for the code-2 collision -- see the module docstring.",
-          "enum": [
-            "completed",
-            "refused"
-          ],
-          "title": "Status",
-          "type": "string"
+          "description": "Whether projects were scanned at all. The discriminator for the code-2 collision -- see the module docstring."
         },
         "unconvertible_finding_paths": {
           "default": 0,
@@ -27340,6 +27335,15 @@
       ],
       "title": "WorkspaceResults",
       "type": "object"
+    },
+    "WorkspaceRunStatus": {
+      "description": "Whether a workspace run scanned projects at all.\n\nThe discriminator for the code-2 collision (see the module docstring). Distinct\nfrom ``ProjectRunStatus`` (one project's outcome) and the MCP registry's scan\nstatus, which share the word ``completed`` and stay separate vocabularies.",
+      "enum": [
+        "completed",
+        "refused"
+      ],
+      "title": "WorkspaceRunStatus",
+      "type": "string"
     },
     "YAMLReporterConfig": {
       "additionalProperties": true,
