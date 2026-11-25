@@ -7,7 +7,9 @@ The subprocess is replaced by a fake, so these run on every platform without the
 binary. The JSON documents are written by hand from the rustsec ``Report`` types
 (``vulnerabilities.list[]`` and ``warnings.<kind>[]``, each with ``advisory`` and
 ``package``); they are not captures of a real run, and the advisory ids and crate
-names are made up.
+names are made up. No real capture exists yet: cargo-audit is on no desk and is
+not installable under the frozen toolchain, so a real-report oracle (checklist
+rows 18, 21, 24) is owed to a run on a host that has it.
 """
 
 from __future__ import annotations
@@ -418,7 +420,7 @@ class TestReport:
         self, tree, tmp_path, on_path, monkeypatch
     ):
         scanner = _scanner(tree, tmp_path)
-        stale = tmp_path / "out" / "source" / "cargo-audit.sarif"
+        stale = Path(scanner.results_dir) / "source" / "cargo-audit.sarif"
         stale.parent.mkdir(parents=True, exist_ok=True)
         stale.write_text("STALE")
         _run(
@@ -561,7 +563,7 @@ class TestSandboxRequirements:
         from automated_security_helper.utils.sandbox.policy import build_scanner_policy
 
         home = tmp_path / "home"
-        home.mkdir()
+        (home / ".cargo" / "advisory-db").mkdir(parents=True)
         monkeypatch.setenv("HOME", str(home))
         monkeypatch.setenv("USERPROFILE", str(home))
         source = tmp_path / "src"
@@ -651,7 +653,7 @@ class TestFacetRegisters:
         )
         rows = [
             FlatVulnerability.from_sarif_result(
-                result, report.runs[0], scanner_name="cargo-audit"
+                result, "cargo-audit", "SCA", report.runs[0]
             )
             for result in report.runs[0].results
         ]
@@ -667,3 +669,16 @@ class TestFacetRegisters:
         for facet, attr in column.items():
             assert getattr(facets, facet).state is FacetState.MAPPED
             assert all(getattr(row, attr) not in (None, "", 0) for row in rows), facet
+        # DROPPED and N/A cells must read empty: a populated column means the
+        # declaration is out of date.
+        for facet in (
+            "resource_id",
+            "resource_type",
+            "package_name",
+            "package_version",
+            "taxonomy_cve",
+            "fix_available",
+            "references",
+        ):
+            assert getattr(facets, facet).state is not FacetState.MAPPED
+            assert all(not getattr(row, facet, None) for row in rows), facet
