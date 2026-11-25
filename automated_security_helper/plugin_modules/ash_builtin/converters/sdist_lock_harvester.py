@@ -19,6 +19,7 @@ from automated_security_helper.models.core import (
     ignore_paths_that_skip_scanning,
 )
 from automated_security_helper.plugins.decorators import ash_converter_plugin
+from automated_security_helper.utils.atomic_write import write_text_atomically
 from automated_security_helper.utils.download_utils import download_file
 from automated_security_helper.utils.get_scan_set import honors_ignore_files, scan_set
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
@@ -446,7 +447,10 @@ class SdistLockHarvester(ConverterPluginBase[SdistLockHarvesterConfig]):
                 max_bytes=max_sdist_bytes,
             )
             harvested = harvest_lockfiles_from_sdist(archive, wanted, entry)
-        entry.joinpath("cached-lockfiles.json").write_text(
+        # Replaced whole, so a concurrent scan reading this entry sees the old
+        # index or the new one, never a truncated file it would evict as torn.
+        write_text_atomically(
+            entry.joinpath("cached-lockfiles.json"),
             json.dumps(
                 {
                     "sha256": package.sdist_sha256,
