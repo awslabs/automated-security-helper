@@ -36,3 +36,8 @@ None of these is made on this branch (shared files). Each is a one-line edit:
 - Module tests (behavior, fixture report, sandbox requirements): all pass.
 - Facets and operational-facets registry, totality, corpus, conformance and vocabulary families: 581 passed, 26 failed. The same families on the unmodified main base: 494 passed, 20 failed. The 20 base failures are other scanners' corpus rows and are not touched here. The 6 additional failures are exactly the central registrations above (items 2, 3 and 4); items 1 to 4 close them.
 - Extract removed from the desk and its absence read back.
+
+### Final-review rows (round 2)
+
+- HIGH, held (venue): the fixtures under `tests/test_data/scanners/composer_audit/modeled/` are modeled, not captured. Replacing them needs one `composer audit --format=json` run on a host that already has PHP and Composer 2.8 or later; none of the three dev desktops has either, and installing a PHP toolchain there is outside their frozen toolchain. The fixture test's expectations are hand-written from the severity table, so the real capture drops in without test edits.
+- Owed: whole-tree collect smoke has not been run on this branch; it belongs to the integration commit together with the central registrations listed above.
