@@ -2617,14 +2617,14 @@ SOFTWARE.
         
           
           <div class="md-nav__link md-nav__container">
-            <a href="../docs/plugins/community/" class="md-nav__link ">
+            <a href="../docs/plugins/alpha/" class="md-nav__link ">
               
   
   
   <span class="md-ellipsis">
     
   
-    Community plugins
+    Alpha plugins
   
 
     
@@ -2646,7 +2646,7 @@ SOFTWARE.
             <span class="md-nav__icon md-icon"></span>
             
   
-    Community plugins
+    Alpha plugins
   
 
           </label>
@@ -2661,14 +2661,14 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
-      <a href="../docs/plugins/community/betterleaks-plugin/" class="md-nav__link">
+      <a href="../docs/plugins/alpha/betterleaks-plugin/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Betterleaks (community plugin)
+    Betterleaks (alpha plugin)
   
 
     
@@ -2689,7 +2689,7 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
-      <a href="../docs/plugins/community/ferret-scan-plugin/" class="md-nav__link">
+      <a href="../docs/plugins/alpha/ferret-scan-plugin/" class="md-nav__link">
         
   
   
@@ -2717,14 +2717,14 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
-      <a href="../docs/plugins/community/guarddog-plugin/" class="md-nav__link">
+      <a href="../docs/plugins/alpha/guarddog-plugin/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    GuardDog scanner (community plugin)
+    GuardDog scanner (alpha plugin)
   
 
     
@@ -2745,14 +2745,14 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
-      <a href="../docs/plugins/community/hadolint-plugin/" class="md-nav__link">
+      <a href="../docs/plugins/alpha/hadolint-plugin/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    hadolint (community plugin)
+    hadolint (alpha plugin)
   
 
     
@@ -2773,7 +2773,7 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
-      <a href="../docs/plugins/community/snyk-plugin/" class="md-nav__link">
+      <a href="../docs/plugins/alpha/snyk-plugin/" class="md-nav__link">
         
   
   
@@ -2801,7 +2801,7 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
-      <a href="../docs/plugins/community/snyk-plugin-setup/" class="md-nav__link">
+      <a href="../docs/plugins/alpha/snyk-plugin-setup/" class="md-nav__link">
         
   
   
@@ -2829,7 +2829,7 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
-      <a href="../docs/plugins/community/trivy-plugin/" class="md-nav__link">
+      <a href="../docs/plugins/alpha/trivy-plugin/" class="md-nav__link">
         
   
   
@@ -3490,7 +3490,7 @@ SOFTWARE.
 <tr>
 <td>Plugin modules that ship with ASH, under <code>automated_security_helper.plugin_modules</code></td>
 <td>when a module list names them (for the MCP server, see <a href="#what-a-plugin-can-do">What a plugin can do</a>)</td>
-<td>the <a href="../docs/plugins/community/">community plugins</a> (<code>betterleaks</code>, <code>ferret-scan</code>, <code>guarddog</code>, <code>hadolint</code>, <code>snyk-code</code>, and <code>trivy-repo</code>) and the <a href="aws/">AWS reporters</a></td>
+<td>the <a href="../docs/plugins/alpha/">alpha plugins</a> (<code>betterleaks</code>, <code>ferret-scan</code>, <code>guarddog</code>, <code>hadolint</code>, <code>snyk-code</code>, and <code>trivy-repo</code>) and the <a href="aws/">AWS reporters</a></td>
 </tr>
 <tr>
 <td>Third-party packages</td>
@@ -3517,7 +3517,7 @@ SOFTWARE.
 <p>To check what a module provides before you scan with it, list the plugins with the module loaded. <code>ferret-scan</code> then appears in the scanners table:</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>ash<span class="w"> </span>plugin<span class="w"> </span>list<span class="w"> </span>--ash-plugin-modules<span class="w"> </span>automated_security_helper.plugin_modules.ash_ferret_plugins
 </span></code></pre></div>
-<p>The plugins in the modules that ship with ASH are enabled as soon as their module is loaded, so loading one adds its scanners to a default scan; set <code>enabled: false</code> for a plugin in your config to turn it off. The exceptions are the four AWS reporters, which stay off until the operator turns each one on (<a href="aws/#enable">AWS reporters</a>). A third-party plugin's config class sets its own default. ASH imports the names from every source together, in order, and a name given twice is imported once. Every source splits an entry on commas, so <code>"a_ash_plugins, b_ash_plugins"</code> names two modules. This lists the scanners of two community modules named in one value:</p>
+<p>The plugins in the modules that ship with ASH are enabled as soon as their module is loaded, so loading one adds its scanners to a default scan; set <code>enabled: false</code> for a plugin in your config to turn it off. The exceptions are the four AWS reporters, which stay off until the operator turns each one on (<a href="aws/#enable">AWS reporters</a>). A third-party plugin's config class sets its own default. ASH imports the names from every source together, in order, and a name given twice is imported once. Every source splits an entry on commas, so <code>"a_ash_plugins, b_ash_plugins"</code> names two modules. This lists the scanners of two alpha modules named in one value:</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>ash<span class="w"> </span>plugin<span class="w"> </span>list<span class="w"> </span><span class="se">\</span>
 </span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span>--ash-plugin-modules<span class="w"> </span><span class="s2">&quot;automated_security_helper.plugin_modules.ash_ferret_plugins, automated_security_helper.plugin_modules.ash_trivy_plugins&quot;</span><span class="w"> </span><span class="se">\</span>
 </span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">  </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-E<span class="w"> </span>-o<span class="w"> </span><span class="s2">&quot;ferret-scan|trivy-repo&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>sort<span class="w"> </span>-u

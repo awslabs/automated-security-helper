@@ -992,10 +992,10 @@ SOFTWARE.
 </li>
       
         <li class="md-nav__item">
-  <a href="#community" class="md-nav__link">
+  <a href="#alpha" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Add community scanners
+        Add alpha scanners
       
     </span>
   </a>
@@ -2747,14 +2747,14 @@ SOFTWARE.
         
           
           <div class="md-nav__link md-nav__container">
-            <a href="../../docs/plugins/community/" class="md-nav__link ">
+            <a href="../../docs/plugins/alpha/" class="md-nav__link ">
               
   
   
   <span class="md-ellipsis">
     
   
-    Community plugins
+    Alpha plugins
   
 
     
@@ -2776,7 +2776,7 @@ SOFTWARE.
             <span class="md-nav__icon md-icon"></span>
             
   
-    Community plugins
+    Alpha plugins
   
 
           </label>
@@ -2791,14 +2791,14 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
-      <a href="../../docs/plugins/community/betterleaks-plugin/" class="md-nav__link">
+      <a href="../../docs/plugins/alpha/betterleaks-plugin/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Betterleaks (community plugin)
+    Betterleaks (alpha plugin)
   
 
     
@@ -2819,7 +2819,7 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
-      <a href="../../docs/plugins/community/ferret-scan-plugin/" class="md-nav__link">
+      <a href="../../docs/plugins/alpha/ferret-scan-plugin/" class="md-nav__link">
         
   
   
@@ -2847,14 +2847,14 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
-      <a href="../../docs/plugins/community/guarddog-plugin/" class="md-nav__link">
+      <a href="../../docs/plugins/alpha/guarddog-plugin/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    GuardDog scanner (community plugin)
+    GuardDog scanner (alpha plugin)
   
 
     
@@ -2875,14 +2875,14 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
-      <a href="../../docs/plugins/community/hadolint-plugin/" class="md-nav__link">
+      <a href="../../docs/plugins/alpha/hadolint-plugin/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    hadolint (community plugin)
+    hadolint (alpha plugin)
   
 
     
@@ -2903,7 +2903,7 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
-      <a href="../../docs/plugins/community/snyk-plugin/" class="md-nav__link">
+      <a href="../../docs/plugins/alpha/snyk-plugin/" class="md-nav__link">
         
   
   
@@ -2931,7 +2931,7 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
-      <a href="../../docs/plugins/community/snyk-plugin-setup/" class="md-nav__link">
+      <a href="../../docs/plugins/alpha/snyk-plugin-setup/" class="md-nav__link">
         
   
   
@@ -2959,7 +2959,7 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
-      <a href="../../docs/plugins/community/trivy-plugin/" class="md-nav__link">
+      <a href="../../docs/plugins/alpha/trivy-plugin/" class="md-nav__link">
         
   
   
@@ -3504,10 +3504,10 @@ SOFTWARE.
 </li>
       
         <li class="md-nav__item">
-  <a href="#community" class="md-nav__link">
+  <a href="#alpha" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Add community scanners
+        Add alpha scanners
       
     </span>
   </a>
@@ -3618,7 +3618,7 @@ SOFTWARE.
 
 
 <h1 id="choose-scanners">Choose scanners<a class="headerlink" href="#choose-scanners" title="Permanent link">&para;</a></h1>
-<p>ASH runs every enabled scanner it has, and all 16 built-in scanners are enabled by default (on Windows, semgrep and opengrep are off by default). This page shows how to see which scanners a scan will run, turn some off, add community scanners, and set a scanner's options. The <a href="../../reference/scanners/">scanner reference</a> lists each scanner with its tool and options.</p>
+<p>ASH runs every enabled scanner it has, and all 16 built-in scanners are enabled by default (on Windows, semgrep and opengrep are off by default). This page shows how to see which scanners a scan will run, turn some off, add alpha scanners, and set a scanner's options. The <a href="../../reference/scanners/">scanner reference</a> lists each scanner with its tool and options.</p>
 <h2 id="see-which-scanners-will-run">See which scanners will run<a class="headerlink" href="#see-which-scanners-will-run" title="Permanent link">&para;</a></h2>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>ash<span class="w"> </span>plugin<span class="w"> </span>list
 </span></code></pre></div>
@@ -3655,15 +3655,16 @@ SOFTWARE.
 <p>A scanner that is turned off, not selected, or excluded is recorded SKIPPED and does not affect the exit code. If every selected scanner is SKIPPED, including when none of them has a file to scan, the scan exits 1 (with <code>fail_on_incomplete_scanners</code> on, the default).</p>
 <h3 id="run-only-python-based-scanners">Run only Python-based scanners<a class="headerlink" href="#run-only-python-based-scanners" title="Permanent link">&para;</a></h3>
 <p><code>--python-only</code> keeps the scanners that need nothing but Python: bandit, cfn-lint, checkov, detect-secrets, semgrep, and zizmor. ASH applies it before it checks the scanners' tools, so every other scanner is recorded SKIPPED whether or not its tool is installed, and does not affect the exit code. When the run selects no Python-only scanner, as with <code>--python-only --scanners grype</code>, no scanner runs and the scan exits 1.</p>
-<h2 id="community">Add community scanners<a class="headerlink" href="#community" title="Permanent link">&para;</a></h2>
-<p>Community scanners ship with ASH in plugin modules that load only when you name them. Add the module to <code>ash_plugin_modules</code>:</p>
+<p><a id="community"></a></p>
+<h2 id="alpha">Add alpha scanners<a class="headerlink" href="#alpha" title="Permanent link">&para;</a></h2>
+<p>Alpha scanners are opt-in scanners that ship with ASH in plugin modules that load only when you name them. ASH does not yet promote them as supported. Add the module to <code>ash_plugin_modules</code>:</p>
 <div class="language-yaml highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nt">ash_plugin_modules</span><span class="p">:</span>
 </span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">automated_security_helper.plugin_modules.ash_ferret_plugins</span>
 </span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="nt">scanners</span><span class="p">:</span>
 </span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">  </span><span class="nt">ferret-scan</span><span class="p">:</span>
 </span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
 </span></code></pre></div>
-<p>You can also load a module for one run with <code>--ash-plugin-modules</code> or the <code>ASH_PLUGIN_MODULES</code> environment variable. The modules and their scanners are listed in <a href="../../docs/plugins/community/">Community plugins</a>. Two modules send data off the host, <code>ash_snyk_plugins</code> (the scanned source) and <code>ash_aws_plugins</code> (findings), and ASH loads them only from an operator source: <code>--ash-plugin-modules</code>, <code>ASH_PLUGIN_MODULES</code>, <code>--config-overrides</code>, or a config file outside every git checkout and the scanned directory (<a href="../../concepts/trust-model/#how-the-tier-is-decided">Configuration trust model</a>). From any other config file they are ignored with a warning.</p>
+<p>You can also load a module for one run with <code>--ash-plugin-modules</code> or the <code>ASH_PLUGIN_MODULES</code> environment variable. The modules and their scanners are listed in <a href="../../docs/plugins/alpha/">Alpha plugins</a>. Two modules send data off the host, <code>ash_snyk_plugins</code> (the scanned source) and <code>ash_aws_plugins</code> (findings), and ASH loads them only from an operator source: <code>--ash-plugin-modules</code>, <code>ASH_PLUGIN_MODULES</code>, <code>--config-overrides</code>, or a config file outside every git checkout and the scanned directory (<a href="../../concepts/trust-model/#how-the-tier-is-decided">Configuration trust model</a>). From any other config file they are ignored with a warning.</p>
 <h2 id="set-a-scanners-options">Set a scanner's options<a class="headerlink" href="#set-a-scanners-options" title="Permanent link">&para;</a></h2>
 <p>Each scanner's options go under <code>scanners.&lt;name&gt;.options</code>:</p>
 <div class="language-yaml highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="nt">scanners</span><span class="p">:</span>
@@ -3715,7 +3716,7 @@ SOFTWARE.
 </tr>
 </tbody>
 </table>
-<p>The community scanner trivy-repo runs trivy as well. To keep one of each pair, turn the other off:</p>
+<p>The alpha scanner trivy-repo runs trivy as well. To keep one of each pair, turn the other off:</p>
 <div class="language-yaml highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="nt">scanners</span><span class="p">:</span>
 </span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="w">  </span><span class="nt">opengrep</span><span class="p">:</span>
 </span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
@@ -3812,27 +3813,27 @@ SOFTWARE.
 <td>not a path</td>
 </tr>
 <tr>
-<td>ferret-scan (community)</td>
+<td>ferret-scan (alpha)</td>
 <td><code>config_file</code></td>
 <td>no</td>
 </tr>
 <tr>
-<td>ferret-scan (community)</td>
+<td>ferret-scan (alpha)</td>
 <td><code>profile</code>, <code>use_default_config</code></td>
 <td>not a path</td>
 </tr>
 <tr>
-<td>snyk-code (community)</td>
+<td>snyk-code (alpha)</td>
 <td><code>honor_tree_exclusions</code></td>
 <td>not a path</td>
 </tr>
 <tr>
-<td>trivy-repo (community)</td>
+<td>trivy-repo (alpha)</td>
 <td><code>config_file</code>, <code>ignore_file</code>, <code>secret_config_file</code>, <code>module_dir</code></td>
 <td>no</td>
 </tr>
 <tr>
-<td>trivy-repo (community)</td>
+<td>trivy-repo (alpha)</td>
 <td><code>disable_telemetry</code> set to <code>false</code></td>
 <td>not a path</td>
 </tr>

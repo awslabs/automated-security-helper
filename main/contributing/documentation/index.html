@@ -2615,14 +2615,14 @@ SOFTWARE.
         
           
           <div class="md-nav__link md-nav__container">
-            <a href="../../docs/plugins/community/" class="md-nav__link ">
+            <a href="../../docs/plugins/alpha/" class="md-nav__link ">
               
   
   
   <span class="md-ellipsis">
     
   
-    Community plugins
+    Alpha plugins
   
 
     
@@ -2644,7 +2644,7 @@ SOFTWARE.
             <span class="md-nav__icon md-icon"></span>
             
   
-    Community plugins
+    Alpha plugins
   
 
           </label>
@@ -2659,14 +2659,14 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
-      <a href="../../docs/plugins/community/betterleaks-plugin/" class="md-nav__link">
+      <a href="../../docs/plugins/alpha/betterleaks-plugin/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Betterleaks (community plugin)
+    Betterleaks (alpha plugin)
   
 
     
@@ -2687,7 +2687,7 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
-      <a href="../../docs/plugins/community/ferret-scan-plugin/" class="md-nav__link">
+      <a href="../../docs/plugins/alpha/ferret-scan-plugin/" class="md-nav__link">
         
   
   
@@ -2715,14 +2715,14 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
-      <a href="../../docs/plugins/community/guarddog-plugin/" class="md-nav__link">
+      <a href="../../docs/plugins/alpha/guarddog-plugin/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    GuardDog scanner (community plugin)
+    GuardDog scanner (alpha plugin)
   
 
     
@@ -2743,14 +2743,14 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
-      <a href="../../docs/plugins/community/hadolint-plugin/" class="md-nav__link">
+      <a href="../../docs/plugins/alpha/hadolint-plugin/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    hadolint (community plugin)
+    hadolint (alpha plugin)
   
 
     
@@ -2771,7 +2771,7 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
-      <a href="../../docs/plugins/community/snyk-plugin/" class="md-nav__link">
+      <a href="../../docs/plugins/alpha/snyk-plugin/" class="md-nav__link">
         
   
   
@@ -2799,7 +2799,7 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
-      <a href="../../docs/plugins/community/snyk-plugin-setup/" class="md-nav__link">
+      <a href="../../docs/plugins/alpha/snyk-plugin-setup/" class="md-nav__link">
         
   
   
@@ -2827,7 +2827,7 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
-      <a href="../../docs/plugins/community/trivy-plugin/" class="md-nav__link">
+      <a href="../../docs/plugins/alpha/trivy-plugin/" class="md-nav__link">
         
   
   
@@ -4733,7 +4733,7 @@ scanner need no row.</p>
 </tr>
 <tr>
 <td><code>scanners</code>, <code>reporters</code>, <code>converters</code></td>
-<td>the plugins of that section, by name, built-in and community ones; a column headed Enabled by default or On by default is compared with each plugin's <code>enabled</code> default</td>
+<td>the plugins of that section, by name, built-in and alpha ones; a column headed Enabled by default or On by default is compared with each plugin's <code>enabled</code> default</td>
 </tr>
 <tr>
 <td><code>config</code></td>
@@ -4822,7 +4822,7 @@ family as <code>ASH_MCP_*</code>; at least one variable ASH reads must start wit
 <p>An inline code span that is a dotted config path starting with a top-level config key
 (<code>scanners.bandit.options.severity_threshold</code>, <code>global_settings.suppressions</code>,
 <code>sandbox.mode</code>, also with a value after it, as in <code>scanners.bandit.enabled=false</code>) must
-resolve in ASH's config models, community plugins included when this ASH has them. Use
+resolve in ASH's config models, alpha plugins included when this ASH has them. Use
 <code>*</code> or <code>&lt;name&gt;</code> for a plugin name that is not fixed: <code>scanners.&lt;name&gt;.enabled</code>.</p>
 <p>Two more kinds of name are accepted. A build argument, declared with <code>ARG</code> in the
 Dockerfile ASH ships or passed by ASH as <code>--build-arg NAME=...</code> (as it passes the
@@ -4853,8 +4853,8 @@ repository, such as the example plugin package, on a page in the package's proje
 directory or a page that names the package. A placeholder, as in
 <code>reports/ash.&lt;extension&gt;</code>, is not checked.</p>
 <p>In a table, every item of a column headed Scanner, Scanners, Built-in scanners,
-Community plugins, or Community scanners must be one scanner ASH ships, built in or a
-community plugin as the header says. A note in parentheses after a name is ignored. Any other item of several
+Alpha plugins, or Alpha scanners must be one scanner ASH ships, built in or an
+alpha plugin as the header says. A note in parentheses after a name is ignored. Any other item of several
 words is an error, because nothing can check it: write
 <code>semgrep, opengrep (as far as their rules cover the language)</code>, and put longer notes in
 another column.</p>
@@ -4870,7 +4870,7 @@ another column.</p>
 <li>Every page is reachable from a <code>.nav.yml</code>, or matches a pattern in <code>not_in_nav</code> in
   <code>mkdocs.yml</code> with a comment saying why. A <code>.nav.yml</code> entry may be a page, a
   directory (which then uses its own <code>.nav.yml</code>, or lists everything in it), or a glob
-  such as <code>docs/plugins/community/*.md</code>. The check runs awesome-nav's own resolver, so
+  such as <code>docs/plugins/alpha/*.md</code>. The check runs awesome-nav's own resolver, so
   a glob means what it means in the build, including that it only picks up pages no
   other entry already took. A glob that matches nothing is an error. A glob with
   options is written <code>- glob: "&lt;pattern&gt;"</code> with at least one option beside it; on its
@@ -5520,7 +5520,7 @@ to resolve in: save the block inside one with <code>save-as=&lt;package&gt;/&lt;
 <td>fix the name; the message suggests the nearest one</td>
 </tr>
 <tr>
-<td>is a community plugin, not a built-in scanner (or the reverse)</td>
+<td>is an alpha plugin, not a built-in scanner (or the reverse)</td>
 <td>move the name to the column for its kind</td>
 </tr>
 <tr>

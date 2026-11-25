@@ -85,6 +85,38 @@
          <lastmod>2026-11-25</lastmod>
     </url>
     <url>
+         <loc>https://awslabs.github.io/automated-security-helper/latest/docs/plugins/alpha/</loc>
+         <lastmod>2026-11-25</lastmod>
+    </url>
+    <url>
+         <loc>https://awslabs.github.io/automated-security-helper/latest/docs/plugins/alpha/betterleaks-plugin/</loc>
+         <lastmod>2026-11-25</lastmod>
+    </url>
+    <url>
+         <loc>https://awslabs.github.io/automated-security-helper/latest/docs/plugins/alpha/ferret-scan-plugin/</loc>
+         <lastmod>2026-11-25</lastmod>
+    </url>
+    <url>
+         <loc>https://awslabs.github.io/automated-security-helper/latest/docs/plugins/alpha/guarddog-plugin/</loc>
+         <lastmod>2026-11-25</lastmod>
+    </url>
+    <url>
+         <loc>https://awslabs.github.io/automated-security-helper/latest/docs/plugins/alpha/hadolint-plugin/</loc>
+         <lastmod>2026-11-25</lastmod>
+    </url>
+    <url>
+         <loc>https://awslabs.github.io/automated-security-helper/latest/docs/plugins/alpha/snyk-plugin-setup/</loc>
+         <lastmod>2026-11-25</lastmod>
+    </url>
+    <url>
+         <loc>https://awslabs.github.io/automated-security-helper/latest/docs/plugins/alpha/snyk-plugin/</loc>
+         <lastmod>2026-11-25</lastmod>
+    </url>
+    <url>
+         <loc>https://awslabs.github.io/automated-security-helper/latest/docs/plugins/alpha/trivy-plugin/</loc>
+         <lastmod>2026-11-25</lastmod>
+    </url>
+    <url>
          <loc>https://awslabs.github.io/automated-security-helper/latest/docs/plugins/builtin/actionlint/</loc>
          <lastmod>2026-11-25</lastmod>
     </url>
@@ -102,38 +134,6 @@
     </url>
     <url>
          <loc>https://awslabs.github.io/automated-security-helper/latest/docs/plugins/builtin/zizmor/</loc>
-         <lastmod>2026-11-25</lastmod>
-    </url>
-    <url>
-         <loc>https://awslabs.github.io/automated-security-helper/latest/docs/plugins/community/</loc>
-         <lastmod>2026-11-25</lastmod>
-    </url>
-    <url>
-         <loc>https://awslabs.github.io/automated-security-helper/latest/docs/plugins/community/betterleaks-plugin/</loc>
-         <lastmod>2026-11-25</lastmod>
-    </url>
-    <url>
-         <loc>https://awslabs.github.io/automated-security-helper/latest/docs/plugins/community/ferret-scan-plugin/</loc>
-         <lastmod>2026-11-25</lastmod>
-    </url>
-    <url>
-         <loc>https://awslabs.github.io/automated-security-helper/latest/docs/plugins/community/guarddog-plugin/</loc>
-         <lastmod>2026-11-25</lastmod>
-    </url>
-    <url>
-         <loc>https://awslabs.github.io/automated-security-helper/latest/docs/plugins/community/hadolint-plugin/</loc>
-         <lastmod>2026-11-25</lastmod>
-    </url>
-    <url>
-         <loc>https://awslabs.github.io/automated-security-helper/latest/docs/plugins/community/snyk-plugin-setup/</loc>
-         <lastmod>2026-11-25</lastmod>
-    </url>
-    <url>
-         <loc>https://awslabs.github.io/automated-security-helper/latest/docs/plugins/community/snyk-plugin/</loc>
-         <lastmod>2026-11-25</lastmod>
-    </url>
-    <url>
-         <loc>https://awslabs.github.io/automated-security-helper/latest/docs/plugins/community/trivy-plugin/</loc>
          <lastmod>2026-11-25</lastmod>
     </url>
     <url>

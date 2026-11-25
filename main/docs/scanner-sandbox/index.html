@@ -1155,10 +1155,10 @@ SOFTWARE.
 </li>
         
           <li class="md-nav__item">
-  <a href="#community-and-third-party-plugin-scanners" class="md-nav__link">
+  <a href="#alpha-and-third-party-plugin-scanners" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Community and third-party plugin scanners
+        Alpha and third-party plugin scanners
       
     </span>
   </a>
@@ -2913,14 +2913,14 @@ SOFTWARE.
         
           
           <div class="md-nav__link md-nav__container">
-            <a href="../plugins/community/" class="md-nav__link ">
+            <a href="../plugins/alpha/" class="md-nav__link ">
               
   
   
   <span class="md-ellipsis">
     
   
-    Community plugins
+    Alpha plugins
   
 
     
@@ -2942,7 +2942,7 @@ SOFTWARE.
             <span class="md-nav__icon md-icon"></span>
             
   
-    Community plugins
+    Alpha plugins
   
 
           </label>
@@ -2957,14 +2957,14 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
-      <a href="../plugins/community/betterleaks-plugin/" class="md-nav__link">
+      <a href="../plugins/alpha/betterleaks-plugin/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Betterleaks (community plugin)
+    Betterleaks (alpha plugin)
   
 
     
@@ -2985,7 +2985,7 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
-      <a href="../plugins/community/ferret-scan-plugin/" class="md-nav__link">
+      <a href="../plugins/alpha/ferret-scan-plugin/" class="md-nav__link">
         
   
   
@@ -3013,14 +3013,14 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
-      <a href="../plugins/community/guarddog-plugin/" class="md-nav__link">
+      <a href="../plugins/alpha/guarddog-plugin/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    GuardDog scanner (community plugin)
+    GuardDog scanner (alpha plugin)
   
 
     
@@ -3041,14 +3041,14 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
-      <a href="../plugins/community/hadolint-plugin/" class="md-nav__link">
+      <a href="../plugins/alpha/hadolint-plugin/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    hadolint (community plugin)
+    hadolint (alpha plugin)
   
 
     
@@ -3069,7 +3069,7 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
-      <a href="../plugins/community/snyk-plugin/" class="md-nav__link">
+      <a href="../plugins/alpha/snyk-plugin/" class="md-nav__link">
         
   
   
@@ -3097,7 +3097,7 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
-      <a href="../plugins/community/snyk-plugin-setup/" class="md-nav__link">
+      <a href="../plugins/alpha/snyk-plugin-setup/" class="md-nav__link">
         
   
   
@@ -3125,7 +3125,7 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
-      <a href="../plugins/community/trivy-plugin/" class="md-nav__link">
+      <a href="../plugins/alpha/trivy-plugin/" class="md-nav__link">
         
   
   
@@ -3665,10 +3665,10 @@ SOFTWARE.
 </li>
         
           <li class="md-nav__item">
-  <a href="#community-and-third-party-plugin-scanners" class="md-nav__link">
+  <a href="#alpha-and-third-party-plugin-scanners" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Community and third-party plugin scanners
+        Alpha and third-party plugin scanners
       
     </span>
   </a>
@@ -4403,9 +4403,9 @@ it needs.</p>
 </tr>
 </tbody>
 </table>
-<h3 id="community-and-third-party-plugin-scanners">Community and third-party plugin scanners<a class="headerlink" href="#community-and-third-party-plugin-scanners" title="Permanent link">&para;</a></h3>
-<p>The sandbox applies to every scanner, whatever module it comes from. A scanner from a
-community module (snyk-code, ferret-scan, trivy-repo) or your own plugin package gets
+<h3 id="alpha-and-third-party-plugin-scanners">Alpha and third-party plugin scanners<a class="headerlink" href="#alpha-and-third-party-plugin-scanners" title="Permanent link">&para;</a></h3>
+<p>The sandbox applies to every scanner, whatever module it comes from. A scanner from an
+alpha module (snyk-code, ferret-scan, trivy-repo) or your own plugin package gets
 its policy from its <code>sandbox_requirements</code> class attribute. A scanner that declares
 none gets the strictest default: no network, the source tree read-only, its own
 results directory as the only writable place, a private empty <code>$HOME</code> and <code>/tmp</code>, and
@@ -4457,7 +4457,7 @@ skipped for lacking a declaration, and never run unsandboxed.</p>
 </span><span id="__span-3-42"><a id="__codelineno-3-42" name="__codelineno-3-42" href="#__codelineno-3-42"></a>        <span class="n">staged_input_only</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
 </span><span id="__span-3-43"><a id="__codelineno-3-43" name="__codelineno-3-43" href="#__codelineno-3-43"></a>    <span class="p">)</span>
 </span></code></pre></div>
-<p>The community scanners declare theirs:</p>
+<p>The alpha scanners declare theirs:</p>
 <ul>
 <li>snyk-code asks for a network, its <code>SNYK_</code> variables and <code>SNYK_TOKEN</code>, and read
   access to its token file.</li>

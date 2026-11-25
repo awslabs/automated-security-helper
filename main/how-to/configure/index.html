@@ -2797,14 +2797,14 @@ SOFTWARE.
         
           
           <div class="md-nav__link md-nav__container">
-            <a href="../../docs/plugins/community/" class="md-nav__link ">
+            <a href="../../docs/plugins/alpha/" class="md-nav__link ">
               
   
   
   <span class="md-ellipsis">
     
   
-    Community plugins
+    Alpha plugins
   
 
     
@@ -2826,7 +2826,7 @@ SOFTWARE.
             <span class="md-nav__icon md-icon"></span>
             
   
-    Community plugins
+    Alpha plugins
   
 
           </label>
@@ -2841,14 +2841,14 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
-      <a href="../../docs/plugins/community/betterleaks-plugin/" class="md-nav__link">
+      <a href="../../docs/plugins/alpha/betterleaks-plugin/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Betterleaks (community plugin)
+    Betterleaks (alpha plugin)
   
 
     
@@ -2869,7 +2869,7 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
-      <a href="../../docs/plugins/community/ferret-scan-plugin/" class="md-nav__link">
+      <a href="../../docs/plugins/alpha/ferret-scan-plugin/" class="md-nav__link">
         
   
   
@@ -2897,14 +2897,14 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
-      <a href="../../docs/plugins/community/guarddog-plugin/" class="md-nav__link">
+      <a href="../../docs/plugins/alpha/guarddog-plugin/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    GuardDog scanner (community plugin)
+    GuardDog scanner (alpha plugin)
   
 
     
@@ -2925,14 +2925,14 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
-      <a href="../../docs/plugins/community/hadolint-plugin/" class="md-nav__link">
+      <a href="../../docs/plugins/alpha/hadolint-plugin/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    hadolint (community plugin)
+    hadolint (alpha plugin)
   
 
     
@@ -2953,7 +2953,7 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
-      <a href="../../docs/plugins/community/snyk-plugin/" class="md-nav__link">
+      <a href="../../docs/plugins/alpha/snyk-plugin/" class="md-nav__link">
         
   
   
@@ -2981,7 +2981,7 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
-      <a href="../../docs/plugins/community/snyk-plugin-setup/" class="md-nav__link">
+      <a href="../../docs/plugins/alpha/snyk-plugin-setup/" class="md-nav__link">
         
   
   
@@ -3009,7 +3009,7 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
-      <a href="../../docs/plugins/community/trivy-plugin/" class="md-nav__link">
+      <a href="../../docs/plugins/alpha/trivy-plugin/" class="md-nav__link">
         
   
   
@@ -3858,7 +3858,7 @@ A path that starts with <code>~</code>, or is absolute, is used as written. In <
 <p>The first line <code>ash config init</code> writes points editors that use the YAML language server (VS Code with the Red Hat YAML extension, for example) at ASH's JSON schema:</p>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a># yaml-language-server: $schema=https://raw.githubusercontent.com/awslabs/automated-security-helper/refs/heads/main/automated_security_helper/schemas/AshConfig.json
 </span></code></pre></div>
-<p>The editor then completes keys and checks values as you type. ASH itself treats the line as a comment. The URL follows the <code>main</code> branch, not the ASH version you have installed, so the schema can list keys your version does not have. The schema flags an unknown key only where ASH itself refuses one (the unknown-key rows of the table in <a href="#typos">Which mistakes ASH catches</a> that end in exit 3, plus <code>build</code> and <code>mcp-resource-management</code>), and it does not include the community plugins' sections.</p>
+<p>The editor then completes keys and checks values as you type. ASH itself treats the line as a comment. The URL follows the <code>main</code> branch, not the ASH version you have installed, so the schema can list keys your version does not have. The schema flags an unknown key only where ASH itself refuses one (the unknown-key rows of the table in <a href="#typos">Which mistakes ASH catches</a> that end in exit 3, plus <code>build</code> and <code>mcp-resource-management</code>), and it does not include the alpha plugins' sections.</p>
 <h2 id="check">Check a config<a class="headerlink" href="#check" title="Permanent link">&para;</a></h2>
 <p>Three commands check a config file. <code>ash config validate</code> and <code>ash config lint</code> give the verdict a scan would give: they load the file with the loader and model <code>ash scan</code> uses, and exit 3 when a scan would refuse it. The one exception is the options of plugins loaded from <code>ash_plugin_modules</code>, which only a scan checks. Each of the three takes <code>--config</code> to check a file other than the one ASH finds, and <code>--source-dir</code> (or <code>ASH_SOURCE_DIR</code>; by default the current directory) for the directory a scan would scan. An <code>ASH_CONFIG</code> that names a file that does not exist makes each of them exit 3, also beside a <code>--config</code> file that loads, as it stops a scan. Each finds the config there and holds its <code>extends</code> chain to the bounds a scan of that directory sets (<a href="#extends">Share settings with <code>extends</code></a>), and <code>validate</code> and <code>lint</code> match ignore and suppression paths against it. <code>validate</code> and <code>get</code> also take <code>--config-overrides</code> and check the config with them applied, as a scan given the same overrides does. An override does not make a file that a scan refuses valid: the file is checked on its own before the overrides apply.</p>
 <table>
