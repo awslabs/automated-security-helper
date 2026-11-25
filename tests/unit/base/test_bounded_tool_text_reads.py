@@ -112,6 +112,12 @@ _ALLOWED_SIZED_READS = {
     ): "one byte to check database readability and bounded+1 metadata JSON; "
     "only the parsed timestamp leaves the reader",
     (
+        "utils/oci_layout_archive.py",
+        "_write_layer",
+    ): "the four-byte magic of an image layer blob, compared to the gzip and zstd "
+    "magics to choose how it is copied; the layer's bytes are copied into an "
+    "archive, never shown",
+    (
         "assets/install-pinned-tool.py",
         "download",
     ): "chunked download into a hash and a file; network bytes, never shown",
