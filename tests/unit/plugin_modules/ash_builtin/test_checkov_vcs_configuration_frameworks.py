@@ -31,6 +31,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.checkov_scann
     CheckovScannerConfig,
     CheckovScannerConfigOptions,
 )
+from tests.utils.env_assertions import environ_value
 
 pytestmark = pytest.mark.unit
 
@@ -98,6 +99,24 @@ class TestVcsConfigurationFrameworkDefaults:
         assert frameworks == [vcs_fw]
         assert vcs_fw not in skipped
 
+    @pytest.mark.parametrize("vcs_fw", _VCS_CONFIGURATION_FRAMEWORKS)
+    def test_explicit_vcs_configuration_framework_beside_all_is_not_skipped(
+        self, tmp_path, vcs_fw
+    ):
+        source = tmp_path / "src"
+        source.mkdir()
+        scanner = _scanner(source, tmp_path / "out", frameworks=["all", vcs_fw])
+
+        frameworks = _flag_values(scanner.args.extra_args, "--framework")
+        skipped = _flag_values(scanner.args.extra_args, "--skip-framework")
+
+        assert frameworks == ["all", vcs_fw]
+        assert vcs_fw not in skipped
+        # The VCS frameworks not named are still left out of "all".
+        for other in _VCS_CONFIGURATION_FRAMEWORKS:
+            if other != vcs_fw:
+                assert other in skipped
+
     def test_external_config_file_framework_all_still_skips_vcs_configs(self, tmp_path):
         source = tmp_path / "src"
         source.mkdir()
@@ -150,7 +169,7 @@ class TestVcsConfDirEnvironment:
             assert configured.is_absolute()
             assert configured == expected_parent / "vcs-config" / conf_subdir
             assert source not in configured.parents
-            assert var_name not in os.environ
+            assert environ_value(var_name) is None
 
     def test_offline_scan_disables_vcs_config_fetch(self, tmp_path, monkeypatch):
         for fetch_var in _VCS_CONFIG_FETCH_ENV_VARS:
