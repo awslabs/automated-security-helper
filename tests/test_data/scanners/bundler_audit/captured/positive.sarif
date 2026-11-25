@@ -1,0 +1,468 @@
+{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "bundler-audit",
+          "informationUri": "https://github.com/rubysec/bundler-audit",
+          "rules": [
+            {
+              "id": "insecure-source",
+              "name": "insecure-source",
+              "shortDescription": {
+                "text": "Gem source fetched over an insecure protocol"
+              },
+              "properties": {
+                "tags": [
+                  "sca",
+                  "dependency",
+                  "ruby",
+                  "supply-chain"
+                ]
+              },
+              "helpUri": "https://github.com/rubysec/bundler-audit#readme"
+            },
+            {
+              "id": "CVE-2021-28965",
+              "name": "CVE-2021-28965",
+              "shortDescription": {
+                "text": "XML round-trip vulnerability in REXML"
+              },
+              "properties": {
+                "tags": [
+                  "sca",
+                  "dependency",
+                  "ruby",
+                  "vulnerability"
+                ]
+              },
+              "helpUri": "https://www.ruby-lang.org/en/news/2021/04/05/xml-round-trip-vulnerability-in-rexml-cve-2021-28965/"
+            },
+            {
+              "id": "CVE-2024-35176",
+              "name": "CVE-2024-35176",
+              "shortDescription": {
+                "text": "REXML contains a denial of service vulnerability"
+              },
+              "properties": {
+                "tags": [
+                  "sca",
+                  "dependency",
+                  "ruby",
+                  "vulnerability"
+                ]
+              },
+              "helpUri": "https://github.com/ruby/rexml/security/advisories/GHSA-vg3r-rm7w-2xgh"
+            },
+            {
+              "id": "CVE-2024-39908",
+              "name": "CVE-2024-39908",
+              "shortDescription": {
+                "text": "DoS in REXML"
+              },
+              "properties": {
+                "tags": [
+                  "sca",
+                  "dependency",
+                  "ruby",
+                  "vulnerability"
+                ]
+              },
+              "helpUri": "https://github.com/ruby/rexml/security/advisories/GHSA-4xqq-m2hx-25v8"
+            },
+            {
+              "id": "CVE-2024-41123",
+              "name": "CVE-2024-41123",
+              "shortDescription": {
+                "text": "DoS vulnerabilities in REXML"
+              },
+              "properties": {
+                "tags": [
+                  "sca",
+                  "dependency",
+                  "ruby",
+                  "vulnerability"
+                ]
+              },
+              "helpUri": "https://www.ruby-lang.org/en/news/2024/08/01/dos-rexml-cve-2024-41123"
+            },
+            {
+              "id": "CVE-2024-41946",
+              "name": "CVE-2024-41946",
+              "shortDescription": {
+                "text": "DoS vulnerabilities in REXML"
+              },
+              "properties": {
+                "tags": [
+                  "sca",
+                  "dependency",
+                  "ruby",
+                  "vulnerability"
+                ]
+              },
+              "helpUri": "https://www.ruby-lang.org/en/news/2024/08/01/dos-rexml-cve-2024-41946"
+            },
+            {
+              "id": "CVE-2024-43398",
+              "name": "CVE-2024-43398",
+              "shortDescription": {
+                "text": "REXML denial of service vulnerability"
+              },
+              "properties": {
+                "tags": [
+                  "sca",
+                  "dependency",
+                  "ruby",
+                  "vulnerability"
+                ]
+              },
+              "helpUri": "https://github.com/ruby/rexml/security/advisories/GHSA-vmwr-mc7x-5vc3"
+            },
+            {
+              "id": "CVE-2024-49761",
+              "name": "CVE-2024-49761",
+              "shortDescription": {
+                "text": "REXML ReDoS vulnerability"
+              },
+              "properties": {
+                "tags": [
+                  "sca",
+                  "dependency",
+                  "ruby",
+                  "vulnerability"
+                ]
+              },
+              "helpUri": "https://github.com/ruby/rexml/security/advisories/GHSA-2rxp-v6pw-ch6m"
+            }
+          ],
+          "version": "0.9.3"
+        }
+      },
+      "results": [
+        {
+          "ruleId": "insecure-source",
+          "level": "warning",
+          "message": {
+            "text": "The Gemfile.lock fetches gems from git://github.com/example/insecure.git, which is not protected against tampering in transit. Use an https:// (or ssh) source."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "Gemfile.lock"
+                },
+                "region": {
+                  "startLine": 8
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "bundlerAudit/v1": "8ac80cde528cf78fb4e7873c39421b9d2236bdd0aef8f8d3004d3f1a9aeff974"
+          },
+          "properties": {
+            "issue_severity": "MEDIUM",
+            "tags": [
+              "sca",
+              "dependency",
+              "ruby",
+              "supply-chain"
+            ],
+            "bundler_audit_source": "git://github.com/example/insecure.git"
+          }
+        },
+        {
+          "ruleId": "CVE-2021-28965",
+          "level": "error",
+          "message": {
+            "text": "rexml 3.2.4 is affected by CVE-2021-28965: XML round-trip vulnerability in REXML. Upgrade to a patched version: ~> 3.1.9.1 or ~> 3.2.3.1 or >= 3.2.5."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "Gemfile.lock"
+                },
+                "region": {
+                  "startLine": 4
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "bundlerAudit/v1": "f8ec4cac8bf03e0eb61ffbea07da7528b9dcbce9e8b30839c7107d34c54fdf76"
+          },
+          "properties": {
+            "issue_severity": "HIGH",
+            "tags": [
+              "sca",
+              "dependency",
+              "ruby",
+              "vulnerability"
+            ],
+            "package_name": "rexml",
+            "package_version": "3.2.4",
+            "package_path": "Gemfile.lock",
+            "bundler_audit_criticality": "high",
+            "bundler_audit_patched_versions": [
+              "~> 3.1.9.1",
+              "~> 3.2.3.1",
+              ">= 3.2.5"
+            ],
+            "bundler_audit_cve": "2021-28965",
+            "bundler_audit_ghsa": "8cr8-4vfw-mr7h",
+            "bundler_audit_cvss_v3": 7.5
+          }
+        },
+        {
+          "ruleId": "CVE-2024-35176",
+          "level": "warning",
+          "message": {
+            "text": "rexml 3.2.4 is affected by CVE-2024-35176: REXML contains a denial of service vulnerability. Upgrade to a patched version: >= 3.2.7."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "Gemfile.lock"
+                },
+                "region": {
+                  "startLine": 4
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "bundlerAudit/v1": "314810fc83b4537f1307cd9337e01c1d4bc6612404d8f83c561c96770fdc9cb5"
+          },
+          "properties": {
+            "issue_severity": "MEDIUM",
+            "tags": [
+              "sca",
+              "dependency",
+              "ruby",
+              "vulnerability"
+            ],
+            "package_name": "rexml",
+            "package_version": "3.2.4",
+            "package_path": "Gemfile.lock",
+            "bundler_audit_criticality": "medium",
+            "bundler_audit_patched_versions": [
+              ">= 3.2.7"
+            ],
+            "bundler_audit_cve": "2024-35176",
+            "bundler_audit_ghsa": "vg3r-rm7w-2xgh",
+            "bundler_audit_cvss_v3": 5.3
+          }
+        },
+        {
+          "ruleId": "CVE-2024-39908",
+          "level": "warning",
+          "message": {
+            "text": "rexml 3.2.4 is affected by CVE-2024-39908: DoS in REXML. Upgrade to a patched version: >= 3.3.2."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "Gemfile.lock"
+                },
+                "region": {
+                  "startLine": 4
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "bundlerAudit/v1": "bc0ff4320ec13149e5bc676a0b5c19c38afa81981cb490f691baf9cc23b52895"
+          },
+          "properties": {
+            "issue_severity": "MEDIUM",
+            "tags": [
+              "sca",
+              "dependency",
+              "ruby",
+              "vulnerability"
+            ],
+            "package_name": "rexml",
+            "package_version": "3.2.4",
+            "package_path": "Gemfile.lock",
+            "bundler_audit_criticality": "medium",
+            "bundler_audit_patched_versions": [
+              ">= 3.3.2"
+            ],
+            "bundler_audit_cve": "2024-39908",
+            "bundler_audit_ghsa": "4xqq-m2hx-25v8",
+            "bundler_audit_cvss_v3": 4.3
+          }
+        },
+        {
+          "ruleId": "CVE-2024-41123",
+          "level": "warning",
+          "message": {
+            "text": "rexml 3.2.4 is affected by CVE-2024-41123: DoS vulnerabilities in REXML. Upgrade to a patched version: >= 3.3.3."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "Gemfile.lock"
+                },
+                "region": {
+                  "startLine": 4
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "bundlerAudit/v1": "972aed0a27f9b82453793894afdedffeaa233c52c4ae2800fdeb29723d67710f"
+          },
+          "properties": {
+            "issue_severity": "MEDIUM",
+            "tags": [
+              "sca",
+              "dependency",
+              "ruby",
+              "vulnerability"
+            ],
+            "package_name": "rexml",
+            "package_version": "3.2.4",
+            "package_path": "Gemfile.lock",
+            "bundler_audit_criticality": "medium",
+            "bundler_audit_patched_versions": [
+              ">= 3.3.3"
+            ],
+            "bundler_audit_cve": "2024-41123",
+            "bundler_audit_ghsa": "r55c-59qm-vjw6",
+            "bundler_audit_cvss_v3": 5.3
+          }
+        },
+        {
+          "ruleId": "CVE-2024-41946",
+          "level": "warning",
+          "message": {
+            "text": "rexml 3.2.4 is affected by CVE-2024-41946: DoS vulnerabilities in REXML. Upgrade to a patched version: >= 3.3.3."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "Gemfile.lock"
+                },
+                "region": {
+                  "startLine": 4
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "bundlerAudit/v1": "57db376d2d8ef67b143937c21602aee96bdcaca482a883adcedf094d2bde8787"
+          },
+          "properties": {
+            "issue_severity": "MEDIUM",
+            "tags": [
+              "sca",
+              "dependency",
+              "ruby",
+              "vulnerability"
+            ],
+            "package_name": "rexml",
+            "package_version": "3.2.4",
+            "package_path": "Gemfile.lock",
+            "bundler_audit_criticality": "medium",
+            "bundler_audit_patched_versions": [
+              ">= 3.3.3"
+            ],
+            "bundler_audit_cve": "2024-41946",
+            "bundler_audit_ghsa": "5866-49gr-22v4",
+            "bundler_audit_cvss_v3": 5.3
+          }
+        },
+        {
+          "ruleId": "CVE-2024-43398",
+          "level": "warning",
+          "message": {
+            "text": "rexml 3.2.4 is affected by CVE-2024-43398: REXML denial of service vulnerability. Upgrade to a patched version: >= 3.3.6."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "Gemfile.lock"
+                },
+                "region": {
+                  "startLine": 4
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "bundlerAudit/v1": "90ce7166377e6e557d46862bf428177805616484587727de96a9e2bffbdaaa77"
+          },
+          "properties": {
+            "issue_severity": "MEDIUM",
+            "tags": [
+              "sca",
+              "dependency",
+              "ruby",
+              "vulnerability"
+            ],
+            "package_name": "rexml",
+            "package_version": "3.2.4",
+            "package_path": "Gemfile.lock",
+            "bundler_audit_criticality": "medium",
+            "bundler_audit_patched_versions": [
+              ">= 3.3.6"
+            ],
+            "bundler_audit_cve": "2024-43398",
+            "bundler_audit_ghsa": "vmwr-mc7x-5vc3",
+            "bundler_audit_cvss_v3": 5.9
+          }
+        },
+        {
+          "ruleId": "CVE-2024-49761",
+          "level": "error",
+          "message": {
+            "text": "rexml 3.2.4 is affected by CVE-2024-49761: REXML ReDoS vulnerability. Upgrade to a patched version: >= 3.3.9."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "Gemfile.lock"
+                },
+                "region": {
+                  "startLine": 4
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "bundlerAudit/v1": "ab7ba994d2a1450ad88fdeb3ff81dfe0bdf343eb48cf387d395c1d8adaa0d834"
+          },
+          "properties": {
+            "issue_severity": "HIGH",
+            "tags": [
+              "sca",
+              "dependency",
+              "ruby",
+              "vulnerability"
+            ],
+            "package_name": "rexml",
+            "package_version": "3.2.4",
+            "package_path": "Gemfile.lock",
+            "bundler_audit_criticality": "high",
+            "bundler_audit_patched_versions": [
+              ">= 3.3.9"
+            ],
+            "bundler_audit_cve": "2024-49761",
+            "bundler_audit_ghsa": "2rxp-v6pw-ch6m",
+            "bundler_audit_cvss_v3": 7.5
+          }
+        }
+      ]
+    }
+  ]
+}

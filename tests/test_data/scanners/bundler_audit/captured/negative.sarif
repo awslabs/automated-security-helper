@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "bundler-audit",
+          "informationUri": "https://github.com/rubysec/bundler-audit",
+          "rules": [],
+          "version": "0.9.3"
+        }
+      },
+      "results": []
+    }
+  ]
+}

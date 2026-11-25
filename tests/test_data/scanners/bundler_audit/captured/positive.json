@@ -1,0 +1,187 @@
+{
+  "created_at": "2026-11-25 00:17:43 +0000",
+  "results": [
+    {
+      "source": "git://github.com/example/insecure.git",
+      "type": "insecure_source"
+    },
+    {
+      "advisory": {
+        "criticality": "high",
+        "cve": "2021-28965",
+        "cvss_v2": null,
+        "cvss_v3": 7.5,
+        "date": "2021-04-05",
+        "description": "When parsing and serializing a crafted XML document, REXML gem (including\nthe one bundled with Ruby) can create a wrong XML document whose structure\nis different from the original one.\n",
+        "ghsa": "8cr8-4vfw-mr7h",
+        "id": "CVE-2021-28965",
+        "osvdb": null,
+        "patched_versions": [
+          "~> 3.1.9.1",
+          "~> 3.2.3.1",
+          ">= 3.2.5"
+        ],
+        "path": "/home/user/.local/share/ruby-advisory-db/gems/rexml/CVE-2021-28965.yml",
+        "title": "XML round-trip vulnerability in REXML",
+        "unaffected_versions": [],
+        "url": "https://www.ruby-lang.org/en/news/2021/04/05/xml-round-trip-vulnerability-in-rexml-cve-2021-28965/"
+      },
+      "gem": {
+        "name": "rexml",
+        "version": "3.2.4"
+      },
+      "type": "unpatched_gem"
+    },
+    {
+      "advisory": {
+        "criticality": "medium",
+        "cve": "2024-35176",
+        "cvss_v2": null,
+        "cvss_v3": 5.3,
+        "date": "2024-05-16",
+        "description": "### Impact\n\nThe REXML gem before 3.2.6 has a DoS vulnerability when it\nparses an XML that has many `<`s in an attribute value.\n\nIf you need to parse untrusted XMLs, you many be impacted\nto this vulnerability.\n\n### Patches\n\nThe REXML gem 3.2.7 or later include the patch to fix this\nvulnerability.\n\n### Workarounds\n\nDon't parse untrusted XMLs.\n\n### References\n\n* https://www.ruby-lang.org/en/news/2024/05/16/dos-rexml-cve-2024-35176/\n",
+        "ghsa": "vg3r-rm7w-2xgh",
+        "id": "CVE-2024-35176",
+        "osvdb": null,
+        "patched_versions": [
+          ">= 3.2.7"
+        ],
+        "path": "/home/user/.local/share/ruby-advisory-db/gems/rexml/CVE-2024-35176.yml",
+        "title": "REXML contains a denial of service vulnerability",
+        "unaffected_versions": [],
+        "url": "https://github.com/ruby/rexml/security/advisories/GHSA-vg3r-rm7w-2xgh"
+      },
+      "gem": {
+        "name": "rexml",
+        "version": "3.2.4"
+      },
+      "type": "unpatched_gem"
+    },
+    {
+      "advisory": {
+        "criticality": "medium",
+        "cve": "2024-39908",
+        "cvss_v2": null,
+        "cvss_v3": 4.3,
+        "date": "2024-07-16",
+        "description": "There is a DoS vulnerability in REXML gem. This vulnerability has\nbeen assigned the CVE identifier CVE-2024-39908. We strongly\nrecommend upgrading the REXML gem.\n\n## Details\n\nWhen it parses an XML that has many specific characters such as\n<, 0 and %>. REXML gem may take long time.\n\nPlease update REXML gem to version 3.3.2 or later.\n\n## Affected versions\n\nREXML gem 3.3.2 or prior\n\n## Credits\n\nThanks to mprogrammer for discovering this issue.\n\n## History\n\nOriginally published at 2024-07-16 03:00:00 (UTC)\n",
+        "ghsa": "4xqq-m2hx-25v8",
+        "id": "CVE-2024-39908",
+        "osvdb": null,
+        "patched_versions": [
+          ">= 3.3.2"
+        ],
+        "path": "/home/user/.local/share/ruby-advisory-db/gems/rexml/CVE-2024-39908.yml",
+        "title": "DoS in REXML",
+        "unaffected_versions": [],
+        "url": "https://github.com/ruby/rexml/security/advisories/GHSA-4xqq-m2hx-25v8"
+      },
+      "gem": {
+        "name": "rexml",
+        "version": "3.2.4"
+      },
+      "type": "unpatched_gem"
+    },
+    {
+      "advisory": {
+        "criticality": "medium",
+        "cve": "2024-41123",
+        "cvss_v2": null,
+        "cvss_v3": 5.3,
+        "date": "2024-08-01",
+        "description": "There are some DoS vulnerabilities in REXML gem.\nThese vulnerabilities have been assigned the CVE identifier\nCVE-2024-41123. We strongly recommend upgrading the REXML gem.\n\n## Details\n\nWhen parsing an XML document that has many specific characters such\nas whitespace character, >] and ]>, REXML gem may take long time.\n\nPlease update REXML gem to version 3.3.3 or later.\n\n## Affected versions\n\n* REXML gem 3.3.2 or prior\n\n## Credits\n\nThanks to mprogrammer and scyoon for discovering these issues.\n\n## History\n\nOriginally published at 2024-08-01 03:00:00 (UTC)\n",
+        "ghsa": "r55c-59qm-vjw6",
+        "id": "CVE-2024-41123",
+        "osvdb": null,
+        "patched_versions": [
+          ">= 3.3.3"
+        ],
+        "path": "/home/user/.local/share/ruby-advisory-db/gems/rexml/CVE-2024-41123.yml",
+        "title": "DoS vulnerabilities in REXML",
+        "unaffected_versions": [],
+        "url": "https://www.ruby-lang.org/en/news/2024/08/01/dos-rexml-cve-2024-41123"
+      },
+      "gem": {
+        "name": "rexml",
+        "version": "3.2.4"
+      },
+      "type": "unpatched_gem"
+    },
+    {
+      "advisory": {
+        "criticality": "medium",
+        "cve": "2024-41946",
+        "cvss_v2": null,
+        "cvss_v3": 5.3,
+        "date": "2024-08-01",
+        "description": "There is a DoS vulnerability in REXML gem.\nThis vulnerability has been assigned the CVE identifier\nCVE-2024-41946. We strongly recommend upgrading the REXML gem.\n\n## Details\n\nWhen parsing an XML that has many entity expansions with SAX2 or\npull parser API, REXML gem may take long time.\n\nPlease update REXML gem to version 3.3.3 or later.\n\n## Affected versions\n\n* REXML gem 3.3.2 or prior\n\n## Credits\n\nThanks to NAITOH Jun for discovering and fixing this issue.\n\n## History\n\nOriginally published at 2024-08-01 03:00:00 (UTC)\n",
+        "ghsa": "5866-49gr-22v4",
+        "id": "CVE-2024-41946",
+        "osvdb": null,
+        "patched_versions": [
+          ">= 3.3.3"
+        ],
+        "path": "/home/user/.local/share/ruby-advisory-db/gems/rexml/CVE-2024-41946.yml",
+        "title": "DoS vulnerabilities in REXML",
+        "unaffected_versions": [],
+        "url": "https://www.ruby-lang.org/en/news/2024/08/01/dos-rexml-cve-2024-41946"
+      },
+      "gem": {
+        "name": "rexml",
+        "version": "3.2.4"
+      },
+      "type": "unpatched_gem"
+    },
+    {
+      "advisory": {
+        "criticality": "medium",
+        "cve": "2024-43398",
+        "cvss_v2": null,
+        "cvss_v3": 5.9,
+        "date": "2024-08-22",
+        "description": "### Impact\n\nThe REXML gem before 3.3.6 has a DoS vulnerability when it parses an\nXML that has many deep elements that have same local name attributes.\n\nIf you need to parse untrusted XMLs with tree parser API like\n`REXML::Document.new`, you may be impacted to this vulnerability.\nIf you use other parser APIs such as stream parser API and SAX2\nparser API, this vulnerability is not affected.\n\nThis vulnerability has been assigned the CVE identifier CVE-2024-43398.\nWe strongly recommend upgrading the REXML gem.\n\n### Patches\n\nThe REXML gem 3.3.6 or later include the patch to fix the\nvulnerability.\n\n### Workarounds\n\nDon't parse untrusted XMLs with tree parser API.\n\n## Affected versions\n\nREXML gem 3.3.5 or prior\n\n## Credits\n\nThanks to l33thaxor for discovering this issue.\n\n## History\n\nOriginally published at 2024-08-22 03:00:00 (UTC)\n",
+        "ghsa": "vmwr-mc7x-5vc3",
+        "id": "CVE-2024-43398",
+        "osvdb": null,
+        "patched_versions": [
+          ">= 3.3.6"
+        ],
+        "path": "/home/user/.local/share/ruby-advisory-db/gems/rexml/CVE-2024-43398.yml",
+        "title": "REXML denial of service vulnerability",
+        "unaffected_versions": [],
+        "url": "https://github.com/ruby/rexml/security/advisories/GHSA-vmwr-mc7x-5vc3"
+      },
+      "gem": {
+        "name": "rexml",
+        "version": "3.2.4"
+      },
+      "type": "unpatched_gem"
+    },
+    {
+      "advisory": {
+        "criticality": "high",
+        "cve": "2024-49761",
+        "cvss_v2": null,
+        "cvss_v3": 7.5,
+        "date": "2024-10-28",
+        "description": "## Impact\n\nThe REXML gem before 3.3.9 has a ReDoS vulnerability when it\nparses an XML that has many digits between `&#` and `x...;`\nin a hex numeric character reference (`&#x...;`).\n\nThis does not happen with Ruby 3.2 or later. Ruby 3.1 is the only\naffected maintained Ruby. Note that Ruby 3.1 will reach EOL on 2025-03.\n\n## Patches\n\nThe REXML gem 3.3.9 or later include the patch to fix the vulnerability.\n\n## Workarounds\n\nUse Ruby 3.2 or later instead of Ruby 3.1.\n\n## References\n\n* https://www.ruby-lang.org/en/news/2024/10/28/redos-rexml-cve-2024-49761\n  * Announced on www.ruby-lang.org.\n",
+        "ghsa": "2rxp-v6pw-ch6m",
+        "id": "CVE-2024-49761",
+        "osvdb": null,
+        "patched_versions": [
+          ">= 3.3.9"
+        ],
+        "path": "/home/user/.local/share/ruby-advisory-db/gems/rexml/CVE-2024-49761.yml",
+        "title": "REXML ReDoS vulnerability",
+        "unaffected_versions": [],
+        "url": "https://github.com/ruby/rexml/security/advisories/GHSA-2rxp-v6pw-ch6m"
+      },
+      "gem": {
+        "name": "rexml",
+        "version": "3.2.4"
+      },
+      "type": "unpatched_gem"
+    }
+  ],
+  "version": "0.9.3"
+}

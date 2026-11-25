@@ -1,0 +1,22 @@
+GEM
+  remote: https://rubygems.org/
+  specs:
+    rexml (3.2.4)
+    thor (0.19.0)
+
+GIT
+  remote: git://github.com/example/insecure.git
+  revision: 0123456789abcdef0123456789abcdef01234567
+  specs:
+    insecure_gem (0.1.0)
+
+PLATFORMS
+  ruby
+
+DEPENDENCIES
+  insecure_gem!
+  rexml (= 3.2.4)
+  thor (= 0.19.0)
+
+BUNDLED WITH
+   2.4.0

@@ -108,10 +108,16 @@ from typing import (
 
 from pydantic import AnyUrl, Field, PrivateAttr, model_validator
 
+from automated_security_helper.base import scanner_operational_facets as opsf
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.plugin_base import (
     CustomCommand,
     install_story_is_declared,
+)
+from automated_security_helper.base.scanner_facets import (
+    FacetDecl,
+    FacetState,
+    ScannerFacets,
 )
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
@@ -415,6 +421,209 @@ class BundlerAuditScanner(ScannerPluginBase[BundlerAuditScannerConfig]):
     #: bundler-audit clones and pulls its advisory database over the network, and
     #: offline the scanner would match nothing against an empty or old database.
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.SKIP_OFFLINE
+
+    #: The facets register row (base/scanner_facets.py). Declaration only: no
+    #: behavior changes. Native fields name bundler-audit's own JSON report
+    #: (tests/test_data/scanners/bundler_audit/captured/positive.json, a real
+    #: 0.9.3 run) and the SARIF this adapter converts it to (positive.sarif).
+    facets: ClassVar[ScannerFacets] = ScannerFacets(
+        rule_id=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='results[].advisory.id (rule "insecure-source" for '
+            'results[] type "insecure_source", which has no advisory)',
+        ),
+        severity=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="results[].advisory.criticality (critical, high, "
+            "medium, low, none; null maps to MEDIUM)",
+        ),
+        file_path=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="(no native path) the adapter sets "
+            "artifactLocation.uri to the Gemfile.lock path relative to the source root",
+        ),
+        line_range=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="(no native location) the adapter sets region.startLine "
+            "to the lockfile line of `name (version)` or `remote: <source>`, "
+            "falling back to 1",
+        ),
+        column=FacetDecl(
+            state=FacetState.NA,
+            reason="the report carries no location; the adapter writes a start line only",
+        ),
+        message=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="results[].advisory.title, with gem.name, gem.version "
+            "and advisory.patched_versions folded in by the adapter",
+        ),
+        resource_id=FacetDecl(
+            state=FacetState.NA,
+            reason="a gem name and version is a package locator, not a deployable "
+            "infrastructure resource",
+        ),
+        resource_type=FacetDecl(
+            state=FacetState.NA,
+            reason="findings name a locked gem, not a deployable resource",
+        ),
+        package_name=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="results[].gem.name",
+        ),
+        package_version=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="results[].gem.version",
+        ),
+        package_path=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="(no native path) the adapter sets it to the Gemfile.lock "
+            "path via identity_properties",
+        ),
+        taxonomy_cve=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="results[].advisory.id (a CVE id) and advisory.cve, "
+            "kept as bundler_audit_cve",
+        ),
+        taxonomy_cwe=FacetDecl(
+            state=FacetState.NA,
+            reason="ruby-advisory-db advisories carry no CWE field in the report",
+        ),
+        fingerprints=FacetDecl(
+            state=FacetState.NA,
+            reason="the tool emits no fingerprint; the adapter's own "
+            "partialFingerprints (bundlerAudit/v1) is not read by the flat "
+            "finding identity (observed over the committed corpus)",
+        ),
+        fix_available=FacetDecl(
+            state=FacetState.DROPPED,
+            native_field="results[].advisory.patched_versions",
+            reason="carried in the message text and the bundler_audit_patched_versions "
+            "property; the flat fix_available column is not written",
+        ),
+        remediation_text=FacetDecl(
+            state=FacetState.NA,
+            reason="the report carries patched version ranges only, no remediation "
+            "prose; the adapter folds them into the message",
+        ),
+        snippet=FacetDecl(
+            state=FacetState.NA,
+            reason="the report carries no source excerpt",
+        ),
+        references=FacetDecl(
+            state=FacetState.DROPPED,
+            native_field="results[].advisory.url",
+            reason="written as the SARIF rule helpUri; the flat references column is "
+            "empty over the committed corpus",
+        ),
+        tags=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="(no native tags) the adapter sets result properties "
+            '"tags" (sca, dependency, ruby, vulnerability or supply-chain)',
+        ),
+        extras=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result properties "bundler_audit_criticality", '
+            '"bundler_audit_patched_versions", "bundler_audit_cve", '
+            '"bundler_audit_ghsa", "bundler_audit_cvss_v3" (and the other '
+            "advisory score fields when present)",
+        ),
+    )
+
+    #: The operational register row (base/scanner_operational_facets.py).
+    operational_facets: ClassVar[opsf.ScannerOperationalFacets] = (
+        opsf.ScannerOperationalFacets(
+            scanner_name="bundler_audit",
+            network=opsf.NetworkFacet(
+                fetch_kind=opsf.FetchKind.CONTENT_FETCH,
+                fetches=(opsf.Fetched.VULN_DB,),
+                prefetch=(),
+                offline_outcome=opsf.OfflineOutcome.NOT_RUN,
+                offline_reason="the ruby-advisory-db git repository is cloned or "
+                "pulled over the network; offline the check would match nothing "
+                "against an empty or old database",
+                offline_strategy=OfflineStrategy.SKIP_OFFLINE,
+                sandbox_network=opsf.SandboxNetwork.ONLINE,
+                source="bundler_audit_scanner.py offline_strategy, "
+                "sandbox_requirements, options.update_database",
+            ),
+            output=opsf.OutputFacet(
+                native_formats=(opsf.OutputFormat.TOOL_JSON,),
+                side_reports=(),
+                non_finding_artifacts=(),
+                note="converted to SARIF by convert_bundler_audit_report",
+            ),
+            targets=opsf.TargetsFacet(
+                kinds=(opsf.TargetKind.DEPENDENCY_LOCKFILES,),
+                tool_type=ScannerToolType.SCA,
+                selection="the Gemfile.lock at the root of the scan target "
+                "(nothing_to_scan_reason; a subdirectory lockfile or a symlink "
+                "is not read)",
+            ),
+            runtime=opsf.RuntimeFacet(
+                kind=opsf.RuntimeKind.USER_INSTALLED_CLI,
+                external_programs=("ruby", "gem"),
+                invocations=opsf.Invocations.ONE,
+                python_only=False,
+                use_uv_tool=False,
+            ),
+            platforms=opsf.PlatformsFacet(
+                provisionable=(),
+                note="a RubyGems package installed on request by `ash dependencies "
+                "install` (gem install --user-install); not a release binary, "
+                "never bundled in the image (GPL-3.0-or-later)",
+            ),
+            severity=opsf.SeverityFacet(
+                severity_class=opsf.SeverityClass.NATIVE,
+                note="advisory.criticality (from the CVSS score) is mapped; an "
+                "unscored advisory is MEDIUM",
+            ),
+            silencing=opsf.SilencingFacet(
+                tool_side=(
+                    opsf.SilencingLayer(
+                        layer=opsf.SilencingLayerKind.IGNORE_FILE,
+                        writer=opsf.SilencingWriter.REPOSITORY,
+                        honored=opsf.Honored.NO,
+                        surface=".bundler-audit.yml `ignore` list in the scanned tree",
+                        cite="bundler_audit_scanner.py module docstring: ASH always "
+                        "passes --config with its own `ignore: []` file",
+                    ),
+                ),
+            ),
+            identity=opsf.IdentityFacet(
+                fingerprint_class=opsf.FingerprintClass.POSITIONAL_ONLY,
+                note="identity is the rule id, file and lockfile line; the "
+                "adapter's partialFingerprints is not read by the flat identity",
+            ),
+            extensibility=opsf.ExtensibilityFacet(
+                custom_rules=opsf.CustomRules.NONE,
+                env_prefixes=(),
+                options_surface="options.update_database only; the advisory "
+                "database is the tool's own and no custom rules are accepted",
+            ),
+            exit_codes=opsf.ExitCodesFacet(
+                success_exit_codes=(0, 1),
+                semantics="0 clean; 1 means findings OR a failure, told apart by "
+                "whether the report file exists and lists results",
+            ),
+            provenance=opsf.ProvenanceFacet(
+                tier=opsf.Tier.COMMUNITY_OPTIN,
+                source=opsf.ProvenanceSource.USER_INSTALLED,
+                selection_surfaces=(
+                    "ash_bundler_audit_plugins in ash_plugin_modules",
+                    "options.update_database",
+                ),
+                upstream_license=(
+                    "GPL-3.0-or-later (source: bundler-audit-0.9.3 gemspec "
+                    "licenses field and COPYING.txt, read from the gem fetched "
+                    "from rubygems.org)"
+                ),
+            ),
+            prerequisites=opsf.PrerequisitesFacet(
+                kinds=(opsf.Prerequisite.LOCKFILE,),
+                note="a regular Gemfile.lock at the root of the scan target",
+            ),
+        )
+    )
 
     #: 0 clean, 1 vulnerable OR failed; the report file tells them apart
     #: (see the module docstring), so ``_read_results_file`` decides.
