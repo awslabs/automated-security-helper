@@ -40,8 +40,14 @@ from typing import Annotated, ClassVar, List, Literal, Set
 
 from pydantic import Field, ValidationError, model_validator
 
+from automated_security_helper.base import scanner_operational_facets as opsf
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.plugin_base import PluginDependency
+from automated_security_helper.base.scanner_facets import (
+    FacetDecl,
+    FacetState,
+    ScannerFacets,
+)
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
@@ -111,6 +117,186 @@ class CdxgenScanner(ScannerPluginBase[CdxgenScannerConfig]):
     display_name = "cdxgen"
     docs_summary = "Software inventory"
     covers = ("SBOM generation",)
+
+    #: The facets register row (base/scanner_facets.py). cdxgen writes a CycloneDX
+    #: document and no findings, so every finding facet is n/a and only the package
+    #: identity of the components is mapped (as for syft).
+    facets: ClassVar[ScannerFacets] = ScannerFacets(
+        rule_id=FacetDecl(
+            state=FacetState.NA,
+            reason="SBOM scanner: no findings exist, so no rule id",
+        ),
+        severity=FacetDecl(
+            state=FacetState.NA,
+            reason="SBOM scanner: no findings exist, so no severity",
+        ),
+        file_path=FacetDecl(
+            state=FacetState.NA,
+            reason="SBOM scanner: no findings exist; component evidence locations are inventory, not a finding location",
+        ),
+        line_range=FacetDecl(
+            state=FacetState.NA,
+            reason="SBOM scanner: no findings exist, so no line range",
+        ),
+        column=FacetDecl(
+            state=FacetState.NA,
+            reason="SBOM scanner: no findings exist, so no column",
+        ),
+        message=FacetDecl(
+            state=FacetState.NA,
+            reason="SBOM scanner: no findings exist, so no message",
+        ),
+        resource_id=FacetDecl(
+            state=FacetState.NA,
+            reason="no findings exist; the SBOM names packages (package identity), not infrastructure resources, and writes no ash_resource_id",
+        ),
+        resource_type=FacetDecl(
+            state=FacetState.NA,
+            reason="no findings exist; CycloneDX component types (library, application) are package kinds, not resource types",
+        ),
+        package_name=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="CycloneDX components[].name",
+        ),
+        package_version=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="CycloneDX components[].version",
+        ),
+        package_path=FacetDecl(
+            state=FacetState.NA,
+            reason="the CycloneDX document is passed through whole; no per-finding package path is written",
+        ),
+        taxonomy_cve=FacetDecl(
+            state=FacetState.NA,
+            reason="SBOM scanner: no findings exist; cdxgen inventories components and matches no advisories here",
+        ),
+        taxonomy_cwe=FacetDecl(
+            state=FacetState.NA,
+            reason="SBOM scanner: no findings exist; cdxgen inventories components and matches no advisories here",
+        ),
+        fingerprints=FacetDecl(
+            state=FacetState.NA,
+            reason="SBOM scanner: no findings exist to fingerprint",
+        ),
+        fix_available=FacetDecl(
+            state=FacetState.NA,
+            reason="SBOM scanner: no findings exist, so no fix state",
+        ),
+        remediation_text=FacetDecl(
+            state=FacetState.NA,
+            reason="SBOM scanner: no findings exist, so no remediation",
+        ),
+        snippet=FacetDecl(
+            state=FacetState.NA,
+            reason="SBOM scanner: no findings exist, so no snippet",
+        ),
+        references=FacetDecl(
+            state=FacetState.NA,
+            reason="SBOM scanner: no findings exist, so no references",
+        ),
+        tags=FacetDecl(
+            state=FacetState.NA,
+            reason="SBOM scanner: no findings exist, so no tags",
+        ),
+        extras=FacetDecl(
+            state=FacetState.NA,
+            reason="SBOM scanner: no SARIF property bag; the CycloneDX document is passed through whole outside the flat path",
+        ),
+    )
+
+    #: The operational register row (base/scanner_operational_facets.py), checked
+    #: against the production declarations it mirrors by
+    #: tests/unit/plugin_modules/test_scanner_operational_facets_consistency.py.
+    operational_facets: ClassVar[opsf.ScannerOperationalFacets] = (
+        opsf.ScannerOperationalFacets(
+            scanner_name="cdxgen",
+            network=opsf.NetworkFacet(
+                fetch_kind=opsf.FetchKind.NONE,
+                fetches=(),
+                prefetch=(),
+                offline_outcome=opsf.OfflineOutcome.UNCHANGED,
+                offline_strategy=OfflineStrategy.BUNDLED,
+                sandbox_network=opsf.SandboxNetwork.NONE,
+                source=(
+                    "cdxgen_scanner.py module header (--no-install-deps) and "
+                    "sandbox_requirements: the strict default grants no network"
+                ),
+                unconfirmed=(
+                    "whether cdxgen makes any other registry or license lookup "
+                    "under --no-install-deps; a sample run with the network "
+                    "blocked would settle it"
+                ),
+            ),
+            output=opsf.OutputFacet(
+                native_formats=(opsf.OutputFormat.CYCLONEDX,),
+                side_reports=(),
+                non_finding_artifacts=("CycloneDXReport (the SBOM)",),
+                consumed_by_deviation=(
+                    "no SARIF Result exists; the SBOM is returned as a "
+                    "CycloneDXReport outside the flat findings path"
+                ),
+            ),
+            targets=opsf.TargetsFacet(
+                kinds=(opsf.TargetKind.PACKAGE_INVENTORY,),
+                tool_type=ScannerToolType.SBOM,
+                selection=(
+                    "the whole directory; project types are detected by cdxgen "
+                    "or set with options.project_type"
+                ),
+            ),
+            runtime=opsf.RuntimeFacet(
+                kind=opsf.RuntimeKind.USER_INSTALLED_CLI,
+                external_programs=("node",),
+                invocations=opsf.Invocations.ONE,
+                python_only=False,
+                use_uv_tool=False,
+            ),
+            platforms=opsf.PlatformsFacet(
+                provisionable=(),
+                note=(
+                    "an npm package (@cyclonedx/cdxgen) installed through the "
+                    "npm package manager on every platform Node.js runs on; ASH "
+                    "downloads no pinned binary for it"
+                ),
+            ),
+            severity=opsf.SeverityFacet(
+                severity_class=opsf.SeverityClass.NOT_APPLICABLE,
+                note="an SBOM has no findings",
+            ),
+            silencing=opsf.SilencingFacet(
+                tool_side=(),
+                none_reason=(
+                    "cdxgen produces an SBOM, not findings; there is nothing to silence"
+                ),
+            ),
+            identity=opsf.IdentityFacet(
+                fingerprint_class=opsf.FingerprintClass.NOT_APPLICABLE,
+                note="no findings to identify",
+            ),
+            extensibility=opsf.ExtensibilityFacet(
+                custom_rules=opsf.CustomRules.NONE,
+                env_prefixes=(),
+                options_surface="typed options (project_type, exclude); no rules surface",
+            ),
+            exit_codes=opsf.ExitCodesFacet(
+                success_exit_codes=(0,),
+                semantics=(
+                    "a completed run exits 0; 1 is a failure and 4 and 5 are "
+                    "--introspect only, which ASH does not use"
+                ),
+            ),
+            provenance=opsf.ProvenanceFacet(
+                tier=opsf.Tier.COMMUNITY_OPTIN,
+                source=opsf.ProvenanceSource.USER_INSTALLED,
+                selection_surfaces=("ash_cdxgen_plugins in ash_plugin_modules",),
+                upstream_license="not read",
+            ),
+            prerequisites=opsf.PrerequisitesFacet(
+                kinds=(opsf.Prerequisite.NODE_RUNTIME,),
+                note="cdxgen is a Node.js program; a directory is the input",
+            ),
+        )
+    )
 
     #: cdxgen is a Node.js program; a Python-only scan does not run it.
     python_only: ClassVar[bool | None] = False
