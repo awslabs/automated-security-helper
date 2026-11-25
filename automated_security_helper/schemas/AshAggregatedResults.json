@@ -1711,6 +1711,15 @@
         "global_settings": {
           "$ref": "#/$defs/AshConfigGlobalSettingsSection",
           "default": {
+            "deduplication": {
+              "annotate": false,
+              "fold": false
+            },
+            "exclusions": [],
+            "history": {
+              "enabled": false,
+              "keep_runs": 50
+            },
             "ignore_paths": [],
             "mcp": {
               "runtime_overrides": {
@@ -1735,6 +1744,7 @@
                   "/scanners/detect-secrets/options/baseline_file",
                   "/global_settings/ignore_paths",
                   "/global_settings/suppressions",
+                  "/global_settings/exclusions",
                   "/global_settings/mcp",
                   "/global_settings/mcp/**",
                   "/scanners/opengrep/options/exclude_rule",
@@ -2370,6 +2380,31 @@
     "AshConfigGlobalSettingsSection": {
       "additionalProperties": false,
       "properties": {
+        "deduplication": {
+          "$ref": "#/$defs/AshDeduplicationConfig",
+          "default": {
+            "annotate": false,
+            "fold": false
+          },
+          "description": "Cross-scanner duplicate annotation in the flat reports (opt-in; off by default)."
+        },
+        "exclusions": {
+          "default": [],
+          "description": "Global list of rule+path exclusions. Each entry names a rule ID (glob allowed), a path (matched like a suppression's), an optional scanner and a required reason, and DROPS the matching results from SARIF instead of keeping them marked suppressed: for finding classes that are always benign in a known place, such as bandit B101 under tests/.",
+          "items": {
+            "$ref": "#/$defs/AshExclusion"
+          },
+          "title": "Exclusions",
+          "type": "array"
+        },
+        "history": {
+          "$ref": "#/$defs/AshHistoryConfig",
+          "default": {
+            "enabled": false,
+            "keep_runs": 50
+          },
+          "description": "Run history recording (a compact record of each completed scan)."
+        },
         "ignore_paths": {
           "default": [],
           "description": "Global list of IgnorePaths. Each path requires a reason for ignoring, e.g. 'Folder contains test data only and is not committed'.",
@@ -2404,6 +2439,7 @@
                 "/scanners/detect-secrets/options/baseline_file",
                 "/global_settings/ignore_paths",
                 "/global_settings/suppressions",
+                "/global_settings/exclusions",
                 "/global_settings/mcp",
                 "/global_settings/mcp/**",
                 "/scanners/opengrep/options/exclude_rule",
@@ -2541,6 +2577,130 @@
       "title": "AshConfigGlobalSettingsSection",
       "type": "object"
     },
+    "AshDeduplicationConfig": {
+      "additionalProperties": false,
+      "description": "Cross-scanner duplicate annotation (opt-in).\n\nFindings that two scanners report for one defect are grouped into a\nduplicate cluster (``utils/finding_clusters``). This section only chooses\nwhether the flat reports say so. Finding ids, SARIF results, metrics,\nsuppressions and baselines never change either way.",
+      "properties": {
+        "annotate": {
+          "default": false,
+          "description": "When true, the CSV and flat-JSON reports gain three columns that name each finding's duplicate cluster: `cluster_id`, `duplicate_of` (the primary finding's id, on every non-primary member) and `duplicate_sources` (on the primary: the other members' scanner, rule, id and severity). Rows and counts are unchanged. Off by default because the columns change the CSV header. CLI: `--annotate-duplicates` on `ash scan` and `ash report`.",
+          "title": "Annotate",
+          "type": "boolean"
+        },
+        "fold": {
+          "default": false,
+          "description": "When true, the HTML, Markdown and text reports show one row per duplicate cluster (the primary finding, with a note naming the other scanners that reported it) in their findings tables, detailed findings, finding cards and hotspots, and add deduplicated counts beside, never in place of, the per-scanner counts. Only clusters of the same CVE and package, or the same line and CWE, fold; IaC resource clusters are annotated only. Finding ids, SARIF, per-scanner metrics, suppressions, baselines, the CSV, flat-JSON and JUnit reports and the exit code are unchanged. Off by default because it changes row counts. CLI: `--fold-duplicates` on `ash scan` and `ash report`.",
+          "title": "Fold",
+          "type": "boolean"
+        }
+      },
+      "title": "AshDeduplicationConfig",
+      "type": "object"
+    },
+    "AshExclusion": {
+      "additionalProperties": true,
+      "description": "A rule+path exclusion: a known-benign finding class DROPPED from results.\n\nUnlike a suppression, which keeps the result in SARIF marked ``suppressed``\n(``kind: inSource``), an exclusion removes it, so a class that is always\nbenign in a known place (bandit B101 under ``tests/``, say) does not pile up\nas suppressed noise in SARIF consumers and dashboards (issue #894). And\nunlike an ignore path, it drops only the named rule in the named path, so\nother rules there are still reported.\n\n``rule_id`` and ``path`` are both required, with ``reason``; ``scanner``\noptionally bounds the exclusion to one scanner's results. The path is read\nexactly as a suppression's (``suppression_matcher.file_path_matches``), the\nrule id as a suppression's rule id (exact, case-insensitive, or a glob), and\n``expires`` as every entry's. Applied by\n``sarif_utils.apply_suppressions_to_sarif`` after the ignore-path check and\nbefore the config suppressions; an entry a client-delivered config supplied\n(``client_supplied``) marks the result as a client suppression instead of\ndropping it, so the results show what the client chose to hide. A runtime\noverride of ``/global_settings/exclusions`` is denied\n(``RuntimeOverridesConfig.denied_paths``).",
+      "properties": {
+        "client_supplied": {
+          "default": false,
+          "description": "Set by ASH: True when a config or workspace policy file an MCP client delivered supplied this entry, so results show which suppressions and ignored paths came from the client. A value written in a config file is ignored.",
+          "title": "Client Supplied",
+          "type": "boolean"
+        },
+        "expiration": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "(Optional) Deprecated alias of 'expires', accepted when a config is read and removed in ASH v4; the entry is written and stored as 'expires'.",
+          "title": "Expiration"
+        },
+        "expires": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "(Optional) Expiration date (YYYY-MM-DD). The entry stops applying on this date, by the local clock of the host running the scan. 'expiration' is accepted as a deprecated alias when a config is read; the alias is removed in ASH v4.",
+          "title": "Expires"
+        },
+        "path": {
+          "description": "Path or pattern to exclude",
+          "title": "Path",
+          "type": "string"
+        },
+        "reason": {
+          "description": "Reason for exclusion",
+          "title": "Reason",
+          "type": "string"
+        },
+        "rule_id": {
+          "description": "Rule ID whose findings the exclusion drops. Compared like a suppression's rule_id: the finding's exact id (case-insensitive), or a glob such as 'B1*'.",
+          "title": "Rule Id",
+          "type": "string"
+        },
+        "scanner": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "(Optional) Only drop this scanner's findings, by its registered name (case-insensitive), e.g. 'bandit'. Omit it to drop the rule from any scanner.",
+          "title": "Scanner"
+        }
+      },
+      "required": [
+        "path",
+        "reason",
+        "rule_id"
+      ],
+      "title": "AshExclusion",
+      "type": "object"
+    },
+    "AshHistoryConfig": {
+      "additionalProperties": false,
+      "description": "Run history: a compact record of each completed scan, for ``ash trend``.",
+      "properties": {
+        "enabled": {
+          "default": false,
+          "description": "Append a compact run record to '<output dir>/history/' after each completed scan. Off by default: it adds files to the output directory on every scan.",
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "keep_runs": {
+          "anyOf": [
+            {
+              "maximum": 10000,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
+          "default": 50,
+          "description": "How many run records to keep when history is enabled; the oldest are removed when a new one is written.",
+          "title": "Keep Runs"
+        }
+      },
+      "title": "AshHistoryConfig",
+      "type": "object"
+    },
     "AshMcpConfig": {
       "additionalProperties": false,
       "description": "MCP-server-specific config bundle (transport-agnostic).",
@@ -2569,6 +2729,7 @@
               "/scanners/detect-secrets/options/baseline_file",
               "/global_settings/ignore_paths",
               "/global_settings/suppressions",
+              "/global_settings/exclusions",
               "/global_settings/mcp",
               "/global_settings/mcp/**",
               "/scanners/opengrep/options/exclude_rule",

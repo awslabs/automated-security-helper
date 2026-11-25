@@ -1,0 +1,515 @@
+{
+  "check_type": "cloudformation",
+  "results": {
+    "failed_checks": [
+      {
+        "bc_category": null,
+        "bc_check_id": null,
+        "benchmarks": null,
+        "caller_file_line_range": null,
+        "caller_file_path": null,
+        "check_class": "checkov.cloudformation.checks.resource.aws.S3AccessLogs",
+        "check_id": "CKV_AWS_18",
+        "check_len": null,
+        "check_name": "Ensure the S3 bucket has access logging enabled",
+        "check_result": {
+          "evaluated_keys": [
+            "Properties/LoggingConfiguration"
+          ],
+          "result": "FAILED"
+        },
+        "code_block": [
+          [
+            7,
+            "  InsecureS3Bucket:\n"
+          ],
+          [
+            8,
+            "    Type: 'AWS::S3::Bucket'\n"
+          ],
+          [
+            9,
+            "    Properties:\n"
+          ],
+          [
+            10,
+            "      BucketName: insecure-s3-bucket\n"
+          ]
+        ],
+        "connected_node": null,
+        "definition_context_file_path": null,
+        "description": null,
+        "details": [],
+        "entity_tags": null,
+        "evaluations": {},
+        "file_abs_path": "fixture_repo/insecure-s3-template.yaml",
+        "file_line_range": [
+          7,
+          10
+        ],
+        "file_path": "/insecure-s3-template.yaml",
+        "fixed_definition": null,
+        "guideline": null,
+        "repo_file_path": "/fixture_repo/insecure-s3-template.yaml",
+        "resource": "AWS::S3::Bucket.InsecureS3Bucket",
+        "resource_address": null,
+        "severity": null,
+        "short_description": null,
+        "vulnerability_details": null
+      },
+      {
+        "bc_category": null,
+        "bc_check_id": null,
+        "benchmarks": null,
+        "caller_file_line_range": null,
+        "caller_file_path": null,
+        "check_class": "checkov.cloudformation.checks.resource.aws.S3BlockPublicACLs",
+        "check_id": "CKV_AWS_53",
+        "check_len": null,
+        "check_name": "Ensure S3 bucket has block public ACLs enabled",
+        "check_result": {
+          "evaluated_keys": [
+            "Properties/PublicAccessBlockConfiguration/BlockPublicAcls"
+          ],
+          "result": "FAILED"
+        },
+        "code_block": [
+          [
+            7,
+            "  InsecureS3Bucket:\n"
+          ],
+          [
+            8,
+            "    Type: 'AWS::S3::Bucket'\n"
+          ],
+          [
+            9,
+            "    Properties:\n"
+          ],
+          [
+            10,
+            "      BucketName: insecure-s3-bucket\n"
+          ]
+        ],
+        "connected_node": null,
+        "definition_context_file_path": null,
+        "description": null,
+        "details": [],
+        "entity_tags": null,
+        "evaluations": {},
+        "file_abs_path": "fixture_repo/insecure-s3-template.yaml",
+        "file_line_range": [
+          7,
+          10
+        ],
+        "file_path": "/insecure-s3-template.yaml",
+        "fixed_definition": null,
+        "guideline": null,
+        "repo_file_path": "/fixture_repo/insecure-s3-template.yaml",
+        "resource": "AWS::S3::Bucket.InsecureS3Bucket",
+        "resource_address": null,
+        "severity": null,
+        "short_description": null,
+        "vulnerability_details": null
+      },
+      {
+        "bc_category": null,
+        "bc_check_id": null,
+        "benchmarks": null,
+        "caller_file_line_range": null,
+        "caller_file_path": null,
+        "check_class": "checkov.cloudformation.checks.resource.aws.S3BlockPublicPolicy",
+        "check_id": "CKV_AWS_54",
+        "check_len": null,
+        "check_name": "Ensure S3 bucket has block public policy enabled",
+        "check_result": {
+          "evaluated_keys": [
+            "Properties/PublicAccessBlockConfiguration/BlockPublicPolicy"
+          ],
+          "result": "FAILED"
+        },
+        "code_block": [
+          [
+            7,
+            "  InsecureS3Bucket:\n"
+          ],
+          [
+            8,
+            "    Type: 'AWS::S3::Bucket'\n"
+          ],
+          [
+            9,
+            "    Properties:\n"
+          ],
+          [
+            10,
+            "      BucketName: insecure-s3-bucket\n"
+          ]
+        ],
+        "connected_node": null,
+        "definition_context_file_path": null,
+        "description": null,
+        "details": [],
+        "entity_tags": null,
+        "evaluations": {},
+        "file_abs_path": "fixture_repo/insecure-s3-template.yaml",
+        "file_line_range": [
+          7,
+          10
+        ],
+        "file_path": "/insecure-s3-template.yaml",
+        "fixed_definition": null,
+        "guideline": null,
+        "repo_file_path": "/fixture_repo/insecure-s3-template.yaml",
+        "resource": "AWS::S3::Bucket.InsecureS3Bucket",
+        "resource_address": null,
+        "severity": null,
+        "short_description": null,
+        "vulnerability_details": null
+      },
+      {
+        "bc_category": null,
+        "bc_check_id": null,
+        "benchmarks": null,
+        "caller_file_line_range": null,
+        "caller_file_path": null,
+        "check_class": "checkov.cloudformation.checks.resource.aws.S3IgnorePublicACLs",
+        "check_id": "CKV_AWS_55",
+        "check_len": null,
+        "check_name": "Ensure S3 bucket has ignore public ACLs enabled",
+        "check_result": {
+          "evaluated_keys": [
+            "Properties/PublicAccessBlockConfiguration/IgnorePublicAcls"
+          ],
+          "result": "FAILED"
+        },
+        "code_block": [
+          [
+            7,
+            "  InsecureS3Bucket:\n"
+          ],
+          [
+            8,
+            "    Type: 'AWS::S3::Bucket'\n"
+          ],
+          [
+            9,
+            "    Properties:\n"
+          ],
+          [
+            10,
+            "      BucketName: insecure-s3-bucket\n"
+          ]
+        ],
+        "connected_node": null,
+        "definition_context_file_path": null,
+        "description": null,
+        "details": [],
+        "entity_tags": null,
+        "evaluations": {},
+        "file_abs_path": "fixture_repo/insecure-s3-template.yaml",
+        "file_line_range": [
+          7,
+          10
+        ],
+        "file_path": "/insecure-s3-template.yaml",
+        "fixed_definition": null,
+        "guideline": null,
+        "repo_file_path": "/fixture_repo/insecure-s3-template.yaml",
+        "resource": "AWS::S3::Bucket.InsecureS3Bucket",
+        "resource_address": null,
+        "severity": null,
+        "short_description": null,
+        "vulnerability_details": null
+      },
+      {
+        "bc_category": null,
+        "bc_check_id": null,
+        "benchmarks": null,
+        "caller_file_line_range": null,
+        "caller_file_path": null,
+        "check_class": "checkov.cloudformation.checks.resource.aws.S3RestrictPublicBuckets",
+        "check_id": "CKV_AWS_56",
+        "check_len": null,
+        "check_name": "Ensure S3 bucket has RestrictPublicBuckets enabled",
+        "check_result": {
+          "evaluated_keys": [
+            "Properties/PublicAccessBlockConfiguration/RestrictPublicBuckets"
+          ],
+          "result": "FAILED"
+        },
+        "code_block": [
+          [
+            7,
+            "  InsecureS3Bucket:\n"
+          ],
+          [
+            8,
+            "    Type: 'AWS::S3::Bucket'\n"
+          ],
+          [
+            9,
+            "    Properties:\n"
+          ],
+          [
+            10,
+            "      BucketName: insecure-s3-bucket\n"
+          ]
+        ],
+        "connected_node": null,
+        "definition_context_file_path": null,
+        "description": null,
+        "details": [],
+        "entity_tags": null,
+        "evaluations": {},
+        "file_abs_path": "fixture_repo/insecure-s3-template.yaml",
+        "file_line_range": [
+          7,
+          10
+        ],
+        "file_path": "/insecure-s3-template.yaml",
+        "fixed_definition": null,
+        "guideline": null,
+        "repo_file_path": "/fixture_repo/insecure-s3-template.yaml",
+        "resource": "AWS::S3::Bucket.InsecureS3Bucket",
+        "resource_address": null,
+        "severity": null,
+        "short_description": null,
+        "vulnerability_details": null
+      },
+      {
+        "bc_category": null,
+        "bc_check_id": null,
+        "benchmarks": null,
+        "caller_file_line_range": null,
+        "caller_file_path": null,
+        "check_class": "checkov.cloudformation.checks.resource.aws.S3Versioning",
+        "check_id": "CKV_AWS_21",
+        "check_len": null,
+        "check_name": "Ensure the S3 bucket has versioning enabled",
+        "check_result": {
+          "evaluated_keys": [
+            "Properties/VersioningConfiguration/Status"
+          ],
+          "result": "FAILED"
+        },
+        "code_block": [
+          [
+            7,
+            "  InsecureS3Bucket:\n"
+          ],
+          [
+            8,
+            "    Type: 'AWS::S3::Bucket'\n"
+          ],
+          [
+            9,
+            "    Properties:\n"
+          ],
+          [
+            10,
+            "      BucketName: insecure-s3-bucket\n"
+          ]
+        ],
+        "connected_node": null,
+        "definition_context_file_path": null,
+        "description": null,
+        "details": [],
+        "entity_tags": null,
+        "evaluations": {},
+        "file_abs_path": "fixture_repo/insecure-s3-template.yaml",
+        "file_line_range": [
+          7,
+          10
+        ],
+        "file_path": "/insecure-s3-template.yaml",
+        "fixed_definition": null,
+        "guideline": null,
+        "repo_file_path": "/fixture_repo/insecure-s3-template.yaml",
+        "resource": "AWS::S3::Bucket.InsecureS3Bucket",
+        "resource_address": null,
+        "severity": null,
+        "short_description": null,
+        "vulnerability_details": null
+      }
+    ],
+    "parsing_errors": [],
+    "passed_checks": [
+      {
+        "bc_category": null,
+        "bc_check_id": null,
+        "benchmarks": null,
+        "caller_file_line_range": null,
+        "caller_file_path": null,
+        "check_class": "checkov.cloudformation.checks.resource.aws.S3Encryption",
+        "check_id": "CKV_AWS_19",
+        "check_len": null,
+        "check_name": "Ensure the S3 bucket has server-side-encryption enabled",
+        "check_result": {
+          "evaluated_keys": [
+            "Properties/BucketEncryption/ServerSideEncryptionConfiguration/[0]/ServerSideEncryptionByDefault/SSEAlgorithm"
+          ],
+          "result": "PASSED"
+        },
+        "code_block": [
+          [
+            7,
+            "  InsecureS3Bucket:\n"
+          ],
+          [
+            8,
+            "    Type: 'AWS::S3::Bucket'\n"
+          ],
+          [
+            9,
+            "    Properties:\n"
+          ],
+          [
+            10,
+            "      BucketName: insecure-s3-bucket\n"
+          ]
+        ],
+        "connected_node": null,
+        "definition_context_file_path": null,
+        "description": null,
+        "details": [],
+        "entity_tags": null,
+        "evaluations": {},
+        "file_abs_path": "fixture_repo/insecure-s3-template.yaml",
+        "file_line_range": [
+          7,
+          10
+        ],
+        "file_path": "/insecure-s3-template.yaml",
+        "fixed_definition": null,
+        "guideline": null,
+        "repo_file_path": "/fixture_repo/insecure-s3-template.yaml",
+        "resource": "AWS::S3::Bucket.InsecureS3Bucket",
+        "resource_address": null,
+        "severity": null,
+        "short_description": null,
+        "vulnerability_details": null
+      },
+      {
+        "bc_category": null,
+        "bc_check_id": null,
+        "benchmarks": null,
+        "caller_file_line_range": null,
+        "caller_file_path": null,
+        "check_class": "checkov.cloudformation.checks.resource.aws.S3PublicACLRead",
+        "check_id": "CKV_AWS_20",
+        "check_len": null,
+        "check_name": "Ensure the S3 bucket does not allow READ permissions to everyone",
+        "check_result": {
+          "evaluated_keys": [
+            "Properties/AccessControl"
+          ],
+          "result": "PASSED"
+        },
+        "code_block": [
+          [
+            7,
+            "  InsecureS3Bucket:\n"
+          ],
+          [
+            8,
+            "    Type: 'AWS::S3::Bucket'\n"
+          ],
+          [
+            9,
+            "    Properties:\n"
+          ],
+          [
+            10,
+            "      BucketName: insecure-s3-bucket\n"
+          ]
+        ],
+        "connected_node": null,
+        "definition_context_file_path": null,
+        "description": null,
+        "details": [],
+        "entity_tags": null,
+        "evaluations": {},
+        "file_abs_path": "fixture_repo/insecure-s3-template.yaml",
+        "file_line_range": [
+          7,
+          10
+        ],
+        "file_path": "/insecure-s3-template.yaml",
+        "fixed_definition": null,
+        "guideline": null,
+        "repo_file_path": "/fixture_repo/insecure-s3-template.yaml",
+        "resource": "AWS::S3::Bucket.InsecureS3Bucket",
+        "resource_address": null,
+        "severity": null,
+        "short_description": null,
+        "vulnerability_details": null
+      },
+      {
+        "bc_category": null,
+        "bc_check_id": null,
+        "benchmarks": null,
+        "caller_file_line_range": null,
+        "caller_file_path": null,
+        "check_class": "checkov.cloudformation.checks.resource.aws.S3PublicACLWrite",
+        "check_id": "CKV_AWS_57",
+        "check_len": null,
+        "check_name": "Ensure the S3 bucket does not allow WRITE permissions to everyone",
+        "check_result": {
+          "evaluated_keys": [
+            "Properties/AccessControl"
+          ],
+          "result": "PASSED"
+        },
+        "code_block": [
+          [
+            7,
+            "  InsecureS3Bucket:\n"
+          ],
+          [
+            8,
+            "    Type: 'AWS::S3::Bucket'\n"
+          ],
+          [
+            9,
+            "    Properties:\n"
+          ],
+          [
+            10,
+            "      BucketName: insecure-s3-bucket\n"
+          ]
+        ],
+        "connected_node": null,
+        "definition_context_file_path": null,
+        "description": null,
+        "details": [],
+        "entity_tags": null,
+        "evaluations": {},
+        "file_abs_path": "fixture_repo/insecure-s3-template.yaml",
+        "file_line_range": [
+          7,
+          10
+        ],
+        "file_path": "/insecure-s3-template.yaml",
+        "fixed_definition": null,
+        "guideline": null,
+        "repo_file_path": "/fixture_repo/insecure-s3-template.yaml",
+        "resource": "AWS::S3::Bucket.InsecureS3Bucket",
+        "resource_address": null,
+        "severity": null,
+        "short_description": null,
+        "vulnerability_details": null
+      }
+    ],
+    "skipped_checks": []
+  },
+  "summary": {
+    "checkov_version": "3.4.6",
+    "failed": 6,
+    "parsing_errors": 0,
+    "passed": 3,
+    "resource_count": 1,
+    "skipped": 0
+  },
+  "url": "Add an api key '--bc-api-key <api-key>' to see more detailed insights via https://bridgecrew.cloud"
+}

@@ -79,7 +79,11 @@ class CdkNagWrapperResponse:
     the signal is carried explicitly rather than inferred from ``results`` being empty -- an
     emptiness check would work today only because a genuinely clean pack yields
     ``{pack: []}`` rather than ``{}``, which is exactly the kind of invariant that gets broken
-    later without anything failing.
+    later without anything failing. And it was broken, upstream: since aws-cdk-lib 2.258.0
+    (aws/aws-cdk#38009) a pack that evaluated the template and found nothing writes no report
+    entry at all, so the ``{pack: []}`` shape for a clean evaluation is re-materialized from
+    the wrapper's own record of the pack's completed ``validate()`` -- see
+    :func:`_build_nag_pack` and :func:`_violations_from_validation_report`.
     """
 
     def __init__(
@@ -98,7 +102,9 @@ class CdkNagWrapperResponse:
 _env_lock = threading.Lock()
 
 
-def _build_nag_pack(pack_name: str):
+def _build_nag_pack(
+    pack_name: str, validate_outcomes: Dict[str, Dict[str, object]] | None = None
+):
     """Construct one nag pack by class name.
 
     Extracted to module level so a test can assert that the keyword arguments passed here are
@@ -110,13 +116,86 @@ def _build_nag_pack(pack_name: str):
     has exactly ``verbose`` and ``writeSuppressionsToCloudFormation``. Earlier majors also
     accepted ``reports`` and ``reportFormats``, which drove a file-based report; v3 replaced
     that with CDK's policy validation report, so passing them now raises TypeError.
+
+    With ``validate_outcomes``, the pack is built as a subclass whose ``validate`` records
+    what the pack's own run did -- whether CDK called it, whether it raised, and the success
+    flag and violation count of the report it returned -- keyed by the name the pack reports
+    under. That record is the only evidence that a pack evaluated a COMPLIANT template:
+    since aws-cdk-lib 2.258.0 (aws/aws-cdk#38009) ``buildPluginReports`` omits every plugin
+    that succeeded with zero violations and nothing suppressed, so such a pack writes no
+    ``pluginReports[]`` entry at all and the report alone cannot tell "evaluated, found
+    nothing" from "never ran". The subclass changes no argument and no return value, keeps
+    the pack's reported name and class name (``type(pack).__name__`` reaches logs and
+    assertions), and records nothing it cannot read: an unreadable report leaves the entry
+    without its success flag, which the report reader treats as no evidence (fail closed,
+    see :func:`_violations_from_validation_report`).
     """
     import cdk_nag
 
     pack_type = getattr(cdk_nag, pack_name, None)
     if pack_type is None:
         raise ValueError(f"Unknown cdk-nag pack: {pack_name}")
-    return pack_type(verbose=True)
+    if validate_outcomes is None:
+        return pack_type(verbose=True)
+    outcomes = validate_outcomes
+
+    class _RecordingPack(pack_type):
+        def validate(self, context):
+            entry: Dict[str, object] = {
+                "returned": False,
+                "success": None,
+                "violations": None,
+                "raised": None,
+            }
+            key = _plugin_report_name(self)
+            if key is not None:
+                outcomes[key] = entry
+            try:
+                report = super().validate(context)
+            except Exception as exc:
+                # CDK catches a plugin that throws and records a failed entry for
+                # it; the record here only says this pack cannot stand in as a
+                # clean evaluation.
+                entry["raised"] = type(exc).__name__
+                raise
+            _record_validate_outcome(entry, report)
+            return report
+
+    _RecordingPack.__name__ = pack_type.__name__
+    _RecordingPack.__qualname__ = pack_type.__qualname__
+    return _RecordingPack(verbose=True)
+
+
+def _record_validate_outcome(entry: Dict[str, object], report) -> None:
+    """Fold what one pack's ``validate()`` returned into the pack's outcome entry.
+
+    ``returned`` is set unconditionally: the call came back instead of raising. The
+    success flag and the violation count are set only when BOTH could be read off the
+    report object, because the reader of these records takes "returned success with
+    zero violations" as evidence that the pack evaluated the template -- evidence that
+    must not be minted from a report this function could not actually read. A report
+    whose fields raise, whose ``success`` is not a bool, or whose ``violations`` has no
+    length leaves the entry as it was: returned, unproven, so the pack still fails
+    closed downstream. ``violations=None`` counts as zero, matching how the report
+    file's own null violations entry is read.
+    """
+    entry["returned"] = True
+    try:
+        success = report.success
+        violations = report.violations
+    except Exception:
+        return
+    if not isinstance(success, bool):
+        return
+    if violations is None:
+        count = 0
+    else:
+        try:
+            count = len(violations)
+        except TypeError:
+            return
+    entry["success"] = success
+    entry["violations"] = count
 
 
 def _plugin_report_name(plugin) -> str | None:
@@ -1018,6 +1097,7 @@ def _violations_from_validation_report(
     expected_plugins: Sequence[str] | None = None,
     every_requested_named: bool = True,
     unnamed_requested: int = 0,
+    validate_outcomes: Mapping[str, Mapping] | None = None,
 ) -> tuple[Dict[str, List["_NagFinding"]], str | None]:
     """Read CDK's policy validation report into per-pack normalized finding dicts.
 
@@ -1047,6 +1127,20 @@ def _violations_from_validation_report(
     of them only if its name is neither a requested name nor CDK's own plugin's, and fewer
     such entries than nameless packs means a requested pack has no entry. With enough of
     them the match is assumed and said at WARNING, since the names cannot be paired.
+
+    The presence check has one admission, and it exists because "no entry" stopped meaning
+    "never ran": since aws-cdk-lib 2.258.0 (aws/aws-cdk#38009) ``buildPluginReports`` omits
+    every plugin that succeeded with zero violations and nothing suppressed, so the requested
+    pack of a COMPLIANT template writes no entry at all and an all-clean template's report is
+    ``{"pluginReports": []}``. ``validate_outcomes`` is the wrapper's own record of what each
+    requested pack's ``validate()`` did (written by the recording subclass
+    :func:`_build_nag_pack` registers, keyed by reported name): a requested pack with no
+    entry whose record shows it RETURNED success with zero violations evaluated the template,
+    and it stands in the returned mapping as ``{pack: []}``, the compliant evaluation's own
+    shape. Everything else fails closed exactly as before -- no record, a ``validate()`` that
+    raised, a non-success return, an unreadable report object, and a recorded success whose
+    violations the file then failed to carry (they would be LOST, not absent) all leave the
+    pack missing.
 
     Replaces the ``*-NagReport.json`` reader used with cdk-nag 2.x. In v3 the packs are
     ``IPolicyValidationPlugin`` implementations rather than aspects, and their output lands in
@@ -1322,18 +1416,51 @@ def _violations_from_validation_report(
     ASH_LOGGER.debug(
         f"cdk-nag validation report: {len(per_pack)} pack(s), {total} violation record(s)"
     )
-    if not seen_names:
-        # The report parsed but held no plugin entry. Every registered pack writes an
-        # entry even when it found nothing -- a compliant template yields ``{pack: []}``,
-        # not ``{}`` -- so no entry at all means no pack reported, which is not a clean
-        # scan either. Decided on the entries read, not on ``per_pack`` and
-        # ``failed_packs``: a failed pack leaves no entry in the mapping, and an
-        # unrequested plugin's failure is logged without joining ``failed_packs``, so
-        # a report whose only entries were unrequested failures read as holding no
-        # plugin reports, and the requested pack it lacked went unnamed; that case
-        # falls through to ``missing`` below, which names it.
+    # A requested pack with no entry did not necessarily skip the template: since
+    # aws-cdk-lib 2.258.0 (aws/aws-cdk#38009) ``buildPluginReports`` omits every
+    # plugin that succeeded with zero violations and nothing suppressed, so the
+    # report alone cannot tell "evaluated, found nothing" from "never ran". The
+    # wrapper's own record of what the pack's ``validate()`` returned can: a pack
+    # recorded as having returned success with zero violations evaluated the
+    # template, and it stands in ``per_pack`` under the compliant evaluation's own
+    # shape, ``{pack: []}``. Anything less -- no record, a raise, a non-success
+    # return, an unreadable report object, or a recorded success whose violations
+    # the file then failed to carry (they would be LOST, not absent) -- stands in
+    # nothing, and ``missing`` below names the pack as before.
+    for name in expected_plugins or ():
+        if name in seen_names or name in per_pack or name in failed_names:
+            continue
+        outcome = (validate_outcomes or {}).get(name)
+        if (
+            outcome is not None
+            and outcome.get("returned") is True
+            and outcome.get("success") is True
+            and outcome.get("violations") == 0
+        ):
+            per_pack[name] = []
+            ASH_LOGGER.debug(
+                f"cdk-nag pack '{name}' wrote no entry into {report_path} and its "
+                "own validate() returned success with zero violations: the pack "
+                "evaluated this template and found nothing (aws-cdk-lib omits a "
+                "clean plugin's report entry since 2.258.0)"
+            )
+    if not seen_names and not per_pack:
+        # The report parsed but held no plugin entry, and no requested pack's own
+        # completion record stands in above. Up to aws-cdk-lib 2.257.x every
+        # registered pack wrote an entry even when it found nothing, so a compliant
+        # template yielded ``{pack: []}``, never ``{}``; since 2.258.0 a clean
+        # pack's entry is omitted, which is why the stand-in exists -- but with no
+        # entry read AND no completion evidence, nothing says any pack ran, and
+        # that is not a clean scan. Decided on the entries read plus the
+        # stand-ins, not on ``failed_packs``: a failed pack leaves no entry in the
+        # mapping, and an unrequested plugin's failure is logged without joining
+        # ``failed_packs``, so a report whose only entries were unrequested
+        # failures read as holding no plugin reports, and the requested pack it
+        # lacked went unnamed; that case falls through to ``missing`` below, which
+        # names it.
         reason = (
-            f"cdk-nag validation report {report_path} contains no plugin reports. No pack "
+            f"cdk-nag validation report {report_path} contains no plugin reports, and "
+            "no requested pack's own run shows it evaluated this template. No pack "
             "evaluated this template."
         )
         ASH_LOGGER.error(reason)
@@ -1397,6 +1524,192 @@ def _violations_from_validation_report(
         ASH_LOGGER.error(_reason(failed_labels))
         return per_pack, _reason(failed_packs)
     return per_pack, None
+
+
+def build_nag_results(
+    cdk_nag_report_lines: Dict[str, List[_NagFinding]],
+    model,
+    template_path,
+    template_lines: List[str],
+    *,
+    include_compliant_checks: bool = False,
+    honor_template_suppressions: bool = True,
+) -> Dict[str, List[Result]]:
+    """The SARIF results of a template's cdk-nag findings, per pack.
+
+    The pure half of :func:`run_cdk_nag_against_cfn_template`: everything after
+    the CDK synth has produced findings. Separated so conformance tests can
+    drive the mapping over committed findings and templates without a CDK app,
+    a node process or an installed cdk-nag (the way
+    ``CfnGuardScanner.normalize_results`` is driven). ``model`` is the parsed
+    template (:func:`~automated_security_helper.utils.cfn_template_model.get_model_from_template_text`)
+    and ``template_lines`` its text, both of which the synth path already holds.
+    No tool is run and nothing outside the arguments is read.
+    """
+    results: Dict[str, List[Result]] = {}
+
+    # Once per template, guarded as the two sites above are: the per-finding loop
+    # was the one call of get_shortest_name with no handler, so a template whose
+    # path merely starts with the working directory's name (a sibling directory)
+    # raised ValueError there and lost every finding it had.
+    cfn_file_rel_path = Path(template_path).as_posix()
+    try:
+        cfn_file_rel_path = str(get_shortest_name(input=template_path))
+    except Exception as e:
+        ASH_LOGGER.debug(f"Could not get relative path to template: {e}")
+
+    # One read of the template for every finding of it; the per-finding
+    # search re-read the whole file per rule, under the environment lock
+    # and inside the worker's scan timeout.
+    locations = _TemplateLocations(template_lines)
+
+    for pack_name, report_lines in cdk_nag_report_lines.items():
+        if pack_name not in results:
+            results[pack_name] = []
+        line: _NagFinding
+        for line in report_lines:
+            if line.compliance == "Compliant" and not include_compliant_checks:
+                ASH_LOGGER.debug(f"Skipping compliant check: {line.rule_id}")
+                continue
+
+            # Under CfnInclude the construct path is
+            # "<stack>/<template>/<LogicalId>", so the last segment is the template's
+            # own logical ID -- the same property 2.x's resourceId had, which is why
+            # the lookup and line-number search below are unchanged.
+            resource_log_id = line.resource_id.split("/")[-1]
+
+            # The URIs name the template absolutely, as the template path the
+            # scanner passes does. get_shortest_name is relative to the working
+            # directory, so with ASH run from an ancestor of the source
+            # directory a URI read "proj/t.yaml", which the path sanitizer then
+            # took as relative to the source directory. An absolute URI is made
+            # relative to the source directory there, wherever ASH runs.
+            cfn_file_uri = Path(os.path.abspath(template_path)).as_posix()
+            cfn_resource_matches = [
+                item
+                for resource_id, item in model.Resources.items()
+                if resource_id == resource_log_id
+            ]
+            if not cfn_resource_matches:
+                # Said out loud, as the construct-less case is: a finding that
+                # cannot be placed on a resource of this template is not reported,
+                # and silence here let a template read clean.
+                ASH_LOGGER.warning(
+                    f"cdk-nag rule '{line.rule_id}' cites construct "
+                    f"'{line.resource_id}', whose logical id is not a resource of "
+                    f"{cfn_file_rel_path}, so that finding is not reported"
+                )
+                continue
+            cfn_resource = cfn_resource_matches[0]
+            resource_line, resource_column = locations.of(resource_log_id)
+            start_column, end_column = _sarif_columns(resource_column, resource_log_id)
+
+            cfn_resource_dict = {
+                "Resources": {resource_log_id: cfn_resource.model_dump(by_alias=True)}
+            }
+            level, kind = _level_and_kind(
+                compliance=line.compliance,
+                rule_level=line.rule_level,
+                exception_reason=line.exception_reason,
+            )
+            # The template may already say why this finding is accepted. See
+            # _template_suppression_reason: cdk-nag 3.x cannot read its own in-band
+            # suppressions back off a template it is re-scanning, so if this is not
+            # done here the author's reason is never applied to anything. A row
+            # whose rule never ran gets none (_suppression_for_finding).
+            template_suppression = _suppression_for_finding(
+                line, cfn_resource, honor_template_suppressions
+            )
+            if template_suppression is not None:
+                # Styles its reason, so it asks for markup and escapes
+                # every value: all four come from the template.
+                ASH_LOGGER.verbose(
+                    f"Suppressing rule '{escape_markup(line.rule_id)}' on "
+                    f"resource '{escape_markup(resource_log_id)}' in "
+                    f"'{escape_markup(cfn_file_rel_path)}' based on the "
+                    f"template's own cdk_nag metadata: "
+                    f"[yellow]{escape_markup(template_suppression)}[/yellow]",
+                    extra=MARKUP,
+                )
+            finding = Result(
+                suppressions=(
+                    [
+                        Suppression(
+                            kind=Kind1.inSource,
+                            justification=(
+                                "(ASH cdk-nag in-template suppression) "
+                                f"{template_suppression}"
+                            ),
+                        )
+                    ]
+                    if template_suppression is not None
+                    else None
+                ),
+                properties=PropertyBag(
+                    cdk_nag_finding=line.as_dict(),
+                    cfn_resource=cfn_resource_dict,
+                    # The universal resource-identity contract for
+                    # resource-scoped suppressions (utils/
+                    # package_identity.py): the construct path and the
+                    # CloudFormation type, as flat keys any reader can
+                    # take without knowing cdk-nag's own bag.
+                    ash_resource_id=line.resource_id,
+                    ash_resource_type=cfn_resource.Type,
+                    tags=[
+                        "aws",
+                        "cdk",
+                        "cdk-nag",
+                        pack_name or "unknown",
+                        line.rule_id,
+                        resource_log_id,
+                        cfn_resource.Type,
+                        "tool_name::cdk-nag",
+                        "tool_type::IAC",
+                    ],
+                ),
+                ruleId=line.rule_id,
+                level=level,
+                kind=kind,
+                message=Message(
+                    root=Message1(text=_result_message_text(line, cfn_file_rel_path))
+                ),
+                analysisTarget=ArtifactLocation(
+                    uri=cfn_file_uri,
+                ),
+                locations=[
+                    Location(
+                        id=1,
+                        physicalLocation=PhysicalLocation(
+                            root=PhysicalLocation2(
+                                artifactLocation=ArtifactLocation(
+                                    uri=cfn_file_uri,
+                                ),
+                                region=Region(
+                                    startLine=(resource_line or 1),
+                                    endLine=(resource_line or 1),
+                                    startColumn=start_column,
+                                    endColumn=end_column,
+                                    snippet=ArtifactContent(
+                                        text=dump_yaml(
+                                            {
+                                                "Resources": {
+                                                    resource_log_id: cfn_resource.model_dump(
+                                                        by_alias=True
+                                                    )
+                                                }
+                                            }
+                                        )
+                                    ),
+                                ),
+                            ),
+                        ),
+                    )
+                ],
+            )
+
+            results[pack_name].append(finding)
+
+    return results
 
 
 def run_cdk_nag_against_cfn_template(
@@ -1769,6 +2082,12 @@ def run_cdk_nag_against_cfn_template(
             # failure could not be told from an unrequested plugin's.
             registered_plugin_names: List[str] = []
             unnamed_requested = 0
+            # What each requested pack's validate() did, written by the recording
+            # subclass _build_nag_pack registers and read by the report reader:
+            # since aws-cdk-lib 2.258.0 a pack that evaluated the template and
+            # found nothing writes no report entry, so this record is the only
+            # evidence a compliant template was evaluated at all.
+            validate_outcomes: Dict[str, Dict[str, object]] = {}
             for pack in nag_packs:
                 if pack not in nag_pack_lookup:
                     raise KeyError(
@@ -1776,7 +2095,7 @@ def run_cdk_nag_against_cfn_template(
                         f"{sorted(nag_pack_lookup)}"
                     )
                 ASH_LOGGER.debug(f"Adding nag pack '{pack}'")
-                plugin = _build_nag_pack(pack)
+                plugin = _build_nag_pack(pack, validate_outcomes)
                 Validations.of(app).add_plugins(plugin)
                 plugin_name = _plugin_report_name(plugin)
                 if plugin_name is not None:
@@ -1846,8 +2165,6 @@ def run_cdk_nag_against_cfn_template(
             ]
             ASH_LOGGER.debug(json.dumps(included, default=str, indent=2))
 
-            results: Dict[str, List[Result]] = {}
-
             # cdk-nag 3.x reports through CDK's policy validation framework, which writes a
             # single validation-report.json rather than the per-pack *-NagReport.json files
             # 2.x produced. Globbing for those files against a v3 install finds nothing and
@@ -1858,177 +2175,20 @@ def run_cdk_nag_against_cfn_template(
                 expected_plugins=registered_plugin_names,
                 every_requested_named=every_requested_named,
                 unnamed_requested=unnamed_requested,
+                validate_outcomes=validate_outcomes,
             )
 
             if not cdk_nag_report_lines:
                 ASH_LOGGER.debug(f"cdk-nag reported no violations for {template_path}")
 
-            # Once per template, guarded as the two sites above are: the per-finding loop
-            # was the one call of get_shortest_name with no handler, so a template whose
-            # path merely starts with the working directory's name (a sibling directory)
-            # raised ValueError there and lost every finding it had.
-            cfn_file_rel_path = Path(template_path).as_posix()
-            try:
-                cfn_file_rel_path = str(get_shortest_name(input=template_path))
-            except Exception as e:
-                ASH_LOGGER.debug(f"Could not get relative path to template: {e}")
-
-            # One read of the template for every finding of it; the per-finding
-            # search re-read the whole file per rule, under the environment lock
-            # and inside the worker's scan timeout.
-            locations = _TemplateLocations(template_lines)
-
-            for pack_name, report_lines in cdk_nag_report_lines.items():
-                if pack_name not in results:
-                    results[pack_name] = []
-                line: _NagFinding
-                for line in report_lines:
-                    if line.compliance == "Compliant" and not include_compliant_checks:
-                        ASH_LOGGER.debug(f"Skipping compliant check: {line.rule_id}")
-                        continue
-
-                    # Under CfnInclude the construct path is
-                    # "<stack>/<template>/<LogicalId>", so the last segment is the template's
-                    # own logical ID -- the same property 2.x's resourceId had, which is why
-                    # the lookup and line-number search below are unchanged.
-                    resource_log_id = line.resource_id.split("/")[-1]
-
-                    # The URIs name the template absolutely, as the template path the
-                    # scanner passes does. get_shortest_name is relative to the working
-                    # directory, so with ASH run from an ancestor of the source
-                    # directory a URI read "proj/t.yaml", which the path sanitizer then
-                    # took as relative to the source directory. An absolute URI is made
-                    # relative to the source directory there, wherever ASH runs.
-                    cfn_file_uri = Path(os.path.abspath(template_path)).as_posix()
-                    cfn_resource_matches = [
-                        item
-                        for resource_id, item in model.Resources.items()
-                        if resource_id == resource_log_id
-                    ]
-                    if not cfn_resource_matches:
-                        # Said out loud, as the construct-less case is: a finding that
-                        # cannot be placed on a resource of this template is not reported,
-                        # and silence here let a template read clean.
-                        ASH_LOGGER.warning(
-                            f"cdk-nag rule '{line.rule_id}' cites construct "
-                            f"'{line.resource_id}', whose logical id is not a resource of "
-                            f"{cfn_file_rel_path}, so that finding is not reported"
-                        )
-                        continue
-                    cfn_resource = cfn_resource_matches[0]
-                    resource_line, resource_column = locations.of(resource_log_id)
-                    start_column, end_column = _sarif_columns(
-                        resource_column, resource_log_id
-                    )
-
-                    cfn_resource_dict = {
-                        "Resources": {
-                            resource_log_id: cfn_resource.model_dump(by_alias=True)
-                        }
-                    }
-                    level, kind = _level_and_kind(
-                        compliance=line.compliance,
-                        rule_level=line.rule_level,
-                        exception_reason=line.exception_reason,
-                    )
-                    # The template may already say why this finding is accepted. See
-                    # _template_suppression_reason: cdk-nag 3.x cannot read its own in-band
-                    # suppressions back off a template it is re-scanning, so if this is not
-                    # done here the author's reason is never applied to anything. A row
-                    # whose rule never ran gets none (_suppression_for_finding).
-                    template_suppression = _suppression_for_finding(
-                        line, cfn_resource, honor_template_suppressions
-                    )
-                    if template_suppression is not None:
-                        # Styles its reason, so it asks for markup and escapes
-                        # every value: all four come from the template.
-                        ASH_LOGGER.verbose(
-                            f"Suppressing rule '{escape_markup(line.rule_id)}' on "
-                            f"resource '{escape_markup(resource_log_id)}' in "
-                            f"'{escape_markup(cfn_file_rel_path)}' based on the "
-                            f"template's own cdk_nag metadata: "
-                            f"[yellow]{escape_markup(template_suppression)}[/yellow]",
-                            extra=MARKUP,
-                        )
-                    finding = Result(
-                        suppressions=(
-                            [
-                                Suppression(
-                                    kind=Kind1.inSource,
-                                    justification=(
-                                        "(ASH cdk-nag in-template suppression) "
-                                        f"{template_suppression}"
-                                    ),
-                                )
-                            ]
-                            if template_suppression is not None
-                            else None
-                        ),
-                        properties=PropertyBag(
-                            cdk_nag_finding=line.as_dict(),
-                            cfn_resource=cfn_resource_dict,
-                            # The universal resource-identity contract for
-                            # resource-scoped suppressions (utils/
-                            # package_identity.py): the construct path and the
-                            # CloudFormation type, as flat keys any reader can
-                            # take without knowing cdk-nag's own bag.
-                            ash_resource_id=line.resource_id,
-                            ash_resource_type=cfn_resource.Type,
-                            tags=[
-                                "aws",
-                                "cdk",
-                                "cdk-nag",
-                                pack_name or "unknown",
-                                line.rule_id,
-                                resource_log_id,
-                                cfn_resource.Type,
-                                "tool_name::cdk-nag",
-                                "tool_type::IAC",
-                            ],
-                        ),
-                        ruleId=line.rule_id,
-                        level=level,
-                        kind=kind,
-                        message=Message(
-                            root=Message1(
-                                text=_result_message_text(line, cfn_file_rel_path)
-                            )
-                        ),
-                        analysisTarget=ArtifactLocation(
-                            uri=cfn_file_uri,
-                        ),
-                        locations=[
-                            Location(
-                                id=1,
-                                physicalLocation=PhysicalLocation(
-                                    root=PhysicalLocation2(
-                                        artifactLocation=ArtifactLocation(
-                                            uri=cfn_file_uri,
-                                        ),
-                                        region=Region(
-                                            startLine=(resource_line or 1),
-                                            endLine=(resource_line or 1),
-                                            startColumn=start_column,
-                                            endColumn=end_column,
-                                            snippet=ArtifactContent(
-                                                text=dump_yaml(
-                                                    {
-                                                        "Resources": {
-                                                            resource_log_id: cfn_resource.model_dump(
-                                                                by_alias=True
-                                                            )
-                                                        }
-                                                    }
-                                                )
-                                            ),
-                                        ),
-                                    ),
-                                ),
-                            )
-                        ],
-                    )
-
-                    results[pack_name].append(finding)
+            results = build_nag_results(
+                cdk_nag_report_lines,
+                model,
+                template_path,
+                template_lines,
+                include_compliant_checks=include_compliant_checks,
+                honor_template_suppressions=honor_template_suppressions,
+            )
 
             return CdkNagWrapperResponse(
                 results=results,

@@ -224,14 +224,20 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
             native_field="tool.driver.rules[].properties.tags (CWE entries)",
         ),
         fingerprints=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field='results[].fingerprints."matchBasedId/v1"',
+            state=FacetState.NA,
+            reason="semgrep OSS writes the placeholder 'requires login' as "
+            'results[].fingerprints."matchBasedId/v1" (the committed capture '
+            "shows it), which the finding-identity reader discards; a real "
+            "match-based id needs semgrep's logged-in engine, and the "
+            "opengrep fork is the build that emits one",
         ),
         fix_available=FacetDecl(
-            state=FacetState.DROPPED,
-            native_field="results[].fixes",
-            reason="SARIF fixes survive the report model and die at the flat "
-            "reader, which reads only fix_available",
+            state=FacetState.NA,
+            reason="semgrep 1.187.0's SARIF has no fixes key even for a rule "
+            "that carries `fix:` (tests/test_data/scanners/semgrep/captured/"
+            "semgrep-1.187.0-fix-rule.sarif: result keys are exactly "
+            "fingerprints, locations, message, properties, ruleId), so there "
+            "is nothing in the SARIF ASH reads to map",
         ),
         remediation_text=FacetDecl(
             state=FacetState.NA,
@@ -243,12 +249,19 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
             native_field="results[].locations[].physicalLocation.region.snippet.text",
         ),
         references=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="tool.driver.rules[].helpUri",
+            state=FacetState.UNCONFIRMED,
+            reason="UNCONFIRMED: the committed captures are local-rule runs, "
+            "whose SARIF rules carry no helpUri. A registry rule's helpUri "
+            "is read into the flat references by the shared rule read "
+            "(FlatVulnerability.from_sarif_result); redeclare MAPPED when a "
+            "registry-rule capture is committed (the corpus gate lists this "
+            "cell as a fixture owed until then)",
         ),
         tags=FacetDecl(
             state=FacetState.MAPPED,
-            native_field="tool.driver.rules[].properties.tags",
+            native_field="tool.driver.rules[].properties.tags, read into the "
+            "flat tags when the result carries none (they also feed the CWE "
+            "read)",
         ),
         extras=FacetDecl(
             state=FacetState.MAPPED,
@@ -279,11 +292,12 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
                 content_database="semgrep-offline-rules",
                 source=(
                     "semgrep_scanner.py sandbox_requirements and default rulesets; "
-                    "_grep_scanner_base.py offline_strategy; utils/content_databases.py"
-                ),
-                unconfirmed=(
-                    "whether metrics 'auto' sends metrics on every registry-rules run at "
-                    "the pinned version; one semgrep documentation read settles it"
+                    "_grep_scanner_base.py offline_strategy and metrics_value_online "
+                    "('auto' in online mode); utils/content_databases.py; online runs "
+                    "send metrics: `semgrep scan --help` (1.180.0) says --metrics 'auto' "
+                    "sends metrics whenever the --config value pulls from the Semgrep "
+                    "server or the user is logged in, and the default rulesets are "
+                    "registry configs"
                 ),
             ),
             output=opsf.OutputFacet(
@@ -319,12 +333,12 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
                     opsf.SilencingLayer(
                         layer=opsf.SilencingLayerKind.INLINE_COMMENT,
                         writer=opsf.SilencingWriter.REPOSITORY,
-                        honored=opsf.Honored.UNCONFIRMED,
+                        honored=opsf.Honored.YES,
                         surface="nosemgrep comments",
-                        cite="tool feature; _grep_scanner_base.py was not read for an ASH-side switch",
-                        reason=(
-                            "whether ASH leaves nosemgrep on was not read at the adapter; "
-                            "one adapter read settles it"
+                        cite=(
+                            "_grep_scanner_base.py and semgrep_scanner.py pass no "
+                            "--disable-nosem anywhere in the package; `semgrep scan "
+                            "--help` (1.180.0): --enable-nosem is enabled by default"
                         ),
                     ),
                     opsf.SilencingLayer(

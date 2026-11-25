@@ -154,7 +154,6 @@ def test_the_enumeration_is_not_vacuous() -> None:
     assert not _REMAINING_LOAD_ERRORS, _REMAINING_LOAD_ERRORS
     assert len(SCANNER_CLASSES) >= 20, sorted(c.__name__ for c in SCANNER_CLASSES)
     assert _classes_in(FacetState.MAPPED), "no scanner declares a mapped resource_id"
-    assert _classes_in(FacetState.DROPPED), "no scanner declares a dropped resource_id"
     assert _classes_in(FacetState.NA), "no scanner declares an n/a resource_id"
 
 
@@ -213,6 +212,36 @@ _MAPPED_WRITERS: dict[str, tuple[str, str]] = {
     # DERIVED: the id is parsed from message prose, so the example is read as
     # a path segment of the committed SARIF text. The parse itself and its
     # rot guard are in test_cfn_guard_scanner.py.
+    "CfnLintScanner": (
+        (
+            "automated_security_helper.plugin_modules.ash_builtin.scanners"
+            ".cfn_lint_scanner"
+        ),
+        "cfn_lint_guard/captured/cfn-lint-1.61.0-m0-bad-property.json",
+    ),
+    # trivy and trivy-repo share one writer (the base module), and the example
+    # is the Resource cell of the captured trivy JSON report.
+    "TrivyScanner": (
+        (
+            "automated_security_helper.plugin_modules.ash_builtin.scanners"
+            "._trivy_scanner_base"
+        ),
+        "trivy/captured/trivy-0.76.2-misconfig-terraform.json",
+    ),
+    "TrivyRepoScanner": (
+        (
+            "automated_security_helper.plugin_modules.ash_builtin.scanners"
+            "._trivy_scanner_base"
+        ),
+        "trivy/captured/trivy-0.76.2-misconfig-terraform.json",
+    ),
+    "CfnNagScanner": (
+        (
+            "automated_security_helper.plugin_modules.ash_builtin.scanners"
+            ".cfn_nag_scanner"
+        ),
+        "cfn_nag/captured/cfn_nag-0.8.10-two-buckets.sarif",
+    ),
     "CfnGuardScanner": (
         (
             "automated_security_helper.plugin_modules.ash_builtin.scanners."
@@ -229,7 +258,7 @@ def _fixture_cells(path: Path) -> set[str]:
     A ``.json`` fixture's cells are every string value anywhere in the
     document; any other fixture is read as CSV and its cells are the fields.
     """
-    if path.suffix == ".json":
+    if path.suffix in (".json", ".sarif"):
         with open(path, encoding="utf-8") as handle:
             return set(_string_values(json.load(handle)))
     with open(path, newline="", encoding="utf-8") as handle:
@@ -269,7 +298,7 @@ def test_a_mapped_resource_id_is_written_and_its_example_is_in_the_fixture(
     )
     example = vars(cls)[SCANNER_FACETS_ATTR].resource_id.example
     assert example, f"{name}: a mapped resource_id carries its example"
-    if fixture.endswith(".sarif"):
+    if fixture.endswith(".sarif") and name == "CfnGuardScanner":
         with open(_FIXTURES / fixture, encoding="utf-8") as handle:
             fixture_text = handle.read()
         example_probe = f"Path=/Resources/{example}/"
@@ -294,28 +323,10 @@ def test_a_mapped_resource_id_is_written_and_its_example_is_in_the_fixture(
 #: totality test, so the claim "the native output carries it" is always read.
 #: A key of ``None`` means the id lives in message prose (cfn-guard), so the
 #: value is read as a substring of the fixture text instead of under a key.
-_DROPPED_FIXTURES: dict[str, tuple[str, str | None, str]] = {
-    "CfnLintScanner": (
-        "cfn_lint_guard/captured/cfn-lint-1.61.0-m0-bad-property.json",
-        "Path",
-        "M0FixtureBucket",
-    ),
-    "CfnNagScanner": (
-        "cfn_nag/src.test.yaml.json",
-        "logical_resource_ids",
-        "S3Bucket3",
-    ),
-    "TrivyScanner": (
-        "trivy/captured/trivy-0.76.2-misconfig-terraform.json",
-        "Resource",
-        "aws_s3_bucket.m0_fixture_bucket",
-    ),
-    "TrivyRepoScanner": (
-        "trivy/captured/trivy-0.76.2-misconfig-terraform.json",
-        "Resource",
-        "aws_s3_bucket.m0_fixture_bucket",
-    ),
-}
+#: Empty since cfn-lint, cfn-nag, trivy and trivy-repo moved to MAPPED (their
+#: native-field example is read from the same fixtures by the must-attach rows
+#: above); the machinery stays for the next cell declared DROPPED.
+_DROPPED_FIXTURES: dict[str, tuple[str, str | None, str]] = {}
 
 
 def _values_under_key(node: Any, key: str) -> Iterator[Any]:

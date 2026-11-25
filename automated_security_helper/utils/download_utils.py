@@ -1948,8 +1948,10 @@ def install_pinned_tool(
     bin_dir.mkdir(parents=True, exist_ok=True)
     target = bin_dir.joinpath(asset.install_as)
 
-    if not force and _already_installed(
-        bin_dir, asset.install_as, asset.url, asset.sha256
+    if (
+        not force
+        and _already_installed(bin_dir, asset.install_as, asset.url, asset.sha256)
+        and _companions_verified(bin_dir, asset)
     ):
         ASH_LOGGER.info(
             f"{asset.tool} {asset.version} already installed at {target}, "
@@ -2064,6 +2066,35 @@ def _executable_by_caller(candidate: Path, info: os.stat_result) -> bool:
     check adds nothing a swapped link could exploit.
     """
     return bool(info.st_mode & 0o111) and os.access(candidate, os.X_OK)
+
+
+def _companions_verified(directory: Path, asset) -> bool:  # asset: ToolAsset
+    """Whether every pinned companion of ``asset`` sits in ``directory`` with its bytes.
+
+    The install verifies each companion (opengrep's Windows DLLs) before it places
+    the executable; accepting an executable already on disk has to ask the same,
+    or a lone ``opengrep.exe`` -- or one whose DLLs were deleted -- reads as
+    installed and then fails to start. Each file is judged on one open descriptor,
+    as the executable is: not a link, a regular file, hashing to its pin.
+    """
+    for name, digest in asset.companion_sha256:
+        path = Path(directory).joinpath(name)
+        if path.is_symlink():
+            return False
+        try:
+            fd = os.open(path, os.O_RDONLY | _O_NOFOLLOW | _O_BINARY | _O_NONBLOCK)
+        except OSError:
+            return False
+        try:
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                return False
+            if _sha256_of_open_file(fd) != digest.lower():
+                return False
+        except OSError:
+            return False
+        finally:
+            os.close(fd)
+    return True
 
 
 @dataclass(frozen=True)
@@ -2191,6 +2222,12 @@ def find_verified_pinned_executable(
             f"{candidate} is named {asset.install_as} but is not the pinned "
             f"{tool} {asset.version} (SHA256 {actual}, pinned {expected.lower()}); "
             "installing the pinned build"
+        )
+        return None
+    if not _companions_verified(candidate.parent, asset):
+        ASH_LOGGER.debug(
+            f"{candidate} is the pinned {tool} {asset.version}, but a companion "
+            "file it loads is missing or differs from its pin; installing"
         )
         return None
     return VerifiedPresentTool(

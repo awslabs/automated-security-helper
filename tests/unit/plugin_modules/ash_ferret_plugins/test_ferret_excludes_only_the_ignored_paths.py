@@ -149,12 +149,14 @@ def _excludes(scanner, target: Path, *ignore_paths: str) -> list[str]:
     return argv[argv.index("--exclude") + 1].split(",")
 
 
-@pytest.mark.parametrize("ignore_path", [".", "api", "./api"])
+@pytest.mark.parametrize("ignore_path", [".", "./api"])
 def test_an_ignore_path_ash_matches_to_nothing_leaves_every_file_scanned(
     mock_plugin_context, ignore_path
 ):
     """ASH matches these to no file, so it drops no finding for them, and ferret-scan
-    is given nothing to leave out: 2.4.x read ``.`` and ``api`` as substrings."""
+    is given nothing to leave out: 2.4.x read ``.`` as a substring. A bare
+    ``api`` matches the directory's subtree since the bare-directory rule
+    (issue #894), so it sits with the directory forms below."""
     root = _tree(mock_plugin_context.source_dir, FILES)
 
     patterns = _excludes(_scanner(mock_plugin_context), root, ignore_path)
@@ -165,7 +167,7 @@ def test_an_ignore_path_ash_matches_to_nothing_leaves_every_file_scanned(
             assert not _skipped(root, relative, patterns, version), (version, relative)
 
 
-@pytest.mark.parametrize("ignore_path", ["api/", "api/**"])
+@pytest.mark.parametrize("ignore_path", ["api/", "api/**", "api"])
 def test_a_directory_ignore_path_skips_only_the_files_below_it(
     mock_plugin_context, ignore_path
 ):

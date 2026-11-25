@@ -145,7 +145,8 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
-from automated_security_helper.utils.frame_text import wire
+from automated_security_helper.utils.frame_ops import ordinal_over
+from automated_security_helper.utils.frame_text import wire, wire_cell
 from automated_security_helper.utils.uri_separators import (
     root_text,
     sanitized_uri_text,
@@ -480,7 +481,7 @@ def _located_keys(
     )
     shared = placed.with_columns(
         pl.len().over("key").alias("members"),
-        pl.int_range(pl.len()).over(["key", "occurrence"]).alias("ordinal"),
+        ordinal_over("key", "occurrence").alias("ordinal"),
     ).filter(pl.col("members") > 1)
     for index, ordinal in shared.select("i", "ordinal").iter_rows():
         keys[index]["occurrence"] = identities[index].occurrence
@@ -537,17 +538,14 @@ def _identity_frame(
 
     keys = identity_keys(identities, default_project)
 
-    def text(value: Any) -> Optional[str]:
-        return None if value is None else wire(str(value))
-
     columns: Dict[str, List[Any]] = {
         "i": list(range(len(keys))),
-        "scanner": [text(key.get("scanner")) for key in keys],
-        "rule": [text(key.get("rule")) for key in keys],
-        "file": [text(key.get("file")) for key in keys],
+        "scanner": [wire_cell(key.get("scanner")) for key in keys],
+        "rule": [wire_cell(key.get("rule")) for key in keys],
+        "file": [wire_cell(key.get("file")) for key in keys],
         "key": [wire(canonical(key)) for key in keys],
         "fingerprinted": [key_is_fingerprinted(key) for key in keys],
-        "occurrence": [text(key.get("occurrence")) for key in keys],
+        "occurrence": [wire_cell(key.get("occurrence")) for key in keys],
         "ordinal": [key.get("ordinal") for key in keys],
     }
     schema: Dict[str, Any] = {

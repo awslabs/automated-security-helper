@@ -211,6 +211,7 @@ _LAZY_SUBCOMMANDS: dict[str, tuple[str, str]] = {
     ),
     "report": ("automated_security_helper.cli.report", "report_command"),
     "diff": ("automated_security_helper.cli.diff", "diff_command"),
+    "trend": ("automated_security_helper.cli.trend", "trend_command"),
     "merge": ("automated_security_helper.cli.merge", "merge_command"),
     "config": ("automated_security_helper.cli.config", "config_app"),
     "dependencies": (
@@ -235,6 +236,7 @@ It takes only the options below. To scan with scan options, run `ash scan --mode
     },
     "report": {},
     "diff": {},
+    "trend": {},
     "merge": {
         "help": """Merges the results of a sharded scan into one unified report.
 
@@ -251,6 +253,7 @@ _COMMAND_ORDER: tuple[str, ...] = (
     "build-image",
     "report",
     "diff",
+    "trend",
     "merge",
     "mcp",
     "get-genai-guide",

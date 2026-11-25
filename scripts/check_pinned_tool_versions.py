@@ -52,7 +52,9 @@ with its ``-updates`` and ``-security`` suites (the codename comes from the
 configures, in ``NODE_MAJOR`` or in a ``node_<major>.x`` or ``setup_<major>.x`` URL.
 Each pin is reported as
 
-* ``current``: the version apt would choose today;
+* ``current``: the version apt would choose today. A version with a ``*``
+  (``20*deb12u*``) is an apt version glob: it is judged by the newest version it
+  matches, and it is ``unavailable`` only when nothing matches;
 * ``outdated``: still installable, but a newer version is published, typically a
   security update. Fails with ``--fail-on-outdated``, like a tool pin;
 * ``unavailable``: no index carries it any more, so the image build is already
@@ -167,6 +169,7 @@ from __future__ import annotations
 import argparse
 import ast
 import base64
+import fnmatch
 import importlib.util
 import json
 import lzma
@@ -1459,7 +1462,7 @@ _APT_INSTALL = re.compile(
     r"(?<![\w-])apt(?:-get)?\s[^;&|]*?(?<![\w-])install(?![\w-])(?P<args>[^;&|]*)"
 )
 _APT_PIN = re.compile(
-    r"^(?P<package>[a-z0-9][a-z0-9+.-]+)=(?P<version>[A-Za-z0-9.+~:-]+)$"
+    r"^(?P<package>[a-z0-9][a-z0-9+.-]+)=(?P<version>[A-Za-z0-9.+~:*-]+)$"
 )
 # A pin whose version is an expansion, ``curl=${CURL_VERSION}``: a package and a version
 # that is known only when the build runs, which no index can be asked about.
@@ -2625,15 +2628,23 @@ def _judge_apt_pin(
     """One pin against the versions the indexes list for its package."""
     versions = available.get(pin.package, set())
     candidate = _newest(versions)
+    # A pin with a ``*`` is an apt version glob (``20*deb12u*``): it names a family
+    # of versions, so a point release inside the family does not retire it. It is
+    # judged by the newest version it matches.
+    glob = "*" in pin.version
+    matched = (
+        {v for v in versions if fnmatch.fnmatchcase(v, pin.version)} if glob else set()
+    )
+    pinned = _newest(matched) if glob else pin.version
     if failed:
         return AptResult(pin, arch, candidate, "error", "; ".join(failed))
     if candidate is None:
         # Gone altogether, not merely moved on: apt cannot install it at any
         # version, so the build is as broken as for a retired version.
         return AptResult(pin, arch, None, "unavailable", "no index lists the package")
-    if pin.version not in versions:
+    if pinned is None or pinned not in versions:
         return AptResult(pin, arch, candidate, "unavailable")
-    if compare_debian_versions(candidate, pin.version) > 0:
+    if compare_debian_versions(candidate, pinned) > 0:
         return AptResult(pin, arch, candidate, "outdated")
     return AptResult(pin, arch, candidate, "current")
 

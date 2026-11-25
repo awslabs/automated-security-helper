@@ -80,16 +80,21 @@ class TestPathPatternAdvice:
             pytest.param(
                 ".\\src", f"Path '.\\src' {PREFIX}. Use 'src/'", id="dot-backslash"
             ),
-            pytest.param(
-                "src\\lib",
-                f"Path 'src\\lib' {DIRECTORY}. Use 'src\\lib/'",
-                id="backslash",
-            ),
         ],
     )
     def test_a_backslash_is_a_separator(self, tmp_path, pattern, shown):
         advice = path_pattern_advice(pattern, _tree(tmp_path), ignore_path=True)
         assert advice is not None and shown in advice, advice
+
+    def test_a_glob_free_directory_name_gets_no_advice(self, tmp_path):
+        """The bare-directory rule (issue #894): 'src\\lib' (a backslash is a
+        separator) and 'src/lib' name the directory and match the files below
+        it, so there is nothing to advise."""
+        for pattern in ("src\\lib", "src/lib", "vendor"):
+            advice = path_pattern_advice(pattern, _tree(tmp_path), ignore_path=True)
+            assert advice is None, (pattern, advice)
+            advice = path_pattern_advice(pattern, _tree(tmp_path), ignore_path=False)
+            assert advice is None, (pattern, advice)
 
     def test_a_doubled_slash_after_the_prefix_is_not_an_absolute_path(self, tmp_path):
         advice = path_pattern_advice(".//src", _tree(tmp_path), ignore_path=True)

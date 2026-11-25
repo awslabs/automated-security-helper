@@ -457,6 +457,23 @@ def module_from_this_checkout(module: str, root: Optional[Path] = None) -> str:
     )
 
 
+#: What a child Python needs from a Windows parent when its environment is
+#: built, not inherited. SYSTEMROOT lets the interpreter start. The two
+#: PROCESSOR_ARCHITECTURE names are where ``platform.machine()`` reads the CPU
+#: type on Windows: without them it answers "", and polars' import-time CPU
+#: check (which runs before the binary loads) then reads no CPU flags and
+#: raises "unknown feature flag: 'sse3'", so every child that imports
+#: automated_security_helper dies at collection. Their values are
+#: architecture names, not ordinary words the report backstop could rewrite.
+WINDOWS_CHILD_START_NAMES = (
+    "SYSTEMROOT",
+    "COMSPEC",
+    "PATHEXT",
+    "PROCESSOR_ARCHITECTURE",
+    "PROCESSOR_ARCHITEW6432",
+)
+
+
 def checkout_env(env: Optional[dict] = None, root: Optional[Path] = None) -> dict:
     """``env`` (os.environ when None), with this checkout first on ``PYTHONPATH``.
 
@@ -534,7 +551,7 @@ def run_a_child_pytest_under_this_suite(
     # failure never wrote (missing_ok).
     scratch = {
         name: os.environ[name]
-        for name in ("SYSTEMROOT", "COMSPEC", "PATHEXT")
+        for name in WINDOWS_CHILD_START_NAMES
         if name in os.environ
     }
     # Containment names the run sets survive the build: a sanitizing wrapper

@@ -197,6 +197,12 @@
   scanner's results directory instead of below checkov's working directory, the
   filesystem root. A directory set in `CKV_GITLAB_CONF_DIR_NAME`,
   `CKV_GITHUB_CONF_DIR_NAME` or `CKV_BITBUCKET_CONF_DIR_NAME` is used as set.
+- checkov leaves its GitLab, GitHub and Bitbucket configuration frameworks out when
+  `frameworks` is `all`, the default. They read the repository host's settings through
+  its API rather than files in the scanned tree, and GitLab's CI job token is not
+  documented to reach the project approvals API that checkov's GitLab check reads.
+  Name a framework in `frameworks`, with or without `all`, to run it. In an offline
+  scan their settings are not fetched.
 
 ## v3.8.0 (2026-11-12)
 

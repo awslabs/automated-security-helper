@@ -718,6 +718,20 @@ def report_command(
             help="Configuration overrides specified as key-value pairs (e.g., 'reporters.cloudwatch-logs.options.aws_region=us-west-2')",
         ),
     ] = None,
+    annotate_duplicates: Annotated[
+        bool,
+        typer.Option(
+            "--annotate-duplicates",
+            help="Add `cluster_id`, `duplicate_of` and `duplicate_sources` columns to the csv and flat-json reports, naming findings that two scanners report for one defect. Rows, ids and counts are unchanged. Adds three columns to the CSV header, so it is off by default. Sets `global_settings.deduplication.annotate`.",
+        ),
+    ] = False,
+    fold_duplicates: Annotated[
+        bool,
+        typer.Option(
+            "--fold-duplicates",
+            help="Show one row per duplicate cluster in the HTML, Markdown and text reports, with a note naming the other scanners that reported it, and add deduplicated counts beside the per-scanner counts. Off by default because it changes row counts. Sets `global_settings.deduplication.fold`.",
+        ),
+    ] = False,
     verbose: Annotated[
         bool, typer.Option("--verbose", "-v", help="Enable verbose logging")
     ] = False,
@@ -1168,6 +1182,29 @@ def report_command(
     except ASHConfigValidationError as e:
         _print_refusal("[red]Invalid configuration: {}[/red]", e)
         raise typer.Exit(3)
+
+    # The reports read the duplicate annotation from the results' recorded
+    # configuration, so a request made to this command (the flag, or the
+    # operator's own configuration) is written there. It only ever turns the
+    # annotation on: a scan that recorded it keeps it, and nothing here turns it
+    # off.
+    recorded_dedup = getattr(
+        getattr(getattr(model, "ash_config", None), "global_settings", None),
+        "deduplication",
+        None,
+    )
+    own_dedup = getattr(
+        getattr(ash_config, "global_settings", None), "deduplication", None
+    )
+    if recorded_dedup is not None and (
+        annotate_duplicates or getattr(own_dedup, "annotate", False) is True
+    ):
+        recorded_dedup.annotate = True
+    # The fold request travels the same way, and likewise only turns it on.
+    if recorded_dedup is not None and (
+        fold_duplicates or getattr(own_dedup, "fold", False) is True
+    ):
+        recorded_dedup.fold = True
 
     # A reporter that sends findings off the host runs only when the operator
     # enables it, which here means --config-overrides: stored results do not

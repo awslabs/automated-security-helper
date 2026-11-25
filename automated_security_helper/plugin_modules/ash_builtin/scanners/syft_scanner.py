@@ -170,15 +170,21 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
             "application) are package kinds, not resource types",
         ),
         package_name=FacetDecl(
-            state=FacetState.MAPPED,
+            state=FacetState.DROPPED,
             native_field="CycloneDX components[].name",
+            reason="carried in the CycloneDX document the scanner returns, "
+            "outside the flat-vulnerability path: syft writes no SARIF "
+            "result, so no flat row ever holds it",
         ),
         package_version=FacetDecl(
-            state=FacetState.MAPPED,
+            state=FacetState.DROPPED,
             native_field="CycloneDX components[].version",
+            reason="carried in the CycloneDX document the scanner returns, "
+            "outside the flat-vulnerability path: syft writes no SARIF "
+            "result, so no flat row ever holds it",
         ),
         package_path=FacetDecl(
-            state=FacetState.NA,
+            state=FacetState.UNCONFIRMED,
             reason="UNCONFIRMED: syft's native artifacts[].locations[].path "
             "(fixture syft.src.json) has a CycloneDX counterpart this "
             "adapter has not been read against; a cyclonedx-json run "

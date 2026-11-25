@@ -214,7 +214,6 @@ from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.utils.config_trust import (
     NOT_THE_OPERATORS,
     refusal_warning,
-    set_by_operator,
 )
 from automated_security_helper.utils.process_env import snapshot_environ
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
@@ -393,12 +392,14 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
             native_field="SARIF result message.text",
         ),
         resource_id=FacetDecl(
-            state=FacetState.DROPPED,
-            native_field="Results[].Misconfigurations[].CauseMetadata.Resource",
-            reason="misconfig only: the address (aws_s3_bucket.m0_fixture_bucket) "
-            "exists in trivy's JSON format and is absent from the SARIF ASH "
-            "reads (0 occurrences, M0 fixture); the vuln findings are packages, "
-            "so no resource_id is ever written until a side-JSON attach lands",
+            state=FacetState.MAPPED,
+            native_field="Results[].Misconfigurations[].CauseMetadata.Resource "
+            "(trivy's JSON report, absent from its SARIF), copied onto the "
+            "SARIF result under ash_resource_id by attach_trivy_resources "
+            "for result type terraform only: cloudformation carries a "
+            "file:line locator (t.yaml:3-4) and kubernetes and dockerfile "
+            "carry none (trivy 0.76.2, M0-FINDINGS.md (a))",
+            example="aws_s3_bucket.m0_fixture_bucket",
         ),
         resource_type=FacetDecl(
             state=FacetState.NA,
@@ -426,7 +427,7 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
             native_field="SARIF result ruleId (the CVE id)",
         ),
         taxonomy_cwe=FacetDecl(
-            state=FacetState.NA,
+            state=FacetState.UNCONFIRMED,
             reason="UNCONFIRMED: trivy's SARIF rules carry no CWE (tags are "
             "vulnerability, security, <severity>); the JSON format's CweIDs "
             "has no committed vulnerability fixture, and a `trivy fs --format "
@@ -438,13 +439,14 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
             "are level, locations, message, ruleId, ruleIndex)",
         ),
         fix_available=FacetDecl(
-            state=FacetState.DROPPED,
-            native_field='message line "Fixed Version: <version>"',
-            reason="the fixed version sits in the message text and is never "
-            "parsed into the fix_available property the flat model reads",
+            state=FacetState.MAPPED,
+            native_field='message line "Fixed Version: <version>", written as '
+            "fix_available=True when non-empty by "
+            "TrivyScannerBase._fixed_version_from_message (an empty value "
+            "writes nothing)",
         ),
         remediation_text=FacetDecl(
-            state=FacetState.NA,
+            state=FacetState.UNCONFIRMED,
             reason="UNCONFIRMED: not classified by the survey; the flat "
             "model has no remediation column, and the rule help text carries "
             "the fixed version already declared under fix_available",
@@ -455,11 +457,15 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         ),
         references=FacetDecl(
             state=FacetState.MAPPED,
-            native_field="SARIF rule helpUri",
+            native_field="SARIF rule helpUri, read into the flat references "
+            "by FlatVulnerability.from_sarif_result when the result carries "
+            "no relatedLocations",
         ),
         tags=FacetDecl(
             state=FacetState.MAPPED,
-            native_field="SARIF rule properties.tags",
+            native_field="SARIF rule properties.tags, read into the flat tags "
+            "by FlatVulnerability.from_sarif_result when the result carries "
+            "none (the severity word among them still feeds issue_severity)",
         ),
         extras=FacetDecl(
             state=FacetState.MAPPED,
@@ -641,17 +647,18 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         chosen = list(options.scanners)
         if chosen == default:
             return
-        config = self.context.config if self.context is not None else None
-        if set_by_operator(config, "scanners.trivy.options.scanners", chosen):
-            return
-        self._plugin_log(
+        granted = self._operator_gated(
+            "scanners.trivy.options.scanners",
+            chosen,
+            default,
             refusal_warning(
                 f"Ignoring scanners.trivy.options.scanners ({chosen}): "
                 f"{NOT_THE_OPERATORS}. trivy runs the default set, {default}.",
                 NOT_THE_OPERATORS,
             ),
-            level=logging.WARNING,
         )
+        if granted is chosen:
+            return
         if self.config is not None:
             self.config.options = options.model_copy(update={"scanners": default})
 
@@ -794,4 +801,5 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         with trivy-repo; see "Severity" above for the rule.
         """
         sarif_report = self._attach_package_identity(sarif_report, target)
+        sarif_report = self._attach_misconfig_resources(sarif_report, final_args)
         return self._attach_trivy_severity(sarif_report)

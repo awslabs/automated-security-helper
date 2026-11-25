@@ -407,6 +407,10 @@ def rewrite_checkov_paths(
         for location in items or []:
             artifact = (location.get("physicalLocation") or {}).get("artifactLocation")
             if isinstance(artifact, dict) and isinstance(artifact.get("uri"), str):
+                # A URL (the guideline attach_checkov_guidelines writes as a
+                # related location) is not a path to rebuild.
+                if artifact["uri"].startswith(("https://", "http://")):
+                    continue
                 artifact["uri"] = _uri(artifact["uri"])
 
     if isinstance(document, dict) and "runs" in document:
@@ -559,6 +563,42 @@ def checkov_resources(json_report: Any) -> dict[_RecordKey, List[Optional[str]]]
     Read before :func:`rewrite_checkov_paths` changes the report's paths: the
     keys are checkov's own spelling, which is what its SARIF URIs hold.
     """
+    return _record_values(
+        json_report,
+        lambda record, named: (
+            record.get("resource")
+            if named
+            and isinstance(record.get("resource"), str)
+            and record.get("resource")
+            else None
+        ),
+    )
+
+
+def checkov_guidelines(json_report: Any) -> dict[_RecordKey, List[Optional[str]]]:
+    """The guideline URL of every record in checkov's JSON report, by record key.
+
+    The same keys and the same per-key order as :func:`checkov_resources`. An
+    entry is the record's ``guideline`` when it is an ``http(s)`` URL and None
+    otherwise (checkov writes null for a check with no policy page). Every
+    framework carries one: a guideline names the policy, not a resource, so the
+    per-framework allow-list of resources does not apply.
+    """
+    return _record_values(
+        json_report,
+        lambda record, _named: (
+            record.get("guideline")
+            if isinstance(record.get("guideline"), str)
+            and record["guideline"].startswith(("https://", "http://"))
+            else None
+        ),
+    )
+
+
+def _record_values(
+    json_report: Any, value_of: Callable[[dict, bool], Optional[str]]
+) -> dict[_RecordKey, List[Optional[str]]]:
+    """``value_of(record, in_a_resource_framework)`` for every record, by key."""
     found: dict[_RecordKey, List[Optional[str]]] = {}
     reports = json_report if isinstance(json_report, list) else [json_report]
     for report in reports:
@@ -574,12 +614,7 @@ def checkov_resources(json_report: Any) -> dict[_RecordKey, List[Optional[str]]]
                 key = _record_key(record)
                 if key is None:
                     continue
-                resource = record.get("resource")
-                found.setdefault(key, []).append(
-                    resource
-                    if named and isinstance(resource, str) and resource
-                    else None
-                )
+                found.setdefault(key, []).append(value_of(record, named))
     return found
 
 
@@ -603,27 +638,63 @@ def attach_checkov_resources(
 
     Must run on the SARIF as checkov wrote it, before its paths are rewritten.
     """
-    if not isinstance(sarif, dict) or not resources:
+
+    def write(result: dict[str, Any], resource: str) -> None:
+        properties = result.get("properties")
+        if not isinstance(properties, dict):
+            properties = {}
+            result["properties"] = properties
+        properties[ASH_RESOURCE_ID_KEY] = resource
+
+    return _attach_by_key(sarif, resources, write)
+
+
+def attach_checkov_guidelines(
+    sarif: Any, guidelines: dict[_RecordKey, List[Optional[str]]]
+) -> int:
+    """Write each result's policy guideline URL as a related location.
+
+    The flat model's ``references`` are the URIs of a result's
+    ``relatedLocations``, and checkov's SARIF carries none: its JSON report
+    names the policy page of each check (``guideline``), which this copies, on
+    the same key and under the same count rule as :func:`attach_checkov_resources`.
+    Must run on the SARIF as checkov wrote it, before its paths are rewritten;
+    :func:`rewrite_checkov_paths` leaves an ``http(s)`` URI alone.
+    """
+
+    def write(result: dict[str, Any], guideline: str) -> None:
+        related = result.get("relatedLocations")
+        if not isinstance(related, list):
+            related = []
+            result["relatedLocations"] = related
+        related.append({"physicalLocation": {"artifactLocation": {"uri": guideline}}})
+
+    return _attach_by_key(sarif, guidelines, write)
+
+
+def _attach_by_key(
+    sarif: Any,
+    values: dict[_RecordKey, List[Optional[str]]],
+    write: Callable[[dict[str, Any], str], None],
+) -> int:
+    """``write`` each key's n-th value to the n-th SARIF result with that key."""
+    if not isinstance(sarif, dict) or not values:
         return 0
     by_key: dict[_RecordKey, List[dict[str, Any]]] = {}
     for run in sarif.get("runs") or []:
         for result in (run.get("results") or []) if isinstance(run, dict) else []:
             key = _result_key(result)
-            if key is not None and key in resources:
+            if key is not None and key in values:
                 by_key.setdefault(key, []).append(result)
     attached = 0
     for key, results in by_key.items():
-        named = resources[key]
+        named = values[key]
         if len(named) != len(results):
             continue
-        for result, resource in zip(results, named):
-            if resource is None:
+        for result, value in zip(results, named):
+            if value is None:
                 continue
-            properties = result.get("properties")
-            if not isinstance(properties, dict):
-                properties = {}
-                result["properties"] = properties
-            properties[ASH_RESOURCE_ID_KEY] = resource
+            write(result, value)
             attached += 1
     return attached
 
@@ -797,11 +868,10 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
             native_field='check "check_id" (e.g. CKV_AWS_55), the SARIF result ruleId',
         ),
         severity=FacetDecl(
-            state=FacetState.NA,
-            reason="UNCONFIRMED: the committed side report carries "
-            '"severity": null on every check and no checkov SARIF golden is '
-            "committed; one checkov --output sarif run settles whether a "
-            "level is emitted",
+            state=FacetState.MAPPED,
+            native_field='SARIF result "level" (settled by the committed '
+            'checkov-3.4.6 capture; the side report\'s "severity" stays '
+            "null without a platform key)",
         ),
         file_path=FacetDecl(
             state=FacetState.MAPPED,
@@ -814,9 +884,9 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         ),
         column=FacetDecl(
             state=FacetState.NA,
-            reason="UNCONFIRMED: the side report carries a line range only "
-            "and no checkov SARIF golden is committed; one SARIF run settles "
-            "whether a column is emitted",
+            reason="the committed checkov-3.4.6 capture's six SARIF regions "
+            "carry startLine, endLine and snippet only, and the side report "
+            "carries a line range only",
         ),
         message=FacetDecl(
             state=FacetState.MAPPED,
@@ -862,15 +932,17 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         ),
         fingerprints=FacetDecl(
             state=FacetState.NA,
-            reason="UNCONFIRMED: the side report carries no fingerprint and "
-            "no checkov SARIF golden is committed; one SARIF run settles it",
+            reason="none of the committed checkov-3.4.6 capture's six SARIF "
+            "results carries fingerprints or partialFingerprints, and the "
+            "side report carries no fingerprint",
         ),
         fix_available=FacetDecl(
             state=FacetState.NA,
-            reason="UNCONFIRMED: the side report has a fixed_definition key "
-            "but it is null on every committed check, so whether a fixable "
-            "check populates it is open; one run over a fixable check "
-            "settles it",
+            reason="the side report has a fixed_definition key and it is null "
+            "on every record read: 34 of 34 across terraform, cloudformation, "
+            "kubernetes and dockerfile (checkov 3.4.5, an offline desk run "
+            "beside the committed fixture), so no run ASH makes has shown "
+            "a fix state to map; a populated record would redeclare it",
         ),
         remediation_text=FacetDecl(
             state=FacetState.NA,
@@ -878,16 +950,19 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
             "remediation text field exists in the side report",
         ),
         snippet=FacetDecl(
-            state=FacetState.DROPPED,
-            native_field='check "code_block" ([line number, text] pairs)',
-            reason="the side report carries the resource's source lines; the "
-            "adapter never reads them",
+            state=FacetState.MAPPED,
+            native_field="SARIF region.snippet.text (settled by the committed "
+            'checkov-3.4.6 capture; the side report\'s "code_block" carries '
+            "the same lines)",
         ),
         references=FacetDecl(
-            state=FacetState.DROPPED,
-            native_field='check "guideline" (a policy documentation URL)',
-            reason="the side report carries a guideline URL per check; the "
-            "adapter never reads it",
+            state=FacetState.NA,
+            reason='the side report has a "guideline" key and it is null on '
+            "every record of the committed capture (9 of 9, checkov 3.4.6 "
+            "insecure-s3), so no run ASH makes has shown a URL to map; "
+            "attach_checkov_guidelines copies a non-null guideline onto the "
+            "result as a related location, which the flat references read, "
+            "so a capture whose records carry one redeclares this cell MAPPED",
         ),
         tags=FacetDecl(
             state=FacetState.NA,
@@ -896,9 +971,8 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         ),
         extras=FacetDecl(
             state=FacetState.NA,
-            reason="UNCONFIRMED: no checkov SARIF golden is committed, so "
-            "whether results carry a property bag is open; one SARIF run "
-            "settles it",
+            reason="none of the committed checkov-3.4.6 capture's six SARIF "
+            "results carries a properties bag",
         ),
     )
 
@@ -996,8 +1070,8 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
                 ),
             ),
             identity=opsf.IdentityFacet(
-                fingerprint_class=opsf.FingerprintClass.UNCONFIRMED,
-                note="no fixture read classifies checkov's fingerprints; reads as positional-only until one does",
+                fingerprint_class=opsf.FingerprintClass.POSITIONAL_ONLY,
+                note="the committed side-report fixtures (tests/test_data/scanners/checkov/src.*.json) carry no fingerprint key and the adapter writes none; identity is file and line through the shared floor",
             ),
             extensibility=opsf.ExtensibilityFacet(
                 custom_rules=opsf.CustomRules.NONE,
@@ -1473,14 +1547,27 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         for item in frameworks:
             self.args.extra_args.append(ToolExtraArg(key="--framework", value=item))
         skip_frameworks = list(self.config.options.skip_frameworks)
+        file_skip_frameworks = file_values.get("skip-framework")
+        if isinstance(file_skip_frameworks, str):
+            file_skip_frameworks = [file_skip_frameworks]
+        for item in (
+            file_skip_frameworks if isinstance(file_skip_frameworks, list) else []
+        ):
+            # Passed on the command line too, since the command line's
+            # --skip-framework list replaces the file's whole, and this scanner
+            # passes one on almost every run (the VCS frameworks below).
+            if isinstance(item, str) and item.strip() and item not in skip_frameworks:
+                skip_frameworks.append(item)
         if "all" in frameworks:
             # Checkov's "all" includes VCS server-configuration frameworks that
             # audit remote server settings over the network rather than files in
             # the scanned tree. Skip them unless explicitly requested via
-            # frameworks (or an external checkov config file's framework key).
+            # frameworks (or an external checkov config file's framework key),
+            # including beside "all".
             for vcs_framework in _VCS_CONFIGURATION_FRAMEWORKS:
-                if vcs_framework not in skip_frameworks:
-                    skip_frameworks.append(vcs_framework)
+                if vcs_framework in frameworks or vcs_framework in skip_frameworks:
+                    continue
+                skip_frameworks.append(vcs_framework)
         for item in skip_frameworks:
             self.args.extra_args.append(
                 ToolExtraArg(key="--skip-framework", value=item)
@@ -1875,12 +1962,14 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         scanned_dirs = [target.as_posix(), Path(source_dir).as_posix()]
         json_report = Path(results_file).parent / "results_json.json"
         resources: dict[_RecordKey, List[Optional[str]]] = {}
+        guidelines: dict[_RecordKey, List[Optional[str]]] = {}
         if json_report.is_file():
             try:
                 with open(json_report, encoding="utf-8") as handle:
                     document = json.load(handle)
                 # Before the paths are rewritten: the keys are checkov's spelling.
                 resources = checkov_resources(document)
+                guidelines = checkov_guidelines(document)
                 rewrite_checkov_paths(
                     document,
                     ran_in=ran_in,
@@ -1907,6 +1996,7 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         raw = super()._read_results_file(results_file)
         if raw is not None:
             attach_checkov_resources(raw, resources)
+            attach_checkov_guidelines(raw, guidelines)
             rewrite_checkov_paths(
                 raw,
                 ran_in=ran_in,

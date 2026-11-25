@@ -80,6 +80,7 @@ from automated_security_helper.core.exceptions import ASHConfigUnsetVariableErro
 from automated_security_helper.core.enums import ExportFormat
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.models.core import (
+    AshExclusion,
     AshSuppression,
     IgnorePathWithReason,
     expiration_date_problem,
@@ -1391,9 +1392,10 @@ class RuntimeOverridesConfig(RedactedSection):
         "/scanners/detect-secrets/options/scan_settings/plugins_used",
         "/scanners/detect-secrets/options/scan_settings/plugins_used/**",
         "/scanners/detect-secrets/options/baseline_file",
-        # Suppressions and ignore paths can hide findings outright.
+        # Suppressions, ignore paths and exclusions can hide findings outright.
         "/global_settings/ignore_paths",
         "/global_settings/suppressions",
+        "/global_settings/exclusions",
         # The runtime-override policy itself: a client that could rewrite it
         # through patch_ops could then lift every other entry here.
         "/global_settings/mcp",
@@ -1898,6 +1900,81 @@ class AshMcpConfig(RedactedSection):
     ] = RuntimeOverridesConfig()
 
 
+class AshDeduplicationConfig(RedactedSection):
+    """Cross-scanner duplicate annotation (opt-in).
+
+    Findings that two scanners report for one defect are grouped into a
+    duplicate cluster (``utils/finding_clusters``). This section only chooses
+    whether the flat reports say so. Finding ids, SARIF results, metrics,
+    suppressions and baselines never change either way.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    annotate: Annotated[
+        bool,
+        Field(
+            description=(
+                "When true, the CSV and flat-JSON reports gain three columns that "
+                "name each finding's duplicate cluster: `cluster_id`, `duplicate_of` "
+                "(the primary finding's id, on every non-primary member) and "
+                "`duplicate_sources` (on the primary: the other members' scanner, "
+                "rule, id and severity). Rows and counts are unchanged. Off by "
+                "default because the columns change the CSV header. CLI: "
+                "`--annotate-duplicates` on `ash scan` and `ash report`."
+            )
+        ),
+    ] = False
+
+    fold: Annotated[
+        bool,
+        Field(
+            description=(
+                "When true, the HTML, Markdown and text reports show one row per "
+                "duplicate cluster (the primary finding, with a note naming the "
+                "other scanners that reported it) in their findings tables, "
+                "detailed findings, finding cards and hotspots, and add "
+                "deduplicated counts beside, never in place of, the per-scanner "
+                "counts. Only clusters of the same CVE and package, or the same "
+                "line and CWE, fold; IaC resource clusters are annotated only. "
+                "Finding ids, SARIF, per-scanner metrics, suppressions, "
+                "baselines, the CSV, flat-JSON and JUnit reports and the exit "
+                "code are unchanged. Off by default because it changes row "
+                "counts. CLI: `--fold-duplicates` on `ash scan` and `ash report`."
+            )
+        ),
+    ] = False
+
+
+class AshHistoryConfig(RedactedSection):
+    """Run history: a compact record of each completed scan, for ``ash trend``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: Annotated[
+        bool,
+        Field(
+            description=(
+                "Append a compact run record to '<output dir>/history/' after each "
+                "completed scan. Off by default: it adds files to the output "
+                "directory on every scan."
+            )
+        ),
+    ] = False
+
+    keep_runs: Annotated[
+        int,
+        Field(
+            ge=1,
+            le=10000,
+            description=(
+                "How many run records to keep when history is enabled; the oldest "
+                "are removed when a new one is written."
+            ),
+        ),
+    ] = 50
+
+
 class AshConfigGlobalSettingsSection(RedactedSection):
     # validate_default is here because `severity_threshold`'s default is derived
     # from an environment variable, and pydantic does not validate a default no
@@ -1941,12 +2018,40 @@ class AshConfigGlobalSettingsSection(RedactedSection):
         ),
     ] = []
 
+    exclusions: Annotated[
+        List[AshExclusion],
+        Field(
+            description=(
+                "Global list of rule+path exclusions. Each entry names a rule ID "
+                "(glob allowed), a path (matched like a suppression's), an "
+                "optional scanner and a required reason, and DROPS the matching "
+                "results from SARIF instead of keeping them marked suppressed: "
+                "for finding classes that are always benign in a known place, "
+                "such as bandit B101 under tests/."
+            )
+        ),
+    ] = []
+
     mcp: Annotated[
         AshMcpConfig,
         Field(
             description="MCP-server-specific configuration (runtime override allowlist, etc.)."
         ),
     ] = AshMcpConfig()
+
+    deduplication: Annotated[
+        AshDeduplicationConfig,
+        Field(
+            description="Cross-scanner duplicate annotation in the flat reports (opt-in; off by default)."
+        ),
+    ] = AshDeduplicationConfig()
+
+    history: Annotated[
+        AshHistoryConfig,
+        Field(
+            description="Run history recording (a compact record of each completed scan)."
+        ),
+    ] = AshHistoryConfig()
 
 
 # Distinguishes "caller did not pass cpu_count" from "caller passed None", which

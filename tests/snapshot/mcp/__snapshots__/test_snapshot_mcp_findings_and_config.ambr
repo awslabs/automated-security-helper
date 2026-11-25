@@ -675,6 +675,16 @@
       'fail_on_incomplete_scanners': True,
       'fail_on_unknown_keys': False,
       'global_settings': dict({
+        'deduplication': dict({
+          'annotate': False,
+          'fold': False,
+        }),
+        'exclusions': list([
+        ]),
+        'history': dict({
+          'enabled': False,
+          'keep_runs': 50,
+        }),
         'ignore_paths': list([
         ]),
         'mcp': dict({
@@ -701,6 +711,7 @@
               '/scanners/detect-secrets/options/baseline_file',
               '/global_settings/ignore_paths',
               '/global_settings/suppressions',
+              '/global_settings/exclusions',
               '/global_settings/mcp',
               '/global_settings/mcp/**',
               '/scanners/opengrep/options/exclude_rule',
@@ -1315,6 +1326,16 @@
       'fail_on_incomplete_scanners': True,
       'fail_on_unknown_keys': False,
       'global_settings': dict({
+        'deduplication': dict({
+          'annotate': False,
+          'fold': False,
+        }),
+        'exclusions': list([
+        ]),
+        'history': dict({
+          'enabled': False,
+          'keep_runs': 50,
+        }),
         'ignore_paths': list([
         ]),
         'mcp': dict({
@@ -1341,6 +1362,7 @@
               '/scanners/detect-secrets/options/baseline_file',
               '/global_settings/ignore_paths',
               '/global_settings/suppressions',
+              '/global_settings/exclusions',
               '/global_settings/mcp',
               '/global_settings/mcp/**',
               '/scanners/opengrep/options/exclude_rule',

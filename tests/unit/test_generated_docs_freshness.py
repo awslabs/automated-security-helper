@@ -114,6 +114,7 @@ REFERENCE_PAGES = {
     "generate_config_reference.py": "configuration.md",
     "generate_converter_reference.py": "converters.md",
     "generate_env_var_reference.py": "environment-variables.md",
+    "generate_facets_reference.py": "scanner-facets.md",
     "generate_mcp_tool_reference.py": "mcp-tools.md",
     "generate_reporter_docs.py": "reporters.md",
     "generate_scanner_reference.py": "scanners.md",

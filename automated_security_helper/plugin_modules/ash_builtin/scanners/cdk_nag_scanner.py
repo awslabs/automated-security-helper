@@ -1220,7 +1220,8 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         references=FacetDecl(
             state=FacetState.MAPPED,
             native_field="per-pack rule help URI (_rule_help_uri, "
-            "ReportingDescriptor.helpUri)",
+            "ReportingDescriptor.helpUri), read into the flat references "
+            "when the result carries no relatedLocations",
         ),
         tags=FacetDecl(
             state=FacetState.MAPPED,

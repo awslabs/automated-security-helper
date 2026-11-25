@@ -469,14 +469,15 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             "location, synthesized as node_modules/<location>/package.json)",
         ),
         line_range=FacetDecl(
-            state=FacetState.NA,
-            reason="npm audit output carries no line; the adapter synthesizes "
-            "1:1, so there is no native line to map",
+            state=FacetState.MAPPED,
+            native_field="(no native line) the adapter writes line 1 of the "
+            "synthesized manifest location on every result",
         ),
         column=FacetDecl(
-            state=FacetState.NA,
-            reason="npm audit output carries no column; the adapter "
-            "synthesizes 1:1, so there is no native column to map",
+            state=FacetState.MAPPED,
+            native_field="(no native column) the adapter writes column 1 of "
+            "the synthesized manifest location on every result, beside the "
+            "line_range cell's line 1",
         ),
         message=FacetDecl(
             state=FacetState.MAPPED,
@@ -508,15 +509,16 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             "lockfile entry for the install path",
         ),
         taxonomy_cve=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field='vulnerabilities.<name>.via[]."url" (the GHSA '
-            "advisory id carried as the ruleId; npm audit names no CVE field)",
+            state=FacetState.NA,
+            reason="npm audit names no CVE field: the advisory id carried as "
+            'the ruleId is vulnerabilities.<name>.via[]."url" (a GHSA id), '
+            "and the flat CVE column reads CVE-shaped rule ids only",
         ),
         taxonomy_cwe=FacetDecl(
-            state=FacetState.DROPPED,
-            native_field='vulnerabilities.<name>.via[]."cwe"',
-            reason='written to the result property "cwe" only; the flat '
-            "cwe_id reader reads tags, so the flat column stays empty",
+            state=FacetState.MAPPED,
+            native_field='vulnerabilities.<name>.via[]."cwe" (and the v1 '
+            'advisory "cwe"), written as CWE-<n> rule tags by _cwe_tags and '
+            'kept in the result property "cwe"',
         ),
         fingerprints=FacetDecl(
             state=FacetState.NA,
@@ -528,7 +530,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             native_field='vulnerabilities.<name>."fixAvailable"',
         ),
         remediation_text=FacetDecl(
-            state=FacetState.NA,
+            state=FacetState.UNCONFIRMED,
             reason="UNCONFIRMED: not classified by the survey; the adapter "
             'writes a composed "recommendation" property, but the flat model '
             "has no remediation column to read it and npm audit's native "
@@ -540,12 +542,15 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         ),
         references=FacetDecl(
             state=FacetState.MAPPED,
-            native_field='vulnerabilities.<name>.via[]."url" (rule helpUri)',
+            native_field='vulnerabilities.<name>.via[]."url" (rule helpUri), '
+            "read into the flat references when the result carries no "
+            "relatedLocations",
         ),
         tags=FacetDecl(
             state=FacetState.MAPPED,
             native_field="rule properties.tags (ASH-composed: security, "
-            "npm-audit, the severity word)",
+            "npm-audit, the severity word), read into the flat tags when the "
+            "result carries none",
         ),
         extras=FacetDecl(
             state=FacetState.MAPPED,
@@ -1841,6 +1846,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                         "security",
                         "npm-audit",
                         severity,
+                        *_cwe_tags(record["cwe"]),
                         f"tool_name::{self.config.name}",
                         f"tool_type::{self.tool_type or 'UNKNOWN'}",
                     ],
@@ -2482,6 +2488,48 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             return True
         return score > kept
 
+    @classmethod
+    def convert_results(
+        cls,
+        npm_audit_results: Dict[str, Any],
+        target_path: Path,
+        lock_file: Path | None = None,
+    ) -> SarifReport:
+        """A default-configured scanner's SARIF view of an npm audit report.
+
+        Tool-free: the plugin context is a default-configured one over
+        ``target_path`` and nothing runs, so conformance tests can drive the
+        conversion over a committed audit capture the way
+        ``CfnGuardScanner.normalize_results`` is driven (the conversion itself
+        is an instance method because it reads the scanner's name, tool type
+        and exit state). ``exit_code`` 0 is the successful-run shape, so the
+        invocation record reads as a completed scan.
+        """
+        from automated_security_helper.base.plugin_context import PluginContext
+        from automated_security_helper.config.ash_config import AshConfig
+        from automated_security_helper.config.default_config import (
+            get_default_config,
+        )
+
+        # The scanner's model carries forward references to AshConfig, which
+        # must be resolved before it is built; done here so a caller needs no
+        # setup of its own. Idempotent.
+        AshConfig.model_rebuild()
+        target = Path(target_path)
+        scanner = cls(
+            context=PluginContext(
+                source_dir=target,
+                output_dir=target / "ash-output",
+                work_dir=target / "ash-work",
+                config=get_default_config(),
+            ),
+            config=NpmAuditScannerConfig(),
+        )
+        scanner.exit_code = 0
+        return scanner._convert_npm_audit_to_sarif(
+            npm_audit_results, target_path, lock_file
+        )
+
     def _convert_npm_audit_to_sarif(
         self,
         npm_audit_results: Dict[str, Any],
@@ -2629,6 +2677,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                                 "security",
                                 "npm-audit",
                                 via_severity,
+                                *_cwe_tags(via.get("cwe")),
                                 f"tool_name::{self.config.name}",
                                 f"tool_type::{self.tool_type or 'UNKNOWN'}",
                             ],
@@ -3743,6 +3792,25 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         except Exception as e:
             # Check if there are useful error details
             raise ScannerError(f"NpmAudit scan failed: {str(e)}")
+
+
+def _cwe_tags(cwe: Any) -> List[str]:
+    """An advisory's CWE ids as the ``CWE-<n>`` tags the flat reader reads.
+
+    npm's ``via[].cwe`` and the v1 advisory's ``cwe`` list ``CWE-79``-style ids
+    (and the odd ``NVD-CWE-Other``, which names no CWE and is left out). The flat
+    ``cwe_id`` column reads tags (``utils/taxonomy_ids.cwes_of_tags``), not the
+    ``cwe`` result property, so the ids go on the rule's tag list too. Defined
+    last in the module, and importing where it runs, so the module's import
+    block and the code above its first call site keep their lines: the call
+    sites themselves shift every line after them, so a suppression pinned below
+    one has to be re-pinned when a call is added or removed.
+    """
+    from automated_security_helper.utils.taxonomy_ids import cwes_of_tags
+
+    if isinstance(cwe, str):
+        cwe = [cwe]
+    return cwes_of_tags(cwe) if isinstance(cwe, (list, tuple)) else []
 
 
 if __name__ == "__main__":

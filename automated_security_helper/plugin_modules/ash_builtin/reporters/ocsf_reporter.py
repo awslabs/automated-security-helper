@@ -91,6 +91,7 @@ from typing import Dict, Optional, List, Sequence, Tuple
 
 import polars as pl
 
+from automated_security_helper.utils.frame_ops import ordered_counts, ordinal_over
 from automated_security_helper.utils.frame_text import wire
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.sarif_utils import (
@@ -464,7 +465,7 @@ def _occurrence_frame(keys: Sequence[Optional[str]]) -> pl.DataFrame:
     )
     return frame.with_columns(
         pl.when(pl.col("key").is_not_null())
-        .then(pl.int_range(pl.len(), dtype=pl.Int64).over("key"))
+        .then(ordinal_over("key"))
         .otherwise(None)
         .alias("occurrence")
     )
@@ -484,7 +485,7 @@ def _outcome_counts(
     )
     counted = {
         outcome: int(count)
-        for outcome, count in frame.group_by("outcome").len().iter_rows()
+        for outcome, count in ordered_counts(frame, "outcome").iter_rows()
     }
     counts = {
         name: counted.get(name, 0)

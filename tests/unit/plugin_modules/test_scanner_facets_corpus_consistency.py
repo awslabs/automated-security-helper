@@ -198,7 +198,7 @@ class Verdict:
     state: str
     non_null: Optional[int]
     total: Optional[int]
-    outcome: str  # "ok" | "FAIL" | "excluded"
+    outcome: str  # "ok" | "FAIL" | "excluded" | "owed"
     detail: str
 
     def row(self) -> str:
@@ -224,6 +224,20 @@ def judge(
     non_null, total = observed if observed is not None else (None, None)
     populated = bool(non_null)
     cell = f"{scanner}.{facet} declared {state.value}"
+    if state is FacetState.UNCONFIRMED:
+        # Neither contamination nor proof: nobody has read a real run for this
+        # cell, so whatever the corpus holds proves nothing yet. It is a fixture
+        # owed, listed in the table and never failed.
+        return Verdict(
+            scanner,
+            facet,
+            state.value,
+            non_null,
+            total,
+            "owed",
+            "fixture owed: author or capture the real run that settles the cell, "
+            "then redeclare it MAPPED or N/A with the evidence",
+        )
     if state is FacetState.MAPPED:
         if observed is None or not total:
             why = (
@@ -335,19 +349,12 @@ class CorpusSpec:
 #: registry-agreement test, so a new scanner forces a decision (a corpus, or a
 #: declared absence with the fixture to author).
 CORPORA: Mapping[str, Optional[CorpusSpec]] = {
-    "actionlint": CorpusSpec(
-        "actionlint",
-        missing="actionlint's committed output is native JSON (actionlint/"
-        "actionlint-1.7.12-*.json) and no prep converts it; author a "
-        "SARIF-shaped capture of build_sarif's output or register a prep",
-    ),
+    "actionlint": CorpusSpec("actionlint", prep="actionlint"),
     "bandit": CorpusSpec("bandit", sarif=("captured/*.sarif",)),
-    "betterleaks": CorpusSpec("betterleaks", sarif=("captured/*.sarif",)),
-    "cdk-nag": CorpusSpec(
-        "cdk",
-        missing="cdk-nag's committed output is the NagReport CSV and no prep "
-        "converts it; author a SARIF capture of the scanner's own report",
+    "betterleaks": CorpusSpec(
+        "betterleaks", sarif=("captured/*.sarif",), prep="betterleaks"
     ),
+    "cdk-nag": CorpusSpec("cdk", prep="cdk-nag"),
     "cfn-guard": CorpusSpec(
         "cfn_lint_guard", sarif=("captured/cfn-guard-*.sarif",), prep="cfn-guard"
     ),
@@ -355,62 +362,39 @@ CORPORA: Mapping[str, Optional[CorpusSpec]] = {
         "cfn_lint_guard", sarif=("captured/cfn-lint-*.sarif",), prep="cfn-lint"
     ),
     "cfn-nag": CorpusSpec(
-        "cfn_nag",
-        missing="cfn-nag's committed output is native JSON "
-        "(cfn_nag/src.test.yaml.json) and no SARIF capture is committed "
-        "(M0-FINDINGS.md (b): the tool could not be run to a real result)",
+        "cfn_nag", sarif=("captured/cfn_nag-0.8.10-*.sarif",), prep="cfn-nag"
     ),
-    "checkov": CorpusSpec(
-        "checkov",
-        missing="checkov's committed output is native JSON (checkov/"
-        "src.test.yaml.json) and no prep converts it; author a SARIF capture "
-        "of the scanner's own report or register a prep",
-    ),
-    "detect-secrets": None,
+    "checkov": CorpusSpec("checkov", sarif=("captured/*.sarif",), prep="checkov"),
+    "detect-secrets": CorpusSpec("detect_secrets", prep="detect-secrets"),
     "ferret-scan": CorpusSpec(
-        "ferret-scan",
-        missing="ferret-scan commits only its input samples (sample.txt, a "
-        ".docx), no captured output",
+        "ferret-scan", sarif=("captured/*.sarif",), prep="ferret-scan"
     ),
-    "gitleaks": CorpusSpec("gitleaks", sarif=("gitleaks-*.sarif",)),
-    "grype": CorpusSpec(
-        "grype",
-        missing="grype commits native JSON only (grype/grype.src.json); the "
-        "SARIF is rendered inside test_grype_fix_available_conformance.py, "
-        "not committed. Commit a `grype -o sarif` capture or register a prep",
-    ),
+    "gitleaks": CorpusSpec("gitleaks", sarif=("gitleaks-*.sarif",), prep="gitleaks"),
+    "grype": CorpusSpec("grype", sarif=("captured/*.sarif",), prep="grype"),
     "guarddog": CorpusSpec("guarddog", prep="guarddog"),
     "hadolint": CorpusSpec("hadolint", sarif=("captured/*.sarif",)),
-    "npm-audit": CorpusSpec(
-        "npmaudit",
-        missing="npm-audit's committed output is raw `npm audit` / yarn / pnpm "
-        "JSON and the converter is an instance method that needs a lockfile "
-        "tree; author a SARIF capture of the scanner's own report",
-    ),
+    "npm-audit": CorpusSpec("npmaudit", prep="npm-audit"),
     "opengrep": CorpusSpec("opengrep", sarif=("captured/*.sarif",)),
-    "semgrep": CorpusSpec(
-        "semgrep",
-        missing="semgrep commits native JSON only (semgrep/semgrep.src.json); "
-        "commit a `semgrep --sarif` capture",
+    "semgrep": CorpusSpec("semgrep", sarif=("captured/*.sarif",)),
+    # Authored in the shape `snyk code test --sarif` writes (see the README in
+    # the directory); a licensed capture committed under captured/ joins it.
+    "snyk-code": CorpusSpec(
+        "snyk", sarif=("authored/*.sarif", "captured/*.sarif"), prep="snyk-code"
     ),
-    "snyk-code": None,
     "syft": CorpusSpec(
         "syft",
         missing="syft commits its native SBOM JSON only (syft/syft.src.json); "
         "commit a capture of the scanner's SARIF report",
     ),
-    "trivy": CorpusSpec("trivy", sarif=("*.sarif", "captured/*.sarif")),
-    "trivy-repo": CorpusSpec("trivy", sarif=("*.sarif", "captured/*.sarif")),
+    "trivy": CorpusSpec("trivy", sarif=("*.sarif", "captured/*.sarif"), prep="trivy"),
+    "trivy-repo": CorpusSpec(
+        "trivy", sarif=("*.sarif", "captured/*.sarif"), prep="trivy"
+    ),
     "zizmor": CorpusSpec("zizmor", sarif=("*.sarif",)),
 }
 
 #: Why a scanner with no CorpusSpec has none (named, not authored).
-_NO_FIXTURE_DIRECTORY = {
-    "detect-secrets": "no tests/test_data/scanners/detect_secrets directory; "
-    "commit a captured detect-secrets result",
-    "snyk-code": "no tests/test_data/scanners/snyk directory; commit a "
-    "captured `snyk code test --sarif` result (needs a licensed run)",
-}
+_NO_FIXTURE_DIRECTORY: dict[str, str] = {}
 
 
 def _load_sarif(path: Path) -> SarifReport:
@@ -431,30 +415,374 @@ def _prep_cfn_guard(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result
 def _prep_cfn_lint(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]]]:
     from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_lint_scanner import (
         CfnLintScanner,
+        attach_cfn_lint_resources,
+        cfn_lint_resources,
     )
 
     for pattern in spec.sarif:
         for path in sorted((_FIXTURES / spec.directory).glob(pattern)):
             report = _load_sarif(path)
+            # The resource comes from the JSON run beside it, when one is
+            # committed. The scanner attaches it as each batch is read, before
+            # normalize_report relocates the results, so the keys still match.
+            companion = path.with_suffix(".json")
+            if companion.is_file():
+                attach_cfn_lint_resources(
+                    report,
+                    cfn_lint_resources(
+                        json.loads(companion.read_text(encoding="utf-8"))
+                    ),
+                )
             # normalize_report reads no instance state: it locates results,
             # maps severities and sorts rules in place.
             CfnLintScanner.normalize_report(None, report)  # type: ignore[arg-type]
             yield report, [r for run in report.runs or [] for r in run.results or []]
 
 
+def _prep_cfn_nag(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]]]:
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_nag_scanner import (
+        attach_cfn_nag_resources,
+    )
+
+    for pattern in spec.sarif:
+        for path in sorted((_FIXTURES / spec.directory).glob(pattern)):
+            report = _load_sarif(path)
+            attach_cfn_nag_resources(report)
+            yield report, [r for run in report.runs or [] for r in run.results or []]
+
+
+def _report_with_rules(tool_name: str, rules: list[Any]) -> SarifReport:
+    """A report whose one run declares *rules* on its driver and holds no
+    results: the results are yielded beside it, and the rule-level facets
+    (help link, tags) are read from the run."""
+    return SarifReport.model_validate(
+        {
+            "version": "2.1.0",
+            "runs": [
+                {
+                    "tool": {
+                        "driver": {
+                            "name": tool_name,
+                            "rules": [
+                                rule.model_dump(mode="json", exclude_none=True)
+                                for rule in rules
+                            ],
+                        }
+                    },
+                    "results": [],
+                }
+            ],
+        }
+    )
+
+
 def _prep_guarddog(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]]]:
     from automated_security_helper.plugin_modules.ash_guarddog_plugins.guarddog_scanner import (
         convert_guarddog_scan_result,
+        manifest_line_for,
     )
 
-    for path in sorted((_FIXTURES / spec.directory / "captured").glob("scan_*.json")):
+    captured = _FIXTURES / spec.directory / "captured"
+    for path in sorted(captured.glob("scan_*.json")):
         ecosystem = path.stem.split("_")[1]
         document = json.loads(path.read_text(encoding="utf-8"))
         converted = convert_guarddog_scan_result(
             document, uri_prefix="", ecosystem=ecosystem, include_capabilities=True
         )
+        yield (
+            _report_with_rules("guarddog", list(converted.rules.values())),
+            list(converted.results),
+        )
+    # Verify mode is where the adapter writes package identity: each committed
+    # verify capture is a list of {dependency, version, result} entries over
+    # the manifest committed beside it, converted the way the scanner's own
+    # verify path converts them.
+    for path in sorted(captured.glob("verify_*.json")):
+        ecosystem = path.stem.split("_")[1]
+        manifest = path.with_suffix(".txt")
+        manifest_text = manifest.read_text(encoding="utf-8")
+        for entry in json.loads(path.read_text(encoding="utf-8")):
+            converted = convert_guarddog_scan_result(
+                entry["result"],
+                uri_prefix="",
+                ecosystem=ecosystem,
+                include_capabilities=True,
+                dependency=(entry["dependency"], entry["version"]),
+                manifest_uri=manifest.name,
+                manifest_line=manifest_line_for(manifest_text, entry["dependency"]),
+            )
+            yield (
+                _report_with_rules("guarddog", list(converted.rules.values())),
+                list(converted.results),
+            )
+
+
+def _prep_checkov(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]]]:
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.checkov_scanner import (
+        attach_checkov_guidelines,
+        attach_checkov_resources,
+        checkov_guidelines,
+        checkov_resources,
+    )
+
+    for pattern in spec.sarif:
+        for path in sorted((_FIXTURES / spec.directory).glob(pattern)):
+            sarif = json.loads(path.read_text(encoding="utf-8"))
+            side = json.loads(path.with_suffix(".json").read_text(encoding="utf-8"))
+            attach_checkov_resources(sarif, checkov_resources(side))
+            attach_checkov_guidelines(sarif, checkov_guidelines(side))
+            report = SarifReport.model_validate(sarif)
+            yield report, [r for run in report.runs or [] for r in run.results or []]
+
+
+def _prep_detect_secrets(
+    spec: CorpusSpec,
+) -> Iterator[tuple[SarifReport, list[Result]]]:
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secrets_scanner import (
+        DetectSecretsScanner,
+    )
+
+    for path in sorted((_FIXTURES / spec.directory / "captured").glob("*.json")):
+        results = []
+        for _key, secrets in json.loads(path.read_text(encoding="utf-8")):
+            for secret in secrets:
+                results.append(
+                    DetectSecretsScanner.build_secret_result(
+                        finding_type=secret["type"],
+                        uri=secret["filename"],
+                        line_number=secret["line_number"],
+                        start_column=secret.get("ash_start_column"),
+                    )
+                )
         report = SarifReport.model_validate({"version": "2.1.0", "runs": []})
-        yield report, list(converted.results)
+        yield report, results
+
+
+def _prep_gitleaks(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]]]:
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.gitleaks_scanner import (
+        GitleaksScanner,
+    )
+
+    for pattern in spec.sarif:
+        for path in sorted((_FIXTURES / spec.directory).glob(pattern)):
+            report = GitleaksScanner.normalize_results(_load_sarif(path))
+            yield report, [r for run in report.runs or [] for r in run.results or []]
+
+
+def _prep_betterleaks(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]]]:
+    from automated_security_helper.plugin_modules.ash_betterleaks_plugins.betterleaks_scanner import (
+        BetterleaksScanner,
+    )
+
+    for pattern in spec.sarif:
+        for path in sorted((_FIXTURES / spec.directory).glob(pattern)):
+            report = BetterleaksScanner.normalize_results(_load_sarif(path))
+            yield report, [r for run in report.runs or [] for r in run.results or []]
+
+
+def _prep_actionlint(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]]]:
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.actionlint_scanner import (
+        build_sarif,
+    )
+
+    for path in sorted((_FIXTURES / spec.directory).glob("actionlint-*.json")):
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        document = build_sarif(payload, 1 if payload.get("errors") else 0)
+        report = SarifReport.model_validate(document)
+        yield report, [r for run in report.runs or [] for r in run.results or []]
+
+
+def _materialized(template: Path, scratch: Path) -> Path:
+    """``template`` copied under ``scratch`` with every ``.fixture`` suffix stripped.
+
+    The suffix dance of ``tests/utils/trivy_fixture.py``: lockfiles naming
+    advisory-bearing versions are committed under a name dependency scanners
+    of this repository do not read, and materialized for a run.
+    """
+    import shutil
+
+    destination = scratch / "src"
+    shutil.copytree(template, destination)
+    for path in sorted(destination.rglob("*.fixture")):
+        path.rename(path.with_name(path.name[: -len(".fixture")]))
+    return destination
+
+
+def _prep_ferret_scan(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]]]:
+    """The committed `ferret-scan --format sarif` capture through the adapter's
+    own base-relative URI resolution, the step it applies before the report is
+    built."""
+    from automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner import (
+        _resolve_sarif_uri_base_ids,
+    )
+
+    for pattern in spec.sarif:
+        for path in sorted((_FIXTURES / spec.directory).glob(pattern)):
+            document = json.loads(path.read_text(encoding="utf-8"))
+            _resolve_sarif_uri_base_ids(document)
+            report = SarifReport.model_validate(document)
+            yield report, [r for run in report.runs or [] for r in run.results or []]
+
+
+def _prep_grype(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]]]:
+    """The committed `grype -o sarif` capture through the adapter's own
+    post-processing (URIs, package identity, fix state). The scan target is an
+    empty directory: the capture was taken over an SBOM, so no lockfile sits
+    beside it for the package-path lookup."""
+    import tempfile
+
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.grype_scanner import (
+        GrypeScanner,
+    )
+
+    with tempfile.TemporaryDirectory(prefix="facets-grype-corpus-") as scratch:
+        for pattern in spec.sarif:
+            for path in sorted((_FIXTURES / spec.directory).glob(pattern)):
+                # The step reads no instance state; building the scanner would
+                # need a run context this pure read has no use for.
+                report = GrypeScanner.__new__(GrypeScanner)._post_process_sarif(
+                    _load_sarif(path), [], Path(scratch)
+                )
+                yield (
+                    report,
+                    [r for run in report.runs or [] for r in run.results or []],
+                )
+
+
+def _prep_snyk_code(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]]]:
+    """The committed SARIF through the adapter's own rule-CWE normalization,
+    the one step the scanner applies before it builds the report."""
+    from automated_security_helper.plugin_modules.ash_snyk_plugins.snyk_code_scanner import (
+        normalize_rule_cwe_into_tags,
+    )
+
+    for pattern in spec.sarif:
+        for path in sorted((_FIXTURES / spec.directory).glob(pattern)):
+            document = normalize_rule_cwe_into_tags(
+                json.loads(path.read_text(encoding="utf-8"))
+            )
+            report = SarifReport.model_validate(document)
+            yield report, [r for run in report.runs or [] for r in run.results or []]
+
+
+def _prep_trivy(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]]]:
+    """The committed SARIF through the adapter's own pure steps.
+
+    Package identity and the fixed version read the message against the
+    materialized fixture lockfiles; a misconfiguration's resource comes from
+    the JSON capture beside its SARIF, when there is one.
+    """
+    import tempfile
+
+    from automated_security_helper.plugin_modules.ash_builtin.scanners._trivy_scanner_base import (
+        attach_trivy_resources,
+        trivy_misconfig_resources,
+    )
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.trivy_scanner import (
+        TrivyScanner,
+    )
+
+    with tempfile.TemporaryDirectory(prefix="facets-trivy-corpus-") as scratch:
+        target = _materialized(
+            _FIXTURES / spec.directory / "fixture_repo", Path(scratch)
+        )
+        for pattern in spec.sarif:
+            for path in sorted((_FIXTURES / spec.directory).glob(pattern)):
+                report = TrivyScanner._attach_package_identity(
+                    _load_sarif(path), target
+                )
+                companion = path.with_suffix(".json")
+                if companion.is_file():
+                    attach_trivy_resources(
+                        report,
+                        trivy_misconfig_resources(
+                            json.loads(companion.read_text(encoding="utf-8"))
+                        ),
+                    )
+                yield (
+                    report,
+                    [r for run in report.runs or [] for r in run.results or []],
+                )
+
+
+def _prep_npm_audit(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]]]:
+    import tempfile
+
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_scanner import (
+        NpmAuditScanner,
+    )
+
+    with tempfile.TemporaryDirectory(prefix="facets-npmaudit-corpus-") as scratch:
+        target = _materialized(
+            _FIXTURES / spec.directory / "fixture_repo", Path(scratch)
+        )
+        audit = json.loads(
+            (_FIXTURES / spec.directory / "npm.json").read_text(encoding="utf-8")
+        )
+        report = NpmAuditScanner.convert_results(
+            audit, target, lock_file=target / "package-lock.json"
+        )
+        yield report, [r for run in report.runs or [] for r in run.results or []]
+
+
+def _prep_cdk_nag(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]]]:
+    import csv
+
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.cdk_nag_scanner import (
+        _reporting_descriptor_for,
+    )
+    from automated_security_helper.utils.cdk_nag_wrapper import (
+        _NagFinding,
+        build_nag_results,
+    )
+    from automated_security_helper.utils.cfn_template_model import (
+        get_model_from_template_text,
+    )
+
+    results_dir = _FIXTURES / spec.directory / "test.yaml_cdk_nag_results"
+    pairs = (
+        ("AwsSolutions-test-yaml-NagReport.csv", "test-yaml.template.json"),
+        (
+            "AwsSolutions-test-yaml-cfn-NagReport.csv",
+            "cfn-and-python-test-yaml.template.json",
+        ),
+    )
+    for report_name, template_name in pairs:
+        pack = report_name.split("-")[0]
+        with (results_dir / report_name).open(encoding="utf-8", newline="") as handle:
+            findings = [
+                _NagFinding(
+                    rule_id=row["Rule ID"],
+                    resource_id=row["Resource ID"],
+                    compliance=row["Compliance"],
+                    exception_reason=row["Exception Reason"],
+                    rule_level=row["Rule Level"],
+                    rule_info=row["Rule Info"],
+                    pack=pack,
+                )
+                for row in csv.DictReader(handle)
+            ]
+        template_path = results_dir / template_name
+        template_text = template_path.read_text(encoding="utf-8")
+        model = get_model_from_template_text(template_text, template_path)
+        assert model is not None, template_name
+        per_pack = build_nag_results(
+            {pack: findings},
+            model,
+            template_path,
+            template_text.splitlines(),
+        )
+        nag_results = [r for results in per_pack.values() for r in results]
+        # The run the scanner writes carries one descriptor per rule, which is
+        # where the rule's help link lives; build it the way scan() does.
+        representatives: dict[Any, Result] = {}
+        for result in nag_results:
+            representatives.setdefault(result.ruleId, result)
+        rules = [
+            _reporting_descriptor_for(rep, tool_name="cdk-nag", tool_type="IAC")
+            for rep in representatives.values()
+        ]
+        yield _report_with_rules("ash-cdk-nag-wrapper", rules), nag_results
 
 
 #: Registered preps: native, non-SARIF or adapter-normalized fixtures through
@@ -462,9 +790,21 @@ def _prep_guarddog(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]
 _PREPS: Mapping[
     str, Callable[[CorpusSpec], Iterator[tuple[SarifReport, list[Result]]]]
 ] = {
+    "actionlint": _prep_actionlint,
+    "betterleaks": _prep_betterleaks,
+    "cdk-nag": _prep_cdk_nag,
     "cfn-guard": _prep_cfn_guard,
     "cfn-lint": _prep_cfn_lint,
+    "cfn-nag": _prep_cfn_nag,
+    "checkov": _prep_checkov,
+    "detect-secrets": _prep_detect_secrets,
+    "ferret-scan": _prep_ferret_scan,
+    "gitleaks": _prep_gitleaks,
+    "grype": _prep_grype,
     "guarddog": _prep_guarddog,
+    "npm-audit": _prep_npm_audit,
+    "snyk-code": _prep_snyk_code,
+    "trivy": _prep_trivy,
 }
 
 
@@ -573,6 +913,48 @@ def test_the_registry_and_the_corpus_table_agree() -> None:
             assert spec.missing, f"{name}: a corpus-less spec names what to author"
 
 
+def test_discovery_does_not_depend_on_which_tier_declares_a_scanner() -> None:
+    """The gate reads every plugin package's ``ASH_SCANNERS`` the same way.
+
+    Core (ash_builtin), the alpha ash_*_plugins packages and any package an SDK
+    plugin ships are one population here: the gate names no tier, and a scanner
+    is in or out by declaring itself, not by where it lives. The registered set
+    must equal the union of every package's list, and must span more than one
+    package so the check is not satisfied by a single tier.
+    """
+    declared: set[type] = set()
+    packages_with_scanners: set[str] = set()
+    for info in pkgutil.iter_modules(plugin_modules.__path__):
+        if not info.ispkg:
+            continue
+        package = importlib.import_module(f"{plugin_modules.__name__}.{info.name}")
+        found = list(getattr(package, "ASH_SCANNERS", []))
+        if found:
+            packages_with_scanners.add(info.name)
+        declared.update(found)
+    assert set(SCANNER_CLASSES) == declared
+    assert len(packages_with_scanners) >= 2, packages_with_scanners
+    # No scanner is looked up by the name of a tier or a package.
+    body = (
+        Path(__file__)
+        .read_text(encoding="utf-8")
+        .split("def test_discovery_does_not_depend")[0]
+    )
+    for needle in ("startswith(" + '"ash_', "== " + '"ash_builtin"'):
+        assert needle not in body, needle
+
+
+def test_the_scanners_read_from_captures_and_authored_shapes_are_observed() -> None:
+    """The scanners whose cells were redeclared unread are observed now."""
+    for name in ("snyk-code", "grype", "ferret-scan"):
+        frame = observed_frame(name, CORPORA[name])
+        assert frame is not None, name
+        assert frame["rule_id"][1] > 0 and frame["rule_id"][0] == frame["rule_id"][1]
+        assert frame["file_path"][0] > 0 and frame["message"][0] > 0, name
+    assert observed_frame("grype", CORPORA["grype"])["fingerprints"][0] > 0
+    assert observed_frame("ferret-scan", CORPORA["ferret-scan"])["fingerprints"][0] == 0
+
+
 def test_the_corpus_is_not_vacuous() -> None:
     """A gate over an empty universe passes everything; refuse that."""
     with_corpus = {}
@@ -654,6 +1036,50 @@ def test_planted_legitimate_cells_pass(
     state: FacetState, observed: Optional[tuple[int, int]]
 ) -> None:
     assert judge("planted", "tags", state, observed).outcome == "ok"
+
+
+@pytest.mark.parametrize(
+    "observed", [(3, 4), (0, 4), None], ids=["populated", "empty", "no-corpus"]
+)
+def test_planted_an_unconfirmed_facet_is_owed_never_failed(
+    observed: Optional[tuple[int, int]],
+) -> None:
+    """UNCONFIRMED is neither contamination (a populated column does not fail
+    it, as it fails N/A) nor proof (an empty one does not pass it, as it passes
+    N/A): it is listed as a fixture owed whatever the corpus holds."""
+    verdict = judge("planted", "rule_id", FacetState.UNCONFIRMED, observed)
+    assert verdict.outcome == "owed", verdict.detail
+    assert "fixture owed" in verdict.detail
+    # The same populated column fails an N/A declaration: the states differ.
+    if observed == (3, 4):
+        assert judge("planted", "rule_id", FacetState.NA, observed).outcome == "FAIL"
+
+
+def test_the_owed_fixtures_are_listed_by_the_gate_table() -> None:
+    owed = [v for v in verdict_rows() if v.outcome == "owed"]
+    assert owed, (
+        "no UNCONFIRMED cell is listed: the register has none, or the gate hides them"
+    )
+    assert {v.state for v in owed} == {FacetState.UNCONFIRMED.value}
+
+
+def test_no_na_cell_is_the_unread_state_in_disguise() -> None:
+    """N/A means the tool cannot carry the facet. A cell whose reason says no run
+    was read, or begins UNCONFIRMED, is the unconfirmed state and is declared so."""
+    stretched = []
+    for cls in SCANNER_CLASSES:
+        facets = vars(cls).get(SCANNER_FACETS_ATTR)
+        for facet in FACET_NAMES:
+            cell = getattr(facets, facet)
+            reason = (cell.reason or "").lower()
+            if cell.state is FacetState.NA and (
+                reason.startswith("unconfirmed") or "output not read" in reason
+            ):
+                stretched.append(f"{_name(cls)}.{facet}")
+    assert not stretched, (
+        "declared n/a but worded as unread: declare these UNCONFIRMED -- "
+        + ", ".join(stretched)
+    )
 
 
 def test_planted_an_excluded_facet_is_never_judged() -> None:

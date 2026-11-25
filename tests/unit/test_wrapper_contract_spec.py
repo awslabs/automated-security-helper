@@ -32,6 +32,7 @@ def test_subcommands():
         "build-image",
         "report",
         "diff",
+        "trend",
         "merge",
         "mcp",
         "get-genai-guide",

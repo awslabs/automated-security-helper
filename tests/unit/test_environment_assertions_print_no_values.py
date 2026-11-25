@@ -55,7 +55,11 @@ from tests.utils.env_assertions import (
     assertrepr_compare_order_problems,
     explain_environment_comparison,
 )
-from tests.utils.helpers import checkout_env, scratch_worker_root
+from tests.utils.helpers import (
+    WINDOWS_CHILD_START_NAMES,
+    checkout_env,
+    scratch_worker_root,
+)
 
 REPOSITORY = Path(__file__).resolve().parents[2]
 
@@ -1882,10 +1886,11 @@ def _run_the_child(
     report = tmp_path / "report.xml"
     # Only what the child pytest needs, the sentinel and the one named value: so
     # the controls print this mapping, not the environment of the run. Windows
-    # needs SYSTEMROOT to start Python; nothing else is taken from this process.
+    # needs SYSTEMROOT to start Python and PROCESSOR_ARCHITECTURE for polars'
+    # CPU check; nothing else is taken from this process.
     scratch = {
         name: os.environ[name]
-        for name in ("SYSTEMROOT", "COMSPEC", "PATHEXT")
+        for name in WINDOWS_CHILD_START_NAMES
         if name in os.environ
     }
     scratch.update(

@@ -378,11 +378,14 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.SKIP_OFFLINE
 
     #: The facets register row (base/scanner_facets.py). Declaration only: no
-    #: behavior changes. snyk code is a pure SARIF pass-through. UNCONFIRMED
-    #: for the whole row: no snyk SARIF fixture from a real tool run is
-    #: committed (the tests' in-test double generates the shape), so the
-    #: native fields below are the survey's reading of that shape; a
-    #: `snyk code test --sarif` run over a sample with a finding settles them.
+    #: behavior changes. snyk code is a pure SARIF pass-through. The mapped
+    #: cells below are observed by the facets corpus gate over the committed,
+    #: authored SARIF in tests/test_data/scanners/snyk/authored (the shape the
+    #: tests' in-test double generates), through the adapter's own rule-CWE
+    #: normalization. No snyk SARIF from a licensed tool run is committed, so
+    #: the native field names are the survey's reading of that shape; a
+    #: `snyk code test --sarif` capture under snyk/captured/ joins the corpus
+    #: and would show any difference.
     facets: ClassVar[ScannerFacets] = ScannerFacets(
         rule_id=FacetDecl(
             state=FacetState.MAPPED,
@@ -390,8 +393,8 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
         ),
         severity=FacetDecl(
             state=FacetState.MAPPED,
-            native_field='result "level"; rules carry no security-severity, so '
-            "a bare error reads as CRITICAL (degraded)",
+            native_field='result "level" (no security-severity on rules, so a '
+            "bare error reads as CRITICAL)",
         ),
         file_path=FacetDecl(
             state=FacetState.MAPPED,
@@ -437,10 +440,9 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
         ),
         taxonomy_cwe=FacetDecl(
             state=FacetState.MAPPED,
-            native_field='tool.driver.rules[].properties "cwe" (e.g. '
-            '["CWE-798"]), normalized by normalize_rule_cwe_into_tags into '
-            "the rule's tags as external/cwe/cwe-<n>, which the shared flat "
-            "reader reads",
+            native_field='rule properties "cwe" (e.g. ["CWE-798"]), normalized '
+            "by normalize_rule_cwe_into_tags into the rule's tags as "
+            "external/cwe/cwe-<n>, which the shared flat reader reads",
         ),
         fingerprints=FacetDecl(
             state=FacetState.MAPPED,
@@ -454,13 +456,13 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
             "against a real tool run",
         ),
         remediation_text=FacetDecl(
-            state=FacetState.NA,
+            state=FacetState.UNCONFIRMED,
             reason="UNCONFIRMED: the survey classified rule help.markdown "
             "under references only; a `snyk code test --sarif` run settles "
             "whether remediation text is separate",
         ),
         snippet=FacetDecl(
-            state=FacetState.NA,
+            state=FacetState.UNCONFIRMED,
             reason="the survey read no snippet in the native regions; "
             "UNCONFIRMED against a real tool run",
         ),
@@ -471,10 +473,12 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
             "flat reader; UNCONFIRMED against a real tool run",
         ),
         tags=FacetDecl(
-            state=FacetState.NA,
-            reason="UNCONFIRMED: the survey records ASH-added tags, but no tag "
-            "write exists in this adapter at this checkout; a "
-            "`snyk code test --sarif` run through the pipeline settles it",
+            state=FacetState.MAPPED,
+            native_field="tool.driver.rules[].properties.tags, read into the "
+            "flat tags by the shared rule read when the result carries none "
+            "of its own",
+            reason="no tag write exists in this adapter at this checkout; the "
+            "rule-level tags are what the flat row carries",
         ),
         extras=FacetDecl(
             state=FacetState.MAPPED,
@@ -531,11 +535,19 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
             ),
             platforms=opsf.PlatformsFacet(
                 provisionable=(),
-                note="the user's installed Snyk CLI; absent from TOOL_VERSIONS and the platform matrix is unread",
+                note="the user's installed Snyk CLI, absent from TOOL_VERSIONS, so ASH provisions "
+                "no platform. Adapter read: the command is the bare name `snyk` resolved on PATH "
+                "(self.command, no per-OS branch), and the one platform branch in the module is "
+                "_hold, which returns None where fcntl is missing (Windows), so a copy a Windows "
+                "run leaves behind is never swept; whether the Snyk CLI itself runs on a given "
+                "OS is the user's install",
             ),
             severity=opsf.SeverityFacet(
                 severity_class=opsf.SeverityClass.DEGRADED,
-                note="rules carry no security-severity, so the bare level maps (error to CRITICAL)",
+                note="rules carry no security-severity, so the bare level maps (error to CRITICAL); "
+                "priorityScore is not graded as a severity (the result's priorityScoreFactors "
+                "show it blends context such as hotFileSource, so it ranks findings rather than "
+                "rating them) and is kept, unchanged, in the result properties the flat row passes through",
                 dropped_native="priorityScore",
             ),
             silencing=opsf.SilencingFacet(
@@ -608,7 +620,6 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
         Returns:
             bool: True if validation passes
         """
-        # TODO: Validate this is rejecting snyk with offline mode.
         if self._is_offline_mode():
             self._plugin_log(
                 f"Offline mode detected. Skipping validation for {self.__class__.__name__}"

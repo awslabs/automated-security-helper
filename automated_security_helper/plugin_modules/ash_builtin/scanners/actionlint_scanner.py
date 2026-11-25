@@ -1339,7 +1339,8 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
         references=FacetDecl(
             state=FacetState.MAPPED,
             native_field="errors[].kind (ASH builds the pinned checks.md "
-            "helpUri; no native URL field)",
+            "helpUri; no native URL field), read into the flat references "
+            "when the result carries no relatedLocations",
         ),
         tags=FacetDecl(
             state=FacetState.MAPPED,

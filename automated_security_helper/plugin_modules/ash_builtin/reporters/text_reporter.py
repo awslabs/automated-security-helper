@@ -25,8 +25,11 @@ from automated_security_helper.utils.terminal_text import (
 )
 from automated_security_helper.utils.ui_theme import FOOTER_CREDIT
 from automated_security_helper.plugin_modules.ash_builtin.reporters.report_content_emitter import (
+    SUMMARY_BELOW_THRESHOLD,
+    SUMMARY_POLICY_NOT_GATING,
     ReportContentEmitter,
     coverage_shortfall_text,
+    deduplicated_summary_text,
     refuse_negative_limit,
 )
 from automated_security_helper.utils.display_text import escape_controls
@@ -64,6 +67,9 @@ def _findings_table(findings) -> list[str]:
         lines.append(
             f"{severity:<10} {scanner:<15} {rule_id:<15} {title:<30} {file_path:<30}"
         )
+        # The fold's note goes under its row, only when the row has one.
+        if finding.get("duplicate_note"):
+            lines.append(f"  {shown_on_one_line(finding['duplicate_note'])}")
     return lines
 
 
@@ -205,12 +211,12 @@ class TextReporter(ReporterPluginBase[TextReporterConfig]):
                 summary["title"].upper(),
                 summary["description"],
                 (
-                    f"{summary['actionable']} actionable | {summary['below_threshold']} below threshold | "
+                    f"{summary['actionable']} actionable | {summary[SUMMARY_BELOW_THRESHOLD]} below threshold | "
                     # Findings the project's outcome left out are counted apart
                     # from the ones the threshold sets aside, only when present.
                     + (
-                        f"{summary['policy_not_gating']} not gating (workspace policy) | "
-                        if summary.get("policy_not_gating")
+                        f"{summary[SUMMARY_POLICY_NOT_GATING]} not gating (workspace policy) | "
+                        if summary.get(SUMMARY_POLICY_NOT_GATING)
                         else ""
                     )
                     + f"{summary['suppressed']} suppressed | {summary['completed']}/{summary['scanners']} scanners completed"
@@ -219,6 +225,9 @@ class TextReporter(ReporterPluginBase[TextReporterConfig]):
                 "",
             ]
         )
+        deduplicated = deduplicated_summary_text(summary)
+        if deduplicated:
+            text_parts.extend([deduplicated, ""])
         # A scanner's name can be a results file's text (``ash report`` renders
         # one a repository committed), so each line naming one is one shown line.
         if summary["shortfalls"]:
@@ -451,6 +460,15 @@ class TextReporter(ReporterPluginBase[TextReporterConfig]):
                             str(shown_on_one_line(f"CWE: {finding['cwe_id']}"))
                         )
 
+                    if finding.get("duplicate_note"):
+                        text_parts.append(
+                            str(
+                                shown_on_one_line(
+                                    f"Duplicates: {finding['duplicate_note']}"
+                                )
+                            )
+                        )
+
                     text_parts.append("")
                     text_parts.append("Description:")
                     text_parts.append(str(shown_not_obeyed(finding["description"])))
@@ -465,9 +483,7 @@ class TextReporter(ReporterPluginBase[TextReporterConfig]):
                 # ACTIONABLE findings, so the note counts those; counting every
                 # finding (suppressed and below-threshold included) printed a
                 # cut that never happened, with numbers the list did not match.
-                total_actionable = sum(
-                    emitter.is_finding_actionable(vuln) for vuln in emitter.flat_vulns
-                )
+                total_actionable = emitter.actionable_finding_count()
                 if total_actionable > len(detailed_findings):
                     text_parts.append(
                         f"Note: Showing {len(detailed_findings)} of {total_actionable} "
@@ -482,22 +498,22 @@ class TextReporter(ReporterPluginBase[TextReporterConfig]):
             )
             # A limit of 0 lists none of them, yet the summary still counts
             # them, so the section and the note follow the count.
-            if summary["policy_not_gating"]:
+            if summary[SUMMARY_POLICY_NOT_GATING]:
                 text_parts.append("NOT GATING (WORKSPACE POLICY)")
                 text_parts.append("-----------------------------")
                 if left_out:
                     text_parts.append(
-                        f"Showing {len(left_out)} of {summary['policy_not_gating']} "
+                        f"Showing {len(left_out)} of {summary[SUMMARY_POLICY_NOT_GATING]} "
                         "findings reported and left out of the outcome because "
                         "policy_scanners_gate is off."
                     )
                     text_parts.extend(_findings_table(left_out))
                 # The list stops at the same limit as the one above, so say
                 # where the rest is, as that list does.
-                if len(left_out) < summary["policy_not_gating"]:
+                if len(left_out) < summary[SUMMARY_POLICY_NOT_GATING]:
                     text_parts.append("")
                     text_parts.append(
-                        f"Note: Showing {len(left_out)} of {summary['policy_not_gating']} "
+                        f"Note: Showing {len(left_out)} of {summary[SUMMARY_POLICY_NOT_GATING]} "
                         "findings left out of the outcome. The HTML report lists "
                         "the rest under its 'Not gating' scope. "
                         "Configure 'max_detailed_findings' to adjust this limit."

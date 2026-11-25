@@ -55,7 +55,11 @@ converters:
     install_timeout: 10
 global_settings:
   ignore_paths:
-    - path: vendor
+    # "**/vendor" names a path exactly under the matcher's "**" reading, so the
+    # directory advice still fires for it; a glob-free "vendor" names the
+    # directory and matches the files below it since the bare-directory rule
+    # (issue #894), and gets no advice.
+    - path: "**/vendor"
       reason: third party code
   suppressions:
     - path: src/app.py

@@ -855,14 +855,19 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
             state=FacetState.MAPPED,
             native_field="the verified requirement's name (verify mode), "
             'written as the result property "package_name"',
-            reason="scan mode's root package identity is not read: the native "
-            'top-level "package" is a scanned directory path',
+            reason="scan mode names no package to read: the native top-level "
+            '"package" is the scanned directory path (<scanned-dir>/<name> in '
+            "every captured scan_*.json), which holds neither a package name "
+            "nor a version, so verify mode's requirement is the only source",
         ),
         package_version=FacetDecl(
             state=FacetState.MAPPED,
             native_field="the verified requirement's version (verify mode), "
             'written as the result property "package_version"',
-            reason="scan mode's root package version is not read",
+            reason="scan mode names no version to read: its top-level keys "
+            "are errors, issues, package (a directory path), results, "
+            "risk_score and risks, none of them a version (every captured "
+            "scan_*.json), so verify mode's requirement is the only source",
         ),
         package_path=FacetDecl(
             state=FacetState.NA,
@@ -896,12 +901,14 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
         references=FacetDecl(
             state=FacetState.MAPPED,
             native_field="rule helpUri https://github.com/DataDog/guarddog"
-            "#heuristics (adapter-written, not per-heuristic)",
+            "#heuristics (adapter-written, not per-heuristic), read into the "
+            "flat references when the result carries no relatedLocations",
         ),
         tags=FacetDecl(
             state=FacetState.MAPPED,
             native_field="rule-level PropertyBag tags guarddog and "
-            "malicious-package, written by the adapter",
+            "malicious-package, written by the adapter, read into the flat "
+            "tags when the result carries none",
         ),
         extras=FacetDecl(
             state=FacetState.MAPPED,
