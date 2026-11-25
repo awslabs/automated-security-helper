@@ -358,6 +358,19 @@ jobs:
           uv run --group dev --with 'ty==0.0.84' ty --version
           uv run --group dev --with 'ty==0.0.84' ty check automated_security_helper/
 
+      # COUNT RATCHET for the step above. No continue-on-error here: this step can
+      # always pass at the ceiling, and it fails when ty's total exceeds the integer
+      # in scripts/ty_ceiling.txt, so new diagnostics cannot land while the old ones
+      # wait for cure PRs, which lower the ceiling. ty's own exit status is ignored
+      # (it is 1 today); a run that prints no total fails the script, not passes it.
+      # Flag-delete condition: at a count of 0, delete the informational step's
+      # continue-on-error and this step.
+      - name: "ty count ratchet (fails above scripts/ty_ceiling.txt)"
+        run: |
+          uv run --group dev --with 'ty==0.0.84' ty check automated_security_helper/ \
+            > "${RUNNER_TEMP}/ty-output.txt" 2>&1 || true
+          python3 scripts/check_ty_ratchet.py "${RUNNER_TEMP}/ty-output.txt"
+
       # scripts/verify_workspace_policy.py runs four real scans of a generated
       # workspace and asserts that a workspace policy's severity ceiling and its
       # suppressions reach exactly the projects they name. Until this step the

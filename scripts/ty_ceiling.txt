@@ -1,0 +1,8 @@
+# Ceiling for `ty check automated_security_helper/` diagnostics (ty 0.0.84).
+# scripts/check_ty_ratchet.py fails the lint job when the count exceeds the integer
+# below. A PR that cures diagnostics lowers it in the same change; nothing raises it
+# except a deliberate ty version bump, which re-measures and says so.
+# Flag-delete condition: when the count reaches 0, delete the ty step's
+# `continue-on-error: true` in .github/workflows/ash-unified-ci.yml and make that
+# step the gate; this file and the ratchet step then go away.
+1308
