@@ -654,7 +654,7 @@ This applies to Python source, YAML config, markdown documentation, and any othe
 scanned file type. The fix is to rename the variable to something neutral (e.g.,
 `SETTING`, `CONFIG_VALUE`, `TEST_PARAM`) in test fixtures and documentation examples.
 If renaming isn't practical (e.g., documentation explaining the problem), add a
-suppression with line number to both `.ash/.ash.yaml` and `.ash/.ash_alpha_plugins.yaml`.
+suppression with line number to both `.ash.yaml` and `.ash/.ash_alpha_plugins.yaml`.
 
 ## False Positive Suppression and CI
 
@@ -761,12 +761,12 @@ mechanism.
 ### Suppression Strategy
 
 ASH supports suppressions in the config file under `global_settings.suppressions`.
-Ferret-scan suppressions must be added to **both** `.ash/.ash.yaml` and
+Ferret-scan suppressions must be added to **both** `.ash.yaml` and
 `.ash/.ash_alpha_plugins.yaml` — the PR scan workflow uses `.ash.yaml`
 while the alpha validation workflow uses `.ash_alpha_plugins.yaml`.
 (Exception: ferret-scan is only *enabled* in `.ash_alpha_plugins.yaml`, so
 ferret-specific rules like `API_KEY_OR_SECRET` only need to live there. This is
-**load-bearing**: if anyone enables ferret-scan in `.ash/.ash.yaml`, the ferret
+**load-bearing**: if anyone enables ferret-scan in `.ash.yaml`, the ferret
 suppressions above must be copied there too, or PR scans will go red with no coverage.)
 
 Suppressions with `line_start`/`line_end` fields are the preferred approach for
@@ -802,13 +802,13 @@ ids carry no granular qualifier.
 | Situation | Approach |
 |-----------|----------|
 | Test fixtures with secret-like variable names | Rename to neutral names (`SETTING`, `CONFIG_VALUE`, `TEST_PARAM`) |
-| Documentation explaining the detection pattern | Add a suppression with `line_start`/`line_end` to both `.ash/.ash.yaml` and `.ash/.ash_alpha_plugins.yaml` |
+| Documentation explaining the detection pattern | Add a suppression with `line_start`/`line_end` to both `.ash.yaml` and `.ash/.ash_alpha_plugins.yaml` |
 | Hardcoded PII in test data generators | Use generator functions with `random.seed()` for reproducibility |
 | Hex-like strings that trigger entropy detectors | Generate values at runtime, not as string literals in source |
 
 ### Adding a Suppression
 
-Add entries under `global_settings.suppressions` in **both** `.ash/.ash.yaml` and
+Add entries under `global_settings.suppressions` in **both** `.ash.yaml` and
 `.ash/.ash_alpha_plugins.yaml`:
 
 ```yaml
@@ -865,7 +865,7 @@ hit that only entries without `line_start` cover. For the line-pinned
 `tests/unit/test_ci_ferret_self_scan_pins.py` fails when the line an entry was
 written for is outside its range, and names the line to use. A new line-pinned
 entry needs a row in that test, holding a fragment of its line. The test reads only
-`.ash_alpha_plugins.yaml`; a pinned entry in `.ash/.ash.yaml` is not checked.
+`.ash_alpha_plugins.yaml`; a pinned entry in `.ash.yaml` is not checked.
 `SECRET-SECRET-KEYWORD` is a detect-secrets rule id, and detect-secrets is off in the
 alpha config, so the test keeps these entries accurate in case it is turned on.
 
@@ -947,7 +947,7 @@ by the ASH Pydantic model. The two config layers are completely independent:
 
 | Layer | File / Source | Validated by | Contains |
 |-------|--------------|-------------|----------|
-| ASH plugin options | `.ash/.ash.yaml` → `scanners.ferret-scan.options` | `FerretScannerConfigOptions` (Pydantic) | Plugin behaviour: confidence, checks, recursive, profile, etc. |
+| ASH plugin options | `.ash.yaml` → `scanners.ferret-scan.options` | `FerretScannerConfigOptions` (Pydantic) | Plugin behaviour: confidence, checks, recursive, profile, etc. |
 | ferret-scan tool config | `ferret-config.yaml` (passed via `--config`) | ferret-scan binary | Tool behaviour: validators, patterns, profiles, defaults, redaction, suppressions |
 
 ### Why "unsupported" options in the config file are safe
@@ -1022,7 +1022,7 @@ pip install ferret-scan
 ferret-scan --version
 ```
 
-Ensure the plugin is enabled in `.ash/.ash.yaml`:
+Ensure the plugin is enabled in `.ash.yaml`:
 ```yaml
 ash_plugin_modules:
   - automated_security_helper.plugin_modules.ash_ferret_plugins
@@ -1213,7 +1213,7 @@ uv run ash scan --source-dir tests/test_data/scanners/ferret-scan --scanners fer
 ```bash
 #!/bin/bash
 # Save as test-ferret-plugin.sh
-# Assumes plugin is enabled in .ash/.ash.yaml
+# Assumes plugin is enabled in .ash.yaml
 
 set -e
 

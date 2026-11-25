@@ -25,15 +25,12 @@ mis-parsed universe would pass vacuously.
 
 from __future__ import annotations
 
-import importlib
 import json
-import pkgutil
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 
-from automated_security_helper import plugin_modules
 from automated_security_helper.base import scanner_operational_facets as opsf
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.base.scanner_facets import (
@@ -43,10 +40,10 @@ from automated_security_helper.base.scanner_facets import (
 from automated_security_helper.base.scanner_plugin import ScannerPluginBase
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
-from automated_security_helper.plugin_modules import ash_builtin
 from automated_security_helper.utils import content_databases as cdb
 from automated_security_helper.utils import tool_downloads
 from automated_security_helper.utils.scanner_names import SCANNER_TOOL_TYPES
+from tests.utils.scanner_enumeration import load_scanner_universe
 
 pytestmark = pytest.mark.unit
 
@@ -54,29 +51,9 @@ pytestmark = pytest.mark.unit
 # tests do.
 AshConfig.model_rebuild()
 
-_REMAINING_LOAD_ERRORS = ash_builtin.retry_failed_plugin_groups()
+SCANNER_CLASSES, _REMAINING_LOAD_ERRORS = load_scanner_universe()
 
 _FIXTURE_ROOT = Path(__file__).resolve().parents[2] / "test_data" / "scanners"
-
-
-def _registered_scanner_classes() -> list[type]:
-    classes: list[type] = []
-    seen: set[type] = set()
-    modules = sorted(
-        pkgutil.iter_modules(plugin_modules.__path__), key=lambda m: m.name
-    )
-    for info in modules:
-        if not info.ispkg:
-            continue
-        package = importlib.import_module(f"{plugin_modules.__name__}.{info.name}")
-        for cls in getattr(package, "ASH_SCANNERS", []):
-            if cls not in seen:
-                seen.add(cls)
-                classes.append(cls)
-    return classes
-
-
-SCANNER_CLASSES = _registered_scanner_classes()
 
 
 def _ops(cls: type) -> opsf.ScannerOperationalFacets:

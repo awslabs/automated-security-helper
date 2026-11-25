@@ -259,9 +259,10 @@ The `ash` hook runs precommit mode (bandit, detect-secrets, checkov, cdk-nag and
 
 ## Configuration
 
-Create `.ashrc.yaml` at the project root to name the project, set the severity
-gate, and choose scanner and reporter options (existing configs under the older
-`.ash/.ash.yaml` name keep loading). The schema provides editor validation.
+Create `.ash.yaml` at the project root to name the project, set the severity
+gate, and choose scanner and reporter options (configs at older locations, such
+as `.ash/.ash.yaml` or `.ashrc.yaml`, still load with a deprecation warning until
+ASH 4.0). The schema provides editor validation.
 
 ```yaml
 # yaml-language-server: $schema=https://raw.githubusercontent.com/awslabs/automated-security-helper/refs/heads/main/automated_security_helper/schemas/AshConfig.json

@@ -73,7 +73,7 @@ snyk code test --help
 
 The Snyk Code plugin is not loaded by default. Its scanner sends the scanned source
 to Snyk with your Snyk token, so only the operator running ASH can load it. A config
-file inside the scanned tree, such as the repository's own `.ash/.ash.yaml`, cannot:
+file inside the scanned tree, such as the repository's own `.ash.yaml`, cannot:
 an `ash_plugin_modules` entry there that names the package, or a module inside it,
 is ignored with a warning naming the entry.
 
@@ -106,7 +106,7 @@ ash_plugin_modules:
 
 The scanner's settings, except `honor_tree_exclusions` (see
 [Exclusion files in the scanned tree](#exclusion-files-in-the-scanned-tree)),
-can stay in the repository's `.ash/.ash.yaml`:
+can stay in the repository's `.ash.yaml`:
 
 ```yaml
 scanners:
@@ -193,7 +193,7 @@ scanners:
 ```
 
 A config file inside the scanned tree, such as the repository's own
-`.ash/.ash.yaml`, or one an MCP client delivered, does not set it.
+`.ash.yaml`, or one an MCP client delivered, does not set it.
 
 ### Advanced Options
 

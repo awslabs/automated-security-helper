@@ -471,6 +471,10 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             native_field='vulnerabilities.<name>.via[]."url" (the GHSA id, '
             'synthesized as the ruleId); "npm-audit-transitive-<name>" for '
             "a transitive-only entry",
+            reason="an advisory with no usable URL segment falls back to "
+            "npm-<package>-<source id> (npm-<package> when it has no source "
+            "id), and a v1 advisory (yarn, pnpm) takes the last segment of "
+            "its own url the same way (_advisory_id)",
         ),
         severity=FacetDecl(
             state=FacetState.MAPPED,
@@ -481,6 +485,9 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             state=FacetState.MAPPED,
             native_field='vulnerabilities.<name>."nodes" (the install '
             "location, synthesized as node_modules/<location>/package.json)",
+            reason="npm 7+ path; yarn and pnpm (v1 advisories) carry no install "
+            "location, so the adapter writes node_modules/<package>/package.json "
+            "from the advisory's package name",
         ),
         line_range=FacetDecl(
             state=FacetState.MAPPED,
@@ -516,11 +523,15 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             state=FacetState.MAPPED,
             native_field="installed version read from the lockfile beside the "
             "manifest (npm audit's own report gives only a vulnerable range)",
+            reason="npm 7+ path; a yarn or pnpm advisory lists the installed "
+            "versions in its findings, and one with none gets no version",
         ),
         package_path=FacetDecl(
             state=FacetState.MAPPED,
             native_field='vulnerabilities.<name>."nodes" resolved against the '
             "lockfile entry for the install path",
+            reason="npm 7+ path only: yarn and pnpm do not say where a copy is "
+            "installed, so their results carry package_path as None",
         ),
         taxonomy_cve=FacetDecl(
             state=FacetState.NA,
@@ -542,6 +553,9 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         fix_available=FacetDecl(
             state=FacetState.MAPPED,
             native_field='vulnerabilities.<name>."fixAvailable"',
+            reason="npm 7+ path; a v1 advisory (yarn 1-3, pnpm) takes it from "
+            'its "patched_versions" (a non-empty range other than <0.0.0), '
+            "and a yarn 4 line carries none",
         ),
         remediation_text=FacetDecl(
             state=FacetState.UNCONFIRMED,
@@ -559,6 +573,9 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             native_field='vulnerabilities.<name>.via[]."url" (rule helpUri), '
             "read into the flat references when the result carries no "
             "relatedLocations",
+            reason="a v1 advisory's native references and cves keys are not "
+            "read (the record takes only its url, title, severity, cvss, cwe, "
+            "ranges and findings), so the advisory url is its only reference",
         ),
         tags=FacetDecl(
             state=FacetState.MAPPED,

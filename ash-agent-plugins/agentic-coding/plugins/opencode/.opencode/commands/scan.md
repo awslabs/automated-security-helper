@@ -15,7 +15,7 @@ Run an ASH security scan on the current project and report what it finds, most s
 3. **Start the scan** — call `run_ash_scan` with:
    - `source_dir` = absolute path
    - `clean_output=True`
-   - `severity_threshold` left unset, so the scan uses the config's `global_settings.severity_threshold`. The argument can only tighten that threshold for one scan, never loosen it: pass it (e.g. `severity_threshold="HIGH"`) only when the user asks for a stricter level. For a looser level, have the user lower the setting in `.ash/.ash.yaml` and re-scan.
+   - `severity_threshold` left unset, so the scan uses the config's `global_settings.severity_threshold`. The argument can only tighten that threshold for one scan, never loosen it: pass it (e.g. `severity_threshold="HIGH"`) only when the user asks for a stricter level. For a looser level, have the user lower the setting in `.ash.yaml` and re-scan.
 
    Store the returned `scan_id`. Reports land in `<source_dir>/.ash/ash_output/`. The MCP server always runs scans in local mode; for container scans the user needs to invoke the ASH CLI directly (`ash scan --mode container`).
 

@@ -99,7 +99,7 @@ properties, so it is auditable back to the bytes that produced it:
 A harvested lockfile is the upstream workspace's whole lockfile: an upper bound
 on what the wheel links, to be read as the dependency tree of the parent
 package. Findings against it are fixed by upgrading the parent package, never by
-editing anything locally; ASH's own `.ash/.ash.yaml` carries worked examples of
+editing anything locally; ASH's own `.ash.yaml` carries worked examples of
 time-boxed, evidence-carrying suppressions on harvested findings (the rustls
 entries whose `path` globs over `sdist-locks/`). See
 [Suppress findings](../../../how-to/suppress-findings.md).

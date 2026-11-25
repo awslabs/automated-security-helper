@@ -1,4 +1,4 @@
-# yaml-language-server: $schema=../automated_security_helper/schemas/AshConfig.json
+# yaml-language-server: $schema=./automated_security_helper/schemas/AshConfig.json
 project_name: automated-security-helper
 fail_on_findings: true
 ash_plugin_modules: []

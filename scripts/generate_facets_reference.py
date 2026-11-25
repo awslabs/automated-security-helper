@@ -173,8 +173,15 @@ def generate() -> tuple[str, dict]:
             if cell.example:
                 example = f"Example: {code(cell.example)}"
                 notes = f"{notes} {example}".strip() if notes else example
+            # An n/a cell whose reason says UNCONFIRMED is the documented form
+            # for "the tool might carry it and no read says" (base/
+            # scanner_facets.py declaration rules); render it as such, so a
+            # reader does not take it for a confident "cannot exist".
+            state_text = cell.state.value
+            if cell.state is FacetState.NA and "UNCONFIRMED" in (cell.reason or ""):
+                state_text = f"{state_text}, unconfirmed"
             lines.append(
-                f"| {code(facet)} | {code(cell.state.value)} | "
+                f"| {code(facet)} | {code(state_text)} | "
                 f"{md_prose(cell.native_field) if cell.native_field else ''} | "
                 f"{notes} |"
             )

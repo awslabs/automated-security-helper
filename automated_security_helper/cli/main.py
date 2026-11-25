@@ -218,6 +218,7 @@ _LAZY_SUBCOMMANDS: dict[str, tuple[str, str]] = {
     "diff": ("automated_security_helper.cli.diff", "diff_command"),
     "trend": ("automated_security_helper.cli.trend", "trend_command"),
     "merge": ("automated_security_helper.cli.merge", "merge_command"),
+    "results": ("automated_security_helper.cli.results", "results_app"),
     "config": ("automated_security_helper.cli.config", "config_app"),
     "dependencies": (
         "automated_security_helper.cli.dependencies",
@@ -228,6 +229,22 @@ _LAZY_SUBCOMMANDS: dict[str, tuple[str, str]] = {
     "suppress": ("automated_security_helper.cli.suppress", "suppress_app"),
     "express": ("automated_security_helper.cli.express", "express_app"),
 }
+
+#: The top-level spellings that moved under ``ash results`` (``ash report`` is now
+#: ``ash results report``). They keep working through the deprecation window: each
+#: prints one DeprecationWarning on stderr (3.9) and is removed in 4.0. They are
+#: hidden from the root ``--help`` so the listing shows the new tree, but stay in
+#: the command mapping, so the docs generator, the wrapper tables and the help
+#: snapshots still walk them.
+DEPRECATED_RESULTS_SPELLINGS: frozenset[str] = frozenset(
+    {"report", "diff", "trend", "merge", "inspect"}
+)
+
+#: The merge command's help, shared by ``ash merge`` and ``ash results merge``.
+MERGE_COMMAND_HELP = """Merges the results of a sharded scan into one unified report.
+
+Pass one --results per shard. The command refuses to merge a set of shards that does not reconstruct exactly one whole scan, and its exit code is the verdict for the union — a shard that owned no failing scanner exits 0, so CI must gate on this command rather than on per-shard success.
+"""
 
 #: The keyword arguments the eager ``app.command(...)`` registration passed for
 #: each lazily-built command function; a sub-Typer needs none (its own module
@@ -243,12 +260,7 @@ It takes only the options below. To scan with scan options, run `ash scan --mode
     "report": {},
     "diff": {},
     "trend": {},
-    "merge": {
-        "help": """Merges the results of a sharded scan into one unified report.
-
-Pass one --results per shard. The command refuses to merge a set of shards that does not reconstruct exactly one whole scan, and its exit code is the verdict for the union — a shard that owned no failing scanner exits 0, so CI must gate on this command rather than on per-shard success.
-""",
-    },
+    "merge": {"help": MERGE_COMMAND_HELP},
 }
 
 #: Root listing order, as the eager registrations produced it: commands in
@@ -261,6 +273,7 @@ _COMMAND_ORDER: tuple[str, ...] = (
     "diff",
     "trend",
     "merge",
+    "results",
     "mcp",
     "get-genai-guide",
     "config",
@@ -290,17 +303,21 @@ def _built_lazy_command(name: str) -> Any:
 
     module_path, attribute = _LAZY_SUBCOMMANDS[name]
     target = getattr(importlib.import_module(module_path), attribute)
+    hidden = name in DEPRECATED_RESULTS_SPELLINGS
     if isinstance(target, typer.Typer):
         return typer.main.get_group_from_info(
-            TyperInfo(typer_instance=target, name=name),
+            TyperInfo(typer_instance=target, name=name, hidden=hidden),
             pretty_exceptions_short=app.pretty_exceptions_short,
             rich_markup_mode=app.rich_markup_mode,
             suggest_commands=app.suggest_commands,
         )
     holder = typer.Typer()
-    holder.command(name=name, cls=CliJsonInputCommand, **_LAZY_COMMAND_KWARGS[name])(
-        target
-    )
+    holder.command(
+        name=name,
+        cls=CliJsonInputCommand,
+        hidden=hidden,
+        **_LAZY_COMMAND_KWARGS[name],
+    )(target)
     return typer.main.get_command_from_info(
         holder.registered_commands[0],
         pretty_exceptions_short=app.pretty_exceptions_short,
@@ -600,6 +617,38 @@ class AshRootTyperGroup(AshTyperGroup):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.commands = _LazyCommands(self.commands)
+
+    def invoke(self, ctx: Any) -> Any:
+        self._warn_deprecated_spelling(ctx)
+        return super().invoke(ctx)
+
+    def _warn_deprecated_spelling(self, ctx: Any) -> None:
+        """Say, once and on stderr, that a top-level results command moved.
+
+        ``ash report`` and the other spellings in ``DEPRECATED_RESULTS_SPELLINGS``
+        still run unchanged through the 3.9 window; this is the only thing the
+        old spelling adds. A help request and ``--generate-cli-skeleton`` only
+        print what the command takes, which is not a use of it, and shell
+        completion (``resilient_parsing``) must print nothing, so none of them warns.
+        """
+        if ctx.resilient_parsing or not ctx._protected_args:
+            return
+        name = ctx._protected_args[0]
+        if name not in DEPRECATED_RESULTS_SPELLINGS:
+            return
+        command = self.get_command(ctx, name)
+        if (
+            command is None
+            or _asks_for_help(command, ctx, ctx.args)
+            or "--generate-cli-skeleton" in ctx.args
+        ):
+            return
+        echo(
+            f"DeprecationWarning: 'ash {name}' is deprecated and is removed in 4.0. "
+            f"Use 'ash results {name}' instead; 'ash {name}' keeps its current "
+            "behavior until then.",
+            err=True,
+        )
 
 
 app = typer.Typer(

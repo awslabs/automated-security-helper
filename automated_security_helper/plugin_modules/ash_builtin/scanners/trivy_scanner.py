@@ -191,11 +191,7 @@ from pydantic import Field
 
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base import scanner_operational_facets as opsf
-from automated_security_helper.base.scanner_facets import (
-    FacetDecl,
-    FacetState,
-    ScannerFacets,
-)
+from automated_security_helper.base.scanner_facets import ScannerFacets
 from automated_security_helper.models.vocab import TargetType
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.config.confinement_remedy import SET_BY_THE_OPERATOR
@@ -205,6 +201,7 @@ from automated_security_helper.models.core import IgnorePathWithReason, ToolArgs
 from automated_security_helper.config.tool_config_trust import empty_tool_directory
 from automated_security_helper.plugin_modules.ash_builtin.scanners._trivy_scanner_base import (  # noqa: F401 -- TRIVY_SEVERITIES, _SARIF_LEVEL, UNBOUNDED_TRIVY_TIMEOUT and trivy_timeout are kept importable from here
     _SARIF_LEVEL,
+    TRIVY_SARIF_FACETS,
     TRIVY_SEVERITIES,
     UNBOUNDED_TRIVY_TIMEOUT,
     TrivyScannerBase,
@@ -366,115 +363,7 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
     #: (tests/test_data/scanners/trivy/trivy-0.69.3.vuln.sarif) and from the
     #: M0 misconfig capture (tests/test_data/scanners/trivy/captured/
     #: trivy-0.76.2-misconfig-terraform.{json,sarif}, M0-FINDINGS.md (a)).
-    facets: ClassVar[ScannerFacets] = ScannerFacets(
-        rule_id=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="SARIF result ruleId",
-        ),
-        severity=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field='result message line "Severity: <level>", checked '
-            "against the result level and the rule tags (issue_severity)",
-        ),
-        file_path=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="SARIF locations[].physicalLocation.artifactLocation.uri",
-        ),
-        line_range=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="SARIF region.startLine / region.endLine",
-        ),
-        column=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="SARIF region.startColumn",
-        ),
-        message=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="SARIF result message.text",
-        ),
-        resource_id=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="Results[].Misconfigurations[].CauseMetadata.Resource "
-            "(trivy's JSON report, absent from its SARIF), copied onto the "
-            "SARIF result under ash_resource_id by attach_trivy_resources "
-            "for result type terraform only: cloudformation carries a "
-            "file:line locator (t.yaml:3-4) and kubernetes and dockerfile "
-            "carry none (trivy 0.76.2, M0-FINDINGS.md (a))",
-            example="aws_s3_bucket.m0_fixture_bucket",
-        ),
-        resource_type=FacetDecl(
-            state=FacetState.NA,
-            reason="trivy's CauseMetadata names Provider and Service (AWS, "
-            "s3) and no resource type; the type is only the prefix of the "
-            "dropped address, which would be a derivation",
-        ),
-        package_name=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field='result message line 1 "Package: <name>" '
-            "(_package_from_message)",
-        ),
-        package_version=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field='result message line 2 "Installed Version: <version>" '
-            "(_package_from_message)",
-        ),
-        package_path=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="npm lockfile entry at the SARIF region.startLine of "
-            "the result's location (one result per installed copy)",
-        ),
-        taxonomy_cve=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="SARIF result ruleId (the CVE id)",
-        ),
-        taxonomy_cwe=FacetDecl(
-            state=FacetState.UNCONFIRMED,
-            reason="UNCONFIRMED: trivy's SARIF rules carry no CWE (tags are "
-            "vulnerability, security, <severity>); the JSON format's CweIDs "
-            "has no committed vulnerability fixture, and a `trivy fs --format "
-            "json` run over a lockfile settles it",
-        ),
-        fingerprints=FacetDecl(
-            state=FacetState.NA,
-            reason="trivy's SARIF results carry no fingerprints (result keys "
-            "are level, locations, message, ruleId, ruleIndex)",
-        ),
-        fix_available=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field='message line "Fixed Version: <version>", written as '
-            "fix_available=True when non-empty by "
-            "TrivyScannerBase._fixed_version_from_message (an empty value "
-            "writes nothing)",
-        ),
-        remediation_text=FacetDecl(
-            state=FacetState.UNCONFIRMED,
-            reason="UNCONFIRMED: not classified by the survey; the flat "
-            "model has no remediation column, and the rule help text carries "
-            "the fixed version already declared under fix_available",
-        ),
-        snippet=FacetDecl(
-            state=FacetState.NA,
-            reason="trivy's SARIF results carry no code snippet",
-        ),
-        references=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="SARIF rule helpUri, read into the flat references "
-            "by FlatVulnerability.from_sarif_result when the result carries "
-            "no relatedLocations",
-        ),
-        tags=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="SARIF rule properties.tags, read into the flat tags "
-            "by FlatVulnerability.from_sarif_result when the result carries "
-            "none (the severity word among them still feeds issue_severity)",
-        ),
-        extras=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="result properties bag (issue_severity and the "
-            "package identity keys this adapter writes) passed through to "
-            "the flat properties",
-        ),
-    )
+    facets: ClassVar[ScannerFacets] = TRIVY_SARIF_FACETS.model_copy()
 
     #: The operational register row (base/scanner_operational_facets.py),
     #: checked against the production declarations it mirrors by

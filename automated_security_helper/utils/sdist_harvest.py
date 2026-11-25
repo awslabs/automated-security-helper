@@ -78,7 +78,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 
 #: The directory, under the harvester's converted output, that every harvested
 #: lockfile lands in: ``sdist-locks/<package-name>/<version>/<lockfile>``. The
-#: suppression entries in ``.ash/.ash.yaml`` and the provenance stamping both
+#: suppression entries in ``.ash.yaml`` and the provenance stamping both
 #: key on this name, so it is declared once.
 HARVEST_DIR_NAME = "sdist-locks"
 

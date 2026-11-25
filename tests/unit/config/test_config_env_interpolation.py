@@ -210,7 +210,7 @@ class TestDocumentedNamesStillResolve:
         "name", ["AWS_REGION", "AWS_DEFAULT_REGION", "AWS_PROFILE"]
     )
     def test_documented_aws_locator_names_resolve(self, tmp_path, monkeypatch, name):
-        """``docs/plugins/aws/s3-reporter.md`` and ASH's own ``.ash/.ash.yaml``
+        """``docs/plugins/aws/s3-reporter.md`` and ASH's own ``.ash.yaml``
         name these, and none of the three carries a credential."""
         monkeypatch.setenv(name, PLACEHOLDER)
         config = _load(tmp_path, f"project_name: {REFERENCE.format(name=name)}\n")
@@ -254,12 +254,12 @@ class TestAshOwnConfigStaysLoadable:
             __import__("pathlib")
             .Path(__file__)
             .parents[3]
-            .joinpath(".ash", ".ash.yaml")
+            .joinpath(".ash.yaml")
             .read_text(encoding="utf-8")
         )
         referenced = set(re.findall(r"\$\{(\w+):", config_text))
         assert referenced, (
-            "expected .ash/.ash.yaml to still carry the reporter examples that "
+            "expected .ash.yaml to still carry the reporter examples that "
             "reference environment variables"
         )
         unlisted = sorted(

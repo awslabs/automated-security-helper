@@ -81,9 +81,8 @@ def _written(path: Path) -> str:
 def _checkout(tmp_path: Path, config: str, base_name: str, base: str) -> Path:
     checkout = tmp_path / "checkout"
     mark_git_checkout(checkout)
-    (checkout / ".ash").mkdir()
-    (checkout / ".ash" / ".ash.yaml").write_text(config, encoding="utf-8")
-    (checkout / ".ash" / base_name).write_text(base, encoding="utf-8")
+    (checkout / ".ash.yaml").write_text(config, encoding="utf-8")
+    (checkout / base_name).write_text(base, encoding="utf-8")
     return checkout
 
 

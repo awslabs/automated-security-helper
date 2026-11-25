@@ -17,7 +17,7 @@ seen.
 What the test does
 ------------------
 It runs ``ash scan`` in local mode, in a child interpreter, on a small tree that
-carries a copy of the example's own ``.ash/.ash.yaml``. The child puts a copy of the
+carries a copy of the example's own ``.ash.yaml``. The child puts a copy of the
 example package on ``sys.path``, which is what installing the package does, and
 nothing else: the plugins are loaded by ASH's own loader from ``ash_plugin_modules``.
 The copy is outside every git checkout, where an installed package is: a config in
@@ -124,8 +124,8 @@ def _scan_env(base: Path) -> dict:
 def scan(tmp_path_factory, installed_example):
     base = tmp_path_factory.mktemp("example-plugins")
     tree = base / "repo"
-    (tree / ".ash").mkdir(parents=True)
-    shutil.copyfile(EXAMPLE_DIR / ".ash" / ".ash.yaml", tree / ".ash" / ".ash.yaml")
+    tree.mkdir(parents=True)
+    shutil.copyfile(EXAMPLE_DIR / ".ash.yaml", tree / ".ash.yaml")
     (tree / "app.py").write_text(
         f"def main():\n    # {MARKER} validate the input\n    return 1\n",
         encoding="utf-8",
