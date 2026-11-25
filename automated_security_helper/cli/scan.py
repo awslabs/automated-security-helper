@@ -414,6 +414,37 @@ def _fail_state(message: str) -> NoReturn:
     raise typer.Exit(1)
 
 
+def _clone_git_source(ctx: typer.Context, url: str, ref: str | None, depth: int) -> str:
+    """Clone ``--source-git`` into a temporary directory and return the source dir.
+
+    The request rules were checked before any work (the same function the MCP
+    ``set_source_git`` tool runs); this makes the clone, with the same git
+    environment (``clone_remote_source``). The temporary directory is removed
+    when the click context closes, which every ending of the command reaches,
+    an exit and an error included. A clone git refuses or cannot make exits 1,
+    the answer for a run that produced no scan, naming what git said.
+    """
+    import shutil
+    import tempfile
+
+    from automated_security_helper.cli.mcp.source_delivery import (
+        CloneRequestRefused,
+        GitCommandError,
+        GitTimeoutError,
+        SessionWorkspaceError,
+        clone_remote_source,
+    )
+
+    root = Path(tempfile.mkdtemp(prefix="ash-source-git-"))
+    ctx.call_on_close(lambda: shutil.rmtree(root, ignore_errors=True))
+    try:
+        return clone_remote_source(url, ref, depth=depth, destination=root).as_posix()
+    except CloneRequestRefused as refusal:
+        _fail_usage(shown_on_one_line(f"--source-git: {refusal}"))
+    except (GitCommandError, GitTimeoutError, SessionWorkspaceError, RuntimeError) as e:
+        _fail_state(shown_on_one_line(f"--source-git: {e}"))
+
+
 def _resolved(path: str | Path) -> Path:
     """*path* with its links followed and its ``..`` folded, for a comparison.
 
@@ -1713,6 +1744,43 @@ def run_ash_scan_cli_command(
             ),
         ),
     ] = None,
+    source_git: Annotated[
+        str | None,
+        typer.Option(
+            "--source-git",
+            metavar="URL",
+            rich_help_panel="Scan",
+            help=(
+                "Scan a remote git repository instead of a source directory: "
+                "ASH clones it (https or ssh URL, or user@host:path; never a "
+                "local path) into a temporary directory, scans that, and "
+                "removes it. git runs without your configuration or "
+                "credentials, so the repository must be readable anonymously "
+                "or by a key a non-interactive ssh finds. Same request rules "
+                "as the MCP set_source_git tool. Exclusive with --source-dir, "
+                "--workspace, the image options, --staged, --use-existing and "
+                "--changed-files-only."
+            ),
+        ),
+    ] = None,
+    git_ref: Annotated[
+        str | None,
+        typer.Option(
+            "--git-ref",
+            metavar="REF",
+            rich_help_panel="Scan",
+            help="Branch, tag or commit of --source-git to scan. Default: the remote's default branch.",
+        ),
+    ] = None,
+    git_depth: Annotated[
+        int | None,
+        typer.Option(
+            "--git-depth",
+            metavar="N",
+            rich_help_panel="Scan",
+            help="How many commits of history --source-git fetches, 1 to 1000 (default 1).",
+        ),
+    ] = None,
 ):
     """Scan code, infrastructure, secrets, and dependencies.
 
@@ -2130,6 +2198,46 @@ def run_ash_scan_cli_command(
             if payload_refusal is not None:
                 _fail_usage(shown_on_one_line(payload_refusal))
 
+    # A remote git repository as the subject (--source-git): its own rules first,
+    # before any work, so a conflicting or refused request does nothing. The
+    # request rules are the MCP set_source_git tool's, run by the same function.
+    if (git_ref is not None or git_depth is not None) and source_git is None:
+        _fail_usage(
+            "--git-ref and --git-depth apply to --source-git only; "
+            "they name which part of the remote repository to scan."
+        )
+    if source_git is not None:
+        for other_flag, other_given in (
+            (
+                "--source-dir",
+                source_dir is not None,
+            ),
+            ("--workspace", workspace is not None),
+            ("--image", image is not None),
+            ("--image-archive", image_archive is not None),
+            ("--image-layout", image_layout is not None),
+            ("--staged", staged),
+            ("--use-existing", use_existing),
+            ("--changed-files-only", changed_files_only),
+        ):
+            if other_given:
+                _fail_usage(
+                    f"--source-git cannot be combined with {other_flag}: one scan "
+                    "has one subject, and the clone has no working-tree state to "
+                    "read. Scan the repository on its own."
+                )
+        from automated_security_helper.cli.mcp.source_delivery import (
+            CloneRequestRefused,
+            validated_remote_clone_request,
+        )
+
+        try:
+            validated_remote_clone_request(
+                source_git, git_ref, 1 if git_depth is None else git_depth
+            )
+        except CloneRequestRefused as refusal:
+            _fail_usage(shown_on_one_line(f"--source-git: {refusal}"))
+
     workspace_plan: WorkspacePlan | None = None
     if workspace is not None:
         workspace_plan = _handle_workspace_mode(
@@ -2213,6 +2321,17 @@ def run_ash_scan_cli_command(
         custom_build_arg = []
 
     # Resolve cwd-based defaults at call time (not import time).
+    if source_git is not None:
+        # The subject is a clone of the remote repository, made here into a
+        # temporary directory that is removed when the command ends however it
+        # ends (the click context's close callback runs on every exit). The
+        # output directory then defaults beside the working directory, not
+        # inside the clone, which would take the results with it.
+        source_dir = _clone_git_source(
+            ctx, source_git, git_ref, 1 if git_depth is None else git_depth
+        )
+        if output_dir is None:
+            output_dir = Path.cwd().joinpath(".ash", "ash_output").as_posix()
     if source_dir is None:
         source_dir = Path.cwd().as_posix()
     # Refused before anything else uses it. A missing --source-dir used to run a

@@ -28,6 +28,8 @@ pytestmark = pytest.mark.unit
         ["scan", "--image-layout", "/tmp/app-layout"],
         ["--image", "alpine:3.20"],
         ["--image-archive=/tmp/app.tar", "--output-dir", "/tmp/out"],
+        ["scan", "--source-git", "https://example.com/team/repo.git"],
+        ["--source-git=https://example.com/team/repo.git", "--git-ref", "main"],
     ],
 )
 def test_an_image_submission_is_a_scan_invocation(argv):
