@@ -64,11 +64,14 @@ def test_a_scanner_with_nothing_red_but_rows_not_run_exits_three() -> None:
 
 
 def test_a_scanner_with_a_red_row_exits_one_and_names_why() -> None:
+    # cdk-nag's facets row went green once the cdk-nag prep made its recorded
+    # CSV reports readable; its red row is now the unconfirmed operational cell.
     result = _verify("cdk-nag")
     assert result.exit_code == 1, result.output
     assert "cdk-nag (supported): fail" in result.output
-    assert "[red] facets green over committed transcripts" in result.output
-    assert "has no corpus to observe" in result.output
+    assert "[green] facets green over committed transcripts" in result.output
+    assert "[red] operational declarations complete" in result.output
+    assert "unconfirmed cell" in result.output
 
 
 def test_one_red_scanner_among_several_makes_the_whole_run_exit_one() -> None:
