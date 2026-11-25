@@ -11,6 +11,13 @@ touches the network or needs AWS credentials, which is also why the partition of
 region is read from botocore's bundled data file rather than through a botocore
 session.
 
+``ProductFields`` carries ASH's own keys, ``ash/target`` through
+``ash/packageVersion`` plus ``ash/correlationId``, the cross-scanner correlation
+id (``utils/finding_identity``, "Correlation ids"). The correlation pair is
+absent for a finding that carries none (SAST and IaC findings, and a secret or
+dependency finding missing its family's key fields); the finding ``Id`` stays
+the scanner-inclusive identity contract v2 hash, untouched.
+
 The frame boundary
 ------------------
 
@@ -52,8 +59,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, TYPE_CHECKING
 
-from automated_security_helper.models.flat_vulnerability import FlatVulnerability
+from automated_security_helper.models.flat_vulnerability import (
+    FlatVulnerability,
+    correlation_id_for,
+)
 from automated_security_helper.utils.finding_identity import (
+    CORRELATION_ID_PROPERTY,
+    correlation_target,
     identity_keys,
     relative_path,
     relative_to_scan_root,
@@ -186,6 +198,10 @@ class AsffFormatter:
         model_project = _model_project(model)
         scope = self.scope
         source_dir = self.source_dir
+        # The correlation target is the model's, not this reporter's findings
+        # scope: every reporter of one run must export one value for one
+        # finding, and only the model-level scope is known to all of them.
+        corr_target = correlation_target(getattr(model.metadata, "project_name", None))
 
         prepared: list[dict[str, Any]] = []
         for run in (model.sarif.runs if model.sarif else None) or []:
@@ -200,6 +216,7 @@ class AsffFormatter:
                         target=target,
                         model_project=model_project,
                         source_dir=source_dir,
+                        correlation_scope=corr_target,
                     )
                 )
 
@@ -229,6 +246,7 @@ class AsffFormatter:
         target: str,
         model_project: str | None,
         source_dir: str | Path | None,
+        correlation_scope: str,
     ) -> dict[str, Any]:
         flat = FlatVulnerability.from_sarif_result(result, tool_name, "UNKNOWN")
         identity = flat.identity
@@ -239,6 +257,19 @@ class AsffFormatter:
                 f"finding Id can be derived for it; {self.nothing}"
             )
         project = flat.workspace_project or model_project
+        identity = relative_to_scan_root(
+            identity, source_dir, resolve_root=not self.offline
+        )
+        # Assigned here because this formatter flattens each result itself
+        # rather than reading model.to_flat_vulnerabilities(); the spelling is
+        # the shared one (flat_vulnerability.correlation_id_for), over the
+        # rebased identity, as the finding Id is.
+        flat.correlation_id = correlation_id_for(
+            flat,
+            target=correlation_scope,
+            identity=identity,
+            default_project=model_project,
+        )
         return {
             "flat": flat,
             "result": result,
@@ -249,9 +280,7 @@ class AsffFormatter:
             ),
             "project": project,
             "target_key": _target_key(target, project),
-            "identity": relative_to_scan_root(
-                identity, source_dir, resolve_root=not self.offline
-            ),
+            "identity": identity,
             "message": _without_code_blocks(flat.description or ""),
             "severity": _resolve_result_severity(result),
             "is_cve": bool(_CVE_PATTERN.search(flat.rule_id or "unknown")),
@@ -310,6 +339,11 @@ class AsffFormatter:
             ),
             "ash/packageName": flat.package_name,
             "ash/packageVersion": flat.package_version,
+            # The cross-scanner correlation id (utils/finding_identity,
+            # "Correlation ids"). The pair is omitted for a finding that
+            # carries none, by the None filter below: an always-present key
+            # would make every non-carrying finding "correlate" in a filter.
+            CORRELATION_ID_PROPERTY: flat.correlation_id,
         }
 
         return {
