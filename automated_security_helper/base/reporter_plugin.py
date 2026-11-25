@@ -614,7 +614,9 @@ class ReporterPluginBase(PluginBase, Generic[T]):
         # Every concrete reporter fills its config in ``model_post_init`` when
         # none was given, so the methods read it as the plugin's own config
         # type; the runtime field below still accepts None until then.
-        config: T
+        # ``Field(default=None)`` keeps it optional in the constructor the
+        # checker sees; it is never evaluated.
+        config: T = Field(default=None)
     else:
         config: T | ReporterPluginConfigBase | None = None
     dependencies_satisfied: bool = True

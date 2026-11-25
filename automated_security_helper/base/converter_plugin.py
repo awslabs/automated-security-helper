@@ -75,7 +75,11 @@ class ConverterPluginBase(PluginBase, Generic[T]):
         # Every concrete converter fills its config in ``model_post_init`` when
         # none was given, so the methods read it as the plugin's own config
         # type; the runtime field below still accepts None until then.
-        config: T
+        # ``Field(default=None)`` keeps both optional in the constructor the
+        # checker sees; it is never evaluated.
+        config: T = Field(default=None)
+        # The converter's own results directory, set before a conversion runs.
+        results_dir: Path = Field(default=None)
     else:
         config: T | ConverterPluginConfigBase | None = None
     dependencies_satisfied: bool = True

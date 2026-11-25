@@ -502,7 +502,7 @@ def _offline_partition(region: str) -> str:
         if region in partition["regions"]:
             return partition["partition"]
         pattern = partition.get("regionRegex")
-        if pattern and re.compile(pattern).match(region):
+        if pattern and region and re.compile(pattern).match(region):
             return partition["partition"]
     return "aws"
 

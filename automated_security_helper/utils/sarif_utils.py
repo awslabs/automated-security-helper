@@ -5,7 +5,16 @@ import os
 import random
 import re
 from contextlib import suppress
-from typing import TYPE_CHECKING, Any, Callable, Dict, Iterable, List, Optional
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    overload,
+)
 import uuid
 from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
 from automated_security_helper.base.plugin_context import PluginContext
@@ -784,6 +793,20 @@ def _fill_message_arguments(
         return token
 
     return _MESSAGE_PLACEHOLDER.sub(fill, text)
+
+
+@overload
+def result_message_text(result: Any, rule: Any = None, *, default: str) -> str: ...
+
+
+@overload
+def result_message_text(result: Any, rule: Any, default: str) -> str: ...
+
+
+@overload
+def result_message_text(
+    result: Any, rule: Any = None, default: None = None
+) -> str | None: ...
 
 
 def result_message_text(

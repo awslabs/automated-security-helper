@@ -969,7 +969,9 @@ class PluginBase(UVToolMixin, BaseModel):
         # a directory from it runs; the few that can be reached without one
         # check ``is None`` first. The runtime field below accepts None so a
         # plugin can still be built on its own.
-        context: PluginContext
+        # ``Field(default=None)`` keeps it optional in the constructor the
+        # checker sees; it is never evaluated.
+        context: PluginContext = Field(default=None)
     else:
         context: PluginContext | None = None
     config: PluginConfigBase | None = None
