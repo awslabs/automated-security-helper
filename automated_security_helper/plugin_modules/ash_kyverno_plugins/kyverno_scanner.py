@@ -6,10 +6,16 @@
 What it runs
 ------------
 ``kyverno apply --policy-report --remove-color --output-format=yaml
---resource=<manifest> ... -- <policy file> ...`` in the source directory. Kyverno
-evaluates the operator's policies against the Kubernetes manifests in the scanned
-tree, offline: no ``--cluster`` flag is passed, so it makes no API call, and
-``--registry`` (image registry access) is not passed either.
+[--exception=<exceptions file>] --resource=<manifest> ... -- <policies file>`` in the
+source directory. Kyverno evaluates the operator's policies against the Kubernetes
+manifests in the scanned tree, offline: no ``--cluster`` flag is passed, so it makes
+no API call, and ``--registry`` (image registry access) is not passed either.
+
+The policies reach Kyverno as one file under the results directory that holds every
+policy document found under ``policy_paths`` (so a vendored policy library of hundreds
+of files costs one argument, not hundreds), and the ``PolicyException`` documents found
+there go to a second file passed as ``--exception=``: Kyverno loads an exception given
+as a positional policy path without applying it.
 
 Policies are bring-your-own. Kyverno ships no rules, so with no policy configured the
 scanner does nothing: it logs at INFO and reports SKIPPED (``targets_attempted = 0``),
@@ -44,6 +50,18 @@ Measured against the pinned release (v1.19.2)
 * A policy path that does not exist, and a file that is not a policy, are skipped
   without a word and exit 0, so ASH checks both itself before the run (a missing path
   fails the scan; a tree with no policy document reports SKIPPED).
+* An invalid policy among valid ones is skipped: stdout carries a ``Policies Skipped:``
+  block (numbered ``<policy name>: path: <reason>`` lines between rows of dashes)
+  before the report, and the run still exits by its results. If every policy is
+  invalid there is no report and the exit is 1.
+* A ``PolicyException`` given as a positional policy path draws a deprecation warning
+  and is not applied; given with ``--exception=<file>`` it is, and the rule's result
+  becomes ``skip`` (which is not a finding).
+* A name given to ``--resource`` is split on commas as CSV by the flag parser, so
+  ``a,b.yaml`` becomes the paths ``a`` and ``b.yaml`` (exit 1, "failed to load
+  resources"), and a double quote fails the parse. ASH leaves such files out.
+* A policy in ``policies.kyverno.io`` (``ValidatingPolicy``) has no named rules, so its
+  results carry no ``rule`` and ASH reports them as ``<policy>/unknown-rule``.
 * v1.20.0 refuses to load the legacy ``kyverno.io/v1`` ``ClusterPolicy`` and ``Policy``
   kinds. The pin is v1.19.2, the last release that loads both those and the
   ``policies.kyverno.io`` kinds. Moving the pin to 1.20 or later takes a policy
@@ -53,24 +71,42 @@ Severity
 --------
 Kyverno's severity names map one to one: critical is CRITICAL (SARIF ``error``), high
 is HIGH (``error``), medium is MEDIUM (``warning``), low is LOW (``note``), info is
-INFO (``none``). ``error`` is HIGH, not CRITICAL, as for hadolint: these are policy
-violations, not demonstrated exploits. A policy that declares no severity gets MEDIUM
-for a ``fail`` and LOW for a ``warn``. A severity name outside the five is HIGH, so an
-unrecognized value is never under-reported. ``issue_severity`` and the SARIF level are
-set from the same row.
+INFO (``none``). The SARIF level of a CRITICAL or HIGH finding is ``error``, which is
+not a Kyverno severity name; these are policy violations, not demonstrated exploits.
+A policy that declares no severity gets MEDIUM for a ``fail`` and LOW for a ``warn``.
+The name is matched without regard to case. A severity name outside the five is HIGH,
+not CRITICAL, so an unrecognized value is not dropped to a lower level.
+``issue_severity`` and the SARIF level are set from the same row.
 
 A ``result: error`` entry is not a finding: Kyverno could not evaluate that rule on
-that resource. It counts as a failed target and is listed in the scan's errors (policy,
-rule and resource only; the message is not copied, since it can quote the resource).
-``pass`` and ``skip`` entries are not findings.
+that resource. It is listed in the scan's errors (policy, rule and resource only; the
+message is not copied, since it can quote the resource), one line per entry. The scan
+counts failed targets as distinct files, not entries: ``targets_failed`` is the number
+of manifest files with at least one such entry, plus each invalid policy file and each
+manifest Kyverno could not load, and never exceeds ``targets_attempted``.
 
 What is scanned
 ---------------
 The YAML and JSON files of the scan set that hold a Kubernetes object. Kyverno's own
-policy kinds (``kyverno.io``, ``policies.kyverno.io``, ``cli.kyverno.io``), report
-kinds and admission policies are not treated as resources. Files that do not parse,
-and files over ``MAX_MANIFEST_BYTES``, are skipped. Helm templates and other
-templated YAML therefore do not reach Kyverno.
+kinds (``kyverno.io``, ``policies.kyverno.io``, ``cli.kyverno.io``), Chainsaw tests
+(``chainsaw.kyverno.io``), kustomize files (``kustomize.config.k8s.io``), report kinds
+and admission policies are not treated as resources, and neither is anything under a
+directory named in ``policy_paths`` (a vendored policy library carries negative test
+fixtures that are meant to violate its policies). Files that do not parse, and files
+over ``MAX_MANIFEST_BYTES``, are skipped. A file that holds an object beside other
+documents is left out whole and named in a WARNING, because Kyverno stops the run at a
+document that is not an object. Helm templates and other templated YAML do not reach
+Kyverno.
+
+Where a finding lands
+---------------------
+Kyverno's report names a resource, not a file, so ASH maps ``(kind, namespace, name)``
+back to the file that declares it. Two files that declare the same object (a kustomize
+base and its overlays) would make that mapping ambiguous, so ASH never gives such files
+the same Kyverno run: it plans the runs so that, within one run, every identity is
+declared by one file, and maps each run's report with that run's own index. A file
+with no namespace collides with a copy of the same kind and name in any namespace,
+because Kyverno may report a namespace the manifest does not state.
 
 Offline and sandbox
 -------------------
@@ -82,7 +118,9 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import re
 import time
+from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import (
     Annotated,
@@ -92,6 +130,7 @@ from typing import (
     Iterable,
     List,
     Literal,
+    NamedTuple,
     Optional,
     Set,
     Tuple,
@@ -99,6 +138,7 @@ from typing import (
 
 import yaml
 from pydantic import AnyUrl, Field, model_validator
+from typing_extensions import Self
 
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.plugin_context import PluginContext
@@ -162,6 +202,28 @@ NON_RESOURCE_GROUPS = frozenset(
         "reports.kyverno.io",
         "wgpolicyk8s.io",
         "openreports.io",
+        "chainsaw.kyverno.io",
+        "kustomize.config.k8s.io",
+    }
+)
+
+#: API groups whose kinds Kyverno loads as policies, minus ``NON_POLICY_KYVERNO_KINDS``.
+POLICY_GROUPS = ("kyverno.io", "policies.kyverno.io")
+
+#: Kinds of ``POLICY_GROUPS`` that ``kyverno apply`` takes as exceptions.
+EXCEPTION_KINDS = frozenset({"PolicyException"})
+
+#: Kinds of ``POLICY_GROUPS`` that are not policies for ``kyverno apply``: exceptions
+#: (passed with ``--exception``) and the cleanup and context kinds it has no use for.
+NON_POLICY_KYVERNO_KINDS = frozenset(
+    {
+        *EXCEPTION_KINDS,
+        "CleanupPolicy",
+        "ClusterCleanupPolicy",
+        "DeletingPolicy",
+        "NamespacedDeletingPolicy",
+        "GlobalContextEntry",
+        "UpdateRequest",
     }
 )
 
@@ -184,6 +246,13 @@ MAX_MANIFEST_BYTES = 5 * 1024 * 1024
 #: Upper bound on one kyverno command line, in characters (Windows caps it at 32,767).
 _MAX_COMMAND_LINE_CHARS = 24_000
 
+#: Most extra Kyverno runs one scan spends splitting a run that failed without a report
+#: to find the manifest it could not load.
+_MAX_BISECTS = 32
+
+#: Longest list of paths named in one notice.
+_NOTICE_PATHS = 10
+
 #: The clock the scan's time budget is measured on; a seam for tests.
 _now = time.monotonic
 
@@ -198,15 +267,30 @@ def _group_of(api_version: str) -> str:
 
 
 def is_policy_document(doc: Any) -> bool:
-    """Whether a parsed YAML document is a policy Kyverno would load."""
+    """Whether a parsed YAML document is a policy ``kyverno apply`` evaluates.
+
+    Exceptions (``is_exception_document``) and the cleanup and context kinds are
+    Kyverno's but not policies: counting them would open the opt-in gate for a tree
+    that holds nothing to evaluate.
+    """
     if not isinstance(doc, dict):
         return False
     api_version, kind = doc.get("apiVersion"), doc.get("kind")
     if not isinstance(api_version, str) or not isinstance(kind, str):
         return False
-    if _group_of(api_version) in ("kyverno.io", "policies.kyverno.io"):
-        return True
+    if _group_of(api_version) in POLICY_GROUPS:
+        return kind not in NON_POLICY_KYVERNO_KINDS
     return kind in ADMISSION_POLICY_KINDS
+
+
+def is_exception_document(doc: Any) -> bool:
+    """Whether a parsed YAML document is a Kyverno policy exception."""
+    if not isinstance(doc, dict):
+        return False
+    api_version, kind = doc.get("apiVersion"), doc.get("kind")
+    if not isinstance(api_version, str) or not isinstance(kind, str):
+        return False
+    return _group_of(api_version) in POLICY_GROUPS and kind in EXCEPTION_KINDS
 
 
 def is_resource_document(doc: Any) -> bool:
@@ -260,7 +344,8 @@ class ManifestIndex:
     name)`` back to the file and line. A resource whose manifest sets no namespace is
     found by ``(kind, name)`` alone, because Kyverno may report a namespace the
     manifest does not state. When two files declare the same object the first, in
-    sorted order, wins.
+    sorted order, wins, so a scan builds one index per run of files that do not share
+    an identity (``plan_runs``) and the rule never has to choose.
     """
 
     def __init__(self) -> None:
@@ -278,29 +363,155 @@ class ManifestIndex:
         )
 
 
-def load_manifest(
-    text: str,
-) -> Optional[List[Tuple[Dict[str, Any], int]]]:
-    """The Kubernetes objects of one file, with their start lines; None when none.
+class _Manifest(NamedTuple):
+    """One manifest file of the scan: where it is, how it is spelled, what it holds."""
 
-    None for a file that does not parse, that holds no object with ``apiVersion`` and
-    ``kind``, or that holds anything else: Kyverno stops the whole run at one document
-    that is not an object, so a file is passed only when every document in it is one
-    (empty documents, which YAML allows between separators, are ignored). A
-    ``kind: List`` is expanded into its items, all located at the list's start line.
+    path: Path
+    uri: str
+    objects: List[Tuple[Dict[str, Any], int]]
+
+
+class _Run:
+    """The manifests one group of Kyverno invocations covers, no two sharing an identity.
+
+    An identity is a ``(kind, namespace, name)``. A manifest with no namespace is
+    taken to collide with any namespace of the same kind and name, because
+    ``ManifestIndex.locate`` falls back to ``(kind, name)`` for it and Kyverno may
+    report a namespace the manifest does not state.
+    """
+
+    def __init__(self) -> None:
+        self.manifests: List[_Manifest] = []
+        self._exact: Set[Tuple[str, str, str]] = set()
+        self._any_namespace: Set[Tuple[str, str]] = set()
+        self._no_namespace: Set[Tuple[str, str]] = set()
+
+    @staticmethod
+    def _identities(manifest: _Manifest) -> Set[Tuple[str, str, str]]:
+        found = {_identity(doc) for doc, _ in manifest.objects}
+        return {i for i in found if i[2]}
+
+    def accepts(self, manifest: _Manifest) -> bool:
+        for kind, namespace, name in self._identities(manifest):
+            if (kind, namespace, name) in self._exact:
+                return False
+            if not namespace and (kind, name) in self._any_namespace:
+                return False
+            if namespace and (kind, name) in self._no_namespace:
+                return False
+        return True
+
+    def add(self, manifest: _Manifest) -> None:
+        self.manifests.append(manifest)
+        for kind, namespace, name in self._identities(manifest):
+            self._exact.add((kind, namespace, name))
+            self._any_namespace.add((kind, name))
+            if not namespace:
+                self._no_namespace.add((kind, name))
+
+    def index(self) -> ManifestIndex:
+        index = ManifestIndex()
+        for manifest in self.manifests:
+            for doc, line in manifest.objects:
+                index.add(doc, manifest.uri, line)
+        return index
+
+
+def plan_runs(manifests: List[_Manifest]) -> List[_Run]:
+    """Group *manifests* (in order) into runs in which no identity has two files.
+
+    Each manifest goes to the first run that does not already hold one of its
+    identities, so a tree without collisions is one run and a kustomize tree with N
+    overlays of one object is N+1.
+    """
+    runs: List[_Run] = []
+    for manifest in manifests:
+        for run in runs:
+            if run.accepts(manifest):
+                run.add(manifest)
+                break
+        else:
+            run = _Run()
+            run.add(manifest)
+            runs.append(run)
+    return runs
+
+
+@dataclass
+class _Policies:
+    """What ``policy_paths`` names: the policy and exception documents and where they are.
+
+    ``dirs`` are the configured directories, so that nothing under one is scanned as
+    a resource; ``owners`` maps a policy's name to the files that declare it.
+    """
+
+    files: List[Path] = field(default_factory=list)
+    exception_files: List[Path] = field(default_factory=list)
+    dirs: List[Path] = field(default_factory=list)
+    policies: List[Dict[str, Any]] = field(default_factory=list)
+    exceptions: List[Dict[str, Any]] = field(default_factory=list)
+    owners: Dict[str, List[Path]] = field(default_factory=dict)
+
+
+@dataclass
+class _Outcome:
+    """What the Kyverno invocations over one set of manifests came to."""
+
+    entries: List[Dict[str, Any]] = field(default_factory=list)
+    skipped_policies: List[str] = field(default_factory=list)
+    failed_uris: List[str] = field(default_factory=list)
+    completed: int = 0
+    final_args: List[str] = field(default_factory=list)
+
+
+_NO_REPORT_MESSAGE = (
+    "kyverno exited 1 without printing a report, which means it failed before "
+    "evaluating anything (its message is in the scanner's stderr log and is not "
+    "quoted here)"
+)
+
+
+class FailedTarget(str):  # noqa: SLOT000 - one more attribute per line, kept in __dict__
+    """One line of the scan's errors, and the file (or ``.``) it counts against."""
+
+    uri: str
+
+    def __new__(cls, text: str, uri: str) -> Self:
+        obj = super().__new__(cls, text)
+        obj.uri = uri
+        return obj
+
+
+def read_manifest(
+    text: str,
+) -> Tuple[Optional[List[Tuple[Dict[str, Any], int]]], Optional[str]]:
+    """The Kubernetes objects of one file with their start lines, and why not.
+
+    The objects are None for a file that does not parse, that holds no object with
+    ``apiVersion`` and ``kind``, or that holds anything else: Kyverno stops the whole
+    run at one document that is not an object, so a file is passed only when every
+    document in it is one (empty documents, which YAML allows between separators, are
+    ignored). A ``kind: List`` is expanded into its items, all located at the list's
+    start line.
+
+    The reason is ``"mixed"`` when the objects are None because a file holds an object
+    beside a document that is not one (a real workload left out is worth saying so),
+    and None otherwise.
     """
     if "apiVersion" not in text or "kind" not in text:
-        return None
+        return None, None
     try:
         documents = _documents(text)
     except yaml.YAMLError:
-        return None
+        return None, None
     objects: List[Tuple[Dict[str, Any], int]] = []
+    other = False
     for doc, line in documents:
         if doc is None:
             continue
         if not is_resource_document(doc):
-            return None
+            other = True
+            continue
         items = doc.get("items")
         if doc.get("kind") == "List" and isinstance(items, list):
             for item in items:
@@ -308,7 +519,39 @@ def load_manifest(
                     objects.append((item, line))
             continue
         objects.append((doc, line))
-    return objects or None
+    if other:
+        return None, "mixed" if objects else None
+    return (objects or None), None
+
+
+def load_manifest(
+    text: str,
+) -> Optional[List[Tuple[Dict[str, Any], int]]]:
+    """The Kubernetes objects of one file, with their start lines; None when none.
+
+    See ``read_manifest`` for which files are passed.
+    """
+    return read_manifest(text)[0]
+
+
+_SKIPPED_ENTRY = re.compile(r"^\s*\d+\.\s+(\S.*?):\s+path:", re.MULTILINE)
+
+
+def parse_skipped_policies(text: str) -> List[str]:
+    """The names of the policies Kyverno skipped as invalid, from its stdout.
+
+    Kyverno prints a ``Policies Skipped:`` block (numbered ``<name>: path: <reason>``
+    lines between rows of dashes) before the report. Only the names are returned: the
+    reason can quote the policy.
+    """
+    marker = text.find("Policies Skipped:")
+    if marker < 0:
+        return []
+    block = text[marker:]
+    end = block.find("\n-----")
+    if end >= 0:
+        block = block[:end]
+    return [m.group(1) for m in _SKIPPED_ENTRY.finditer(block)]
 
 
 def parse_policy_report_output(text: str) -> List[Dict[str, Any]]:
@@ -382,16 +625,17 @@ def convert_report_results(
     entries: Iterable[Dict[str, Any]],
     index: ManifestIndex,
     fallback_uri: str = ".",
-) -> Tuple[List[Result], List[ReportingDescriptor], List[str]]:
+) -> Tuple[List[Result], List[ReportingDescriptor], List[FailedTarget]]:
     """Kyverno report results as SARIF results, rule descriptors and failed targets.
 
     ``fail`` and ``warn`` entries become one SARIF result per resource they name.
     ``error`` entries become one line each in the third list: ``"<uri>: ..."``, one
-    per resource, naming the policy and rule but not Kyverno's message.
+    per resource, naming the policy and rule but not Kyverno's message. Each line is a
+    ``FailedTarget``, a string that also knows the file it counts against.
     """
     results: List[Result] = []
     rules: Dict[str, ReportingDescriptor] = {}
-    failed: List[str] = []
+    failed: List[FailedTarget] = []
     seen: Set[Tuple[Any, ...]] = set()
     for entry in entries:
         outcome = str(entry.get("result") or "").lower()
@@ -402,8 +646,11 @@ def convert_report_results(
             for resource in resources:
                 uri, _ = _place(resource, index, fallback_uri)
                 failed.append(
-                    f"{uri}: kyverno could not evaluate policy {policy}, rule {rule}"
-                    f"{_describe_resource(resource)}, so it was not checked"
+                    FailedTarget(
+                        f"{uri}: kyverno could not evaluate policy {policy}, rule "
+                        f"{rule}{_describe_resource(resource)}, so it was not checked",
+                        uri,
+                    )
                 )
             continue
         if outcome not in FINDING_RESULTS:
@@ -602,28 +849,39 @@ class KyvernoScanner(ScannerPluginBase[KyvernoScannerConfig]):
             raise ScannerError("KyvernoScanner has no plugin context")
         return self.context
 
-    @property
-    def _options(self) -> KyvernoScannerConfigOptions:
-        options = getattr(self.config, "options", None)
+    def _options_of(self, config: Any = None) -> KyvernoScannerConfigOptions:
+        """The options of *config* (what ``scan()`` was given) or of this scanner.
+
+        ``_pre_scan`` swaps the scanner's config for the one ``scan()`` is given, but
+        the opt-in gate runs before it, so the gate has to read the same config.
+        """
+        source = config if config is not None else self.config
+        if isinstance(source, dict):
+            options = source.get("options")
+        else:
+            options = getattr(source, "options", None)
         if isinstance(options, KyvernoScannerConfigOptions):
             return options
-        return KyvernoScannerConfigOptions.model_validate(
-            options.model_dump() if options is not None else {}
-        )
+        if options is None:
+            return KyvernoScannerConfigOptions()
+        data = options if isinstance(options, dict) else options.model_dump()
+        return KyvernoScannerConfigOptions.model_validate(data)
 
-    def _policy_files(self) -> List[Path]:
-        """The policy files to pass to kyverno, sorted; empty when none is configured.
+    def _policy_inputs(self, config: Any = None) -> "_Policies":
+        """The policies and exceptions to apply; empty when none is configured.
 
         Every operator entry is resolved (``operator_paths``); one the scanned tree
-        set is ignored with a warning. A file is kept when it holds a policy
-        document. A directory contributes the policy files under it.
+        set is ignored with a warning. A file is kept when it holds a policy or an
+        exception document. A directory contributes the files under it, and is
+        remembered so that nothing under it is scanned as a resource.
 
         Raises:
             ScannerError: when an entry the operator set does not exist.
         """
-        configured = list(self._options.policy_paths or [])
+        configured = list(self._options_of(config).policy_paths or [])
+        found = _Policies()
         if not configured:
-            return []
+            return found
         source_dir = Path(self._ctx.source_dir)
         chosen = operator_paths(
             self._ctx.config,
@@ -632,7 +890,7 @@ class KyvernoScanner(ScannerPluginBase[KyvernoScannerConfig]):
             source_dir,
             outside_tree=False,
         )
-        files: Set[Path] = set()
+        seen: Set[Path] = set()
         for entry, candidate in zip(configured, chosen):
             if candidate.path is None:
                 self._plugin_log(
@@ -648,42 +906,63 @@ class KyvernoScanner(ScannerPluginBase[KyvernoScannerConfig]):
                     f"does not exist (looked for {path.as_posix()}). Fix the path, "
                     "or remove it to leave the kyverno scanner idle."
                 )
-            candidates = (
-                sorted(
+            if path.is_dir():
+                found.dirs.append(path.resolve())
+                candidates = sorted(
                     p for p in path.rglob("*") if p.suffix.lower() in MANIFEST_SUFFIXES
                 )
-                if path.is_dir()
-                else [path]
-            )
+            else:
+                candidates = [path]
             for file in candidates:
-                if self._holds_policy(file):
-                    files.add(file)
-        return sorted(files)
+                resolved = file.resolve()
+                if resolved in seen:
+                    continue
+                seen.add(resolved)
+                documents = self._policy_documents(file)
+                policies = [d for d in documents if is_policy_document(d)]
+                exceptions = [d for d in documents if is_exception_document(d)]
+                if policies:
+                    found.files.append(file)
+                    found.policies.extend(policies)
+                    for doc in policies:
+                        name = (doc.get("metadata") or {}).get("name")
+                        if isinstance(name, str):
+                            found.owners.setdefault(name, []).append(file)
+                if exceptions:
+                    found.exception_files.append(file)
+                    found.exceptions.extend(exceptions)
+        found.files.sort()
+        found.exception_files.sort()
+        return found
 
     @staticmethod
-    def _holds_policy(path: Path) -> bool:
+    def _policy_documents(path: Path) -> List[Dict[str, Any]]:
+        """The documents of a policy file that are mappings; none for a file not read."""
         try:
             if not path.is_file() or path.stat().st_size > MAX_MANIFEST_BYTES:
-                return False
+                return []
             text = path.read_text(encoding="utf-8", errors="replace")
-            return any(is_policy_document(doc) for doc, _ in _documents(text))
+            return [doc for doc, _ in _documents(text) if isinstance(doc, dict)]
         except (OSError, yaml.YAMLError):
-            return False
+            return []
 
     def _manifests(
         self,
         target: Path,
         target_type: Literal["source", "converted"],
         global_ignore_paths: List[IgnorePathWithReason],
-        policy_files: List[Path],
-    ) -> Tuple[List[Path], ManifestIndex]:
-        """The manifest files under *target* to pass to kyverno, sorted, and their index.
+        policies: "_Policies",
+    ) -> List[_Manifest]:
+        """The manifest files under *target* to pass to kyverno, sorted, with objects.
 
         The source branch reads ASH's scan set, so .gitignore and the rest have
         already removed what they remove, and ASH's own output directory is dropped.
         The converted branch walks ``work_dir``. A file must resolve inside *target*:
         a link leaving the tree is skipped, because kyverno's errors quote the
-        file's text. A policy file is never a resource.
+        file's text. A policy or exception file is never a resource, and neither is
+        anything under a configured policy directory. A file whose name Kyverno's
+        ``--resource`` flag would split is left out, and so is one that mixes
+        objects with other documents; both are named in a WARNING.
         """
         from automated_security_helper.utils.scan_output_dirs import scan_set_of
 
@@ -695,9 +974,15 @@ class KyvernoScanner(ScannerPluginBase[KyvernoScannerConfig]):
         root = Path(target).resolve()
         output_dir = Path(self._ctx.output_dir).absolute()
         source_dir = Path(self._ctx.source_dir).resolve()
-        policies = {p.resolve() for p in policy_files}
-        index = ManifestIndex()
-        selected: List[Path] = []
+        excluded_files = {
+            p.resolve() for p in [*policies.files, *policies.exception_files]
+        }
+        # A directory that holds the whole target (policy_paths: ["."]) cannot be
+        # used to exclude: nothing would be left to scan.
+        excluded_dirs = [d for d in policies.dirs if not root.is_relative_to(d)]
+        selected: List[_Manifest] = []
+        mixed: List[str] = []
+        unsafe: List[str] = []
         for path in sorted(set(candidates)):
             if path.suffix.lower() not in MANIFEST_SUFFIXES:
                 continue
@@ -719,25 +1004,61 @@ class KyvernoScanner(ScannerPluginBase[KyvernoScannerConfig]):
                     level=logging.WARNING,
                 )
                 continue
-            if resolved in policies:
+            if resolved in excluded_files or any(
+                resolved.is_relative_to(d) for d in excluded_dirs
+            ):
                 continue
             if global_ignore_paths and self._ignored(
                 path, source_dir, global_ignore_paths
             ):
                 continue
             try:
-                objects = load_manifest(
+                objects, reason = read_manifest(
                     path.read_text(encoding="utf-8", errors="replace")
                 )
             except OSError:
                 continue
-            if objects is None:
-                continue
             uri = self._argv_path(path)
-            for doc, line in objects:
-                index.add(doc, uri, line)
-            selected.append(path)
-        return selected, index
+            if objects is None:
+                if reason == "mixed":
+                    mixed.append(uri)
+                continue
+            if "," in uri or '"' in uri:
+                unsafe.append(uri)
+                continue
+            selected.append(_Manifest(path, uri, objects))
+        self._notice_paths(
+            mixed,
+            "Left out {n} file(s) that hold a Kubernetes object beside other "
+            "documents (kyverno stops its run at a document that is not an object, "
+            "so a file is passed only when every document in it is one): {paths}.",
+            target_type,
+        )
+        self._notice_paths(
+            unsafe,
+            "Left out {n} file(s) whose names kyverno's --resource flag would split "
+            "(a comma or a double quote; rename them to have them scanned): {paths}.",
+            target_type,
+        )
+        return selected
+
+    def _notice_paths(
+        self,
+        paths: List[str],
+        template: str,
+        target_type: Literal["source", "converted"],
+    ) -> None:
+        """Log one WARNING that names (up to ``_NOTICE_PATHS`` of) *paths*."""
+        if not paths:
+            return
+        shown = ", ".join(paths[:_NOTICE_PATHS])
+        if len(paths) > _NOTICE_PATHS:
+            shown += f", and {len(paths) - _NOTICE_PATHS} more"
+        self._plugin_log(
+            template.format(n=len(paths), paths=shown),
+            target_type=target_type,
+            level=logging.WARNING,
+        )
 
     @staticmethod
     def _ignored(
@@ -831,9 +1152,11 @@ class KyvernoScanner(ScannerPluginBase[KyvernoScannerConfig]):
         # The opt-in gate. Before _pre_scan, so an idle scanner does not ask for a
         # binary it will not run. An empty policy list and a list with no policy
         # document in it are the same outcome: nothing was evaluated, so the row
-        # grades SKIPPED (targets_attempted = 0), not PASSED.
-        policy_files = self._policy_files()
-        if not policy_files:
+        # grades SKIPPED (targets_attempted = 0), not PASSED. Only policies count: a
+        # directory of exceptions has nothing to evaluate. The gate reads the config
+        # scan() was given, which _pre_scan has not yet swapped in.
+        policies = self._policy_inputs(config)
+        if not policies.files:
             self._plugin_log(
                 "Kyverno has no policies to apply, so the scan was skipped. Kyverno "
                 "ships none: set scanners.kyverno.options.policy_paths to policy "
@@ -851,8 +1174,8 @@ class KyvernoScanner(ScannerPluginBase[KyvernoScannerConfig]):
 
         results_file: Optional[Path] = None
         try:
-            manifests, index = self._manifests(
-                target, target_type, global_ignore_paths, policy_files
+            manifests = self._manifests(
+                target, target_type, global_ignore_paths, policies
             )
             if not manifests:
                 self._plugin_log(
@@ -865,11 +1188,6 @@ class KyvernoScanner(ScannerPluginBase[KyvernoScannerConfig]):
                 return self._empty_report()
 
             self.targets_attempted = len(manifests)
-            base_args = self._base_args()
-            tail = ["--", *[self._argv_path(p) for p in policy_files]]
-            chunks = _argv_chunks(
-                base_args, [self._argv_path(p) for p in manifests], tail
-            )
 
             results_dir = Path(self.results_dir or self._ctx.output_dir).joinpath(
                 target_type
@@ -878,66 +1196,105 @@ class KyvernoScanner(ScannerPluginBase[KyvernoScannerConfig]):
             results_file = results_dir.joinpath("kyverno.sarif")
             results_file.unlink(missing_ok=True)
 
+            base_args = self._base_args()
+            policy_file = self._write_documents(
+                results_dir.joinpath("kyverno-policies.yaml"), policies.policies
+            )
+            if policies.exceptions:
+                exception_file = self._write_documents(
+                    results_dir.joinpath("kyverno-exceptions.yaml"), policies.exceptions
+                )
+                spelled = self._argv_path(exception_file)
+                if "," in spelled or '"' in spelled:
+                    self._plugin_log(
+                        "Policy exceptions were not passed to kyverno: the path of "
+                        "the file that holds them contains a comma or a double quote, "
+                        "which kyverno's --exception flag would split. Findings that "
+                        "an exception waives are reported.",
+                        target_type=target_type,
+                        level=logging.WARNING,
+                    )
+                else:
+                    base_args.append(f"--exception={spelled}")
+            tail = ["--", self._argv_path(policy_file)]
+
             # One budget for every invocation of this scan, so scan_timeout bounds
             # the scanner and not each process.
             timeout = self._effective_scan_timeout()
             deadline = None if timeout is None else _now() + timeout
 
-            entries: List[Dict[str, Any]] = []
+            results: List[Result] = []
+            rules_by_id: Dict[str, ReportingDescriptor] = {}
+            skipped_policies: Set[str] = set()
+            failed: List[FailedTarget] = []
             final_args: List[str] = []
-            for chunk in chunks:
-                final_args = [*base_args, *[f"--resource={p}" for p in chunk], *tail]
-                response = self._run_until(final_args, results_dir, deadline)
-                exit_code = self.exit_code
-                if response.get("timed_out"):
-                    self._post_scan(target=target, target_type=target_type)
-                    raise ScannerError(
-                        f"kyverno timed out after {timeout}s and was killed, so it "
-                        "produced no report. Raise scanners.kyverno.options.scan_timeout "
-                        "if these manifests legitimately need longer."
+            completed = 0
+            bisects = [_MAX_BISECTS]
+            try:
+                for run in plan_runs(manifests):
+                    outcome = self._run_manifests(
+                        [m.uri for m in run.manifests],
+                        base_args,
+                        tail,
+                        results_dir,
+                        deadline,
+                        timeout,
+                        bisects,
                     )
-                if exit_code not in self.success_exit_codes:
-                    self._post_scan(target=target, target_type=target_type)
-                    raise ScannerError(
-                        f"kyverno exited {exit_code}; it exits 0 or 1 when it ran, "
-                        "so this run did not complete"
+                    final_args = outcome.final_args or final_args
+                    completed += outcome.completed
+                    skipped_policies.update(outcome.skipped_policies)
+                    run_results, run_rules, run_failed = convert_report_results(
+                        outcome.entries, run.index()
                     )
-                try:
-                    chunk_entries = parse_policy_report_output(
-                        response.get("stdout") or ""
+                    results.extend(run_results)
+                    for rule in run_rules:
+                        rules_by_id.setdefault(rule.id, rule)
+                    failed.extend(run_failed)
+                    failed.extend(
+                        FailedTarget(
+                            f"{uri}: kyverno exited without a report for a run that "
+                            "held this file, so it was not checked",
+                            uri,
+                        )
+                        for uri in outcome.failed_uris
                     )
-                except ValueError as exc:
-                    self._post_scan(target=target, target_type=target_type)
-                    raise ScannerError(f"kyverno wrote a report ASH cannot read: {exc}")
-                if exit_code == 1 and not chunk_entries:
-                    # Exit 1 is a violation or a failed load; only a report says which.
-                    self._post_scan(target=target, target_type=target_type)
-                    raise ScannerError(
-                        "kyverno exited 1 without printing a report, which means it "
-                        "failed before evaluating anything (its message is in the "
-                        "scanner's stderr log and is not quoted here)"
-                    )
-                entries.extend(chunk_entries)
+                    if not outcome.entries and not outcome.failed_uris:
+                        self._plugin_log(
+                            "kyverno printed no results: no policy matched a "
+                            "manifest, or every policy was skipped as invalid. "
+                            "Nothing was reported.",
+                            target_type=target_type,
+                            level=logging.WARNING,
+                        )
+                if not completed:
+                    raise ScannerError(_NO_REPORT_MESSAGE)
+            except ScannerError:
+                self._post_scan(target=target, target_type=target_type)
+                raise
             self._post_scan(target=target, target_type=target_type)
 
-            if not entries:
-                self._plugin_log(
-                    "kyverno printed no results: no policy matched a manifest, or "
-                    "every policy was skipped as invalid. Nothing was reported.",
-                    target_type=target_type,
-                    level=logging.WARNING,
+            for name in sorted(skipped_policies):
+                owners = policies.owners.get(name) or []
+                uris = [self._argv_path(p) for p in owners] or ["."]
+                failed.extend(
+                    FailedTarget(
+                        f"{uri}: kyverno skipped policy {name[:200]} as invalid, so "
+                        "its rules were not applied",
+                        uri,
+                    )
+                    for uri in uris
                 )
-
-            results, rules, failed = convert_report_results(entries, index)
+            rules = [rules_by_id[k] for k in sorted(rules_by_id)]
             for line in failed:
-                self.targets_failed += 1
-                self.errors.append(line)
-                self._plugin_log(
-                    line,
-                    target_type=target_type,
-                    level=logging.ERROR,
-                    append_to_stream="stderr",
-                )
+                # An ERROR-level log line is also appended to self.errors, once per
+                # entry, so it is not appended here as well.
+                self._plugin_log(line, target_type=target_type, level=logging.ERROR)
+            # Files, not entries: the framework reads failed >= attempted as a total
+            # loss, and one erroring rule on a file of many resources is one file.
+            self.targets_failed = min(
+                len({f.uri for f in failed}), self.targets_attempted
+            )
 
             report = SarifReport(
                 version="2.1.0",
@@ -967,6 +1324,87 @@ class KyvernoScanner(ScannerPluginBase[KyvernoScannerConfig]):
             raise
         except Exception as e:
             raise ScannerError(self._describe_scan_failure(e, results_file))
+
+    @staticmethod
+    def _write_documents(path: Path, documents: List[Dict[str, Any]]) -> Path:
+        """Write *documents* to *path* as one multi-document YAML file."""
+        with open_for_write(path) as handle:
+            handle.write(yaml.safe_dump_all(documents, sort_keys=False))
+        return path
+
+    def _run_manifests(
+        self,
+        uris: List[str],
+        base_args: List[str],
+        tail: List[str],
+        results_dir: Path,
+        deadline: Optional[float],
+        timeout: Optional[float],
+        bisects: List[int],
+    ) -> "_Outcome":
+        """Run Kyverno over the manifests *uris* in as many invocations as the cap needs.
+
+        A run that exits 1 without a failed or errored result did not evaluate what
+        it was given (Kyverno exits 1 for a result that failed and for any command
+        error, so only the report says which). Its manifests are split in two and run
+        again, so that one manifest Kyverno cannot load costs that manifest alone; a
+        single manifest that still fails is returned in ``failed_uris``. ``bisects``
+        holds what is left of the scan's budget for such splits. A run that fails
+        because every policy is invalid is not split: the policies are the cause.
+
+        Raises:
+            ScannerError: on a timeout, an unexpected exit code, a report that cannot
+                be read, or when every policy was skipped as invalid.
+        """
+        outcome = _Outcome()
+        pending = _argv_chunks(base_args, uris, tail)
+        while pending:
+            group = pending.pop(0)
+            outcome.final_args = [
+                *base_args,
+                *[f"--resource={p}" for p in group],
+                *tail,
+            ]
+            response = self._run_until(outcome.final_args, results_dir, deadline)
+            exit_code = self.exit_code
+            if response.get("timed_out"):
+                raise ScannerError(
+                    f"kyverno timed out after {timeout}s and was killed, so it "
+                    "produced no report. Raise scanners.kyverno.options.scan_timeout "
+                    "if these manifests legitimately need longer."
+                )
+            if exit_code not in self.success_exit_codes:
+                raise ScannerError(
+                    f"kyverno exited {exit_code}; it exits 0 or 1 when it ran, "
+                    "so this run did not complete"
+                )
+            stdout = response.get("stdout") or ""
+            try:
+                group_entries = parse_policy_report_output(stdout)
+            except ValueError as exc:
+                raise ScannerError(f"kyverno wrote a report ASH cannot read: {exc}")
+            skipped = parse_skipped_policies(stdout)
+            evaluated = any(
+                str(e.get("result") or "").lower() in ("fail", "error")
+                for e in group_entries
+            )
+            if exit_code != 1 or evaluated:
+                outcome.entries.extend(group_entries)
+                outcome.skipped_policies.extend(skipped)
+                outcome.completed += 1
+                continue
+            if skipped and not group_entries:
+                raise ScannerError(
+                    "kyverno skipped every policy as invalid and evaluated nothing: "
+                    + ", ".join(sorted({s[:200] for s in skipped}))
+                )
+            if len(group) > 1 and bisects[0] > 0:
+                bisects[0] -= 1
+                middle = len(group) // 2
+                pending[:0] = [group[:middle], group[middle:]]
+                continue
+            outcome.failed_uris.extend(group)
+        return outcome
 
     def _run_until(
         self, argv: List[str], results_dir: Path, deadline: Optional[float]
@@ -1006,15 +1444,20 @@ class KyvernoScanner(ScannerPluginBase[KyvernoScannerConfig]):
 
 
 __all__ = [
+    "FailedTarget",
     "KYVERNO_SEVERITY_MAP",
     "KyvernoScanner",
     "KyvernoScannerConfig",
     "KyvernoScannerConfigOptions",
     "ManifestIndex",
     "convert_report_results",
+    "is_exception_document",
     "is_policy_document",
     "is_resource_document",
     "load_manifest",
     "parse_policy_report_output",
+    "parse_skipped_policies",
+    "plan_runs",
+    "read_manifest",
     "severity_for",
 ]
