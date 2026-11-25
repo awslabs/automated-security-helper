@@ -371,11 +371,11 @@ def _join_by_stated_id(
             if c < len(components)
             for label in labels
         ],
-        schema={"comp": pl.Int64, "label": pl.Utf8},
+        schema={"comp": pl.Int64, "label": pl.String},
         orient="row",
     )
     scanner_frame = pl.DataFrame(
-        scope_rows, schema={"row": pl.Int64, "label": pl.Utf8}, orient="row"
+        scope_rows, schema={"row": pl.Int64, "label": pl.String}, orient="row"
     ).join(labels_frame, on="label")  # (row, comp) pairs that share a name
 
     keep = ["row", "k", "tier", "comp", "pos"]
@@ -523,7 +523,7 @@ def resolve_missing_levels(sarif_report: object) -> None:
                     "fail": is_fail,
                     "rule_level": [next(levels) if fail else None for fail in is_fail],
                 },
-                schema={"fail": pl.Boolean, "rule_level": pl.Utf8},
+                schema={"fail": pl.Boolean, "rule_level": pl.String},
             )
             .select(
                 pl.when("fail")
