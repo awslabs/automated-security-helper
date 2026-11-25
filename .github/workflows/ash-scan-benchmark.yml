@@ -21,27 +21,42 @@ name: ASH - Scan-Time Benchmark
 # changes nothing about its result. If the figures prove stable for a few months, a
 # threshold can be proposed separately; this job does not set one.
 #
+# THE THREE BUILDS, AND WHERE THEY COME FROM
+#
+# The baselines are resolved the way ash-upgrade-paths.yml resolves its starting points,
+# from the local clone, with no fetch, so a deleted merge-queue ref or a moved tag cannot
+# break the run. The checkout takes full history and tags (fetch-depth: 0). The tip is the
+# commit under test (on a pull request, the merge commit GitHub builds). The previous
+# commit is HEAD~1, which is the base branch's tip on a pull request and the parent of
+# the measured commit on main. The previous release is the highest vX.Y.Z tag, not the
+# nearest tag by distance, which would name the retired floating major tag, and not only
+# the tags main contains, which are older than the latest release (see the step that
+# resolves it). The old trees are materialised with `git worktree add --detach` and
+# installed like the tip. The three are then timed together, on the same fixture, the
+# same scenarios, the same flags and one runner, and the summary and the trend carry the
+# tip's difference from each baseline.
+#
 # HOW THE NOISE IS HANDLED
 #
-# The base and the head of the pull request are installed into two virtual environments
-# on one runner, and scripts/measure_precommit_cost.py alternates them (base, head, base,
-# head, ...) on the same four scenarios, after one discarded warm-up round, five runs per
-# build. A runner that speeds up or slows down during the job affects both builds alike,
-# which is the largest single reduction in noise. Timing noise only adds, so the minimum
-# is the steadiest figure; the median shows the typical run. The summary reports both, for
-# each build and as head minus base, and prints a warning for a scenario when the head
-# median is more than 10% and 0.2 s above the base median and the head minimum is above
-# the base minimum. A run that exits with a code the scenario does not expect (anything
-# but 0, or 0 and 2 for scans that find something) stops the script, so an error exit
-# is never read as a fast scan.
+# scripts/measure_precommit_cost.py alternates the three builds (previous release,
+# previous commit, tip, previous release, ...) on the four scenarios, after one discarded
+# warm-up round, five runs per build. A runner that speeds up or slows down during the job
+# affects every build alike, which is the largest single reduction in noise. Timing noise
+# only adds, so the minimum is the steadiest figure; the median shows the typical run.
+# The summary reports both for each build and as tip minus baseline, and prints a warning
+# for a scenario when the tip median is more than 10% and 0.2 s above a baseline's median
+# and the tip minimum is above that baseline's minimum. A run that exits with a code the
+# scenario does not expect (anything but 0, or 0 and 2 for scans that find something)
+# stops the script, so an error exit is never read as a fast scan.
 #
 # WHAT RUNS, AND WITH WHAT TOKEN
 #
 # The job runs the pull request's own code, from a fork too, so it holds a read-only token
 # and nothing else: `contents: read` (and `actions: read` to fetch last night's trend
 # artifact), no secrets, no trigger that hands fork code a write token, no checkout that
-# keeps credentials, and no `${{ }}` expression pasted into a script. The updating pull request comment that
-# issue #1099 lists as an option would need a write token and is not implemented.
+# keeps credentials, and no `${{ }}` expression pasted into a script. The updating pull
+# request comment that issue #1099 lists as an option would need a write token and is not
+# implemented.
 #
 # WHAT IT MEASURES
 #
@@ -49,8 +64,10 @@ name: ASH - Scan-Time Benchmark
 # file, so it is the same bytes on every run (a unit test pins its digest): ten Python
 # files plus one CI config with planted findings. The scenarios are `ash --version`, a
 # staged precommit scan with one .py file staged, one with one CI config staged, and a
-# precommit scan of the whole fixture. The nightly run on main times the head build alone
-# and appends one line to the `scan-benchmark-trend` artifact.
+# precommit scan of the whole fixture. Every trigger times all three builds; the nightly
+# run on main also appends one line to the `scan-benchmark-trend` artifact, which keeps
+# the tip's figures under the keys earlier lines carry and adds each baseline's figures
+# and the tip's difference from it.
 
 on:
   pull_request:
@@ -81,26 +98,18 @@ jobs:
     name: Scan-time benchmark (informational)
     runs-on: ubuntu-latest
     continue-on-error: true
-    timeout-minutes: 45
+    timeout-minutes: 60
     permissions:
-      contents: read # checks out the head and the base
+      contents: read # checks out the history and the tags
       actions: read # lists and downloads last night's trend artifact; nothing is written
     env:
       HEAD_SHA: ${{ github.sha }}
-      BASE_SHA: ${{ github.event.pull_request.base.sha }}
     steps:
-      - name: Check out the head
+      - name: Check out the history and the tags
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          path: head
-          persist-credentials: false
-
-      - name: Check out the base
-        if: ${{ github.event_name == 'pull_request' }}
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.event.pull_request.base.sha }}
-          path: base
+          # Full history and tags: the old versions are resolved locally, not fetched.
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Set up Python
@@ -113,20 +122,63 @@ jobs:
         with:
           enable-cache: false
 
-      - name: Install the head build
+      - name: Resolve the previous commit and the previous release
+        id: baselines
+        run: |
+          set -euo pipefail
+          # The parent of the measured commit: the base branch's tip on a pull request
+          # (the checkout is the merge commit), the previous commit on main.
+          if ! prev_commit="$(git rev-parse --verify HEAD~1 2>/dev/null)"; then
+            echo "::error::HEAD has no parent - cannot time against the previous commit."
+            exit 1
+          fi
+          # The highest vX.Y.Z tag, which is the latest release. Not `git describe
+          # --tags`, which picks the nearest tag by distance and would return the bare
+          # major tag `v3`, the retired floating tag. And not ash-upgrade-paths.yml's
+          # extra filter to tags that are ancestors of HEAD: releases are cut on a
+          # release line that main does not contain, so on 2026-11-25 that filter
+          # returned v3.7.0 while the latest release was v3.8.0, and a baseline two
+          # releases old would make every delta look like a regression.
+          release_tag="$(git tag --sort=-v:refname \
+            | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+            | sed -n '1p')" || true
+          if [ -z "$release_tag" ]; then
+            echo "::error::No vX.Y.Z release tag exists - cannot time against the previous release."
+            exit 1
+          fi
+          {
+            echo "prev_commit=${prev_commit}"
+            echo "release_tag=${release_tag}"
+            echo "release_commit=$(git rev-parse --verify "${release_tag}^{commit}")"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Install the tip
         run: |
           set -euo pipefail
           uv venv --python python3.12 "$RUNNER_TEMP/venv-head"
-          uv pip install --python "$RUNNER_TEMP/venv-head/bin/python" "./head[cdk]"
+          uv pip install --python "$RUNNER_TEMP/venv-head/bin/python" ".[cdk]"
           "$RUNNER_TEMP/venv-head/bin/ash" dependencies install
 
-      - name: Install the base build
-        if: ${{ github.event_name == 'pull_request' }}
+      - name: Install the previous commit
+        env:
+          PREV_COMMIT: ${{ steps.baselines.outputs.prev_commit }}
         run: |
           set -euo pipefail
-          uv venv --python python3.12 "$RUNNER_TEMP/venv-base"
-          uv pip install --python "$RUNNER_TEMP/venv-base/bin/python" "./base[cdk]"
-          "$RUNNER_TEMP/venv-base/bin/ash" dependencies install
+          # Materialise the old tree from the local clone. No fetch.
+          git worktree add --detach "$RUNNER_TEMP/prev-commit" "$PREV_COMMIT"
+          uv venv --python python3.12 "$RUNNER_TEMP/venv-prev-commit"
+          uv pip install --python "$RUNNER_TEMP/venv-prev-commit/bin/python" "$RUNNER_TEMP/prev-commit[cdk]"
+          "$RUNNER_TEMP/venv-prev-commit/bin/ash" dependencies install
+
+      - name: Install the previous release
+        env:
+          RELEASE_COMMIT: ${{ steps.baselines.outputs.release_commit }}
+        run: |
+          set -euo pipefail
+          git worktree add --detach "$RUNNER_TEMP/prev-release" "$RELEASE_COMMIT"
+          uv venv --python python3.12 "$RUNNER_TEMP/venv-prev-release"
+          uv pip install --python "$RUNNER_TEMP/venv-prev-release/bin/python" "$RUNNER_TEMP/prev-release[cdk]"
+          "$RUNNER_TEMP/venv-prev-release/bin/ash" dependencies install
 
       - name: Fetch the previous trend
         if: ${{ github.event_name == 'schedule' }}
@@ -145,30 +197,28 @@ jobs:
               || echo "no previous trend artifact; starting a new one"
           fi
 
-      - name: Time base against head
-        if: ${{ github.event_name == 'pull_request' }}
+      - name: Time the tip against the previous commit and the previous release
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PREV_COMMIT: ${{ steps.baselines.outputs.prev_commit }}
+          RELEASE_TAG: ${{ steps.baselines.outputs.release_tag }}
+          RELEASE_COMMIT: ${{ steps.baselines.outputs.release_commit }}
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/out"
-          python head/scripts/measure_precommit_cost.py bench "$RUNNER_TEMP/bench" \
+          trend=()
+          if [ "$EVENT_NAME" = schedule ]; then
+            trend=(--trend-in "$RUNNER_TEMP/trend-previous/trend.jsonl" \
+                   --trend-out "$RUNNER_TEMP/out/trend.jsonl")
+          fi
+          python scripts/measure_precommit_cost.py bench "$RUNNER_TEMP/bench" \
             --ash "$RUNNER_TEMP/venv-head/bin/ash" --commit "$HEAD_SHA" \
-            --base-ash "$RUNNER_TEMP/venv-base/bin/ash" --base-commit "$BASE_SHA" \
-            --repeats 5 --allow-busy \
-            --json "$RUNNER_TEMP/out/benchmark.json" \
-            --summary "$GITHUB_STEP_SUMMARY"
-
-      - name: Time the head and append to the trend
-        if: ${{ github.event_name != 'pull_request' }}
-        run: |
-          set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/out"
-          python head/scripts/measure_precommit_cost.py bench "$RUNNER_TEMP/bench" \
-            --ash "$RUNNER_TEMP/venv-head/bin/ash" --commit "$HEAD_SHA" \
+            --baseline prev-release "$RUNNER_TEMP/venv-prev-release/bin/ash" "$RELEASE_COMMIT" "$RELEASE_TAG" \
+            --baseline prev-commit "$RUNNER_TEMP/venv-prev-commit/bin/ash" "$PREV_COMMIT" "" \
             --repeats 5 --allow-busy \
             --json "$RUNNER_TEMP/out/benchmark.json" \
             --summary "$GITHUB_STEP_SUMMARY" \
-            --trend-in "$RUNNER_TEMP/trend-previous/trend.jsonl" \
-            --trend-out "$RUNNER_TEMP/out/trend.jsonl"
+            "${trend[@]}"
 
       - name: Upload the benchmark record
         if: ${{ !cancelled() }}

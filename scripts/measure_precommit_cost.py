@@ -7,8 +7,8 @@ Run with: python scripts/measure_precommit_cost.py --help
 
 Two things use this file. The "What it costs" table in
 docs/content/how-to/pre-commit.md compares a small repository with a larger one, and
-the scan-time benchmark job (.github/workflows/ash-scan-benchmark.yml) times the base
-and the head of a pull request against each other. Both need a repository that can be
+the scan-time benchmark job (.github/workflows/ash-scan-benchmark.yml) times the
+measured commit against its parent and against the latest release. Both need a repository that can be
 rebuilt, so every fixture is generated here, deterministically, from nothing but this
 file: the same call produces the same bytes on every host, and ``fixture_digest``
 fingerprints the result so a test can pin it. The figures themselves are not pinned
@@ -44,10 +44,13 @@ with ``git add`` before the run and leave the fixture's commit untouched. A row
 reports the minimum, median, mean and maximum, the exit code of every run, and the
 load average after each run.
 
-With ``--base-ash`` the script times two builds in one invocation and alternates
-them (base, head, base, head, ...), each on its own copy of the fixture, so a machine
-that speeds up or slows down during the run affects both alike. Without it the single
-build is timed on ``DEST`` itself, as the doc table's commands do.
+Each ``--baseline LABEL ASH COMMIT REF`` adds a build to time against the tip
+(``--ash``, labelled ``head``) in one invocation. The builds alternate (one round per
+repeat, every build once per round), each on its own copy of the fixture, so a machine
+that speeds up or slows down during the run affects all of them alike. The benchmark
+job passes two baselines: ``prev-commit``, the parent of the measured commit, and
+``prev-release``, the latest release tag. Without a baseline the single build is timed
+on ``DEST`` itself, as the doc table's commands do.
 
 A run that exits with a code outside the row's expected set stops the script with the
 row, the build and the first of its stderr, so an error exit that returns quickly can
@@ -57,9 +60,11 @@ is recorded either way.
 
 ``--json`` writes the full report, ``--summary`` a Markdown table (the benchmark job
 points it at ``$GITHUB_STEP_SUMMARY``), and ``--trend-in`` with ``--trend-out`` appends
-one line per run to a JSON Lines trend file. The summary flags a scenario when the head
-median is more than 10% and 0.2 s above the base median and the head minimum is above
-the base minimum; it only prints, and the exit status never depends on it.
+one line per run to a JSON Lines trend file: the tip's figures under the keys earlier
+lines carry, then each baseline's figures and the tip's difference from it. The summary
+flags a scenario against a baseline when the tip median is more than 10% and 0.2 s above
+that baseline's median and the tip minimum is above its minimum; it only prints, and the
+exit status never depends on it.
 """
 
 from __future__ import annotations
@@ -84,8 +89,11 @@ LARGE_MODULES_PER_PACKAGE = 30
 LARGE_FILES = LARGE_PACKAGES * LARGE_MODULES_PER_PACKAGE
 
 # A scan that finds something exits 2 (ACTIONABLE_FINDINGS); 1 is a scanner error and
-# 5 a refused command line, both of which a timing must never swallow.
+# 5 a refused command line, both of which a timing must never swallow. The one
+# exception is a baseline that predates a flag (see ``collect``): it is left out of that
+# scenario and the report says so.
 SCAN_CODES = frozenset({0, 2})
+USAGE_ERROR = 5
 LOAD_REFUSE_RATIO = 1.0
 WARN_RELATIVE = 0.10
 WARN_ABSOLUTE_SECONDS = 0.2
@@ -350,6 +358,7 @@ class Build:
     ash: list[str]
     root: Path
     commit: str = "unknown"
+    ref: str = ""
 
 
 @dataclass(frozen=True)
@@ -409,22 +418,38 @@ def _check(sample: Sample, scenario: Scenario, build: Build, argv: list[str]) ->
 
 
 def collect(
-    builds: Sequence[Build], scenario: Scenario, repeats: int
+    builds: Sequence[Build],
+    scenario: Scenario,
+    repeats: int,
+    tip_label: str = "head",
 ) -> dict[str, list[Sample]]:
     """Time ``scenario`` on every build, alternating, after one discarded round.
 
     Raises ``BadExit`` at the first run whose exit code is outside the scenario's
-    expected set; nothing after it runs.
+    expected set; nothing after it runs. One exception: a baseline (any build but the
+    tip) that answers the warm-up run with the usage-error code does not know the
+    command line, which is what an older release does for a flag added since. It is
+    left out of this scenario and its entry in the result is an empty list; the tip
+    must always run.
     """
     by_label = {build.label: build for build in builds}
     for build in builds:
         prepare(build.root, scenario)
     samples: dict[str, list[Sample]] = {build.label: [] for build in builds}
+    timed = list(builds)
     try:
         for build in builds:  # the warm-up round, discarded
             argv = [*build.ash, *scenario.args]
-            _check(_run_once(argv, build.root), scenario, build, argv)
-        for label in alternation_order([b.label for b in builds], repeats):
+            warm = _run_once(argv, build.root)
+            if (
+                build.label != tip_label
+                and warm.returncode == USAGE_ERROR
+                and USAGE_ERROR not in scenario.expected
+            ):
+                timed.remove(build)
+                continue
+            _check(warm, scenario, build, argv)
+        for label in alternation_order([b.label for b in timed], repeats):
             build = by_label[label]
             argv = [*build.ash, *scenario.args]
             sample = _run_once(argv, build.root)
@@ -476,6 +501,7 @@ def make_record(build: Build, scenario: Scenario, samples: Sequence[Sample]) -> 
     return {
         "build": build.label,
         "commit": build.commit,
+        "ref": build.ref,
         "scenario": scenario.name,
         "runs": [round(s.seconds, 4) for s in samples],
         "returncodes": [s.returncode for s in samples],
@@ -490,10 +516,12 @@ def make_record(build: Build, scenario: Scenario, samples: Sequence[Sample]) -> 
 
 
 def make_comparison(base: dict, head: dict) -> dict:
+    """The tip (``head``) against one baseline build, for one scenario."""
     base_stats = Stats(base["min"], base["median"], base["mean"], base["max"])
     head_stats = Stats(head["min"], head["median"], head["mean"], head["max"])
     median_delta = head["median"] - base["median"]
     return {
+        "baseline": base["build"],
         "scenario": head["scenario"],
         "median_delta": round(median_delta, 4),
         "min_delta": round(head["min"] - base["min"], 4),
@@ -521,8 +549,9 @@ def format_summary(report: dict) -> str:
     ]
     for rec in report["results"]:
         codes = ",".join(str(c) for c in sorted(set(rec["returncodes"])))
+        ref = f"{rec['ref']} " if rec.get("ref") else ""
         lines.append(
-            f"| {rec['scenario']} | {rec['build']} | `{rec['commit'][:12]}` | "
+            f"| {rec['scenario']} | {rec['build']} | {ref}`{rec['commit'][:12]}` | "
             f"{rec['min']:.3f} | {rec['median']:.3f} | {rec['mean']:.3f} | "
             f"{rec['max']:.3f} | {codes} |"
         )
@@ -530,20 +559,23 @@ def format_summary(report: dict) -> str:
     if comparisons:
         lines += [
             "",
-            "| Scenario | median, head minus base | min, head minus base | note |",
-            "|---|---|---|---|",
+            (
+                "| Scenario | Against | median, tip minus baseline | "
+                "min, tip minus baseline | note |"
+            ),
+            "|---|---|---|---|---|",
         ]
         for cmp in comparisons:
             percent = cmp["median_percent"]
             pct = "" if percent is None else f" ({percent:+.1f}%)"
             note = (
-                "WARNING: head looks slower (median over +10% and +0.2 s, min up too)"
+                "WARNING: the tip looks slower (median over +10% and +0.2 s, min up too)"
                 if cmp["warning"]
                 else ""
             )
             lines.append(
-                f"| {cmp['scenario']} | {cmp['median_delta']:+.3f}{pct} | "
-                f"{cmp['min_delta']:+.3f} | {note} |"
+                f"| {cmp['scenario']} | {cmp['baseline']} | "
+                f"{cmp['median_delta']:+.3f}{pct} | {cmp['min_delta']:+.3f} | {note} |"
             )
         if any(c["warning"] for c in comparisons):
             lines += [
@@ -553,6 +585,15 @@ def format_summary(report: dict) -> str:
                     "shared and this job is not a gate."
                 ),
             ]
+    for item in report.get("unsupported") or []:
+        lines += [
+            "",
+            (
+                f"Not measured: {item['scenario']} on the {item['build']} build, which "
+                "does not accept that command line (an older release lacks a flag "
+                "added since)."
+            ),
+        ]
     load = report.get("load")
     if load and load.get("max_per_cpu") is not None:
         busy = " (above 1: read these figures with care)" if load["busy"] else ""
@@ -567,16 +608,37 @@ def format_summary(report: dict) -> str:
 
 
 def trend_line(report: dict, date: str) -> dict:
-    """One trend entry: the head build's statistics per scenario."""
+    """One trend entry: the tip's statistics per scenario, then each baseline's.
+
+    The first three keys are the shape every earlier line has. ``baselines`` holds,
+    per baseline label, its commit, its ref (a release tag, say), its statistics and
+    the tip's median and min minus its own.
+    """
+    stat_keys = ("min", "median", "mean", "max")
     heads = [r for r in report["results"] if r["build"] == "head"]
-    return {
+    line: dict = {
         "date": date,
         "commit": heads[0]["commit"] if heads else None,
-        "scenarios": {
-            r["scenario"]: {k: r[k] for k in ("min", "median", "mean", "max")}
-            for r in heads
-        },
+        "scenarios": {r["scenario"]: {k: r[k] for k in stat_keys} for r in heads},
+        "baselines": {},
     }
+    for rec in report["results"]:
+        if rec["build"] == "head":
+            continue
+        entry = line["baselines"].setdefault(
+            rec["build"],
+            {"commit": rec["commit"], "ref": rec.get("ref", ""), "scenarios": {}},
+        )
+        entry["scenarios"][rec["scenario"]] = {k: rec[k] for k in stat_keys}
+    for cmp in report.get("comparisons") or []:
+        scenario = line["baselines"][cmp["baseline"]]["scenarios"][cmp["scenario"]]
+        scenario["tip_minus_median"] = cmp["median_delta"]
+        scenario["tip_minus_min"] = cmp["min_delta"]
+    skipped: dict[str, list[str]] = {}
+    for item in report.get("unsupported") or []:
+        skipped.setdefault(item["build"], []).append(item["scenario"])
+    line["not_measured"] = skipped
+    return line
 
 
 def append_trend(previous: Path | None, out: Path, line: dict) -> None:
@@ -606,14 +668,21 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "dest", type=Path, help="empty directory to build the fixture in"
     )
-    parser.add_argument("--ash", default="ash", help="the ash executable to time")
     parser.add_argument(
-        "--base-ash",
-        help="a second ash executable (the base build): time both, alternating",
+        "--ash", default="ash", help="the ash executable to time (the tip)"
     )
     parser.add_argument("--commit", default="unknown", help="commit of the --ash build")
     parser.add_argument(
-        "--base-commit", default="unknown", help="commit of the --base-ash build"
+        "--baseline",
+        nargs=4,
+        action="append",
+        default=[],
+        metavar=("LABEL", "ASH", "COMMIT", "REF"),
+        help=(
+            "a baseline build to time against the tip, alternating with it: its "
+            "label (prev-commit, prev-release), its ash executable, its commit and "
+            "a name for it such as a release tag (may be empty); repeatable"
+        ),
     )
     parser.add_argument("--repeats", type=_positive_int, default=3)
     parser.add_argument(
@@ -672,8 +741,11 @@ def main(argv: list[str] | None = None) -> int:
             )
         scenarios = tuple(s for s in scenarios if s.name in args.only)
 
-    if args.base_ash:
-        roots = {"base": args.dest / "base", "head": args.dest / "head"}
+    labels = [label for label, *_ in args.baseline]
+    if len(set(labels)) != len(labels) or "head" in labels:
+        parser.error("baseline labels must be distinct and not 'head'")
+    if args.baseline:
+        roots = {label: args.dest / label for label in [*labels, "head"]}
     else:
         roots = {"head": args.dest}
     for label, root in roots.items():
@@ -697,18 +769,24 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 3
 
-    builds = [Build("head", [args.ash], roots["head"], args.commit)]
-    if args.base_ash:
-        builds.insert(
-            0, Build("base", [args.base_ash], roots["base"], args.base_commit)
-        )
+    builds = [
+        Build(label, [ash], roots[label], commit, ref)
+        for label, ash, commit, ref in args.baseline
+    ]
+    builds.append(Build("head", [args.ash], roots["head"], args.commit))
     try:
         versions = {b.label: _version(b) for b in builds}
         results: list[dict] = []
+        unsupported: list[dict] = []
         loads: list[float] = []
         for scenario in scenarios:
             samples = collect(builds, scenario, args.repeats)
             for build in builds:
+                if not samples[build.label]:
+                    unsupported.append(
+                        {"build": build.label, "scenario": scenario.name}
+                    )
+                    continue
                 results.append(make_record(build, scenario, samples[build.label]))
                 loads += [
                     s.loadavg for s in samples[build.label] if s.loadavg is not None
@@ -718,10 +796,11 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     comparisons = []
-    if args.base_ash:
+    for label in labels:
         for scenario in scenarios:
             pair = {r["build"]: r for r in results if r["scenario"] == scenario.name}
-            comparisons.append(make_comparison(pair["base"], pair["head"]))
+            if label in pair:
+                comparisons.append(make_comparison(pair[label], pair["head"]))
     max_per_cpu = max(loads) / cpus if loads else None
     report = {
         "schema": 1,
@@ -741,6 +820,7 @@ def main(argv: list[str] | None = None) -> int:
         },
         "results": results,
         "comparisons": comparisons,
+        "unsupported": unsupported,
     }
 
     print(
@@ -756,11 +836,17 @@ def main(argv: list[str] | None = None) -> int:
             f"exit codes {sorted(set(rec['returncodes']))})  "
             f"[{rec['build']}] {rec['scenario']}"
         )
+    for item in unsupported:
+        print(
+            f"not measured: [{item['build']}] {item['scenario']} (the build does not "
+            "accept this command line)"
+        )
     for cmp in comparisons:
         if cmp["warning"]:
             print(
-                f"WARNING: {cmp['scenario']}: head median is {cmp['median_delta']:+.3f} s "
-                "from base and the minimum is up too (informational, not a failure)"
+                f"WARNING: {cmp['scenario']}: the tip's median is "
+                f"{cmp['median_delta']:+.3f} s from {cmp['baseline']} and its minimum "
+                "is up too (informational, not a failure)"
             )
     if max_per_cpu is not None and max_per_cpu > LOAD_REFUSE_RATIO:
         print(f"note: load average per CPU reached {max_per_cpu:.2f} during the run")
