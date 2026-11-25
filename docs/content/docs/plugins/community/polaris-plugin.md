@@ -28,7 +28,7 @@ With the module listed, `polaris` runs by default, like every other scanner. `sc
 ## Installing Polaris
 
 - **Container mode:** the ASH image includes the pinned Polaris release once the image build lists it.
-- **Local mode:** `ash dependencies install --tool polaris`, with the module listed in `ash_plugin_modules` (or added with `--config-overrides 'ash_plugin_modules+=["automated_security_helper.plugin_modules.ash_polaris_plugins"]'`), downloads the pinned release archive from GitHub and verifies it against the SHA256 digest pinned in ASH. Polaris publishes Linux (amd64, arm64), macOS (amd64, arm64) and Windows (amd64) builds.
+- **Local mode:** `ash dependencies install --tool polaris`, with the module listed in `ash_plugin_modules` (or added with `--config-overrides 'ash_plugin_modules+=["automated_security_helper.plugin_modules.ash_polaris_plugins"]'`), downloads the pinned release archive from GitHub and verifies it against the SHA256 digest pinned in the plugin module (the archive, and the executable inside it). Polaris publishes Linux (amd64, arm64), macOS (amd64, arm64) and Windows (amd64) builds.
 - Any `polaris` already on `PATH` is also used.
 
 ## What is scanned
