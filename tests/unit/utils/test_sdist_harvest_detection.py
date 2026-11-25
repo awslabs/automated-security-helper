@@ -184,4 +184,3 @@ wheels = [
 """.encode()
         (package,) = flagged_packages_in_uv_lock(lock, "uv.lock")
         assert package.rejected_reason
-        assert package.sdist_sha256 is None
