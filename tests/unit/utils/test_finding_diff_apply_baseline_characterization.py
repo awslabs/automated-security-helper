@@ -961,7 +961,7 @@ def test_a_baseline_with_only_additional_report_rows_covers_nothing():
     assert apply_baseline(current, baseline).matched == 0
 
 
-SECRET = "generic.secrets.aws-key"
+SECRET = "generic.secrets.aws-key"  # pragma: allowlist secret
 
 
 def test_a_secret_with_fingerprints_on_both_sides_is_dropped_when_exact():

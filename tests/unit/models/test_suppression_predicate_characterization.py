@@ -1136,12 +1136,8 @@ def _sha256(text: str) -> str:
 #: corpus_outcomes / corpus_first_hits and must produce these exactly.
 GOLDEN_CORPUS_PAIRS = 25600
 GOLDEN_CORPUS_MATCHES = 2970
-GOLDEN_CORPUS_OUTCOMES_SHA256 = (
-    "5fbc0b8a353bc0c8467ab724bab6f690d6ec6cd133d16c4d4df4df84f70566a7"
-)
-GOLDEN_CORPUS_FIRST_HITS_SHA256 = (
-    "6121a274904d957296d52a38d6a54a6770a5ba526569c5ba23d8c3fb93d8f7d6"
-)
+GOLDEN_CORPUS_OUTCOMES_SHA256 = "5fbc0b8a353bc0c8467ab724bab6f690d6ec6cd133d16c4d4df4df84f70566a7"  # pragma: allowlist secret
+GOLDEN_CORPUS_FIRST_HITS_SHA256 = "6121a274904d957296d52a38d6a54a6770a5ba526569c5ba23d8c3fb93d8f7d6"  # pragma: allowlist secret
 
 
 class TestGeneratedCorpus:
