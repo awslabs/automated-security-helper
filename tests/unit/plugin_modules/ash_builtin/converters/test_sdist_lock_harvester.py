@@ -423,3 +423,54 @@ def test_oversize_stream_is_aborted_at_the_cap(harvest_env, tmp_path: Path) -> N
     assert not [p for root in roots for p in root.glob("**/cached-lockfiles.json")], (
         "a refused transfer must cache nothing"
     )
+
+
+@pytest.mark.parametrize(
+    "field,bad_value",
+    [
+        ("name", "../x"),
+        ("name", ".hidden"),
+        ("name", "a/b"),
+        ("version", "../../escape"),
+        ("version", "1.0/../x"),
+    ],
+)
+def test_identifier_that_is_not_a_package_identifier_is_skipped(
+    harvest_env, field: str, bad_value: str
+) -> None:
+    """A lock's name/version names a directory under the results dir; a value
+    with a path separator or a leading dot is rejected at parse time, never
+    fetched and never joined into a path."""
+    _source, output, opener, build = harvest_env
+    lock = fixture_uv_lock(SDIST_URL, WHEEL_URL)
+    original = b'name = "fixturepkg"' if field == "name" else b'version = "0.1.0"'
+    replaced = f'{field} = "{bad_value}"'.encode()
+    assert original in lock
+    lock = lock.replace(original, replaced, 1)
+    converter = build(lock_bytes=lock)
+
+    results = converter.convert()
+
+    assert results == []
+    assert opener.calls == [], "a rejected entry must authorize no fetch"
+    assert not list(output.glob("**/Cargo.lock"))
+    assert not list(output.parent.glob("**/x/**/Cargo.lock"))
+    (record,) = converter.refused_inputs
+    assert HARVEST_SKIPPED_RULE in record.reason
+    assert "not a valid package" in record.reason
+
+
+@pytest.mark.parametrize("digest", ["z" * 64, "g" * 63 + "0", "-" * 64])
+def test_sha256_pin_that_is_not_hex_is_skipped(harvest_env, digest: str) -> None:
+    _source, _output, opener, build = harvest_env
+    converter = build(
+        lock_bytes=fixture_uv_lock(SDIST_URL, WHEEL_URL, sdist_sha256=digest)
+    )
+
+    results = converter.convert()
+
+    assert results == []
+    assert opener.calls == [], "a non-hex pin must authorize no fetch"
+    (record,) = converter.refused_inputs
+    assert HARVEST_SKIPPED_RULE in record.reason
+    assert "not a 64-character hex digest" in record.reason

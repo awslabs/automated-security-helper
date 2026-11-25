@@ -162,3 +162,26 @@ version = "0.0.1"
 source = { editable = "." }
 """
         assert flagged_packages_in_uv_lock(lock, "uv.lock") == []
+
+    @pytest.mark.parametrize(
+        "name,digest",
+        [("../x", "a" * 64), ("okpkg", "z" * 64), ("okpkg", "a" * 63)],
+    )
+    def test_entry_with_an_invalid_name_or_pin_is_marked_rejected(
+        self, name: str, digest: str
+    ) -> None:
+        lock = f"""
+version = 1
+
+[[package]]
+name = "{name}"
+version = "1.0.0"
+source = {{ registry = "https://pypi.org/simple" }}
+sdist = {{ url = "https://files.test.invalid/x-1.0.0.tar.gz", hash = "sha256:{digest}" }}
+wheels = [
+    {{ url = "https://files.test.invalid/x-1.0.0-cp312-cp312-win_amd64.whl", hash = "sha256:{"1" * 64}" }},
+]
+""".encode()
+        (package,) = flagged_packages_in_uv_lock(lock, "uv.lock")
+        assert package.rejected_reason
+        assert package.sdist_sha256 is None
