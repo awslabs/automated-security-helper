@@ -41,7 +41,15 @@ Central edits this alpha plugin does not make, because they touch shared files:
 - `tests/unit/plugin_modules/test_scanner_facets_corpus_consistency.py`:
   `"titus": CorpusSpec("titus", sarif=("captured/*.sarif",))` in `CORPORA`.
 - `tests/unit/plugin_modules/test_scanner_operational_facets_consistency.py`: the
-  scanner count in `test_the_universe_is_the_twenty_two_shipped_scanners`.
+  scanner count in `test_the_universe_is_the_twenty_two_shipped_scanners` (22 to 23).
+- `tests/unit/walked_package.py`: `"plugin_modules/ash_titus_plugins"` in
+  `PACKAGE_DIRS`.
+- `core/scanner_inventory.py`: the module in the community module list (beside
+  `ash_betterleaks_plugins`).
+- Docs: the staged page above, the homepage's community scanner count and links, the
+  plugins overview, the coverage tables, and the page's claims in
+  `tests/unit/docs/test_page_claims.py` (the doctest ratchet refuses a new page with
+  no mechanism).
 
 ## What it runs
 
@@ -61,4 +69,7 @@ The scanner takes the common scanner options (`severity_threshold`, `scan_timeou
 
 ## Documentation
 
-See https://awslabs.github.io/automated-security-helper/docs/plugins/community/titus-plugin/
+The user documentation page is written and staged at `.scanner-pr-body/titus-docs-page.md`
+for the integration lane, which adds it as
+`docs/content/docs/plugins/community/titus-plugin.md` together with the central docs
+edits that make the docs tests accept a new community page.

@@ -645,7 +645,11 @@ class TestCapturedReport:
         report = _run(
             _scanner(tree, tmp_path), FakeTitus(document=document), monkeypatch
         )
-        assert "absolute_path" not in report.model_dump_json()
+        results = report.get_all_results()
+        assert len(results) == 3
+        for result in results:
+            assert "absolute_path" not in (result.properties.model_extra or {})
+            assert "titus_score" in result.properties.model_extra
         assert "/lane/src" not in report.model_dump_json()
 
     def test_the_captured_fingerprint_and_score_survive(

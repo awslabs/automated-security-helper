@@ -251,9 +251,10 @@ class TitusScanner(ScannerPluginBase[TitusScannerConfig]):
             reason="the SARIF rules carry no reference URLs",
         ),
         tags=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field='result properties "tags" (none natively); the adapter '
-            "appends secret and security",
+            state=FacetState.NA,
+            reason="titus results carry no tags (the captured report's properties "
+            "hold security-severity, titus_score and absolute_path); the adapter "
+            "adds secret and security as ASH's own tags",
         ),
         extras=FacetDecl(
             state=FacetState.MAPPED,
