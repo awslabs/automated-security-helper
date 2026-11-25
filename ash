@@ -48,8 +48,10 @@ OCI_RUNNER_FROM_OPTION="NO"
 # scan, and an --output-dir that is a file, cannot be made, cannot be entered or
 # cannot be written (refuse_usage). A failed build or run is not a refusal: it keeps
 # its own status.
+# BEGIN generated: sh-exit-codes (scripts/generate_wrapper_tables.py)
 WRAPPER_REFUSAL_EXIT=3
 USAGE_ERROR_EXIT=5
+# END generated: sh-exit-codes
 refuse() {
   echo "ERROR: $*" >&2
   exit "${WRAPPER_REFUSAL_EXIT}"
@@ -1722,8 +1724,22 @@ if [[ "${OFFLINE}" == "YES" ]]; then
   DOCKER_RUN_EXTRA_ARGS="${DOCKER_RUN_EXTRA_ARGS} --network=none"
 fi
 
-# Resolve the OCI_RUNNER
-RESOLVED_OCI_RUNNER=${OCI_RUNNER:-$(command -v finch || command -v docker || command -v nerdctl || command -v podman)}
+# Resolve the OCI_RUNNER: the one named, else the first of the runners below that is on
+# PATH. The order is the ash CLI's own (container mode's candidates), generated.
+# BEGIN generated: sh-runner-order (scripts/generate_wrapper_tables.py)
+ASH_RUNNER_ORDER="finch docker nerdctl podman"
+# END generated: sh-runner-order
+first_runner_on_path() {
+    local candidate found
+    for candidate in ${ASH_RUNNER_ORDER}; do
+        if found="$(command -v "${candidate}")"; then
+            echo "${found}"
+            return 0
+        fi
+    done
+    return 1
+}
+RESOLVED_OCI_RUNNER=${OCI_RUNNER:-$(first_runner_on_path)}
 # If we couldn't resolve an OCI_RUNNER, refuse. Checked before OCI_RUNNER_WRAPPER is
 # prefixed, which would otherwise turn an empty runner into "sudo " and pass the check.
 # A blank OCI_RUNNER from the environment is refused too: unquoted below, " " ran a
@@ -1781,7 +1797,10 @@ else
     # character, a vertical tab included, is a word there, so it is a wrapper here.
     RUNNER_ENV_ARGS=()
     if [ "${NO_RUN}" = "NO" ]; then
-      for RUNNER_VARIABLE in GITHUB_ACTIONS TF_BUILD TEAMCITY_VERSION; do
+      # BEGIN generated: sh-ci-runner-markers (scripts/generate_wrapper_tables.py)
+      ASH_CI_RUNNER_MARKERS="GITHUB_ACTIONS TF_BUILD TEAMCITY_VERSION"
+      # END generated: sh-ci-runner-markers
+      for RUNNER_VARIABLE in ${ASH_CI_RUNNER_MARKERS}; do
         if [[ -z "${!RUNNER_VARIABLE:-}" ]]; then
           continue
         elif [[ -z "${OCI_RUNNER_WRAPPER//[$' \t\n']/}" ]]; then
