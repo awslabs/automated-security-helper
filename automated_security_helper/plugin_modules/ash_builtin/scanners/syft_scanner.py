@@ -21,6 +21,7 @@ from automated_security_helper.core.enums import OfflineStrategy, ScannerToolTyp
 from automated_security_helper.config.confinement_remedy import SET_BY_THE_OPERATOR
 from automated_security_helper.config.tool_config_trust import empty_tool_config
 from automated_security_helper.models.core import ToolArgs
+from automated_security_helper.models.vocab import TargetType
 from automated_security_helper.models.core import (
     IgnorePathWithReason,
     ToolExtraArg,
@@ -564,7 +565,7 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
     def scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason] | None = None,
         config: SyftScannerConfig | None = None,
     ) -> CycloneDXReport | bool:
@@ -807,7 +808,7 @@ def _demo_main(source_dir: Path, output_dir: Path) -> Path:
         source_dir=source_dir, output_dir=output_dir, config=get_default_config()
     )
     scanner = SyftScanner(context=context)
-    report: Any = scanner.scan(target=source_dir, target_type="source")
+    report: Any = scanner.scan(target=source_dir, target_type=TargetType.SOURCE)
     if hasattr(report, "model_dump_json"):
         report_json = report.model_dump_json(
             indent=2, by_alias=True, exclude_unset=True

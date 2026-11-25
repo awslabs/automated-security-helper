@@ -26,6 +26,7 @@ from automated_security_helper.base.scanner_facets import (
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.config.confinement_remedy import SET_BY_THE_OPERATOR
 from automated_security_helper.models.core import ToolArgs
+from automated_security_helper.models.vocab import TargetType
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     redacted_command_record,
@@ -840,7 +841,7 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
     def scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[Any] | None = None,
         config: Any | None = None,
         *args,
@@ -933,7 +934,7 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
         try:
             if (
                 not self.config.options.honor_tree_exclusions
-                and target_type != "source"
+                and target_type != TargetType.SOURCE
             ):
                 # The converted target is tested where ASH wrote it, so the
                 # exclusion files there are the ones snyk reads. The source target
@@ -972,7 +973,7 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
             results_file.unlink(missing_ok=True)
 
             tested = target
-            if target_type == "source":
+            if target_type == TargetType.SOURCE:
                 staged = self._stage_source(target, global_ignore_paths or [], cleanup)
                 if staged is None:
                     # _stage_source has said why: every file is left out, or there
@@ -1270,7 +1271,7 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
             # (PluginBase.unevaluated_targets).
             self._plugin_log(
                 f"{shown} not copied for Snyk: {why}",
-                target_type="source",
+                target_type=TargetType.SOURCE,
                 level=logging.DEBUG,
             )
             self.record_unevaluated_target(shown)
@@ -1318,7 +1319,7 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
                 self._plugin_log(
                     f"{relative.as_posix()} not copied for Snyk: honor_ignore_files "
                     "is false, and snyk would apply it to the copy",
-                    target_type="source",
+                    target_type=TargetType.SOURCE,
                     level=logging.DEBUG,
                 )
                 continue
@@ -1368,7 +1369,7 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
                 self._plugin_log(
                     f"{relative.as_posix()} not copied for Snyk: {reason}; it is "
                     f"tested as {tested_as}",
-                    target_type="source",
+                    target_type=TargetType.SOURCE,
                     level=logging.DEBUG,
                 )
                 continue
@@ -1386,7 +1387,7 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
             self._plugin_log(
                 f"{_count(refused, 'file')} in the scan set not copied "
                 f"({refused_reasons}), so Snyk does not test them.",
-                target_type="source",
+                target_type=TargetType.SOURCE,
                 level=logging.WARNING,
             )
         if not copied:
@@ -1401,7 +1402,7 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
                 "sent to Snyk."
                 if ignored
                 else "The scan set holds no file to send to Snyk, so nothing is sent.",
-                target_type="source",
+                target_type=TargetType.SOURCE,
                 level=logging.INFO,
             )
             return None
@@ -1409,7 +1410,7 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
         self._plugin_log(
             f"Testing a copy of {_count(copied, 'file')} from the scan set; "
             f"{_count(ignored, 'file')} under ignore paths not sent to Snyk.",
-            target_type="source",
+            target_type=TargetType.SOURCE,
             level=logging.INFO,
         )
 

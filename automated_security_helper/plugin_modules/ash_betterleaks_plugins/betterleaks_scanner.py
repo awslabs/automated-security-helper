@@ -162,6 +162,7 @@ from automated_security_helper.config.tool_config_trust import empty_tool_direct
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason, ToolArgs
+from automated_security_helper.models.vocab import TargetType
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.schemas.sarif_schema_model import (
     Kind,
@@ -778,7 +779,7 @@ class BetterleaksScanner(ScannerPluginBase[BetterleaksScannerConfig]):
     def _execute_scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason],
     ) -> Tuple[List[str], Path, Optional[Dict[str, str]]]:
         """Resolve the argv and results path for one Betterleaks run.

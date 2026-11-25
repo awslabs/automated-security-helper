@@ -105,6 +105,7 @@ from automated_security_helper.core.enums import OfflineStrategy, ScannerToolTyp
 from automated_security_helper.config.confinement_remedy import SET_BY_THE_OPERATOR
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason
+from automated_security_helper.models.vocab import TargetType
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactLocation,
@@ -1006,7 +1007,7 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
     def _execute_scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason],
     ) -> Tuple[List[str], Path, Optional[Dict[str, Any]]]:
         """Abstract stub; cfn-guard overrides scan() to run once per template."""
@@ -1114,7 +1115,7 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
     def scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason] | None = None,
         config: ScannerPluginConfigBase | None = None,
         *args: Any,

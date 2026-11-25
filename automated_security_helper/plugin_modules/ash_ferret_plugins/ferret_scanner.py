@@ -64,6 +64,7 @@ from automated_security_helper.base.scanner_facets import (
     ScannerFacets,
 )
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
+from automated_security_helper.models.vocab import TargetType
 from automated_security_helper.models.core import (
     EMPTY_SCOPE_RULE,
     ToolArgs,
@@ -2026,7 +2027,7 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
     def scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[Any] | None = None,
         config: FerretScannerConfig | None = None,
         *args,

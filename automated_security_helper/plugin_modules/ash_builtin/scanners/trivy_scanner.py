@@ -201,6 +201,7 @@ from automated_security_helper.config.confinement_remedy import SET_BY_THE_OPERA
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason, ToolArgs
+from automated_security_helper.models.vocab import TargetType
 from automated_security_helper.config.tool_config_trust import empty_tool_directory
 from automated_security_helper.plugin_modules.ash_builtin.scanners._trivy_scanner_base import (  # noqa: F401 -- TRIVY_SEVERITIES, _SARIF_LEVEL, UNBOUNDED_TRIVY_TIMEOUT and trivy_timeout are kept importable from here
     _SARIF_LEVEL,
@@ -675,7 +676,7 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
     def scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason] | None = None,
         config: Any = None,
         *args: Any,
@@ -696,7 +697,7 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
     def _execute_scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason],
     ) -> Tuple[List[str], Path, Optional[Dict[str, str]]]:
         """Resolve the argv, results path and environment for one trivy run.

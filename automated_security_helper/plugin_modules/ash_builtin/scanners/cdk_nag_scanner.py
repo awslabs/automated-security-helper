@@ -76,6 +76,7 @@ from automated_security_helper.utils.scanned_tree import (
     relative_display,
 )
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
+from automated_security_helper.models.vocab import TargetType
 from automated_security_helper.models.core import (
     EMPTY_SCOPE_RULE,
     IgnorePathWithReason,
@@ -1649,7 +1650,7 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
     def scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason] | None = None,
         config: CdkNagScannerConfig | None = None,
     ) -> SarifReport | bool:
@@ -1877,7 +1878,7 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         # before it reaches the worker, and the worker reads it under the same rule.
         scan_root = (
             self.context.work_dir
-            if target_type == "converted"
+            if target_type == TargetType.CONVERTED
             else self.context.source_dir
         )
         # Candidates the scanned-tree rule refused, counted so a target that
@@ -2532,7 +2533,9 @@ if __name__ == "__main__":
             )
         ),
     )
-    report = scanner.scan(target=scanner.context.source_dir, target_type="source")
+    report = scanner.scan(
+        target=scanner.context.source_dir, target_type=TargetType.SOURCE
+    )
 
     from automated_security_helper.utils.command_safe_stream import (
         json_commands_broken,

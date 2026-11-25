@@ -137,6 +137,7 @@ from automated_security_helper.core.constants import KNOWN_IGNORE_PATHS
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason, ToolArgs
+from automated_security_helper.models.vocab import TargetType
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactLocation,
@@ -1239,7 +1240,7 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
     def _candidate_files(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason],
     ) -> List[Path]:
         """Every file under ``target`` ASH would scan, as absolute paths.
@@ -1256,7 +1257,7 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
         )
 
         target = Path(target).absolute()
-        if target_type == "converted":
+        if target_type == TargetType.CONVERTED:
             listed = [
                 Path(root, name)
                 for root, _dirs, files in os.walk(target)
@@ -1285,7 +1286,7 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
             absolute = Path(os.path.abspath(absolute))
             if not absolute.is_relative_to(target):
                 continue
-            if target_type == "source" and absolute.is_relative_to(output_dir):
+            if target_type == TargetType.SOURCE and absolute.is_relative_to(output_dir):
                 continue
             if absolute.is_symlink() or not absolute.is_file():
                 continue
@@ -1756,7 +1757,7 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
     def _execute_scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason],
     ) -> Tuple[List[str], Path, Dict[Any, Any] | None]:
         """Abstract stub: GuardDog overrides scan() directly; this is unreachable."""
@@ -1767,7 +1768,7 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
     def scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason] | None = None,
         config: GuardDogScannerConfig | ScannerPluginConfigBase | None = None,
         *args: Any,
@@ -1806,7 +1807,7 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
     def _scan_target(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason],
     ) -> SarifReport:
         results_dir = Path(cast(Path, self.results_dir)).joinpath(target_type)

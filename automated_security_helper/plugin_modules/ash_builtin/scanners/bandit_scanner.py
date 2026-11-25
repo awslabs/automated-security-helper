@@ -32,6 +32,7 @@ from automated_security_helper.core.enums import OfflineStrategy, ScannerToolTyp
 from automated_security_helper.config.confinement_remedy import SET_BY_THE_OPERATOR
 from automated_security_helper.config.tool_config_trust import empty_tool_config
 from automated_security_helper.models.core import ToolArgs
+from automated_security_helper.models.vocab import TargetType
 from automated_security_helper.models.core import (
     IgnorePathWithReason,
     ToolExtraArg,
@@ -1108,7 +1109,7 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
     def _pre_scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         config: Any = None,
         *args,
         **kwargs,
@@ -1860,7 +1861,7 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
     def scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason] | None = None,
         config: Any = None,
         *args,
@@ -1880,7 +1881,7 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
     def _execute_scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason],
     ):
         """Resolve final argv and results path for Bandit.
@@ -2313,7 +2314,7 @@ if __name__ == "__main__":
             )
         ),
     )
-    report = scanner.scan(target=Path("."), target_type="source")
+    report = scanner.scan(target=Path("."), target_type=TargetType.SOURCE)
 
     if isinstance(report, SarifReport):
         from automated_security_helper.utils.command_safe_stream import (

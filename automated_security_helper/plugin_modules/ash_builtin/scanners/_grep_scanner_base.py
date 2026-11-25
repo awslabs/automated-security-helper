@@ -27,7 +27,6 @@ from typing import (
     ClassVar,
     Generic,
     List,
-    Literal,
     Optional,
     Tuple,
     TypeVar,
@@ -44,6 +43,7 @@ from automated_security_helper.config.path_trust import honored_path, resolved_p
 from automated_security_helper.core.constants import ASH_ASSETS_DIR
 from automated_security_helper.core.enums import OfflineStrategy
 from automated_security_helper.core.exceptions import ScannerError
+from automated_security_helper.models.vocab import TargetType
 from automated_security_helper.models.core import (
     IgnorePathWithReason,
     ToolExtraArg,
@@ -195,7 +195,7 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
     _output_dir_excluded: List[Path] = PrivateAttr(default_factory=list)
     # Which target the current command is for: the converted target drops the
     # converted-file exclude and reads git-ignored files (_resolve_scan_arguments).
-    _scan_target_type: str = PrivateAttr(default="source")
+    _scan_target_type: TargetType = PrivateAttr(default=TargetType.SOURCE)
     # The offline rule cache the command reads as --config, absolute, or None when
     # the offline scan reads no cache (the operator's local rules, no cache found,
     # or an online scan). content_databases_in_use and the
@@ -772,7 +772,7 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
     def scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason] | None = None,
         config: Any = None,
         *args,
@@ -792,7 +792,7 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
     def _execute_scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths,
     ) -> Tuple[List[str], Path, Optional[dict]]:
         """Resolve final argv + results path + subprocess env.
@@ -881,7 +881,7 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
         the files the repository's ignore files match to be scanned too; the
         tools' own git-ignore reading left them out whatever ASH's scan set did.
         """
-        if self._scan_target_type == "converted":
+        if self._scan_target_type == TargetType.CONVERTED:
             return True
         return not honors_ignore_files(getattr(self.context, "config", None))
 
@@ -917,7 +917,7 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
         ``--exclude``, the pattern as the value), so a drop keyed on the split form
         reaches only what ASH itself appended, and an operator's ``build/`` stays.
         """
-        if self._scan_target_type != "converted":
+        if self._scan_target_type != TargetType.CONVERTED:
             return list(self.args.extra_args)
         dropped = f"--exclude={CONVERTED_FILE_EXCLUDE}"
         covering = _covering_default_ignores(target)
@@ -1084,7 +1084,7 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
         """The ``SEMGREP_DEFAULT_IGNORES`` the current target's command carries: all
         of them on the source target; on the converted target, less the directory
         defaults that cover the target itself (_extra_args_for_target)."""
-        if self._scan_target_type != "converted":
+        if self._scan_target_type != TargetType.CONVERTED:
             return list(SEMGREP_DEFAULT_IGNORES)
         covering = _covering_default_ignores(target)
         return [
@@ -1102,7 +1102,7 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
             if pattern in configured
             and not (
                 pattern == CONVERTED_FILE_EXCLUDE
-                and self._scan_target_type == "converted"
+                and self._scan_target_type == TargetType.CONVERTED
             )
         ]
 

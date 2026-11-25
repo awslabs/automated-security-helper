@@ -149,6 +149,7 @@ from automated_security_helper.core.constants import KNOWN_IGNORE_PATHS
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason, ToolArgs
+from automated_security_helper.models.vocab import TargetType
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.schemas.sarif_schema_model import (
     Level,
@@ -1272,7 +1273,7 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
     def _collect_inputs(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason],
         report: bool = True,
     ) -> List[Path]:
@@ -1290,7 +1291,7 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
         """
         target_abs = Path(target).absolute()
         target_real = Path(target).resolve()
-        if target_type == "converted":
+        if target_type == TargetType.CONVERTED:
             candidates = [p for p in target_abs.rglob("*") if p.is_file()]
         else:
             # In a workspace scan the workspace's output directory holds every
@@ -1462,7 +1463,7 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
     def scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason] | None = None,
         config: Any = None,
         *args: Any,
@@ -1671,7 +1672,7 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
     def _execute_scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason],
     ) -> Tuple[List[str], Path, Optional[Dict[str, str]]]:
         """Build zizmor's argv; SARIF arrives on stdout, written to the stdout log."""

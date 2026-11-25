@@ -32,6 +32,7 @@ from automated_security_helper.core.enums import OfflineStrategy, ScannerToolTyp
 from automated_security_helper.config.confinement_remedy import SET_BY_THE_OPERATOR
 from automated_security_helper.config.tool_config_trust import empty_tool_config
 from automated_security_helper.models.core import ToolArgs
+from automated_security_helper.models.vocab import TargetType
 from automated_security_helper.models.core import (
     IgnorePathWithReason,
     ToolExtraArg,
@@ -1111,7 +1112,7 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
     def _execute_scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason],
     ):
         """Resolve final argv, results path, and subprocess env for Grype."""

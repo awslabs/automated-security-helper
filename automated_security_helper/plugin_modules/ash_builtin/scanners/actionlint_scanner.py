@@ -212,6 +212,7 @@ from automated_security_helper.base.scanner_plugin import (
 from automated_security_helper.core.constants import KNOWN_IGNORE_PATHS
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
+from automated_security_helper.models.vocab import TargetType
 from automated_security_helper.models.core import (
     IgnorePathWithReason,
     ignore_paths_that_skip_scanning,
@@ -1667,7 +1668,7 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
     def _workflow_files(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason],
         report: bool = True,
         left_out: Optional[List[Dict[str, str]]] = None,
@@ -1690,7 +1691,7 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
 
         target_abs = Path(target).absolute()
         target_real = Path(target).resolve()
-        if target_type == "converted":
+        if target_type == TargetType.CONVERTED:
             candidates = [str(p) for p in target_abs.rglob("*") if p.is_file()]
         else:
             # In a workspace scan the workspace's output directory holds every
@@ -1976,7 +1977,7 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
     def _execute_scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason],
     ) -> Tuple[List[str], Path, Optional[Dict[str, str]]]:
         """Abstract stub: ActionlintScanner overrides scan() directly."""
@@ -2013,7 +2014,7 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
     def scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason] | None = None,
         config: ActionlintScannerConfig | ScannerPluginConfigBase | None = None,
         *args: Any,
@@ -2206,7 +2207,9 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
                 if effective_timeout is None
                 else time.monotonic() + effective_timeout
             )
-            uri_base = Path(target).absolute() if target_type == "converted" else None
+            uri_base = (
+                Path(target).absolute() if target_type == TargetType.CONVERTED else None
+            )
             # The workflows go on the command line in batches that fit the
             # platform's limit (workflow_batches); each run is judged by its own
             # exit code and parsed on its own, then the findings are joined.

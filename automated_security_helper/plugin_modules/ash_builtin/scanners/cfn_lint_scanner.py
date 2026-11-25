@@ -118,6 +118,7 @@ from automated_security_helper.base.uv_tool_mixin import guarded_values
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason
+from automated_security_helper.models.vocab import TargetType
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactLocation,
@@ -1632,7 +1633,7 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
     def _execute_scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason],
     ) -> Tuple[List[str], Path, Optional[Dict[str, Any]]]:
         """Abstract stub; cfn-lint overrides scan() to batch templates."""
@@ -1662,7 +1663,7 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
     def scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason] | None = None,
         config: ScannerPluginConfigBase | None = None,
         *args: Any,

@@ -158,6 +158,7 @@ from automated_security_helper.config.confinement_remedy import SET_BY_THE_OPERA
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason, ToolArgs
+from automated_security_helper.models.vocab import TargetType
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.schemas.sarif_schema_model import (
     Level,
@@ -577,7 +578,7 @@ class HadolintScanner(ScannerPluginBase[HadolintScannerConfig]):
     def _dockerfiles(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason],
     ) -> List[Path]:
         """The Dockerfiles under *target* to pass to hadolint, sorted.
@@ -595,7 +596,7 @@ class HadolintScanner(ScannerPluginBase[HadolintScannerConfig]):
         """
         from automated_security_helper.utils.scan_output_dirs import scan_set_of
 
-        if target_type == "converted":
+        if target_type == TargetType.CONVERTED:
             candidates = list(Path(self._ctx.work_dir).rglob("*"))
         else:
             candidates = [Path(p) for p in scan_set_of(self._ctx)]
@@ -608,7 +609,7 @@ class HadolintScanner(ScannerPluginBase[HadolintScannerConfig]):
         for path in candidates:
             if not is_dockerfile_name(path.name):
                 continue
-            if target_type == "source" and path.absolute().is_relative_to(
+            if target_type == TargetType.SOURCE and path.absolute().is_relative_to(
                 absolute_output_dir
             ):
                 continue
@@ -710,7 +711,7 @@ class HadolintScanner(ScannerPluginBase[HadolintScannerConfig]):
     def scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason] | None = None,
         config: HadolintScannerConfig | ScannerPluginConfigBase | None = None,
         *args: Any,

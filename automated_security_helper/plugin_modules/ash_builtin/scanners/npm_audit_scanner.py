@@ -23,6 +23,7 @@ from automated_security_helper.base.scanner_facets import (
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.models.core import ToolArgs
+from automated_security_helper.models.vocab import TargetType
 from automated_security_helper.models.core import (
     IgnorePathWithReason,
     ignore_paths_that_skip_scanning,
@@ -744,7 +745,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             # point, so the source tree is what is recorded, through the same
             # guarded selection the package-manager check below reads.
             self.inputs_not_scanned = self._offline_skips(
-                self._source_manifests(), "source"
+                self._source_manifests(), TargetType.SOURCE
             )
             return False
         if find_executable(self.command):
@@ -765,7 +766,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         when the selection cannot be made (the selection is scan()'s to fail
         loudly, the check only reads it)."""
         try:
-            return self._package_manifests("source")
+            return self._package_manifests(TargetType.SOURCE)
         except Exception as exc:
             ASH_LOGGER.debug(
                 f"npm-audit: could not list the packages for the dependency check: "
@@ -852,7 +853,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
 
     def _package_manifests(
         self,
-        target_type: str,
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason] | None = None,
     ) -> List[str]:
         """Every package.json in one tree: the scan set, or the work directory.
@@ -902,7 +903,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         )
         workspace_output = getattr(self.context, "workspace_output_dir", None)
         ignored_lockfiles: Set[Path] = set()
-        if target_type == "converted":
+        if target_type == TargetType.CONVERTED:
             tree_root = Path(self.context.work_dir)
             orig_scannable = list(self.context.work_dir.glob("**/*.*"))
         else:
@@ -1001,10 +1002,10 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         list from the config here while scan() used the orchestrator's answered
         from another selection. See the base class.
         """
-        trees = ["source"]
+        trees = [TargetType.SOURCE]
         work_dir = Path(self.context.work_dir)
         if work_dir.is_dir() and any(work_dir.rglob("*.*")):
-            trees.append("converted")
+            trees.append(TargetType.CONVERTED)
         for target_type in trees:
             for package_file in self._package_manifests(
                 target_type, self._handed_ignore_paths
@@ -1064,11 +1065,11 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             ),
         }
 
-    def _shown_path(self, path: Path, target_type: str) -> str:
+    def _shown_path(self, path: Path, target_type: TargetType) -> str:
         """``path`` as recorded in the results: relative to the target, as named."""
         base = Path(
             self.context.work_dir
-            if target_type == "converted"
+            if target_type == TargetType.CONVERTED
             else self.context.source_dir
         ).absolute()
         try:
@@ -3178,7 +3179,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
     )
 
     def _offline_skips(
-        self, package_files: List[str], target_type: str
+        self, package_files: List[str], target_type: TargetType
     ) -> List[Dict[str, str]]:
         """The not-scanned entries for every lockfile beside *package_files*.
 
@@ -3195,7 +3196,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         return skipped
 
     def _skip_offline(
-        self, package_files: List[str], target: Path, target_type: str
+        self, package_files: List[str], target: Path, target_type: TargetType
     ) -> None:
         """Record every lockfile as not audited.
 
@@ -3227,7 +3228,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
     def scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason] | None = None,
         config: NpmAuditScannerConfig | None = None,
     ) -> SarifReport | bool:
@@ -3819,7 +3820,9 @@ if __name__ == "__main__":
             output_dir=Path.cwd().joinpath(".ash", "ash_output"),
         )
     )
-    report = scanner.scan(target=scanner.context.source_dir, target_type="source")
+    report = scanner.scan(
+        target=scanner.context.source_dir, target_type=TargetType.SOURCE
+    )
 
     if report:
         from automated_security_helper.utils.command_safe_stream import (

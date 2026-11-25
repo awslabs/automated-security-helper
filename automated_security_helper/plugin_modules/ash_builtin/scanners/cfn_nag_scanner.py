@@ -30,6 +30,7 @@ from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.core.constants import ASH_ASSETS_DIR
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
+from automated_security_helper.models.vocab import TargetType
 from automated_security_helper.models.core import (
     IgnorePathWithReason,
     ToolArgs,
@@ -1026,7 +1027,7 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
     def scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason] | None = None,
         config: CfnNagScannerConfig | None = None,
     ) -> SarifReport | bool:
@@ -1174,7 +1175,7 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
             # refused before ASH parses it or hands it to cfn_nag_scan.
             scan_root = (
                 self.context.work_dir
-                if target_type == "converted"
+                if target_type == TargetType.CONVERTED
                 else self.context.source_dir
             )
             # The results directory names already taken in this scan (_unique_name).

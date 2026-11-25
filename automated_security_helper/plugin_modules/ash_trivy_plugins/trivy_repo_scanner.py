@@ -18,6 +18,7 @@ from automated_security_helper.base.scanner_facets import (
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.config.tool_config_trust import empty_tool_directory
 from automated_security_helper.models.core import ToolArgs
+from automated_security_helper.models.vocab import TargetType
 
 # trivy_default_misconfig_scanners and its reset live with the shared base, which
 # the builtin trivy uses too; this module has always offered them, so it still does.
@@ -546,7 +547,7 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
     def scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[Any] | None = None,
         config: Any | None = None,
         *args,
