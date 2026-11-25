@@ -474,9 +474,10 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             "synthesized manifest location on every result",
         ),
         column=FacetDecl(
-            state=FacetState.NA,
-            reason="npm audit output carries no column; the adapter "
-            "synthesizes 1:1, so there is no native column to map",
+            state=FacetState.MAPPED,
+            native_field="(no native column) the adapter writes column 1 of "
+            "the synthesized manifest location on every result, beside the "
+            "line_range cell's line 1",
         ),
         message=FacetDecl(
             state=FacetState.MAPPED,
@@ -529,7 +530,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             native_field='vulnerabilities.<name>."fixAvailable"',
         ),
         remediation_text=FacetDecl(
-            state=FacetState.NA,
+            state=FacetState.UNCONFIRMED,
             reason="UNCONFIRMED: not classified by the survey; the adapter "
             'writes a composed "recommendation" property, but the flat model '
             "has no remediation column to read it and npm audit's native "
@@ -540,18 +541,16 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             reason="a package advisory has no source code snippet",
         ),
         references=FacetDecl(
-            state=FacetState.DROPPED,
-            native_field='vulnerabilities.<name>.via[]."url" (rule helpUri)',
-            reason="written at rule level only: the flat reader takes "
-            "references from result relatedLocations, so the advisory link "
-            "is discarded today",
+            state=FacetState.MAPPED,
+            native_field='vulnerabilities.<name>.via[]."url" (rule helpUri), '
+            "read into the flat references when the result carries no "
+            "relatedLocations",
         ),
         tags=FacetDecl(
-            state=FacetState.DROPPED,
+            state=FacetState.MAPPED,
             native_field="rule properties.tags (ASH-composed: security, "
-            "npm-audit, the severity word)",
-            reason="written at rule level only: the flat reader takes tags "
-            "from result properties, so the rule tags are discarded today",
+            "npm-audit, the severity word), read into the flat tags when the "
+            "result carries none",
         ),
         extras=FacetDecl(
             state=FacetState.MAPPED,
@@ -2507,10 +2506,15 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         invocation record reads as a completed scan.
         """
         from automated_security_helper.base.plugin_context import PluginContext
+        from automated_security_helper.config.ash_config import AshConfig
         from automated_security_helper.config.default_config import (
             get_default_config,
         )
 
+        # The scanner's model carries forward references to AshConfig, which
+        # must be resolved before it is built; done here so a caller needs no
+        # setup of its own. Idempotent.
+        AshConfig.model_rebuild()
         target = Path(target_path)
         scanner = cls(
             context=PluginContext(
@@ -3797,8 +3801,10 @@ def _cwe_tags(cwe: Any) -> List[str]:
     (and the odd ``NVD-CWE-Other``, which names no CWE and is left out). The flat
     ``cwe_id`` column reads tags (``utils/taxonomy_ids.cwes_of_tags``), not the
     ``cwe`` result property, so the ids go on the rule's tag list too. Defined
-    last in the module, and importing where it runs, so that the line-pinned
-    suppressions above it keep their lines.
+    last in the module, and importing where it runs, so the module's import
+    block and the code above its first call site keep their lines: the call
+    sites themselves shift every line after them, so a suppression pinned below
+    one has to be re-pinned when a call is added or removed.
     """
     from automated_security_helper.utils.taxonomy_ids import cwes_of_tags
 

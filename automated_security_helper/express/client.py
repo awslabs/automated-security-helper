@@ -73,6 +73,7 @@ NON_SCAN_SUBCOMMANDS = frozenset(
         "inspect",
         "plugin",
         "express",
+        "trend",
     }
 )
 
@@ -513,9 +514,7 @@ def _run_on_daemon(
 
         def send_signal_frame(signum: int) -> None:
             try:
-                runtime.send_frame(
-                    sock, {"op": runtime.ExpressOp.SIGNAL.value, "signum": int(signum)}
-                )
+                runtime.send_frame(sock, runtime.signal_frame(signum))
             except Exception:
                 pass
 
@@ -606,7 +605,7 @@ def _run_on_daemon(
                 # send is therefore still a safe fallback: no complete go
                 # frame reached the wire, so nothing forks.
                 try:
-                    runtime.send_frame(sock, {"op": runtime.ExpressOp.GO.value})
+                    runtime.send_frame(sock, runtime.go_frame())
                 except (OSError, runtime.ExpressProtocolError) as exc:
                     interrupted = _signal_exit_code(state["pending"])
                     if interrupted is not None:
@@ -721,7 +720,7 @@ def stop_daemon(path: PathLike) -> None:
     socket and all: the caller's fallbacks already cover a daemon that will
     not die, and removing its socket would not kill it, only hide it.
     """
-    answer = control_request(path, {"op": runtime.ExpressOp.STOP.value})
+    answer = control_request(path, runtime.stop_frame())
     if answer is None:
         return
     pid = answer.get("pid")

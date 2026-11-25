@@ -106,8 +106,11 @@ def directory_path_advice(path_pattern: str, *, ignore_path: bool) -> str:
     """The warning for a path that names an existing directory and no file in it.
 
     Shared by ``ash config validate`` and ``ash config lint``, and spelled as
-    ``path_matching.directory_spelling`` spells it, as the warning after the scan
-    does: ``<dir>/`` for an ignore path, ``<dir>/**/*`` for a suppression path.
+    ``path_matching.directory_spelling`` spells it: ``<dir>/`` for an ignore
+    path, ``<dir>/**/*`` for a suppression path. Since the bare-directory rule
+    (issue #894) a glob-free pattern matches the files below the directory it
+    names, so only a ``**`` pattern whose last component names a directory gets
+    this advice.
     """
     spelling = directory_spelling(path_pattern, ignore_path=ignore_path)
     action = (
@@ -334,9 +337,6 @@ def path_pattern_advice(
             )
         return f"Path '{shown}' matches '{spelled}' {CASE_ONLY_PROBLEM}."
 
-    # An ignore path ending in / names the directory and what is in it.
-    if ignore_path and form.endswith("/"):
-        return None
     clean_path = form.rstrip("/")
     # A glob in the last component matches files.
     from pathlib import PurePosixPath
@@ -348,12 +348,12 @@ def path_pattern_advice(
         # '**' matches any run of directories, and the last component then
         # names a path exactly: '**/node_modules' is a file of that name, and
         # the files inside a directory of that name do not match. Advised only
-        # for a directory the tree holds somewhere, by a bounded walk.
+        # for a directory the tree holds somewhere, by a bounded walk. A
+        # glob-free pattern gets no such advice: under the bare-directory rule
+        # (issue #894) it names the directory and matches the files below it,
+        # in ignore paths and suppressions alike.
         if basename != "**" and _names_a_directory_below(basename, project_root):
             return directory_path_advice(shown, ignore_path=ignore_path)
-        return None
-    if _names_a_directory(project_root / clean_path):
-        return directory_path_advice(shown, ignore_path=ignore_path)
     return None
 
 

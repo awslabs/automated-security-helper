@@ -983,21 +983,10 @@ class ScanExecutionEngine:
                     plugin_context=self._context,
                     used_suppressions=getattr(self._results, "used_suppressions", None),
                 )
-                # After the last suppression pass, once: a suppression path
-                # ending in "/" matches no file.
-                from automated_security_helper.utils.suppression_matcher import (
-                    warn_unmatched_directory_suppressions,
-                )
-
-                # With the config: the warning quotes a path the config read
-                # from the environment by its reference, as every other
-                # message about a suppression does. Without it the record was
-                # never built and this one warning printed the value.
-                warn_unmatched_directory_suppressions(
-                    self._context.config.global_settings.suppressions or [],
-                    getattr(self._results, "used_suppressions", None) or (),
-                    config=self._context.config,
-                )
+                # A suppression path ending in "/" names its directory and
+                # matches the files below it (the bare-directory rule, issue
+                # #894), so the warning that such a path matches no file is
+                # gone with the behavior it described.
             else:
                 self._results.sarif = exclude_output_dir_results(
                     sarif_report=self._results.sarif,

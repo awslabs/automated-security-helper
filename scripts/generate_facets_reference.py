@@ -11,8 +11,10 @@ Usage:
 Every scanner class declares a ``ScannerFacets`` register row
 (``automated_security_helper/base/scanner_facets.py``) classifying each facet of
 the vocabulary as mapped (lands where the shared pipeline reads it),
-mappable-dropped (the native output carries it; ASH discards it today) or n/a
-(this scanner class cannot have it, with the reason). The page renders that
+mappable-dropped (the native output carries it; ASH discards it today), n/a
+(this scanner class cannot have it, with the reason) or unconfirmed (no real
+run of the tool has been read for it, with the run that would settle it). The
+page renders that
 register as written: a per-scanner summary, then one table per scanner with the
 declared state, the native field and the reason of every facet. The register is
 the source; the page invents nothing and so can say nothing the register does
@@ -64,8 +66,17 @@ STATE_MEANINGS = (
     (
         "n/a",
         (
-            "this scanner class cannot have the facet (or its output was not "
-            "read), with the reason."
+            "this scanner class cannot have the facet, with the reason. The "
+            "corpus gate treats a populated column here as contamination."
+        ),
+    ),
+    (
+        "unconfirmed",
+        (
+            "no real run of the tool has been read for the facet, so the "
+            "register claims neither that it maps nor that it cannot exist. The "
+            "cell says what was read instead and the run that would settle it. "
+            "The corpus gate lists it as a fixture owed and fails nothing."
         ),
     ),
 )
@@ -112,7 +123,7 @@ def generate() -> tuple[str, dict]:
             "pipeline. The register is production code "
             "(`automated_security_helper/base/scanner_facets.py`): the declaration "
             "has runtime consumers, and a scanner without one is refused by the "
-            "registry totality test. The three states:"
+            "registry totality test. The four states:"
         ),
         "",
     ]
@@ -127,8 +138,8 @@ def generate() -> tuple[str, dict]:
         "",
         "## Summary",
         "",
-        "| Scanner | Mapped | Mappable, dropped | Not applicable |",
-        "|---------|--------|-------------------|----------------|",
+        "| Scanner | Mapped | Mappable, dropped | Not applicable | Unconfirmed |",
+        "|---------|--------|-------------------|----------------|-------------|",
     ]
 
     def states(declaration) -> list[FacetState]:
@@ -140,7 +151,8 @@ def generate() -> tuple[str, dict]:
             f"| [{code(p.name)}](#{p.name}) | "
             f"{declared.count(FacetState.MAPPED)} | "
             f"{declared.count(FacetState.DROPPED)} | "
-            f"{declared.count(FacetState.NA)} |"
+            f"{declared.count(FacetState.NA)} | "
+            f"{declared.count(FacetState.UNCONFIRMED)} |"
         )
     lines.append("")
 
@@ -156,7 +168,9 @@ def generate() -> tuple[str, dict]:
         for facet in FACET_NAMES:
             cell = getattr(declaration, facet)
             notes = md_prose(cell.reason) if cell.reason else ""
-            if facet == "resource_id" and cell.example:
+            # Every facet's example, as the register wrote it: a value from a
+            # real read is the evidence the cell stands on, wherever it sits.
+            if cell.example:
                 example = f"Example: {code(cell.example)}"
                 notes = f"{notes} {example}".strip() if notes else example
             lines.append(

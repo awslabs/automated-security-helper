@@ -73,7 +73,9 @@ from automated_security_helper.utils.scanned_tree import (
     open_in_scanned_tree,
 )
 from automated_security_helper.utils.secret_masking import source_snippet_masker
-from automated_security_helper.utils.severity_ladder import result_severity
+from automated_security_helper.utils.severity_ladder import (
+    result_severity,
+)
 from automated_security_helper.utils.terminal_text import (
     controls_shown,
     only_controls_shown,

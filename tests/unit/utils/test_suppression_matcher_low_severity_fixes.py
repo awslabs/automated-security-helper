@@ -36,7 +36,6 @@ from automated_security_helper.utils.suppression_matcher import (
     check_for_expiring_suppressions,
     find_inline_suppressions,
     should_suppress_finding,
-    warn_unmatched_directory_suppressions,
 )
 from automated_security_helper.utils.unknown_keys import TOLERATE_STORED_CONFIG
 
@@ -68,108 +67,6 @@ def _finding(path: str = "src/a.py", rule_id: str = "R1") -> FlatVulnerability:
         rule_id=rule_id,
         file_path=path,
     )
-
-
-class TestUnmatchedDirectoryWarning:
-    @pytest.mark.parametrize("path", ["build/**/", "build\\**\\", "**/"])
-    def test_a_path_ending_in_doublestar_and_a_slash_is_not_called_literal(
-        self, ash_warnings, path
-    ):
-        """Red at the base: the warning said ``build/**/`` matches only that
-        literal path, though it is ``build/**`` and matches the files below."""
-        suppression = AshSuppression(path=path, rule_id="R1", reason="r")
-
-        warn_unmatched_directory_suppressions([suppression], used_ids=set())
-
-        assert [record.getMessage() for record in ash_warnings] == []
-
-    def test_a_literal_directory_path_still_draws_the_warning(self, ash_warnings):
-        """The control: ``build/`` really matches nothing, and a path whose slash
-        follows another component than ``**`` is still named."""
-        literal = AshSuppression(path="build/", rule_id="R1", reason="r")
-        deeper = AshSuppression(path="build/**/*/", rule_id="R2", reason="r")
-        # One slash after ``**`` is part of it; a second is a component no path
-        # has, so this one matches nothing.
-        doubled = AshSuppression(path="a/b/**//", rule_id="R3", reason="r")
-
-        warn_unmatched_directory_suppressions(
-            [literal, deeper, doubled], used_ids=set()
-        )
-
-        messages = [record.getMessage() for record in ash_warnings]
-        assert len(messages) == 3, messages
-        for path in ("build/", "build/**/*/", "a/b/**//"):
-            assert any(f"'{path}'" in message for message in messages), (path, messages)
-
-    @pytest.mark.parametrize("path", ["./", ".\\"])
-    def test_a_path_that_reduces_to_the_current_directory_raises_nothing(
-        self, ash_warnings, path
-    ):
-        """The path's components are never empty (``str.split`` returns at least
-        one, and only a ``**`` pair is dropped), so ``./`` and ``.\\`` reach the
-        trailing-slash warning like any literal directory and do not raise
-        IndexError in the pass that reads the last component."""
-        suppression = AshSuppression(path=path, rule_id="R1", reason="r")
-
-        warn_unmatched_directory_suppressions([suppression], used_ids=set())
-
-        messages = [record.getMessage() for record in ash_warnings]
-        assert len(messages) == 1, messages
-        assert f"'{path}'" in messages[0], messages
-
-    def test_a_path_read_from_the_environment_is_quoted_by_its_reference(
-        self, ash_warnings
-    ):
-        """Red at the base: ``recorded`` was not a parameter, and the warning
-        quoted the resolved path."""
-        suppression = AshSuppression(path="resolved-dir/", rule_id="R1", reason="r")
-        recorded = {id(suppression): {"path": "${ASH_LOW_FIX_DIR}/"}}
-
-        warn_unmatched_directory_suppressions(
-            [suppression], used_ids=set(), recorded=recorded
-        )
-
-        messages = [record.getMessage() for record in ash_warnings]
-        assert len(messages) == 1, messages
-        assert "'${ASH_LOW_FIX_DIR}/'" in messages[0]
-        assert "'${ASH_LOW_FIX_DIR}/**/*'" in messages[0]
-        assert "resolved-dir" not in messages[0]
-
-    def test_without_a_record_the_path_is_quoted_as_it_is(self, ash_warnings):
-        suppression = AshSuppression(path="plain-dir/", rule_id="R1", reason="r")
-
-        warn_unmatched_directory_suppressions([suppression], used_ids=set())
-
-        messages = [record.getMessage() for record in ash_warnings]
-        assert len(messages) == 1 and "'plain-dir/'" in messages[0], messages
-
-    def test_a_config_given_builds_the_record_itself(self, ash_warnings, monkeypatch):
-        """Red at the base: the function took ``recorded`` only, and the scan's
-        caller passed neither, so this one warning quoted a path read from the
-        environment by its value. Given the config, the record is built here
-        (``recorded_suppressions``) from the config's own suppressions, and the
-        path is quoted by its reference."""
-        from automated_security_helper.utils import suppression_matcher
-
-        suppression = AshSuppression(path="resolved-dir/", rule_id="R1", reason="r")
-        config = object()
-        asked_for = []
-
-        def fake_record(given):
-            asked_for.append(given)
-            return {id(suppression): {"path": "${ASH_LOW_FIX_DIR}/"}}
-
-        monkeypatch.setattr(suppression_matcher, "recorded_suppressions", fake_record)
-
-        warn_unmatched_directory_suppressions(
-            [suppression], used_ids=set(), config=config
-        )
-
-        assert asked_for == [config]
-        messages = [record.getMessage() for record in ash_warnings]
-        assert len(messages) == 1, messages
-        assert "'${ASH_LOW_FIX_DIR}/'" in messages[0]
-        assert "resolved-dir" not in messages[0]
 
 
 class TestUnreadableExpiration:

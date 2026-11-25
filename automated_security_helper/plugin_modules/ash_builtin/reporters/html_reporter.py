@@ -26,6 +26,8 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.workspace_se
 )
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 from automated_security_helper.plugin_modules.ash_builtin.reporters.report_content_emitter import (
+    SUMMARY_BELOW_THRESHOLD,
+    SUMMARY_POLICY_NOT_GATING,
     ReportContentEmitter,
     coverage_shortfall_text,
     deduplicated_summary_text,
@@ -257,9 +259,9 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
             "outcome_description": summary["description"],
             "next_step": summary["next_step"],
             "actionable": summary["actionable"],
-            "below_threshold": summary["below_threshold"],
+            "below_threshold": summary[SUMMARY_BELOW_THRESHOLD],
             "policy_not_gating_tile": self._format_policy_not_gating_tile(
-                summary.get("policy_not_gating", 0)
+                summary.get(SUMMARY_POLICY_NOT_GATING, 0)
             ),
             "suppressed": summary["suppressed"],
             "completed": summary["completed"],
@@ -444,7 +446,6 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
 
     @staticmethod
     def _format_finding_cards(emitter: ReportContentEmitter) -> str:
-        order = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "INFO": 4}
         # With the fold on, one card per duplicate cluster, the others named in
         # its note; off, every finding has its card.
         shown, notes = emitter.fold_findings(emitter.flat_vulns)
@@ -452,7 +453,7 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
             shown,
             key=lambda finding: (
                 finding.is_suppressed,
-                order.get(finding.severity.upper(), 5),
+                _SEVERITY_ORDER.get(finding.severity.upper(), len(_SEVERITY_ORDER)),
                 finding.file_path or "",
                 finding.line_start or 0,
                 finding.rule_id or "",
@@ -463,7 +464,9 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
         cards = []
         for index, finding in enumerate(findings, 1):
             severity = finding.severity.upper()
-            severity_class = severity.lower() if severity in order else "unknown"
+            severity_class = (
+                severity.lower() if severity in _SEVERITY_ORDER else "unknown"
+            )
             if finding.is_suppressed:
                 status, label = "suppressed", "Suppressed"
             elif emitter.is_policy_not_gating(finding):

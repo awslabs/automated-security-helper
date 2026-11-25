@@ -1062,6 +1062,12 @@ class PluginBase(UVToolMixin, BaseModel):
     # two apart. ``errors`` still holds both. See ``_tool_error_lines``.
     _plugin_log_lines: List[str] = PrivateAttr(default_factory=list)
 
+    # True while ``_run_unrecorded`` has a side run in flight: ``_plugin_log``
+    # then keeps an ERROR note out of the operator's view, because the run's
+    # record is put back afterwards and a scan that passes should not carry an
+    # ERROR line for a run that did not count.
+    _side_run_active: bool = PrivateAttr(default=False)
+
     # Whether this plugin's configuration was read from its context's resolved
     # configuration (a section ``AshConfig.get_plugin_config`` answered, as a
     # scan hands it over) rather than built by the embedding caller as a typed
@@ -1264,6 +1270,11 @@ class PluginBase(UVToolMixin, BaseModel):
         tt = ""
         if target_type is not None:
             tt = f" @ [magenta]{escape_markup(target_type)}[/magenta]"
+        if level >= logging.ERROR and getattr(self, "_side_run_active", False):
+            # A side run's own failure notes (a timeout, a spawn failure) are
+            # put back with the rest of its record; shown at ERROR they would
+            # read as a failure of a scan that is reported as it would have been.
+            level = logging.DEBUG
 
         # The prefix is styled, so the record asks for markup, and everything
         # interpolated is escaped: the message is the plugin's, and it often names a
@@ -2118,19 +2129,25 @@ class PluginBase(UVToolMixin, BaseModel):
             level=logging.ERROR,
         )
 
-    #: What a run leaves on the plugin: the output and error lines, the exit code
-    #: and the per-run flags the recorders set (``_record_response``).
+    #: What a run leaves on the plugin that a side run puts back: the output and
+    #: error lines, ASH's own notes among them (``_plugin_log_lines``, which
+    #: ``_plugin_log`` writes beside ``errors`` and ``_reset_errors`` clears with
+    #: it), the exit code and the per-run flags the recorders set
+    #: (``_record_response``).
+    #:
+    #: Left out on purpose: the could-not-stop record (``_scan_could_not_stop``
+    #: and its two per-run forms). It says a tool ASH could not kill may still be
+    #: writing into the output directory, which stays true whichever run left it
+    #: there, so a side run adds to it and never erases it.
     _RUN_RECORD_ATTRIBUTES: ClassVar[Tuple[str, ...]] = (
         "output",
         "errors",
         "exit_code",
+        "_plugin_log_lines",
         "_scan_timed_out_after",
         "_scan_spawn_failure",
         "_scan_post_run_error",
         "_scan_kept_flag",
-        "_scan_could_not_stop",
-        "_scan_could_not_stop_runs",
-        "_scan_could_not_stop_history",
         "_unevaluated_targets",
     )
 
@@ -2150,15 +2167,29 @@ class PluginBase(UVToolMixin, BaseModel):
         failed, or only wrote to stderr, must not fail or annotate a scan whose
         main run was fine, so those attributes are put back to what they were.
         Its response is returned for the caller to read; nothing of it is kept.
+
+        One record is not put back: a tool ASH could not stop (the could-not-stop
+        state, see :data:`_RUN_RECORD_ATTRIBUTES`). That ending means a process
+        may still be running and writing into the output directory after the
+        report is read, so ``run_ash_scan`` fails the run on it whichever run
+        left it.
+
+        The put-back is a save and a restore of this plugin's own attributes, so
+        it must not run beside another run on the same plugin: that run's
+        record would be overwritten when this one ends. Both callers run their
+        side run after the main run's response is read, one at a time.
         """
         saved: Dict[str, Any] = {}
         for name in self._RUN_RECORD_ATTRIBUTES:
             if hasattr(self, name):
                 value = getattr(self, name)
                 saved[name] = copy.copy(value)
+        was_active = self._side_run_active
+        self._side_run_active = True
         try:
             return run(command, **kwargs)
         finally:
+            self._side_run_active = was_active
             for name, value in saved.items():
                 setattr(self, name, value)
 

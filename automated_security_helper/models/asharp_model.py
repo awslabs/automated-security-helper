@@ -28,6 +28,10 @@ from automated_security_helper.core.enums import (
     ScannerToolType,
 )
 from automated_security_helper.core.sharding import ShardAssignment
+from automated_security_helper.utils.severity_ladder import (
+    SEVERITY_COUNT_KEYS,
+    SUPPRESSED_COUNT_KEY,
+)
 from automated_security_helper.models.core import IgnoreFileExclusions
 from automated_security_helper.models.vocab import FailureKind
 from automated_security_helper.models.flat_vulnerability import (
@@ -77,11 +81,9 @@ if TYPE_CHECKING:
 __all__ = ["AshAggregatedResults"]
 
 
-_SEVERITY_ORDER = ("critical", "high", "medium", "low", "info")
-_VALID_INCREMENT_FIELDS = _SEVERITY_ORDER + ("suppressed",)
-_SUMMARY_SEVERITY_FIELDS = frozenset(
-    ("critical", "high", "medium", "low", "info", "suppressed")
-)
+_SEVERITY_ORDER = SEVERITY_COUNT_KEYS
+_VALID_INCREMENT_FIELDS = _SEVERITY_ORDER + (SUPPRESSED_COUNT_KEY,)
+_SUMMARY_SEVERITY_FIELDS = frozenset((*SEVERITY_COUNT_KEYS, SUPPRESSED_COUNT_KEY))
 
 #: The tool types a SARIF driver's ``tags`` can name: every ``ScannerToolType``
 #: but ``CUSTOM`` and ``UNKNOWN``, which no tag states (a tag that spells either

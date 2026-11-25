@@ -382,6 +382,12 @@ global_settings:
       path: tests/snapshot/container/test_snapshot_container_nix.py
       reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
     - rule_id: generic-api-key
+      path: tests/unit/utils/test_finding_trend.py
+      reason: "False positive. A report-id helper whose default argument is a made-up twelve-character token, so the generated ids are fixed. The provider-specific gitleaks rules still apply to this file."
+    - rule_id: generic-api-key
+      path: tests/unit/utils/test_scan_history.py
+      reason: "False positive. A report-id helper whose default argument is a made-up twelve-character token, so the generated ids are fixed. The provider-specific gitleaks rules still apply to this file."
+    - rule_id: generic-api-key
       path: tests/unit/base/test_a_failure_after_the_tool_ran_keeps_its_exit_code.py
       reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
     - rule_id: generic-api-key
@@ -3304,8 +3310,8 @@ global_settings:
       reason: "A docstring bullet naming /etc/passwd as an example of the absolute archive paths delivery REJECTS; prose, not a read."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/utils/path_matching.py
-      line_start: 268
-      line_end: 268
+      line_start: 317
+      line_end: 317
       reason: "A docstring naming .env and .npmrc as dotfiles the detect-secrets scan set must keep; prose, not a read."
     - rule_id: threat-process-download-exec
       path: automated_security_helper/assets/install-pinned-tool.py
@@ -3384,13 +3390,13 @@ global_settings:
       reason: "'.env' is the dotfile stem whose stage-suffixed variants (.env.local) the converter admits for scanning; a name in a table, not a read."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/plugin_modules/ash_builtin/scanners/npm_audit_scanner.py
-      line_start: 787
-      line_end: 787
+      line_start: 792
+      line_end: 792
       reason: "A docstring naming .npmrc to say why the version probe's directory holds its own package.json; nothing here reads the file."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/plugin_modules/ash_builtin/scanners/npm_audit_scanner.py
-      line_start: 789
-      line_end: 789
+      line_start: 794
+      line_end: 794
       reason: "A docstring naming .npmrc to say why the version probe's directory holds its own package.json; nothing here reads the file."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/utils/package_manager_child.py

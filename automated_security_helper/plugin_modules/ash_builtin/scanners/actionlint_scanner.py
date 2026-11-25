@@ -1337,12 +1337,10 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
             "credentials finding, where it would hold the password)",
         ),
         references=FacetDecl(
-            state=FacetState.DROPPED,
+            state=FacetState.MAPPED,
             native_field="errors[].kind (ASH builds the pinned checks.md "
-            "helpUri; no native URL field)",
-            reason="the helpUri is written at rule level only: the flat "
-            "reader takes references from result relatedLocations, so the "
-            "help link is discarded today",
+            "helpUri; no native URL field), read into the flat references "
+            "when the result carries no relatedLocations",
         ),
         tags=FacetDecl(
             state=FacetState.MAPPED,

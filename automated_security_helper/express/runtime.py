@@ -762,6 +762,29 @@ def scrubbed_daemon_environment(environ: Mapping[str, str]) -> dict[str, str]:
     return kept
 
 
+#: The client and the ``ash express`` commands build their request frames with
+#: these builders, from the :class:`ExpressOp` members, so a frame's spelling
+#: lives once (the enum) and its shape lives once (here).
+def status_frame() -> dict[str, Any]:
+    """The control request asking a daemon for its status."""
+    return {"op": ExpressOp.STATUS.value}
+
+
+def stop_frame() -> dict[str, Any]:
+    """The control request asking a daemon to stop."""
+    return {"op": ExpressOp.STOP.value}
+
+
+def go_frame() -> dict[str, Any]:
+    """The client's answer to the daemon's scan ok: fork the scan now."""
+    return {"op": ExpressOp.GO.value}
+
+
+def signal_frame(signum: int) -> dict[str, Any]:
+    """The client forwarding *signum* to the scan the daemon forked for it."""
+    return {"op": ExpressOp.SIGNAL.value, "signum": int(signum)}
+
+
 def send_frame(sock: socket.socket, frame: dict[str, Any]) -> None:
     """Write one frame: a compact JSON object and its newline."""
     data = json.dumps(frame, separators=(",", ":")).encode("utf-8") + b"\n"

@@ -39,7 +39,10 @@ from automated_security_helper.utils.error_text import (
 )
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
 from automated_security_helper.utils.scanner_tool_types import result_scanner_name
-from automated_security_helper.utils.severity_ladder import result_severity
+from automated_security_helper.utils.severity_ladder import (
+    SUPPRESSED_COUNT_KEY,
+    result_severity,
+)
 from automated_security_helper.utils.terminal_text import raw_controls_on_one_line
 
 # Configure module logger
@@ -65,7 +68,7 @@ _logger = ASH_LOGGER
 # canonical per-scanner counts in the aggregated results file are typed by
 # ScannerTargetStatusInfo and have a fixed field set; this constant governs only
 # the MCP progress and summary views assembled in this module.
-SEVERITY_BUCKETS = _LADDER_BUCKETS + ("suppressed",)
+SEVERITY_BUCKETS = (*_LADDER_BUCKETS, SUPPRESSED_COUNT_KEY)
 UNKNOWN_SEVERITY = "unknown"
 
 
@@ -2238,8 +2241,8 @@ def get_scan_results(
             "scanner_results", {}
         ).items():
             if scanner_results.get("status", "UNKNOWN") in (
-                ScannerStatus.PASSED.value,
-                ScannerStatus.FAILED.value,
+                ScannerStatus.PASSED,
+                ScannerStatus.FAILED,
             ):
                 scanners_completed.append(scanner_name)
 

@@ -81,7 +81,8 @@ class ScannerMetrics(ScannerSeverityCount):
     duration: Optional[float] = (
         None  # Time taken by the scanner in seconds, None for skipped/missing scanners
     )
-    # A ScannerStatus value (the wire text of a ScannerStatus member).
+    # Scanner status: a ScannerStatus value ("PASSED", "FAILED", "SKIPPED",
+    # "MISSING" or "ERROR")
     status: str = ScannerStatus.PASSED.value
     threshold: str = ""  # Severity threshold used for this scanner
     threshold_source: str = ""  # Source of the threshold ("global", "config", etc.)
@@ -179,9 +180,9 @@ class ScannerMetrics(ScannerSeverityCount):
         are untouched.
         """
         return self.status in (
-            ScannerStatus.PASSED.value,
-            ScannerStatus.SKIPPED.value,
-            ScannerStatus.MISSING.value,
+            ScannerStatus.PASSED,
+            ScannerStatus.SKIPPED,
+            ScannerStatus.MISSING,
         )
 
 
@@ -1106,28 +1107,24 @@ def _populate_summary_stats_from_unified_metrics(
     # partial one. ERROR had no counter until this was added, which made the other
     # four sum to less than the scanner count on exactly the runs where the
     # difference mattered.
-    passed_count = sum(
-        1 for m in unified_metrics if m.status == ScannerStatus.PASSED.value
-    )
-    failed_count = sum(
-        1 for m in unified_metrics if m.status == ScannerStatus.FAILED.value
-    )
-    skipped_count = sum(
-        1 for m in unified_metrics if m.status == ScannerStatus.SKIPPED.value
-    )
-    missing_count = sum(
-        1 for m in unified_metrics if m.status == ScannerStatus.MISSING.value
-    )
+    passed_count = sum(1 for m in unified_metrics if m.status == ScannerStatus.PASSED)
+    failed_count = sum(1 for m in unified_metrics if m.status == ScannerStatus.FAILED)
+    skipped_count = sum(1 for m in unified_metrics if m.status == ScannerStatus.SKIPPED)
+    missing_count = sum(1 for m in unified_metrics if m.status == ScannerStatus.MISSING)
     # Every other status is an error: a status that is not one of ASH's own is
     # no result, and counted in no column the five no longer summed to the
     # scanner count.
-    counted_apart = (
-        ScannerStatus.PASSED.value,
-        ScannerStatus.FAILED.value,
-        ScannerStatus.SKIPPED.value,
-        ScannerStatus.MISSING.value,
+    error_count = sum(
+        1
+        for m in unified_metrics
+        if m.status
+        not in (
+            ScannerStatus.PASSED,
+            ScannerStatus.FAILED,
+            ScannerStatus.SKIPPED,
+            ScannerStatus.MISSING,
+        )
     )
-    error_count = sum(1 for m in unified_metrics if m.status not in counted_apart)
 
     # Preserve timing information if it exists
     held = aggregated_results.metadata.summary_stats
@@ -1270,7 +1267,7 @@ def _populate_scanner_results_from_unified_metrics(
         # Convert status from string to enum (the ingest point for the row's text)
         try:
             status = ScannerStatus(metrics.status)
-        except ValueError:
+        except (ValueError, TypeError):
             # Not a status of ASH's: no result that can be read, so the row
             # says ERROR, never a PASSED nothing graded.
             ASH_LOGGER.warning(

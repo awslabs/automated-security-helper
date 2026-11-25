@@ -3,10 +3,12 @@
 
 """Tests for ignore_path and suppression path validation in config linter and validator.
 
-Covers two bugs:
-1. Invalid ignore_paths pass validation silently (no error from `ash config validate`)
-2. Folder paths without `**` are silently ignored (should warn, naming `<dir>/` for an
-   ignore path and `<dir>/**/*` for a suppression path)
+Since the bare-directory rule (issue #894) a glob-free path names the directory
+it spells and matches the files below it, in ignore paths and suppressions
+alike, so the checks accept it with no advice. What still draws the
+points-to-a-directory warning is a ``**`` pattern whose last component names a
+directory the tree holds (``**/docs``): its last component names a path
+exactly, so the files inside the directory do not match.
 """
 
 import pytest
@@ -148,18 +150,42 @@ def config_with_suppression_dir_path(project_with_dirs):
 class TestIgnorePathLinting:
     """Tests for ignore_path validation in the config linter."""
 
-    def test_warns_on_directory_without_glob(
+    def test_accepts_a_directory_without_glob(
         self, config_with_dir_ignore_path, project_with_dirs
     ):
-        """A path pointing to an existing directory without ** should produce a warning."""
+        """A glob-free path naming an existing directory matches the files below
+        it (the bare-directory rule, issue #894), so there is nothing to warn
+        about."""
         result = ConfigLinter.lint(config_with_dir_ignore_path)
+
+        ignore_path_issues = [
+            i for i in result.issues if i.category == LintCategory.IGNORE_PATH_ISSUE
+        ]
+        assert ignore_path_issues == []
+
+    def test_warns_on_a_recursive_pattern_naming_a_directory(self, project_with_dirs):
+        """A ``**`` pattern whose last component names an existing directory
+        still matches no file in it, and draws the warning."""
+        config_path = project_with_dirs / ".ash" / ".ash.yaml"
+        config_path.write_text(
+            yaml.dump(
+                {
+                    "project_name": "test-project",
+                    "global_settings": {
+                        "ignore_paths": [{"path": "**/docs", "reason": "docs"}]
+                    },
+                }
+            )
+        )
+
+        result = ConfigLinter.lint(config_path)
 
         ignore_path_issues = [
             i for i in result.issues if i.category == LintCategory.IGNORE_PATH_ISSUE
         ]
         assert len(ignore_path_issues) == 1
         assert ignore_path_issues[0].severity == LintSeverity.WARNING
-        assert "'tests/test_data/'" in ignore_path_issues[0].message
+        assert "'**/docs/'" in ignore_path_issues[0].message
 
     def test_no_warning_for_an_ignore_path_ending_in_a_slash(
         self, config_with_trailing_slash_ignore_path
@@ -173,8 +199,9 @@ class TestIgnorePathLinting:
         ]
         assert ignore_path_issues == []
 
-    def test_warns_on_a_suppression_path_ending_in_a_slash(self, project_with_dirs):
-        """A suppression path ending in '/' still matches no file in the directory."""
+    def test_accepts_a_suppression_path_ending_in_a_slash(self, project_with_dirs):
+        """A suppression path ending in '/' names the directory and matches the
+        files below it (the bare-directory rule, issue #894): no warning."""
         config_path = project_with_dirs / ".ash" / ".ash.yaml"
         config_path.write_text(
             yaml.dump(
@@ -194,8 +221,7 @@ class TestIgnorePathLinting:
         ignore_path_issues = [
             i for i in result.issues if i.category == LintCategory.IGNORE_PATH_ISSUE
         ]
-        assert len(ignore_path_issues) == 1
-        assert "'docs/**/*'" in ignore_path_issues[0].message
+        assert ignore_path_issues == []
 
     def test_no_warning_for_valid_glob_paths(self, config_with_valid_ignore_paths):
         """Paths with ** or file wildcards should not produce warnings."""
@@ -221,17 +247,17 @@ class TestIgnorePathLinting:
         ]
         assert len(ignore_path_issues) == 0
 
-    def test_warns_on_suppression_directory_path(
+    def test_accepts_a_suppression_directory_path(
         self, config_with_suppression_dir_path
     ):
-        """Suppression paths pointing to existing directories without ** should also warn."""
+        """A glob-free suppression path naming an existing directory matches the
+        findings below it (the bare-directory rule, issue #894): no warning."""
         result = ConfigLinter.lint(config_with_suppression_dir_path)
 
         ignore_path_issues = [
             i for i in result.issues if i.category == LintCategory.IGNORE_PATH_ISSUE
         ]
-        assert len(ignore_path_issues) == 1
-        assert "'docs/**/*'" in ignore_path_issues[0].message
+        assert ignore_path_issues == []
 
     def test_respects_source_dir_parameter(self, tmp_path):
         """The source_dir parameter should be used for resolving paths."""
@@ -249,7 +275,9 @@ class TestIgnorePathLinting:
             "project_name": "test-project",
             "global_settings": {
                 "ignore_paths": [
-                    {"path": "lib", "reason": "Library folder"},
+                    # "**/lib" keeps the warning under the bare-directory rule
+                    # (issue #894): its last component names a path exactly.
+                    {"path": "**/lib", "reason": "Library folder"},
                 ],
             },
         }
@@ -277,14 +305,14 @@ class TestIgnorePathLinting:
         assert "lib" in issues_with_source[0].message
 
     def test_multiple_issues_reported(self, project_with_dirs):
-        """Multiple directory paths without ** should each produce a warning."""
+        """Several ``**`` patterns naming directories each produce a warning."""
         config_path = project_with_dirs / ".ash" / ".ash.yaml"
         config_data = {
             "project_name": "test-project",
             "global_settings": {
                 "ignore_paths": [
-                    {"path": "tests/test_data", "reason": "Test data"},
-                    {"path": "docs", "reason": "Documentation"},
+                    {"path": "**/test_data", "reason": "Test data"},
+                    {"path": "**/docs", "reason": "Documentation"},
                 ],
             },
         }
@@ -297,9 +325,21 @@ class TestIgnorePathLinting:
         ]
         assert len(ignore_path_issues) == 2
 
-    def test_path_prefix_in_issue(self, config_with_dir_ignore_path):
+    def test_path_prefix_in_issue(self, project_with_dirs):
         """The issue should include the correct config path prefix for identification."""
-        result = ConfigLinter.lint(config_with_dir_ignore_path)
+        config_path = project_with_dirs / ".ash" / ".ash.yaml"
+        config_path.write_text(
+            yaml.dump(
+                {
+                    "project_name": "test-project",
+                    "global_settings": {
+                        "ignore_paths": [{"path": "**/docs", "reason": "docs"}]
+                    },
+                }
+            )
+        )
+
+        result = ConfigLinter.lint(config_path)
 
         ignore_path_issues = [
             i for i in result.issues if i.category == LintCategory.IGNORE_PATH_ISSUE
@@ -311,17 +351,17 @@ class TestIgnorePathLinting:
 class TestIgnorePathValidation:
     """Tests for ignore_path validation in the config validator (ash config validate)."""
 
-    def test_validate_warns_on_directory_without_glob(
+    def test_validate_accepts_a_directory_without_glob(
         self, config_with_dir_ignore_path
     ):
-        """ash config validate should flag directory paths without **."""
+        """A glob-free directory path matches the files below it (the
+        bare-directory rule, issue #894), so validate gives it no warning."""
         is_valid, errors = ConfigValidator.validate_config_file(
             config_with_dir_ignore_path
         )
 
-        # A scan accepts the path, so the file is valid; the warning is listed.
         assert is_valid
-        assert any("'tests/test_data/'" in e for e in errors), errors
+        assert not [e for e in errors if "points to a directory" in e], errors
 
     def test_validate_passes_with_valid_paths(self, config_with_valid_ignore_paths):
         """ash config validate should pass with properly formed paths."""
@@ -344,16 +384,17 @@ class TestIgnorePathValidation:
         path_errors = [e for e in errors if "points to a directory" in e]
         assert len(path_errors) == 0
 
-    def test_validate_warns_on_suppression_directory_path(
+    def test_validate_accepts_a_suppression_directory_path(
         self, config_with_suppression_dir_path
     ):
-        """ash config validate should also flag suppression paths pointing to directories."""
+        """A glob-free suppression path naming a directory matches the findings
+        below it (the bare-directory rule, issue #894): no warning."""
         is_valid, errors = ConfigValidator.validate_config_file(
             config_with_suppression_dir_path
         )
 
         assert is_valid
-        assert any("'docs/**/*'" in e for e in errors), errors
+        assert not [e for e in errors if "points to a directory" in e], errors
 
     def test_validate_with_source_dir(self, tmp_path):
         """ash config validate should accept source_dir for path resolution."""
@@ -368,7 +409,10 @@ class TestIgnorePathValidation:
             "project_name": "test-project",
             "global_settings": {
                 "ignore_paths": [
-                    {"path": "vendor", "reason": "Third-party code"},
+                    # "**/vendor" keeps the warning under the bare-directory
+                    # rule (issue #894); the bare "vendor" matches the files
+                    # below the directory and gets none.
+                    {"path": "**/vendor", "reason": "Third-party code"},
                 ],
             },
         }
@@ -379,7 +423,7 @@ class TestIgnorePathValidation:
         )
 
         assert is_valid
-        path_errors = [e for e in errors if "'vendor/'" in e]
+        path_errors = [e for e in errors if "'**/vendor/'" in e]
         assert len(path_errors) == 1, errors
 
 
@@ -396,21 +440,27 @@ _FOLLOWS_THE_MATCHER = "follows-the-matcher"
 @pytest.mark.parametrize(
     "section, path, advice",
     [
-        ("ignore_paths", "docs", "'docs/'"),
+        # Glob-free spellings all name the directory and match the files below
+        # it (the bare-directory rule, issue #894): no advice.
+        ("ignore_paths", "docs", None),
         ("ignore_paths", "docs/", None),
-        ("suppressions", "docs", "'docs/**/*'"),
+        ("suppressions", "docs", None),
         ("suppressions", "docs/", _FOLLOWS_THE_MATCHER),
+        # A "**" pattern's last component names a path exactly, so the files
+        # inside the directory do not match, and the advice gives the spelling.
+        ("ignore_paths", "**/docs", "'**/docs/'"),
+        ("suppressions", "**/docs", "'**/docs/**/*'"),
     ],
 )
 def test_one_spelling_for_every_file_inside_a_directory(
     project_with_dirs, checker, section, path, advice
 ):
     """``ash config lint`` and ``ash config validate`` give the spelling the scan
-    reads as "every file inside the directory": ``docs/`` for an ignore path, and
-    ``docs/**/*`` for a suppression path, where ``docs/**`` would also match a
-    path named exactly ``docs``. A path already ending in ``/`` gets no advice
-    when the matcher reads it as the directory's files: an ignore path always,
-    a suppression path as _FOLLOWS_THE_MATCHER says."""
+    reads as "every file inside the directory" for a ``**`` pattern naming one:
+    ``**/docs/`` for an ignore path, and ``**/docs/**/*`` for a suppression
+    path, where ``**/docs/**`` would also match a path named exactly ``docs``.
+    A glob-free path gets no advice: under the bare-directory rule (issue #894)
+    it already matches the directory's files, with or without the slash."""
     if advice == _FOLLOWS_THE_MATCHER:
         from automated_security_helper.utils.suppression_matcher import (
             file_path_matches,
@@ -537,14 +587,15 @@ class TestEdgeCases:
         assert len(ignore_path_issues) == 0
 
     def test_mixed_valid_and_invalid_paths(self, project_with_dirs):
-        """Only directory paths without ** should be flagged, valid ones should pass."""
+        """Only a ** pattern naming a directory is flagged; the rest pass."""
         config_path = project_with_dirs / ".ash" / ".ash.yaml"
         config_data = {
             "project_name": "test-project",
             "global_settings": {
                 "ignore_paths": [
                     {"path": "tests/test_data/**", "reason": "Valid - has **"},
-                    {"path": "docs", "reason": "Invalid - directory without **"},
+                    {"path": "**/docs", "reason": "Flagged - names the path only"},
+                    {"path": "docs", "reason": "Valid - the bare-directory rule"},
                     {"path": "src/app.py", "reason": "Valid - specific file"},
                     {"path": "nonexistent_dir", "reason": "Valid - doesn't exist"},
                 ],
@@ -556,6 +607,6 @@ class TestEdgeCases:
         ignore_path_issues = [
             i for i in result.issues if i.category == LintCategory.IGNORE_PATH_ISSUE
         ]
-        # Only 'docs' should be flagged (exists as directory, no **)
+        # Only '**/docs' should be flagged.
         assert len(ignore_path_issues) == 1
-        assert "docs" in ignore_path_issues[0].message
+        assert "**/docs" in ignore_path_issues[0].message

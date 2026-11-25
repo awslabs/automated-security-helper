@@ -223,6 +223,10 @@ SEVERITY_THRESHOLD_VALUES: Tuple[str, ...] = tuple(m.value for m in SeverityThre
 #: derived from the enum so the ladder is spelled once.
 SEVERITY_BUCKETS: Tuple[str, ...] = tuple(m.bucket for m in Severity)
 
+#: The count field of findings a suppression hides. It is a count bucket beside
+#: the five severities, not a sixth severity: it never takes part in the gate.
+SUPPRESSED_COUNT_KEY = "suppressed"
+
 #: ``SEVERITY_BUCKETS`` with the ``suppressed`` tally in front, the field order
 #: of ``ScannerSeverityCount``.
-SEVERITY_COUNT_FIELDS: Tuple[str, ...] = ("suppressed",) + SEVERITY_BUCKETS
+SEVERITY_COUNT_FIELDS: Tuple[str, ...] = (SUPPRESSED_COUNT_KEY,) + SEVERITY_BUCKETS

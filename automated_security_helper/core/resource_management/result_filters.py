@@ -15,6 +15,7 @@ from automated_security_helper.core.enums import ScannerStatus
 from automated_security_helper.models.vocab import SEVERITY_BUCKETS
 from automated_security_helper.utils.severity_ladder import (
     SEVERITY_THRESHOLDS,
+    SUPPRESSED_COUNT_KEY,
     result_severity,
 )
 
@@ -26,7 +27,7 @@ ARTIFACT_PATH_PROPERTY = "workspace_artifact_path"
 
 #: The per-severity buckets a summary carries, in the order the summary lists
 #: them. ``suppressed`` is a bucket of its own, as it is in SummaryStats.
-_SEVERITY_KEYS = SEVERITY_BUCKETS + ("suppressed",)
+_SEVERITY_KEYS = (*SEVERITY_BUCKETS, SUPPRESSED_COUNT_KEY)
 
 #: The buckets ``total`` counts. SummaryStats.total is "the sum of all
 #: non-suppressed severity counts" (models/asharp_model.py), and the per-scanner
