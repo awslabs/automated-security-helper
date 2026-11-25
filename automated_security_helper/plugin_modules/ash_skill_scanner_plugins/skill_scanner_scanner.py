@@ -27,16 +27,19 @@ the pin, which the unrelated project's does not.
 What it runs
 ------------
 ``skill-scanner scan-all --recursive --format=sarif --output-sarif=<file> --
-<target>``, once per scanned target. ``scan-all --recursive`` finds every
+.``, once per scanned target, with the target as the working directory. ``scan-all --recursive`` finds every
 directory holding a ``SKILL.md`` below the target. ASH looks for the same files
 first: a target with no ``SKILL.md`` is SKIPPED without starting the tool,
 because ``scan-all`` exits 1 with "No skills found to scan." and writes no
 report (measured at 2.3.2), which would read as a failed scan.
 
-The target is passed as an absolute path after ``--``. skill-scanner then
-writes artifact URIs relative to the target's parent (``<target name>/<skill>/
-SKILL.md``), so the post-processing step drops the leading target-name segment
-and results are target-relative like every other scanner's.
+The tool runs with the target as its working directory and ``.`` as the path
+after ``--``. skill-scanner writes each artifact URI relative to its working
+directory when the skill is below it (measured at 2.3.2: ``marker-skill/
+SKILL.md``), and relative to the skill itself when it is not (a bare
+``SKILL.md`` for every skill, which would make two skills' findings
+indistinguishable). Running in the target gives target-relative URIs like every
+other scanner's, for the converted target as well as the source.
 
 Only the offline, deterministic analyzers run
 ---------------------------------------------
@@ -105,7 +108,10 @@ from typing import Annotated, Any, ClassVar, Dict, List, Literal, Tuple, cast
 from pydantic import Field
 
 from automated_security_helper.base import scanner_operational_facets as opsf
-from automated_security_helper.base.options import ScannerOptionsBase
+from automated_security_helper.base.options import (
+    ScannerOptionsBase,
+    tool_version_constraint,
+)
 from automated_security_helper.base.scanner_facets import (
     FacetDecl,
     FacetState,
@@ -217,11 +223,29 @@ def map_severity(result_severity: Any) -> Tuple[str, Level]:
 class SkillScannerScannerConfigOptions(ScannerOptionsBase):
     """Options for the skill-scanner plugin.
 
-    Only the shared options (``tool_version``, ``install_timeout``,
-    ``scan_timeout``, ``offline``, ``severity_threshold``). The tool's policy,
-    custom-rule and model options are deliberately not exposed: each either
-    reads a file the scanned tree could supply or leaves the machine.
+    The shared options (``scan_timeout``, ``offline``, ``severity_threshold``)
+    plus the install pin. The tool's policy, custom-rule and model options are
+    deliberately not exposed: each either reads a file the scanned tree could
+    supply or leaves the machine.
     """
+
+    tool_version: Annotated[
+        str | None,
+        tool_version_constraint("scanners.skill_scanner.options.tool_version"),
+        Field(
+            description=(
+                "Version constraint for the cisco-ai-skill-scanner installation, "
+                "in pip requirement syntax. Leave unset to use the scanner's own "
+                "default constraint, which is the release the result parser is "
+                "tested against. A value that is not a version constraint is "
+                "ignored with a warning. It applies to that package only."
+            )
+        ),
+    ] = None
+    install_timeout: Annotated[
+        int,
+        Field(description="Timeout in seconds for tool installation"),
+    ] = 300
 
 
 class SkillScannerScannerConfig(ScannerPluginConfigBase):
@@ -317,11 +341,9 @@ class SkillScannerScanner(ScannerPluginBase[SkillScannerScannerConfig]):
             "identifiers (properties.framework_mappings), not CWE",
         ),
         fingerprints=FacetDecl(
-            state=FacetState.DROPPED,
+            state=FacetState.MAPPED,
             native_field='result "fingerprints" primaryLocationLineHash '
             "(e.g. YARA_prompt_injection_generic_f4aec1d6b0)",
-            reason="the tool writes fingerprints, not partialFingerprints, "
-            "which is the field the flat identity reads",
         ),
         fix_available=FacetDecl(
             state=FacetState.NA,
@@ -383,6 +405,7 @@ class SkillScannerScanner(ScannerPluginBase[SkillScannerScannerConfig]):
                     "holding a SKILL.md (skill_directories), scanned by "
                     "scan-all --recursive"
                 ),
+                covers_note="a community scanner; it declares no covers display string",
                 tool_type_note="agent skills are markdown instructions and "
                 "bundled scripts; the nearest ASH type is SAST",
             ),
@@ -408,9 +431,10 @@ class SkillScannerScanner(ScannerPluginBase[SkillScannerScannerConfig]):
                 "suppressions are the surface this register records",
             ),
             identity=opsf.IdentityFacet(
-                fingerprint_class=opsf.FingerprintClass.DROPPED_BY_POLICY,
-                note="the tool's fingerprints field is not read by the flat "
-                "identity (partialFingerprints is)",
+                fingerprint_class=opsf.FingerprintClass.STABLE_NATIVE,
+                note="the tool's own fingerprints.primaryLocationLineHash "
+                "(rule id plus a content hash); the flat row observed it "
+                "populated on all four captured results",
             ),
             extensibility=opsf.ExtensibilityFacet(
                 custom_rules=opsf.CustomRules.NONE,
@@ -469,6 +493,7 @@ class SkillScannerScanner(ScannerPluginBase[SkillScannerScannerConfig]):
             extra_args=[],
         )
         self.targets_attempted = None
+        self._scan_cwd: Path | None = None
         super().model_post_init(context)
 
     # ------------------------------------------------------------------
@@ -582,8 +607,10 @@ class SkillScannerScanner(ScannerPluginBase[SkillScannerScannerConfig]):
         results_file.parent.mkdir(exist_ok=True, parents=True)
         # A report an earlier run left must never be read as this run's.
         results_file.unlink(missing_ok=True)
-        # Every option is one --flag=value token and the target follows "--", so
-        # no path or value can be read as a flag.
+        # The tool runs IN the target (_subprocess_cwd) and is given "." after
+        # "--", so no path or value can be read as a flag and every URI it
+        # writes is relative to the target.
+        self._scan_cwd = Path(target)
         argv = [
             _COMMAND,
             "scan-all",
@@ -591,9 +618,13 @@ class SkillScannerScanner(ScannerPluginBase[SkillScannerScannerConfig]):
             "--format=sarif",
             f"--output-sarif={results_file.as_posix()}",
             "--",
-            Path(target).as_posix(),
+            ".",
         ]
         return argv, results_file, None
+
+    def _subprocess_cwd(self, results_dir: Path) -> Path | None:
+        """The target being scanned: skill-scanner makes its URIs relative to it."""
+        return self._scan_cwd
 
     def _post_process_sarif(
         self,
@@ -601,8 +632,7 @@ class SkillScannerScanner(ScannerPluginBase[SkillScannerScannerConfig]):
         final_args: List[str],
         target: Path,
     ) -> SarifReport:
-        """Target-relative URIs, ASH severities, and the real driver version."""
-        prefix = f"{Path(target).name}/"
+        """ASH severities and levels, the real driver version, no ASH output."""
         output_dirs = [
             path.as_posix().rstrip("/") + "/"
             for path in self._ash_output_dirs_inside(Path(target))
@@ -614,13 +644,8 @@ class SkillScannerScanner(ScannerPluginBase[SkillScannerScannerConfig]):
             for result in run.results or []:
                 location = self._artifact_location(result)
                 if location is not None and location.uri:
-                    uri = location.uri
-                    if "://" not in uri and uri.startswith(prefix):
-                        uri = uri[len(prefix) :]
-                        location.uri = uri
-                    if any(
-                        PurePosixPath(uri).as_posix().startswith(d) for d in output_dirs
-                    ):
+                    uri = PurePosixPath(location.uri).as_posix()
+                    if any(uri.startswith(d) for d in output_dirs):
                         continue
                 severity, level = map_severity(
                     getattr(result.properties, "severity", None)

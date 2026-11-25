@@ -66,10 +66,6 @@ DATA = Path(__file__).resolve().parents[3] / "test_data" / "scanners" / "skill_s
 CAPTURED = DATA / "captured"
 PLUGIN_DIR = Path(module.__file__).resolve().parent
 
-#: The root directory name the captures were made under; the fake renames it to
-#: the scanned target's name, as the tool does for whatever it is given.
-CAPTURE_ROOT = "tree"
-
 #: The skill trees, as built by the code under test's own fixtures. Compared with
 #: the committed inputs below.
 BENIGN_SKILL = """\
@@ -170,24 +166,23 @@ class FakeSkillScanner:
         output_flag = next(c for c in command if c.startswith("--output-sarif="))
         report = Path(output_flag.split("=", 1)[1])
         self.stale_at_start.append(report.exists())
-        target = Path(command[-1])
+        # The tool answers for the tree it runs in, as the real one does: its
+        # working directory is the target.
+        target = Path(cwd)
         if self.write_report:
             text = (
                 self.report_text
                 if self.report_text is not None
                 else self.capture_for(target)
             )
-            if self.report_text is None:
+            if self.report_text is None and self.rewrite:
                 document = json.loads(text)
                 for run in document["runs"]:
                     for result in run["results"]:
                         for location in result["locations"]:
-                            artifact = location["physicalLocation"]["artifactLocation"]
-                            artifact["uri"] = artifact["uri"].replace(
-                                f"{CAPTURE_ROOT}/", f"{target.name}/", 1
+                            self.rewrite(
+                                location["physicalLocation"]["artifactLocation"]
                             )
-                            if self.rewrite:
-                                self.rewrite(artifact)
                 text = json.dumps(document)
             report.write_text(text, encoding="utf-8")
         scanner.exit_code = max(scanner.exit_code or 0, self.returncode)
@@ -321,8 +316,10 @@ class TestInvocation:
             "--format=sarif",
             f"--output-sarif={report.as_posix()}",
             "--",
-            repo.as_posix(),
+            ".",
         ]
+        # In the target, so the tool's URIs come out relative to it.
+        assert call["cwd"] == repo
         assert call["env"] is None
 
     @pytest.mark.parametrize("flag", FORBIDDEN_FLAGS)
@@ -423,16 +420,23 @@ class TestReport:
         for result in document["runs"][0]["results"]:
             if result["ruleId"] == "YARA_prompt_injection_generic":
                 result["properties"]["severity"] = "LOW"
-        fake.report_text = json.dumps(document).replace("tree/", f"{repo.name}/")
+        fake.report_text = json.dumps(document)
         report = _scanner(repo, tmp_path).scan(target=repo, target_type="source")
         assert _rows(report) != MARKER_EXPECTED
 
-    def test_results_are_target_relative(self, tmp_path, fake):
+    def test_results_are_target_relative_for_the_converted_target_too(
+        self, tmp_path, fake
+    ):
+        """The tool runs in whichever target it is scanning, source or converted."""
         repo = _marker_repo(tmp_path)
-        report = _scanner(repo, tmp_path).scan(target=repo, target_type="source")
+        scanner = _scanner(repo, tmp_path)
+        converted = tmp_path / "out" / "converted"
+        _write_skill(converted, "marker-skill", MARKER_SKILL)
+        scanner.scan(target=repo, target_type="source")
+        report = scanner.scan(target=converted, target_type="converted")
+        assert [c["cwd"] for c in fake.calls] == [repo, converted]
         for result in report.runs[0].results:
             uri = result.locations[0].physicalLocation.root.artifactLocation.uri
-            assert not uri.startswith(f"{repo.name}/")
             assert uri == "marker-skill/SKILL.md"
 
     def test_the_driver_version_is_the_probed_one_not_the_tools_hardcoded_1_0_0(
@@ -661,6 +665,17 @@ class TestInstallPin:
     def test_no_install_command_names_the_bare_package(self, tmp_path):
         text = _install_text(_scanner(_marker_repo(tmp_path), tmp_path))
         assert BARE_NAME.search(text) is None, text
+
+    def test_planted_installing_under_the_command_name_is_caught_by_the_guard(
+        self, tmp_path
+    ):
+        """The must-flag control, through the real install builder: a scanner
+        that fell back to the command name would install the unrelated package,
+        and the guard's text check reads it."""
+        scanner = _scanner(_marker_repo(tmp_path), tmp_path)
+        scanner.uv_tool_package_name = None
+        scanner._setup_uv_tool_install_commands()
+        assert BARE_NAME.search(_install_text(scanner)), _install_text(scanner)
 
     def test_an_operator_pin_replaces_the_version_and_not_the_package(self, tmp_path):
         scanner = _scanner(_marker_repo(tmp_path), tmp_path, tool_version="==2.3.1")

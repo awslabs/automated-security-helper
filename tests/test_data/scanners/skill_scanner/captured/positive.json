@@ -7,7 +7,7 @@
         "pipeline",
         "correlation"
       ],
-      "duration_ms": 322,
+      "duration_ms": 350,
       "findings": [
         {
           "analyzer": "static",
@@ -159,7 +159,7 @@
       "findings_count": 3,
       "is_safe": false,
       "max_severity": "CRITICAL",
-      "scan_duration_seconds": 0.32263875007629395,
+      "scan_duration_seconds": 0.3505678176879883,
       "scan_metadata": {
         "cel": {
           "elapsed_ms": 0.0,
@@ -205,8 +205,8 @@
         }
       },
       "skill_name": "marker-skill",
-      "skill_path": "<scanned-dir>/tree/marker-skill",
-      "timestamp": "2026-11-25T04:52:27.968311+00:00"
+      "skill_path": "<scanned-dir>/marker-skill",
+      "timestamp": "2026-11-25T05:00:56.030161+00:00"
     }
   ],
   "summary": {
@@ -218,7 +218,7 @@
       "medium": 0
     },
     "safe_skills": 0,
-    "timestamp": "2026-11-25T04:52:27.638369+00:00",
+    "timestamp": "2026-11-25T05:00:55.676155+00:00",
     "total_findings": 3,
     "total_skills_scanned": 1
   }

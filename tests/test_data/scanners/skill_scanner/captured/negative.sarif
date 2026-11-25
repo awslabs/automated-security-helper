@@ -53,7 +53,7 @@
             {
               "physicalLocation": {
                 "artifactLocation": {
-                  "uri": "cap/benign/tree/benign-skill/SKILL.md",
+                  "uri": "benign-skill/SKILL.md",
                   "uriBaseId": "%SRCROOT%"
                 }
               }
@@ -67,7 +67,7 @@
       "invocations": [
         {
           "executionSuccessful": true,
-          "endTimeUtc": "2026-11-25T04:52:17Z"
+          "endTimeUtc": "2026-11-25T05:00:45Z"
         }
       ]
     }

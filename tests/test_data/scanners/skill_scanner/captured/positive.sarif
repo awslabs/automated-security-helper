@@ -103,7 +103,7 @@
             {
               "physicalLocation": {
                 "artifactLocation": {
-                  "uri": "cap/marker/tree/marker-skill/SKILL.md",
+                  "uri": "marker-skill/SKILL.md",
                   "uriBaseId": "%SRCROOT%"
                 }
               }
@@ -154,7 +154,7 @@
             {
               "physicalLocation": {
                 "artifactLocation": {
-                  "uri": "cap/marker/tree/marker-skill/SKILL.md",
+                  "uri": "marker-skill/SKILL.md",
                   "uriBaseId": "%SRCROOT%"
                 },
                 "region": {
@@ -211,7 +211,7 @@
             {
               "physicalLocation": {
                 "artifactLocation": {
-                  "uri": "cap/marker/tree/marker-skill/SKILL.md",
+                  "uri": "marker-skill/SKILL.md",
                   "uriBaseId": "%SRCROOT%"
                 },
                 "region": {
@@ -231,7 +231,7 @@
       "invocations": [
         {
           "executionSuccessful": true,
-          "endTimeUtc": "2026-11-25T04:52:27Z"
+          "endTimeUtc": "2026-11-25T05:00:55Z"
         }
       ]
     }

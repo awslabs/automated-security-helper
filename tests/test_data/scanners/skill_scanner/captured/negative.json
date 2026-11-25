@@ -7,7 +7,7 @@
         "pipeline",
         "correlation"
       ],
-      "duration_ms": 324,
+      "duration_ms": 327,
       "findings": [
         {
           "analyzer": "static",
@@ -37,7 +37,7 @@
       "findings_count": 1,
       "is_safe": true,
       "max_severity": "INFO",
-      "scan_duration_seconds": 0.3244283199310303,
+      "scan_duration_seconds": 0.327364444732666,
       "scan_metadata": {
         "cel": {
           "elapsed_ms": 0.0,
@@ -83,8 +83,8 @@
         }
       },
       "skill_name": "benign-skill",
-      "skill_path": "<scanned-dir>/tree/benign-skill",
-      "timestamp": "2026-11-25T04:52:17.929021+00:00"
+      "skill_path": "<scanned-dir>/benign-skill",
+      "timestamp": "2026-11-25T05:00:46.169320+00:00"
     }
   ],
   "summary": {
@@ -96,7 +96,7 @@
       "medium": 0
     },
     "safe_skills": 1,
-    "timestamp": "2026-11-25T04:52:17.596494+00:00",
+    "timestamp": "2026-11-25T05:00:45.838219+00:00",
     "total_findings": 1,
     "total_skills_scanned": 1
   }

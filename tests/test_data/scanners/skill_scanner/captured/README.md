@@ -17,10 +17,11 @@ The unit tests build both trees from constants and compare them with these files
 
 ## Commands
 
-Each tree was copied into a directory named `tree` and scanned with the argv ASH builds:
+Each tree was copied into a directory named `tree`, and the tool was run with that directory as its working
+directory, with the argv ASH builds plus a JSON report:
 
 ```bash
-skill-scanner scan-all --recursive --format=sarif --output-sarif=positive.sarif --format=json --output-json=positive.json -- <abs path>/tree
+cd tree && skill-scanner scan-all --recursive --format=sarif --output-sarif=positive.sarif --format=json --output-json=positive.json -- .
 ```
 
 (`marker` input for `positive`, `benign` input for `negative`.)
@@ -34,8 +35,11 @@ skill-scanner scan-all --recursive --format=sarif --output-sarif=positive.sarif 
 - Exit status is 0 for both runs, findings included. `--fail-on-findings` on the marker skill exits 1, a missing
   directory exits 1, and `scan-all` over a tree with no `SKILL.md` prints "No skills found to scan." to stderr,
   exits 1 and writes no report.
-- Artifact URIs are relative to the scanned directory's parent and begin with its name (`tree/marker-skill/
-  SKILL.md`); run from inside a skill directory with `.`, they have no prefix. The scanner strips the prefix.
+- Artifact URIs are relative to the tool's working directory when the skill is below it (`marker-skill/SKILL.md`
+  here). Run from a directory that is not an ancestor of the skill, the URI is relative to the skill itself: a
+  bare `SKILL.md` for every skill (measured with the working directory beside the tree, 2.3.2). The scanner
+  therefore runs the tool in the target. Run from the tree with an absolute path instead of `.`, the URIs are the
+  same.
 - The SARIF driver `version` is `1.0.0` in both captures (the tool's reporter default), not the tool version.
 - `results[].level` follows `properties.severity`: CRITICAL and HIGH are `error`, INFO is `note`. MEDIUM and LOW are
   not in these captures; the tool's reporter maps them to `warning` and `note`
