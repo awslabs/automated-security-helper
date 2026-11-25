@@ -18,8 +18,8 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
-SMALL_DIGEST = "ffbd2e49b3745cd1c0cb11cafda6de6c166154d2943f5fb546b812403bb092f3"
-LARGE_DIGEST = "dd60607916dbc43a698d5c548e2b3019b296dce709003a1f08002e8a1077057a"
+SMALL_DIGEST = "ffbd2e49b3745cd1c0cb11cafda6de6c166154d2943f5fb546b812403bb092f3"  # pragma: allowlist secret
+LARGE_DIGEST = "dd60607916dbc43a698d5c548e2b3019b296dce709003a1f08002e8a1077057a"  # pragma: allowlist secret
 
 
 @pytest.fixture

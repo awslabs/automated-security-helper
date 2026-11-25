@@ -107,7 +107,11 @@ def _module_source(package: int, module: int) -> str:
             "",
         ]
     if index % 150 == 7:
-        lines += ["", f'PASSWORD = "fixture-not-a-secret-{index:04d}"', ""]
+        lines += [
+            "",
+            f'PASSWORD = "fixture-not-a-secret-{index:04d}"',  # pragma: allowlist secret
+            "",
+        ]
     return "\n".join(lines)
 
 
@@ -164,8 +168,12 @@ def fixture_digest(root: Path) -> str:
     Skips ``.git`` so the digest depends on the generated content only.
     """
     digest = hashlib.sha256()
+    # Sorted by the posix text of the relative path, not by the Path objects: Windows
+    # compares Path parts case-insensitively, which puts README.md after pkg_00 where
+    # every other platform puts it before, and the digest follows the order.
     for path in sorted(
-        p for p in root.rglob("*") if p.is_file() and ".git" not in p.parts
+        (p for p in root.rglob("*") if p.is_file() and ".git" not in p.parts),
+        key=lambda p: p.relative_to(root).as_posix(),
     ):
         relative = path.relative_to(root).as_posix()
         digest.update(relative.encode() + b"\0")

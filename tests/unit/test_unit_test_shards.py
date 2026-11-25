@@ -3243,7 +3243,13 @@ class TestTheCombineGateReadsEveryOsAtOnce:
         folded = self._folded_files(tmp_path, two_aliases, source)
         assert len(folded) == 1, folded
         assert folded[0].endswith("automated_security_helper/mod.py"), folded
-        assert not folded[0].startswith(("D:", "/home/runner", "/Users/runner")), folded
+        # The fold lands on the file in the checkout the data is combined in. Comparing
+        # against a runner prefix would fail whenever pytest's own temporary directory
+        # sits under /home/runner, which is where a hosted runner puts it.
+        assert os.path.samefile(
+            folded[0], tmp_path / "fold" / "automated_security_helper" / "mod.py"
+        ), folded
+        assert folded[0] != source, folded
         unfolded = self._folded_files(tmp_path / "control", head, source)
         assert unfolded == [source], unfolded
 
