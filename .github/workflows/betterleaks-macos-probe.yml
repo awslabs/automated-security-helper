@@ -1,0 +1,124 @@
+name: betterleaks macOS probe
+
+# A measurement, not a gate. It runs only when someone dispatches it, on one macOS
+# runner, and nothing depends on it.
+#
+# On macOS, betterleaks starts under sandbox-exec, finds the fixture's secrets and
+# exits 2, then crashes inside its embedded regular-expression engine (go-re2 over
+# wazero) before it writes betterleaks.sarif. This workflow runs the same scanner
+# parity comparison the sandbox-scanner-parity job runs, for betterleaks alone, and
+# keeps what is needed to read the cause: the scanner's own stderr and log files,
+# the parity script's output, the macOS version, the sandbox entries of the system
+# log, the resource limits, and any crash report.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: betterleaks-macos-probe-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    name: "betterleaks under sandbox-exec (macos-latest)"
+    runs-on: macos-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      TMPDIR: ${{ github.workspace }}/../probe-tmp
+      CAPTURE: ${{ github.workspace }}/../probe-capture
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Nothing in this job uses git credentials after checkout.
+          persist-credentials: false
+      - uses: ./.github/actions/setup-ash
+        with:
+          python-version: "3.12"
+      - name: Prepare the temp and capture directories
+        run: |
+          mkdir -p "$TMPDIR" "$CAPTURE"
+      - name: Record the machine
+        run: |
+          {
+            echo "## sw_vers"
+            sw_vers
+            echo
+            echo "## uname -a"
+            uname -a
+            echo
+            echo "## ulimit -a"
+            ulimit -a
+          } 2>&1 | tee "$CAPTURE/machine.txt"
+      - name: Install betterleaks
+        run: |
+          ash dependencies install --tool betterleaks \
+            --config-overrides "ash_plugin_modules+=[automated_security_helper.plugin_modules.ash_betterleaks_plugins]" \
+            2>&1 | tee "$CAPTURE/install.log"
+      # continue-on-error so the capture steps below always run.
+      - name: Compare betterleaks with and without the sandbox
+        id: parity
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          python scripts/verify_sandbox_scanner_parity.py \
+            --sandbox sandbox-exec \
+            --ash ash \
+            --ash-plugin-modules automated_security_helper.plugin_modules.ash_betterleaks_plugins \
+            --require betterleaks \
+            --min-findings 1 \
+            --report "$CAPTURE/sandbox-parity.json" \
+            2>&1 | tee "$CAPTURE/parity-output.txt"
+      - name: Copy the scan output
+        if: always()
+        run: |
+          for dir in "$TMPDIR"/ash-sandbox-parity-*; do
+            [ -d "$dir" ] || continue
+            mkdir -p "$CAPTURE/scan-output"
+            # Everything under each out-* directory except the fixture source tree:
+            # the scanners' stderr and logs, ash.log, and the aggregated results.
+            for out in "$dir"/out-*; do
+              [ -d "$out" ] || continue
+              cp -R "$out" "$CAPTURE/scan-output/$(basename "$out")" || true
+            done
+          done
+          find "$CAPTURE/scan-output" -path '*betterleaks*' -type f 2>/dev/null | sort > "$CAPTURE/betterleaks-files.txt" || true
+      - name: Capture the sandbox entries of the system log
+        if: always()
+        run: |
+          # Without sudo first; the hosted runner allows sudo if that is refused.
+          if ! log show --last 30m --predicate 'sender == "Sandbox"' --style compact > "$CAPTURE/sandbox-log.txt" 2> "$CAPTURE/sandbox-log.err"; then
+            sudo log show --last 30m --predicate 'sender == "Sandbox"' --style compact > "$CAPTURE/sandbox-log.txt" 2>> "$CAPTURE/sandbox-log.err" || true
+          fi
+          wc -l "$CAPTURE/sandbox-log.txt" || true
+          grep -i 'betterleaks' "$CAPTURE/sandbox-log.txt" > "$CAPTURE/sandbox-log-betterleaks.txt" || true
+          wc -l "$CAPTURE/sandbox-log-betterleaks.txt" || true
+      - name: Sweep the crash reports
+        if: always()
+        run: |
+          mkdir -p "$CAPTURE/crash-reports"
+          ls -la "$HOME/Library/Logs/DiagnosticReports" > "$CAPTURE/crash-reports/listing.txt" 2>&1 || true
+          for report in "$HOME"/Library/Logs/DiagnosticReports/*; do
+            [ -f "$report" ] || continue
+            cp "$report" "$CAPTURE/crash-reports/" || true
+          done
+          # wazero and go-re2 lines in anything the scan wrote.
+          grep -rIn -i -E 'wazero|go-re2|re2|wasm|sigsegv|sigbus|fatal error|panic|goroutine' "$CAPTURE/scan-output" > "$CAPTURE/crash-signature-lines.txt" 2>/dev/null || true
+          wc -l "$CAPTURE/crash-signature-lines.txt" || true
+      - name: Upload the capture
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: betterleaks-macos-probe
+          path: ${{ github.workspace }}/../probe-capture
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Report the parity result
+        if: steps.parity.outcome == 'failure'
+        run: |
+          echo "::notice::The parity step failed, which is the expected measurement; the capture is uploaded as betterleaks-macos-probe."
