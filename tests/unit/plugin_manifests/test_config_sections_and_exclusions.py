@@ -55,6 +55,7 @@ SCANNER_SECTION_FIELDS = {
     "detect_secrets": "detect-secrets",
     "gitleaks": None,
     "grype": None,
+    "mcp_config": "mcp-config",
     "npm_audit": "npm-audit",
     "opengrep": None,
     "semgrep": None,
@@ -80,7 +81,7 @@ REPORTER_SECTION_FIELDS = {
     "unused_suppressions": "unused-suppressions",
     "yaml": None,
 }
-CONVERTER_SECTION_FIELDS = {"archive": None, "jupyter": None}
+CONVERTER_SECTION_FIELDS = {"archive": None, "jupyter": None, "mcp_config": None}
 
 
 def _fields_and_aliases(segment) -> dict:
@@ -141,7 +142,7 @@ def test_only_the_builtin_scanners_have_typed_sections():
     with_section = {m.name for m in scanner_manifests() if m.config_section}
     builtin = {m.name for m in scanner_manifests() if m.default_enabled}
     assert with_section == builtin, "an alpha scanner is configured through extras"
-    assert len(builtin) == 16, "control: the builtin set shrank"
+    assert len(builtin) == 17, "control: the builtin set shrank"
 
 
 def test_the_section_class_is_built_into_the_default_config():
