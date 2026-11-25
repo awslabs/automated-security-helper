@@ -51,11 +51,11 @@ whatever ran before it.
 import pytest
 
 from automated_security_helper.cli.mcp_tools import (
-    _VENDORED_SCANNER_PLUGIN_PACKAGES,
     _loaded_scanner_classes,
     mcp_list_scanners,
 )
 from automated_security_helper.plugins import ash_plugin_manager
+from automated_security_helper.plugins.enablement import modules_needing_naming
 from automated_security_helper.plugins.loader import (
     load_additional_plugin_modules,
     load_internal_plugins,
@@ -130,7 +130,7 @@ class TestListScannersIsImportOrderIndependent:
         chose discovery over the vendored list whenever discovery returned
         anything, so whichever set the winner did not cover simply vanished.
         """
-        load_additional_plugin_modules(list(_VENDORED_SCANNER_PLUGIN_PACKAGES))
+        load_additional_plugin_modules(list(modules_needing_naming()))
 
         names = {entry["name"] for entry in mcp_list_scanners()}
         assert VENDORED_SCANNER_NAMES <= names
@@ -199,7 +199,7 @@ class TestLoadedScannerClasses:
         leaf_paths = [
             f"{package}.{leaf}"
             for package, leaf in zip(
-                _VENDORED_SCANNER_PLUGIN_PACKAGES,
+                modules_needing_naming(),
                 (
                     "betterleaks_scanner",
                     "ferret_scanner",
@@ -213,9 +213,7 @@ class TestLoadedScannerClasses:
         ]
 
         via_leaves = load_additional_plugin_modules(leaf_paths)
-        via_packages = load_additional_plugin_modules(
-            list(_VENDORED_SCANNER_PLUGIN_PACKAGES)
-        )
+        via_packages = load_additional_plugin_modules(list(modules_needing_naming()))
 
         assert via_leaves["scanners"] == [], (
             "leaf module paths now report scanners; if ASH_SCANNERS moved into "

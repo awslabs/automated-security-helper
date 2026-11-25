@@ -31,11 +31,13 @@ built is still listed, with the instance-only columns marked as not determined.
 
 Built-in and alpha
 ------------------
-``ash_builtin`` is the built-in package. A scanner from any other package under
-``plugin_modules/`` is an alpha scanner. The scan phase reads the tier from the
-manifests in ``plugin_manifests/`` to decide which module to suggest for a
-scanner that was not loaded. Reporters and converters outside ``ash_builtin`` (the AWS
-reporters) are not called alpha plugins; the pages name their module.
+Both labels come from the manifests in ``plugin_manifests/``, the one source: a
+plugin whose manifest is ``default_enabled`` is built in (the package
+``plugins/enablement.py`` says loads on every scan), and a scanner whose
+manifest declares the ``alpha`` tier is grouped as an alpha module, wherever its
+package sits. A scanner that ships opt-in but is promoted to ``supported``, and
+the reporters and converters outside the built-in package (the AWS reporters),
+are named by their module with no tier label.
 
 Options tables
 --------------
@@ -78,8 +80,17 @@ from generate_config_reference import (
     unknown_keys_text,
 )
 
+from automated_security_helper.base.plugin_manifest import PluginTier
+from automated_security_helper.plugin_manifests import manifest_for
+from automated_security_helper.plugins.enablement import (
+    loads_unnamed,
+    modules_loading_unnamed,
+)
+
 PLUGIN_ROOT = "automated_security_helper.plugin_modules"
-BUILTIN_PACKAGE = f"{PLUGIN_ROOT}.ash_builtin"
+#: Derived from the manifests' ``default_enabled`` (one package today): this
+#: generator groups what it lists by that fact instead of hand-knowing a name.
+BUILTIN_PACKAGE = modules_loading_unnamed()[0]
 REGISTRY_LISTS = {
     "scanner": "ASH_SCANNERS",
     "reporter": "ASH_REPORTERS",
@@ -113,7 +124,7 @@ class Plugin:
 
     @property
     def builtin(self) -> bool:
-        return self.package == BUILTIN_PACKAGE
+        return loads_unnamed(self.package)
 
 
 def _declared_config(cls: type) -> Optional[type]:
@@ -304,7 +315,13 @@ def module_name(plugin: Plugin) -> str:
 
 
 def _origin(plugin: Plugin) -> str:
-    return "alpha module" if plugin.kind == "scanner" else "plugin module"
+    """The grouping label, from the plugin's manifest tier, never from where its
+    package sits: only a scanner whose manifest says ``alpha`` is an "alpha
+    module"; any other plugin is a plain "plugin module"."""
+    manifest = manifest_for(plugin.name) if plugin.kind == "scanner" else None
+    if manifest is not None and manifest.tier is PluginTier.ALPHA:
+        return "alpha module"
+    return "plugin module"
 
 
 def package_short(plugin: Plugin) -> str:

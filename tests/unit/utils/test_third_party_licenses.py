@@ -562,11 +562,11 @@ class TestThePythonTools:
         )
         assert len(declared) == 2 and declared[0] == declared[1], declared
         from automated_security_helper.plugin_manifests import (
-            alpha_scanner_modules,
+            opt_in_scanner_modules,
         )
 
         expected = sorted(
-            set(alpha_scanner_modules().values())
+            set(opt_in_scanner_modules().values())
             - {
                 "automated_security_helper.plugin_modules.ash_ferret_plugins",
                 "automated_security_helper.plugin_modules.ash_snyk_plugins",

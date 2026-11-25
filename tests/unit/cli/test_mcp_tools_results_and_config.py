@@ -31,9 +31,7 @@ from automated_security_helper.cli.mcp_tools import (
     mcp_suggest_suppression,
     mcp_validate_config,
 )
-from automated_security_helper.core.scanner_inventory import (
-    _VENDORED_SCANNER_PLUGIN_PACKAGES,
-)
+from automated_security_helper.plugins.enablement import modules_needing_naming
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 
 pytestmark = pytest.mark.unit
@@ -644,7 +642,7 @@ class TestListScanners:
             call([package])
             for package in (
                 "automated_security_helper.plugin_modules.acme_scan",
-                *_VENDORED_SCANNER_PLUGIN_PACKAGES,
+                *modules_needing_naming(),
             )
         ]
 

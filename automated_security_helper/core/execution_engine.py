@@ -35,10 +35,10 @@ from automated_security_helper.core.cancellation import (
 from automated_security_helper.core.enums import ExecutionPhase, ExecutionStrategy
 from automated_security_helper.core.exceptions import ScannerSelectionError
 from automated_security_helper.core.scanner_selection import (
-    alpha_scanner_refusal,
     refuse_selection_matching_no_scanner,
     selection_after_exclusions,
 )
+from automated_security_helper.plugins.enablement import unloaded_opt_in_refusal
 from automated_security_helper.core.metrics_table import display_metrics_table
 from automated_security_helper.core.phases.convert_phase import ConvertPhase
 from automated_security_helper.core.phases.report_phase import ReportPhase
@@ -807,11 +807,11 @@ class ScanExecutionEngine:
             # check keyed on the lowercased class name would refuse the configured
             # name the phase accepts; the workspace pre-check
             # (workspace.execution.refuse_unresolvable_scanner_selection) defers
-            # the same way. A request naming an alpha scanner whose module
+            # the same way. A request naming a shipped scanner whose module
             # this run did not load is refused HERE, before anything is cleared,
             # with the module to add rather than spelling advice, in the one
             # text ScanPhase's backstop also raises
-            # (core.scanner_selection.alpha_scanner_refusal), which names
+            # (plugins.enablement.unloaded_opt_in_refusal), which names
             # any misspelled name beside the module. Nothing registered means
             # nothing to judge against: deferred, as every selection refusal
             # defers that case.
@@ -823,7 +823,7 @@ class ScanExecutionEngine:
                 ]
                 declared_names = [name for name in selectable if name is not None]
                 if scanner_classes and len(declared_names) == len(selectable):
-                    refusal = alpha_scanner_refusal(
+                    refusal = unloaded_opt_in_refusal(
                         self._init_enabled_scanners, declared_names, scanner_classes
                     )
                     if refusal:

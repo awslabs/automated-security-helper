@@ -1689,29 +1689,30 @@ def install_dependencies(
                     + escape(", ".join(sorted(o.name for o in failed_to_load)))
                 )
             )
-            # An alpha scanner that ships with ASH is not a typo when its module
-            # is simply not loaded: say which module to add.
+            # A scanner that ships with ASH is not a typo when its module is
+            # simply not loaded: say which module to add.
             from automated_security_helper.plugin_manifests import (
-                alpha_module_for,
+                opt_in_module_for,
             )
 
-            alpha = {
-                name: module for name in unknown if (module := alpha_module_for(name))
+            unloaded = {
+                name: module for name in unknown if (module := opt_in_module_for(name))
             }
-            alpha_note = "".join(
-                f"\n[yellow]{escape(name)}[/yellow] is an alpha plugin scanner: "
+            unloaded_note = "".join(
+                f"\n[yellow]{escape(name)}[/yellow] is provided by a plugin "
+                "module this run did not load: "
                 + escape(
                     f"load {module} with --config (ash_plugin_modules) or "
                     f'--config-overrides "ash_plugin_modules+=[{module}]".'
                 )
-                for name, module in sorted(alpha.items())
+                for name, module in sorted(unloaded.items())
             )
             console.print(
                 Panel(
                     f"[bold red]Unknown tool(s): "
                     f"{escape(', '.join(sorted(unknown)))}[/bold red]\n"
                     f"[cyan]Available:[/cyan] {escape(', '.join(available))}"
-                    f"{alpha_note}{broken_note}",
+                    f"{unloaded_note}{broken_note}",
                     title="Nothing installed",
                     expand=False,
                 )

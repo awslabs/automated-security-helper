@@ -6,10 +6,10 @@
 Pure data; see :mod:`automated_security_helper.plugin_manifests`. An alpha
 scanner ships inside ASH but loads only when its plugin module is listed in
 ``ash_plugin_modules`` or passed with ``--ash-plugin-modules``, so each is
-``alpha`` and not ``default_enabled``. The scan phase reads this tier to say
-which module to add for a scanner that was named but not loaded.
-
-Promotion to ``supported`` is the one-line ``tier`` edit here.
+``alpha`` and not ``default_enabled``. The scan phase reads ``default_enabled``
+(not the tier) to say which module to add for a scanner that was named but not
+loaded, so promotion to ``supported`` is the one-line ``tier`` edit here and
+changes neither that hint nor how the plugin loads.
 """
 
 from typing import Any

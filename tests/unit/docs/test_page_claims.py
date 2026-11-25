@@ -22712,14 +22712,12 @@ def test_the_homepage_says_asha_ships_six_alpha_scanners_and_links_each(
     a page under docs/content, the alpha index and the scanners reference
     included.
     """
-    from automated_security_helper.core.scanner_inventory import (
-        _VENDORED_SCANNER_PLUGIN_PACKAGES,
-    )
+    from automated_security_helper.plugins.enablement import modules_needing_naming
 
     assert_on_page(_HOMEPAGE, _HOMEPAGE_ALPHA_SENTENCE)
     builtin, alpha = _shipped_scanner_split(tmp_path, monkeypatch)
-    assert len(_VENDORED_SCANNER_PLUGIN_PACKAGES) == len(alpha) == 6, (
-        len(_VENDORED_SCANNER_PLUGIN_PACKAGES),
+    assert len(modules_needing_naming()) == len(alpha) == 6, (
+        len(modules_needing_naming()),
         sorted(alpha),
     )
     assert len(builtin) + len(alpha) == 23, (len(builtin), len(alpha))

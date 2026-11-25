@@ -139,15 +139,17 @@ def test_a_pattern_of_the_configured_shape_would_catch_the_probe():
 
 
 @pytest.mark.unit
-def test_the_vendored_list_is_every_in_tree_alpha_module():
-    """A new alpha module that is not listed here is missing from list_scanners."""
-    from automated_security_helper.cli.mcp_tools import (
-        _VENDORED_SCANNER_PLUGIN_PACKAGES,
-    )
-    from automated_security_helper.plugin_manifests import (
-        alpha_scanner_modules,
-    )
+def test_the_shipped_module_list_is_every_opt_in_scanner_module():
+    """The modules list_scanners loads are exactly the opt-in scanners' modules.
 
-    assert set(_VENDORED_SCANNER_PLUGIN_PACKAGES) == set(
-        alpha_scanner_modules().values()
+    There is no hand list to drift any more: both sides are read from the
+    manifests, and this pins that the two reads (the loading policy's and the
+    name index's) agree.
+    """
+    from automated_security_helper.plugin_manifests import (
+        opt_in_scanner_modules,
     )
+    from automated_security_helper.plugins.enablement import modules_needing_naming
+
+    assert modules_needing_naming()
+    assert set(modules_needing_naming()) == set(opt_in_scanner_modules().values())
