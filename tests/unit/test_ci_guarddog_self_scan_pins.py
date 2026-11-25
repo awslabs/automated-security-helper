@@ -1,8 +1,8 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""The self-scan runs GuardDog with no hit limit, and every GuardDog pin is one line
-that holds the flagged text.
+"""The self-scan runs GuardDog with no hit limit, and every GuardDog suppression
+names either one line that holds the flagged text, or one definition whose span does.
 
 Why this exists
 ---------------
@@ -12,29 +12,38 @@ repository's own self-scan (``.ash/.ash_community_plugins.yaml``) stopped
 threat-filesystem-read at its 5th hit, so matches past it were never reported or
 reviewed. The self-scan sets ``max_hits: 0`` so every hit is visible, and each hit
 it reports that is a test or fixture doing what the rule describes is suppressed
-on its own line.
+on its own: by the named definition that holds it (``symbol``) where one exists,
+on its own line at module level.
 
-A GuardDog suppression in either ``.ash`` config names one rule, one file and one
-line, so a new hit anywhere else, even in the same file, is still reported. The cost
-is that the pin goes stale when the file changes above it: the entry then suppresses
-nothing, the real hit is reported again, and the stale entry still reads as fine to
-anyone looking at the config. Measured when that check was added: 8 of the 13 pins in
-each config pointed at a blank line, a comment or an unrelated statement.
+A GuardDog suppression in either ``.ash`` config names one rule, one file, and one
+line or one definition, so a new hit anywhere else, even in the same file, is still
+reported. A line pin also goes stale when the file changes above it: the entry then
+suppresses nothing, the real hit is reported again, and the stale entry still reads
+as fine to anyone looking at the config. Measured when that check was added: 8 of
+the 13 pins in each config pointed at a blank line, a comment or an unrelated
+statement. A ``symbol`` entry does not rot that way (the resolver follows the
+definition), but it can still name a definition whose body no longer holds what the
+rule flags, so it gets the marker check over its resolved span instead.
 
 What this checks
 ----------------
 * The self-scan config sets ``max_hits: 0`` for GuardDog.
 * Every GuardDog suppression (``threat-*`` and ``capability-*`` rule ids) in either
-  ``.ash`` config names one rule, one file and one line, so a new hit anywhere
-  else, even in the same file, is still reported.
-* Every such pin names a line that holds at least one of the markers for its rule
-  id. A rule id with no row in ``_RULE_LINE_MARKERS`` fails, so the first pin for a
-  new rule adds its row.
+  ``.ash`` config names one rule, one file, and either one line or one symbol, so a
+  new hit anywhere else, even in the same file, is still reported.
+* Every line pin names a line, and every symbol entry a definition span, that holds
+  at least one of the markers for its rule id. A rule id with no row in
+  ``_RULE_LINE_MARKERS`` fails, so the first entry for a new rule adds its row.
 * Both configs carry the same GuardDog suppressions, as their comments say: the
   self-scan reads only the community config, and ``.ash/.ash.yaml`` keeps the
   same entries for a scan that lists the GuardDog module there.
+
+The symbol spans come from tree-sitter, the optional ``symbols`` extra. Without it
+the span checks skip, unless ``ASH_REQUIRE_SYMBOLS_EXTRA`` is set, as CI sets it,
+in which case a missing extra is a failure rather than a skip.
 """
 
+import os
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
@@ -68,7 +77,35 @@ def _key(entry: Dict[str, Any]) -> Tuple[Any, ...]:
         entry["path"],
         entry.get("line_start"),
         entry.get("line_end"),
+        entry.get("symbol"),
     )
+
+
+def _symbol_spans(entry: Dict[str, Any]) -> List[Tuple[int, int]]:
+    """The resolved spans of a symbol entry, skipping when the extra is missing."""
+    try:
+        from automated_security_helper.utils.symbol_spans import (
+            grammar_for_path,
+            index_symbols,
+        )
+
+        grammar = grammar_for_path(entry["path"])
+        assert grammar is not None, f"no symbol grammar for {entry['path']}"
+        spans = index_symbols((REPO_ROOT / entry["path"]).read_bytes(), grammar)
+    except ImportError as exc:  # pragma: no cover - environment-dependent
+        if os.environ.get("ASH_REQUIRE_SYMBOLS_EXTRA", "").strip().upper() in (
+            "1",
+            "YES",
+            "TRUE",
+        ):
+            pytest.fail(
+                "ASH_REQUIRE_SYMBOLS_EXTRA is set but the [symbols] extra is not "
+                f"importable ({exc})."
+            )
+        pytest.skip(f"[symbols] extra not installed ({exc})")
+    resolved = spans.get(entry["symbol"], ())
+    assert resolved, f"{entry['path']}: symbol {entry['symbol']!r} resolves to nothing"
+    return list(resolved)
 
 
 #: Text the pinned line must contain, by rule id: the shape of what each GuardDog
@@ -114,7 +151,7 @@ def test_the_self_scan_reports_every_guarddog_hit() -> None:
 
 
 @pytest.mark.parametrize("config", [SELF_SCAN, DEFAULT], ids=lambda p: p.name)
-def test_every_guarddog_suppression_is_one_rule_one_file_one_line(
+def test_every_guarddog_suppression_is_one_rule_one_file_one_line_or_one_symbol(
     config: Path,
 ) -> None:
     pins = _guarddog_pins(config)
@@ -123,24 +160,55 @@ def test_every_guarddog_suppression_is_one_rule_one_file_one_line(
         where = f"{config.name}: {entry}"
         assert not GLOB_CHARACTERS & set(entry["rule_id"]), where
         assert not GLOB_CHARACTERS & set(entry.get("path") or "*"), where
-        assert isinstance(entry.get("line_start"), int), where
-        assert entry.get("line_end") == entry["line_start"], where
+        if entry.get("symbol") is not None:
+            # One definition, never a definition AND a line range: stacking both
+            # would narrow the entry to their intersection, which is neither
+            # reference's documented meaning for these one-hit entries.
+            assert isinstance(entry["symbol"], str) and entry["symbol"], where
+            assert entry.get("line_start") is None, where
+            assert entry.get("line_end") is None, where
+        else:
+            assert isinstance(entry.get("line_start"), int), where
+            assert entry.get("line_end") == entry["line_start"], where
         assert str(entry.get("reason") or "").strip(), where
 
 
 @pytest.mark.parametrize("config", [SELF_SCAN, DEFAULT], ids=lambda p: p.name)
-def test_every_guarddog_pin_names_a_line_that_holds_the_flagged_text(
+def test_every_guarddog_entry_names_a_place_that_holds_the_flagged_text(
     config: Path,
 ) -> None:
+    """A line pin's one line, or a symbol entry's resolved span, holds a marker.
+
+    A symbol follows its definition when the file moves, so it cannot point at a
+    blank line the way a stale pin does; what it CAN do is keep naming a
+    definition whose body no longer holds what the rule flags, after the flagged
+    code moved to another function. The span check catches that the same way the
+    line check catches a drifted pin.
+    """
     pins = _guarddog_pins(config)
     assert pins, f"{config.name} has no GuardDog suppressions to check"
     for entry in pins:
+        markers = _RULE_LINE_MARKERS.get(entry["rule_id"])
+        lines = (REPO_ROOT / entry["path"]).read_text(encoding="utf-8").splitlines()
+        if entry.get("symbol") is not None:
+            where = (
+                f"{config.name}: {entry['rule_id']} {entry['path']} {entry['symbol']}"
+            )
+            assert markers, f"{where}: no line markers for this rule id; add a row"
+            held = [
+                lines[n - 1]
+                for start, end in _symbol_spans(entry)
+                for n in range(start, min(end, len(lines)) + 1)
+            ]
+            assert any(marker in line for marker in markers for line in held), (
+                f"{where}: no line of the definition holds any of {markers}. "
+                "The flagged code moved out of this definition; re-measure the entry."
+            )
+            continue
         where = (
             f"{config.name}: {entry['rule_id']} {entry['path']}:{entry['line_start']}"
         )
-        markers = _RULE_LINE_MARKERS.get(entry["rule_id"])
         assert markers, f"{where}: no line markers for this rule id; add a row above"
-        lines = (REPO_ROOT / entry["path"]).read_text(encoding="utf-8").splitlines()
         number = entry["line_start"]
         assert 1 <= number <= len(lines), f"{where}: past the end of the file"
         line = lines[number - 1]

@@ -15,16 +15,17 @@ external_reports_to_include: []
 global_settings:
   severity_threshold: MEDIUM
   suppressions:
-    # === GuardDog false positive in this repository's own tests (line-pinned) ===
+    # === GuardDog false positive in this repository's own tests (symbol-scoped) ===
     # GuardDog's heuristics read source text, so test code that writes a fake
-    # credentials file matches them. Pinned to the one line GuardDog reports, so a
-    # real finding elsewhere in the file is still reported. The test writes creds.env
-    # twice, at lines 738 and 954; GuardDog 3.2.0 drops a match whose code snippet
-    # is the same as one it already reported, so it reports 738 only.
+    # credentials file matches them. Scoped to the one test function GuardDog
+    # reports the hit in, so a real finding elsewhere in the file is still reported
+    # and the entry keeps covering the write when edits move the lines. The test
+    # file writes creds.env twice, in two test functions; GuardDog 3.2.0 drops a
+    # match whose code snippet is the same as one it already reported, so it
+    # reports only the first, whose enclosing function this entry names.
     - rule_id: "threat-filesystem-read"
       path: "tests/integration/scanners/test_trivy_real_binary.py"
-      line_start: 738
-      line_end: 738
+      symbol: test_the_scanned_repos_secret_config_cannot_disable_rules
       reason: >-
         False positive. The line writes a creds.env holding a fake AWS key id and
         secret, generated per run with secrets.choice, into the test's temporary
@@ -33,8 +34,7 @@ global_settings:
     # === Product code and documents: pinned or scoped to the file ===
     - rule_id: B104
       path: automated_security_helper/cli/mcp/__init__.py
-      line_start: 930
-      line_end: 930
+      symbol: _log_where_the_server_listens
       reason: >-
         False positive. The line only works out the host to show in the "running on"
         message, for a server whose socket is already bound. Nothing binds to it, and
@@ -310,19 +310,17 @@ global_settings:
       reason: "False positive — hatch build config paths contain strings that match secret patterns"
     # === GuardDog false positives, continued: the docs-CI and MCP waves ===
     #
-    # The same dispositions as the line-pinned block below: heuristics matching
+    # The same dispositions as the GuardDog block below: heuristics matching
     # docstrings that NAME sensitive paths, fixtures that PLANT the hazard a test
     # asserts is refused, and a doc-claims harness talking to its own loopback
-    # server. One entry per finding, pinned to its line.
+    # server. One entry per finding, scoped to the named definition that holds it.
     - rule_id: threat-filesystem-read
       path: automated_security_helper/cli/mcp/source_delivery.py
-      line_start: 2501
-      line_end: 2501
+      symbol: _validate_zip_member
       reason: "A docstring bullet naming /etc/passwd as an example of the absolute archive paths delivery REJECTS; prose, not a read."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/utils/path_matching.py
-      line_start: 268
-      line_end: 268
+      symbol: ignore_path_pattern
       reason: "A docstring naming .env and .npmrc as dotfiles the detect-secrets scan set must keep; prose, not a read."
     # === ferret-scan API_KEY_OR_SECRET, unquoted-assignment false positives ===
     # ferret-scan v2.3.3 added unquoted keyword-assignment detection to the SECRETS
@@ -547,22 +545,19 @@ global_settings:
     # the same files did not report them.
     - path: tests/unit/utils/test_secret_masking_shapes_in_text.py
       rule_id: API_KEY_OR_SECRET
-      line_start: 49
-      line_end: 49
+      symbol: test_a_token_of_a_recorded_shape_is_masked
       reason: >-
         False positive. A masking test's assertion over a made-up fixture value,
         the same shape as the other secret-masking tests.
     - path: tests/unit/utils/test_secret_masking_regression.py
       rule_id: API_KEY_OR_SECRET
-      line_start: 51
-      line_end: 51
+      symbol: TestSecretMasking.test_b106_rule_masks_secret
       reason: >-
         False positive. A masking test's input string holding a made-up password
         literal, so the masker has something to mask.
     - path: tests/unit/utils/test_secret_masking_regression.py
       rule_id: API_KEY_OR_SECRET
-      line_start: 60
-      line_end: 60
+      symbol: TestSecretMasking.test_b107_rule_masks_secret
       reason: >-
         False positive. A masking test's input string holding a made-up password
         literal, so the masker has something to mask.
@@ -582,15 +577,15 @@ global_settings:
         for the trade_secret keywords, pattern text and not a value.
     - path: .ash/.ash.yaml
       rule_id: API_KEY_OR_SECRET
-      line_start: 1049
-      line_end: 1049
+      line_start: 1050
+      line_end: 1050
       reason: >-
         False positive. A suppression reason that quotes a placeholder fixture
         literal; the text explains why another finding is a false positive.
     - path: .ash/.ash.yaml
       rule_id: API_KEY_OR_SECRET
-      line_start: 1296
-      line_end: 1296
+      line_start: 1297
+      line_end: 1297
       reason: >-
         False positive. A suppression reason that quotes a placeholder fixture
         literal; the text explains why another finding is a false positive.
@@ -662,13 +657,11 @@ global_settings:
       reason: Subprocess module required — ferret-scan is an external CLI tool invoked via subprocess with list args (no shell=True).
     - path: automated_security_helper/plugin_modules/ash_ferret_plugins/ferret_scanner.py
       rule_id: B603
-      line_start: 1455
-      line_end: 1455
+      symbol: FerretScanScanner.get_installation_commands
       reason: Subprocess calls use list args (no shell=True) with validated inputs. ferret-scan binary path comes from shutil.which().
     - path: automated_security_helper/plugin_modules/ash_ferret_plugins/ferret_scanner.py
       rule_id: B607
-      line_start: 1455
-      line_end: 1455
+      symbol: FerretScanScanner.get_installation_commands
       reason: Partial executable path resolved via shutil.which() in validate_plugin_dependencies(). Standard ASH scanner pattern.
     - path: scripts/generate_test_docx.py
       rule_id: B311
@@ -682,8 +675,7 @@ global_settings:
       reason: False positive — SETTING = "placeholder" uses a neutral variable name.
     - path: scripts/generate_test_docx.py
       rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
-      line_start: 346
-      line_end: 350
+      symbol: main
       reason: False positive — runtime-generated synthetic credit card numbers from seeded random for test data.
     - path: scripts/generate_test_docx.py
       rule_id: PASSPORT
@@ -1498,33 +1490,30 @@ global_settings:
     # === GuardDog (#727): false positives, approved by the maintainer 2026-10-07 ===
     # The same 12 entries as .ash/.ash.yaml. This is the config the self-scan runs
     # GuardDog under, and it does not read .ash/.ash.yaml.
-    # One entry per finding, pinned to its line, so a new hit anywhere else in these
-    # files is still reported. If a line moves, the finding comes back and the entry
-    # needs its line updated, which is the point of not using a range or a glob.
+    # One entry per finding, scoped to the named definition that holds it (symbol),
+    # so a new hit anywhere else in these files is still reported while the entry
+    # keeps covering the finding when edits move the definition. A hit at module
+    # level has no definition to name and stays pinned to its line; if that line
+    # moves, the finding comes back and the entry needs its line updated.
     - rule_id: threat-process-download-exec
       path: automated_security_helper/assets/install-pinned-tool.py
-      line_start: 1030
-      line_end: 1030
+      symbol: uv_tool_dir
       reason: "subprocess.run of `uv tool dir`; it runs nothing this script downloaded."
     - rule_id: threat-process-download-exec
       path: automated_security_helper/assets/install-pinned-tool.py
-      line_start: 1518
-      line_end: 1518
+      symbol: version_output
       reason: "subprocess.run of `<tool> --version` on an installed binary in a throwaway HOME; nothing downloaded is executed."
     - rule_id: threat-process-download-exec
       path: automated_security_helper/assets/install-pinned-tool.py
-      line_start: 1612
-      line_end: 1612
+      symbol: _uv_tool_dir
       reason: "subprocess.run of `uv tool dir`; it runs nothing this script downloaded."
     - rule_id: threat-process-download-exec
       path: automated_security_helper/utils/python_installer.py
-      line_start: 116
-      line_end: 116
+      symbol: python_package_install_command
       reason: "The pip install argv ASH builds for its own interpreter when it runs outside a uv tool environment; returned to the caller, which installs ASH's own pinned requirements. Nothing downloaded here is executed."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/interactions/run_ash_container.py
-      line_start: 4361
-      line_end: 4361
+      symbol: _write_env_file
       reason: "The container.env file ASH writes, under a temporary directory it has checked is outside the source and output trees, to hand its own variables to the container runner; a write of ASH's file, not a read of a dotenv."
     # === GuardDog: hits the self-scan reports with max_hits: 0 ===
     # Measured with GuardDog 3.2.0 over the tree the plugin stages, with no hit limit
@@ -1532,7 +1521,8 @@ global_settings:
     # config the self-scan runs GuardDog under). Each is code whose text is what the
     # rule describes: an input a check must reject, a file planted under a test's
     # temporary directory, a command string a test inspects, or one variable read by
-    # name. One entry per line, as above.
+    # name. One entry per finding, as above: symbol-scoped inside a named
+    # definition, line-pinned at module level.
     - rule_id: threat-runtime-environment-read
       path: deploy/cdk/lib/ash-container-scripts.ts
       line_start: 559
@@ -1550,38 +1540,31 @@ global_settings:
       reason: "file:///etc/passwd is an input the test asserts is rejected as non-https."
     - rule_id: threat-filesystem-destruction
       path: tests/snapshot/test_snapshot_normalizer.py
-      line_start: 266
-      line_end: 266
+      symbol: TestSurvives.test_panel_width_on_a_masked_line
       reason: "Regex artifact: the match is the \"rm\" inside \"normalizer\" before add_literal(\"/home/...\"); nothing is deleted."
     - rule_id: threat-filesystem-destruction
       path: tests/snapshot/test_snapshot_normalizer.py
-      line_start: 274
-      line_end: 274
+      symbol: TestSurvives.test_markdown_table_padding_after_a_masked_value
       reason: "Regex artifact: the match is the \"rm\" inside \"normalizer\" before add_literal(\"/home/...\"); nothing is deleted."
     - rule_id: threat-filesystem-read
       path: tests/unit/test_artifact_contents_gate.py
-      line_start: 784
-      line_end: 784
+      symbol: TestPlantedPayload.test_link_whose_target_escapes_the_artifact_is_rejected
       reason: "Symlink target in a synthetic archive that the gate under test must reject."
     - rule_id: threat-filesystem-read
       path: tests/unit/test_artifact_contents_gate.py
-      line_start: 1471
-      line_end: 1471
+      symbol: TestArchiveReading.test_an_escaping_symlink_in_a_real_tar_fails_the_gate
       reason: "Symlink target in a synthetic archive that the gate under test must reject."
     - rule_id: threat-filesystem-read
       path: tests/unit/test_defense_in_depth.py
-      line_start: 406
-      line_end: 406
+      symbol: TestDockerBuildArgRevisionValidation.test_rejects_shell_metacharacters
       reason: "'v1.0|cat /etc/passwd' is a revision string the test asserts is rejected."
     - rule_id: threat-filesystem-read
       path: tests/unit/test_pinned_tool_version_check.py
-      line_start: 1175
-      line_end: 1175
+      symbol: TestOnlyAllowlistedHttpsUrlsAreFetched.test_a_url_outside_the_allowlist_is_refused_unopened
       reason: "file:///etc/passwd is a URL the test asserts is refused before opening."
     - rule_id: threat-runtime-obfuscation-base64exec
       path: tests/unit/utils/test_opengrep_pinned_download.py
-      line_start: 613
-      line_end: 613
+      symbol: TestNixPinsTheSameBytes._nix_pins
       reason: "Decodes a nix SRI hash to hex to compare with the pinned table; nothing is executed."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/plugin_modules/ash_builtin/converters/archive_converter.py
@@ -1600,13 +1583,11 @@ global_settings:
       reason: "'.env' is the dotfile stem whose stage-suffixed variants (.env.local) the converter admits for scanning; a name in a table, not a read."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/plugin_modules/ash_builtin/scanners/npm_audit_scanner.py
-      line_start: 787
-      line_end: 787
+      symbol: NpmAuditScanner._probe_npm_version
       reason: "A docstring naming .npmrc to say why the version probe's directory holds its own package.json; nothing here reads the file."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/plugin_modules/ash_builtin/scanners/npm_audit_scanner.py
-      line_start: 789
-      line_end: 789
+      symbol: NpmAuditScanner._probe_npm_version
       reason: "A docstring naming .npmrc to say why the version probe's directory holds its own package.json; nothing here reads the file."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/utils/package_manager_child.py
@@ -1615,38 +1596,31 @@ global_settings:
       reason: "Module prose naming .npmrc to document which configuration the package managers would read and why the scan copy avoids it; nothing here reads the file."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/utils/package_manager_child.py
-      line_start: 304
-      line_end: 304
+      symbol: _nearest_real_directory
       reason: "Module prose naming .npmrc to document which configuration the package managers would read and why the scan copy avoids it; nothing here reads the file."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/utils/package_manager_child.py
-      line_start: 319
-      line_end: 319
+      symbol: _untrusted_ancestor
       reason: "Module prose naming .npmrc to document which configuration the package managers would read and why the scan copy avoids it; nothing here reads the file."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/utils/package_manager_child.py
-      line_start: 359
-      line_end: 359
+      symbol: _settings_file_ancestor
       reason: "Module prose naming .npmrc to document which configuration the package managers would read and why the scan copy avoids it; nothing here reads the file."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/utils/package_manager_child.py
-      line_start: 420
-      line_end: 420
+      symbol: _yarn_copy_parent
       reason: "Module prose naming .npmrc to document which configuration the package managers would read and why the scan copy avoids it; nothing here reads the file."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/utils/package_manager_child.py
-      line_start: 436
-      line_end: 436
+      symbol: _yarn_copy_parent
       reason: "Module prose naming .npmrc to document which configuration the package managers would read and why the scan copy avoids it; nothing here reads the file."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/utils/package_manager_child.py
-      line_start: 574
-      line_end: 574
+      symbol: _pnpm_workspace_copy
       reason: "Module prose naming .npmrc to document which configuration the package managers would read and why the scan copy avoids it; nothing here reads the file."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/utils/package_manager_child.py
-      line_start: 1186
-      line_end: 1186
+      symbol: package_manager_child
       reason: "A refusal message naming ~/.npmrc and ~/.yarnrc as what the audit copy keeps the package managers away from; nothing here reads the files."
     - rule_id: threat-filesystem-read
       path: scripts/generate_plugin_data_partial.py

@@ -9,16 +9,17 @@ external_reports_to_include: []
 global_settings:
   severity_threshold: MEDIUM
   suppressions:
-    # === GuardDog false positive in this repository's own tests (line-pinned) ===
+    # === GuardDog false positive in this repository's own tests (symbol-scoped) ===
     # GuardDog's heuristics read source text, so test code that writes a fake
-    # credentials file matches them. Pinned to the one line GuardDog reports, so a
-    # real finding elsewhere in the file is still reported. The test writes creds.env
-    # twice, at lines 738 and 954; GuardDog 3.2.0 drops a match whose code snippet
-    # is the same as one it already reported, so it reports 738 only.
+    # credentials file matches them. Scoped to the one test function GuardDog
+    # reports the hit in, so a real finding elsewhere in the file is still reported
+    # and the entry keeps covering the write when edits move the lines. The test
+    # file writes creds.env twice, in two test functions; GuardDog 3.2.0 drops a
+    # match whose code snippet is the same as one it already reported, so it
+    # reports only the first, whose enclosing function this entry names.
     - rule_id: "threat-filesystem-read"
       path: "tests/integration/scanners/test_trivy_real_binary.py"
-      line_start: 738
-      line_end: 738
+      symbol: test_the_scanned_repos_secret_config_cannot_disable_rules
       reason: >-
         False positive. The line writes a creds.env holding a fake AWS key id and
         secret, generated per run with secrets.choice, into the test's temporary
@@ -1825,18 +1826,17 @@ global_settings:
         keep these findings actionable.
     - rule_id: HIPAA.Security-IAMNoInlinePolicy
       path: deploy/cdk/templates/AshCodeCommitGate.template.json
-      line_start: 1323
-      line_end: 1323
+      resource_id: "*/ScanFunctionRoleEc2Access99A7E33E"
       reason: >-
-        LINE-PINNED to ScanFunctionRoleEc2Access99A7E33E, the line ASH reports for
-        that resource (the first line naming its logical id, the function's
-        ash:vpc-access-policy tag), and listed before the file-level entry below so it
-        claims this one record. A standalone AWS::IAM::Policy attached through Roles,
+        RESOURCE-SCOPED to ScanFunctionRoleEc2Access99A7E33E: resource_id matches
+        the construct path the cdk-nag wrapper reports, whose last segment is that
+        logical id, so the entry survives `cdk synth` moving every line. Listed
+        before the file-level entry below so it claims this one record. A standalone AWS::IAM::Policy attached through Roles,
         not a policy embedded in a role, created only when VpcId and VpcSubnetIds are
         set. It holds the network-interface grant Lambda needs to attach the function
         to a VPC, and is separate from the role's DefaultPolicy so it can carry that
         condition. Pinned by
-        tests/unit/deploy/test_cdk_template_line_pinned_suppressions.py.
+        tests/unit/deploy/test_cdk_template_resource_scoped_suppressions.py.
     - rule_id: HIPAA.Security-IAMNoInlinePolicy
       path: deploy/cdk/templates/AshCodeCommitGate.template.json
       reason: >-
@@ -1849,18 +1849,17 @@ global_settings:
         this template holds.
     - rule_id: NIST.800.53.R4-IAMNoInlinePolicy
       path: deploy/cdk/templates/AshCodeCommitGate.template.json
-      line_start: 1323
-      line_end: 1323
+      resource_id: "*/ScanFunctionRoleEc2Access99A7E33E"
       reason: >-
-        LINE-PINNED to ScanFunctionRoleEc2Access99A7E33E, the line ASH reports for
-        that resource (the first line naming its logical id, the function's
-        ash:vpc-access-policy tag), and listed before the file-level entry below so it
-        claims this one record. A standalone AWS::IAM::Policy attached through Roles,
+        RESOURCE-SCOPED to ScanFunctionRoleEc2Access99A7E33E: resource_id matches
+        the construct path the cdk-nag wrapper reports, whose last segment is that
+        logical id, so the entry survives `cdk synth` moving every line. Listed
+        before the file-level entry below so it claims this one record. A standalone AWS::IAM::Policy attached through Roles,
         not a policy embedded in a role, created only when VpcId and VpcSubnetIds are
         set. It holds the network-interface grant Lambda needs to attach the function
         to a VPC, and is separate from the role's DefaultPolicy so it can carry that
         condition. Pinned by
-        tests/unit/deploy/test_cdk_template_line_pinned_suppressions.py.
+        tests/unit/deploy/test_cdk_template_resource_scoped_suppressions.py.
     - rule_id: NIST.800.53.R4-IAMNoInlinePolicy
       path: deploy/cdk/templates/AshCodeCommitGate.template.json
       reason: >-
@@ -1872,18 +1871,17 @@ global_settings:
         id, so leaving it out would keep these findings actionable.
     - rule_id: NIST.800.53.R5-IAMNoInlinePolicy
       path: deploy/cdk/templates/AshCodeCommitGate.template.json
-      line_start: 1323
-      line_end: 1323
+      resource_id: "*/ScanFunctionRoleEc2Access99A7E33E"
       reason: >-
-        LINE-PINNED to ScanFunctionRoleEc2Access99A7E33E, the line ASH reports for
-        that resource (the first line naming its logical id, the function's
-        ash:vpc-access-policy tag), and listed before the file-level entry below so it
-        claims this one record. A standalone AWS::IAM::Policy attached through Roles,
+        RESOURCE-SCOPED to ScanFunctionRoleEc2Access99A7E33E: resource_id matches
+        the construct path the cdk-nag wrapper reports, whose last segment is that
+        logical id, so the entry survives `cdk synth` moving every line. Listed
+        before the file-level entry below so it claims this one record. A standalone AWS::IAM::Policy attached through Roles,
         not a policy embedded in a role, created only when VpcId and VpcSubnetIds are
         set. It holds the network-interface grant Lambda needs to attach the function
         to a VPC, and is separate from the role's DefaultPolicy so it can carry that
         condition. Pinned by
-        tests/unit/deploy/test_cdk_template_line_pinned_suppressions.py.
+        tests/unit/deploy/test_cdk_template_resource_scoped_suppressions.py.
     - rule_id: NIST.800.53.R5-IAMNoInlinePolicy
       path: deploy/cdk/templates/AshCodeCommitGate.template.json
       reason: >-
@@ -1895,18 +1893,17 @@ global_settings:
         id, so leaving it out would keep these findings actionable.
     - rule_id: PCI.DSS.321-IAMNoInlinePolicy
       path: deploy/cdk/templates/AshCodeCommitGate.template.json
-      line_start: 1323
-      line_end: 1323
+      resource_id: "*/ScanFunctionRoleEc2Access99A7E33E"
       reason: >-
-        LINE-PINNED to ScanFunctionRoleEc2Access99A7E33E, the line ASH reports for
-        that resource (the first line naming its logical id, the function's
-        ash:vpc-access-policy tag), and listed before the file-level entry below so it
-        claims this one record. A standalone AWS::IAM::Policy attached through Roles,
+        RESOURCE-SCOPED to ScanFunctionRoleEc2Access99A7E33E: resource_id matches
+        the construct path the cdk-nag wrapper reports, whose last segment is that
+        logical id, so the entry survives `cdk synth` moving every line. Listed
+        before the file-level entry below so it claims this one record. A standalone AWS::IAM::Policy attached through Roles,
         not a policy embedded in a role, created only when VpcId and VpcSubnetIds are
         set. It holds the network-interface grant Lambda needs to attach the function
         to a VPC, and is separate from the role's DefaultPolicy so it can carry that
         condition. Pinned by
-        tests/unit/deploy/test_cdk_template_line_pinned_suppressions.py.
+        tests/unit/deploy/test_cdk_template_resource_scoped_suppressions.py.
     - rule_id: PCI.DSS.321-IAMNoInlinePolicy
       path: deploy/cdk/templates/AshCodeCommitGate.template.json
       reason: >-
@@ -3002,16 +2999,16 @@ global_settings:
         KMS key-or-alias ARN pattern. See the block comment above.
     - rule_id: F3031
       path: deploy/cdk/templates/AshCodeCommitGate.template.json
-      line_start: 1202
-      line_end: 1202
+      resource_id: "*/ScanFunction322CD7EE"
       reason: >-
-        LINE-PINNED to ScanFunction322CD7EE, the line ASH reports for that resource
-        (the first line naming its logical id), and listed before the file-level
+        RESOURCE-SCOPED to ScanFunction322CD7EE: resource_id matches the construct
+        path the cdk-nag wrapper reports, whose last segment is that logical id, so
+        the entry survives `cdk synth` moving every line. Listed before the file-level
         entry below so it claims this one record. The validator checks the scan
         function's KmsKeyArn once a VpcConfig is present; KmsKeyArn is an Fn::If over
         HasKmsKey, so it presents as '' with no parameter bound, the same artifact the
         file-level entry describes for the log groups. Pinned by
-        tests/unit/deploy/test_cdk_template_line_pinned_suppressions.py.
+        tests/unit/deploy/test_cdk_template_resource_scoped_suppressions.py.
     - rule_id: F3031
       path: deploy/cdk/templates/AshCodeCommitGate.template.json
       reason: >-
@@ -3272,18 +3269,18 @@ global_settings:
         Value DESCRIBED rather than quoted, and no line number cited, for the two
         reasons the entry above records from having got both of those wrong.
     # === GuardDog (#727): false positives, approved by the maintainer 2026-10-07 ===
-    # One entry per finding, pinned to its line, so a new hit anywhere else in these
-    # files is still reported. If a line moves, the finding comes back and the entry
-    # needs its line updated, which is the point of not using a range or a glob.
+    # One entry per finding, scoped to the named definition that holds it (symbol),
+    # so a new hit anywhere else in these files is still reported while the entry
+    # keeps covering the finding when edits move the definition. A hit at module
+    # level has no definition to name and stays pinned to its line; if that line
+    # moves, the finding comes back and the entry needs its line updated.
     - rule_id: threat-process-download-exec
       path: automated_security_helper/assets/install-pinned-tool.py
-      line_start: 1030
-      line_end: 1030
+      symbol: uv_tool_dir
       reason: "subprocess.run of `uv tool dir`; it runs nothing this script downloaded."
     - rule_id: threat-process-download-exec
       path: automated_security_helper/assets/install-pinned-tool.py
-      line_start: 1518
-      line_end: 1518
+      symbol: version_output
       reason: "subprocess.run of `<tool> --version` on an installed binary in a throwaway HOME; nothing downloaded is executed."
     # === GuardDog: hits the self-scan reports with max_hits: 0 ===
     # Measured with GuardDog 3.2.0 over the tree the plugin stages, with no hit limit
@@ -3291,7 +3288,8 @@ global_settings:
     # config the self-scan runs GuardDog under). Each is code whose text is what the
     # rule describes: an input a check must reject, a file planted under a test's
     # temporary directory, a command string a test inspects, or one variable read by
-    # name. One entry per line, as above.
+    # name. One entry per finding, as above: symbol-scoped inside a named
+    # definition, line-pinned at module level.
     - rule_id: threat-runtime-environment-read
       path: deploy/cdk/lib/ash-container-scripts.ts
       line_start: 559
@@ -3299,28 +3297,23 @@ global_settings:
       reason: "The entrypoint reads one variable by name, ASH_MCP_AUTH_HEADER_VALUE_SECRET_ARN, the secret it needs to resolve; nothing else in the environment."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/cli/mcp/source_delivery.py
-      line_start: 2501
-      line_end: 2501
+      symbol: _validate_zip_member
       reason: "A docstring bullet naming /etc/passwd as an example of the absolute archive paths delivery REJECTS; prose, not a read."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/utils/path_matching.py
-      line_start: 268
-      line_end: 268
+      symbol: ignore_path_pattern
       reason: "A docstring naming .env and .npmrc as dotfiles the detect-secrets scan set must keep; prose, not a read."
     - rule_id: threat-process-download-exec
       path: automated_security_helper/assets/install-pinned-tool.py
-      line_start: 1612
-      line_end: 1612
+      symbol: _uv_tool_dir
       reason: "subprocess.run of `uv tool dir`; it runs nothing this script downloaded."
     - rule_id: threat-process-download-exec
       path: automated_security_helper/utils/python_installer.py
-      line_start: 116
-      line_end: 116
+      symbol: python_package_install_command
       reason: "The pip install argv ASH builds for its own interpreter when it runs outside a uv tool environment; returned to the caller, which installs ASH's own pinned requirements. Nothing downloaded here is executed."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/interactions/run_ash_container.py
-      line_start: 4361
-      line_end: 4361
+      symbol: _write_env_file
       reason: "The container.env file ASH writes, under a temporary directory it has checked is outside the source and output trees, to hand its own variables to the container runner; a write of ASH's file, not a read of a dotenv."
     - rule_id: threat-filesystem-destruction
       path: deploy/cdk-constructs/test/ash-scan-step.test.ts
@@ -3334,38 +3327,31 @@ global_settings:
       reason: "file:///etc/passwd is an input the test asserts is rejected as non-https."
     - rule_id: threat-filesystem-destruction
       path: tests/snapshot/test_snapshot_normalizer.py
-      line_start: 266
-      line_end: 266
+      symbol: TestSurvives.test_panel_width_on_a_masked_line
       reason: "Regex artifact: the match is the \"rm\" inside \"normalizer\" before add_literal(\"/home/...\"); nothing is deleted."
     - rule_id: threat-filesystem-destruction
       path: tests/snapshot/test_snapshot_normalizer.py
-      line_start: 274
-      line_end: 274
+      symbol: TestSurvives.test_markdown_table_padding_after_a_masked_value
       reason: "Regex artifact: the match is the \"rm\" inside \"normalizer\" before add_literal(\"/home/...\"); nothing is deleted."
     - rule_id: threat-filesystem-read
       path: tests/unit/test_artifact_contents_gate.py
-      line_start: 784
-      line_end: 784
+      symbol: TestPlantedPayload.test_link_whose_target_escapes_the_artifact_is_rejected
       reason: "Symlink target in a synthetic archive that the gate under test must reject."
     - rule_id: threat-filesystem-read
       path: tests/unit/test_artifact_contents_gate.py
-      line_start: 1471
-      line_end: 1471
+      symbol: TestArchiveReading.test_an_escaping_symlink_in_a_real_tar_fails_the_gate
       reason: "Symlink target in a synthetic archive that the gate under test must reject."
     - rule_id: threat-filesystem-read
       path: tests/unit/test_defense_in_depth.py
-      line_start: 406
-      line_end: 406
+      symbol: TestDockerBuildArgRevisionValidation.test_rejects_shell_metacharacters
       reason: "'v1.0|cat /etc/passwd' is a revision string the test asserts is rejected."
     - rule_id: threat-filesystem-read
       path: tests/unit/test_pinned_tool_version_check.py
-      line_start: 1175
-      line_end: 1175
+      symbol: TestOnlyAllowlistedHttpsUrlsAreFetched.test_a_url_outside_the_allowlist_is_refused_unopened
       reason: "file:///etc/passwd is a URL the test asserts is refused before opening."
     - rule_id: threat-runtime-obfuscation-base64exec
       path: tests/unit/utils/test_opengrep_pinned_download.py
-      line_start: 613
-      line_end: 613
+      symbol: TestNixPinsTheSameBytes._nix_pins
       reason: "Decodes a nix SRI hash to hex to compare with the pinned table; nothing is executed."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/plugin_modules/ash_builtin/converters/archive_converter.py
@@ -3384,13 +3370,11 @@ global_settings:
       reason: "'.env' is the dotfile stem whose stage-suffixed variants (.env.local) the converter admits for scanning; a name in a table, not a read."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/plugin_modules/ash_builtin/scanners/npm_audit_scanner.py
-      line_start: 787
-      line_end: 787
+      symbol: NpmAuditScanner._probe_npm_version
       reason: "A docstring naming .npmrc to say why the version probe's directory holds its own package.json; nothing here reads the file."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/plugin_modules/ash_builtin/scanners/npm_audit_scanner.py
-      line_start: 789
-      line_end: 789
+      symbol: NpmAuditScanner._probe_npm_version
       reason: "A docstring naming .npmrc to say why the version probe's directory holds its own package.json; nothing here reads the file."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/utils/package_manager_child.py
@@ -3399,38 +3383,31 @@ global_settings:
       reason: "Module prose naming .npmrc to document which configuration the package managers would read and why the scan copy avoids it; nothing here reads the file."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/utils/package_manager_child.py
-      line_start: 304
-      line_end: 304
+      symbol: _nearest_real_directory
       reason: "Module prose naming .npmrc to document which configuration the package managers would read and why the scan copy avoids it; nothing here reads the file."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/utils/package_manager_child.py
-      line_start: 319
-      line_end: 319
+      symbol: _untrusted_ancestor
       reason: "Module prose naming .npmrc to document which configuration the package managers would read and why the scan copy avoids it; nothing here reads the file."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/utils/package_manager_child.py
-      line_start: 359
-      line_end: 359
+      symbol: _settings_file_ancestor
       reason: "Module prose naming .npmrc to document which configuration the package managers would read and why the scan copy avoids it; nothing here reads the file."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/utils/package_manager_child.py
-      line_start: 420
-      line_end: 420
+      symbol: _yarn_copy_parent
       reason: "Module prose naming .npmrc to document which configuration the package managers would read and why the scan copy avoids it; nothing here reads the file."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/utils/package_manager_child.py
-      line_start: 436
-      line_end: 436
+      symbol: _yarn_copy_parent
       reason: "Module prose naming .npmrc to document which configuration the package managers would read and why the scan copy avoids it; nothing here reads the file."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/utils/package_manager_child.py
-      line_start: 574
-      line_end: 574
+      symbol: _pnpm_workspace_copy
       reason: "Module prose naming .npmrc to document which configuration the package managers would read and why the scan copy avoids it; nothing here reads the file."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/utils/package_manager_child.py
-      line_start: 1186
-      line_end: 1186
+      symbol: package_manager_child
       reason: "A refusal message naming ~/.npmrc and ~/.yarnrc as what the audit copy keeps the package managers away from; nothing here reads the files."
     - rule_id: threat-filesystem-read
       path: scripts/generate_plugin_data_partial.py
@@ -3809,9 +3786,9 @@ global_settings:
         assertion. No key body exists.
     # === The #865 chain's product lines: pinned to the lines the rules report ===
     # Documentation placeholders, labels and a by-design seam inside the
-    # masking/redaction and dependency-install machinery. Line-pinned, as the
-    # product-code section at the top of this file does, so a real finding
-    # elsewhere in each file still reports.
+    # masking/redaction and dependency-install machinery. Scoped to the named
+    # definition that holds each one (symbol) where one exists, line-pinned at
+    # module level, so a real finding elsewhere in each file still reports.
     - rule_id: B104
       path: automated_security_helper/utils/secret_masking.py
       line_start: 458
@@ -3822,24 +3799,21 @@ global_settings:
         a bind address; no socket is opened.
     - rule_id: B604
       path: automated_security_helper/cli/dependencies.py
-      line_start: 1785
-      line_end: 1785
+      symbol: install_dependencies
       reason: >-
         Forwards a CustomCommand's user-declared shell flag; the seam the
         comment above the line documents. The command string is the operator's
         own declared install command, not derived input.
     - rule_id: B608
       path: automated_security_helper/utils/content_db_refresh.py
-      line_start: 837
-      line_end: 837
+      symbol: _say_grype_auto_update_once
       reason: >-
         False positive. The flagged f-string is an operator-facing WARNING line
         about ASH's grype database refresh; no SQL is constructed anywhere in
         the function.
     - rule_id: SECRET-BASIC-AUTH-CREDENTIALS
       path: automated_security_helper/interactions/run_ash_nix.py
-      line_start: 198
-      line_end: 198
+      symbol: shown_flake_ref
       reason: >-
         False positive. A docstring placeholder URL naming the credential shape
         shown_flake_ref REDACTS. No value is held.
@@ -3852,16 +3826,14 @@ global_settings:
         URL's userinfo in log excerpts. No value is held.
     - rule_id: SECRET-BASIC-AUTH-CREDENTIALS
       path: automated_security_helper/utils/secret_masking.py
-      line_start: 2261
-      line_end: 2261
+      symbol: _exposed_values
       reason: >-
         False positive. A docstring placeholder URL naming the defect the
         masking code fixes (credentials in pydantic URL fields used to survive
         masking). No value is held.
     - rule_id: SECRET-BASIC-AUTH-CREDENTIALS
       path: automated_security_helper/utils/secret_masking.py
-      line_start: 2960
-      line_end: 2960
+      symbol: mask_secrets_in_sarif_report
       reason: >-
         False positive. A comment placeholder URL naming the credential spelling
         the quoting lambda below it covers. No value is held.
@@ -3874,8 +3846,7 @@ global_settings:
         strips when classifying secret findings; a label, not a value.
     - rule_id: SECRET-SECRET-KEYWORD
       path: automated_security_helper/utils/detect_secrets_worker.py
-      line_start: 138
-      line_end: 138
+      symbol: _names_a_key
       reason: >-
         False positive. Docstring examples of the key/value spellings the
         worker's column-finding logic distinguishes. No value is held.
