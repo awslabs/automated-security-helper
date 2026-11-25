@@ -282,6 +282,22 @@ class ToolDownloadIntegrityError(ASHValidationError):
     """
 
 
+class DownloadTooLargeError(ASHValidationError):
+    """Exception raised when a download's body exceeds the caller's byte bound.
+
+    Raised while the bytes are still streaming into the download's temporary
+    file -- or before any byte is read, when the response declares an oversize
+    length -- so the transfer is ABORTED at the bound, never completed and then
+    measured. Without it, a size limit checked only against a recorded claim
+    (a lockfile's own ``size`` field, which the scanned repository wrote) was
+    no limit at all: a lying claim bought an unbounded transfer spooled whole
+    to disk.
+
+    Never classified transient: the same URL serves the same body, so a retry
+    only repeats the cost the bound exists to refuse.
+    """
+
+
 class ToolNotProvisionableError(ASHValidationError):
     """Exception raised when a tool cannot be installed on the current platform.
 

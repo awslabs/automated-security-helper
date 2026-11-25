@@ -337,6 +337,16 @@ scanners:
       exclude: []
       additional_outputs:
       - syft-table
+      sdist_harvest:
+        enabled: true
+        ecosystems:
+        - cargo
+        - gomod
+        - npm
+        max_sdist_mb: 100
+        cache_dir: null
+        lockfiles:
+        - uv.lock
   trivy:
     enabled: true
     options:
