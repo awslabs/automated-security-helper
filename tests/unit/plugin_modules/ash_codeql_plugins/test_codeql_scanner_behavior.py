@@ -272,7 +272,10 @@ class TestLanguages:
             _run(scanner, fake, monkeypatch)
         assert fake.calls == []
 
-    @pytest.mark.parametrize("name", ["go", "swift"])
+    # kotlin: --build-mode=none extracts Java only, so a java-kotlin database made
+    # without a build holds no Kotlin. Accepting the name would report a clean scan
+    # of code that was never analyzed, so it is refused like Go and Swift.
+    @pytest.mark.parametrize("name", ["go", "swift", "kotlin", "Kotlin"])
     def test_a_language_that_needs_a_build_is_refused(
         self, tree, tmp_path, on_path, monkeypatch, name
     ):
@@ -292,7 +295,6 @@ class TestLanguages:
             ("javascript", "javascript-typescript"),
             ("TypeScript", "javascript-typescript"),
             ("java", "java-kotlin"),
-            ("kotlin", "java-kotlin"),
             ("cpp", "c-cpp"),
             ("c", "c-cpp"),
             ("python", "python"),
@@ -370,7 +372,11 @@ class TestInvocation:
         self, tree, tmp_path, on_path, monkeypatch
     ):
         fake = FakeCodeql()
-        _run(_scanner(tree, tmp_path, languages=["java", "kotlin"]), fake, monkeypatch)
+        _run(
+            _scanner(tree, tmp_path, languages=["java", "java-kotlin"]),
+            fake,
+            monkeypatch,
+        )
         assert len(fake.calls) == 2
 
     def test_an_empty_target_never_reaches_the_tool(
@@ -619,3 +625,47 @@ class TestSandboxDeclaration:
         requirements = CodeqlScanner.sandbox_requirements
         assert requirements == SandboxRequirements()
         assert not requirements.network
+
+
+_SAMPLE = (
+    Path(__file__).resolve().parents[3]
+    / "test_data"
+    / "scanners"
+    / "codeql"
+    / "sample"
+    / "codeql-python.sarif"
+)
+
+
+class TestCommittedSample:
+    """The committed sample report (hand-built to the documented shape)."""
+
+    def test_the_severity_mapping_over_the_sample(self):
+        document = rate_codeql_sarif(json.loads(_SAMPLE.read_text(encoding="utf-8")))
+        by_rule = {
+            r["ruleId"]: (r["properties"]["issue_severity"], r["level"])
+            for r in document["runs"][0]["results"]
+        }
+        # security-severity 8.8 -> HIGH; problem.severity recommendation -> LOW.
+        assert by_rule == {
+            "py/sql-injection": ("HIGH", "error"),
+            "py/unused-import": ("LOW", "note"),
+        }
+
+    def test_the_sample_validates_as_a_sarif_report(self):
+        from automated_security_helper.schemas.sarif_schema_model import SarifReport
+
+        document = rate_codeql_sarif(json.loads(_SAMPLE.read_text(encoding="utf-8")))
+        report = SarifReport.model_validate(document)
+        assert len(report.runs[0].results) == 2
+
+
+class TestFacetsDeclaration:
+    def test_the_scanner_declares_its_own_facets(self):
+        assert "facets" in vars(CodeqlScanner)
+        assert "operational_facets" in vars(CodeqlScanner)
+        assert CodeqlScanner.operational_facets.scanner_name == "codeql"
+
+    def test_the_declared_exit_codes_mirror_the_class(self):
+        declared = CodeqlScanner.operational_facets.exit_codes.success_exit_codes
+        assert declared == tuple(sorted(CodeqlScanner.success_exit_codes))

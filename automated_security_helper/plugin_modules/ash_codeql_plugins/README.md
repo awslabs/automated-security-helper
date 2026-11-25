@@ -36,7 +36,7 @@ scanners:
       scan_timeout: 1800        # one budget for every CodeQL process of the scan
 ```
 
-Go and Swift need a build to make a database and are refused.
+Go, Swift and Kotlin need a build to make a database and are refused (without a build, `java-kotlin` extracts Java only).
 
 ## Severity
 

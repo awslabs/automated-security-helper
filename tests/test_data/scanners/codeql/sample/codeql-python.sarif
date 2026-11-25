@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "CodeQL",
+          "organization": "GitHub",
+          "semanticVersion": "2.20.0",
+          "informationUri": "https://codeql.github.com",
+          "notifications": [],
+          "rules": [
+            {
+              "id": "py/sql-injection",
+              "name": "py/sql-injection",
+              "shortDescription": {"text": "SQL query built from user-controlled sources"},
+              "fullDescription": {
+                "text": "Building a SQL query from user-controlled sources is vulnerable to insertion of malicious SQL code by the user."
+              },
+              "defaultConfiguration": {"level": "error"},
+              "help": {
+                "text": "Parameterize the query instead of building it from user input.",
+                "markdown": "Parameterize the query instead of building it from user input."
+              },
+              "properties": {
+                "tags": ["security", "external/cwe/cwe-089"],
+                "kind": "path-problem",
+                "precision": "high",
+                "problem.severity": "error",
+                "security-severity": "8.8"
+              }
+            },
+            {
+              "id": "py/unused-import",
+              "name": "py/unused-import",
+              "shortDescription": {"text": "Unused import"},
+              "fullDescription": {"text": "Importing a module that is not used."},
+              "defaultConfiguration": {"level": "note"},
+              "help": {"text": "Remove the unused import.", "markdown": "Remove the unused import."},
+              "properties": {
+                "tags": ["maintainability"],
+                "kind": "problem",
+                "precision": "very-high",
+                "problem.severity": "recommendation"
+              }
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "py/sql-injection",
+          "ruleIndex": 0,
+          "rule": {"id": "py/sql-injection", "index": 0},
+          "message": {"text": "This SQL query depends on a [user-provided value](1)."},
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {"uri": "app/db.py", "uriBaseId": "%SRCROOT%", "index": 0},
+                "region": {
+                  "startLine": 14,
+                  "startColumn": 20,
+                  "endColumn": 52,
+                  "snippet": {"text": "\"SELECT * FROM t WHERE id=\" + uid"}
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "primaryLocationLineHash": "1f2e3d4c5b6a7988:1",
+            "primaryLocationStartColumnFingerprint": "15"
+          }
+        },
+        {
+          "ruleId": "py/unused-import",
+          "ruleIndex": 1,
+          "rule": {"id": "py/unused-import", "index": 1},
+          "message": {"text": "Import of 'os' is not used."},
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {"uri": "app/util.py", "uriBaseId": "%SRCROOT%", "index": 1},
+                "region": {
+                  "startLine": 1,
+                  "startColumn": 8,
+                  "endColumn": 10,
+                  "snippet": {"text": "import os"}
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "primaryLocationLineHash": "0a1b2c3d4e5f6071:1",
+            "primaryLocationStartColumnFingerprint": "0"
+          }
+        }
+      ]
+    }
+  ]
+}

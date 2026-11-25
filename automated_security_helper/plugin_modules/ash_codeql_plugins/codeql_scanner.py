@@ -64,7 +64,13 @@ from typing import Annotated, Any, ClassVar, Dict, List, Literal, Optional, Set,
 
 from pydantic import AnyUrl, Field
 
+from automated_security_helper.base import scanner_operational_facets as opsf
 from automated_security_helper.base.options import ScannerOptionsBase
+from automated_security_helper.base.scanner_facets import (
+    FacetDecl,
+    FacetState,
+    ScannerFacets,
+)
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
@@ -103,14 +109,17 @@ LANGUAGE_ALIASES: Dict[str, str] = {
     "javascript": "javascript-typescript",
     "typescript": "javascript-typescript",
     "java": "java-kotlin",
-    "kotlin": "java-kotlin",
     "c": "c-cpp",
     "cpp": "c-cpp",
 }
 
 #: Languages CodeQL supports that need a build to make a database. Not run: a
-#: build would execute the scanned tree's own build scripts.
-BUILD_REQUIRED_LANGUAGES = ("go", "swift")
+#: build would execute the scanned tree's own build scripts. ``kotlin`` is here
+#: because ``--build-mode=none`` extracts Java only: a ``java-kotlin`` database
+#: made without a build contains no Kotlin, so naming ``kotlin`` would report a
+#: clean scan of code that was never analyzed. ``java`` stays accepted and means
+#: the Java sources only.
+BUILD_REQUIRED_LANGUAGES = ("go", "swift", "kotlin")
 
 #: Severity -> SARIF level. ``issue_severity`` and the level always agree.
 SEVERITY_LEVELS: Dict[str, str] = {
@@ -257,8 +266,9 @@ class CodeqlScannerConfigOptions(ScannerOptionsBase):
                 "The languages to analyze, one database per language. Required; "
                 "empty fails the scan. One of: "
                 + ", ".join(sorted(LANGUAGE_PACKS))
-                + " (java, kotlin, javascript, typescript, c and cpp are accepted "
-                "as aliases). Go and Swift need a build and are refused."
+                + " (java, javascript, typescript, c and cpp are accepted "
+                "as aliases; java analyzes Java sources only). Go, Swift and Kotlin need a "
+                "build and are refused."
             ),
         ),
     ] = []
@@ -297,6 +307,192 @@ class CodeqlScanner(ScannerPluginBase[CodeqlScannerConfig]):
     # The strict default; grants for the CodeQL install directory wait for the
     # sandbox grant gates.
     sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements()
+
+    #: The facets register row (base/scanner_facets.py). Declaration only: no
+    #: behavior changes. CodeQL writes SARIF; the committed sample
+    #: (tests/test_data/scanners/codeql/sample) is hand-built to the documented
+    #: shape, not captured, because the CLI's terms bar an automated run here.
+    facets: ClassVar[ScannerFacets] = ScannerFacets(
+        rule_id=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result "ruleId" (e.g. py/sql-injection)',
+        ),
+        severity=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='rule properties "security-severity" (0-10 score), '
+            'then "problem.severity", then the result "level"; the adapter '
+            "rewrites the level to agree (rate_codeql_sarif)",
+        ),
+        file_path=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="locations[].physicalLocation.artifactLocation.uri "
+            "(%SRCROOT% base)",
+        ),
+        line_range=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="region.startLine / region.endLine",
+        ),
+        column=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="region.startColumn / region.endColumn",
+        ),
+        message=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result "message.text"',
+        ),
+        resource_id=FacetDecl(
+            state=FacetState.NA,
+            reason="pure SAST: findings are source locators, not deployable resources",
+        ),
+        resource_type=FacetDecl(
+            state=FacetState.NA,
+            reason="pure SAST: findings are source locators, not deployable resources",
+        ),
+        package_name=FacetDecl(
+            state=FacetState.NA,
+            reason="CodeQL query results are source defects and carry no package",
+        ),
+        package_version=FacetDecl(
+            state=FacetState.NA,
+            reason="CodeQL query results are source defects and carry no package",
+        ),
+        package_path=FacetDecl(
+            state=FacetState.NA,
+            reason="CodeQL query results are source defects and carry no package",
+        ),
+        taxonomy_cve=FacetDecl(
+            state=FacetState.NA,
+            reason="CodeQL rules are source-defect classes, not CVEs",
+        ),
+        taxonomy_cwe=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="tool.driver.rules[].properties.tags entries "
+            '"external/cwe/cwe-<n>", which the shared flat reader reads',
+        ),
+        fingerprints=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result partialFingerprints "primaryLocationLineHash"',
+        ),
+        fix_available=FacetDecl(
+            state=FacetState.NA,
+            reason="CodeQL query results carry no fix state",
+        ),
+        remediation_text=FacetDecl(
+            state=FacetState.NA,
+            reason="rule help text is guidance for the query, which the shared "
+            "pipeline reads as references; no separate remediation field exists",
+        ),
+        snippet=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="region.snippet.text (written because analyze runs "
+            "with --sarif-add-snippets)",
+        ),
+        references=FacetDecl(
+            state=FacetState.NA,
+            reason="rules carry help text and no URI list; no reference field "
+            "reaches the flat row (UNCONFIRMED against a real run)",
+        ),
+        tags=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="tool.driver.rules[].properties.tags (security, "
+            "maintainability, external/cwe/...)",
+        ),
+        extras=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="result and rule properties bags, passed through the "
+            "SARIF model; the adapter adds issue_severity",
+        ),
+    )
+
+    #: The operational register row (base/scanner_operational_facets.py),
+    #: checked against the production declarations it mirrors by
+    #: tests/unit/plugin_modules/test_scanner_operational_facets_consistency.py.
+    operational_facets: ClassVar[opsf.ScannerOperationalFacets] = (
+        opsf.ScannerOperationalFacets(
+            scanner_name="codeql",
+            network=opsf.NetworkFacet(
+                fetch_kind=opsf.FetchKind.NONE,
+                fetches=(),
+                prefetch=(),
+                offline_outcome=opsf.OfflineOutcome.UNCHANGED,
+                offline_strategy=OfflineStrategy.BUNDLED,
+                sandbox_network=opsf.SandboxNetwork.NONE,
+                source=(
+                    "codeql_scanner.py: analyze runs --no-download, so the query "
+                    "packs must already be installed; offline_strategy comment"
+                ),
+            ),
+            output=opsf.OutputFacet(
+                native_formats=(opsf.OutputFormat.SARIF,),
+                side_reports=(),
+                non_finding_artifacts=(),
+                note="one CodeQL database per language is written under the "
+                "results directory and not read by ASH",
+            ),
+            targets=opsf.TargetsFacet(
+                kinds=(opsf.TargetKind.SOURCE_CODE,),
+                tool_type=ScannerToolType.SAST,
+                selection="one database per language in options.languages, created "
+                "with --build-mode=none over the source directory; exit 32 (no "
+                "source for the language) skips that language",
+                covers_note="a community scanner; it declares no covers display string",
+            ),
+            runtime=opsf.RuntimeFacet(
+                kind=opsf.RuntimeKind.USER_INSTALLED_CLI,
+                external_programs=("codeql",),
+                invocations=opsf.Invocations.MULTI_PASS,
+                invocation_note="two commands (database create, database analyze) "
+                "per configured language, inside one shared time budget",
+                python_only=False,
+                use_uv_tool=False,
+            ),
+            platforms=opsf.PlatformsFacet(
+                provisionable=(),
+                note="ASH installs nothing: the CodeQL CLI's terms are the "
+                "user's to accept, so there is no installer by license design",
+            ),
+            severity=opsf.SeverityFacet(
+                severity_class=opsf.SeverityClass.NATIVE,
+                note="the rule's security-severity score maps to CRITICAL, HIGH, "
+                "MEDIUM or LOW; problem.severity and the result level are the "
+                "fallbacks",
+            ),
+            silencing=opsf.SilencingFacet(
+                tool_side=(),
+                none_reason="ASH passes no query path, config or suppression "
+                "file from the scanned tree; ASH suppressions are the surface "
+                "this register records",
+            ),
+            identity=opsf.IdentityFacet(
+                fingerprint_class=opsf.FingerprintClass.STABLE_NATIVE,
+                note="partialFingerprints primaryLocationLineHash",
+            ),
+            extensibility=opsf.ExtensibilityFacet(
+                custom_rules=opsf.CustomRules.NONE,
+                env_prefixes=(),
+                options_surface="typed options (license_terms_acknowledged, "
+                "languages, threads); the query suites are CodeQL's own",
+            ),
+            exit_codes=opsf.ExitCodesFacet(
+                success_exit_codes=(0, 32),
+                semantics="0 success, 32 the extractor found nothing to analyze "
+                "(a skipped language); findings do not change the exit status",
+            ),
+            provenance=opsf.ProvenanceFacet(
+                tier=opsf.Tier.COMMUNITY_OPTIN,
+                source=opsf.ProvenanceSource.USER_INSTALLED,
+                selection_surfaces=(
+                    "ash_codeql_plugins in ash_plugin_modules",
+                    "options.license_terms_acknowledged (required)",
+                ),
+                upstream_license=opsf.LICENSE_NOT_READ,
+            ),
+            prerequisites=opsf.PrerequisitesFacet(
+                kinds=(opsf.Prerequisite.NONE,),
+                note="the CodeQL CLI and its query packs installed on the host",
+            ),
+        )
+    )
 
     def model_post_init(self, context: Any) -> None:
         if self.config is None:

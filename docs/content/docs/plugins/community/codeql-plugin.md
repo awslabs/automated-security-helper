@@ -42,7 +42,7 @@ codeql database create --language=python --source-root=<dir> --build-mode=none -
 codeql database analyze --format=sarifv2.1.0 --output=<report> --no-download --sarif-add-snippets --sarif-category=ash-codeql-python --threads=1 -- <db> codeql/python-queries:codeql-suites/python-code-scanning.qls
 ```
 
-`--build-mode=none` means CodeQL never builds the scanned tree, so none of its build scripts run. That supports Python, JavaScript/TypeScript, Ruby, C#, Java/Kotlin, C/C++ and Rust. Go and Swift need a build, and the plugin refuses them. ASH passes no query path or config from the scanned tree. A language with no source in the tree (CodeQL exit code 32) is skipped, and if every language is skipped the target reads as nothing scanned.
+`--build-mode=none` means CodeQL never builds the scanned tree, so none of its build scripts run. That supports Python, JavaScript/TypeScript, Ruby, C#, Java, C/C++ and Rust. Go, Swift and Kotlin need a build, and the plugin refuses them: a `java-kotlin` database made without a build holds the Java sources only, so naming `kotlin` would report a clean scan of code that was never analyzed. ASH passes no query path or config from the scanned tree. A language with no source in the tree (CodeQL exit code 32) is skipped, and if every language is skipped the target reads as nothing scanned.
 
 ## Configuration
 
@@ -54,7 +54,7 @@ scanners:
     options:
       license_terms_acknowledged: true
       # python, javascript-typescript, java-kotlin, csharp, c-cpp, ruby, rust.
-      # javascript, typescript, java, kotlin, c and cpp are accepted as aliases.
+      # javascript, typescript, java, c and cpp are accepted as aliases (java is Java only).
       languages: [python, javascript-typescript]
       # CodeQL --threads for both steps (0 is one per core).
       threads: 1
