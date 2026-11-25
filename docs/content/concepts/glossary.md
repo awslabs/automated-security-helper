@@ -20,7 +20,7 @@ The single SARIF run that every scanner's results are merged into, written as `r
 
 ## Alpha plugin
 
-A plugin package that ships with ASH but is not built in, such as the trivy-repo, snyk-code, and ferret-scan scanners. Alpha is a maturity label: ASH ships these scanners but does not yet promote them as supported. `ash scan` loads one only when a plugin module list names it; for the MCP server, see [What a plugin can do](../plugins/index.md#what-a-plugin-can-do). See [Alpha plugins](../docs/plugins/alpha/index.md).
+One of the opt-in scanner packages (`ash_*_plugins`) that ships with ASH but is not built in, such as the trivy-repo, snyk-code, and ferret-scan scanners. Alpha is a maturity label: ASH ships these scanners but does not yet promote them as supported. The `ash_aws_plugins` reporters load the same opt-in way but are not alpha plugins. `ash scan` loads one only when a plugin module list names it; for the MCP server, see [What a plugin can do](../plugins/index.md#what-a-plugin-can-do). See [Alpha plugins](../docs/plugins/alpha/index.md).
 
 ## AWS plugins
 

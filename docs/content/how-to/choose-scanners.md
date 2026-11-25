@@ -60,6 +60,8 @@ A scanner that is turned off, not selected, or excluded is recorded SKIPPED and 
 
 `--python-only` keeps the scanners that need nothing but Python: bandit, cfn-lint, checkov, detect-secrets, semgrep, and zizmor. ASH applies it before it checks the scanners' tools, so every other scanner is recorded SKIPPED whether or not its tool is installed, and does not affect the exit code. When the run selects no Python-only scanner, as with `--python-only --scanners grype`, no scanner runs and the scan exits 1.
 
+<a id="community"></a>
+
 ## Add alpha scanners {#alpha}
 
 Alpha scanners are opt-in scanners that ship with ASH in plugin modules that load only when you name them. ASH does not yet promote them as supported. Add the module to `ash_plugin_modules`:

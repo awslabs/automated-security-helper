@@ -5,7 +5,7 @@
 
 Why this exists
 ---------------
-snyk-code, ferret-scan, trivy-repo, GuardDog and hadolint live in alpha plugin
+snyk-code, ferret-scan, trivy-repo, GuardDog, hadolint and Betterleaks live in alpha plugin
 modules (``plugin_modules/ash_*_plugins``). Listing a module is the opt-in: a run
 that does not list it never loads its scanners. Two things follow, and are tested
 here:
@@ -130,6 +130,7 @@ def _scan(context, plugins, enabled_scanners: List[str]) -> AshAggregatedResults
 @pytest.mark.parametrize(
     "scanner,module",
     [
+        ("betterleaks", "ash_betterleaks_plugins"),
         ("ferret-scan", "ash_ferret_plugins"),
         ("guarddog", "ash_guarddog_plugins"),
         ("hadolint", "ash_hadolint_plugins"),

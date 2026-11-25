@@ -33,8 +33,8 @@ global_settings:
     # === Product code and documents: pinned or scoped to the file ===
     - rule_id: B104
       path: automated_security_helper/cli/mcp/__init__.py
-      line_start: 930
-      line_end: 930
+      line_start: 943
+      line_end: 943
       reason: >-
         False positive. The line only works out the host to show in the "running on"
         message, for a server whose socket is already bound. Nothing binds to it, and
@@ -47,13 +47,6 @@ global_settings:
         False positive. The line is one row of a table that names, for each scanner,
         the option that points at a file; the detector reads a scanner name and a word
         in the row. No value is held.
-    - rule_id: API_KEY_OR_SECRET
-      path: "deploy/cdk/templates/*.template.json"
-      reason: >-
-        False positive. The flagged lines are CloudFormation logical ids and references
-        to them (a hash-suffixed id for the MCP auth header resource, route table ids)
-        and a build command that names a repository URL variable. The templates hold
-        names, not values.
     - rule_id: API_KEY_OR_SECRET
       path: automated_security_helper/plugin_modules/ash_ferret_plugins/spec/2026-09-13-ferret-scan-plugin-v2-update-analysis.md
       reason: >-
@@ -1902,14 +1895,6 @@ global_settings:
         prove redaction. The reason does not repeat the assignment, so this file
         does not flag itself.
     # === bandit in tests and one log line (kept in step with .ash/.ash.yaml) ===
-    - rule_id: B104
-      path: automated_security_helper/cli/mcp/__init__.py
-      reason: >-
-        Not a bind. The flagged line is the startup LOG helper that reproduces
-        uvicorn's "running on" message: host = "0.0.0.0" if config.host is None
-        mirrors the display default uvicorn itself logs; the socket was bound
-        elsewhere, where tests/unit/cli/test_mcp_non_loopback_bind_is_refused.py
-        asserts a non-loopback bind is refused without the explicit opt-in.
     - rule_id: B314
       path: tests/integration/docs/ci_runners/reports.py
       reason: >-
@@ -1942,8 +1927,11 @@ global_settings:
       reason: CI-generated coverage reports contain rendered source that triggers false positives
     - path: "tests/test_data/**"
       reason: This is test data that is used during unit testing only and is not part of the core application.
-    # The same entry as in .ash/.ash.yaml, which explains the "/**/*" spelling: ASH's
-    # path matcher ignores a trailing "**" once the pattern has more than one segment.
+    # The same entry as in .ash/.ash.yaml. The matcher (utils/path_matching.py) reads a
+    # trailing "**" as zero or more path components, so "/**" would also match every
+    # file below the directory (pinned by tests/unit/utils/
+    # test_suppression_path_spellings_the_ash_files_carry.py); "/**/*" is the spelling
+    # this entry has always had and matches the same files.
     # Without it here, ferret-scan reported the fixture's placeholder password as
     # API_KEY_OR_SECRET (CRITICAL) in four reporter snapshots that quote it.
     - path: "tests/**/__snapshots__/**/*"

@@ -120,7 +120,7 @@ def parse_suppressions(text: str, source: str = "") -> List[Dict[str, Any]]:
     return suppressions
 
 
-def load_alpha_suppressions(
+def load_repo_suppressions(
     config_files: Iterable[Path] = SUPPRESSION_CONFIG_FILES,
 ) -> List[Dict[str, Any]]:
     """The suppression entries of every config file this repository scans with."""
@@ -231,7 +231,7 @@ def has_matching_suppression(rel_path, line_num, rule_id, suppressions):
     return any(suppression_covers(s, rel_path, line_num, rule_id) for s in suppressions)
 
 
-ALPHA_SUPPRESSIONS = load_alpha_suppressions()
+REPO_SUPPRESSIONS = load_repo_suppressions()
 
 
 # ============================================================================
@@ -368,7 +368,7 @@ def check_secret_keywords():
                 continue
             # Skip hits that have a matching suppression with line number
             if has_matching_suppression(
-                rel, i, "SECRET-SECRET-KEYWORD", ALPHA_SUPPRESSIONS
+                rel, i, "SECRET-SECRET-KEYWORD", REPO_SUPPRESSIONS
             ):
                 continue
             fail(
@@ -877,7 +877,7 @@ def check_suppression_coverage():
             # whole file, which also hides every later hit there.
             covering = [
                 s
-                for s in ALPHA_SUPPRESSIONS
+                for s in REPO_SUPPRESSIONS
                 if suppression_covers(s, rel, i, "SECRET-SECRET-KEYWORD")
             ]
             if covering and all(s.get("line_start") is None for s in covering):

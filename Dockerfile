@@ -706,11 +706,14 @@ ENV _ASH_EXEC_MODE="local"
 # them; a scan in the image still loads a module only when it is listed. trivy-repo,
 # snyk and ferret are not in the list: their tools come another way.
 ARG ASH_ALPHA_PLUGIN_MODULES="automated_security_helper.plugin_modules.ash_betterleaks_plugins,automated_security_helper.plugin_modules.ash_guarddog_plugins,automated_security_helper.plugin_modules.ash_hadolint_plugins"
+# The pre-rename name of the build argument, honored until ASH 3.9.0: a value given
+# for it wins over ASH_ALPHA_PLUGIN_MODULES below.
+ARG ASH_COMMUNITY_PLUGIN_MODULES=""
 RUN pins="$(install-pinned-tool --uv-tool-pins)" && \
     uv_tmp="$(mktemp -d)" && \
     { TMPDIR="${uv_tmp}" UV_NO_CACHE=1 ASH_OFFLINE=NO \
     ash dependencies install --bin-path "${ASH_BIN_PATH}" ${pins} \
-    --config-overrides "ash_plugin_modules+=[${ASH_ALPHA_PLUGIN_MODULES}]"; \
+    --config-overrides "ash_plugin_modules+=[${ASH_COMMUNITY_PLUGIN_MODULES:-${ASH_ALPHA_PLUGIN_MODULES}}]"; \
     status=$?; rm -rf "${uv_tmp:?}"; exit "${status}"; }
 ENV PATH="${ASH_BIN_PATH}:$PATH"
 
@@ -853,11 +856,14 @@ ENV PATH="${ASHUSER_HOME}/.local/bin:$PATH"
 # modules are loaded for it; an ARG does not reach a stage built FROM another, so it
 # is declared again (a unit test keeps the two equal).
 ARG ASH_ALPHA_PLUGIN_MODULES="automated_security_helper.plugin_modules.ash_betterleaks_plugins,automated_security_helper.plugin_modules.ash_guarddog_plugins,automated_security_helper.plugin_modules.ash_hadolint_plugins"
+# The pre-rename name of the build argument, honored until ASH 3.9.0: a value given
+# for it wins over ASH_ALPHA_PLUGIN_MODULES below.
+ARG ASH_COMMUNITY_PLUGIN_MODULES=""
 RUN pins="$(install-pinned-tool --uv-tool-pins)" && \
     uv_tmp="$(mktemp -d)" && \
     { TMPDIR="${uv_tmp}" UV_NO_CACHE=1 ASH_OFFLINE=NO \
     ash dependencies install --bin-path "${ASH_BIN_PATH}" ${pins} \
-    --config-overrides "ash_plugin_modules+=[${ASH_ALPHA_PLUGIN_MODULES}]"; \
+    --config-overrides "ash_plugin_modules+=[${ASH_COMMUNITY_PLUGIN_MODULES:-${ASH_ALPHA_PLUGIN_MODULES}}]"; \
     status=$?; rm -rf "${uv_tmp:?}"; exit "${status}"; }
 # GuardDog again, for the non-root user's own uv tool install.
 RUN guarddog --version

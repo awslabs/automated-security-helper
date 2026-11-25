@@ -27,6 +27,7 @@ class, a subclass of ``ScannerPluginConfigBase``.
 
 import ast
 import functools
+import threading
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -38,19 +39,24 @@ _PACKAGE = "automated_security_helper.plugin_modules"
 COMMUNITY_ALIASES_DROPPED_IN = "3.9.0"
 
 _WARNED_COMMUNITY_ALIASES: set[str] = set()
+# Workspace mode builds engines on several threads, so the check-then-add below
+# is taken under a lock to keep the warning to once per process.
+_WARNED_LOCK = threading.Lock()
 
 
 def warn_community_alias(old: str, new: str) -> None:
     """Say once per process that the "community" spelling *old* is now *new*."""
-    if old in _WARNED_COMMUNITY_ALIASES:
-        return
-    _WARNED_COMMUNITY_ALIASES.add(old)
+    with _WARNED_LOCK:
+        if old in _WARNED_COMMUNITY_ALIASES:
+            return
+        _WARNED_COMMUNITY_ALIASES.add(old)
     # Imported here: the log module is not needed to map scanners to modules.
     from automated_security_helper.utils.log import ASH_LOGGER
 
     ASH_LOGGER.warning(
         f"'{old}' is deprecated: the community tier is now called alpha, so use "
-        f"'{new}'. The old spelling is accepted until ASH {COMMUNITY_ALIASES_DROPPED_IN}.",
+        f"'{new}'. The old spelling is accepted until ASH "
+        f"{COMMUNITY_ALIASES_DROPPED_IN} and is removed in that release.",
         extra={"markup": False},
     )
 
@@ -84,7 +90,7 @@ def alpha_scanner_modules() -> Dict[str, str]:
     """``{scanner name, lowercased: dotted module path}`` for every in-tree module."""
     mapping: Dict[str, str] = {}
     for package in sorted(_PLUGIN_MODULES.glob("ash_*_plugins")):
-        if package.name == "ash_builtin" or not (package / "__init__.py").is_file():
+        if not (package / "__init__.py").is_file():
             continue
         for source in sorted(package.glob("*.py")):
             for name in _scanner_config_names(source.read_text(encoding="utf-8")):

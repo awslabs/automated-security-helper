@@ -231,7 +231,16 @@ def _runs_on_python_local(step: dict) -> bool:
     # Only a top-level conjunct can exclude the leg; an `||` could re-admit it.
     if "inputs.method != 'python-local'" in condition and "||" not in condition:
         return False
-    for method in ("python-container", "bash", "powershell", "sh-helper"):
+    other_methods = ("python-container", "bash", "powershell", "sh-helper")
+    if "||" in condition:
+        # A disjunction leaves python-local out only when every alternative is a
+        # method equality for another method; `a || python-local` stays in scope.
+        alternatives = [part.strip() for part in condition.split("||")]
+        return not all(
+            any(part == f"inputs.method == '{method}'" for method in other_methods)
+            for part in alternatives
+        )
+    for method in other_methods:
         if f"inputs.method == '{method}'" in condition:
             return False
     return True
@@ -434,3 +443,18 @@ def test_the_unix_setup_ruby_step_still_excludes_windows(steps):
     ]
     assert len(unix) == 1, f"expected one non-Windows setup-ruby step, got {len(unix)}"
     assert "runner.os != 'Windows'" in unix[0]["if"]
+
+
+@pytest.mark.parametrize(
+    "condition,in_scope",
+    [
+        ("inputs.method == 'bash' || inputs.method == 'sh-helper'", False),
+        ("inputs.method == 'sh-helper' || inputs.method == 'python-local'", True),
+        ("inputs.method == 'bash' || always()", True),
+        ("inputs.method == 'bash'", False),
+        ("inputs.method != 'python-local'", False),
+    ],
+)
+def test_runs_on_python_local_reads_a_disjunction_whole(condition, in_scope):
+    """A disjunction is out of scope only when every alternative names another method."""
+    assert _runs_on_python_local({"if": condition}) is in_scope
