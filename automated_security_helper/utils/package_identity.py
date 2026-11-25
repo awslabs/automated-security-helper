@@ -454,7 +454,9 @@ def extract_root_advisories(properties: Any) -> List[Dict[str, str]]:
     for item in raw:
         ref: Dict[str, str] = {}
         if isinstance(item, dict) and isinstance(item.get("rule_id"), str):
-            for key in ("rule_id", "package_path", "uri"):
+            # package_name names a path-less root (an entry npm lists no node
+            # for), whose lockfile URI alone no longer tells packages apart.
+            for key in ("rule_id", "package_path", "package_name", "uri"):
                 value = item.get(key)
                 if isinstance(value, str) and value:
                     ref[key] = value

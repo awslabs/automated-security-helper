@@ -41,6 +41,7 @@ pytestmark = pytest.mark.unit
 
 BRACES = "GHSA-vfj7-8cjw-p6xm"
 PICOMATCH = "GHSA-0000-pico-0000"
+BABEL = "GHSA-67hx-6x53-jw92"
 
 
 def write_lockfile(project: Path, entries: dict) -> Path:
@@ -91,6 +92,50 @@ def transitive(name: str, via: list) -> dict:
         "nodes": [f"node_modules/{name}"],
         "fixAvailable": False,
     }
+
+
+def pathless_advisory(name: str, ghsa: str, title: str) -> dict:
+    """An advisory entry npm lists no node for: its result is the package by
+    name, located at the lockfile with no install path."""
+    entry = advisory(name, ghsa)
+    entry["via"][0]["title"] = title
+    entry["nodes"] = []
+    return entry
+
+
+def babel_audit() -> str:
+    """The babel-traverse shape: two packages share one advisory (one GHSA URL
+    and one title, so one rule id), npm lists no node for either, and a third
+    package reaches both through its ``via`` chain."""
+    title = "Babel vulnerable to arbitrary code execution"
+    return json.dumps(
+        {
+            "vulnerabilities": {
+                "babel-traverse": pathless_advisory("babel-traverse", BABEL, title),
+                "@babel/traverse": pathless_advisory("@babel/traverse", BABEL, title),
+                "jest": transitive("jest", ["babel-traverse", "@babel/traverse"]),
+            }
+        }
+    )
+
+
+def by_name(report) -> dict:
+    """{(rule id, package_name): result}: path-less results share (rule id,
+    package_path=None), so ``by_key`` would collapse them."""
+    return {
+        (r.ruleId, props(r).get("package_name")): r
+        for run in report.runs
+        for r in run.results or []
+    }
+
+
+def suppress_pathless_root(name: str, ghsa: str, lockdir: str) -> AshSuppression:
+    return AshSuppression(
+        rule_id=ghsa,
+        path=f"{lockdir}/package-lock.json",
+        package_name=name,
+        reason="root with no install path",
+    )
 
 
 def audit_json(micromatch_via=("braces",)) -> str:
@@ -415,3 +460,87 @@ class TestRootSuppressionReachesTransitive:
         used: set = set()
         apply_suppressions_to_sarif(report, context, used)
         assert used == {supp.id}
+
+
+class TestPathlessRootsUnderOneRule:
+    """Roots npm lists no node for, two packages behind one advisory.
+
+    Located at the lockfile, such roots share rule id AND URI, so a reference
+    keyed on those two alone let one package's suppressed result stand in for
+    the other package's missing one, and a live advisory was silently hidden
+    (the fail-closed contract broke). The reference carries the package name,
+    which keeps it on the root's own by-name result.
+    """
+
+    def test_refs_of_pathless_roots_carry_the_package_name(
+        self, npm_scanner, tmp_path, cdk
+    ):
+        report = run_npm_scan(npm_scanner, tmp_path, {cdk: babel_audit()})
+        jest = by_name(report)[("npm-audit-transitive-jest", "jest")]
+        assert props(jest)["root_advisories"] == [
+            {
+                "rule_id": BABEL,
+                "package_name": "@babel/traverse",
+                "uri": "deploy/cdk/package-lock.json",
+            },
+            {
+                "rule_id": BABEL,
+                "package_name": "babel-traverse",
+                "uri": "deploy/cdk/package-lock.json",
+            },
+        ]
+
+    def test_missing_root_is_not_vouched_for_by_a_sibling_under_its_rule(
+        self, npm_scanner, tmp_path, cdk, test_output_dir
+    ):
+        """babel-traverse suppressed, @babel/traverse's result absent: the
+        absent root's advisory is live, so jest's finding stays visible."""
+        report = run_npm_scan(npm_scanner, tmp_path, {cdk: babel_audit()})
+        for run in report.runs:
+            run.results = [
+                r
+                for r in run.results
+                if props(r).get("package_name") != "@babel/traverse"
+            ]
+        out = apply(
+            report,
+            tmp_path,
+            test_output_dir,
+            suppress_pathless_root("babel-traverse", BABEL, "deploy/cdk"),
+        )
+        results = by_name(out)
+        assert results[(BABEL, "babel-traverse")].suppressions
+        assert not results[("npm-audit-transitive-jest", "jest")].suppressions
+
+    def test_one_unsuppressed_pathless_root_keeps_transitive_visible(
+        self, npm_scanner, tmp_path, cdk, test_output_dir
+    ):
+        report = run_npm_scan(npm_scanner, tmp_path, {cdk: babel_audit()})
+        out = apply(
+            report,
+            tmp_path,
+            test_output_dir,
+            suppress_pathless_root("babel-traverse", BABEL, "deploy/cdk"),
+        )
+        results = by_name(out)
+        assert results[(BABEL, "babel-traverse")].suppressions
+        assert not results[(BABEL, "@babel/traverse")].suppressions
+        assert not results[("npm-audit-transitive-jest", "jest")].suppressions
+
+    def test_both_pathless_roots_suppressed_suppresses_transitive(
+        self, npm_scanner, tmp_path, cdk, test_output_dir
+    ):
+        report = run_npm_scan(npm_scanner, tmp_path, {cdk: babel_audit()})
+        out = apply(
+            report,
+            tmp_path,
+            test_output_dir,
+            suppress_pathless_root("babel-traverse", BABEL, "deploy/cdk"),
+            suppress_pathless_root("@babel/traverse", BABEL, "deploy/cdk"),
+        )
+        results = by_name(out)
+        assert all(r.suppressions for r in results.values())
+        jest = results[("npm-audit-transitive-jest", "jest")]
+        justification = jest.suppressions[0].justification
+        assert "babel-traverse" in justification
+        assert "@babel/traverse" in justification
