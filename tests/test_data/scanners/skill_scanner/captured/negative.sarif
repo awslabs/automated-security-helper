@@ -1,0 +1,75 @@
+{
+  "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "skill-scanner",
+          "version": "1.0.0",
+          "informationUri": "https://github.com/cisco-ai-defense/skill-scanner",
+          "rules": [
+            {
+              "id": "MANIFEST_MISSING_LICENSE",
+              "name": "Manifest Missing License",
+              "shortDescription": {
+                "text": "Skill does not specify a license"
+              },
+              "fullDescription": {
+                "text": "Skill manifest does not include a 'license' field. Specifying a license helps users understand usage terms."
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              },
+              "properties": {
+                "category": "policy_violation",
+                "severity": "INFO",
+                "tags": [
+                  "policy_violation",
+                  "security"
+                ]
+              },
+              "help": {
+                "text": "Add 'license' field to SKILL.md frontmatter (e.g., MIT, Apache-2.0)",
+                "markdown": "**Remediation**: Add 'license' field to SKILL.md frontmatter (e.g., MIT, Apache-2.0)"
+              }
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "MANIFEST_MISSING_LICENSE",
+          "level": "note",
+          "message": {
+            "text": "Skill manifest does not include a 'license' field. Specifying a license helps users understand usage terms."
+          },
+          "properties": {
+            "category": "policy_violation",
+            "severity": "INFO",
+            "remediation": "Add 'license' field to SKILL.md frontmatter (e.g., MIT, Apache-2.0)"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "cap/benign/tree/benign-skill/SKILL.md",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ],
+          "fingerprints": {
+            "primaryLocationLineHash": "MANIFEST_MISSING_LICENSE_c5ae9be793"
+          }
+        }
+      ],
+      "invocations": [
+        {
+          "executionSuccessful": true,
+          "endTimeUtc": "2026-11-25T04:52:17Z"
+        }
+      ]
+    }
+  ]
+}
