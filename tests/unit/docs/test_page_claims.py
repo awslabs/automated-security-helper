@@ -17839,9 +17839,9 @@ def test_every_python_range_the_pages_give_is_requires_python() -> None:
     """
     assert_on_page(
         INSTALL_PAGE,
-        "- Python 3.10 to 3.14. uv and pipx can fetch a matching Python for you.",
+        "- Python 3.11 to 3.14. uv and pipx can fetch a matching Python for you.",
     )
-    assert_on_page(INSTALL_PAGE, "Use any Python 3.10 to 3.14 in place of 3.12.")
+    assert_on_page(INSTALL_PAGE, "Use any Python 3.11 to 3.14 in place of 3.12.")
     minors = _install_supported_minors()
     assert minors and minors == list(range(minors[0], minors[-1] + 1)), minors
     ranges = [
@@ -17957,7 +17957,7 @@ def test_ci_installs_ash_on_the_pythons_and_runners_the_page_names() -> None:
     control is that the matrix holds all three methods.
     """
     sentence = (
-        "CI installs ASH with pip and pipx on Python 3.10 to 3.14 and with uvx on 3.12, "
+        "CI installs ASH with pip and pipx on Python 3.11 to 3.14 and with uvx on 3.12, "
         "on Ubuntu (x86-64 and arm64), macOS on Apple silicon, and Windows."
     )
     assert_on_page(INSTALL_PAGE, sentence)

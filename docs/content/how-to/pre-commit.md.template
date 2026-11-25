@@ -5,7 +5,7 @@ This page sets up the `ash` hook, says what it scans, and what it costs per comm
 
 Prerequisites:
 
-- pre-commit, running on Python 3.10 to 3.14, or a `language_version` as shown
+- pre-commit, running on Python 3.11 to 3.14, or a `language_version` as shown
   [below](#python-version).
 - A git repository with a `.pre-commit-config.yaml`.
 - Network access to GitHub and PyPI the first time the hook runs.
@@ -266,7 +266,7 @@ gate:
 - [Jenkins, CodeBuild, Azure Pipelines, CircleCI, and other systems](ci/other-ci.md)
 
 If you want CI to enforce the same hook configuration, `pre-commit run ash --all-files`
-works on a runner that has pre-commit, Python 3.10 to 3.14, and network access to GitHub
+works on a runner that has pre-commit, Python 3.11 to 3.14, and network access to GitHub
 and PyPI. If the repository has CloudFormation templates or a `package.json` with a
 lockfile, the runner also needs Node.js and npm, or the hook exits 1 on every run (see
 [Behavior](#behavior) for the `--exclude-scanners` alternative). It runs only the precommit scanner set, so keep a direct ASH scan in the
@@ -304,7 +304,7 @@ out.
 ## Pre-commit on another Python {#python-version}
 
 pre-commit builds a Python hook's environment with the interpreter it runs under, and ASH
-installs on Python 3.10 to 3.14 only. If pre-commit itself runs on another version,
+installs on Python 3.11 to 3.14 only. If pre-commit itself runs on another version,
 building the hook environment fails; on Python 3.9 the error is
 `No matching distribution found for hatchling>=1.32.4`. Install pre-commit on a supported
 interpreter:

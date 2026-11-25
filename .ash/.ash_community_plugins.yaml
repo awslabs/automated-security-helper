@@ -1752,65 +1752,6 @@ global_settings:
       path: tests/unit/utils/test_ash_install_failures_are_logged_redacted.py
       expires: "2027-05-06"
       reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file. Reviewed at the expiry date."
-    # === Time-boxed: dnspython CVE-2026-114605 / GHSA-45c3-73f7-pv4m on Python 3.10 (expires 2026-12-27) ===
-    # Same decision as the dnspython entries in .ash/.ash.yaml, restated here because
-    # a suppression list is not inherited across config files. uv.lock holds two
-    # dnspython entries. The one for Python 3.11 and later is at 2.9.0, the first
-    # fixed release. The one for Python 3.10 stays at 2.8.0 because 2.9.0 requires
-    # Python 3.11 and requires-python is >=3.10. dnspython comes in through
-    # email-validator, which pydantic[email] uses to validate email syntax. The
-    # version is pinned in the entry, so the 2.9.0 entry is never covered and a
-    # different 3.10 version reports again. trivy-repo reports the CVE id as is; grype,
-    # which would add the package name to the GHSA id, is off in this mode.
-    # Revisit when requires-python rises or a dnspython release supporting Python
-    # 3.10 ships.
-    - rule_id: "CVE-2026-114605"
-      path: "uv.lock"
-      package_name: "dnspython"
-      package_version: "2.8.0"
-      expires: "2026-12-27"
-      reason: >-
-        CVE-2026-114605 (GHSA-45c3-73f7-pv4m): dnspython 2.8.0 in uv.lock, the Python 3.10
-        entry. The fixed release 2.9.0 requires Python 3.11; the Python 3.11 and later entry
-        is at 2.9.0. Revisit when requires-python rises or a supporting release ships.
-    # === Time-boxed: dnspython CVE-2026-128089 / GHSA-vvf4-9x63-8xvv on Python 3.10 (expires 2026-12-27) ===
-    # Same decision as the dnspython CVE-2026-128089 entries in .ash/.ash.yaml, restated
-    # here because a suppression list is not inherited across config files. Same Python
-    # 3.10 entry as above: the fixed release 2.9.2 requires Python 3.11, so the 3.10
-    # entry stays at 2.8.0 and the Python 3.11 and later entry moves to 2.9.2. trivy
-    # and trivy-repo both report the CVE id as is; grype, which would add the package
-    # name to the GHSA id, is off in this mode, so one CVE-spelled entry covers both.
-    # Revisit when requires-python rises or a dnspython release supporting Python
-    # 3.10 ships.
-    - rule_id: "CVE-2026-128089"
-      path: "uv.lock"
-      package_name: "dnspython"
-      package_version: "2.8.0"
-      expires: "2026-12-27"
-      reason: >-
-        CVE-2026-128089 (GHSA-vvf4-9x63-8xvv): dnspython 2.8.0 in uv.lock, the Python 3.10
-        entry. The fixed release 2.9.2 requires Python 3.11; the Python 3.11 and later entry
-        is at 2.9.2. Revisit when requires-python rises or a supporting release ships.
-    # === Time-boxed: wcmatch CVE-2026-132276 / GHSA-53pm-wgxf-c6qf on Python 3.10 (expires 2026-12-27) ===
-    # Same decision as the wcmatch entries in .ash/.ash.yaml, restated here because a
-    # suppression list is not inherited across config files. uv.lock holds two wcmatch
-    # entries. The one for Python 3.10 stays at 11.1 because the first fixed release,
-    # 11.2, requires Python 3.11 and requires-python is >=3.10; the Python 3.11 and later
-    # entry is at 12.0.1. The version is pinned in the entry, so the 12.0.1 entry is never
-    # covered and a different 3.10 version reports again. trivy and trivy-repo report the
-    # CVE alias as is; grype, which would add the package name to the GHSA id, is off in
-    # this mode, so one CVE-spelled entry covers both. Revisit when requires-python rises
-    # or a wcmatch release supporting Python 3.10 ships.
-    - rule_id: "CVE-2026-132276"
-      path: "uv.lock"
-      package_name: "wcmatch"
-      package_version: "11.1"
-      expires: "2026-12-27"
-      reason: >-
-        CVE-2026-132276 is the CVE alias spelling of GHSA-53pm-wgxf-c6qf: wcmatch 11.1 in
-        uv.lock, the Python 3.10 entry only. The first fixed release, 11.2, requires Python
-        3.11; the Python 3.11 and later entry is at 12.0.1. Revisit when requires-python
-        rises or a supporting release ships.
     # === Time-boxed: minimatch CVE-2026-118764 / GHSA-g3hv-75wg-m249, bundled in aws-cdk-lib (expires 2027-02-06) ===
     # The flagged copy is node_modules/aws-cdk-lib/node_modules/minimatch 10.2.5
     # (inBundle: true) in deploy/cdk/package-lock.json. The repository's own override
