@@ -29,7 +29,7 @@ pytestmark = pytest.mark.unit
 def test_message_variants(snapshot):
     messages = {}
     for entry in cdb.CONTENT_DATABASES:
-        for policy in (cdb.STALENESS_FAIL, cdb.STALENESS_WARN):
+        for policy in (cdb.StalenessPolicy.FAIL, cdb.StalenessPolicy.WARN):
             stale = content_db_record(
                 entry.name,
                 policy=policy,

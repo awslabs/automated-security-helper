@@ -14,6 +14,7 @@ from typer.core import TyperGroup
 from typer._click.exceptions import UsageError
 
 from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
+from automated_security_helper.core.enums import AshExitCode
 from automated_security_helper.cli.json_input import (
     CliJsonInputCommand,
     usage_error_text,
@@ -838,7 +839,7 @@ def get_genai_guide(
                 "--branch <tag> for the guide of a given release.",
                 err=True,
             )
-            raise typer.Exit(1)
+            raise typer.Exit(AshExitCode.SCAN_ERRORS)
         source = "local"
 
     if guide_content is None:
@@ -871,7 +872,7 @@ def get_genai_guide(
             echo(f"Error: Could not fetch from GitHub: {e}", err=True)
             echo("\nYou can download it directly from:", err=True)
             echo(github_url, err=True)
-            raise typer.Exit(1)
+            raise typer.Exit(AshExitCode.SCAN_ERRORS)
 
     # Write to output file, as a new file renamed over the destination: a symlink
     # there is refused rather than written through (fs_guard).
@@ -893,7 +894,7 @@ def get_genai_guide(
             f"Error: cannot create the directory for {output_file.absolute()}: {e}",
             err=True,
         )
-        raise typer.Exit(1)
+        raise typer.Exit(AshExitCode.SCAN_ERRORS)
     # Written as it was read: UTF-8, because the guide holds characters a C,
     # latin-1 or Windows ANSI locale's codec cannot encode.
     try:
@@ -901,7 +902,7 @@ def get_genai_guide(
     except OutputDirLinkRefused as refused:
         # The family's base, a symlink or a file another name refers to alike.
         echo(f"Error: {refused}", err=True)
-        raise typer.Exit(1)
+        raise typer.Exit(AshExitCode.SCAN_ERRORS)
     except OSError as e:
         # An unwritable destination, a full disk, a directory that vanished:
         # the command's own refusal, not a traceback.
@@ -909,7 +910,7 @@ def get_genai_guide(
             f"Error: cannot write the guide to {output_file.absolute()}: {e}",
             err=True,
         )
-        raise typer.Exit(1)
+        raise typer.Exit(AshExitCode.SCAN_ERRORS)
 
     # ASCII only: the file is already written, and a console that cannot encode a
     # check mark or a bullet (latin-1, ASCII) must not turn that into exit 1. The

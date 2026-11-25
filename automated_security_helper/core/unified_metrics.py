@@ -36,7 +36,13 @@ import math
 import weakref
 from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional
-from pydantic import ConfigDict, Field, computed_field
+from pydantic import (
+    ConfigDict,
+    Field,
+    computed_field,
+    field_serializer,
+    field_validator,
+)
 
 from automated_security_helper.models.asharp_model import (
     AshAggregatedResults,
@@ -47,7 +53,7 @@ from automated_security_helper.models.asharp_model import (
 from automated_security_helper.core.scanner_statistics_calculator import (
     ScannerStatisticsCalculator,
 )
-from automated_security_helper.core.enums import ScannerStatus
+from automated_security_helper.core.enums import ScannerStatus, ThresholdSource
 from automated_security_helper.core.status_order import grade as grade_status
 from automated_security_helper.models.workspace import is_workspace_scan
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -85,7 +91,20 @@ class ScannerMetrics(ScannerSeverityCount):
         "PASSED"  # Scanner status: "PASSED", "FAILED", "SKIPPED", or "MISSING"
     )
     threshold: str = ""  # Severity threshold used for this scanner
-    threshold_source: str = ""  # Source of the threshold ("global", "config", etc.)
+    # Where the threshold came from. None is "not set", written as "" on the
+    # wire: the empty string is the sentinel the results JSON has always carried,
+    # and it is not a member.
+    threshold_source: Optional[ThresholdSource] = None
+
+    @field_validator("threshold_source", mode="before")
+    @classmethod
+    def _unset_threshold_source_is_none(cls, value: Any) -> Any:
+        return None if value == "" else value
+
+    @field_serializer("threshold_source")
+    def _serialize_threshold_source(self, value: Optional[ThresholdSource]) -> str:
+        return "" if value is None else value.value
+
     # True when ``threshold`` is the written reference of a value the resolver read
     # from the environment. Provenance, so a surface that abbreviates a reference
     # does not infer it from the text's shape.

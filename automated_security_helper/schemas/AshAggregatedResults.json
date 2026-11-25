@@ -1618,11 +1618,7 @@
         "content_db_staleness": {
           "anyOf": [
             {
-              "enum": [
-                "fail",
-                "warn"
-              ],
-              "type": "string"
+              "$ref": "#/$defs/StalenessPolicy"
             },
             {
               "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
@@ -1631,8 +1627,7 @@
             }
           ],
           "default": "fail",
-          "description": "What a scan does when a scanner's content database (grype's or trivy's vulnerability database, the offline semgrep/opengrep rulesets) was built longer ago than the bound declared for it in automated_security_helper/utils/content_databases.py. 'fail' (the default) keeps the scanner's findings and exits 1, naming the database, its build time, its age and the bound. 'warn' lets the scan pass and records the same warning in the log and in the reports (summary, SARIF invocation notifications, flat JSON). The CLI flag --allow-stale-content-db sets 'warn' for one scan and takes precedence over this value; --no-allow-stale-content-db sets 'fail'.",
-          "title": "Content Db Staleness"
+          "description": "What a scan does when a scanner's content database (grype's or trivy's vulnerability database, the offline semgrep/opengrep rulesets) was built longer ago than the bound declared for it in automated_security_helper/utils/content_databases.py. 'fail' (the default) keeps the scanner's findings and exits 1, naming the database, its build time, its age and the bound. 'warn' lets the scan pass and records the same warning in the log and in the reports (summary, SARIF invocation notifications, flat JSON). The CLI flag --allow-stale-content-db sets 'warn' for one scan and takes precedence over this value; --no-allow-stale-content-db sets 'fail'."
         },
         "content_db_staleness_offline_image_default": {
           "default": true,
@@ -6042,13 +6037,8 @@
           "type": "string"
         },
         "policy": {
-          "description": "The policy this database is held to while the entry is in effect.",
-          "enum": [
-            "fail",
-            "warn"
-          ],
-          "title": "Policy",
-          "type": "string"
+          "$ref": "#/$defs/StalenessPolicy",
+          "description": "The policy this database is held to while the entry is in effect."
         },
         "reason": {
           "description": "Required. Why this database is held differently.",
@@ -9175,14 +9165,9 @@
           "title": "Accepted Reason"
         },
         "kind": {
+          "$ref": "#/$defs/FailureKind",
           "default": "tool",
-          "description": "What failed: 'input' when the file is not one the converter could hand to its tool (for the jupyter converter, not a notebook), 'tool' when the tool could not convert it. The completeness gate's trust in 'accepted' rides on the kind, so any other value is read as 'tool', which is never accepted, rather than as 'input' or as a refusal to load the record.",
-          "enum": [
-            "input",
-            "tool"
-          ],
-          "title": "Kind",
-          "type": "string"
+          "description": "What failed: 'input' when the file is not one the converter could hand to its tool (for the jupyter converter, not a notebook), 'tool' when the tool could not convert it. The completeness gate's trust in 'accepted' rides on the kind, so any other value is read as 'tool', which is never accepted, rather than as 'input' or as a refusal to load the record."
         },
         "path": {
           "description": "The input's path relative to the scanned tree, with '/' separators.",
@@ -9201,6 +9186,15 @@
       ],
       "title": "FailedInputInfo",
       "type": "object"
+    },
+    "FailureKind": {
+      "description": "What failed when a converter could not convert an input.\n\n``INPUT`` is the file not being one the converter could hand to its tool;\n``TOOL`` is the tool, or the run, failing. The kind decides who may waive\nthe completeness gate: only an ``INPUT`` failure can be accepted by an\n``ash-unconverted-input`` suppression. Any value this version does not know\nreads as ``TOOL``, the side that is never accepted.",
+      "enum": [
+        "input",
+        "tool"
+      ],
+      "title": "FailureKind",
+      "type": "string"
     },
     "FairnessAssessment": {
       "additionalProperties": false,
@@ -22876,6 +22870,15 @@
       },
       "title": "StackFrame",
       "type": "object"
+    },
+    "StalenessPolicy": {
+      "description": "What a scan does about a stale content database: ``FAIL`` or ``WARN``.",
+      "enum": [
+        "fail",
+        "warn"
+      ],
+      "title": "StalenessPolicy",
+      "type": "string"
     },
     "Standard": {
       "additionalProperties": false,
