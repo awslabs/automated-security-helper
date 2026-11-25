@@ -58,6 +58,7 @@ Safety properties, stated once here and relied on by both halves:
 from __future__ import annotations
 
 import json
+import re
 import tarfile
 import tomllib
 from dataclasses import dataclass, field
@@ -140,6 +141,18 @@ def default_harvest_cache_root() -> Optional[Path]:
     return base.joinpath("ash", "sdist-harvest")
 
 
+#: What a lock's package name or version must look like to be used at all: the
+#: harvest joins both into a directory path (``sdist-locks/<name>/<version>``)
+#: and into a cache-served record, so a value a repository wrote is accepted
+#: only when it is one path component of letters, digits and the PEP 503 /
+#: SemVer separators ``. _ - +``, starting with a letter or digit (no leading
+#: dot, no path separator, no ``..`` component).
+PACKAGE_IDENTIFIER_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+\-]*")
+
+#: A sha256 pin must be exactly 64 lowercase hex digits (after lowercasing).
+SHA256_HEX_RE = re.compile(r"[0-9a-f]{64}")
+
+
 @dataclass(frozen=True)
 class FlaggedPackage:
     """A resolved package whose lock entry names at least one platform wheel.
@@ -157,6 +170,10 @@ class FlaggedPackage:
     sdist_url: Optional[str] = None
     sdist_sha256: Optional[str] = None
     sdist_size: Optional[int] = None
+    #: Why the entry must not be harvested (an identifier or pin that failed
+    #: validation); None for an entry the harvest may act on. The converter
+    #: records the skip and fetches nothing for a rejected entry.
+    rejected_reason: Optional[str] = None
 
     @property
     def parent_purl(self) -> str:
@@ -268,6 +285,7 @@ def flagged_packages_in_uv_lock(
         sdist_url: Optional[str] = None
         sdist_sha256: Optional[str] = None
         sdist_size: Optional[int] = None
+        rejected_reason: Optional[str] = None
         sdist = entry.get("sdist")
         if isinstance(sdist, dict):
             url_value = sdist.get("url")
@@ -275,14 +293,25 @@ def flagged_packages_in_uv_lock(
             size_value = sdist.get("size")
             if isinstance(url_value, str) and url_value:
                 sdist_url = url_value
-            if (
-                isinstance(hash_value, str)
-                and hash_value.startswith("sha256:")
-                and len(hash_value) == len("sha256:") + 64
-            ):
-                sdist_sha256 = hash_value[len("sha256:") :].lower()
+            if isinstance(hash_value, str) and hash_value.startswith("sha256:"):
+                candidate = hash_value[len("sha256:") :].lower()
+                if SHA256_HEX_RE.fullmatch(candidate):
+                    sdist_sha256 = candidate
+                else:
+                    rejected_reason = (
+                        "its lock entry's sdist sha256 pin is not a 64-character "
+                        "hex digest"
+                    )
             if isinstance(size_value, int) and size_value >= 0:
                 sdist_size = size_value
+        if not (
+            PACKAGE_IDENTIFIER_RE.fullmatch(name)
+            and PACKAGE_IDENTIFIER_RE.fullmatch(version)
+        ):
+            rejected_reason = (
+                "its lock entry's name or version is not a valid package "
+                "identifier (letters, digits and . _ - + only, no leading dot)"
+            )
         flagged.append(
             FlaggedPackage(
                 name=name,
@@ -291,6 +320,7 @@ def flagged_packages_in_uv_lock(
                 sdist_url=sdist_url,
                 sdist_sha256=sdist_sha256,
                 sdist_size=sdist_size,
+                rejected_reason=rejected_reason,
             )
         )
     return flagged

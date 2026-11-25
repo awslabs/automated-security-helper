@@ -575,6 +575,9 @@ class SdistLockHarvester(ConverterPluginBase[SdistLockHarvesterConfig]):
         skip,
     ) -> None:
         """Harvest one flagged package, or record why it was skipped."""
+        if package.rejected_reason is not None:
+            skip(package, package.rejected_reason)
+            return
         if package.sdist_url is None or package.sdist_sha256 is None:
             skip(
                 package,
