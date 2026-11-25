@@ -610,8 +610,13 @@ class TestExitStatus:
     ):
         scanner = _scanner(tree, tmp_path)
         fake = FakeSpotBugs(exit_code=code)
-        with pytest.raises(ScannerError, match=f"spotbugs exited {code}"):
+        # The base scan() records the code and refuses a code outside
+        # success_exit_codes before it reads the report on disk.
+        with pytest.raises(
+            ScannerError, match="does not accept as a completed run"
+        ) as e:
             _run(scanner, fake, monkeypatch)
+        assert f"exit code {code}" in str(e.value)
 
     def test_a_run_that_wrote_no_report_fails_the_scan(
         self, tree, tmp_path, on_path, monkeypatch

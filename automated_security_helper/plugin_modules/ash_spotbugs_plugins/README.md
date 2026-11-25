@@ -19,7 +19,7 @@ or, for one run:
 ash scan --ash-plugin-modules automated_security_helper.plugin_modules.ash_spotbugs_plugins
 ```
 
-With the module listed, `spotbugs` runs by default. `scanners.spotbugs.enabled: false` turns it off again. There is no license or service gate.
+With the module listed, `spotbugs` runs by default. `scanners.spotbugs.enabled: false` turns it off again. There is no service gate. SpotBugs (LGPL-2.1) and Find Security Bugs (LGPL-3.0) are never bundled with ASH or put in its container image: the install command below downloads them when you run it, and ASH starts them as a separate process.
 
 ## Installing the tool
 

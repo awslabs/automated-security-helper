@@ -139,7 +139,13 @@ from typing import (
 from pydantic import Field, PrivateAttr, model_validator
 
 from automated_security_helper.base.options import ScannerOptionsBase
+from automated_security_helper.base import scanner_operational_facets as opsf
 from automated_security_helper.base.plugin_base import CustomCommand
+from automated_security_helper.base.scanner_facets import (
+    FacetDecl,
+    FacetState,
+    ScannerFacets,
+)
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
@@ -535,6 +541,194 @@ class SpotBugsScanner(ScannerPluginBase[SpotBugsScannerConfig]):
 
     # The detectors are inside the installed jars and the analysis reads no network.
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
+
+    #: The facets register row (base/scanner_facets.py). Declaration only: no
+    #: behavior changes. Native fields name SpotBugs' own SARIF as captured by
+    #: SpotBugs 4.10.5 with Find Security Bugs 1.14.0 (fixture
+    #: tests/test_data/scanners/spotbugs/captured/positive.sarif).
+    facets: ClassVar[ScannerFacets] = ScannerFacets(
+        rule_id=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result "ruleId"',
+        ),
+        severity=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result "level" (error, warning, note; from the bug '
+            'rank) plus properties "issue_severity" set by _post_process_sarif',
+        ),
+        file_path=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="locations[].physicalLocation.artifactLocation.uri "
+            "(a source-style path, rewritten to the one matching source file)",
+        ),
+        line_range=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="region.startLine / region.endLine",
+        ),
+        column=FacetDecl(
+            state=FacetState.NA,
+            reason="SpotBugs reads bytecode line tables; its regions carry "
+            "startLine and endLine and no column",
+        ),
+        message=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result "message.text"',
+        ),
+        resource_id=FacetDecl(
+            state=FacetState.NA,
+            reason="bytecode findings name a class member, not a deployable "
+            "resource; logicalLocations carries a Java symbol, which the "
+            "resource value test excludes",
+        ),
+        resource_type=FacetDecl(
+            state=FacetState.NA,
+            reason="bytecode findings name a class member, not a deployable resource",
+        ),
+        package_name=FacetDecl(
+            state=FacetState.NA,
+            reason="code findings carry no dependency package",
+        ),
+        package_version=FacetDecl(
+            state=FacetState.NA,
+            reason="code findings carry no dependency package",
+        ),
+        package_path=FacetDecl(
+            state=FacetState.NA,
+            reason="code findings carry no dependency package",
+        ),
+        taxonomy_cve=FacetDecl(
+            state=FacetState.NA,
+            reason="SAST rules carry no CVE taxonomy",
+        ),
+        taxonomy_cwe=FacetDecl(
+            state=FacetState.DROPPED,
+            native_field='rules[].relationships[].target.id (toolComponent "CWE")',
+            reason="the rule descriptors link a CWE id; ASH does not read rule "
+            "relationships into the finding today",
+        ),
+        fingerprints=FacetDecl(
+            state=FacetState.NA,
+            reason="the captured results carry no partialFingerprints or "
+            "fingerprints; identity is file and line",
+        ),
+        fix_available=FacetDecl(
+            state=FacetState.NA,
+            reason="SpotBugs results carry no fix state",
+        ),
+        remediation_text=FacetDecl(
+            state=FacetState.DROPPED,
+            native_field="rules[].fullDescription.text",
+            reason="the rule description explains the weakness and its usual "
+            "remedy; ASH does not carry it onto the finding",
+        ),
+        snippet=FacetDecl(
+            state=FacetState.NA,
+            reason="bytecode analysis has no source text; the captured regions "
+            "hold no snippet",
+        ),
+        references=FacetDecl(
+            state=FacetState.DROPPED,
+            native_field="rules[].helpUri",
+            reason="each rule links its SpotBugs bug description; ASH does not "
+            "carry it onto the finding",
+        ),
+        tags=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='rules[].properties "tags" (the SpotBugs category, '
+            "SECURITY among them); the adapter appends security and jvm to "
+            "each result",
+        ),
+        extras=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result properties "issue_severity" written by the adapter',
+        ),
+    )
+
+    #: The operational register row (base/scanner_operational_facets.py),
+    #: checked against the production declarations it mirrors by
+    #: tests/unit/plugin_modules/test_scanner_operational_facets_consistency.py.
+    operational_facets: ClassVar[opsf.ScannerOperationalFacets] = (
+        opsf.ScannerOperationalFacets(
+            scanner_name="spotbugs",
+            network=opsf.NetworkFacet(
+                fetch_kind=opsf.FetchKind.NONE,
+                fetches=(),
+                prefetch=(),
+                offline_outcome=opsf.OfflineOutcome.UNCHANGED,
+                offline_strategy=OfflineStrategy.BUNDLED,
+                sandbox_network=opsf.SandboxNetwork.NONE,
+                source=(
+                    "spotbugs_scanner.py offline_strategy, sandbox_requirements; "
+                    "module header (Offline): the detectors are inside the installed "
+                    "jars and no option reaches the network"
+                ),
+            ),
+            output=opsf.OutputFacet(
+                native_formats=(opsf.OutputFormat.SARIF,),
+                side_reports=(),
+                non_finding_artifacts=(),
+            ),
+            targets=opsf.TargetsFacet(
+                kinds=(opsf.TargetKind.SOURCE_CODE,),
+                tool_type=ScannerToolType.SAST,
+                selection="discover_jvm_inputs: compiled .class roots and .jar/.war/.ear archives in the target; a tree with no bytecode is skipped (module header)",
+                covers_note="the community scanners declare no covers display string",
+            ),
+            runtime=opsf.RuntimeFacet(
+                kind=opsf.RuntimeKind.USER_INSTALLED_CLI,
+                external_programs=("java",),
+                invocations=opsf.Invocations.ONE,
+                python_only=False,
+                use_uv_tool=False,
+            ),
+            platforms=opsf.PlatformsFacet(
+                provisionable=(),
+                note="installed on request by install_pinned_spotbugs (linux and macOS, amd64 and arm64), not through the TOOL_VERSIONS table; Java is the user's",
+            ),
+            severity=opsf.SeverityFacet(
+                severity_class=opsf.SeverityClass.NATIVE,
+                note="the SARIF level from SpotBugs' bug rank maps to HIGH, MEDIUM, LOW or INFO; never CRITICAL, since a bytecode pattern is not a confirmed exploit",
+            ),
+            silencing=opsf.SilencingFacet(
+                tool_side=(
+                    opsf.SilencingLayer(
+                        layer=opsf.SilencingLayerKind.INLINE_COMMENT,
+                        writer=opsf.SilencingWriter.REPOSITORY,
+                        honored=opsf.Honored.YES,
+                        surface="@SuppressFBWarnings annotations compiled into the scanned bytecode",
+                        cite="spotbugs_scanner.py module header (Suppressions): SpotBugs honors the annotation inside the bytecode and the plugin cannot turn it off",
+                    ),
+                ),
+            ),
+            identity=opsf.IdentityFacet(
+                fingerprint_class=opsf.FingerprintClass.POSITIONAL_ONLY,
+                note="the captured results carry no fingerprints; identity is the rule, file and line",
+            ),
+            extensibility=opsf.ExtensibilityFacet(
+                custom_rules=opsf.CustomRules.NONE,
+                env_prefixes=(),
+                options_surface="confidence, effort and security_only; no filter file, user preferences or extra detector plugin is passed",
+            ),
+            exit_codes=opsf.ExitCodesFacet(
+                success_exit_codes=(0, 1, 2, 3),
+                semantics="with -exitcode the status is a bit set: 1 bugs found, 2 classes missing, 4 analysis error; 0 to 3 finished, 4 and above fail the scan",
+            ),
+            provenance=opsf.ProvenanceFacet(
+                tier=opsf.Tier.COMMUNITY_OPTIN,
+                source=opsf.ProvenanceSource.USER_INSTALLED,
+                selection_surfaces=(
+                    "ash_spotbugs_plugins in ash_plugin_modules",
+                    "options.security_only",
+                ),
+                upstream_license=opsf.LICENSE_NOT_READ,
+            ),
+            prerequisites=opsf.PrerequisitesFacet(
+                kinds=(opsf.Prerequisite.NONE,),
+                note="compiled JVM code in the target and a Java runtime; neither is an input kind the register names",
+            ),
+        )
+    )
+
     success_exit_codes: ClassVar[Set[int]] = set(SUCCESS_EXIT_CODES)
     # The strict default; see "Sandbox" in the module docstring.
     sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements()
@@ -685,20 +879,10 @@ class SpotBugsScanner(ScannerPluginBase[SpotBugsScannerConfig]):
         )
         return final_args, results_file, None
 
-    def _read_results_file(self, results_file: Path) -> Optional[Dict[str, Any]]:
-        """Refuse the report of a run that did not finish.
-
-        The error flag (4) means SpotBugs hit a serious analysis error; any code
-        outside 0 to 3 is not one it documents. Raised before reading so a partial
-        report cannot pass as a complete one.
-        """
-        if self.exit_code not in self.success_exit_codes:
-            raise ScannerError(
-                f"spotbugs exited {self.exit_code}; with -exitcode it exits 0 to 3 "
-                "when it finished (1 bugs found, 2 classes were missing) and 4 or "
-                "more on an analysis error, so this run failed"
-            )
-        return super()._read_results_file(results_file)
+    # A code outside ``success_exit_codes`` (4 and above: the analysis-error flag or
+    # a code SpotBugs does not document) is refused by the base scan() through
+    # ``_refuse_rejected_exit_code`` before the results file is read, so a partial
+    # report cannot pass as a complete one. No override is needed here.
 
     def _describe_scan_failure(
         self,
