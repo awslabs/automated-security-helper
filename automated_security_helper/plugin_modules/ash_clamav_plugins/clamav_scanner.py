@@ -76,7 +76,13 @@ from typing import Annotated, Any, ClassVar, Dict, List, Literal, Optional, Set,
 
 from pydantic import Field
 
+from automated_security_helper.base import scanner_operational_facets as opsf
 from automated_security_helper.base.options import ScannerOptionsBase
+from automated_security_helper.base.scanner_facets import (
+    FacetDecl,
+    FacetState,
+    ScannerFacets,
+)
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
@@ -251,9 +257,202 @@ class ClamAVScanner(ScannerPluginBase[ClamAVScannerConfig]):
 
     # The signature database is read from disk; clamscan makes no network call.
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
+    #: The facets register row (base/scanner_facets.py). Declaration only: no
+    #: behavior changes. Native fields name the lines of clamscan's own ``--log``
+    #: text (clamscan/manager.c); the SARIF is built from them by
+    #: ``detections_to_sarif``, so nothing here is a SARIF field of the tool.
+    facets: ClassVar[ScannerFacets] = ScannerFacets(
+        rule_id=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='log line "<path>: <signature> FOUND", the signature name',
+        ),
+        severity=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="(no native severity) constant level error plus "
+            'properties "issue_severity" HIGH, both set by _post_process_sarif',
+        ),
+        file_path=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='log line "<path>: <signature> FOUND", the path',
+        ),
+        line_range=FacetDecl(
+            state=FacetState.NA,
+            reason="clamscan names a file, not a line; the adapter writes "
+            "startLine 1 as a placeholder, not a native value",
+        ),
+        column=FacetDecl(
+            state=FacetState.NA,
+            reason="clamscan names a file, not a position inside it",
+        ),
+        message=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='log line "<path>: <signature> FOUND", the signature '
+            '(the message text is "ClamAV detected <signature>")',
+        ),
+        resource_id=FacetDecl(
+            state=FacetState.NA,
+            reason="a malware detection names a file, not a deployable resource",
+        ),
+        resource_type=FacetDecl(
+            state=FacetState.NA,
+            reason="a malware detection names a file, not a deployable resource",
+        ),
+        package_name=FacetDecl(
+            state=FacetState.NA,
+            reason="clamscan detections carry no package",
+        ),
+        package_version=FacetDecl(
+            state=FacetState.NA,
+            reason="clamscan detections carry no package",
+        ),
+        package_path=FacetDecl(
+            state=FacetState.NA,
+            reason="clamscan detections carry no package",
+        ),
+        taxonomy_cve=FacetDecl(
+            state=FacetState.NA,
+            reason="signature names are not CVE identifiers",
+        ),
+        taxonomy_cwe=FacetDecl(
+            state=FacetState.NA,
+            reason="clamscan detections carry no CWE taxonomy",
+        ),
+        fingerprints=FacetDecl(
+            state=FacetState.NA,
+            reason="the log carries no file hash or fingerprint (the --log text "
+            "lists path, signature and the summary counts only)",
+        ),
+        fix_available=FacetDecl(
+            state=FacetState.NA,
+            reason="malware detections carry no fix state",
+        ),
+        remediation_text=FacetDecl(
+            state=FacetState.NA,
+            reason="the log carries a signature name only; no remediation text",
+        ),
+        snippet=FacetDecl(
+            state=FacetState.NA,
+            reason="clamscan reports no matched content",
+        ),
+        references=FacetDecl(
+            state=FacetState.NA,
+            reason="the log carries no reference URLs",
+        ),
+        tags=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result properties "tags" (none natively); the adapter '
+            "appends malware and security",
+        ),
+        extras=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result properties "issue_severity" written by the '
+            'adapter; the summary "Engine version" line becomes the SARIF '
+            "driver version",
+        ),
+    )
+
+    #: The operational register row (base/scanner_operational_facets.py),
+    #: checked against the production declarations it mirrors by
+    #: tests/unit/plugin_modules/test_scanner_operational_facets_consistency.py.
+    operational_facets: ClassVar[opsf.ScannerOperationalFacets] = (
+        opsf.ScannerOperationalFacets(
+            scanner_name="clamav",
+            network=opsf.NetworkFacet(
+                fetch_kind=opsf.FetchKind.NONE,
+                fetches=(),
+                prefetch=(),
+                offline_outcome=opsf.OfflineOutcome.UNCHANGED,
+                offline_strategy=OfflineStrategy.BUNDLED,
+                sandbox_network=opsf.SandboxNetwork.NONE,
+                source=(
+                    "clamav_scanner.py offline_strategy, sandbox_requirements; "
+                    "module header (Database): clamscan reads the signature "
+                    "database from disk and ASH never runs freshclam"
+                ),
+            ),
+            output=opsf.OutputFacet(
+                native_formats=(opsf.OutputFormat.SYNTHESIZED,),
+                side_reports=("clamav.log",),
+                non_finding_artifacts=(),
+                note="clamscan has no SARIF or JSON output; ASH reads its --log "
+                "text and builds the SARIF (detections_to_sarif)",
+            ),
+            targets=opsf.TargetsFacet(
+                kinds=(opsf.TargetKind.PACKAGE_SOURCES,),
+                tool_type=ScannerToolType.CUSTOM,
+                selection="`clamscan --recursive` over the scan target; every file, "
+                "links never followed (module header)",
+                covers_note=(
+                    "the community scanners declare no covers display string; the "
+                    "register has no malware target kind, so package_sources "
+                    "(files an ASH scan set holds) is the nearest declared kind"
+                ),
+                tool_type_note="ASH has no malware tool type, so CUSTOM",
+            ),
+            runtime=opsf.RuntimeFacet(
+                kind=opsf.RuntimeKind.USER_INSTALLED_CLI,
+                external_programs=("clamscan",),
+                invocations=opsf.Invocations.ONE,
+                python_only=False,
+                use_uv_tool=False,
+            ),
+            platforms=opsf.PlatformsFacet(
+                provisionable=(),
+                note="a system package the user installs (apt, dnf, brew) and "
+                "keeps up to date with freshclam; ASH neither downloads nor "
+                "redistributes it, and the platform matrix is unread",
+            ),
+            severity=opsf.SeverityFacet(
+                severity_class=opsf.SeverityClass.CONSTANT,
+                note="every detection is HIGH: a signature match says the file "
+                "matches, not that it ran (module header, Severity)",
+            ),
+            silencing=opsf.SilencingFacet(
+                tool_side=(),
+                none_reason="ASH passes no --exclude, --include or database "
+                "option, so no file in the scanned tree can silence a "
+                "detection; ASH suppressions apply as for any scanner",
+            ),
+            identity=opsf.IdentityFacet(
+                fingerprint_class=opsf.FingerprintClass.POSITIONAL_ONLY,
+                note="the log carries no hash; identity is the file and the "
+                "signature rule id, with a constant line 1",
+            ),
+            extensibility=opsf.ExtensibilityFacet(
+                custom_rules=opsf.CustomRules.NONE,
+                env_prefixes=(),
+                options_surface="typed options only; the signatures are the "
+                "installed database's, and ASH never passes --database",
+            ),
+            exit_codes=opsf.ExitCodesFacet(
+                success_exit_codes=(0, 1),
+                semantics="clamscan exits 0 when it finds nothing, 1 when it "
+                "finds malware and 2 on an error; 2 fails the scan even with "
+                "detections logged (clamscan.1)",
+            ),
+            provenance=opsf.ProvenanceFacet(
+                tier=opsf.Tier.COMMUNITY_OPTIN,
+                source=opsf.ProvenanceSource.USER_INSTALLED,
+                selection_surfaces=("ash_clamav_plugins in ash_plugin_modules",),
+                upstream_license=opsf.LICENSE_NOT_READ,
+            ),
+            prerequisites=opsf.PrerequisitesFacet(
+                kinds=(opsf.Prerequisite.NONE,),
+                note="a signature database installed by freshclam must exist on "
+                "the host; without one clamscan exits 2 and the scan fails",
+            ),
+        )
+    )
+
     success_exit_codes: ClassVar[Set[int]] = {0, INFECTED_EXIT_CODE}
     # The strict default; see "Sandbox" in the module docstring.
     sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements()
+
+    # clamscan's stderr and --log quote file names from the scanned tree, and the
+    # scanner executor copies errors into the scan's results: the base class keeps
+    # the stream out of both and out of the failure text.
+    quote_tool_stderr: ClassVar[bool] = False
+    unquoted_failure_tool_name: ClassVar[Optional[str]] = "clamscan"
 
     def model_post_init(self, context: Any) -> None:
         if self.config is None:
@@ -345,15 +544,6 @@ class ClamAVScanner(ScannerPluginBase[ClamAVScannerConfig]):
                 level=logging.WARNING,
             )
         return detections_to_sarif(parsed)
-
-    def _process_command_response(self, response: Dict[str, Any]) -> None:
-        """Count the exit code; keep clamscan's stderr out of ``self.errors``.
-
-        Its error lines quote file names from the scanned tree.
-        """
-        super()._process_command_response(
-            {key: value for key, value in response.items() if key != "stderr"}
-        )
 
     def _drop_results_under_output_dir(
         self, sarif_report: SarifReport, target: Path

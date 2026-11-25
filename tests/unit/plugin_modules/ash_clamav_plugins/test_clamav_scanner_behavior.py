@@ -19,6 +19,8 @@ import pytest
 
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.default_config import get_default_config
+from automated_security_helper.base import scanner_operational_facets as opsf
+from automated_security_helper.core.enums import ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.plugin_modules import ash_clamav_plugins
 from automated_security_helper.plugin_modules.ash_clamav_plugins import (
@@ -46,14 +48,16 @@ Start Date: 2026:11:18 10:00:00
 End Date:   2026:11:18 10:00:12
 """
 
+FIXTURES = (
+    Path(__file__).resolve().parents[3]
+    / "test_data"
+    / "scanners"
+    / "clamav"
+    / "documented"
+)
 # Two detections, one of them in a path that itself contains ": ".
-POSITIVE = (
-    "./app.py: OK\n"
-    "./dropper/eicar.com: Win.Test.EICAR_HDB-1 FOUND\n"
-    "./odd: name/payload.bin: Unix.Trojan.Agent-123 FOUND\n"
-) + SUMMARY.format(infected=2)
-
-NEGATIVE = "./app.py: OK\n./lib/util.py: OK\n" + SUMMARY.format(infected=0)
+POSITIVE = (FIXTURES / "positive.log").read_text(encoding="utf-8")
+NEGATIVE = (FIXTURES / "negative.log").read_text(encoding="utf-8")
 
 POSITIVE_EXPECTED = [
     ("Win.Test.EICAR_HDB-1", "error", "HIGH", "dropper/eicar.com", 1),
@@ -333,9 +337,31 @@ class TestExitStatus:
     def test_stderr_is_not_copied_into_errors(
         self, tree, tmp_path, monkeypatch, on_path
     ):
+        """Through the real fold, not through the fake subprocess.
+
+        The fake replaces ``_run_subprocess`` wholesale, so the response the base
+        class folds is built here by hand and passed to the method under test.
+        """
         scanner = _scanner(tree, tmp_path)
-        _run(scanner, FakeClamscan(), monkeypatch)
+        scanner._process_command_response(
+            {"returncode": 2, "stdout": "", "stderr": "./secret-name.txt: denied ERROR"}
+        )
+        assert scanner.exit_code == 2
         assert not any("secret-name" in e for e in scanner.errors)
+
+    def test_the_planted_control_quoting_does_copy_stderr(
+        self, tree, tmp_path, monkeypatch, on_path
+    ):
+        """The same call with quoting on does copy it, so the test above can fail."""
+        monkeypatch.setattr(ClamAVScanner, "quote_tool_stderr", True)
+        scanner = _scanner(tree, tmp_path)
+        scanner._process_command_response(
+            {"returncode": 2, "stdout": "", "stderr": "./secret-name.txt: denied ERROR"}
+        )
+        assert any("secret-name" in e for e in scanner.errors)
+
+    def test_the_declaration_keeps_the_stream_out(self):
+        assert ClamAVScanner.quote_tool_stderr is False
 
 
 class TestTimeout:
@@ -426,3 +452,28 @@ class TestSandboxDeclaration:
         from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 
         assert ClamAVScanner.sandbox_requirements == SandboxRequirements()
+
+
+class TestRegisterRows:
+    def test_both_register_rows_are_declared_on_the_class_itself(self):
+        assert "facets" in vars(ClamAVScanner)
+        assert "operational_facets" in vars(ClamAVScanner)
+
+    def test_the_operational_row_mirrors_the_class(self):
+        ops = ClamAVScanner.operational_facets
+        assert ops.scanner_name == ClamAVScannerConfig().name
+        assert ops.exit_codes.success_exit_codes == tuple(
+            sorted(ClamAVScanner.success_exit_codes)
+        )
+        assert ops.network.offline_strategy is ClamAVScanner.offline_strategy
+        assert ops.runtime.external_programs == ("clamscan",)
+        assert ops.runtime.python_only is bool(ClamAVScanner.python_only)
+        assert ops.runtime.use_uv_tool is False
+        assert ops.targets.tool_type is ScannerToolType.CUSTOM
+        # The tool is user-installed and never redistributed (GPL-2.0 plus a
+        # separate signature database): nothing is provisioned by ASH.
+        assert ops.platforms.provisionable == ()
+        assert ops.provenance.source is opsf.ProvenanceSource.USER_INSTALLED
+
+    def test_the_instance_matches_the_declared_tool_type(self):
+        assert ClamAVScanner().tool_type is ScannerToolType.CUSTOM
