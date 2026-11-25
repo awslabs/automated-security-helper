@@ -15,21 +15,6 @@ external_reports_to_include: []
 global_settings:
   severity_threshold: MEDIUM
   suppressions:
-    # === GuardDog false positive in this repository's own tests (line-pinned) ===
-    # GuardDog's heuristics read source text, so test code that writes a fake
-    # credentials file matches them. Pinned to the one line GuardDog reports, so a
-    # real finding elsewhere in the file is still reported. The test writes creds.env
-    # twice, at lines 738 and 954; GuardDog 3.2.0 drops a match whose code snippet
-    # is the same as one it already reported, so it reports 738 only.
-    - rule_id: "threat-filesystem-read"
-      path: "tests/integration/scanners/test_trivy_real_binary.py"
-      line_start: 738
-      line_end: 738
-      reason: >-
-        False positive. The line writes a creds.env holding a fake AWS key id and
-        secret, generated per run with secrets.choice, into the test's temporary
-        fixture tree so trivy's secret scanner has something to find. Nothing reads
-        a real credentials file.
     # === Product code and documents: pinned or scoped to the file ===
     - rule_id: B104
       path: automated_security_helper/cli/mcp/__init__.py
@@ -656,26 +641,11 @@ global_settings:
         is what an entropy detector is built to flag. Pinned to that block's lines,
         which hold nothing but those values; tests/unit/utils/test_third_party_licenses.py
         fails when the block moves and this range does not.
-    - path: automated_security_helper/plugin_modules/ash_ferret_plugins/DEVELOPMENT.md
-      rule_id: SECRET-SECRET-KEYWORD
-      line_start: 650
-      line_end: 650
-      reason: Documentation example showing the SECRET-SECRET-KEYWORD detection pattern.
     - path: scripts/generate_test_docx.py
       rule_id: B311
       line_start: 1
       line_end: 203
       reason: Standard random is intentional — generates synthetic test data with random.seed(42) for reproducibility, not used for security/crypto.
-    - path: tests/unit/plugin_modules/ash_ferret_plugins/conftest.py
-      rule_id: SECRET-SECRET-KEYWORD
-      line_start: 132
-      line_end: 132
-      reason: False positive — SETTING = "placeholder" uses a neutral variable name.
-    - path: scripts/generate_test_docx.py
-      rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
-      line_start: 346
-      line_end: 350
-      reason: False positive — runtime-generated synthetic credit card numbers from seeded random for test data.
     - path: scripts/generate_test_docx.py
       rule_id: PASSPORT
       line_start: 211
@@ -702,30 +672,6 @@ global_settings:
         entries above do pin lines, which suits a generator script that does not
         change; this list grows, and a pinned suppression would silently stop matching
         the moment an entry is added above the JWT one.
-    - path: tests/integration/cli/test_mcp_file_tracking_integration.py
-      rule_id: SECRET-SECRET-KEYWORD
-      reason: False positive.
-    - path: tests/integration/cli/test_mcp_integration_simple.py
-      rule_id: SECRET-SECRET-KEYWORD
-      reason: False positive.
-    - path: tests/integration/cli/test_mcp_integration.py
-      rule_id: SECRET-SECRET-KEYWORD
-      reason: False positive.
-    - path: tests/integration/cli/conftest.py
-      rule_id: SECRET-SECRET-KEYWORD
-      reason: False positive.
-    - path: pyproject.toml
-      rule_id: SECRET-BASE64-HIGH-ENTROPY-STRING
-      reason: This is the project configuration. Findings of this type are false positives.
-    - path: automated_security_helper/utils/subprocess_utils.py
-      rule_id: python.lang.compatibility.python36.python36-compatibility-Popen1
-      reason: This package requires Python3.10 or greater.
-    - path: automated_security_helper/utils/subprocess_utils.py
-      rule_id: python.lang.compatibility.python36.python36-compatibility-Popen2
-      reason: This package requires Python3.10 or greater.
-    - path: tests/unit/plugin_modules/ash_aws_plugins/test_cloudwatch_logs_reporter*
-      rule_id: SECRET-SECRET-KEYWORD
-      reason: False positive, dummy test data and not an actual secret.
     - path: tests/**/*.py
       rule_id: B101
       reason: Assert usage expected with Pytest
@@ -744,30 +690,6 @@ global_settings:
     - path: tests/**/*.py
       rule_id: B607
       reason: Mocking and other test mechanisms. These instances are in test suites and not in the code used at runtime.
-    - path: docs/content/docs/plugins/aws/index.md
-      rule_id: SECRET-SECRET-KEYWORD
-      reason: False positive, not an actual secret
-    - path: docs/content/docs/plugins/development-guide.md
-      rule_id: SECRET-SECRET-KEYWORD
-      reason: False positive, not an actual secret
-    - rule_id: "python.lang.compatibility.python37.python37-compatibility-importlib2"
-      path: "automated_security_helper/cli/main.py"
-      reason: "False positive - ASH requires Python 3.10+"
-    - rule_id: "SECRET-SECRET-KEYWORD"
-      path: "automated_security_helper/utils/secret_masking.py"
-      reason: "False positive - module processes secret-related strings"
-    - rule_id: "SECRET-SECRET-KEYWORD"
-      path: "tests/unit/utils/test_secret_masking.py"
-      reason: "False positive - test fixtures for secret masking"
-    - rule_id: "SECRET-SECRET-KEYWORD"
-      path: "tests/unit/utils/test_secret_masking*.py"
-      reason: "False positive - test fixtures for secret masking"
-    - rule_id: "SECRET-BASE64-HIGH-ENTROPY-STRING"
-      path: "tests/unit/utils/test_secret_masking.py"
-      reason: "False positive - test fixtures for secret masking"
-    - rule_id: "SECRET-HEX-HIGH-ENTROPY-STRING"
-      path: "tests/unit/test_defense_in_depth.py"
-      reason: "False positive - test hex strings for tarfile validation"
     - rule_id: "B108"
       path: "tests/unit/converters/test_converters.py"
       reason: "Test validates path traversal protection"
@@ -786,9 +708,6 @@ global_settings:
     - rule_id: "B404"
       path: "tests/unit/utils/test_subprocess_utils_regression.py"
       reason: "Test file must import subprocess"
-    - rule_id: "python.lang.security.audit.non-literal-import.non-literal-import"
-      path: "automated_security_helper/plugin_modules/ash_builtin/__init__.py"
-      reason: "Lazy plugin loading uses hardcoded module paths"
     - rule_id: B110
       path: automated_security_helper/**/*.py
       reason: "try/except/pass for graceful degradation in tool orchestrator"
@@ -849,22 +768,6 @@ global_settings:
     - rule_id: B603
       path: scripts/*.py
       reason: "Build scripts use list-form subprocess"
-    # === Broad p/ci ruleset suppressions (semgrep/opengrep) ===
-    - rule_id: "python.lang.compatibility.python36.python36-compatibility-Popen1"
-      path: "automated_security_helper/**/*.py"
-      reason: "This package requires Python3.10 or greater (pyproject.toml)."
-    - rule_id: "python.lang.compatibility.python36.python36-compatibility-Popen2"
-      path: "automated_security_helper/**/*.py"
-      reason: "This package requires Python3.10 or greater (pyproject.toml)."
-    - rule_id: "python.lang.security.audit.non-literal-import.non-literal-import"
-      path: "automated_security_helper/**/*.py"
-      reason: "Plugin loading uses hardcoded module paths from registry, not user input"
-    - rule_id: "python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected"
-      path: "automated_security_helper/**/*.py"
-      reason: "URLs are constructed from trusted config values, not user input"
-    - rule_id: "bash.lang.security.ifs-tampering.ifs-tampering"
-      path: "**/*.sh"
-      reason: "IFS manipulation in ASH shell scripts is intentional for delimiter parsing"
     # === Approved license findings (trivy license scanner) ===
     - rule_id: "*:MIT"
       path: "**"
@@ -1384,8 +1287,17 @@ global_settings:
         sets allow_plaintext_auth_header, so reaching a plaintext listener that
         carries an auth header takes a deliberate opt-in.
     # === trivy AWS-0104 is cfn-nag's W5, and only the destination CIDR is left ===
+    # Both AWS-0104 entries are whole-file and carry an expiry. A per-resource scope
+    # (resource_id) cannot narrow them: trivy-repo findings carry no resource identity
+    # (0 of the 101 it reported in the 2026-11-25 self-scan did), and a finding with
+    # none never matches a scoped entry. A line pin does not fit the template either,
+    # since `cdk synth` moves its lines. So the entry expires, and the scan then fails
+    # until the egress rule is re-read or the scanner reports a resource identity.
+    # Re-read both egress rules by the expiry date, or drop the entries if trivy
+    # has begun to report a resource identity and a scoped entry fits.
     - rule_id: AWS-0104
       path: deploy/cdk/templates/AshFargate.template.json
+      expires: "2027-05-25"
       reason: >-
         ServiceSecurityGroup, the same egress rule CFN_NAG_W5 fires on in
         .ash/.ash.yaml, where the full accounting lives. The protocol and port are
@@ -1396,6 +1308,7 @@ global_settings:
         CIDR needs interface endpoints, billed hourly per Availability Zone.
     - rule_id: AWS-0104
       path: deploy/terraform/modules/fargate/main.tf
+      expires: "2027-05-25"
       reason: >-
         aws_vpc_security_group_egress_rule.service_all, the terraform counterpart of
         the rule CFN_NAG_W5 covers above, with the same public-internet destination
@@ -1511,8 +1424,13 @@ global_settings:
         API and never reads a Docker HEALTHCHECK, so the instruction would have no
         effect. Same reasoning as this file's inline CKV_DOCKER_2 skip.
     # === GuardDog (#727): false positives, approved by the maintainer 2026-10-07 ===
-    # The same 12 entries as .ash/.ash.yaml. This is the config the self-scan runs
-    # GuardDog under, and it does not read .ash/.ash.yaml.
+    # The product-file entries here are the ones .ash/.ash.yaml holds too. This is the
+    # config the self-scan runs GuardDog under, and it does not read .ash/.ash.yaml.
+    # The test-file pins live only in .ash/.ash.yaml: this config excludes tests/** and
+    # deploy/cdk-constructs/test/** from GuardDog (scanners.guarddog.options.excluded_paths),
+    # so a pin under either could never match here. A scan that keeps the product
+    # pins and drops the exclusion reads them from .ash/.ash.yaml.
+    # tests/unit/test_ci_guarddog_self_scan_pins.py holds the two files in step.
     # One entry per finding, pinned to its line, so a new hit anywhere else in these
     # files is still reported. If a line moves, the finding comes back and the entry
     # needs its line updated, which is the point of not using a range or a glob.
@@ -1553,51 +1471,6 @@ global_settings:
       line_start: 559
       line_end: 559
       reason: "The entrypoint reads one variable by name, ASH_MCP_AUTH_HEADER_VALUE_SECRET_ARN, the secret it needs to resolve; nothing else in the environment."
-    - rule_id: threat-filesystem-destruction
-      path: deploy/cdk-constructs/test/ash-scan-step.test.ts
-      line_start: 367
-      line_end: 367
-      reason: "'main; rm -rf /' is an input the test asserts is rejected at synth."
-    - rule_id: threat-filesystem-read
-      path: deploy/cdk-constructs/test/ash-scan-step.test.ts
-      line_start: 362
-      line_end: 362
-      reason: "file:///etc/passwd is an input the test asserts is rejected as non-https."
-    - rule_id: threat-filesystem-destruction
-      path: tests/snapshot/test_snapshot_normalizer.py
-      line_start: 266
-      line_end: 266
-      reason: "Regex artifact: the match is the \"rm\" inside \"normalizer\" before add_literal(\"/home/...\"); nothing is deleted."
-    - rule_id: threat-filesystem-destruction
-      path: tests/snapshot/test_snapshot_normalizer.py
-      line_start: 274
-      line_end: 274
-      reason: "Regex artifact: the match is the \"rm\" inside \"normalizer\" before add_literal(\"/home/...\"); nothing is deleted."
-    - rule_id: threat-filesystem-read
-      path: tests/unit/test_artifact_contents_gate.py
-      line_start: 784
-      line_end: 784
-      reason: "Symlink target in a synthetic archive that the gate under test must reject."
-    - rule_id: threat-filesystem-read
-      path: tests/unit/test_artifact_contents_gate.py
-      line_start: 1471
-      line_end: 1471
-      reason: "Symlink target in a synthetic archive that the gate under test must reject."
-    - rule_id: threat-filesystem-read
-      path: tests/unit/test_defense_in_depth.py
-      line_start: 406
-      line_end: 406
-      reason: "'v1.0|cat /etc/passwd' is a revision string the test asserts is rejected."
-    - rule_id: threat-filesystem-read
-      path: tests/unit/test_pinned_tool_version_check.py
-      line_start: 1175
-      line_end: 1175
-      reason: "file:///etc/passwd is a URL the test asserts is refused before opening."
-    - rule_id: threat-runtime-obfuscation-base64exec
-      path: tests/unit/utils/test_opengrep_pinned_download.py
-      line_start: 613
-      line_end: 613
-      reason: "Decodes a nix SRI hash to hex to compare with the pinned table; nothing is executed."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/plugin_modules/ash_builtin/converters/archive_converter.py
       line_start: 141
@@ -1789,105 +1662,10 @@ global_settings:
         cannot reach it. Fix = aws-cdk-lib >= none released yet (2.277.0 declares minimatch
         ^10.2.6; the fix is minimatch 11.0.1). Revisit when a release bundles minimatch
         >=11.0.1.
-    # === Time-boxed: picomatch GHSA-fc5q-39xc-vjpf, no patched version (expires 2026-12-27) ===
-    # Kept in step with .ash/.ash.yaml: suppression lists are not inherited across
-    # config files, so the npm-audit entries live in both. picomatch up to and
-    # including 4.0.7 is affected (ReDoS through single-branch repeated extglobs) and
-    # 4.0.7 is the newest release on the registry (read 2026-11-17), so no upgrade or
-    # npm `overrides` pin can remove it. Every copy in both lockfiles is a dev
-    # dependency ("dev": true) of the deploy tooling; none of it ships in the wheel or
-    # the container image. One entry per install path, version pinned, so a new copy or
-    # a different version reports again. The `npm-audit-transitive-<package>` findings
-    # whose via chains reach these copies are covered by these root entries. Revisit
-    # when a picomatch release above 4.0.7 ships.
-    - rule_id: "GHSA-fc5q-39xc-vjpf"
-      path: "node_modules/picomatch/package.json"
-      package_name: "picomatch"
-      package_version: "2.3.2"
-      package_path: "deploy/cdk/node_modules/picomatch"
-      expires: "2026-12-27"
-      reason: >-
-        GHSA-fc5q-39xc-vjpf: picomatch 2.3.2 in deploy/cdk/package-lock.json, hoisted for
-        anymatch. No patched version exists (newest release is 4.0.7, inside the affected
-        range). Dev dependency of the deploy tooling only, not shipped in the wheel or the
-        container image. Revisit when a fix ships; see the block comment above.
-    - rule_id: "GHSA-fc5q-39xc-vjpf"
-      path: "node_modules/@parcel/watcher/picomatch/package.json"
-      package_name: "picomatch"
-      package_version: "4.0.7"
-      package_path: "deploy/cdk/node_modules/@parcel/watcher/node_modules/picomatch"
-      expires: "2026-12-27"
-      reason: >-
-        GHSA-fc5q-39xc-vjpf: picomatch 4.0.7 under @parcel/watcher in
-        deploy/cdk/package-lock.json. No patched version exists. Dev dependency of the
-        deploy tooling only, not shipped in the wheel or the container image. Revisit when
-        a fix ships; see the block comment above.
-    - rule_id: "GHSA-fc5q-39xc-vjpf"
-      path: "node_modules/jest-haste-map/picomatch/package.json"
-      package_name: "picomatch"
-      package_version: "4.0.7"
-      package_path: "deploy/cdk/node_modules/jest-haste-map/node_modules/picomatch"
-      expires: "2026-12-27"
-      reason: >-
-        GHSA-fc5q-39xc-vjpf: picomatch 4.0.7 under jest-haste-map in
-        deploy/cdk/package-lock.json. No patched version exists. Dev dependency of the
-        deploy tooling only, not shipped in the wheel or the container image. Revisit when
-        a fix ships; see the block comment above.
-    - rule_id: "GHSA-fc5q-39xc-vjpf"
-      path: "node_modules/jest-message-util/picomatch/package.json"
-      package_name: "picomatch"
-      package_version: "4.0.7"
-      package_path: "deploy/cdk/node_modules/jest-message-util/node_modules/picomatch"
-      expires: "2026-12-27"
-      reason: >-
-        GHSA-fc5q-39xc-vjpf: picomatch 4.0.7 under jest-message-util in
-        deploy/cdk/package-lock.json. No patched version exists. Dev dependency of the
-        deploy tooling only, not shipped in the wheel or the container image. Revisit when
-        a fix ships; see the block comment above.
-    - rule_id: "GHSA-fc5q-39xc-vjpf"
-      path: "node_modules/jest-util/picomatch/package.json"
-      package_name: "picomatch"
-      package_version: "4.0.7"
-      package_path: "deploy/cdk/node_modules/jest-util/node_modules/picomatch"
-      expires: "2026-12-27"
-      reason: >-
-        GHSA-fc5q-39xc-vjpf: picomatch 4.0.7 under jest-util in
-        deploy/cdk/package-lock.json. No patched version exists. Dev dependency of the
-        deploy tooling only, not shipped in the wheel or the container image. Revisit when
-        a fix ships; see the block comment above.
-    - rule_id: "GHSA-fc5q-39xc-vjpf"
-      path: "node_modules/picomatch/package.json"
-      package_name: "picomatch"
-      package_version: "4.0.7"
-      package_path: "deploy/cdk-constructs/node_modules/picomatch"
-      expires: "2026-12-27"
-      reason: >-
-        GHSA-fc5q-39xc-vjpf: picomatch 4.0.7 in deploy/cdk-constructs/package-lock.json,
-        hoisted for fdir and the jest 30 tree. No patched version exists. Dev dependency of
-        the constructs package's build tooling only, not shipped in the wheel or the
-        container image. Revisit when a fix ships; see the block comment above.
-    - rule_id: "GHSA-fc5q-39xc-vjpf"
-      path: "node_modules/anymatch/picomatch/package.json"
-      package_name: "picomatch"
-      package_version: "2.3.2"
-      package_path: "deploy/cdk-constructs/node_modules/anymatch/node_modules/picomatch"
-      expires: "2026-12-27"
-      reason: >-
-        GHSA-fc5q-39xc-vjpf: picomatch 2.3.2 under anymatch in
-        deploy/cdk-constructs/package-lock.json. No patched version exists. Dev dependency
-        of the constructs package's build tooling only, not shipped in the wheel or the
-        container image. Revisit when a fix ships; see the block comment above.
-    - rule_id: "GHSA-fc5q-39xc-vjpf"
-      path: "node_modules/micromatch/picomatch/package.json"
-      package_name: "picomatch"
-      package_version: "2.3.2"
-      package_path: "deploy/cdk-constructs/node_modules/micromatch/node_modules/picomatch"
-      expires: "2026-12-27"
-      reason: >-
-        GHSA-fc5q-39xc-vjpf: picomatch 2.3.2 under micromatch in
-        deploy/cdk-constructs/package-lock.json. No patched version exists. Dev dependency
-        of the constructs package's build tooling only, not shipped in the wheel or the
-        container image. Revisit when a fix ships; see the block comment above.
+    # The picomatch GHSA-fc5q-39xc-vjpf entries are not carried here: they were
+    # shaped for the npm-audit scanner (node_modules paths with a package_path), which
+    # this config leaves off, and the self-scan measured none of them as matched.
+    # .ash/.ash.yaml, which runs npm-audit, keeps them with their expiry.
     # === ferret-scan API_KEY_OR_SECRET, continued: names and generated templates ===
     #
     # The same unquoted-assignment and name-matching dispositions as the ferret-scan

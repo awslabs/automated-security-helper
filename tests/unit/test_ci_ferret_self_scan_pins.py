@@ -19,10 +19,9 @@ in the config as one that works.
 
 ``SECRET-SECRET-KEYWORD`` and ``SECRET-HEX-HIGH-ENTROPY-STRING`` are detect-secrets rule
 ids, and detect-secrets is off in that config (``scanners.detect-secrets.enabled:
-false``, as it was when the entries were added), so no scan of that config reads the
-entries for those two rule ids today. This test keeps them accurate in case
-detect-secrets is turned on for the self-scan. It reads only the alpha-plugins
-config; ``.ash/.ash.yaml`` has no pin of this kind.
+false``), so no scan of that config could read an entry for them. The entries were
+removed, and ``_PIN_MARKERS`` is empty until one returns with detect-secrets. This
+test reads only the alpha-plugins config; ``.ash/.ash.yaml`` has no pin of this kind.
 
 What this checks
 ----------------
@@ -99,10 +98,11 @@ class _Marker:
 #: of markers: a path with two pinned entries has two. When a file changes above its
 #: pin, this row is what says which line the pin has to move to. An entry whose path has
 #: no row fails below, and so does a row whose entry is gone.
-_PIN_MARKERS: dict[str, list[_Marker]] = {
-    f"{PLUGIN_DIR}/DEVELOPMENT.md": [_Marker((r"assigned value\. Even",))],
-    f"{TEST_DIR}/conftest.py": [_Marker(('SETTING = "placeholder"',))],
-}
+#: Empty while the alpha-plugins config carries no SECRET-SECRET-KEYWORD pin: that is
+#: a detect-secrets rule id, detect-secrets is off in that config, and its two pins
+#: (the plugin's development notes and its test conftest) were removed because they
+#: could not match.
+_PIN_MARKERS: dict[str, list[_Marker]] = {}
 
 #: The calls to the random module that the docx generator makes.
 _RANDOM_CALL = (
@@ -141,15 +141,6 @@ _RANGED_PIN_MARKERS: dict[tuple[str, str], list[_Marker]] = {
     ],
     # Every line that draws a value from the random module, as the file was written.
     ("B311", DOCX_SCRIPT): [_Marker((_RANDOM_CALL,), every_line=True)],
-    # The two narrative lines the entry was written for, which the pin takes with the
-    # lines between them. The generator builds the card numbers at run time, and
-    # since the Luhn-valid rewrite the MasterCard line names its last four digits
-    # through a variable too, so neither line holds a number.
-    ("SECRET-HEX-HIGH-ENTROPY-STRING", DOCX_SCRIPT): [
-        _Marker(
-            (r"The MasterCard ending in \{approved_last_four\}", r"Expiration: 12/25")
-        ),
-    ],
     # The two MRZ-style passport lines of the MRZ_LINES tuple, each padded to the TD3
     # length with the "<" filler. The padding call is what no other line of the file
     # has, so the pattern names the two lines without spelling out a passport line.
@@ -653,16 +644,6 @@ def test_an_every_line_pattern_that_matches_nothing_is_reported():
             "random.seed(42)",
         ),
         (
-            ("SECRET-HEX-HIGH-ENTROPY-STRING", DOCX_SCRIPT),
-            'f"The MasterCard ending in {approved_last_four} ({approved_card}) has "',
-            'f"MasterCard: {approved_card}"',
-        ),
-        (
-            ("SECRET-HEX-HIGH-ENTROPY-STRING", DOCX_SCRIPT),
-            'f"AMEX: {card()} - Expiration: 12/25. "',
-            'f"AMEX: {card()}"',
-        ),
-        (
             ("PASSPORT", DOCX_SCRIPT),
             '    "P<USA".ljust(TD3_LINE_LENGTH, "<"),',
             "    for mrz_line in MRZ_LINES:",
@@ -675,8 +656,6 @@ def test_an_every_line_pattern_that_matches_nothing_is_reported():
         "ash_yaml_head",
         "ash_yaml_secret",
         "B311",
-        "SECRET-HEX first line",
-        "SECRET-HEX second line",
         "PASSPORT",
     ],
 )

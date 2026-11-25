@@ -543,7 +543,7 @@ global_settings:
       path: "deploy/cdk/package-lock.json"
       package_name: "minimatch"
       package_version: "10.2.5"
-      expires: "2026-12-27"
+      expires: "2027-02-06"
       reason: >-
         CVE-2026-118764 (GHSA-g3hv-75wg-m249, trivy spelling): minimatch 10.2.5 bundled
         inside aws-cdk-lib 2.273.0 in deploy/cdk/package-lock.json. The lockfile's own
@@ -3788,18 +3788,23 @@ global_settings:
     # merge; the pre-merge residual on the PR's own run is by design.
     - rule_id: "generic-api-key"
       path: "tests/unit/base/test_uv_tool_mixin_guards_and_decisions.py"
+      expires: "2027-05-06"
       reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
     - rule_id: "generic-api-key"
       path: "tests/unit/core/test_orchestrator_project_name_holding_an_environment_value.py"
+      expires: "2027-05-06"
       reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
     - rule_id: "generic-api-key"
       path: "tests/unit/plugin_modules/ash_builtin/scanners/test_npm_audit_probe_selection_and_report_shapes.py"
+      expires: "2027-05-06"
       reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
     - rule_id: "generic-api-key"
       path: "tests/unit/plugin_modules/ash_builtin/scanners/test_npm_audit_response_logging.py"
+      expires: "2027-05-06"
       reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
     - rule_id: "generic-api-key"
       path: "tests/unit/utils/test_ash_install_failures_are_logged_redacted.py"
+      expires: "2027-05-06"
       reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
     - rule_id: "private-key"
       path: "tests/unit/interactions/test_run_ash_container_input_and_run_edges.py"
