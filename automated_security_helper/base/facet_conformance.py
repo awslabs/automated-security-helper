@@ -22,10 +22,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, Iterable, Mapping, Optional
 
-from automated_security_helper.base.scanner_facets import FACET_NAMES, FacetState
+from automated_security_helper.base.scanner_facets import FacetState
 
 
-def _text(value: Any) -> bool:
+def text_present(value: Any) -> bool:
+    """Whether a text column holds a value (not blank, ``[]``, ``{}`` or ``null``)."""
     return isinstance(value, str) and value.strip() not in ("", "[]", "{}", "null")
 
 
@@ -48,9 +49,9 @@ class Observation:
 
 
 FACET_COLUMNS: Mapping[str, Observation] = {
-    "rule_id": Observation(("rule_id",), _text),
-    "severity": Observation(("severity",), _text),
-    "file_path": Observation(("file_path",), _text),
+    "rule_id": Observation(("rule_id",), text_present),
+    "severity": Observation(("severity",), text_present),
+    "file_path": Observation(("file_path",), text_present),
     "line_range": Observation(
         ("line_start", "line_end"), lambda start, end: _present(start) or _present(end)
     ),
@@ -58,14 +59,14 @@ FACET_COLUMNS: Mapping[str, Observation] = {
         excluded="the flat row has no column field: the start column is read "
         "only into the finding identity, so it is observed nowhere (G10 shape)"
     ),
-    "message": Observation(("description",), _text),
-    "resource_id": Observation(("resource_id",), _text),
-    "resource_type": Observation(("resource_type",), _text),
-    "package_name": Observation(("package_name",), _text),
-    "package_version": Observation(("package_version",), _text),
-    "package_path": Observation(("package_path",), _text),
-    "taxonomy_cve": Observation(("cve_id",), _text),
-    "taxonomy_cwe": Observation(("cwe_id",), _text),
+    "message": Observation(("description",), text_present),
+    "resource_id": Observation(("resource_id",), text_present),
+    "resource_type": Observation(("resource_type",), text_present),
+    "package_name": Observation(("package_name",), text_present),
+    "package_version": Observation(("package_version",), text_present),
+    "package_path": Observation(("package_path",), text_present),
+    "taxonomy_cve": Observation(("cve_id",), text_present),
+    "taxonomy_cwe": Observation(("cwe_id",), text_present),
     # A boolean observation: the id is keyed by a scanner fingerprint.
     "fingerprints": Observation(("has_fingerprint_identity",), bool),
     # False is a written value (the adapter said "no fix"); only None is empty.
@@ -74,9 +75,9 @@ FACET_COLUMNS: Mapping[str, Observation] = {
         excluded="no flat column: remediation text lives only in the SARIF "
         "property bag (G10; add property-bag observation as its own unit)"
     ),
-    "snippet": Observation(("code_snippet",), _text),
-    "references": Observation(("references",), _text),
-    "tags": Observation(("tags",), _text),
+    "snippet": Observation(("code_snippet",), text_present),
+    "references": Observation(("references",), text_present),
+    "tags": Observation(("tags",), text_present),
     "extras": Observation(
         excluded="no flat column: extras are the property bag itself (G10; "
         "add property-bag observation as its own unit)"
@@ -105,7 +106,12 @@ class Verdict:
     detail: str
 
     def row(self) -> str:
-        counted = "no-corpus" if self.total is None else f"{self.non_null}/{self.total}"
+        if self.outcome == "excluded":
+            counted = "excluded"
+        else:
+            counted = (
+                "no-corpus" if self.total is None else f"{self.non_null}/{self.total}"
+            )
         return (
             f"{self.scanner}\t{self.facet}\t{self.state}\t{counted}\t"
             f"{self.outcome}\t{self.detail}"
@@ -198,8 +204,3 @@ def observed_counts(flats: Iterable[Any]) -> dict[str, tuple[int, int]]:
                 populated += 1
         counts[facet] = (populated, len(rows))
     return counts
-
-
-def facet_map_is_total() -> bool:
-    """Whether :data:`FACET_COLUMNS` covers exactly the facet vocabulary, in order."""
-    return list(FACET_COLUMNS) == list(FACET_NAMES)

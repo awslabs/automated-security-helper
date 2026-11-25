@@ -65,9 +65,9 @@ from automated_security_helper import plugin_modules
 from automated_security_helper.base.facet_conformance import (
     FACET_COLUMNS,
     Verdict,
-    _text,
     judge,
     observed_counts,
+    text_present,
 )
 from automated_security_helper.base.scanner_facets import (
     FACET_NAMES,
@@ -130,9 +130,10 @@ def test_the_exclusions_are_exactly_the_facets_with_no_flat_column() -> None:
 # The verdict (GC-2): a pure join of declared state and observed counts.
 # --------------------------------------------------------------------------
 
-# Verdict, judge, Observation and FACET_COLUMNS are imported from
-# base/facet_conformance.py: the harness behind `ash plugin verify` judges
-# cells with the same function, over transcripts instead of CorpusSpecs.
+# Verdict, judge, FACET_COLUMNS, observed_counts and text_present are imported from
+# base/facet_conformance.py (Observation is defined there and not imported here): the
+# harness behind `ash plugin verify` judges cells with the same function, over
+# transcripts instead of CorpusSpecs.
 
 
 # --------------------------------------------------------------------------
@@ -750,7 +751,7 @@ def test_planted_a_fixture_with_the_mapped_field_removed_is_flagged(
             for run in report.runs or []
             for r in run.results or []
         ]
-        non_null = sum(1 for f in flats if _text(f.file_path))
+        non_null = sum(1 for f in flats if text_present(f.file_path))
         verdict = judge(
             "planted", "file_path", FacetState.MAPPED, (non_null, len(flats))
         )
@@ -790,6 +791,51 @@ def test_the_transcripts_observe_exactly_what_the_corpus_table_observes(
     mine = transcripts_of(name, discover_transcript_files(_FIXTURES))
     got = transcript_frame(name, mine) if mine else None
     assert got == observed_frame(name, CORPORA.get(name))
+
+
+@pytest.mark.parametrize("cls", SCANNER_CLASSES, ids=_name)
+def test_the_current_recordings_alone_carry_every_mapped_cell(cls: type) -> None:
+    """``ash plugin verify`` judges a MAPPED cell over current recordings only, so a
+    historical recording of an older release cannot keep a cell green after the pinned
+    tool stops filling it. The shipped corpus must satisfy that stricter reading: for a
+    scanner that has a current, readable recording, every MAPPED cell is populated in
+    the current recordings alone."""
+    from automated_security_helper.core.plugin_conformance import (
+        discover_transcript_files,
+        observed_frame as transcript_frame,
+        transcripts_of,
+    )
+
+    name = _name(cls)
+    mine = transcripts_of(name, discover_transcript_files(_FIXTURES))
+    current = transcript_frame(name, mine, current_only=True)
+    if current is None:
+        return
+    declared = vars(cls).get(SCANNER_FACETS_ATTR)
+    for facet in FACET_NAMES:
+        state = getattr(declared, facet).state
+        if state is not FacetState.MAPPED:
+            continue
+        verdict = judge(name, facet, state, current.get(facet))
+        assert verdict.outcome in ("ok", "excluded"), verdict.detail
+
+
+def test_the_current_only_reading_is_not_vacuous() -> None:
+    """Some scanner has both a current and a historical recording, and some scanner has a
+    current recording that reads as results; otherwise the test above checks nothing."""
+    from automated_security_helper.core.plugin_conformance import (
+        discover_transcript_files,
+        transcripts_of,
+    )
+
+    files = discover_transcript_files(_FIXTURES)
+    mixed = [
+        _name(cls)
+        for cls in SCANNER_CLASSES
+        if {t.retention for _b, t in transcripts_of(_name(cls), files)}
+        == {"current", "historical"}
+    ]
+    assert mixed, "no scanner keeps both a current and a historical recording"
 
 
 if __name__ == "__main__":  # pragma: no cover

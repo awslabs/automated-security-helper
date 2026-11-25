@@ -23,13 +23,15 @@ remain diffable and the transcript is a small reviewable index. :func:`verify_di
 refuses a transcript whose bytes moved.
 
 ``provenance`` says how much the transcript knows. ``captured`` means the recording
-run's argv, exit code and stderr are known. ``attested`` means loose output files were
-upgraded into this format and only what the committed files and their documentation
-say is recorded: the argv, the exit code and the stderr tail are then ``None``, never
-invented. A re-record replaces an attested transcript with a captured one.
+run's argv and exit code are known (the model requires both). ``attested`` means loose
+output files were upgraded into this format and only what the committed files and their
+documentation say is recorded: the argv, the exit code and the stderr tail are whatever
+that documentation gave, and ``None`` where it gave nothing; the model does not check an
+attested transcript's argv against anything, so a reviewer reads it. A re-record replaces
+an attested transcript with a captured one.
 
-This module imports only the standard library, pydantic and the provisioning table,
-so a consumer can read a transcript without loading any plugin.
+This module imports only the standard library and pydantic, so a consumer can read a
+transcript without loading any plugin.
 """
 
 from __future__ import annotations
@@ -50,6 +52,13 @@ TRANSCRIPT_FILE_NAME = "transcripts.json"
 
 _ID = re.compile(r"[a-z0-9][a-z0-9._-]*")
 _SHA256 = re.compile(r"[0-9a-f]{64}")
+_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
+
+
+def is_sha256(value: object) -> bool:
+    """Whether *value* is a SHA-256 digest as this format spells one: 64 lower-case hex."""
+    return isinstance(value, str) and _SHA256.fullmatch(value) is not None
+
 
 ResultFormat = Literal["sarif", "json", "text", "csv"]
 Provenance = Literal["captured", "attested"]
@@ -60,13 +69,30 @@ class TranscriptSchemaError(ValueError):
     """A transcript file this code refuses to read, with the reason as prose."""
 
 
+class TranscriptRestampError(ValueError):
+    """A restamp this code refuses, with the reason as prose."""
+
+
 class _Frozen(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
 
 def _relative_posix(value: str) -> str:
-    if not value or value.startswith("/") or "\\" in value or ".." in value.split("/"):
-        raise ValueError(f"{value!r} is not a relative posix path without '..'")
+    """*value* as a normalized relative posix path: no empty, ``.`` or ``..`` segment.
+
+    ``./out.sarif`` and ``out.sarif`` name one file, and ``.`` names the transcript
+    file's own directory (whose digest could never match, since ``transcripts.json``
+    holds it), so neither spelling is accepted.
+    """
+    if (
+        not value
+        or value.startswith("/")
+        or "\\" in value
+        or any(segment in ("", ".", "..") for segment in value.split("/"))
+    ):
+        raise ValueError(
+            f"{value!r} is not a relative posix path without empty, '.' or '..' segments"
+        )
     return value
 
 
@@ -189,8 +215,22 @@ class ToolTranscript(_Frozen):
             raise ValueError(f"{value!r} is not a transcript id")
         return value
 
+    @field_validator("recorded_on")
+    @classmethod
+    def _recorded_on(cls, value: Optional[str]) -> Optional[str]:
+        if value is not None and not _DATE.fullmatch(value):
+            raise ValueError(f"recorded_on {value!r} is not YYYY-MM-DD")
+        return value
+
     @model_validator(mode="after")
     def _shape(self) -> "ToolTranscript":
+        if self.scanner in self.also_for or len(set(self.also_for)) != len(
+            self.also_for
+        ):
+            raise ValueError(
+                "also_for names other scanners, each once, and never the transcript's "
+                "own scanner"
+            )
         if (self.retention == "historical") != bool(
             self.reason and self.reason.strip()
         ):
@@ -242,7 +282,7 @@ class TranscriptFile(_Frozen):
         ids = [t.id for t in self.transcripts]
         if len(set(ids)) != len(ids):
             raise ValueError("a transcript id is used twice in one file")
-        recorded = {t.scanner for t in self.transcripts}
+        recorded = {s for t in self.transcripts for s in t.scanners}
         both = recorded & {u.scanner for u in self.unrecorded}
         if both:
             raise ValueError(
@@ -253,7 +293,13 @@ class TranscriptFile(_Frozen):
 
 def parse_transcript_file(data: Mapping[str, Any]) -> TranscriptFile:
     """Validate a transcript file read from data; a newer schema is refused in prose."""
+    if not isinstance(data, Mapping):
+        raise TranscriptSchemaError(
+            f"a transcript file is a JSON object, not {type(data).__name__}"
+        )
     declared = data.get("schema_version")
+    if isinstance(declared, str) and declared.strip().isdecimal():
+        declared = int(declared)
     if isinstance(declared, int) and declared > TRANSCRIPT_SCHEMA_VERSION:
         raise TranscriptSchemaError(
             f"this transcript file declares schema_version {declared}, but this ASH "
@@ -366,13 +412,16 @@ def stale_transcripts(
     pins its tool. A ``current`` transcript of such a scanner with no stamp is refused:
     an unstamped recording could never go stale, which is the failure the stamp exists to
     prevent. (A scanner with no pin has nothing to stamp and nothing to go stale against.)
+    An unstamped ``historical`` transcript of such a scanner is held to the one fact it
+    has: its recorded tool version must differ from the pin in force. A stamped
+    transcript of such a scanner must carry the stamp of THAT scanner's own pin.
     """
     problems: list[str] = []
+    pinned_by_scanner = pinned_scanners or {}
     for transcript in transcripts:
         stamp = transcript.pin_stamp
+        owned = [s for s in transcript.scanners if s in pinned_by_scanner]
         if stamp is None:
-            pinned_by_scanner = pinned_scanners or {}
-            owned = [s for s in transcript.scanners if s in pinned_by_scanner]
             if owned and transcript.retention == "current":
                 problems.append(
                     f"{transcript.id}: {owned[0]} pins its tool "
@@ -380,7 +429,27 @@ def stale_transcripts(
                     "no stamp; stamp it with the pin it was recorded at, or mark it "
                     "historical if the version it recorded is not the pin"
                 )
+            elif owned and transcript.retention == "historical":
+                # Unstamped, so the recorded tool version is the only evidence there
+                # is: a "historical" recording of the release in force is a current one.
+                in_force = current_pins.get(pinned_by_scanner[owned[0]])
+                if in_force is not None and same_release(
+                    transcript.tool.version, in_force
+                ):
+                    problems.append(
+                        f"{transcript.id}: marked historical but the tool version it "
+                        f"records ({transcript.tool.version}) is the pin in force "
+                        f"({in_force}); it is a current transcript"
+                    )
             continue
+        for scanner in owned:
+            if stamp.tool != pinned_by_scanner[scanner]:
+                problems.append(
+                    f"{transcript.id}: stamped with the pin of {stamp.tool!r} but "
+                    f"{scanner} pins {pinned_by_scanner[scanner]!r}; a recording "
+                    "copied from another tool's fixture never goes stale on this "
+                    "tool's pin bump, so re-record it for this scanner"
+                )
         pinned = current_pins.get(stamp.tool)
         if pinned is None:
             problems.append(
@@ -413,23 +482,56 @@ def stale_transcripts(
 
 
 def restamp(
-    transcript: ToolTranscript, current_pins: Mapping[str, str]
+    transcript: ToolTranscript,
+    current_pins: Mapping[str, str],
+    *,
+    observed_version: str,
+    results: tuple[ResultsFile, ...],
+    side_reports: Optional[tuple[ResultsFile, ...]] = None,
 ) -> ToolTranscript:
-    """The same transcript stamped with the pin now in force.
+    """The final step of a re-record: *transcript* carrying the new run's results,
+    the version the run reported, and the stamp of the pin now in force.
 
     The re-record path calls this AFTER it has run the tool and replaced the results
-    bytes, so the stamp and the bytes move together in one reviewable edit. It never
-    stamps a transcript whose bytes were not re-recorded: a stamp copied onto old
-    bytes would hide exactly the rot the stamp exists to expose.
+    bytes, passing what it recorded: *observed_version* is the version string the tool
+    printed (it goes into ``tool.version`` as printed, not as the manifest spells the
+    pin, so :func:`stale_transcripts` can still catch a run of the wrong binary) and
+    *results* are the new files' digests. Digests identical to the transcript's own mean
+    nothing was re-recorded, and the call is refused: a stamp moved onto old bytes would
+    hide exactly the rot the stamp exists to expose. A transcript with no stamp has
+    nothing to move and is returned as it is.
     """
-    if transcript.pin_stamp is None:
+    stamp = transcript.pin_stamp
+    if stamp is None:
         return transcript
-    pinned = current_pins[transcript.pin_stamp.tool]
-    return transcript.model_copy(
-        update={
-            "pin_stamp": PinStamp(tool=transcript.pin_stamp.tool, version=pinned),
-            "tool": ToolRef(name=transcript.tool.name, version=pinned),
-            "retention": "current",
-            "reason": None,
-        }
+    pinned = current_pins.get(stamp.tool)
+    if pinned is None:
+        raise TranscriptRestampError(
+            f"{transcript.id}: stamped with the pin of {stamp.tool!r}, which no "
+            "manifest pins now; there is no pin to restamp it with. Drop the stamp "
+            "with the pin, or re-record under a pin that exists"
+        )
+
+    def _digests(entries: tuple[ResultsFile, ...]) -> set[tuple[str, str]]:
+        return {(entry.path, entry.sha256) for entry in entries}
+
+    if _digests(results) == _digests(transcript.results) and (
+        side_reports is None
+        or _digests(side_reports) == _digests(transcript.side_reports)
+    ):
+        raise TranscriptRestampError(
+            f"{transcript.id}: the results digests are the ones it already records, so "
+            "nothing was re-recorded; restamp is the last step of a re-record that "
+            "replaced the bytes"
+        )
+    data = transcript.model_dump()
+    data.update(
+        pin_stamp={"tool": stamp.tool, "version": pinned},
+        tool={"name": transcript.tool.name, "version": observed_version},
+        retention="current",
+        reason=None,
+        results=[entry.model_dump() for entry in results],
     )
+    if side_reports is not None:
+        data["side_reports"] = [entry.model_dump() for entry in side_reports]
+    return ToolTranscript.model_validate(data)

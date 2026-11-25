@@ -15,10 +15,12 @@ from automated_security_helper.base.tool_transcript import (
     ToolRef,
     ToolTranscript,
     TranscriptFile,
+    TranscriptRestampError,
     TranscriptSchemaError,
     Unrecorded,
     dump_transcript_file,
     file_sha256,
+    is_sha256,
     load_transcript_file,
     parse_transcript_file,
     restamp,
@@ -88,10 +90,53 @@ def test_a_transcript_names_at_least_one_results_file_once() -> None:
         _transcript(results=(entry,), side_reports=(entry,))
 
 
-@pytest.mark.parametrize("path", ["/abs.sarif", "a/../b.sarif", "a\\b.sarif", ""])
-def test_a_results_path_is_relative_posix_without_dotdot(path: str) -> None:
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/abs.sarif",
+        "a/../b.sarif",
+        "a\\b.sarif",
+        "",
+        "./out.sarif",
+        "a/./b.sarif",
+        "a//b.sarif",
+        "dir/",
+        ".",
+    ],
+)
+def test_a_results_path_is_a_normalized_relative_posix_path(path: str) -> None:
     with pytest.raises(ValueError, match="relative posix path"):
         ResultsFile(path=path, sha256=_SHA, format="sarif")
+
+
+@pytest.mark.parametrize("path", [".", "./", "a/./b"])
+def test_a_fixture_tree_cannot_name_the_transcript_files_own_directory(
+    path: str,
+) -> None:
+    """``.`` would hash ``transcripts.json`` itself, whose digest then never matches."""
+    with pytest.raises(ValueError, match="relative posix path"):
+        FixtureTree(paths=(path,), sha256=_SHA)
+
+
+def test_recorded_on_is_a_date_when_given() -> None:
+    assert _transcript(recorded_on="2026-11-25").recorded_on == "2026-11-25"
+    for bad in ("2026-11-25T01:00:00Z", "25/11/2026", "yesterday", ""):
+        with pytest.raises(ValueError, match="YYYY-MM-DD"):
+            _transcript(recorded_on=bad)
+
+
+def test_also_for_names_other_scanners_once_each() -> None:
+    assert _transcript(also_for=("trivy-repo",)).scanners == ("gitleaks", "trivy-repo")
+    with pytest.raises(ValueError, match="never the transcript's own scanner"):
+        _transcript(also_for=("gitleaks",))
+    with pytest.raises(ValueError, match="each once"):
+        _transcript(also_for=("trivy-repo", "trivy-repo"))
+
+
+def test_is_sha256_is_sixty_four_lowercase_hex_and_nothing_else() -> None:
+    assert is_sha256("a" * 64)
+    for bad in ("A" * 64, "g" * 64, "a" * 63, "", None, 7):
+        assert not is_sha256(bad)
 
 
 def test_a_digest_is_sixty_four_lowercase_hex_digits() -> None:
@@ -112,6 +157,15 @@ def test_a_scanner_is_recorded_or_unrecorded_in_one_file_never_both() -> None:
         )
 
 
+def test_a_scanner_a_recording_also_serves_is_not_unrecorded_in_that_file() -> None:
+    shared = _transcript(scanner="trivy", also_for=("trivy-repo",))
+    with pytest.raises(ValueError, match="both recorded and listed as unrecorded"):
+        _file(
+            shared,
+            unrecorded=[Unrecorded(scanner="trivy-repo", reason="record it")],
+        )
+
+
 def test_a_transcript_id_is_unique_within_its_file() -> None:
     with pytest.raises(ValueError, match="used twice"):
         _file(_transcript(), _transcript())
@@ -125,6 +179,19 @@ def test_an_unrecorded_row_says_what_is_missing() -> None:
 def test_a_newer_schema_is_refused_in_prose_not_guessed() -> None:
     data = json.loads(dump_transcript_file(_file(_transcript())))
     data["schema_version"] = TRANSCRIPT_SCHEMA_VERSION + 1
+    with pytest.raises(TranscriptSchemaError, match="upgrade ASH to read it"):
+        parse_transcript_file(data)
+
+
+@pytest.mark.parametrize("data", [[], "text", 3, None])
+def test_a_transcript_file_that_is_not_an_object_is_refused_in_prose(data) -> None:
+    with pytest.raises(TranscriptSchemaError, match="JSON object"):
+        parse_transcript_file(data)
+
+
+def test_a_numeric_string_schema_version_gets_the_upgrade_message_too() -> None:
+    data = json.loads(dump_transcript_file(_file(_transcript())))
+    data["schema_version"] = str(TRANSCRIPT_SCHEMA_VERSION + 1)
     with pytest.raises(TranscriptSchemaError, match="upgrade ASH to read it"):
         parse_transcript_file(data)
 
@@ -255,7 +322,12 @@ def test_an_unstamped_current_transcript_of_a_pinned_scanner_is_refused() -> Non
     # a scanner with no pin has nothing to stamp
     assert stale_transcripts([unstamped], PINS, {}) == []
     # a historical one is allowed to be unstamped: it does not claim to be fresh
-    old = _transcript(pin_stamp=None, retention="historical", reason="old")
+    old = _transcript(
+        pin_stamp=None,
+        retention="historical",
+        reason="old",
+        tool=ToolRef(name="gitleaks", version="8.29.0"),
+    )
     assert stale_transcripts([old], PINS, {"gitleaks": "gitleaks"}) == []
 
 
@@ -265,20 +337,104 @@ def test_the_unstamped_rule_covers_every_scanner_a_recording_serves() -> None:
     assert len(problems) == 1 and "trivy pins its tool" in problems[0]
 
 
-def test_restamping_moves_the_stamp_and_the_tool_version_together() -> None:
-    old = _transcript(
+def test_a_stamp_naming_another_scanners_pin_never_goes_stale_so_it_is_refused() -> (
+    None
+):
+    """A gitleaks recording copied from betterleaks' fixture keeps betterleaks' stamp."""
+    pins = {"gitleaks": "v8.30.1", "betterleaks": "v1.2.3"}
+    copied = _transcript(
+        pin_stamp=PinStamp(tool="betterleaks", version="v1.2.3"),
+        tool=ToolRef(name="gitleaks", version="1.2.3"),
+    )
+    problems = stale_transcripts([copied], pins, {"gitleaks": "gitleaks"})
+    assert len(problems) == 1
+    assert (
+        "stamped with the pin of 'betterleaks' but gitleaks pins 'gitleaks'"
+        in (problems[0])
+    )
+    # the same recording, stamped with its own scanner's pin, is clean
+    assert stale_transcripts([_transcript()], pins, {"gitleaks": "gitleaks"}) == []
+    # and with no scanner pin map there is nothing to compare against
+    assert stale_transcripts([copied], pins, {}) == []
+
+
+def test_the_stamp_check_covers_every_scanner_a_recording_serves() -> None:
+    pins = {"trivy": "v0.76.2"}
+    shared = _transcript(
+        scanner="trivy",
+        also_for=("trivy-repo",),
+        pin_stamp=PinStamp(tool="trivy", version="v0.76.2"),
+        tool=ToolRef(name="trivy", version="0.76.2"),
+    )
+    assert stale_transcripts([shared], pins, {"trivy-repo": "trivy"}) == []
+    problems = stale_transcripts([shared], pins, {"trivy-repo": "other"})
+    assert len(problems) == 1 and "trivy-repo pins 'other'" in problems[0]
+
+
+def test_an_unstamped_historical_recording_of_the_pinned_release_is_a_current_one() -> (
+    None
+):
+    pinned = {"gitleaks": "gitleaks"}
+    at_pin = _transcript(pin_stamp=None, retention="historical", reason="kept")
+    problems = stale_transcripts([at_pin], PINS, pinned)
+    assert len(problems) == 1 and "it is a current transcript" in problems[0]
+    older = _transcript(
+        pin_stamp=None,
+        retention="historical",
+        reason="old",
+        tool=ToolRef(name="gitleaks", version="8.29.0"),
+    )
+    assert stale_transcripts([older], PINS, pinned) == []
+
+
+def _rerecord(name: str = "out.sarif", sha: str = "1" * 64) -> tuple[ResultsFile, ...]:
+    return (ResultsFile(path=name, sha256=sha, format="sarif"),)
+
+
+def _old_recording() -> ToolTranscript:
+    return _transcript(
         retention="historical",
         reason="old",
         pin_stamp=PinStamp(tool="gitleaks", version="v8.29.0"),
         tool=ToolRef(name="gitleaks", version="8.29.0"),
     )
-    fresh = restamp(old, PINS)
+
+
+def test_restamping_after_a_rerecord_takes_the_version_the_run_reported() -> None:
+    fresh = restamp(
+        _old_recording(), PINS, observed_version="8.30.1", results=_rerecord()
+    )
     assert fresh.retention == "current" and fresh.reason is None
     assert fresh.pin_stamp == PinStamp(tool="gitleaks", version="v8.30.1")
-    assert fresh.tool.version == "v8.30.1"
+    # the tool's own spelling, not the manifest's: the pin is "v8.30.1"
+    assert fresh.tool.version == "8.30.1"
+    assert fresh.results == _rerecord()
     assert stale_transcripts([fresh], PINS) == []
+
+
+def test_restamping_a_run_of_the_wrong_binary_still_trips_the_version_check() -> None:
+    """The stray gitleaks 8.1.0 on PATH: the stamp moves, the version it printed stays."""
+    liar = restamp(
+        _old_recording(), PINS, observed_version="8.1.0", results=_rerecord()
+    )
+    problems = stale_transcripts([liar], PINS)
+    assert len(problems) == 1 and "is not the version it is stamped with" in problems[0]
+
+
+def test_restamping_refuses_when_no_results_digest_changed() -> None:
+    old = _old_recording()
+    with pytest.raises(TranscriptRestampError, match="nothing was re-recorded"):
+        restamp(old, PINS, observed_version="8.30.1", results=old.results)
+
+
+def test_restamping_a_stamp_whose_pin_is_gone_is_a_readable_error() -> None:
+    with pytest.raises(TranscriptRestampError, match="no manifest pins now"):
+        restamp(_old_recording(), {}, observed_version="8.30.1", results=_rerecord())
 
 
 def test_restamping_an_unstamped_transcript_changes_nothing() -> None:
     unstamped = _transcript(pin_stamp=None)
-    assert restamp(unstamped, PINS) == unstamped
+    assert (
+        restamp(unstamped, PINS, observed_version="8.30.1", results=_rerecord())
+        == unstamped
+    )

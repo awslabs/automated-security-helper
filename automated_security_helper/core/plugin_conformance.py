@@ -29,20 +29,29 @@ verdict is ``fail`` if any row is red, ``pass`` only if all five are green, and
 ``incomplete`` otherwise; ``ash plugin verify`` exits 1, 0 and 3 for them. Demotion is
 the same check read the other way, so a ``supported`` scanner is verified the same way.
 
-The harness reaches a plugin only through its manifest (``resolve_ref``) and imports no
-plugin module by name, so the layer order holds. A scanner class is loaded to read its
-register rows, the way the kernel will read them.
+The harness reaches a plugin through its manifest (``resolve_ref``). The built-in
+adapter preps below name the built-in plugin modules by dotted-path STRING, resolved at
+run time, so ``core`` imports no plugin module while still depending on those paths
+existing (a manifest-named prep, which would drop that dependency, is not built yet). A
+scanner class is loaded to read its register rows, the way the kernel will read them: a
+class is judged on the rows it declares itself (``vars``), for every register, so a
+subclass that inherits a parent's row has declared nothing.
+
+A damaged recording is a red row, never a traceback: a results file whose digest fails
+is left out of what the facets are judged over, and a file or transcript that cannot be
+read or validated is named in row 1 while every other scanner and transcript is still
+judged.
 """
 
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Iterator, Mapping, Optional
+from typing import Any, Callable, Iterator, Mapping, Optional, Sequence
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from automated_security_helper.base.facet_conformance import (
     Verdict,
@@ -69,13 +78,16 @@ from automated_security_helper.base.tool_transcript import (
     TRANSCRIPT_FILE_NAME,
     ToolTranscript,
     TranscriptFile,
+    is_sha256,
     load_transcript_file,
+    parse_transcript_file,
     stale_transcripts,
     verify_digests,
 )
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 from automated_security_helper.schemas.sarif_schema_model import Result, SarifReport
 from automated_security_helper.utils.scanner_names import SCANNER_TOOL_TYPES
+from automated_security_helper.utils.scanner_tool_types import scanner_tool_type
 
 #: The exit codes of ``ash plugin verify``.
 EXIT_PASS = 0
@@ -133,6 +145,7 @@ class BarReport:
                 }
                 for row in self.rows
             ],
+            "verdicts": [asdict(verdict) for verdict in self.verdicts],
         }
 
 
@@ -142,15 +155,100 @@ class BarReport:
 
 
 def discover_transcript_files(root: Path) -> list[tuple[Path, TranscriptFile]]:
-    """Every ``transcripts.json`` under *root*, with its directory, in path order."""
+    """Every ``transcripts.json`` under *root*, with its directory, in path order.
+
+    Strict: a file that cannot be read raises. The harness itself discovers through
+    :func:`discover_transcripts`, which reports such a file instead.
+    """
     return [
         (path.parent, load_transcript_file(path))
         for path in sorted(root.rglob(TRANSCRIPT_FILE_NAME))
     ]
 
 
+def _describe(error: BaseException) -> str:
+    """One line saying what went wrong, without a pydantic dump or a traceback."""
+    if isinstance(error, ValidationError):
+        found = [
+            f"{'.'.join(str(part) for part in item['loc']) or 'file'}: {item['msg']}"
+            for item in error.errors()[:3]
+        ]
+        return "; ".join(found) or "validation failed"
+    text = str(error).strip().splitlines()
+    return f"{type(error).__name__}: {text[0]}" if text else type(error).__name__
+
+
+@dataclass(frozen=True)
+class UnreadableTranscriptFile:
+    """A ``transcripts.json`` the harness could not read, and what it could tell of it."""
+
+    problem: str
+    #: The scanners the file's raw JSON names, or None when it could not be read that
+    #: far (then every scanner is told, since it may be the one that file records).
+    scanners: Optional[frozenset[str]] = None
+
+    def concerns(self, scanner: str) -> bool:
+        return self.scanners is None or scanner in self.scanners
+
+
+@dataclass(frozen=True)
+class Discovery:
+    """What one walk of a transcript root found: the readable files, and the others."""
+
+    files: tuple[tuple[Path, TranscriptFile], ...] = ()
+    unreadable: tuple[UnreadableTranscriptFile, ...] = ()
+
+
+def _scanners_named_by(data: Any) -> Optional[frozenset[str]]:
+    if not isinstance(data, Mapping):
+        return None
+    names: set[str] = set()
+    for entry in data.get("transcripts") or ():
+        if not isinstance(entry, Mapping):
+            continue
+        if isinstance(entry.get("scanner"), str):
+            names.add(entry["scanner"])
+        also = entry.get("also_for")
+        if isinstance(also, (list, tuple)):
+            names.update(s for s in also if isinstance(s, str))
+    for entry in data.get("unrecorded") or ():
+        if isinstance(entry, Mapping) and isinstance(entry.get("scanner"), str):
+            names.add(entry["scanner"])
+    return frozenset(names)
+
+
+def discover_transcripts(root: Path) -> Discovery:
+    """Every ``transcripts.json`` under *root*: the readable ones with their directory,
+    and a description of each that is not valid JSON or not a valid transcript file
+    (a newer schema, a bad shape), so one damaged file never stops the walk."""
+    files: list[tuple[Path, TranscriptFile]] = []
+    unreadable: list[UnreadableTranscriptFile] = []
+    for path in sorted(root.rglob(TRANSCRIPT_FILE_NAME)):
+        shown = path.relative_to(root).as_posix()
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as error:
+            unreadable.append(
+                UnreadableTranscriptFile(
+                    f"{shown} cannot be read as JSON ({_describe(error)})"
+                )
+            )
+            continue
+        try:
+            files.append((path.parent, parse_transcript_file(data)))
+        except ValueError as error:
+            unreadable.append(
+                UnreadableTranscriptFile(
+                    f"{shown} is not a transcript file this ASH reads "
+                    f"({_describe(error)})",
+                    _scanners_named_by(data),
+                )
+            )
+    return Discovery(tuple(files), tuple(unreadable))
+
+
 def transcripts_of(
-    scanner: str, files: list[tuple[Path, TranscriptFile]]
+    scanner: str, files: Sequence[tuple[Path, TranscriptFile]]
 ) -> list[tuple[Path, ToolTranscript]]:
     return [
         (base, transcript)
@@ -161,7 +259,7 @@ def transcripts_of(
 
 
 def unrecorded_reasons(
-    scanner: str, files: list[tuple[Path, TranscriptFile]]
+    scanner: str, files: Sequence[tuple[Path, TranscriptFile]]
 ) -> list[str]:
     return [
         row.reason
@@ -208,7 +306,13 @@ def _prep_guarddog(
         "automated_security_helper.plugin_modules.ash_guarddog_plugins."
         "guarddog_scanner:convert_guarddog_scan_result"
     )
-    ecosystem = file.stem.split("_")[1]
+    parts = file.stem.split("_")
+    if len(parts) < 2 or not parts[1] or parts[0] not in ("scan", "verify"):
+        raise ValueError(
+            f"guarddog results file {file.name!r} is not named scan_<ecosystem>... or "
+            "verify_<ecosystem>...; the prep reads the ecosystem from the file name"
+        )
+    ecosystem = parts[1]
     if file.name.startswith("verify_"):
         # Verify mode is where the adapter writes package identity: a committed
         # verify capture is a list of {dependency, version, result} entries over
@@ -442,28 +546,99 @@ def _results_with_runs(
                     yield run, result
 
 
-def observed_frame(
-    scanner: str,
-    transcripts: list[tuple[Path, ToolTranscript]],
-    tool_type: Optional[str] = None,
-) -> Optional[dict[str, tuple[int, int]]]:
-    """Per facet ``(non_null_count, total_results)`` over the scanner's transcripts, or
-    None when none of them can be read as results (native bytes with no registered prep)."""
-    readable = [
+def _readable(
+    transcripts: Sequence[tuple[Path, ToolTranscript]],
+) -> list[tuple[Path, ToolTranscript]]:
+    """The transcripts whose results can be read as findings: observable, and either
+    SARIF as written or native bytes with an adapter prep."""
+    return [
         (base, t)
         for base, t in transcripts
         if t.observable
         and (t.adapter_prep is not None or any(r.format == "sarif" for r in t.results))
     ]
+
+
+def _flats_of(
+    scanner: str, kind: str, transcript: ToolTranscript, base: Path
+) -> list[FlatVulnerability]:
+    if transcript.adapter_prep is not None and transcript.adapter_prep not in PREPS:
+        raise ValueError(
+            f"it names adapter prep {transcript.adapter_prep!r}, which is not "
+            f"registered (registered: {', '.join(sorted(PREPS))})"
+        )
+    return [
+        FlatVulnerability.from_sarif_result(result, scanner, kind, run)
+        for run, result in _results_with_runs(transcript, base)
+    ]
+
+
+def observed_frame(
+    scanner: str,
+    transcripts: Sequence[tuple[Path, ToolTranscript]],
+    tool_type: Optional[str] = None,
+    *,
+    current_only: bool = False,
+) -> Optional[dict[str, tuple[int, int]]]:
+    """Per facet ``(non_null_count, total_results)`` over the scanner's transcripts, or
+    None when none of them can be read as results (native bytes with no registered prep).
+
+    Strict: a transcript whose results cannot be read raises. ``current_only`` leaves
+    out the ``historical`` recordings. The harness reads through
+    :func:`observe_transcripts` instead, which reports an unreadable transcript.
+    """
+    readable = _readable(
+        [(b, t) for b, t in transcripts if not current_only or t.retention == "current"]
+    )
     if not readable:
         return None
     kind = tool_type or SCANNER_TOOL_TYPES[scanner]
-    flats = [
-        FlatVulnerability.from_sarif_result(result, scanner, kind, run)
+    return observed_counts(
+        flat
         for base, transcript in readable
-        for run, result in _results_with_runs(transcript, base)
-    ]
-    return observed_counts(flats)
+        for flat in _flats_of(scanner, kind, transcript, base)
+    )
+
+
+@dataclass(frozen=True)
+class Observed:
+    """What the readable recordings of one scanner carry, and what could not be read."""
+
+    #: Facet counts over every readable transcript, or None when none could be read.
+    every: Optional[dict[str, tuple[int, int]]] = None
+    #: The same over the ``current`` transcripts only, or None when none could be read.
+    current: Optional[dict[str, tuple[int, int]]] = None
+    #: One sentence per transcript that could not be read as results.
+    problems: tuple[str, ...] = ()
+
+
+def observe_transcripts(
+    scanner: str,
+    transcripts: Sequence[tuple[Path, ToolTranscript]],
+    tool_type: str,
+) -> Observed:
+    """Like :func:`observed_frame`, but a transcript whose results cannot be read (a
+    missing or damaged file, an invalid SARIF, an unregistered prep, an adapter that
+    raises) is named in ``problems`` and left out, so one bad recording never stops the
+    others from being judged. Each transcript is read once for both frames."""
+    read: list[tuple[ToolTranscript, list[FlatVulnerability]]] = []
+    problems: list[str] = []
+    for base, transcript in _readable(transcripts):
+        try:
+            read.append((transcript, _flats_of(scanner, tool_type, transcript, base)))
+        except Exception as error:  # noqa: BLE001 - a damaged recording is a finding
+            problems.append(
+                f"{transcript.id}: its results could not be read ({_describe(error)})"
+            )
+    return Observed(
+        every=observed_counts(f for _t, flats in read for f in flats) if read else None,
+        current=observed_counts(
+            f for t, flats in read if t.retention == "current" for f in flats
+        )
+        if any(t.retention == "current" for t, _f in read)
+        else None,
+        problems=tuple(problems),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -471,28 +646,75 @@ def observed_frame(
 # ---------------------------------------------------------------------------
 
 
+class PluginLoadError(RuntimeError):
+    """A manifest's scanner entry point cannot be imported: the plugin is not
+    installed or its manifest is wrong, which is not a verdict on the promotion bar."""
+
+
 def _scanner_class(manifest: ScannerManifest) -> type:
-    return resolve_ref(manifest.entry_points.scanner)
+    try:
+        return resolve_ref(manifest.entry_points.scanner)
+    except (ImportError, AttributeError, ValueError) as error:
+        raise PluginLoadError(
+            f"{manifest.name}'s scanner entry point {manifest.entry_points.scanner!r} "
+            f"cannot be loaded ({_describe(error)})"
+        ) from error
+
+
+def _own_row(cls: type, attribute: str) -> Any:
+    """The register row *cls* declares itself, or None: one lookup rule for every
+    register (``vars``, never an inherited attribute)."""
+    return vars(cls).get(attribute)
+
+
+def _tool_type_of(name: str, cls: type, override: Optional[str]) -> Optional[str]:
+    """The scanner's tool type: the caller's override, else what its operational row
+    declares, else the shipped table or the class default, else None."""
+    if override:
+        return override
+    operational = _own_row(cls, OPERATIONAL_FACETS_ATTR)
+    declared = getattr(getattr(operational, "targets", None), "tool_type", None)
+    value = getattr(declared, "value", declared)
+    if isinstance(value, str) and value and value != "UNKNOWN":
+        return value
+    return scanner_tool_type(name)
+
+
+def _digest_problems(transcript: ToolTranscript, base: Path) -> list[str]:
+    try:
+        return verify_digests(transcript, base)
+    except OSError as error:
+        return [
+            f"{transcript.id}: the bytes it names cannot be read ({_describe(error)})"
+        ]
 
 
 def _row_facets(
     manifest: ScannerManifest,
-    files: list[tuple[Path, TranscriptFile]],
+    discovery: Discovery,
     pins: Mapping[str, str],
     tool_type: Optional[str],
 ) -> tuple[BarRow, tuple[Verdict, ...]]:
     name = manifest.name
-    problems: list[str] = []
-    mine = transcripts_of(name, files)
+    problems: list[str] = [
+        file.problem for file in discovery.unreadable if file.concerns(name)
+    ]
+    mine = transcripts_of(name, discovery.files)
     if not mine:
-        reasons = unrecorded_reasons(name, files)
+        reasons = unrecorded_reasons(name, discovery.files)
         problems.append(
             f"{name} has no recorded transcript"
             + (f" ({reasons[0]})" if reasons else "")
             + "; record one (a transcripts.json beside its fixture)"
         )
+    # A recording whose bytes failed their digest is not evidence of anything: it is
+    # named, and left out of what the facets are judged over.
+    sound: list[tuple[Path, ToolTranscript]] = []
     for base, transcript in mine:
-        problems.extend(verify_digests(transcript, base))
+        found = _digest_problems(transcript, base)
+        problems.extend(found)
+        if not found:
+            sound.append((base, transcript))
     pinned = {name: pin.tool for pin in manifest.provisioning.tool_pins[:1]}
     problems.extend(stale_transcripts((t for _base, t in mine), pins, pinned))
     if pinned and mine and not any(t.retention == "current" for _b, t in mine):
@@ -502,22 +724,44 @@ def _row_facets(
             "tool as shipped)"
         )
     verdicts: list[Verdict] = []
-    declared = vars(_scanner_class(manifest)).get(SCANNER_FACETS_ATTR)
+    cls = _scanner_class(manifest)
+    declared = _own_row(cls, SCANNER_FACETS_ATTR)
     if declared is None:
         problems.append(f"{name}'s scanner class declares no facets register row")
-    else:
-        frame = observed_frame(name, mine, tool_type) if mine else None
-        hint = (
-            f"{name}'s transcripts hold no readable results (no SARIF, no registered "
-            "adapter prep)"
-        )
-        for facet in FACET_NAMES:
-            state: FacetState = getattr(declared, facet).state
-            observed = None if frame is None else frame.get(facet)
-            verdict = judge(name, facet, state, observed, corpus_hint=hint)
-            verdicts.append(verdict)
-            if verdict.outcome == "FAIL":
-                problems.append(f"[{name}.{facet}] {verdict.detail}")
+    elif sound:
+        kind = _tool_type_of(name, cls, tool_type)
+        if kind is None:
+            problems.append(
+                f"{name}'s tool type is declared nowhere ({name}'s operational row "
+                "targets.tool_type, or the shipped scanner table); declare it so its "
+                "results can be read"
+            )
+        else:
+            observed = observe_transcripts(name, sound, kind)
+            problems.extend(observed.problems)
+            every_hint = (
+                f"{name}'s transcripts hold no readable results (no SARIF, no "
+                "registered adapter prep)"
+            )
+            current_hint = (
+                f"{name} has no current recording that can be read as results (a "
+                "mapped cell is judged over a recording of the tool as shipped, "
+                "never over a historical one)"
+            )
+            for facet in FACET_NAMES:
+                state: FacetState = getattr(declared, facet).state
+                mapped = state is FacetState.MAPPED
+                frame = observed.current if mapped else observed.every
+                verdict = judge(
+                    name,
+                    facet,
+                    state,
+                    None if frame is None else frame.get(facet),
+                    corpus_hint=current_hint if mapped else every_hint,
+                )
+                verdicts.append(verdict)
+                if verdict.outcome == "FAIL":
+                    problems.append(f"[{name}.{facet}] {verdict.detail}")
     status = RowStatus.RED if problems else RowStatus.GREEN
     return (
         BarRow(1, "facets green over committed transcripts", status, tuple(problems)),
@@ -538,6 +782,12 @@ def unconfirmed_cells(value: Any, path: str = "") -> Iterator[str]:
     elif isinstance(value, (tuple, list)):
         for index, child in enumerate(value):
             yield from unconfirmed_cells(child, f"{path}[{index}]")
+    elif isinstance(value, Mapping):
+        for key, child in value.items():
+            yield from unconfirmed_cells(child, f"{path}[{key!r}]")
+    elif isinstance(value, (set, frozenset)):
+        for index, child in enumerate(sorted(value, key=repr)):
+            yield from unconfirmed_cells(child, f"{path}{{{index}}}")
     elif isinstance(value, Enum):
         if value.value == "unconfirmed":
             yield f"{path}: unconfirmed"
@@ -545,19 +795,22 @@ def unconfirmed_cells(value: Any, path: str = "") -> Iterator[str]:
         yield f"{path}: {LICENSE_NOT_READ}"
 
 
+_ROW_OPERATIONAL = "operational declarations complete, zero unconfirmed"
+
+
 def _row_operational(manifest: ScannerManifest) -> BarRow:
-    row = getattr(_scanner_class(manifest), OPERATIONAL_FACETS_ATTR, None)
+    row = _own_row(_scanner_class(manifest), OPERATIONAL_FACETS_ATTR)
     if row is None:
         return BarRow(
             2,
-            "operational declarations complete",
+            _ROW_OPERATIONAL,
             RowStatus.RED,
             (f"{manifest.name}'s scanner class declares no operational register row",),
         )
     cells = tuple(unconfirmed_cells(row))
     return BarRow(
         2,
-        "operational declarations complete, zero unconfirmed",
+        _ROW_OPERATIONAL,
         RowStatus.RED if cells else RowStatus.GREEN,
         tuple(f"unconfirmed cell {cell}" for cell in cells),
     )
@@ -566,7 +819,7 @@ def _row_operational(manifest: ScannerManifest) -> BarRow:
 def _row_live(
     manifest: ScannerManifest, live_results: Optional[Mapping[str, bool]]
 ) -> BarRow:
-    operational = getattr(_scanner_class(manifest), OPERATIONAL_FACETS_ATTR, None)
+    operational = _own_row(_scanner_class(manifest), OPERATIONAL_FACETS_ATTR)
     required = (
         tuple(operational.platforms.provisionable)
         if operational is not None and operational.platforms.provisionable
@@ -599,7 +852,7 @@ def _row_live(
 def _row_provisioning(manifest: ScannerManifest) -> BarRow:
     name = "provisioning pinned, or user-installed with prerequisites"
     cls = _scanner_class(manifest)
-    operational = getattr(cls, OPERATIONAL_FACETS_ATTR, None)
+    operational = _own_row(cls, OPERATIONAL_FACETS_ATTR)
     if operational is None:
         return BarRow(
             4,
@@ -628,8 +881,11 @@ def _row_provisioning(manifest: ScannerManifest) -> BarRow:
             except Exception as error:  # noqa: BLE001 - reported as the finding
                 problems.append(f"{key} on {platform}: {error}")
                 continue
-            if len(asset.sha256) != 64:
-                problems.append(f"{key} on {platform} carries no SHA-256 digest")
+            if not is_sha256(getattr(asset, "sha256", None)):
+                problems.append(
+                    f"{key} on {platform} carries no SHA-256 digest (64 lower-case "
+                    "hex digits)"
+                )
         return BarRow(
             4,
             name,
@@ -669,12 +925,20 @@ def verify_plugin(
     live_results: Optional[Mapping[str, bool]] = None,
     pins: Optional[Mapping[str, str]] = None,
     tool_type: Optional[str] = None,
+    discovered: Optional[Discovery] = None,
 ) -> BarReport:
     """Evaluate the promotion bar for *manifest* over the transcripts under
-    *transcripts_root*. Runs no tool and touches no network."""
-    files = discover_transcript_files(transcripts_root)
+    *transcripts_root*. Runs no tool and touches no network.
+
+    *discovered* is a :func:`discover_transcripts` result for the root, so a run over
+    many manifests walks and parses the tree once; without one it is discovered here.
+    *tool_type* overrides the type the scanner's own declarations give.
+    """
+    found = (
+        discovered if discovered is not None else discover_transcripts(transcripts_root)
+    )
     facets_row, verdicts = _row_facets(
-        manifest, files, pins if pins is not None else tool_versions(), tool_type
+        manifest, found, pins if pins is not None else tool_versions(), tool_type
     )
     return BarReport(
         scanner=manifest.name,

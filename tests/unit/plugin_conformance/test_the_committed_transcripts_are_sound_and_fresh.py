@@ -62,9 +62,18 @@ def test_the_gate_carries_no_waiver() -> None:
     """The gate has no skip, xfail or allowlist; the only exits are re-record or a
     transcript that declares itself historical."""
     source = Path(__file__).read_text(encoding="utf-8")
-    body = source.split("def test_the_gate_carries_no_waiver")[0]
-    for needle in ("pytest." + "skip(", "pytest." + "xfail(", "mark." + "xfail"):
-        assert needle not in body, needle
+    # The needles are built by concatenation so this file does not contain them; the
+    # whole file is read, this test and every gate test after it included.
+    needles = (
+        "pytest." + "skip(",
+        "pytest." + "xfail(",
+        "pytest." + "importorskip(",
+        "importor" + "skip(",
+        "mark." + "skip",
+        "mark." + "xfail",
+    )
+    for needle in needles:
+        assert needle not in source, needle
 
 
 @pytest.mark.parametrize("item", _TRANSCRIPTS, ids=_id)
@@ -157,8 +166,10 @@ def test_the_historical_recordings_are_the_ones_older_than_their_pin() -> None:
 
 
 def test_a_transcript_file_is_found_by_its_name_alone() -> None:
-    names = {p.name for p in _ROOT.rglob("transcripts.json")}
-    assert names == {TRANSCRIPT_FILE_NAME}
+    """Discovery needs no list: every directory holding a ``transcripts.json`` is one
+    discovery returned, so a new fixture directory cannot be forgotten."""
+    on_disk = {p.parent for p in _ROOT.rglob(TRANSCRIPT_FILE_NAME)}
+    assert on_disk and on_disk == {base for base, _ in _FILES}
 
 
 def test_the_committed_files_are_in_the_canonical_text() -> None:
