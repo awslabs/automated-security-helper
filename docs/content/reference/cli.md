@@ -46,6 +46,7 @@ The Environment variable column names the variable click reads for the option; a
 | [`ash merge`](#merge) | Merges the results of a sharded scan into one unified report. |
 | [`ash plugin`](#plugin) | Manage ASH plugins |
 | [`ash plugin list`](#plugin-list) | The `plugin list` command lists what a scan with this configuration loads, on or off. |
+| [`ash plugin verify`](#plugin-verify) | The `plugin verify` command evaluates the alpha-to-supported promotion bar for scanner plugins over their manifests and their recorded tool transcripts: no tool is run and no network is touched. The five rows are the facets over the committed transcripts, the operational declarations (zero unconfirmed), the live-tool cell on every declared platform, pinned provisioning, and docs generated from the manifest. A row that cannot be evaluated here reads not-run, which is not a pass. |
 | [`ash report`](#report) | Generate a report from ASH scan results using the specified reporter plugin. |
 | [`ash scan`](#scan) | Scan code, infrastructure, secrets, and dependencies. |
 | [`ash trend`](#trend) | Show new, carried and fixed findings over a series of saved ASH scans. |
@@ -645,7 +646,7 @@ ash plugin [OPTIONS] COMMAND [ARGS]...
 
 This command takes no options.
 
-Subcommands: [`ash plugin list`](#plugin-list).
+Subcommands: [`ash plugin list`](#plugin-list), [`ash plugin verify`](#plugin-verify).
 
 ### <a id="plugin-list"></a>`ash plugin list`
 
@@ -666,6 +667,35 @@ ash plugin list [OPTIONS]
 | <a id="plugin-list--debug"></a>`--debug`, `-d` | flag | off |  | Enable debug logging |
 | <a id="plugin-list--show-versions"></a>`--show-versions` | flag | off |  | For scanners, add Version and Reachable columns reporting each scanner's detected tool version and whether its dependencies are satisfied (Yes/No/Unknown). Off by default; enabling it checks each scanner's dependencies and probes its version, which takes longer. |
 | <a id="plugin-list--color"></a>`--color` / `--no-color` | flag | on |  | Enable/disable colorized output |
+
+### <a id="plugin-verify"></a>`ash plugin verify`
+
+The `plugin verify` command evaluates the alpha-to-supported promotion bar for scanner
+plugins over their manifests and their recorded tool transcripts: no tool is run and no
+network is touched. The five rows are the facets over the committed transcripts, the
+operational declarations (zero unconfirmed), the live-tool cell on every declared
+platform, pinned provisioning, and docs generated from the manifest. A row that cannot
+be evaluated here reads not-run, which is not a pass.
+
+Exit status: 0 when every named plugin passes, 1 when any row is red, 3 when none is red
+but some row was not run, 2 for a usage error (an unknown plugin, no transcript root).
+
+```text
+ash plugin verify [OPTIONS] [names]...
+```
+
+<!-- doctest: options of=cli.plugin.verify -->
+| Argument | Type | Default | Environment variable | Description |
+|----------|------|---------|----------------------|-------------|
+| <a id="plugin-verify--arg-names"></a>`names` | text, any number | not set |  | Scanner names to verify (as in `ash plugin list`). Omit with --all. |
+
+<!-- doctest: options of=cli.plugin.verify -->
+| Option | Type | Default | Environment variable | Description |
+|--------|------|---------|----------------------|-------------|
+| <a id="plugin-verify--all"></a>`--all` | flag | off |  | Verify every scanner with a manifest. |
+| <a id="plugin-verify--transcripts-root"></a>`--transcripts-root` | path | not set |  | The directory holding the committed fixture directories (searched for transcripts.json). Defaults to tests/test_data/scanners of a source checkout. |
+| <a id="plugin-verify--live-result"></a>`--live-result` | text, repeatable | not set |  | A live-cell result CI recorded, as PLATFORM=pass or PLATFORM=fail (for example linux/amd64=pass). Without any, row 3 is not-run. |
+| <a id="plugin-verify--json"></a>`--json` | flag | off |  | Print the reports as JSON. |
 
 ## <a id="report"></a>`ash report`
 

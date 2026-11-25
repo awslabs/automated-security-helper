@@ -287,11 +287,8 @@ def dump_transcript_file(transcripts: TranscriptFile) -> str:
 
 
 def file_sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1 << 20), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+    # Committed fixture bytes, not tool log text: read whole.
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def _tree_files(base: Path, relative: str) -> list[Path]:

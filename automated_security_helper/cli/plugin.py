@@ -40,7 +40,12 @@ from automated_security_helper.plugins.loader import (
     plugin_module_fix,
     scan_plugin_filter,
 )
-from automated_security_helper.utils.console import ash_console, secho
+from automated_security_helper.utils.console import (
+    ash_console,
+    echo,
+    echo_raw,
+    secho,
+)
 from automated_security_helper.utils.error_text import error_text, text_without_values
 from automated_security_helper.utils.log import (
     escape_markup,
@@ -683,14 +688,14 @@ def verify_plugins(
             live[platform] = outcome == "pass"
     reports = [verify_plugin(m, root, live_results=live) for m in manifests]
     if as_json:
-        typer.echo(json.dumps([r.as_dict() for r in reports], indent=2))
+        echo_raw(json.dumps([r.as_dict() for r in reports], indent=2))
     else:
         for report in reports:
-            typer.echo(f"{report.scanner} ({report.tier}): {report.verdict}")
+            echo(f"{report.scanner} ({report.tier}): {report.verdict}")
             for row in report.rows:
-                typer.echo(f"  {row.number}. [{row.status.value}] {row.name}")
+                echo(f"  {row.number}. [{row.status.value}] {row.name}")
                 for detail in row.details:
-                    typer.echo(f"       - {shown_on_one_line(detail)}")
+                    echo(f"       - {shown_on_one_line(detail)}")
     codes = {r.exit_code for r in reports}
     raise typer.Exit(
         EXIT_FAIL if EXIT_FAIL in codes else EXIT_INCOMPLETE if codes - {0} else 0
