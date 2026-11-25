@@ -46,7 +46,7 @@ The Environment variable column names the variable click reads for the option; a
 | [`ash merge`](#merge) | Merges the results of a sharded scan into one unified report. |
 | [`ash plugin`](#plugin) | Manage ASH plugins |
 | [`ash plugin list`](#plugin-list) | The `plugin list` command lists what a scan with this configuration loads, on or off. |
-| [`ash plugin verify`](#plugin-verify) | The `plugin verify` command evaluates the alpha-to-supported promotion bar for scanner plugins over their manifests and their recorded tool transcripts: no tool is run and no network is touched. The five rows are the facets over the committed transcripts, the operational declarations (zero unconfirmed), the live-tool cell on every declared platform, pinned provisioning, and docs generated from the manifest. A row that cannot be evaluated here reads not-run, which is not a pass. |
+| [`ash plugin verify`](#plugin-verify) | The `plugin verify` command evaluates the alpha-to-supported promotion bar for scanner plugins. |
 | [`ash report`](#report) | Generate a report from ASH scan results using the specified reporter plugin. |
 | [`ash scan`](#scan) | Scan code, infrastructure, secrets, and dependencies. |
 | [`ash trend`](#trend) | Show new, carried and fixed findings over a series of saved ASH scans. |
@@ -671,7 +671,9 @@ ash plugin list [OPTIONS]
 ### <a id="plugin-verify"></a>`ash plugin verify`
 
 The `plugin verify` command evaluates the alpha-to-supported promotion bar for scanner
-plugins over their manifests and their recorded tool transcripts: no tool is run and no
+plugins.
+
+It reads each plugin's manifest and its recorded tool transcripts: no tool is run and no
 network is touched. The five rows are the facets over the committed transcripts, the
 operational declarations (zero unconfirmed), the live-tool cell on every declared
 platform, pinned provisioning, and docs generated from the manifest. A row that cannot

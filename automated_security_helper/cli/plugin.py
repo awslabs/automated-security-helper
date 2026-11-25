@@ -597,7 +597,9 @@ plugin_group.registered_commands.extend(plugin_app.registered_commands)
     name="verify",
     help="""
 The `plugin verify` command evaluates the alpha-to-supported promotion bar for scanner
-plugins over their manifests and their recorded tool transcripts: no tool is run and no
+plugins.
+
+It reads each plugin's manifest and its recorded tool transcripts: no tool is run and no
 network is touched. The five rows are the facets over the committed transcripts, the
 operational declarations (zero unconfirmed), the live-tool cell on every declared
 platform, pinned provisioning, and docs generated from the manifest. A row that cannot
