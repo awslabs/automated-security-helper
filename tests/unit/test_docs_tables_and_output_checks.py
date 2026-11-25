@@ -1302,7 +1302,7 @@ def test_curated_release_notes_are_historical_docs(tmp_path, file_code):
 
 CLEAN_SCANNER_TABLES = """# Scanners
 
-| What your repository has | Built-in scanners | Community plugins |
+| What your repository has | Built-in scanners | Alpha plugins |
 |---|---|---|
 | Python code | bandit, semgrep, opengrep | snyk-code |
 | Secrets, in any file | detect-secrets | ferret-scan (sensitive data), trivy-repo |
@@ -1323,7 +1323,7 @@ SCANNER_DEFECTS = [
     (
         "an invented scanner in a plain-text cell",
         (
-            "| What | Built-in scanners | Community plugins |\n|---|---|---|\n"
+            "| What | Built-in scanners | Alpha plugins |\n|---|---|---|\n"
             "| Secrets | detect-secrets, trufflehog | |\n"
         ),
         "'trufflehog' in the Built-in scanners column is not a scanner ASH ships",
@@ -1334,14 +1334,14 @@ SCANNER_DEFECTS = [
         "'gitleakz' in the Scanner column is not a scanner ASH ships",
     ),
     (
-        "a community plugin listed as built in",
+        "an alpha plugin listed as built in",
         "| What | Built-in scanners |\n|---|---|\n| Secrets | ferret-scan |\n",
-        "'ferret-scan' in the Built-in scanners column is a community plugin",
+        "'ferret-scan' in the Built-in scanners column is an alpha plugin",
     ),
     (
-        "a built-in scanner listed as a community plugin",
-        "| What | Community plugins |\n|---|---|\n| Python | bandit |\n",
-        "'bandit' in the Community plugins column is a built-in scanner",
+        "a built-in scanner listed as an alpha plugin",
+        "| What | Alpha plugins |\n|---|---|\n| Python | bandit |\n",
+        "'bandit' in the Alpha plugins column is a built-in scanner",
     ),
     (
         "an invented scanner with a word after it",

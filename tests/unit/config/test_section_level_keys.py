@@ -429,8 +429,8 @@ class TestStoredResults:
         assert located, warnings
         assert not [w for w in warnings if "severity_threshold" in w], warnings
 
-    def test_a_community_plugin_section_in_results_loads_without_warnings(self):
-        """A results file cannot know a community plugin's own config class, so
+    def test_an_alpha_plugin_section_in_results_loads_without_warnings(self):
+        """A results file cannot know an alpha plugin's own config class, so
         its section is read against the generic base, which declares only the
         shared keys. A key the plugin itself declares must not be reported as
         unknown because the stand-in does not declare it."""

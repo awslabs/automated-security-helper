@@ -1,17 +1,17 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Every `ash dependencies install --tool <community scanner>` loads that scanner's module.
+"""Every `ash dependencies install --tool <alpha scanner>` loads that scanner's module.
 
 Why this exists
 ---------------
-A community scanner (trivy-repo, snyk-code, ferret-scan, ...) is a plugin only once
+An alpha scanner (trivy-repo, snyk-code, ferret-scan, ...) is a plugin only once
 its module is listed, so `ash dependencies install --tool trivy-repo` without the
 module refuses the name and exits 2. Two CI steps once did exactly that for scanners
-that were community plugins at the time, and nothing ran them before the change
+that were alpha plugins at the time, and nothing ran them before the change
 reached CI. This reads every
 `ash dependencies install` in the workflows, composite actions and Dockerfile and
-fails if one names a community tool without loading its module, either through a
+fails if one names an alpha tool without loading its module, either through a
 `--config` whose `ash_plugin_modules` lists it or a
 `--config-overrides "ash_plugin_modules+=[...]"` that names it.
 """
@@ -23,7 +23,8 @@ from pathlib import Path
 import pytest
 import yaml
 
-from automated_security_helper.core.community_scanners import community_module_for
+from automated_security_helper.config.plugin_module_trust import off_host_package
+from automated_security_helper.core.alpha_scanners import alpha_module_for
 
 pytestmark = pytest.mark.unit
 
@@ -60,8 +61,20 @@ def _install_commands(script: str):
 
 
 def _config_modules(path: str) -> "set[str]":
+    """The modules a repo-relative config loads at run time.
+
+    ``plugin_module_trust`` drops an off-host package (``ash_snyk_plugins``,
+    ``ash_aws_plugins``) that a config file inside the checkout lists, so the command
+    exits 2 for it; only the ``--ash-plugin-modules`` and ``--config-overrides``
+    flags can load one. Counting those entries as loaded would pass the very
+    command this check exists to catch.
+    """
     doc = yaml.safe_load((REPO_ROOT / path).read_text(encoding="utf-8")) or {}
-    return set(doc.get("ash_plugin_modules") or [])
+    return {
+        module
+        for module in doc.get("ash_plugin_modules") or []
+        if off_host_package(module) is None
+    }
 
 
 def problems_in(command: str) -> "list[str]":
@@ -83,13 +96,13 @@ def problems_in(command: str) -> "list[str]":
             loaded.add(value)
     found = []
     for tool in tools:
-        module = community_module_for(tool)
+        module = alpha_module_for(tool)
         if module and module not in loaded:
             found.append(f"--tool {tool} without {module}")
     return found
 
 
-def test_every_community_tool_install_loads_its_module():
+def test_every_alpha_tool_install_loads_its_module():
     problems = [
         f"{where}: {p}"
         for where, script in _scripts()
@@ -100,19 +113,19 @@ def test_every_community_tool_install_loads_its_module():
 
 
 def test_the_scan_finds_the_installs_it_is_meant_to_check():
-    """Control: the walk sees the CI install that names a community tool."""
+    """Control: the walk sees the CI install that names an alpha tool."""
     named = [
         command
         for _, script in _scripts()
         for command in _install_commands(script)
         if "--tool trivy-repo" in command
     ]
-    assert named, "no CI install of a community tool found; the check is vacuous"
+    assert named, "no CI install of an alpha tool found; the check is vacuous"
 
 
 _TRIVY = "automated_security_helper.plugin_modules.ash_trivy_plugins"
 _SNYK = "automated_security_helper.plugin_modules.ash_snyk_plugins"
-_COMMUNITY = "--config .ash/.ash_community_plugins.yaml"
+_ALPHA = "--config .ash/.ash_alpha_plugins.yaml"
 
 
 @pytest.mark.parametrize(
@@ -120,7 +133,7 @@ _COMMUNITY = "--config .ash/.ash_community_plugins.yaml"
     [
         ("ash dependencies install --tool trivy-repo", True),
         ("ash dependencies install --tool gitleaks", False),
-        (f"ash dependencies install {_COMMUNITY} --tool trivy-repo", False),
+        (f"ash dependencies install {_ALPHA} --tool trivy-repo", False),
         (
             f'ash dependencies install --config-overrides "ash_plugin_modules+=[{_TRIVY}]" --tool trivy-repo',
             False,
@@ -133,3 +146,18 @@ _COMMUNITY = "--config .ash/.ash_community_plugins.yaml"
 )
 def test_the_check_itself(command, bad):
     assert bool(problems_in(command)) is bad
+
+
+def test_a_repo_config_cannot_load_an_off_host_module(tmp_path, monkeypatch):
+    """A config in the checkout that lists snyk does not load it, so the command is bad.
+
+    Control: the same tool with the module on ``--ash-plugin-modules`` is fine.
+    """
+    config = tmp_path / "cfg.yaml"
+    config.write_text(f"ash_plugin_modules:\n  - {_SNYK}\n", encoding="utf-8")
+    monkeypatch.setattr(f"{__name__}.REPO_ROOT", tmp_path)
+    assert problems_in("ash dependencies install --config cfg.yaml --tool snyk-code")
+    assert not problems_in(
+        f"ash dependencies install --config cfg.yaml --ash-plugin-modules {_SNYK}"
+        " --tool snyk-code"
+    )

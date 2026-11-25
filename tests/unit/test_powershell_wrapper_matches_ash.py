@@ -3199,7 +3199,7 @@ def test_the_ci_powershell_step_names_only_declared_parameters(tmp_path):
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("config_file", ["default", "community"])
+@pytest.mark.parametrize("config_file", ["default", "alpha"])
 def test_the_ci_powershell_step_reaches_the_container_as_written(tmp_path, config_file):
     # The step dot-sources ./utils/ash_helpers.ps1 and scans $PWD, so it runs here in a
     # scratch directory holding a copy of the wrapper and a Dockerfile for it to name,
@@ -3227,8 +3227,8 @@ def test_the_ci_powershell_step_reaches_the_container_as_written(tmp_path, confi
     run = _run_call(result, _calls(tmp_path))
     assert run[0] == "docker", run
     inner = _inner_ash_args(run)
-    if config_file == "community":
-        assert inner[inner.index("--config") + 1] == ".ash/.ash_community_plugins.yaml"
+    if config_file == "alpha":
+        assert inner[inner.index("--config") + 1] == ".ash/.ash_alpha_plugins.yaml"
     else:
         assert "--config" not in inner, inner
 

@@ -1,10 +1,10 @@
-# Betterleaks (community plugin)
+# Betterleaks (alpha plugin)
 
 [Betterleaks](https://github.com/betterleaks/betterleaks) finds secrets in files. It is the successor to gitleaks, written by gitleaks' author, and takes the same flags for everything ASH uses. ASH runs it as `betterleaks dir` over the scan target: the files as they are on disk, not git history, which is what ASH's builtin gitleaks and detect-secrets scanners read too. ASH pins the 1.x line (v1.10.1); the 2.0 release candidates are not used.
 
 ## Enabling it
 
-Betterleaks is a community plugin that ships with ASH. Its plugin module is loaded only when you list it, so an `ash scan` that does not list it is unchanged: no row in the results, the summary, the reports or the SARIF.
+Betterleaks is an alpha plugin that ships with ASH. Its plugin module is loaded only when you list it, so an `ash scan` that does not list it is unchanged: no row in the results, the summary, the reports or the SARIF.
 
 ```yaml
 # .ash/.ash.yaml

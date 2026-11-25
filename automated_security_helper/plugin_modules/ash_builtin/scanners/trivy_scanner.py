@@ -5,7 +5,7 @@
 
 What it runs
 ------------
-``trivy fs`` over each scan target, SARIF out. ``fs`` rather than the community
+``trivy fs`` over each scan target, SARIF out. ``fs`` rather than the alpha
 plugin's ``repository``: ASH hands every scanner a directory, and ``fs`` is trivy's
 command for a local directory (the converted target, for one, is never a git
 checkout).
