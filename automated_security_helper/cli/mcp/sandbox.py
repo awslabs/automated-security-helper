@@ -115,6 +115,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePath
 from typing import Any, Callable, List, Optional, Tuple
 
+from automated_security_helper.core.enums import DEFAULT_TRANSPORT, Transport
 from automated_security_helper.core.resource_management.error_handling import (
     ErrorCategory,
 )
@@ -169,10 +170,10 @@ CONFIG_DIR_NAME = "config"
 CLIENT_CONFIG_DIR_NAME = "client-config"
 
 #: Transports that carry callers the server does not otherwise trust.
-_NETWORKED_TRANSPORTS = frozenset({"streamable-http", "sse"})
+_NETWORKED_TRANSPORTS = frozenset(t for t in Transport if t.is_networked)
 
 #: Every value ``ASH_MCP_TRANSPORT`` may hold, once stripped and lower-cased.
-KNOWN_TRANSPORTS = frozenset({"stdio"}) | _NETWORKED_TRANSPORTS
+KNOWN_TRANSPORTS = frozenset(Transport)
 
 #: Which transport this process serves. Held in the environment rather than in a
 #: module global, for two reasons that a global got wrong.
@@ -192,11 +193,10 @@ KNOWN_TRANSPORTS = frozenset({"stdio"}) | _NETWORKED_TRANSPORTS
 #: different mechanism from them.
 ASH_MCP_TRANSPORT_ENV = "ASH_MCP_TRANSPORT"
 
-#: What an unset ``ASH_MCP_TRANSPORT`` means. stdio, deliberately, so that
-#: importing this module cannot tighten behavior for an in-process caller that is
-#: not a server at all -- a unit test, or a library consumer calling the tool
-#: functions directly.
-DEFAULT_TRANSPORT = "stdio"
+#: What an unset ``ASH_MCP_TRANSPORT`` means (``DEFAULT_TRANSPORT``, imported from
+#: ``core.enums``). stdio, deliberately, so that importing this module cannot
+#: tighten behavior for an in-process caller that is not a server at all -- a unit
+#: test, or a library consumer calling the tool functions directly.
 
 
 def set_server_transport(name: str) -> None:
@@ -205,7 +205,7 @@ def set_server_transport(name: str) -> None:
     Called once from ``mcp_command`` before the server starts serving.
     """
 
-    set_environ(ASH_MCP_TRANSPORT_ENV, name)
+    set_environ(ASH_MCP_TRANSPORT_ENV, str(name))
 
 
 def get_server_transport() -> str:
@@ -216,7 +216,7 @@ def get_server_transport() -> str:
     """
 
     return (os.environ.get(ASH_MCP_TRANSPORT_ENV) or "").strip().lower() or (
-        DEFAULT_TRANSPORT
+        DEFAULT_TRANSPORT.value
     )
 
 
@@ -231,13 +231,13 @@ def transport_is_networked() -> bool:
     (:func:`unknown_transport_override`).
     """
 
-    return get_server_transport() != DEFAULT_TRANSPORT
+    return Transport.parse(get_server_transport()) is not DEFAULT_TRANSPORT
 
 
 def unknown_transport_override() -> Optional[str]:
     """The raw ``ASH_MCP_TRANSPORT`` value when it names no known transport."""
 
-    if get_server_transport() in KNOWN_TRANSPORTS:
+    if Transport.parse(get_server_transport()) in KNOWN_TRANSPORTS:
         return None
     return os.environ.get(ASH_MCP_TRANSPORT_ENV)
 
