@@ -124,7 +124,9 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Level,
     Location,
     Message,
+    Message1,
     PhysicalLocation,
+    PhysicalLocation2,
     PropertyBag,
     Region,
     Result,
@@ -1004,14 +1006,16 @@ class McpConfigScanner(ScannerPluginBase[McpConfigScannerConfig]):
             ruleId=finding.rule_id,
             level=_LEVEL_BY_SEVERITY[severity],
             kind=Kind.fail,
-            message=Message(text=finding.message),
+            message=Message(root=Message1(text=finding.message)),
             properties=properties,
             locations=[
                 Location(
                     id=1,
                     physicalLocation=PhysicalLocation(
-                        artifactLocation=ArtifactLocation(uri=entry.source_file),
-                        region=region,
+                        root=PhysicalLocation2(
+                            artifactLocation=ArtifactLocation(uri=entry.source_file),
+                            region=region,
+                        )
                     ),
                 )
             ],
