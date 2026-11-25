@@ -418,6 +418,9 @@ class PsalmScanner(ScannerPluginBase[PsalmScannerConfig]):
             for relative in inside:
                 if relative is not None:
                     ignored.append(Path(os.path.normpath(root / relative)))
+        # Psalm analyzes ``.php`` only unless ``fileExtensions`` says otherwise, so
+        # the suffixes this plugin promises (and ``_has_php`` looks for) are named.
+        # They are PHP files: no custom scanner or checker is given.
         lines = [
             '<?xml version="1.0"?>',
             '<psalm errorLevel="1" runTaintAnalysis="true">',
@@ -431,7 +434,9 @@ class PsalmScanner(ScannerPluginBase[PsalmScannerConfig]):
             if text not in seen:
                 seen.add(text)
                 lines.append(f"      <directory name={quoteattr(text)} />")
-        lines += ["    </ignoreFiles>", "  </projectFiles>", "</psalm>", ""]
+        lines += ["    </ignoreFiles>", "  </projectFiles>", "  <fileExtensions>"]
+        lines += [f"    <extension name={quoteattr(s)} />" for s in PHP_SUFFIXES]
+        lines += ["  </fileExtensions>", "</psalm>", ""]
         return "\n".join(lines)
 
     def _write_config(self, target: Path, config_dir: Path) -> Path:
@@ -476,10 +481,8 @@ class PsalmScanner(ScannerPluginBase[PsalmScannerConfig]):
         """
         if self.results_dir is None:
             raise ScannerError("PsalmScanner has no results directory")
-        # The executor runs this instance over the source and then the converted
-        # target and keeps the worst exit code; a failed first run must not fail the
-        # second.
-        self.exit_code = 0
+        # (``scan()`` resets ``exit_code`` per target, so a failed first run cannot
+        # fail the converted-target run.)
         base = Path(self.results_dir).absolute() / target_type
         results_file = base / "psalm.sarif"
         results_file.parent.mkdir(exist_ok=True, parents=True)
@@ -531,8 +534,15 @@ class PsalmScanner(ScannerPluginBase[PsalmScannerConfig]):
 
     def _relative_uri(self, uri: str, target: Path) -> str:
         """Make a report path source-relative when Psalm wrote it absolute."""
-        root = self._scan_root(target).as_posix().rstrip("/") + "/"
-        return uri.removeprefix(root)
+        # Psalm resolves the config's directory names with realpath, so for a target
+        # reached through a symlink it writes the resolved path, not the one ASH
+        # passed. Both spellings of the root are stripped.
+        absolute = self._scan_root(target)
+        for root in (absolute, absolute.resolve()):
+            prefix = root.as_posix().rstrip("/") + "/"
+            if uri.startswith(prefix):
+                return uri.removeprefix(prefix)
+        return uri
 
     def _post_process_sarif(
         self,

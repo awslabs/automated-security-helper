@@ -296,6 +296,17 @@ class TestInvocation:
         assert f'<directory name="{tree.absolute().as_posix()}" />' in xml
         assert f"{tree.absolute().as_posix()}/vendor" in xml
 
+    def test_the_config_names_every_suffix_the_plugin_promises(
+        self, tree, tmp_path, on_path, monkeypatch
+    ):
+        # Psalm analyzes .php only by default; .phtml and .inc need fileExtensions.
+        scanner = _scanner(tree, tmp_path)
+        fake = FakePsalm()
+        _run(scanner, fake, monkeypatch)
+        xml = Path(_flag(fake.argv, "--config=")).read_text(encoding="utf-8")
+        for suffix in ps.PHP_SUFFIXES:
+            assert f'<extension name="{suffix}" />' in xml
+
     def test_a_psalm_xml_in_the_tree_is_not_what_is_passed(
         self, tree, tmp_path, on_path, monkeypatch
     ):
@@ -326,6 +337,20 @@ class TestInvocation:
 
 
 class TestReport:
+    def test_paths_are_source_relative_when_the_target_is_reached_by_a_symlink(
+        self, tree, tmp_path, on_path, monkeypatch
+    ):
+        # Psalm realpaths the config's directory names, so it writes the resolved
+        # root even though ASH passed the symlinked one.
+        link = tmp_path / "link"
+        link.symlink_to(tree, target_is_directory=True)
+        resolved = tree.resolve().as_posix()
+        sarif = POSITIVE.replace(TREE_ROOT_PLACEHOLDER, resolved)
+        report = _run(
+            _scanner(link, tmp_path), FakePsalm(sarif_text=sarif), monkeypatch
+        )
+        assert _findings(report) == POSITIVE_EXPECTED
+
     def test_taint_findings_are_rated_and_located(
         self, tree, tmp_path, on_path, monkeypatch
     ):
