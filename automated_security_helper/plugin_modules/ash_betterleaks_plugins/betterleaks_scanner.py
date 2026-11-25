@@ -395,7 +395,8 @@ class BetterleaksScanner(ScannerPluginBase[BetterleaksScannerConfig]):
             "email, date, commitMessage)",
             reason="dir mode emits empty-string git metadata, which "
             "_post_process_sarif drops because an empty fingerprint is "
-            "identical across every result; git-mode values pass through",
+            "identical across every result; ASH runs only the dir subcommand, "
+            "so no git metadata is ever kept",
         ),
         fix_available=FacetDecl(
             state=FacetState.NA,
@@ -408,7 +409,7 @@ class BetterleaksScanner(ScannerPluginBase[BetterleaksScannerConfig]):
         snippet=FacetDecl(
             state=FacetState.MAPPED,
             native_field="region.snippet.text, forced to REDACTED by "
-            "_post_process_sarif",
+            "--redact=100 and again by _post_process_sarif",
         ),
         references=FacetDecl(
             state=FacetState.NA,

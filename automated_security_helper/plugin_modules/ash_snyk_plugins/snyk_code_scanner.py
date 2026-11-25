@@ -484,8 +484,12 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
         ),
         extras=FacetDecl(
             state=FacetState.MAPPED,
-            native_field="result and rule properties bags, passed through the "
-            "SARIF model untouched",
+            native_field="result properties bag, passed through the SARIF model "
+            "untouched and read whole into the flat properties",
+            reason="the rule properties bag survives the SARIF model but the "
+            "flat reader takes only the rule's tags and helpUri from the "
+            "rule, so rule-bag keys (cwe, isAutofixable, exampleCommitFixes) "
+            "reach the flat row only through the cells above that name them",
         ),
     )
 
