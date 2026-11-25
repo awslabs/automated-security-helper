@@ -1209,6 +1209,23 @@ SOFTWARE.
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Engine delegation">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#tag-only-references-and-their-digest" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tag-only references and their digest
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1238,6 +1255,17 @@ SOFTWARE.
     <span class="md-ellipsis">
       
         Tests never pull
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#limits-that-remain" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Limits that remain
       
     </span>
   </a>
@@ -3598,6 +3626,23 @@ SOFTWARE.
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Engine delegation">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#tag-only-references-and-their-digest" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tag-only references and their digest
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -3627,6 +3672,17 @@ SOFTWARE.
     <span class="md-ellipsis">
       
         Tests never pull
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#limits-that-remain" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Limits that remain
       
     </span>
   </a>
@@ -3743,16 +3799,42 @@ scan, <code>--use-existing</code>, <code>--changed-files-only</code> or a shard 
 image presents none of), so asking for the convert phase alone is refused. The scan
 records the image, not the directory it was started from, as its scan source, and does
 not walk that directory.</p>
+<p><code>--changed-files-only</code> scopes a scan by git history, and an image has no diff base, so it
+means nothing there. It is not refused: ASH warns once that it has no meaning for an image
+scan and scans the whole image.</p>
+<p><strong>One subject per scan, several scans per call.</strong> A scan reports on one asset, and each
+image keeps its own report, its own identity scope and its own exit code. To scan several
+images in one call, repeat <code>--image</code> or give a comma-separated list (the two forms mix):</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>ash<span class="w"> </span>scan<span class="w"> </span>--image<span class="w"> </span>registry.example.com/team/app:1.2.3<span class="w"> </span>--image<span class="w"> </span>registry.example.com/team/db:4.5
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>ash<span class="w"> </span>scan<span class="w"> </span>--image<span class="w"> </span>registry.example.com/team/app:1.2.3,registry.example.com/team/db:4.5
+</span></code></pre></div>
+<p>ASH then runs one single-image scan per reference, in the order given, each in its own
+report directory under <code>--output-dir</code> named <code>&lt;NN&gt;-&lt;name&gt;-&lt;8 hex of the reference's hash&gt;</code>
+(for example <code>01-registry.example.com-team-app-1.2.3-3fa9c0de</code>). The reports are not
+merged, so no finding of one image can be attributed to another. The call's exit code is
+the worst of the per-image codes, worst first: 5, 3, 4, 1, 2, 0. A 3 or a 5 (a refused
+configuration, a missing required scanner) does not depend on which image is scanned, so
+it ends the batch at once and the images after it are reported as not scanned. Any other
+failure is recorded and the next image still runs. <code>--image-archive</code> and <code>--image-layout</code>
+name one payload each and cannot be repeated, and a list with an empty or repeated entry is refused before anything runs.</p>
+<p><code>--baseline</code> is refused with an image. A baseline compares findings against a stored
+scan of one scanned directory, keyed on that directory's relative path; an image has no
+such directory, and its finding ids carry the image digest, so a baseline taken against
+one build of an image would match nothing of the next and the "moved" pairing would pair
+unrelated findings. Compare two images by diffing their reports instead.</p>
 <h2 id="which-scanners-look-at-the-image">Which scanners look at the image<a class="headerlink" href="#which-scanners-look-at-the-image" title="Permanent link">&para;</a></h2>
 <p>Capability lives in one place: a scanner's operational-facets register row. A scanner
 serves container images exactly when its row declares the <code>container_image</code> target
 kind; every other scanner -- and every third-party plugin that predates the register --
 is reported <strong>SKIPPED</strong> for an image scan, with a row naming the declaration, before
-its tool or dependencies are ever probed. A filesystem-only scanner whose constructor
-raises is SKIPPED the same way. A module that fails to import is still reported as an
-error, because without the class ASH cannot tell whether it would have read the image.
-An image scan's report therefore says which scanners did not look, rather than looking
-clean.</p>
+its tool or dependencies are ever probed. A scanner that is <em>selected</em> but cannot be
+built is an <strong>ERROR</strong> row with the reason, on an image scan and on a directory scan
+alike: a module that fails to import, and a scanner whose constructor raises. For a
+scanner that does not serve images the row adds that this image scan lost none of its
+image coverage; a reason never hides a scanner that is missing. A scanner that was
+excluded, left out of an allowlist or disabled is still SKIPPED, because nothing
+selected it. An image scan's report therefore says which scanners did not look, rather
+than looking clean.</p>
 <p>When <em>nothing</em> scanned the image -- no selected scanner declares the kind, or
 no engine is present on an offline host -- the report carries one
 informational SARIF result (<code>kind=informational</code>, <code>level=note</code>, rule
@@ -3770,6 +3852,31 @@ is skipped as described above. The direct-payload shapes (<code>--image-archive<
 <code>--image-layout</code>, and the MCP archive upload) need no engine and no network at all,
 which is what air-gapped hosts use.</p>
 <p>containerd is reached only through a tool's own options and is never probed by ASH.</p>
+<p>trivy reads a reference or a saved archive, not an OCI layout directory, so for
+<code>--image-layout</code> ASH re-packs the layout as a docker-archive tarball in a temporary file
+of the scan's own, in pure Python, and gives trivy that archive. The layout is only read.
+A layout whose layers are compressed any way but gzip is reported with the layer named.</p>
+<h3 id="tag-only-references-and-their-digest">Tag-only references and their digest<a class="headerlink" href="#tag-only-references-and-their-digest" title="Permanent link">&para;</a></h3>
+<p>A reference that already carries its digest (<code>repo@sha256:...</code>) needs no lookup. For a
+tag-only reference (<code>repo:tag</code>) ASH resolves the digest once at scan start, trying two
+rungs in order and stopping at the first that answers:</p>
+<ol>
+<li><strong>The local engine.</strong> ASH asks the detected docker or podman daemon, over its unix
+   socket, for the image's inspect record and takes the <code>RepoDigests</code> entry of the
+   reference's own repository (Docker Hub names are normalized), else the image ID. This
+   works offline and fetches nothing, but only for an image the engine already holds.</li>
+<li><strong>The registry.</strong> <code>crane digest &lt;ref&gt;</code>, a registry request for the manifest's digest
+   that needs no engine and fetches no layer. <code>crane</code> is a pinned tool like grype, and
+   the container image carries it. It is skipped when ASH is offline (<code>--offline</code>,
+   <code>ASH_OFFLINE</code>) or <code>crane</code> is not installed.</li>
+</ol>
+<p>The digest is recorded for the scan, so finding ids and the scan's identity scope key on
+it, and one log line names the rung that answered. Ids stay the same when the tag is moved
+to another name and change when the tag moves to a different image; a re-tagged image
+therefore never archives or overwrites the findings of the image it replaced. Only when
+every rung fails do the ids and the scope key on the reference text; ASH then logs one
+warning that lists why each rung failed, and the scan itself is never failed or skipped by
+it. A reference that begins with <code>-</code> is refused before any rung runs.</p>
 <h2 id="over-the-mcp-server">Over the MCP server<a class="headerlink" href="#over-the-mcp-server" title="Permanent link">&para;</a></h2>
 <p>The MCP server carries both shapes beside its git and zip channels:</p>
 <ul>
@@ -3802,11 +3909,11 @@ as written. Three attribution columns say which image it came from:</p>
 </tr>
 <tr>
 <td><code>image_digest</code></td>
-<td>The image's sha256 digest, when there is one: the tool's own run output (trivy records the image ID), else the digest a pinned reference (<code>repo@sha256:...</code>) states. A tag-only reference scanned by a tool that reports no digest (grype, syft) has none.</td>
+<td>The image's sha256 digest, when there is one: the tool's own run output (trivy records the image ID), else the digest the lookup ladder resolved for a tag-only reference (the local engine, then <code>crane digest</code>; see above), else the digest a pinned reference (<code>repo@sha256:...</code>) states. Empty only when every rung failed.</td>
 </tr>
 <tr>
 <td><code>layer_digest</code></td>
-<td>The layer that introduced the finding, for a scanner that reports one. Attribution only.</td>
+<td>The digest of the layer the finding comes from, for trivy findings. trivy's SARIF carries no layer data, so ASH runs trivy once more with JSON output, joins each result to the SARIF by finding (vulnerability: CVE and package; secret: rule, target and start line; misconfiguration: check ID and target), and writes the layer's <code>Digest</code>, else its <code>DiffID</code>. A finding two layers both report, or one the JSON pass cannot match, stays empty. If the second pass fails the scan still succeeds with the column empty. syft reports no findings and grype's output has no layer data, so their findings carry none. Attribution only.</td>
 </tr>
 </tbody>
 </table>
@@ -3819,19 +3926,78 @@ the same path. The layer digest is not part of the id: a rebuilt layer that stil
 carries the same vulnerable file at the same path is the same finding.</p>
 <p>To scope a suppression to one image, add <code>image</code>, a case-insensitive glob matched
 against the submitted reference and the resolved digest:</p>
-<div class="language-yaml highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nt">global_settings</span><span class="p">:</span>
-</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span><span class="nt">suppressions</span><span class="p">:</span>
-</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/usr/lib/**</span>
-</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">      </span><span class="nt">rule_id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">CVE-2024-*</span>
-</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">      </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">registry.example.com/team/app:*</span>
-</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="w">      </span><span class="nt">reason</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Base image CVE, fixed in the next rebuild</span>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nt">global_settings</span><span class="p">:</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span><span class="nt">suppressions</span><span class="p">:</span>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/usr/lib/**</span>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">      </span><span class="nt">rule_id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">CVE-2024-*</span>
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">      </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">registry.example.com/team/app:*</span>
+</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">      </span><span class="nt">reason</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Base image CVE, fixed in the next rebuild</span>
 </span></code></pre></div>
 <p>A suppression without <code>image</code> applies to any finding, image or filesystem, as before.
-One with <code>image</code> never applies to a filesystem finding. <code>ignore_paths</code> and
-<code>--changed-files-only</code> stay filesystem-only: there is no directory walk inside an image.</p>
+One with <code>image</code> never applies to a filesystem finding.</p>
+<p><code>ignore_paths</code> filters image findings by the in-image path, through the same matcher as a
+directory scan and after the scan, like a suppression: an entry names the path as the tool
+reports it, leading slash included (<code>/usr/share/doc/</code>), and a finding whose every location
+is under one is dropped. The directory the scan was started from only anchors it, so no
+path is read relative to it. That filter always runs. Where the tool can also be told to
+skip the path, ASH passes it as well, so the tool does less work:</p>
+<table>
+<thead>
+<tr>
+<th>Tool</th>
+<th>What ASH passes</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>trivy</td>
+<td><code>trivy --skip-files &lt;glob&gt;</code> per entry</td>
+<td>Measured on trivy 0.76.2: <code>trivy --skip-dirs</code> removed nothing from an image scan in any spelling, so it is not used. A path with no glob becomes the path and <code>&lt;path&gt;/**</code>.</td>
+</tr>
+<tr>
+<td>grype</td>
+<td><code>--exclude &lt;glob&gt;</code> per entry</td>
+<td>Absolute in-image globs only; the <code>./</code> spelling matches nothing.</td>
+</tr>
+<tr>
+<td>syft</td>
+<td><code>--exclude &lt;glob&gt;</code> per entry</td>
+<td>Same rule as grype.</td>
+</tr>
+</tbody>
+</table>
+<p>Only an entry that starts with <code>/</code> or <code>**</code> is translated. A relative pattern, a glob that
+ends in <code>/</code>, a pattern that names no path, and one holding a newline, carriage return or
+NUL are left to the report filter alone, and ASH logs one line saying so; at most 200
+globs are passed to a tool. <code>--changed-files-only</code> has no meaning for an image and is
+warned about once, as above. The convert phase stays filesystem-only.</p>
 <h2 id="tests-never-pull">Tests never pull<a class="headerlink" href="#tests-never-pull" title="Permanent link">&para;</a></h2>
-<p>ASH's own test fixtures build OCI layout directories from scratch; no third-party
-image is pulled by a test, and no engine is required for CI.</p>
+<p>ASH's own test fixtures build OCI layout directories and a small saved-image archive from
+scratch; no third-party image is pulled by a test, and no engine is required for CI. One
+integration test runs the real trivy over that committed archive, and over the same image
+re-packed as an OCI layout, and checks that it finds the token the image holds; further
+integration tests run the real trivy and syft over it for layer digests and ignore paths,
+and the digest ladder against a real unix-socket daemon.</p>
+<p>One CI job (<code>ash-image-scan-live-engine.yml</code>) covers the live engine and registry. It
+builds a small image, pushes it to a local registry container (both base and registry
+images pinned by digest from the public.ecr.aws gallery), scans it by tag, and requires
+the report's scope to key on the digest the registry holds: once while the engine holds
+the image (the engine rung) and once after the image is removed from the engine (the
+registry rung).</p>
+<h2 id="limits-that-remain">Limits that remain<a class="headerlink" href="#limits-that-remain" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Only grype, syft and trivy read images. Every other scanner is filesystem-only and is
+  reported SKIPPED for an image scan.</li>
+<li><code>layer_digest</code> is filled for trivy findings only.</li>
+<li><code>--baseline</code>, shards, <code>--staged</code> and convert-only are refused with an image, as above.</li>
+<li>Ignore paths reach the tools as absolute in-image globs only; relative patterns and
+  globs ending in <code>/</code> are applied by the report filter after the scan, and trivy gets
+  <code>trivy --skip-files</code> only because <code>trivy --skip-dirs</code> has no effect on images.</li>
+<li>The engine rung needs a docker or podman daemon socket; containerd is never probed.</li>
+<li>The live-engine CI job exercises docker on a Linux runner; podman and other platforms
+  rely on unit tests and the unix-socket fake daemon.</li>
+</ul>
 
 
 
