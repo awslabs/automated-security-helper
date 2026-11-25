@@ -32,6 +32,7 @@ from automated_security_helper.models.frame_model import (
     OverflowNullable,
     Position,
     RankEncoded,
+    Ranked,
     RawText,
     WireText,
     assert_accounted,
@@ -42,6 +43,7 @@ from automated_security_helper.models.frame_model import (
     unaccounted,
 )
 from automated_security_helper.models.core import AshSuppression
+from automated_security_helper.utils.finding_diff import SIDE_SPEC, _side
 from automated_security_helper.utils.finding_identity import identity_frame_spec
 from automated_security_helper.utils.frame_text import unwire, wire
 from automated_security_helper.utils.suppression_frame import (
@@ -59,6 +61,7 @@ pytestmark = pytest.mark.unit
 FRAME_SPECS: Dict[str, Tuple[FrameSpec, Callable[[], pl.DataFrame]]] = {
     "flat_frame": (FLAT_SPEC, lambda: flat_frame([])),
     "suppression_line_span": (line_span_spec(), lambda: _span_frame([], [])),
+    "finding_diff_side": (SIDE_SPEC, lambda: _side([])),
 }
 
 # Models whose frames are derived from a whole run's keys, so no per-row column
@@ -324,6 +327,30 @@ def test_optional_fields_derive_nullable_and_required_ones_do_not():
     assert not info["name"].nullable and not info["flag"].nullable
 
 
+def test_a_ranked_entry_projects_a_field_under_the_sites_rank_policy():
+    # _Toy.first/.second carry OverflowNullable, the flat-frame-shaped policy; a
+    # Ranked entry overrides it for a frame that only ever compares order.
+    spec = FrameSpec(_Toy, (Ranked("first", "g"), Ranked("second", "g")))
+    info = {c.name: c for c in frame_columns(spec)}
+    assert info["first"].rank_group == "g"
+    assert info["first"].overflow_flag is None
+    # no flag column is appended, and the dtype is a rank's Int64
+    assert list(frame_schema(spec)) == ["first", "second"]
+    frame = to_frame(
+        [_toy(first=2**70, second=5), _toy(first=None, second=2**70)], spec
+    )
+    assert frame["first"].to_list() == [1, None]  # a null value is a null rank
+    assert frame["second"].to_list() == [0, 1]
+
+
+def test_the_side_spec_line_columns_carry_the_diff_sides_rank_policy():
+    info = {c.name: c for c in frame_columns(SIDE_SPEC)}
+    for name in ("line_start", "line_end"):
+        assert info[name].rank_group == "lines"
+        assert info[name].overflow_flag is None
+        assert info[name].nullable is True
+
+
 class _Unbounded(BaseModel):
     count: int = 0
 
@@ -341,6 +368,10 @@ class _Unbounded(BaseModel):
             _Toy, ("name", Computed("c", "String", str, reads=("no_such_attr",)))
         ),
         lambda: FrameSpec(_Toy, ("first", Computed("over", "Boolean", bool))),
+        lambda: FrameSpec(_Toy, (Ranked("name"),)),  # a str field has no rank
+        lambda: FrameSpec(_Toy, (Ranked("nope"),)),  # not a model field
+        lambda: FrameSpec(_Toy, (Ranked("skipped"),)),  # marked NotInFrame
+        lambda: FrameSpec(_Toy, ("first", Ranked("first"))),  # declared twice
         lambda: FrameSpec(_Toy, (3,)),  # type: ignore[arg-type]
     ],
 )

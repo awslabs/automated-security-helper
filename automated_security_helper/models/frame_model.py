@@ -28,8 +28,12 @@ the field, as ``Annotated`` markers pydantic ignores:
 A frame is never wholly derivable (a private attribute, a property, a position
 and a lower-cased key are not fields), so the unit of derivation is a
 :class:`FrameSpec`: the ordered columns, each a model field named by string or a
-declared :class:`Computed` / :class:`Position` entry. Properties and private
-attributes are declared, never derived: a ``Computed`` names what it ``reads``.
+declared :class:`Computed` / :class:`Position` / :class:`Ranked` entry.
+Properties and private attributes are declared, never derived: a ``Computed``
+names what it ``reads``. A :class:`Ranked` entry projects an int field under
+THIS frame's rank policy when the field's own marker carries another site's
+(one unbounded-int shape, two encodings, chosen per site: the flat frame nulls
+an overflowing line and flags it, the diff side compares order alone).
 
 The boundary rule: pydantic validates at ingest and egress only. :func:`to_frame`
 reads attributes of instances the boundary already validated, never
@@ -141,6 +145,22 @@ class Position:
 
 
 @dataclass(frozen=True)
+class Ranked:
+    """A model int field projected as the dense rank of its value within ``group``.
+
+    The per-site override of the field's own int policy: a field whose marker
+    carries another frame's encoding (``line_start`` is overflow-nullable on the
+    flat frame) is still projected here, as order alone, when this frame only
+    ever compares and sorts it. Ranks are collection-relative exactly as
+    :class:`RankEncoded` says; a null value stays a null rank, and no overflow
+    flag column is appended.
+    """
+
+    name: str
+    group: str = "lines"
+
+
+@dataclass(frozen=True)
 class Computed:
     """A column the model's fields cannot supply, declared.
 
@@ -158,7 +178,7 @@ class Computed:
     note: str = ""
 
 
-Entry = Union[str, Computed, Position]
+Entry = Union[str, Computed, Position, Ranked]
 
 
 @dataclass(frozen=True, eq=False)
@@ -261,6 +281,27 @@ def _field_column(model: type, name: str) -> ColumnInfo:
     )
 
 
+def _ranked_column(model: type, entry: Ranked) -> ColumnInfo:
+    info = model.model_fields.get(entry.name)  # type: ignore[attr-defined]
+    if info is None:
+        raise FrameSpecError(f"{model.__name__}.{entry.name} is not a model field")
+    if _marker(info.metadata, NotInFrame) is not None:
+        raise FrameSpecError(f"{model.__name__}.{entry.name} is marked NotInFrame")
+    base, optional = _unwrap(info.annotation)
+    if base is not int:
+        raise FrameSpecError(
+            f"Ranked({entry.name!r}) projects {model.__name__}.{entry.name} of "
+            f"type {info.annotation!r}; only an int field has a rank"
+        )
+    return ColumnInfo(
+        name=entry.name,
+        dtype="Int64",
+        nullable=optional or info.default is None,
+        source="field",
+        rank_group=entry.group,
+    )
+
+
 def _resolve(spec: FrameSpec) -> Tuple[ColumnInfo, ...]:
     cached = _RESOLVED.get(id(spec))
     if cached is not None and cached[0] is spec:
@@ -272,6 +313,8 @@ def _resolve(spec: FrameSpec) -> Tuple[ColumnInfo, ...]:
     for entry in spec.columns:
         if isinstance(entry, str):
             info = _field_column(model, entry)
+        elif isinstance(entry, Ranked):
+            info = _ranked_column(model, entry)
         elif isinstance(entry, Position):
             info = ColumnInfo(entry.name, "Int64", False, "position")
         elif isinstance(entry, Computed):
@@ -439,7 +482,9 @@ def unaccounted(spec: FrameSpec) -> List[str]:
     is accounted for when a ``Computed`` reads it or it is waived.
     """
     model = spec.model
-    projected = {c for c in spec.columns if isinstance(c, str)}
+    projected = {c for c in spec.columns if isinstance(c, str)} | {
+        c.name for c in spec.columns if isinstance(c, Ranked)
+    }
     read = {r for c in spec.columns if isinstance(c, Computed) for r in c.reads}
     missing: List[str] = []
     for name, info in model.model_fields.items():  # type: ignore[attr-defined]
