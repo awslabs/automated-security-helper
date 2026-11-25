@@ -3250,7 +3250,9 @@ def set_source_image_archive_finalize(
         if refusal is not None:
             with contextlib.suppress(OSError):
                 final.unlink()
-            raise ValueError(refusal)
+            # The staged name is an upload-channel detail; the caller is told
+            # the archive's own name, as the gate always worded it.
+            raise ValueError(refusal.replace(str(final), str(destination)))
         os.replace(final, destination)
 
     # The archive is the session's one image subject: every other entry in
