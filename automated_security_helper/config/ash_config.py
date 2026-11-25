@@ -57,6 +57,10 @@ from automated_security_helper.base.scanner_plugin import (
 )
 from automated_security_helper.base.extraction_limits import EXTRACTION_LIMIT_OPTIONS
 from automated_security_helper.config.plugin_sections import build_segment
+from automated_security_helper.config.wire_enum import (
+    wire_enum_validator,
+    wire_value,
+)
 from automated_security_helper.core.constants import (
     ASH_CONFIG_ENV_VAR_ALLOWLIST,
     ASH_CONFIG_ENV_VAR_PREFIX,
@@ -1546,30 +1550,25 @@ SandboxModeName = Literal[
 ]
 
 
-def _sandbox_mode_name(value: Any) -> Any:
-    """``sandbox.mode``: a name becomes its ``SandboxMode``.
+def _refuse_sandbox_mode(value: Any) -> Any:
+    """The refusal of a ``sandbox.mode`` that names no mode.
 
-    Config files are validated with strict=True, which accepts only a
-    SandboxMode instance for a SandboxMode field, so a name read from YAML would
-    be refused; converting here keeps the enum type. Anything that is no mode,
-    a boolean included, is refused with the error the field's Literal gave
-    before it was an enum (type ``literal_error``, the same text), so a refusal
-    reads as it always has. A name read from an environment reference arrives as
-    the loader's carrier ``str`` subclass and leaves as the plain member.
+    Anything that is no mode, a boolean included, is refused with the error the
+    field's Literal gave before it was an enum (type ``literal_error``, the same
+    text), so a refusal reads as it always has. The value is not quoted.
     """
-    if isinstance(value, SandboxMode):
-        return value
-    if isinstance(value, str):
-        try:
-            return SandboxMode(str(value))
-        except ValueError:
-            pass
     names = [f"'{mode.value}'" for mode in SandboxMode]
     raise PydanticCustomError(
         "literal_error",
         "Input should be {expected}",
         {"expected": f"{', '.join(names[:-1])} or {names[-1]}"},
     )
+
+
+#: ``sandbox.mode``: a name becomes its ``SandboxMode`` (see ``config/wire_enum.py``;
+#: a name read from an environment reference arrives as the loader's carrier
+#: ``str`` subclass and leaves as the plain member).
+_sandbox_mode_name = wire_enum_validator(SandboxMode, _refuse_sandbox_mode)
 
 
 class SandboxConfig(RedactedSection):
@@ -1605,9 +1604,10 @@ class SandboxConfig(RedactedSection):
         # The name, not the member, in every dump mode, for the reason
         # ``AshConfig._output_format_values`` gives: a Python-mode dump of a member
         # is refused by yaml.safe_dump and written by yaml.dump as a tag no later
-        # load reads. Read through SandboxMode so a mode assigned as a plain str
-        # (the model does not validate assignment) is written the same way.
-        return SandboxMode(v).value
+        # load reads. A mode assigned as a plain str (the model does not validate
+        # assignment) is written as that text: ``wire_value`` never raises and
+        # never quotes the value, which may have come from the environment.
+        return wire_value(v)
 
     network_scanners: Annotated[
         Optional[List[str]],
@@ -2277,28 +2277,27 @@ class ContentDbStalenessOverride(RedactedSection):
         return (now or datetime.now(timezone.utc)) >= self.expires_at
 
 
-def _export_format_name(item: Any) -> Any:
-    """One ``output_formats`` entry: a name becomes its ``ExportFormat``.
+def _refuse_export_format(item: Any) -> Any:
+    """The refusal of an ``output_formats`` entry that names no format.
 
-    Config files are validated with strict=True, which accepts only an
-    ExportFormat instance for an ExportFormat field, so a name read from YAML
-    would be refused; converting here keeps the enum type. Per entry, so that a
-    refusal is located at the entry and its input is that name alone: ``ash
-    config validate`` replaces every input value in a message with ``<value>``,
-    and with the whole list as the input, a valid name the list also held was
-    replaced in the list of valid formats too.
+    The valid formats, not the entry, which may have been read from the
+    environment; the error's location names the entry. An entry that is not text
+    is left for the field's own type check.
     """
-    if isinstance(item, str) and not isinstance(item, ExportFormat):
-        try:
-            return ExportFormat(item.strip())
-        except ValueError:
-            valid = ", ".join(fmt.value for fmt in ExportFormat)
-            # The valid formats, not the entry, which may have been read from
-            # the environment; the error's location names the entry.
-            raise ValueError(
-                f"the value is not a valid format. Valid formats are: {valid}"
-            ) from None
+    if isinstance(item, str):
+        valid = ", ".join(fmt.value for fmt in ExportFormat)
+        raise ValueError(f"the value is not a valid format. Valid formats are: {valid}")
     return item
+
+
+#: One ``output_formats`` entry: a name becomes its ``ExportFormat`` (see
+#: ``config/wire_enum.py``). Per entry, so that a refusal is located at the entry
+#: and its input is that name alone: ``ash config validate`` replaces every input
+#: value in a message with ``<value>``, and with the whole list as the input, a
+#: valid name the list also held was replaced in the list of valid formats too.
+_export_format_name = wire_enum_validator(
+    ExportFormat, _refuse_export_format, strip=True
+)
 
 
 def _output_formats_schema(schema: Dict[str, Any]) -> None:
@@ -2918,7 +2917,7 @@ class AshConfig(RedactedSection):
         # !!python/object/apply tags that no later load could read, and refused by
         # yaml.safe_dump (save, the MCP session config). A file that failed to load
         # was then scanned with the default config.
-        return [str(getattr(fmt, "value", fmt)) for fmt in v]
+        return [wire_value(fmt) for fmt in v]
 
     @field_validator("content_db_staleness_overrides")
     @classmethod
