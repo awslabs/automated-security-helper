@@ -22,7 +22,6 @@ from automated_security_helper.schemas.sarif_schema_model import SarifReport
 
 from .test_spotbugs_scanner_behavior import (  # noqa: F401  (fixtures)
     FakeSpotBugs,
-    _findings,
     _run,
     _scanner,
     on_path,
@@ -42,6 +41,25 @@ CAPTURED = (
 #: The capture holds 300 results: 270 note, 15 warning, 15 error. Thirteen belong to
 #: rules tagged SECURITY: 3 error and 10 warning.
 SECURITY_RESULTS = 13
+
+
+def _findings(report: SarifReport):
+    """(ruleId, SARIF level, ASH severity, start line or None) for every result.
+
+    Some captured results name a class and carry no region, so the line is optional.
+    """
+    out = []
+    for r in report.get_all_results():
+        region = r.locations[0].physicalLocation.root.region
+        out.append(
+            (
+                r.ruleId,
+                getattr(r.level, "value", r.level),
+                getattr(r.properties, "issue_severity", None),
+                region.startLine if region else None,
+            )
+        )
+    return out
 
 
 def _text(name: str) -> str:

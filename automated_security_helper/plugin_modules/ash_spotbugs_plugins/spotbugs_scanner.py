@@ -108,8 +108,9 @@ network at scan time (``OfflineStrategy.BUNDLED``).
 Sandbox
 -------
 The strict default, ``SandboxRequirements()``. Whether the JVM starts under it with
-only the baseline environment (``JAVA_HOME`` is not passed) was not measured; see
-the plugin README.
+only the baseline environment was not measured. The baseline passes ``JAVA_HOME``
+but not ``JAVA_TOOL_OPTIONS`` or ``_JAVA_OPTIONS`` (pinned by
+tests/unit/plugin_modules/test_spotbugs_sandbox_requirements.py).
 """
 
 from __future__ import annotations
@@ -834,7 +835,9 @@ class SpotBugsScanner(ScannerPluginBase[SpotBugsScannerConfig]):
                     f"{reason}. Not running the tool on {target_type}.",
                     target_type=target_type,
                     level=logging.INFO,
-                    append_to_stream="stderr",
+                    # Not the error stream: a tree with no bytecode is a clean skip,
+                    # and the row says why through _nothing_scanned_reason.
+                    append_to_stream="none",
                 )
                 self._post_scan(target=target, target_type=target_type)
                 return True

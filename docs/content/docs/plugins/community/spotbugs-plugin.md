@@ -68,7 +68,7 @@ scanners:
 
 No option names a path, a filter file or a configuration file, so none can be set from the scanned tree to hide findings. ASH passes none of SpotBugs's `-include`, `-exclude`, `-excludeBugs` or `-userPrefs` options. SpotBugs's own `@SuppressFBWarnings` annotation is read from the bytecode by SpotBugs and cannot be turned off by ASH.
 
-SpotBugs's default heap is 768 MB. A large application at `effort: max` can need more. The plugin declares the strict sandbox default and no environment variables, so `JAVA_HOME` and the `fb_maxheap` heap setting are not passed in under `--sandbox`; `java` has to be found on `PATH`. A SpotBugs run under `--sandbox` has not been measured.
+SpotBugs's default heap is 768 MB. A large application at `effort: max` can need more. The plugin declares the strict sandbox default and no environment variables of its own. The baseline environment passes `JAVA_HOME` in under `--sandbox` but not `JAVA_TOOL_OPTIONS`, `_JAVA_OPTIONS` or the `fb_maxheap` heap setting. A SpotBugs run under `--sandbox` has not been measured.
 
 ## Severity
 

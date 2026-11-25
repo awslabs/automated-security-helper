@@ -73,13 +73,14 @@ def test_spotbugs_declares_the_strict_default(layout):
     assert _real(policy.cache) == _real(default.cache)
 
 
-def test_the_java_environment_is_not_passed_into_the_sandbox(layout):
+def test_only_java_home_of_the_java_environment_is_passed_into_the_sandbox(layout):
     policy = _policy(layout, SpotBugsScanner.sandbox_requirements)
     passed = policy.filter_env(
         {
             "JAVA_HOME": "/opt/jdk",
             "JAVA_TOOL_OPTIONS": "-javaagent:/tmp/agent.jar",
             "_JAVA_OPTIONS": "-Xmx1m",
+            "fb_maxheap": "4096",
         }
     )
-    assert passed.keys() == {"HOME"} | set(policy.extra_env)
+    assert passed.keys() == {"JAVA_HOME", "HOME"} | set(policy.extra_env)
