@@ -1297,7 +1297,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
     def _pre_scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: Literal["source", "converted", "image"],
         config: Optional[ScannerPluginConfigBase] = None,
         *args,
         **kwargs,
@@ -1441,7 +1441,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
     def _post_scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: Literal["source", "converted", "image"],
     ) -> None:
         """Perform pre-scan setup.
 
