@@ -66,7 +66,7 @@ dependencies = [
  "markdown-it-py>=2.2,<5",
  # Dataframe engine for the relational core of the shared result pipeline. Held below 2.0:
  # polars 2.x requires Python >=3.11 and this project supports 3.10.
- "polars>=1.33,<2.0",
+ "polars>=2.0.0,<3.0",
 ]
 [project.optional-dependencies]
 cdk = [
