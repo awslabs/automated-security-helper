@@ -536,6 +536,35 @@ def record_run_if_enabled(
     return record_run(results, output_dir, keep)
 
 
+def discard_run_record(output_dir: str | os.PathLike[str], report_id: Any) -> bool:
+    """Remove the run record of *report_id*, if one is there; whether one went.
+
+    For the paths that take a finished run's output back: a cancel that lands
+    after the orchestrator recorded the run, and a workspace project abandoned
+    after its scan returned. The record says the run completed, and leaving it
+    made the taken-back run a point in ``ash trend``. Never raises (these paths
+    run while a cancel or a failure is propagating), never follows a link, and
+    an id that is not a record's name (:func:`record_file_name`) names nothing.
+    """
+    name = record_file_name(report_id)
+    if name is None:
+        return False
+    path = history_dir(output_dir) / name
+    if _is_link(path):
+        return False
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        return False
+    except OSError as exc:
+        ASH_LOGGER.warning(
+            f"Could not remove the taken-back run's record {path}: {exc}"
+        )
+        return False
+    ASH_LOGGER.info(f"Removed the taken-back run's record {path}")
+    return True
+
+
 def record_names(output_dir: str | os.PathLike[str]) -> Iterable[str]:
     """The names of the run records in the history, oldest first."""
     directory = history_dir(output_dir)

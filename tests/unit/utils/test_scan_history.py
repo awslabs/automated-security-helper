@@ -465,6 +465,37 @@ def test_a_record_whose_severity_or_scanner_is_not_text_is_skipped(tmp_path):
         assert scan_history.read_run_record(directory / f"{report_id(2)}.json") is None
 
 
+def test_discard_removes_only_the_named_record_and_never_raises(tmp_path):
+    for second in (1, 2):
+        scan_history.write_run_record(
+            results(finding("B101"), rid=report_id(second)), tmp_path, keep_runs=50
+        )
+    assert scan_history.discard_run_record(tmp_path, report_id(1)) is True
+    assert scan_history.discard_run_record(tmp_path, report_id(1)) is False
+    assert scan_history.discard_run_record(tmp_path, "../escape") is False
+    assert scan_history.discard_run_record(tmp_path, None) is False
+    assert list(scan_history.record_names(tmp_path)) == [f"{report_id(2)}.json"]
+
+
+def test_a_cancel_after_the_record_was_written_takes_the_record_back(tmp_path):
+    # The CLI's last cancel check lands after the orchestrator recorded the
+    # run; the record must not say a cancelled run completed.
+    from automated_security_helper.interactions.run_ash_scan import (
+        _discard_history_record,
+    )
+
+    run = results(finding("B101"), rid=report_id(1))
+    scan_history.write_run_record(run, tmp_path, keep_runs=50)
+    _discard_history_record(run, tmp_path)
+    assert list(scan_history.record_names(tmp_path)) == []
+    # The dict form a non-model run carries, and shapes that name no record.
+    scan_history.write_run_record(run, tmp_path, keep_runs=50)
+    _discard_history_record({"metadata": {"report_id": report_id(1)}}, tmp_path)
+    assert list(scan_history.record_names(tmp_path)) == []
+    _discard_history_record(None, tmp_path)
+    _discard_history_record({"metadata": "text"}, tmp_path)
+
+
 def test_a_scan_the_history_leaves_out_is_said_at_warning(tmp_path, caplog):
     run = results(finding("B101"), changed_files_only=True)
     with caplog.at_level(logging.WARNING, logger="ash"):

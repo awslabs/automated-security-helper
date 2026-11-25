@@ -49,8 +49,10 @@ def test_each_scan_output_entry_is_read_with_the_sandbox_link_reader(
     _discard_project_output(output)
 
     # RED at the base: the entries were asked Path.is_symlink() and the reader
-    # was never consulted.
-    assert sorted(seen) == [False, True]
+    # was never consulted. Three reads: the run-record discard reads the
+    # results file first (_discard_run_record_of), then the loop reads the
+    # results file and the reports directory.
+    assert sorted(seen) == [False, False, True]
     assert not (output / RESULTS_FILENAME).exists()
     assert not (output / "reports").exists()
     # Not one of the two names: left as it was.

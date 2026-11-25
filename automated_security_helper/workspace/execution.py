@@ -2827,6 +2827,46 @@ def _close_never_started(future: Any, gate: Any, key: str) -> bool:
 _SCAN_OUTPUT_NAMES = frozenset({RESULTS_FILENAME, "reports"})
 
 
+def _discard_run_record_of(project_output: Path) -> None:
+    """Remove the history record paired with the results file an abandon removes.
+
+    The record (``utils/scan_history``) says its run completed, so leaving it
+    made the abandoned run a point in ``ash trend`` beside a FAILED verdict.
+    The record removed is the one the results file being removed names by its
+    ``report_id``: the abandon removes that file whatever run wrote it, and the
+    record of a run whose results the abandon takes back goes with them. A
+    results file that is missing, a link, or unreadable names no record, and
+    nothing here raises: the abandon's own outcome is what the caller records.
+    """
+    import os
+    import stat as stat_module
+
+    from automated_security_helper.utils.scan_history import discard_run_record
+    from automated_security_helper.utils.scanned_tree import _is_link_stat
+
+    results_file = project_output / RESULTS_FILENAME
+    try:
+        info = os.lstat(results_file)
+    except OSError:
+        return
+    if _is_link_stat(info) or not stat_module.S_ISREG(info.st_mode):
+        return
+    try:
+        data = json.loads(results_file.read_text(encoding="utf-8"))
+    except (OSError, ValueError, RecursionError):
+        return
+    metadata = data.get("metadata") if isinstance(data, dict) else None
+    report_id = metadata.get("report_id") if isinstance(metadata, dict) else None
+    try:
+        discard_run_record(project_output, report_id)
+    except Exception as error:  # noqa: BLE001 - the abandon must finish
+        ASH_LOGGER.warning(
+            f"Could not remove the abandoned project's run record under "
+            f"{project_output}: {error_text(error)}",
+            extra=NO_MARKUP,
+        )
+
+
 def _discard_project_output(project_output: Path) -> None:
     """Remove what a scan wrote under ``projects/<key>/`` before it was abandoned.
 
@@ -2857,6 +2897,9 @@ def _discard_project_output(project_output: Path) -> None:
 
     from automated_security_helper.utils.scanned_tree import _is_link_stat
 
+    # Before the removals: the record's id is read from the results file this
+    # loop is about to remove.
+    _discard_run_record_of(project_output)
     try:
         entries = list(project_output.iterdir())
     except FileNotFoundError:
