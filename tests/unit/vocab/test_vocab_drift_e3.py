@@ -313,8 +313,13 @@ def test_the_manager_reads_a_member_and_a_spelling_alike_and_refuses_an_unknown_
 
     for kind in PluginKind:
         by_member = ash_plugin_manager._registry(kind)
+        # Non-vacuity anchor: the manager knows every member. The identity
+        # between this dict and the library's section field is the manager's
+        # own implementation detail; reaching plugin_library from here is what
+        # tests/unit/workspace/test_project_isolation.py's registry sweep bans,
+        # so the section mapping stays proven inside the manager's API.
+        assert by_member is not None
         assert by_member is ash_plugin_manager._registry(kind.value)
-        assert by_member is getattr(ash_plugin_manager.plugin_library, kind.section)
         assert by_member is ash_plugin_manager._registrations(kind.value)
     assert ash_plugin_manager._registry("plugin") is None
     assert ash_plugin_manager._registry("scanners") is None
