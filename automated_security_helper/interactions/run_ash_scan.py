@@ -39,6 +39,7 @@ from rich.text import Text
 # module for no behavior change -- and tests/unit/cli/mcp/test_stdout_jsonrpc_safety.py
 # reasons about this exact import form. It is utils/console.py's print, not rich's:
 # its console checks each line it writes off a terminal, so none reads as a CI command.
+from automated_security_helper.models.vocab import Severity
 from automated_security_helper.utils.console import echo, global_console, secho
 from automated_security_helper.utils.console import print  # noqa: A004
 from automated_security_helper.utils.terminal_text import (
@@ -6821,13 +6822,13 @@ def _gating_actionable_count(
             counts = ScannerStatisticsCalculator.dict_result_counts(
                 results, metric.scanner_name
             )
-            for severity in ("CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"):
-                count = getattr(counts, severity.lower())
+            for severity in Severity:
+                count = getattr(counts, severity.bucket)
                 if count and severity_fails_threshold(
-                    severity, threshold_for(metric.scanner_name)
+                    severity.value, threshold_for(metric.scanner_name)
                 ):
                     non_sarif_actionable += count
-                    rank = _SEVERITY_RANK.get(severity.lower(), _SEVERITY_RANK["low"])
+                    rank = _SEVERITY_RANK.get(severity.bucket, _SEVERITY_RANK["low"])
                     if rank >= min_sev_rank:
                         non_sarif_qualifying = True
     # Set when the count below is taken from the written report: whether that

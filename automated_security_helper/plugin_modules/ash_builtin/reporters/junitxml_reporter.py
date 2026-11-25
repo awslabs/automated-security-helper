@@ -59,6 +59,7 @@ from automated_security_helper.utils.sarif_utils import (
     result_rule_id,
     suppressions_in_effect,
 )
+from automated_security_helper.models.vocab import SeverityThreshold
 from automated_security_helper.utils.severity_ladder import (
     SEVERITIES,
     SEVERITY_THRESHOLDS,
@@ -165,7 +166,7 @@ def _configured_severity_threshold(model: "AshAggregatedResults") -> str:
             threshold,
             ", ".join(SEVERITY_THRESHOLDS),
         )
-        return "ALL"
+        return SeverityThreshold.ALL.value
     return normalized
 
 

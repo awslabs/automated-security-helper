@@ -222,6 +222,7 @@ from automated_security_helper.interactions.run_ash_scan import (
     incomplete_scanner_reason,
     resolve_workspace_execution_config,
 )
+from automated_security_helper.models.vocab import SeverityThreshold
 from automated_security_helper.models.workspace import (
     ProjectRunStatus,
     WorkspaceExitCode,
@@ -294,7 +295,7 @@ AGGREGATED_RESULTS_FILENAME = "ash_aggregated_results.json"
 #: Matches ``ScanRegistry.register_scan``'s own default. Reachable only for a
 #: hand-built plan, which ``workspace/plan.py`` documents can exist; every plan
 #: ``resolve_workspace`` produces gives each active project a threshold.
-_UNSTATED_SEVERITY_THRESHOLD = "MEDIUM"
+_UNSTATED_SEVERITY_THRESHOLD = SeverityThreshold.MEDIUM.value
 
 #: The key a workspace scan with no active project registers its output root
 #: under. A project key is never empty (``ProjectPlan.key`` has a minimum length

@@ -9,6 +9,7 @@ from rich.panel import Panel
 
 from automated_security_helper.config.environment_record import reads_as_reference
 from automated_security_helper.models.asharp_model import AshAggregatedResults
+from automated_security_helper.models.vocab import SeverityThreshold
 from automated_security_helper.core.unified_metrics import (
     coverage_shortfalls,
     get_unified_scanner_metrics,
@@ -148,7 +149,7 @@ def generate_metrics_table_from_unified_data(
                 # one, or a name it refuses such as ``${HOME}``. The same four
                 # characters would cut it mid-reference, so it gets a token too.
                 threshold_display = "REF"
-            elif metrics.threshold == "MEDIUM":
+            elif metrics.threshold == SeverityThreshold.MEDIUM:
                 threshold_display = "MED"
             else:
                 threshold_display = metrics.threshold[:4].upper()

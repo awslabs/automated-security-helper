@@ -17,6 +17,7 @@ from automated_security_helper.models.asharp_model import (
     InputNotScanned,
     ScannerSeverityCount,
 )
+from automated_security_helper.models.vocab import Severity, SeverityThresholdText
 from automated_security_helper.utils.get_shortest_name import home_as_tilde
 
 __all__ = ["InputNotScanned", "ScanResultsContainer"]
@@ -63,9 +64,7 @@ class ScanResultsContainer(BaseModel):
     metadata: Dict[str, Any] = {}
     raw_results: Any | None = None
     severity_counts: ScannerSeverityCount = Field(default_factory=ScannerSeverityCount)
-    scanner_severity_threshold: (
-        Literal["ALL", "LOW", "MEDIUM", "HIGH", "CRITICAL"] | None
-    ) = None
+    scanner_severity_threshold: SeverityThresholdText | None = None
     status: ScannerStatus = ScannerStatus.PASSED
     dependencies_satisfied: bool = True
     excluded: bool = False
@@ -519,15 +518,10 @@ class ScanResultsContainer(BaseModel):
         )
 
         counts = self.severity_counts
-        counts_by_severity = (
-            ("CRITICAL", counts.critical),
-            ("HIGH", counts.high),
-            ("MEDIUM", counts.medium),
-            ("LOW", counts.low),
-            ("INFO", counts.info),
-        )
-
-        for severity, count in counts_by_severity:
-            if count > 0 and severity_fails_threshold(severity, threshold):
+        # Most severe first, the member order of the ladder; the count fields are
+        # the lowercase buckets the same members derive.
+        for severity in Severity:
+            count = getattr(counts, severity.bucket)
+            if count > 0 and severity_fails_threshold(severity.value, threshold):
                 return ScannerStatus.FAILED
         return ScannerStatus.PASSED

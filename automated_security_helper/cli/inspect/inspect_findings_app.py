@@ -46,6 +46,7 @@ from textual.widgets.data_table import ColumnKey
 
 from automated_security_helper.config.ash_config import add_suppression_to_config
 from automated_security_helper.core.exceptions import ASHConfigSourceError
+from automated_security_helper.models.vocab import SEVERITY_BUCKETS
 from automated_security_helper.utils.console import echo, secho
 from automated_security_helper.config.resolve_config import find_config_file
 from automated_security_helper.core.constants import (
@@ -932,7 +933,7 @@ def _summary_line(findings: list) -> Text:
     summary = Text()
     active = [finding for finding in findings if not finding.get("suppressed")]
     summary.append(f"{len(active)} active", style=f"bold {COLORS['foreground']}")
-    for level in ("critical", "high", "medium", "low", "info"):
+    for level in SEVERITY_BUCKETS:
         count = sum(finding.get("severity", "").lower() == level for finding in active)
         if count:
             summary.append("  ·  ", style=COLORS["muted"])
@@ -1940,7 +1941,7 @@ class FindingsExplorerApp(App):
 
     def _apply_sorting(self) -> None:
         """Sort the filtered findings."""
-        severity_order = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
+        severity_order = {level: rank for rank, level in enumerate(SEVERITY_BUCKETS)}
 
         if self.current_sort == "severity":
             self.filtered_findings.sort(
