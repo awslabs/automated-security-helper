@@ -60,6 +60,18 @@ runs:
         refuse_command_text config-file "${IN_CONFIG_FILE}"
         refuse_command_text oci-runner "${IN_OCI_RUNNER}"
         refuse_command_text offline "${IN_OFFLINE}"
+        # Every later branch compares config-file with `alpha` alone, so any other value
+        # would fall through to the default config and the leg would pass without the
+        # alpha scanners. A caller still passing the old `community` value fails here
+        # by name instead. Fail closed, not an alias: this action is internal to the
+        # repository's workflows, so no outside caller needs a grace period.
+        case "${IN_CONFIG_FILE}" in
+          default | alpha) ;;
+          *)
+            echo "::error::config-file must be default or alpha (community was renamed alpha)."
+            exit 1
+            ;;
+        esac
 
     # WHY THE PLATFORM STRING IS DERIVED HERE RATHER THAN PASSED IN
     #

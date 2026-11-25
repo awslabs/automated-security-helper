@@ -138,6 +138,8 @@ FLAT_SPEC = FrameSpec(
         "side, not a column of the flat frame",
         "location_display": "display text over file_path and the lines, which "
         "the frame carries as columns",
+        "is_secret_detection": "a rule-classification flag the correlation "
+        "registry reads on the host; the frame carries no column for it",
         "requires_exact_identity_match": "a baseline-gate policy flag, not a "
         "column of the flat frame",
     },

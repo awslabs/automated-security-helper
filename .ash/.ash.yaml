@@ -383,6 +383,12 @@ global_settings:
       path: tests/snapshot/container/test_snapshot_container_nix.py
       reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
     - rule_id: generic-api-key
+      path: tests/unit/utils/test_finding_trend.py
+      reason: "False positive. A report-id helper whose default argument is a made-up twelve-character token, so the generated ids are fixed. The provider-specific gitleaks rules still apply to this file."
+    - rule_id: generic-api-key
+      path: tests/unit/utils/test_scan_history.py
+      reason: "False positive. A report-id helper whose default argument is a made-up twelve-character token, so the generated ids are fixed. The provider-specific gitleaks rules still apply to this file."
+    - rule_id: generic-api-key
       path: tests/unit/base/test_a_failure_after_the_tool_ran_keeps_its_exit_code.py
       reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
     - rule_id: generic-api-key
@@ -544,7 +550,7 @@ global_settings:
       path: "deploy/cdk/package-lock.json"
       package_name: "minimatch"
       package_version: "10.2.5"
-      expires: "2026-12-27"
+      expires: "2027-02-06"
       reason: >-
         CVE-2026-118764 (GHSA-g3hv-75wg-m249, trivy spelling): minimatch 10.2.5 bundled
         inside aws-cdk-lib 2.273.0 in deploy/cdk/package-lock.json. The lockfile's own
@@ -3814,18 +3820,23 @@ global_settings:
     # merge; the pre-merge residual on the PR's own run is by design.
     - rule_id: "generic-api-key"
       path: "tests/unit/base/test_uv_tool_mixin_guards_and_decisions.py"
+      expires: "2027-05-06"
       reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
     - rule_id: "generic-api-key"
       path: "tests/unit/core/test_orchestrator_project_name_holding_an_environment_value.py"
+      expires: "2027-05-06"
       reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
     - rule_id: "generic-api-key"
       path: "tests/unit/plugin_modules/ash_builtin/scanners/test_npm_audit_probe_selection_and_report_shapes.py"
+      expires: "2027-05-06"
       reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
     - rule_id: "generic-api-key"
       path: "tests/unit/plugin_modules/ash_builtin/scanners/test_npm_audit_response_logging.py"
+      expires: "2027-05-06"
       reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
     - rule_id: "generic-api-key"
       path: "tests/unit/utils/test_ash_install_failures_are_logged_redacted.py"
+      expires: "2027-05-06"
       reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
     - rule_id: "private-key"
       path: "tests/unit/interactions/test_run_ash_container_input_and_run_edges.py"
@@ -3921,11 +3932,11 @@ global_settings:
         (aws-cdk-lib alone is about 7,500 files of third-party JavaScript).
     - path: "tests/test_data/**"
       reason: This is test data that is used during unit testing only and is not part of the core application.
-    # Spelled "tests/**/__snapshots__/**/*", not "tests/**/__snapshots__/**": ASH's
-    # path matcher (utils/path_matching.py _recursive_glob_match) ignores a trailing
-    # "**" once the pattern has more than one segment, so the shorter spelling
-    # matches no file under the directory. Measured with file_path_matches, which
-    # the SARIF ignore filter uses: "/**" matched 0 of 2 snapshot paths, "/**/*" 2 of 2.
+    # Spelled "tests/**/__snapshots__/**/*". The matcher (utils/path_matching.py
+    # _recursive_glob_match) reads a trailing "**" as zero or more path components, so
+    # "tests/**/__snapshots__/**" matches the same files; an earlier matcher ignored a
+    # trailing "**" and this spelling dates from then. Both spellings are pinned by
+    # tests/unit/utils/test_suppression_path_spellings_the_ash_files_carry.py.
     - path: "tests/**/__snapshots__/**/*"
       reason: >-
         Recorded output of the snapshot tests under tests/, most of it ASH's reports

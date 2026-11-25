@@ -805,6 +805,11 @@ def secret_correlation_key(
     return key
 
 
+#: The ASFF reporter's name for the same key (it landed there first); one function,
+#: so the two spellings cannot drift apart.
+secret_location_key = secret_correlation_key
+
+
 def dep_correlation_key(
     advisory_id: Optional[str],
     package_name: Optional[str],

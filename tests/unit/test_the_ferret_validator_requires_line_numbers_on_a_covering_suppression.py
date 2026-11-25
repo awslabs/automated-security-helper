@@ -69,7 +69,7 @@ def _failures_of(validator, name):
 
 
 def _coverage_failures(validator, suppressions):
-    validator.ALPHA_SUPPRESSIONS = suppressions
+    validator.REPO_SUPPRESSIONS = suppressions
     validator.check_suppression_coverage()
     return _failures_of(validator, COVERAGE_CHECK)
 
@@ -174,7 +174,7 @@ def test_an_alpha_config_entry_is_judged_by_its_line_numbers(
     # The loader reads the config files it is given. Its default is the list of this
     # repository's own configs, fixed when the module is loaded, so the file the
     # test wrote under tmp_path is named outright.
-    validator.ALPHA_SUPPRESSIONS = validator.load_alpha_suppressions([config])
+    validator.REPO_SUPPRESSIONS = validator.load_repo_suppressions([config])
 
     validator.check_suppression_coverage()
 

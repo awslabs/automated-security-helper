@@ -550,6 +550,10 @@ class TestGeneratedGuideCopyIsNotACorpusPage:
         made a repository) lists the copy, so the corpus names it out."""
         import subprocess
 
+        # A git hook exports these, and `git init` would then reinitialize the
+        # repository running the hook instead of tmp_path.
+        for name in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"):
+            monkeypatch.delenv(name, raising=False)
         subprocess.run(
             ["git", "init", "-q", str(tmp_path)], check=True, capture_output=True
         )
@@ -565,6 +569,28 @@ class TestGeneratedGuideCopyIsNotACorpusPage:
         }
 
         assert collected == {"docs/content/docs/genai-steering-guide.md"}
+
+
+def _unmarked_options_finding(freshness, checks) -> list:
+    """Findings for a synthetic page whose options table names no section."""
+    import tempfile
+    from pathlib import Path
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        page = root / "docs" / "page.md"
+        page.parent.mkdir(parents=True)
+        page.write_text(
+            "| Option | Default | Description |\n|---|---|---|\n"
+            "| `enabled` | `true` | Run it. |\n"
+            "| `severity_threshold` | `MEDIUM` | Gate. |\n",
+            encoding="utf-8",
+        )
+        return [
+            f
+            for f in checks.check_option_tables([page], root)
+            if "names no section" in f.message
+        ]
 
 
 class TestUnsupportedOptionTablesAreNotOptionTables:
@@ -583,6 +609,11 @@ class TestUnsupportedOptionTablesAreNotOptionTables:
         table they were reported as unmarked; headed for what they hold they are not."""
         checks = freshness._docs_checks()
         page = freshness.REPO_ROOT / rel
+        assert page.is_file(), f"{rel} moved: the check would read nothing"
+        assert _unmarked_options_finding(freshness, checks), (
+            "the check no longer reports an unmarked options table, so the empty "
+            "result below proves nothing"
+        )
         findings = [
             f
             for f in checks.check_option_tables([page], freshness.REPO_ROOT)

@@ -1792,7 +1792,9 @@ class UVToolMixin:
             # value an earlier uv probe wrote names an environment the scan
             # does not run (#955, the probe resolved 3.4.5 while the PATH copy
             # was 3.3.15), and the uv probe is no longer owed on this route.
-            self.tool_version = getattr(verdict, "version", None) or None
+            # mypy reads this mixin's tool_version as the str the first assignment above
+            # gave it; PluginBase declares it ``str | None``, which is what this holds.
+            self.tool_version = getattr(verdict, "version", None) or None  # type: ignore[assignment]
             self._deferred_tool_version_probe = None
             return True
 

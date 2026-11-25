@@ -82,6 +82,8 @@ ASH does not deduplicate findings, within a scan or across shards. When two scan
 
 This has three consequences. Finding counts are counts of scanner results, not of distinct problems. A suppression that names a `rule_id` matches the rule IDs of whichever scanner uses that ID, so the same problem reported by another scanner under another ID stays unsuppressed; a suppression without `rule_id` covers every rule in its path. And the gate counts every unsuppressed duplicate. If two scanners overlap more than you want, turn one of them off; see [Choose scanners](../how-to/choose-scanners.md). [Suppressions, ignore paths, and scanner exclusions](suppressions.md) explains how suppressions match.
 
+For secret detections, the ASFF findings of the `asff` and `aws-security-hub` reporters say which of them are about one secret: they share an `ash/correlationId`, derived from where the secret is and not from who reported it. The findings stay separate. See [AWS reporters](../plugins/aws.md#aws-security-hub).
+
 Sharding splits a scan by scanner, not by file, so `ash merge` of the shards does not count any finding twice. See [Scale to large repositories](../how-to/scale-large-repos.md).
 
 ## Where the exit code comes from

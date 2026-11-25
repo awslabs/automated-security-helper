@@ -252,6 +252,8 @@ SIDE_SPEC = FrameSpec(
         "location_display": "display text over fields the diff never joins on",
         "correlation_id": "a cross-scanner grouping id assigned at flatten time; "
         "the diff pairs findings by identity and never joins on it",
+        "is_secret_detection": "a rule-classification flag the correlation "
+        "registry reads on the host; the diff never joins on it",
         "requires_exact_identity_match": "a gating policy flag the pair "
         "consumer applies on the host (see match_findings' docstring)",
     },

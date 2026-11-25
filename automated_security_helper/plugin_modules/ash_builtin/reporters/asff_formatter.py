@@ -62,6 +62,8 @@ from typing import Any, Callable, TYPE_CHECKING
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 from automated_security_helper.utils.finding_identity import (
     CORRELATION_ID_PROPERTY,
+    SECRET_CORRELATION_PREFIX,
+    correlation_id,
     identity_keys,
     relative_path,
     relative_to_scan_root,
@@ -512,6 +514,13 @@ def _unique_by_id(
     first = ids.unique(subset="id", keep="first", maintain_order=True)["i"]
     kept = [findings[index] for index in first.to_list()]
     return kept, len(findings) - len(kept)
+
+
+def _secret_correlation_id(target: str, key: dict[str, Any] | None) -> str | None:
+    """``secret/<sha256>`` of the scan target and a secret's location key: the
+    ``ash/correlationId`` of a secret detection, from the one registry every
+    reporter reads (``utils/finding_identity.correlation_id``)."""
+    return correlation_id(SECRET_CORRELATION_PREFIX, target, key)
 
 
 def _finding_id(target: str, key: dict[str, Any]) -> str:

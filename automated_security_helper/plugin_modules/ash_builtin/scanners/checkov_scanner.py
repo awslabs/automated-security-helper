@@ -596,7 +596,7 @@ def checkov_guidelines(json_report: Any) -> dict[_RecordKey, List[Optional[str]]
 
 
 def _record_values(
-    json_report: Any, value_of: Callable[[dict, bool], Optional[str]]
+    json_report: Any, value_of: Callable[[dict[str, Any], bool], Optional[str]]
 ) -> dict[_RecordKey, List[Optional[str]]]:
     """``value_of(record, in_a_resource_framework)`` for every record, by key."""
     found: dict[_RecordKey, List[Optional[str]]] = {}
