@@ -192,22 +192,28 @@ class GovulncheckScanner(ScannerPluginBase[GovulncheckScannerConfig]):
 
     #: The facets register row (base/scanner_facets.py). Declaration only.
     #: No real govulncheck output is committed (no Go toolchain was available
-    #: where this scanner was built), so every cell the adapter does not itself
-    #: write or the tool's documented SARIF shape does not guarantee is n/a with
-    #: the reason "output not read"; a sample run would settle each one.
+    #: where this scanner was built), and the register refuses a MAPPED cell
+    #: with no corpus to observe, so every cell is n/a with the reason "output
+    #: not read". The adapter does carry the rule id, location, message, tags
+    #: and the issue_severity it writes (tests over hand-written SARIF); a
+    #: captured run (tests/test_data/scanners/govulncheck/captured) is what
+    #: moves those cells to MAPPED.
     facets: ClassVar[ScannerFacets] = ScannerFacets(
         rule_id=FacetDecl(
-            state=FacetState.MAPPED, native_field='result "ruleId" (the OSV id)'
+            state=FacetState.NA,
+            reason="output not read; a sample run would settle it (the adapter "
+            "passes the result ruleId, an OSV id, through)",
         ),
         severity=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field='result "level" (error/warning/note), rewritten to an '
-            'ASH severity by apply_severity_mapping into properties "issue_severity"',
+            state=FacetState.NA,
+            reason="output not read; a sample run would settle it (the adapter "
+            "maps the result level error/warning/note to HIGH/MEDIUM/LOW in "
+            "apply_severity_mapping)",
         ),
         file_path=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="locations[].physicalLocation.artifactLocation.uri "
-            "(the module's go.mod, prefixed with the module directory)",
+            state=FacetState.NA,
+            reason="output not read; a sample run would settle it (the adapter "
+            "prefixes the module directory onto the go.mod location uri)",
         ),
         line_range=FacetDecl(
             state=FacetState.NA,
@@ -219,7 +225,8 @@ class GovulncheckScanner(ScannerPluginBase[GovulncheckScannerConfig]):
             reason="output not read; a sample run would settle it",
         ),
         message=FacetDecl(
-            state=FacetState.MAPPED, native_field='result "message.text"'
+            state=FacetState.NA,
+            reason="output not read; a sample run would settle it",
         ),
         resource_id=FacetDecl(
             state=FacetState.NA,
@@ -274,13 +281,14 @@ class GovulncheckScanner(ScannerPluginBase[GovulncheckScannerConfig]):
             "a helpUri",
         ),
         tags=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field='result properties "tags"; the adapter appends '
-            "vulnerability and security",
+            state=FacetState.NA,
+            reason="output not read; a sample run would settle it (the adapter "
+            "appends vulnerability and security)",
         ),
         extras=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field='result properties "issue_severity" written by the adapter',
+            state=FacetState.NA,
+            reason="output not read; a sample run would settle it (the adapter "
+            'writes properties "issue_severity")',
         ),
     )
 
@@ -311,6 +319,11 @@ class GovulncheckScanner(ScannerPluginBase[GovulncheckScannerConfig]):
                 tool_type=ScannerToolType.SCA,
                 selection="one run per directory holding a go.mod "
                 "(GovulncheckScanner._modules)",
+                covers_note=(
+                    "the community scanners declare no covers display string; "
+                    "go.mod is the Go dependency manifest, which govulncheck reads "
+                    "with the code that imports it"
+                ),
             ),
             runtime=opsf.RuntimeFacet(
                 kind=opsf.RuntimeKind.USER_INSTALLED_CLI,
