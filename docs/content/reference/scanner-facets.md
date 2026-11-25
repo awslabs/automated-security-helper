@@ -35,8 +35,8 @@ The facet vocabulary, in declaration order: `rule_id`, `severity`, `file_path`, 
 | [`gitleaks`](#gitleaks) | 9 | 1 | 10 | 0 |
 | [`grype`](#grype) | 12 | 0 | 4 | 4 |
 | [`npm-audit`](#npm-audit) | 14 | 0 | 5 | 1 |
-| [`opengrep`](#opengrep) | 11 | 0 | 9 | 0 |
-| [`semgrep`](#semgrep) | 10 | 0 | 10 | 0 |
+| [`opengrep`](#opengrep) | 11 | 0 | 8 | 1 |
+| [`semgrep`](#semgrep) | 10 | 0 | 9 | 1 |
 | [`syft`](#syft) | 0 | 2 | 17 | 1 |
 | [`trivy`](#trivy) | 15 | 0 | 3 | 2 |
 | [`zizmor`](#zizmor) | 10 | 0 | 10 | 0 |
@@ -367,7 +367,7 @@ The facet vocabulary, in declaration order: `rule_id`, `severity`, `file_path`, 
 | `fix_available` | `n/a` |  | opengrep 2.0.0's SARIF has no fixes key even for a rule that carries `fix:` (tests/test_data/scanners/opengrep/captured/opengrep-2.0.0-fix-rule.sarif: result keys are exactly fingerprints, locations, message, properties, ruleId), so there is nothing in the SARIF ASH reads to map |
 | `remediation_text` | `n/a` |  | rule help describes the rule, not a remediation; fixes are recorded under fix_available |
 | `snippet` | `mapped` | results[].locations[].physicalLocation.region.snippet.text |  |
-| `references` | `n/a` |  | UNCONFIRMED: the committed captures' SARIF rules carry no helpUri (the rule help is help.markdown text, not a link). A rule helpUri would be read into the flat references by the shared rule read (FlatVulnerability.from_sarif_result); redeclare MAPPED when a capture carrying one is committed (the corpus gate fails this cell as soon as the observed column is populated) |
+| `references` | `unconfirmed` |  | UNCONFIRMED: the committed captures' SARIF rules carry no helpUri (the rule help is help.markdown text, not a link). A rule helpUri would be read into the flat references by the shared rule read (FlatVulnerability.from_sarif_result); redeclare MAPPED when a capture carrying one is committed (the corpus gate lists this cell as a fixture owed until then) |
 | `tags` | `mapped` | tool.driver.rules[].properties.tags, read into the flat tags when the result carries none (they also feed the CWE read) |  |
 | `extras` | `mapped` | results[].properties (SARIF property bag, passed through unmodified) |  |
 
@@ -394,7 +394,7 @@ The facet vocabulary, in declaration order: `rule_id`, `severity`, `file_path`, 
 | `fix_available` | `n/a` |  | semgrep 1.187.0's SARIF has no fixes key even for a rule that carries `fix:` (tests/test_data/scanners/semgrep/captured/semgrep-1.187.0-fix-rule.sarif: result keys are exactly fingerprints, locations, message, properties, ruleId), so there is nothing in the SARIF ASH reads to map |
 | `remediation_text` | `n/a` |  | rule help describes the rule, not a remediation; fixes are recorded under fix_available |
 | `snippet` | `mapped` | results[].locations[].physicalLocation.region.snippet.text |  |
-| `references` | `n/a` |  | UNCONFIRMED: the committed captures are local-rule runs, whose SARIF rules carry no helpUri. A registry rule's helpUri is read into the flat references by the shared rule read (FlatVulnerability.from_sarif_result); redeclare MAPPED when a registry-rule capture is committed (the corpus gate fails this cell as soon as the observed column is populated) |
+| `references` | `unconfirmed` |  | UNCONFIRMED: the committed captures are local-rule runs, whose SARIF rules carry no helpUri. A registry rule's helpUri is read into the flat references by the shared rule read (FlatVulnerability.from_sarif_result); redeclare MAPPED when a registry-rule capture is committed (the corpus gate lists this cell as a fixture owed until then) |
 | `tags` | `mapped` | tool.driver.rules[].properties.tags, read into the flat tags when the result carries none (they also feed the CWE read) |  |
 | `extras` | `mapped` | results[].properties (SARIF property bag, passed through unmodified) |  |
 

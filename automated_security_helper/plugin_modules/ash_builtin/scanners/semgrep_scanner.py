@@ -249,13 +249,13 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
             native_field="results[].locations[].physicalLocation.region.snippet.text",
         ),
         references=FacetDecl(
-            state=FacetState.NA,
+            state=FacetState.UNCONFIRMED,
             reason="UNCONFIRMED: the committed captures are local-rule runs, "
             "whose SARIF rules carry no helpUri. A registry rule's helpUri "
             "is read into the flat references by the shared rule read "
             "(FlatVulnerability.from_sarif_result); redeclare MAPPED when a "
-            "registry-rule capture is committed (the corpus gate fails this "
-            "cell as soon as the observed column is populated)",
+            "registry-rule capture is committed (the corpus gate lists this "
+            "cell as a fixture owed until then)",
         ),
         tags=FacetDecl(
             state=FacetState.MAPPED,

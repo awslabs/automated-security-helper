@@ -36,6 +36,8 @@ from typing import Dict, Iterator, List, Optional, Set
 
 import pytest
 
+from tests.utils.helpers import importing_this_checkout
+
 pytestmark = pytest.mark.unit
 
 PACKAGE = "automated_security_helper"
@@ -285,7 +287,7 @@ def test_the_named_reporters_are_allowlisted_modules():
 def test_importing_the_models_loads_no_polars_in_a_fresh_interpreter():
     # the source scan cannot see an import-time call that imports polars inside a
     # helper (frame_schema(...) at module scope, a decorator, importlib)
-    code = (
+    code = importing_this_checkout(
         "import sys; import automated_security_helper.models.core; "
         "assert 'polars' not in sys.modules, 'polars loaded with models.core'"
     )

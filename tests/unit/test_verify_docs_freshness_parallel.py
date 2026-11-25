@@ -191,10 +191,13 @@ def test_parallel_and_serial_runs_agree_on_the_real_tree():
     """
     import subprocess
 
+    from tests.utils.helpers import checkout_env
+
     def run(*extra: str) -> tuple[int, str]:
         done = subprocess.run(
             [sys.executable, str(SCRIPT), *extra],
             cwd=REPO_ROOT,
+            env=checkout_env(),
             capture_output=True,
             text=True,
             check=False,
