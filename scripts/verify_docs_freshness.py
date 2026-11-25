@@ -517,25 +517,9 @@ def compare_inventories(
 
 def _segment_names(segment: type) -> dict[str, str]:
     """Map each plugin's user-facing name to the config field that declares it."""
-    from automated_security_helper.plugin_manifests import plugin_config_sections
-
-    kind = {
-        "ScannerConfigSegment": "scanners",
-        "ReporterConfigSegment": "reporters",
-        "ConverterConfigSegment": "converters",
-    }.get(segment.__name__)
-    # A plugin whose name is its field name carries no alias, so the name a manifest
-    # row declares ("mcp_config") is what the field is, not a dashed spelling of it.
-    declared = (
-        {name.replace("-", "_"): name for name, _ in plugin_config_sections(kind)}
-        if kind
-        else {}
-    )
     names: dict[str, str] = {}
     for field_name, field_info in segment.model_fields.items():
-        display_name = (
-            field_info.alias or declared.get(field_name) or field_name.replace("_", "-")
-        )
+        display_name = field_info.alias or field_name.replace("_", "-")
         names[display_name] = f"field {field_name}"
     return names
 
@@ -699,10 +683,7 @@ def check_plugin_data() -> list[str]:
     are compared with the same registry. Every link the partial gives into the
     scanner and reporter references must name a heading that exists there.
     """
-    from automated_security_helper.config.ash_config import (
-        ConverterConfigSegment,
-        ScannerConfigSegment,
-    )
+    from automated_security_helper.config.ash_config import ScannerConfigSegment
 
     failures: list[str] = []
     where = "docs/overrides/partials/generated/plugin-data.html"
@@ -723,7 +704,15 @@ def check_plugin_data() -> list[str]:
                 f"missing {sorted(expected - listed)}, extra {sorted(listed - expected)}"
             )
 
-    converters = set(_segment_names(ConverterConfigSegment))
+    # The converters come from the plugin registry, not the config segment: a
+    # converter whose section the config model does not declare (the sdist lock
+    # harvester) is still a converter, and a name with an underscore ("mcp_config")
+    # is that name, not a dashed spelling of its field.
+    # scripts/ is not on sys.path where this module is loaded by path.
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from _plugin_reference import discover
+
+    converters = {plugin.name for plugin in discover("converter")}
     block = _partial_block(text, "converters")
     listed = (
         set(re.findall(r'"name": "([^"]+)"', block)) if block is not None else set()

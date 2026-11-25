@@ -1618,8 +1618,8 @@ global_settings:
       reason: "A warning message naming ~/.npmrc and ~/.yarnrc as what the audit copy keeps the package managers away from; nothing here reads the files."
     - rule_id: threat-filesystem-read
       path: scripts/generate_plugin_data_partial.py
-      line_start: 185
-      line_end: 185
+      line_start: 187
+      line_end: 187
       reason: "'.env' is the example file name a docs graphic row shows for the secrets category; display data, not a read."
     # === trivy license scanner: two expressions the approved list does not match ===
     #
