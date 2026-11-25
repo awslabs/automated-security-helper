@@ -652,6 +652,16 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             cls, ScannerPluginConfigBase, value, handler, info
         )
 
+    def tool_type_tag(self) -> str:
+        """The ``tool_type::<TYPE>`` tag a scanner puts on its results.
+
+        Written from the member's value: ``f"{member}"`` is the value on Python
+        3.10 and 3.11 and ``ClassName.MEMBER`` on 3.12, and the tag is a wire
+        spelling that readers (``utils/scanner_tool_types``) normalize from.
+        """
+        tool_type = self.tool_type or ScannerToolType.UNKNOWN
+        return f"tool_type::{getattr(tool_type, 'value', tool_type)}"
+
     def model_post_init(self, context):
         if self.config is None:
             raise ScannerError(

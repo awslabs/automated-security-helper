@@ -956,7 +956,6 @@ class PluginBase(UVToolMixin, BaseModel):
     model_config = ConfigDict(
         extra="allow",
         arbitrary_types_allowed=True,
-        use_enum_values=True,
         # A phase builds a plugin from its config section, which a config model
         # may not type (a plugin module's section), so the plugin's own error is
         # the one raised. A refused value can be a secret read from the
