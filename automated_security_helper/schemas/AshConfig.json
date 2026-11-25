@@ -3336,7 +3336,7 @@
           "description": "Configure the options for the McpConfigConverter"
         },
         "sdist-lock-harvester": {
-          "$ref": "#/$defs/SdistLockHarvesterConfig",
+          "$ref": "#/$defs/SdistLockHarvesterConverterConfig",
           "default": {
             "enabled": true,
             "name": "sdist-lock-harvester",
@@ -7724,7 +7724,7 @@
       "title": "SdistHarvestOptions",
       "type": "object"
     },
-    "SdistLockHarvesterConfig": {
+    "SdistLockHarvesterConverterConfig": {
       "additionalProperties": false,
       "description": "Configuration for the sdist lockfile harvester.\n\nThe feature's OPTIONS live on the syft scanner's options surface\n(``scanners.syft.options.sdist_harvest``), because that is where the\noperator already configures SBOM behavior and where ASH's config trust\nmachinery polices who wrote a value. This section only turns the converter\nitself on or off; with the converter on, ``sdist_harvest.enabled`` and\noffline mode decide whether anything is fetched.",
       "properties": {
@@ -7763,7 +7763,7 @@
           "description": "Converter options"
         }
       },
-      "title": "SdistLockHarvesterConfig",
+      "title": "SdistLockHarvesterConverterConfig",
       "type": "object"
     },
     "SemgrepScannerConfig": {

@@ -67,7 +67,7 @@ def confined_path(root: Path, *parts: str) -> Optional[Path]:
     return joined
 
 
-class SdistLockHarvesterConfig(ConverterPluginConfigBase):
+class SdistLockHarvesterConverterConfig(ConverterPluginConfigBase):
     """Configuration for the sdist lockfile harvester.
 
     The feature's OPTIONS live on the syft scanner's options surface
@@ -83,7 +83,7 @@ class SdistLockHarvesterConfig(ConverterPluginConfigBase):
 
 
 @ash_converter_plugin
-class SdistLockHarvester(ConverterPluginBase[SdistLockHarvesterConfig]):
+class SdistLockHarvester(ConverterPluginBase[SdistLockHarvesterConverterConfig]):
     """Harvests cross-toolchain lockfiles from the sdists the tree's lockfiles pin.
 
     A resolved Python dependency whose wheels carry a platform tag ships compiled
@@ -115,7 +115,7 @@ class SdistLockHarvester(ConverterPluginBase[SdistLockHarvesterConfig]):
 
     def model_post_init(self, context):
         if self.config is None:
-            self.config = SdistLockHarvesterConfig()
+            self.config = SdistLockHarvesterConverterConfig()
         return super().model_post_init(context)
 
     def validate_plugin_dependencies(self) -> bool:

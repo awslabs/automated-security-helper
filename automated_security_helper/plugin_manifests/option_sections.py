@@ -184,7 +184,7 @@ CONVERTER_SECTIONS = (
         _section(
             _CONVERTERS,
             "sdist_lock_harvester",
-            "SdistLockHarvesterConfig",
+            "SdistLockHarvesterConverterConfig",
             "the SdistLockHarvester",
         ),
     ),
