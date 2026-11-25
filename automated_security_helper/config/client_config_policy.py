@@ -469,6 +469,13 @@ SHIPPED_DEFAULT_DENIED_PATHS: Tuple[FrozenSet[str], ...] = tuple(
         ),
     )
 )
+#: The default after the sdist harvest's options joined it: they decide whether
+#: ASH fetches the sdists a lockfile pins, which adds the packages those sdists
+#: embed to the SBOM and the findings read from it, so they are the operator's.
+SHIPPED_DEFAULT_DENIED_PATHS = (
+    *SHIPPED_DEFAULT_DENIED_PATHS,
+    SHIPPED_DEFAULT_DENIED_PATHS[-1] | {"/scanners/syft/options/sdist_harvest/**"},
+)
 
 
 class _OptionDefaults(Mapping[Tuple[str, str], Any]):

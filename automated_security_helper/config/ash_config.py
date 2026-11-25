@@ -1267,6 +1267,11 @@ class RuntimeOverridesConfig(RedactedSection):
         "/scanners/ferret-scan/options/config_file",
         "/scanners/grype/options/config_file",
         "/scanners/syft/options/config_file",
+        # Whether syft's SBOM is completed from the sdists a lockfile pins, and
+        # how much of each is fetched and where it is cached: the harvest adds
+        # the packages those sdists embed to the findings, so a client's file
+        # may neither turn it off nor widen it.
+        "/scanners/syft/options/sdist_harvest/**",
         "/scanners/trivy-repo/options/secret_config_file",
         # And the builtin scanners' own config files, trivy-repo's config file
         # and modules directory, cfn-guard's rules files, the programs actionlint

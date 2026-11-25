@@ -176,6 +176,15 @@ LOCAL: Dict[Plugin, str] = {
         "reads the MCP config files in the scan set in process; declares no "
         "network and fetches nothing (mcp_config_scanner.py)"
     ),
+    ("converters", "sdist-lock-harvester"): (
+        "fetches the sdist each uv.lock entry pins by URL and sha256, online only, "
+        "and verifies the bytes against the lock before extracting anything "
+        "(sdist_harvest.py, sdist_lock_harvester.py); it sends nothing about the "
+        "repository. Its options (`scanners.syft.options.sdist_harvest`) are in the "
+        "default denied paths, so a client's file cannot turn the fetch on, off "
+        "or elsewhere; the converter has no config section beyond `enabled`, so "
+        "no whole-section denial exists to list"
+    ),
     ("converters", "jupyter"): (
         "converts notebooks with nbconvert, which it installs from the package "
         "index when missing"
