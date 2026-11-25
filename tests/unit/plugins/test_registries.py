@@ -205,8 +205,8 @@ def test_the_registration_record_carries_no_origin_field() -> None:
 
 
 def test_selection_treats_a_shipped_optin_and_a_custom_identically() -> None:
-    alpha_cls = _defined_in(f"{ALPHA.members[0]}.scanner", "AlphaShipped")
-    custom_cls = _defined_in("custom_ash_plugins.scanner", "Custom")
+    alpha_cls = _defined_in(ALPHA.members[0], "AlphaShipped")
+    custom_cls = _defined_in("custom_ash_plugins", "Custom")
     core_cls = _defined_in(f"{CORE.members[0]}.scanners.x", "Core")
 
     named_both = scan_plugin_filter([ALPHA.members[0], "custom_ash_plugins"])
@@ -218,6 +218,17 @@ def test_selection_treats_a_shipped_optin_and_a_custom_identically() -> None:
         "a custom plugin and a shipped opt-in plugin share one enablement rule"
     )
     assert named_neither(core_cls), "core members load unnamed"
+
+    # The loader's submodule rule is also one rule for both: a class defined
+    # only in a submodule of a named package is not selected through the
+    # package (scan_plugin_filter's documented contract, unchanged here) --
+    # and that answer does not depend on which registry, if any, carries the
+    # package. CORE differs by design: its members load unnamed, subpackages
+    # included.
+    alpha_sub = _defined_in(f"{ALPHA.members[0]}.scanner", "AlphaSub")
+    custom_sub = _defined_in("custom_ash_plugins.scanner", "CustomSub")
+    assert named_both(alpha_sub) == named_both(custom_sub)
+    assert not named_both(alpha_sub)
 
 
 # ---------------------------------------------------------------------------
