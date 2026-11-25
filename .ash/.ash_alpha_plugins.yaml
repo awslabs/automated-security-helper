@@ -41,12 +41,16 @@ global_settings:
         the line is pinned so that a bind elsewhere in the file still reports.
     - rule_id: API_KEY_OR_SECRET
       path: automated_security_helper/config/tool_config_trust.py
-      line_start: 122
-      line_end: 122
+      line_start: 139
+      line_end: 139
       reason: >-
-        False positive. The line is one row of a table that names, for each scanner,
-        the option that points at a file; the detector reads a scanner name and a word
-        in the row. No value is held.
+        False positive. ferret-scan reports this one line of the file, measured with
+        2.6.1 over the tree. It is the SCANNER_CONFIG_FILE_OPTIONS row that pairs
+        the detect-secrets scanner with its baseline_file option; the scanner's name
+        carries the word "secrets" and the value is an option name, not a credential.
+        Pinned to the line so a real value added elsewhere in the file still reports;
+        tests/unit/config/test_tool_config_trust_ferret_pins.py fails if the row
+        moves out of the pinned line.
     - rule_id: API_KEY_OR_SECRET
       path: automated_security_helper/plugin_modules/ash_ferret_plugins/spec/2026-09-13-ferret-scan-plugin-v2-update-analysis.md
       reason: >-
@@ -65,8 +69,8 @@ global_settings:
         hold words, not a credential.
     - rule_id: API_KEY_OR_SECRET
       path: Dockerfile
-      line_start: 812
-      line_end: 814
+      line_start: 815
+      line_end: 817
       reason: >-
         False positive. The adduser command in the non-root-user block passes the
         --disabled-password flag, which the netrc_password detector in ferret-scan 2.6.1
@@ -75,8 +79,8 @@ global_settings:
         moves out of this range.
     - rule_id: API_KEY_OR_SECRET
       path: automated_security_helper/assets/Dockerfile
-      line_start: 812
-      line_end: 814
+      line_start: 815
+      line_end: 817
       reason: >-
         False positive. This is the build-context copy of the Dockerfile entry above, with
         the same adduser --disabled-password flag that ferret-scan 2.6.1 reads as a
@@ -371,15 +375,6 @@ global_settings:
     # what the match is, and none quotes the matching line, so this file does not
     # flag itself. Entries are per file, never tests/** or docs/**, so a real
     # credential added to another file is still reported.
-    - path: automated_security_helper/config/tool_config_trust.py
-      rule_id: API_KEY_OR_SECRET
-      line_start: 116
-      line_end: 116
-      reason: >-
-        False positive. The line is a table key naming the detect-secrets scanner,
-        mapped to the one option the scanned tree may not set for it. The keyword
-        is part of a tool name; the value is an option name, not a credential.
-        Pinned to the line so a real value added elsewhere in the file still reports.
     - path: tests/integration/codecommit_gate_regression/assert_case.py
       rule_id: API_KEY_OR_SECRET
       reason: >-
@@ -486,11 +481,6 @@ global_settings:
         that name a file. It pairs the detect-secrets scanner with its
         baseline_file option. The scanner's name carries the word "secrets"; the
         value is an option name, not a credential.
-    - path: automated_security_helper/config/tool_config_trust.py
-      rule_id: API_KEY_OR_SECRET
-      reason: >-
-        False positive. Same table row as in operator_paths.py: the detect-secrets
-        scanner name and its baseline_file option name, not a credential.
     - path: tests/unit/cli/mcp/test_scan_directory_start_failures.py
       rule_id: API_KEY_OR_SECRET
       reason: >-
@@ -575,15 +565,15 @@ global_settings:
         for the trade_secret keywords, pattern text and not a value.
     - path: .ash/.ash.yaml
       rule_id: API_KEY_OR_SECRET
-      line_start: 1049
-      line_end: 1049
+      line_start: 764
+      line_end: 764
       reason: >-
         False positive. A suppression reason that quotes a placeholder fixture
         literal; the text explains why another finding is a false positive.
     - path: .ash/.ash.yaml
       rule_id: API_KEY_OR_SECRET
-      line_start: 1296
-      line_end: 1296
+      line_start: 1011
+      line_end: 1011
       reason: >-
         False positive. A suppression reason that quotes a placeholder fixture
         literal; the text explains why another finding is a false positive.
@@ -601,6 +591,29 @@ global_settings:
       reason: >-
         False positive. A shell variable named for a token, filled at run time
         from /dev/urandom as a per-run nonce. No value is stored in the file.
+    # === Detections the alpha self-scan reports on files added after the entries above ===
+    # Measured with ferret-scan 2.6.1, gitleaks and GuardDog over the tree as the alpha
+    # self-scan runs it. Each was read at the reported line and is pinned to it.
+    - path: automated_security_helper/base/scanner_operational_facets.py
+      rule_id: API_KEY_OR_SECRET
+      line_start: 715
+      line_end: 715
+      reason: >-
+        False positive. An enum member whose name is a token word and whose value is a
+        lowercase label of the same word; no credential is held.
+    - path: tests/unit/utils/test_finding_trend.py
+      rule_id: API_KEY_OR_SECRET
+      line_start: 23
+      line_end: 23
+      reason: >-
+        False positive. A test helper's default argument, a twelve-character hex id
+        used to build a fake report id; no credential.
+    - rule_id: generic-api-key
+      path: tests/unit/utils/test_finding_trend.py
+      reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
+    - rule_id: generic-api-key
+      path: tests/unit/utils/test_scan_history.py
+      reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
     # === ferret-scan API_KEY_OR_SECRET: pinned release checksums ===
     # Separate from the block above and for a different reason. Those are identifiers
     # whose NAMES match a secret keyword; this one is a table of values that genuinely
@@ -648,21 +661,6 @@ global_settings:
       line_start: 650
       line_end: 650
       reason: Documentation example showing the SECRET-SECRET-KEYWORD detection pattern.
-    - path: automated_security_helper/plugin_modules/ash_ferret_plugins/ferret_scanner.py
-      rule_id: B404
-      line_start: 12
-      line_end: 12
-      reason: Subprocess module required — ferret-scan is an external CLI tool invoked via subprocess with list args (no shell=True).
-    - path: automated_security_helper/plugin_modules/ash_ferret_plugins/ferret_scanner.py
-      rule_id: B603
-      line_start: 1455
-      line_end: 1455
-      reason: Subprocess calls use list args (no shell=True) with validated inputs. ferret-scan binary path comes from shutil.which().
-    - path: automated_security_helper/plugin_modules/ash_ferret_plugins/ferret_scanner.py
-      rule_id: B607
-      line_start: 1455
-      line_end: 1455
-      reason: Partial executable path resolved via shutil.which() in validate_plugin_dependencies(). Standard ASH scanner pattern.
     - path: scripts/generate_test_docx.py
       rule_id: B311
       line_start: 1
@@ -797,15 +795,39 @@ global_settings:
     - rule_id: B311
       path: automated_security_helper/**/*.py
       reason: "Standard random for non-security purposes"
+    # B404 in the product: five import lines, measured with bandit 1.9.4 over the tree
+    # as the alpha self-scan runs it (the repository's bandit config, nosec comments
+    # honored). Each file imports the subprocess module for a type, a constant or a
+    # quoting helper (processes start through ASH's own helper), and bandit reads the import itself. The same scan reports no B603
+    # or B607 finding under automated_security_helper/, so those two rules carry no
+    # product entry: a call that starts to trip either one reports. One entry per
+    # file, pinned to its import line; tests/unit/config/test_product_bandit_subprocess_pins.py
+    # fails when an import moves out of its pin or a sixth file imports subprocess.
     - rule_id: B404
-      path: automated_security_helper/**/*.py
-      reason: "Subprocess module required — tool orchestrator pattern"
-    - rule_id: B603
-      path: automated_security_helper/**/*.py
-      reason: "Subprocess calls use list args with validated executables"
-    - rule_id: B607
-      path: automated_security_helper/**/*.py
-      reason: "Executable paths from find_executable/shutil.which"
+      path: automated_security_helper/interactions/container_leftovers.py
+      line_start: 45
+      line_end: 45
+      reason: "Imports the SubprocessError type to catch it; the process starts through ASH's subprocess_utils helper."
+    - rule_id: B404
+      path: automated_security_helper/plugin_modules/ash_builtin/scanners/_trivy_scanner_base.py
+      line_start: 35
+      line_end: 35
+      reason: "The import is for list2cmdline, which quotes one argument; processes start through ASH's subprocess_utils helper, not this module."
+    - rule_id: B404
+      path: automated_security_helper/plugin_modules/ash_builtin/scanners/bandit_scanner.py
+      line_start: 8
+      line_end: 8
+      reason: "The import is for list2cmdline, which quotes one argument; the scanner starts no process through this module."
+    - rule_id: B404
+      path: automated_security_helper/utils/pre_installed_tool.py
+      line_start: 91
+      line_end: 91
+      reason: "The import is for the CompletedProcess and SubprocessError types the version probe answers with; the probe starts through ASH's spawn helper."
+    - rule_id: B404
+      path: automated_security_helper/utils/scan_output_dirs.py
+      line_start: 90
+      line_end: 90
+      reason: "The import is for the DEVNULL constant and the TimeoutExpired type; the process starts through ASH's spawn_run helper."
     - rule_id: B108
       path: tests/**/*.py
       reason: "Test fixtures use hardcoded temp paths"
@@ -1593,13 +1615,13 @@ global_settings:
       reason: "'.env' is the dotfile stem whose stage-suffixed variants (.env.local) the converter admits for scanning; a name in a table, not a read."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/plugin_modules/ash_builtin/scanners/npm_audit_scanner.py
-      line_start: 787
-      line_end: 787
+      line_start: 793
+      line_end: 793
       reason: "A docstring naming .npmrc to say why the version probe's directory holds its own package.json; nothing here reads the file."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/plugin_modules/ash_builtin/scanners/npm_audit_scanner.py
-      line_start: 789
-      line_end: 789
+      line_start: 795
+      line_end: 795
       reason: "A docstring naming .npmrc to say why the version probe's directory holds its own package.json; nothing here reads the file."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/utils/package_manager_child.py

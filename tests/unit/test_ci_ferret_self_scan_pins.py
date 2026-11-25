@@ -70,6 +70,9 @@ PLUGIN_DIR = "automated_security_helper/plugin_modules/ash_ferret_plugins"
 TEST_DIR = "tests/unit/plugin_modules/ash_ferret_plugins"
 FERRET_SCANNER = f"{PLUGIN_DIR}/ferret_scanner.py"
 DOCX_SCRIPT = "scripts/generate_test_docx.py"
+TOOL_CONFIG_TRUST = "automated_security_helper/config/tool_config_trust.py"
+OPERATIONAL_FACETS = "automated_security_helper/base/scanner_operational_facets.py"
+FINDING_TREND_TEST = "tests/unit/utils/test_finding_trend.py"
 HADOLINT_BEHAVIOR_TEST = (
     "tests/unit/plugin_modules/ash_hadolint_plugins/test_hadolint_scanner_behavior.py"
 )
@@ -111,10 +114,31 @@ _RANDOM_CALL = (
 #: line to use, and so does a row whose entry is gone. An entry with no row here is not
 #: looked at.
 _RANGED_PIN_MARKERS: dict[tuple[str, str], list[_Marker]] = {
-    ("B404", FERRET_SCANNER): [_Marker((r"^import subprocess\b",))],
-    # One call carries both markers, so both rules pin the same lines.
-    ("B603", FERRET_SCANNER): [_Marker((r"# nosec B603 B607\b",))],
-    ("B607", FERRET_SCANNER): [_Marker((r"# nosec B603 B607\b",))],
+    # The three ferret_scanner.py bandit pins are gone: the import and the call carry
+    # nosec comments, bandit reports nothing for either, and the pins excused nothing
+    # (test_product_bandit_subprocess_pins.py holds the comments in place).
+    #
+    # The one line the ferret-scan 2.6.1 self-scan reports in tool_config_trust.py: the
+    # row of the scanner-option table that pairs the detect-secrets scanner with its
+    # baseline option. The pattern names the row without spelling it out.
+    ("API_KEY_OR_SECRET", TOOL_CONFIG_TRUST): [
+        _Marker((r'detect-secrets"\W+\(\W*baseline_file',)),
+    ],
+    # The enum member whose name is a token word, one line of the facets module.
+    ("API_KEY_OR_SECRET", OPERATIONAL_FACETS): [
+        _Marker((r"^    AUTH_TOKEN = ",)),
+    ],
+    # The report-id helper's twelve-hex-digit default argument.
+    ("API_KEY_OR_SECRET", FINDING_TREND_TEST): [
+        _Marker((r"^def report_id\(second, token=",)),
+    ],
+    # The two lines of .ash/.ash.yaml whose reasons quote a placeholder fixture; they
+    # are the findings the self-scan reports on that file, and each is the one line of
+    # the file that has this shape.
+    ("API_KEY_OR_SECRET", ".ash/.ash.yaml"): [
+        _Marker((r'HEAD = "[0-9a-f]{40}" and TOKEN =',)),
+        _Marker((r'`\w+ = "abcdefghijklmnop"` is a fixture',)),
+    ],
     # Every line that draws a value from the random module, as the file was written.
     ("B311", DOCX_SCRIPT): [_Marker((_RANDOM_CALL,), every_line=True)],
     # The two narrative lines the entry was written for, which the pin takes with the
@@ -598,19 +622,30 @@ def test_an_every_line_pattern_that_matches_nothing_is_reported():
     ("key", "hit", "miss"),
     [
         (
-            ("B404", FERRET_SCANNER),
-            "import subprocess  # nosec B404 - the tool is an external CLI",
-            "# import subprocess happens below",
+            ("API_KEY_OR_SECRET", TOOL_CONFIG_TRUST),
+            # Built from two halves so that this file does not hold the flagged row.
+            '    "detect-' + 'secrets": ("baseline_file",),',
+            '    "ferret-scan": ("config_file",),',
         ),
         (
-            ("B603", FERRET_SCANNER),
-            "result = spawn_run(  # nosec B603 B607 - list args",
-            "result = spawn_run(  # nosec B603 - list args",
+            ("API_KEY_OR_SECRET", OPERATIONAL_FACETS),
+            "    AUTH_" + 'TOKEN = "auth_' + 'token"',
+            '    AUTH_HEADER = "auth_header"',
         ),
         (
-            ("B607", FERRET_SCANNER),
-            "result = spawn_run(  # nosec B603 B607 - list args",
-            "result = spawn_run(  # nosec B607 - list args",
+            ("API_KEY_OR_SECRET", FINDING_TREND_TEST),
+            "def report_id(second, token=" + '"012345678901"):',
+            "def other_id(second, count=3):",
+        ),
+        (
+            ("API_KEY_OR_SECRET", ".ash/.ash.yaml"),
+            'HEAD = "' + "0123456789abcdef0123456789abcdef01234567" + '" and TOKEN =',
+            'HEAD = "unset" and nothing else',
+        ),
+        (
+            ("API_KEY_OR_SECRET", ".ash/.ash.yaml"),
+            "`" + 'secret = "abcdefghijklmnop"` is a fixture fed into',
+            "`value` is a fixture fed into",
         ),
         (
             ("B311", DOCX_SCRIPT),
@@ -634,9 +669,11 @@ def test_an_every_line_pattern_that_matches_nothing_is_reported():
         ),
     ],
     ids=[
-        "B404",
-        "B603",
-        "B607",
+        "tool_config_trust",
+        "operational_facets",
+        "finding_trend_test",
+        "ash_yaml_head",
+        "ash_yaml_secret",
         "B311",
         "SECRET-HEX first line",
         "SECRET-HEX second line",
