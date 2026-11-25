@@ -29,13 +29,21 @@ not the template ``_execute_scan`` shape.
 
 Invocation
 ----------
-* ``--file <path>`` is always passed, so cargo-audit never generates a lockfile
-  (which would run ``cargo generate-lockfile`` and reach the network for the
-  scanned project).
+* ``--file=<absolute path>`` is always passed as one token, so cargo-audit never
+  generates a lockfile (which would run ``cargo generate-lockfile`` and reach the
+  network for the scanned project) and no path can be read as a flag.
 * ``--no-fetch`` is added when the scan is offline; the advisory database already
   has to be on disk (``~/.cargo/advisory-db``).
-* The working directory is the source directory and the path is passed relative to
-  it, so result URIs are source-relative.
+* The working directory is outside the scanned tree. cargo-audit reads
+  ``./.cargo/audit.toml`` from it, and a repository's own file could ignore
+  advisories; the operator's ``~/.cargo/audit.toml`` still applies. Result URIs
+  are source-relative, computed by ASH.
+
+Installation
+------------
+ASH does not install cargo-audit: there is no pinned release asset for it in the
+shared download table, so it is a user-installed CLI
+(``cargo install cargo-audit --locked``).
 
 Severity (``issue_severity`` and the SARIF level agree)
 -------------------------------------------------------
@@ -70,10 +78,16 @@ import time
 from pathlib import Path, PurePosixPath
 from typing import Annotated, Any, ClassVar, Dict, List, Literal, Optional, Set, Tuple
 
-from pydantic import Field, model_validator
+from pydantic import Field
 
 from automated_security_helper.base.options import ScannerOptionsBase
+from automated_security_helper.base import scanner_operational_facets as opsf
 from automated_security_helper.base.plugin_context import PluginContext
+from automated_security_helper.base.scanner_facets import (
+    FacetDecl,
+    FacetState,
+    ScannerFacets,
+)
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
@@ -83,9 +97,6 @@ from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason, ToolArgs
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
-from automated_security_helper.utils.download_utils import (
-    pinned_tool_install_commands,
-)
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.output_excerpt import tool_output_excerpt
 from automated_security_helper.utils.process_env import snapshot_environ
@@ -322,6 +333,212 @@ class CargoAuditScanner(ScannerPluginBase[CargoAuditScannerConfig]):
         cache_paths=("~/.cargo/advisory-db",),
     )
 
+    #: The facets register row (base/scanner_facets.py). The native fields name
+    #: the rustsec ``Report`` JSON (``cargo audit --json``) that this adapter
+    #: converts to SARIF; the adapter writes the SARIF, so a mapped cell that
+    #: is not a native field says what the adapter derives it from.
+    facets: ClassVar[ScannerFacets] = ScannerFacets(
+        rule_id=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="vulnerabilities.list[].advisory.id and "
+            "warnings.<kind>[].advisory.id (the warning kind when a warning "
+            "has no advisory)",
+        ),
+        severity=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="advisory.cvss (a CVSS v3 vector the adapter scores); "
+            "warnings use the warning kind",
+        ),
+        file_path=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="(none) the Cargo.lock the run was given, "
+            "source-relative, written by the adapter",
+        ),
+        line_range=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="(none) the report carries no lockfile positions; the "
+            "adapter writes startLine 1",
+        ),
+        column=FacetDecl(
+            state=FacetState.NA,
+            reason="a lockfile advisory has no column",
+        ),
+        message=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="package.name, package.version and advisory.title, "
+            "assembled into the result text by the adapter",
+        ),
+        resource_id=FacetDecl(
+            state=FacetState.NA,
+            reason="findings name a crate and version in a lockfile, not a "
+            "deployable resource",
+        ),
+        resource_type=FacetDecl(
+            state=FacetState.NA,
+            reason="findings name a crate and version in a lockfile, not a "
+            "deployable resource",
+        ),
+        package_name=FacetDecl(
+            state=FacetState.DROPPED,
+            native_field="package.name",
+            reason="the adapter writes the crate into the message and the "
+            "fingerprint only, not into the package properties",
+        ),
+        package_version=FacetDecl(
+            state=FacetState.DROPPED,
+            native_field="package.version",
+            reason="the adapter writes the version into the message and the "
+            "fingerprint only, not into the package properties",
+        ),
+        package_path=FacetDecl(
+            state=FacetState.NA,
+            reason="output not read; a sample run would settle it (the JSON "
+            "report's dependency path is unread)",
+        ),
+        taxonomy_cve=FacetDecl(
+            state=FacetState.DROPPED,
+            native_field="advisory.aliases",
+            reason="RustSec advisories list CVE and GHSA aliases; the adapter "
+            "does not write them",
+        ),
+        taxonomy_cwe=FacetDecl(
+            state=FacetState.NA,
+            reason="output not read; a sample run would settle it",
+        ),
+        fingerprints=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="partialFingerprints[cargo-audit/advisory-fingerprint], "
+            "advisory id, crate and version joined by the adapter",
+        ),
+        fix_available=FacetDecl(
+            state=FacetState.DROPPED,
+            native_field="versions.patched",
+            reason="the adapter does not read the patched version ranges",
+        ),
+        remediation_text=FacetDecl(
+            state=FacetState.DROPPED,
+            native_field="versions.patched",
+            reason="the adapter writes no upgrade text from the patched ranges",
+        ),
+        snippet=FacetDecl(
+            state=FacetState.NA,
+            reason="a lockfile finding has no source snippet",
+        ),
+        references=FacetDecl(
+            state=FacetState.DROPPED,
+            native_field="advisory.url",
+            reason="the adapter writes no advisory link",
+        ),
+        tags=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="properties.tags security, sca, rust and "
+            "vulnerability or warning, written by the adapter",
+        ),
+        extras=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="properties.issue_severity, written by the adapter",
+        ),
+    )
+
+    #: The operational register row (base/scanner_operational_facets.py).
+    operational_facets: ClassVar[opsf.ScannerOperationalFacets] = (
+        opsf.ScannerOperationalFacets(
+            scanner_name="cargo-audit",
+            network=opsf.NetworkFacet(
+                fetch_kind=opsf.FetchKind.CONTENT_FETCH,
+                fetches=(opsf.Fetched.ADVISORY_FEED,),
+                prefetch=(),
+                offline_outcome=opsf.OfflineOutcome.DEGRADED,
+                offline_reason=(
+                    "--no-fetch reads the RustSec database already in "
+                    "~/.cargo/advisory-db; with none present the run fails"
+                ),
+                offline_strategy=OfflineStrategy.CACHE_FLAGS,
+                sandbox_network=opsf.SandboxNetwork.ONLINE,
+                source="cargo_audit_scanner.py _argv (--no-fetch) and "
+                "sandbox_requirements",
+            ),
+            output=opsf.OutputFacet(
+                native_formats=(opsf.OutputFormat.TOOL_JSON,),
+                side_reports=(),
+                non_finding_artifacts=(),
+            ),
+            targets=opsf.TargetsFacet(
+                kinds=(opsf.TargetKind.DEPENDENCY_LOCKFILES,),
+                tool_type=ScannerToolType.SCA,
+                selection="every Cargo.lock in the scan set, outside target/ "
+                "build trees (_lockfiles)",
+                covers_note="a community scanner; it declares no covers display string",
+            ),
+            runtime=opsf.RuntimeFacet(
+                kind=opsf.RuntimeKind.USER_INSTALLED_CLI,
+                external_programs=("cargo-audit",),
+                invocations=opsf.Invocations.PER_TARGET,
+                invocation_note="one cargo-audit run per Cargo.lock",
+                python_only=False,
+                use_uv_tool=False,
+            ),
+            platforms=opsf.PlatformsFacet(
+                provisionable=(),
+                note="the user's installed cargo-audit (cargo install "
+                "cargo-audit --locked); absent from TOOL_VERSIONS, so ASH "
+                "provisions nothing",
+            ),
+            severity=opsf.SeverityFacet(
+                severity_class=opsf.SeverityClass.DERIVED,
+                note="a vulnerability is rated from its advisory's CVSS v3 "
+                "vector (HIGH without one); a warning from its kind",
+            ),
+            silencing=opsf.SilencingFacet(
+                tool_side=(
+                    opsf.SilencingLayer(
+                        layer=opsf.SilencingLayerKind.IGNORE_FILE,
+                        writer=opsf.SilencingWriter.REPOSITORY,
+                        honored=opsf.Honored.NO,
+                        surface="./.cargo/audit.toml in the tool's working "
+                        "directory (advisories.ignore)",
+                        cite="cargo-audit config.rs AuditConfig::load reads "
+                        "./.cargo/audit.toml; _subprocess_cwd runs the tool "
+                        "outside the scanned tree",
+                    ),
+                    opsf.SilencingLayer(
+                        layer=opsf.SilencingLayerKind.IGNORE_FILE,
+                        writer=opsf.SilencingWriter.OPERATOR,
+                        honored=opsf.Honored.YES,
+                        surface="~/.cargo/audit.toml in the operator's home",
+                        cite="cargo-audit config.rs AuditConfig::load",
+                    ),
+                ),
+            ),
+            identity=opsf.IdentityFacet(
+                fingerprint_class=opsf.FingerprintClass.STABLE_COMPUTED,
+                note="advisory id, crate and version under "
+                "cargo-audit/advisory-fingerprint",
+            ),
+            extensibility=opsf.ExtensibilityFacet(
+                custom_rules=opsf.CustomRules.NONE,
+                env_prefixes=(),
+                options_surface="the base options only; the advisories are RustSec's",
+            ),
+            exit_codes=opsf.ExitCodesFacet(
+                success_exit_codes=(0, 1),
+                semantics="0 clean, 1 vulnerabilities found (report complete), "
+                "any other code is a failed run",
+            ),
+            provenance=opsf.ProvenanceFacet(
+                tier=opsf.Tier.COMMUNITY_OPTIN,
+                source=opsf.ProvenanceSource.USER_INSTALLED,
+                selection_surfaces=("ash_cargo_audit_plugins in ash_plugin_modules",),
+                upstream_license=opsf.LICENSE_NOT_READ,
+            ),
+            prerequisites=opsf.PrerequisitesFacet(
+                kinds=(opsf.Prerequisite.LOCKFILE,),
+                note="a Cargo.lock; the tool never generates one (--file is "
+                "always passed)",
+            ),
+        )
+    )
+
     def model_post_init(self, context: Any) -> None:
         if self.config is None:
             self.config = CargoAuditScannerConfig()
@@ -331,11 +548,27 @@ class CargoAuditScanner(ScannerPluginBase[CargoAuditScannerConfig]):
         self.args = ToolArgs(extra_args=[])
         super().model_post_init(context)
 
-    @model_validator(mode="after")
-    def setup_custom_install_commands(self) -> "CargoAuditScanner":
-        """Install from the pinned release asset in ``utils/tool_downloads.py``."""
-        self.custom_install_commands.update(pinned_tool_install_commands("cargo-audit"))
-        return self
+    # No installer, by design of this module: cargo-audit has no pinned release
+    # asset in ``utils/tool_downloads.py`` (a shared file), and a construction-time
+    # lookup of one raised. The user installs it with
+    # ``cargo install cargo-audit --locked``; see validate_plugin_dependencies.
+
+    def nothing_to_scan_reason(self) -> str | None:
+        """None when either tree holds a Cargo.lock outside a build directory."""
+        trees: List[Literal["source", "converted"]] = ["source"]
+        work_dir = Path(self._ctx.work_dir)
+        if work_dir.is_dir() and any(work_dir.rglob("*.*")):
+            trees.append("converted")
+        for target_type in trees:
+            root = (
+                work_dir if target_type == "converted" else Path(self._ctx.source_dir)
+            )
+            try:
+                if self._lockfiles(root, target_type, []):
+                    return None
+            except OSError:
+                return None
+        return f"no {LOCKFILE_NAME} in the scanned files"
 
     def _execute_scan(
         self, target: Any, target_type: Any, global_ignore_paths: Any
@@ -432,12 +665,39 @@ class CargoAuditScanner(ScannerPluginBase[CargoAuditScannerConfig]):
         except ValueError:
             return absolute.as_posix()
 
-    def _argv(self, lockfile_arg: str) -> List[str]:
+    def _argv(self, lockfile: Path) -> List[str]:
+        """The command line for one lockfile.
+
+        The lockfile travels as one ``--file=<absolute path>`` token, so no path
+        can be read as a flag. The tool runs outside the scanned tree
+        (``_subprocess_cwd``), hence the absolute path.
+        """
         args = [self.command or "cargo-audit", "audit", "--json"]
         if self._scanner_offline():
             args.append("--no-fetch")
-        args.extend(["--file", lockfile_arg])
+        args.append(f"--file={lockfile.absolute().as_posix()}")
         return args
+
+    def _subprocess_cwd(self, results_dir: Path) -> Path | None:
+        """A working directory outside the scanned tree.
+
+        cargo-audit reads ``./.cargo/audit.toml`` from its working directory
+        (cargo-audit ``config.rs``, ``AuditConfig::load``) and a project file
+        there outranks the operator's ``~/.cargo/audit.toml``. A repository
+        could therefore list its own advisories under ``ignore`` or point the
+        database at its own path. It has no ``--config`` flag, so the run starts
+        where the scanned tree has no say.
+        """
+        from automated_security_helper.config.path_trust import (
+            cwd_outside_scanned_tree,
+        )
+
+        return cwd_outside_scanned_tree(
+            self._ctx.source_dir,
+            results_dir=results_dir,
+            source_dir=self._ctx.source_dir,
+            config=getattr(self._ctx, "config", None),
+        )
 
     # ------------------------------------------------------------------
     # The scan
@@ -518,7 +778,7 @@ class CargoAuditScanner(ScannerPluginBase[CargoAuditScannerConfig]):
             final_args: List[str] = []
             responses: List[Tuple[Path, Dict[str, Any], Optional[int]]] = []
             for lockfile in lockfiles:
-                final_args = self._argv(self._argv_path(lockfile))
+                final_args = self._argv(lockfile)
                 response = self._run_until(final_args, results_dir, deadline)
                 responses.append((lockfile, response, self.exit_code))
                 if response.get("timed_out") or self.exit_code not in (
@@ -580,6 +840,7 @@ class CargoAuditScanner(ScannerPluginBase[CargoAuditScannerConfig]):
             results_dir=results_dir,
             stdout_preference="return",
             stderr_preference="both",
+            cwd=self._subprocess_cwd(results_dir),
             env=dict(snapshot_environ()),
             timeout=remaining,
         )
@@ -618,10 +879,8 @@ class CargoAuditScanner(ScannerPluginBase[CargoAuditScannerConfig]):
         found = find_executable(self.command or "cargo-audit")
         if not found:
             ASH_LOGGER.warning(
-                "cargo-audit executable not found in PATH. Install it with "
-                "`ash dependencies install --config-overrides "
-                "'ash_plugin_modules+=[\"automated_security_helper.plugin_modules."
-                "ash_cargo_audit_plugins\"]' --tool cargo-audit`."
+                "cargo-audit executable not found in PATH. ASH does not install "
+                "it; install it with `cargo install cargo-audit --locked`."
             )
         return found is not None
 

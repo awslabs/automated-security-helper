@@ -281,17 +281,50 @@ class TestInvocation:
         fake = FakeCargoAudit(stdout=json.dumps(NEGATIVE), exit_code=0)
         _run(_scanner(tree, tmp_path), fake, monkeypatch)
         argvs = [c["argv"] for c in fake.calls]
+        root = tree.absolute().as_posix()
         assert argvs == [
-            ["cargo-audit", "audit", "--json", "--file", "Cargo.lock"],
-            ["cargo-audit", "audit", "--json", "--file", "crates/inner/Cargo.lock"],
+            ["cargo-audit", "audit", "--json", f"--file={root}/Cargo.lock"],
+            [
+                "cargo-audit",
+                "audit",
+                "--json",
+                f"--file={root}/crates/inner/Cargo.lock",
+            ],
         ]
+
+    def test_the_lockfile_is_one_token_so_it_cannot_read_as_a_flag(
+        self, tree, tmp_path, on_path, monkeypatch
+    ):
+        fake = FakeCargoAudit(stdout=json.dumps(NEGATIVE), exit_code=0)
+        _run(_scanner(tree, tmp_path), fake, monkeypatch)
+        for call in fake.calls:
+            assert "--file" not in call["argv"]
+            assert sum(a.startswith("--file=") for a in call["argv"]) == 1
 
     def test_a_build_directory_lockfile_is_never_scanned(
         self, tree, tmp_path, on_path, monkeypatch
     ):
         fake = FakeCargoAudit(stdout=json.dumps(NEGATIVE), exit_code=0)
         _run(_scanner(tree, tmp_path), fake, monkeypatch)
-        assert not any("target" in c["argv"][-1] for c in fake.calls)
+        assert not any("/target/" in c["argv"][-1] for c in fake.calls)
+
+    def test_the_tool_runs_where_a_tree_supplied_audit_toml_is_not_read(
+        self, tree, tmp_path, on_path, monkeypatch
+    ):
+        """cargo-audit reads ./.cargo/audit.toml of its working directory, and a
+        project file can ignore advisories, so the run starts outside the tree
+        (and the repository's own file is in the tree, not in that directory)."""
+        (tree / ".cargo").mkdir()
+        (tree / ".cargo" / "audit.toml").write_text(
+            '[advisories]\nignore = ["RUSTSEC-0000-0001"]\n'
+        )
+        fake = FakeCargoAudit(stdout=json.dumps(NEGATIVE), exit_code=0)
+        _run(_scanner(tree, tmp_path), fake, monkeypatch)
+        assert fake.calls
+        for call in fake.calls:
+            cwd = Path(call["cwd"]).resolve()
+            assert not cwd.is_relative_to(tree.resolve())
+            assert not (cwd / ".cargo" / "audit.toml").exists()
 
     def test_scan_set_exclusions_are_honored(
         self, tree, tmp_path, on_path, monkeypatch
@@ -308,7 +341,9 @@ class TestInvocation:
                 IgnorePathWithReason(path="crates/**", reason="vendored")
             ],
         )
-        assert [c["argv"][-1] for c in fake.calls] == ["Cargo.lock"]
+        assert [c["argv"][-1] for c in fake.calls] == [
+            f"--file={tree.absolute().as_posix()}/Cargo.lock"
+        ]
 
     @pytest.mark.parametrize(
         "forbidden", ["--format", "--db", "--url", "--deny", "--ignore", "--stale"]
@@ -476,6 +511,159 @@ class TestDependencyCheck:
 
 
 class TestInstall:
-    def test_install_commands_come_from_the_pinned_release_table(self, tmp_path):
+    def test_construction_succeeds_and_ash_provisions_nothing(self, tmp_path):
+        """No pinned release asset exists, so the scanner is a user-installed CLI.
+
+        A construction-time lookup of a pin used to raise ToolNotProvisionable
+        before any test could run; a license-clean tool with no download entry
+        is declared as user-installed instead.
+        """
         scanner = _scanner(tmp_path, tmp_path)
-        assert scanner.custom_install_commands, "no install command declared"
+        assert not scanner.custom_install_commands
+
+    def test_the_missing_tool_hint_names_the_real_install(
+        self, monkeypatch, tmp_path, caplog
+    ):
+        monkeypatch.setattr(cas, "find_executable", lambda cmd: None)
+        seen: List[str] = []
+        monkeypatch.setattr(
+            cas.ASH_LOGGER, "warning", lambda msg, *a, **k: seen.append(msg)
+        )
+        _scanner(tmp_path, tmp_path).validate_plugin_dependencies()
+        assert any("cargo install cargo-audit --locked" in m for m in seen)
+        assert not any("ash dependencies install" in m for m in seen)
+
+
+class TestNothingToScan:
+    def test_reason_when_no_lockfile(self, tmp_path):
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "main.rs").write_text("fn main() {}\n")
+        reason = _scanner(src, tmp_path).nothing_to_scan_reason()
+        assert reason and "Cargo.lock" in reason
+
+    def test_none_when_a_lockfile_exists(self, tree, tmp_path):
+        assert _scanner(tree, tmp_path).nothing_to_scan_reason() is None
+
+    def test_a_build_directory_lockfile_alone_is_nothing(self, tmp_path):
+        src = tmp_path / "src"
+        (src / "target").mkdir(parents=True)
+        (src / "target" / "Cargo.lock").write_text("version = 3\n")
+        assert _scanner(src, tmp_path).nothing_to_scan_reason() is not None
+
+
+class TestSandboxRequirements:
+    """The declaration, through the function every sandboxed spawn goes through."""
+
+    def _policy(self, tmp_path, monkeypatch, *, offline):
+        import sys
+
+        from automated_security_helper.utils.sandbox.policy import build_scanner_policy
+
+        home = tmp_path / "home"
+        home.mkdir()
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.setenv("USERPROFILE", str(home))
+        source = tmp_path / "src"
+        source.mkdir()
+        output = source / ".ash" / "ash_output"
+        output.mkdir(parents=True)
+        policy = build_scanner_policy(
+            "cargo-audit",
+            CargoAuditScanner.sandbox_requirements,
+            argv0=sys.executable,
+            source_dir=source,
+            output_dir=output,
+            results_dir=output / "scanners" / "cargo-audit",
+            scan_target=source,
+            cwd=source,
+            offline=offline,
+            network_scanners=None,
+        )
+        return policy, home
+
+    def test_online_grants_the_network_and_the_database_directory(
+        self, tmp_path, monkeypatch
+    ):
+        policy, home = self._policy(tmp_path, monkeypatch, offline=False)
+        assert policy.network is True
+        assert (home / ".cargo" / "advisory-db").resolve() in {
+            p.resolve() for p in policy.cache
+        }
+
+    def test_offline_is_never_granted_the_network(self, tmp_path, monkeypatch):
+        policy, _ = self._policy(tmp_path, monkeypatch, offline=True)
+        assert policy.network is False
+
+
+class TestFacetRegisters:
+    def test_both_registers_are_declared_on_the_class_itself(self):
+        from automated_security_helper.base.scanner_facets import (
+            SCANNER_FACETS_ATTR,
+            ScannerFacets,
+        )
+        from automated_security_helper.base.scanner_operational_facets import (
+            OPERATIONAL_FACETS_ATTR,
+            ScannerOperationalFacets,
+        )
+
+        assert isinstance(vars(CargoAuditScanner)[SCANNER_FACETS_ATTR], ScannerFacets)
+        ops = vars(CargoAuditScanner)[OPERATIONAL_FACETS_ATTR]
+        assert isinstance(ops, ScannerOperationalFacets)
+        assert ops.scanner_name == CargoAuditScannerConfig().name
+
+    def test_operational_mirrors_agree_with_the_class(self, tmp_path):
+        from automated_security_helper.core.enums import ScannerToolType
+
+        ops = vars(CargoAuditScanner)["operational_facets"]
+        scanner = _scanner(tmp_path, tmp_path)
+        assert ops.network.offline_strategy is CargoAuditScanner.offline_strategy
+        assert ops.network.sandbox_network.value == "online"
+        assert CargoAuditScanner.sandbox_requirements.network is True
+        assert ops.exit_codes.success_exit_codes == tuple(
+            sorted(CargoAuditScanner.success_exit_codes)
+        )
+        assert ops.targets.tool_type is scanner.tool_type is ScannerToolType.SCA
+        assert ops.runtime.use_uv_tool is bool(scanner.use_uv_tool)
+        assert ops.runtime.python_only is bool(scanner.is_python_only())
+        assert "cargo-audit" in ops.runtime.external_programs
+
+    def test_mapped_facets_land_in_the_flat_row(self):
+        """Over the converter's own output: each MAPPED column is populated, and
+        each DROPPED or N/A column is empty (the corpus gate's judgment, run
+        here over a document written from the rustsec Report types)."""
+        from automated_security_helper.base.scanner_facets import FacetState
+        from automated_security_helper.models.flat_vulnerability import (
+            FlatVulnerability,
+        )
+
+        results = convert_cargo_audit_report(POSITIVE, uri="Cargo.lock")
+        report = SarifReport.model_validate(
+            {
+                "version": "2.1.0",
+                "runs": [
+                    {
+                        "tool": {"driver": {"name": "cargo-audit"}},
+                        "results": results,
+                    }
+                ],
+            }
+        )
+        rows = [
+            FlatVulnerability.from_sarif_result(
+                result, report.runs[0], scanner_name="cargo-audit"
+            )
+            for result in report.runs[0].results
+        ]
+        assert rows
+        facets = vars(CargoAuditScanner)["facets"]
+        column = {
+            "rule_id": "rule_id",
+            "severity": "severity",
+            "file_path": "file_path",
+            "line_range": "line_start",
+            "message": "description",
+        }
+        for facet, attr in column.items():
+            assert getattr(facets, facet).state is FacetState.MAPPED
+            assert all(getattr(row, attr) not in (None, "", 0) for row in rows), facet
