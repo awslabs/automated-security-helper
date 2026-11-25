@@ -490,6 +490,49 @@ class TestPathlessRootsUnderOneRule:
             },
         ]
 
+    def test_pathless_root_suppressed_in_one_lockfile_only(
+        self, npm_scanner, tmp_path, cdk, test_output_dir
+    ):
+        """The same path-less packages audited in two lockfiles, suppressed in
+        one: a reference carries its lockfile's URI, so the other lockfile's
+        results all stay visible. A matcher keyed on (rule id, package name)
+        alone collapses the two lockfiles' roots into one list and fails both
+        halves of this test."""
+
+        def uri_of(result) -> str:
+            location = (result.locations or [None])[0]
+            if location is None or location.physicalLocation is None:
+                return ""
+            return (
+                location.physicalLocation.root.artifactLocation.uri or ""
+                if location.physicalLocation.root.artifactLocation
+                else ""
+            )
+
+        constructs = tmp_path / "deploy/cdk-constructs"
+        write_lockfile(constructs, LOCK_ENTRIES)
+        report = run_npm_scan(
+            npm_scanner, tmp_path, {cdk: babel_audit(), constructs: babel_audit()}
+        )
+        out = apply(
+            report,
+            tmp_path,
+            test_output_dir,
+            suppress_pathless_root("babel-traverse", BABEL, "deploy/cdk"),
+            suppress_pathless_root("@babel/traverse", BABEL, "deploy/cdk"),
+        )
+        results = [r for run in out.runs for r in run.results or []]
+        assert {uri_of(r) for r in results} == {
+            "deploy/cdk/package-lock.json",
+            "deploy/cdk-constructs/package-lock.json",
+        }
+        for result in results:
+            name = props(result).get("package_name")
+            if uri_of(result) == "deploy/cdk/package-lock.json":
+                assert result.suppressions, (result.ruleId, name)
+            else:
+                assert not result.suppressions, (result.ruleId, name)
+
     def test_missing_root_is_not_vouched_for_by_a_sibling_under_its_rule(
         self, npm_scanner, tmp_path, cdk, test_output_dir
     ):

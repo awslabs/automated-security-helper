@@ -76,8 +76,10 @@ ASH_RESOURCE_TYPE_KEY = "ash_resource_type"
 ROOT_ADVISORIES_KEY = "root_advisories"
 """Property on an npm-audit transitive result: the direct findings it stems from.
 
-A list of ``{"rule_id", "package_path", "uri"}`` dicts, ``package_path`` only
-when known. See :func:`extract_root_advisories`.
+A list of ``{"rule_id", "uri"}`` dicts, each also carrying ``package_path``
+when the lockfile gives the root copy an install path, or ``package_name`` for
+a path-less root (an entry npm lists no node for), whose shared lockfile URI
+alone no longer names one result. See :func:`extract_root_advisories`.
 """
 
 NPM_LOCKFILE_NAMES = frozenset({"package-lock.json", "npm-shrinkwrap.json"})

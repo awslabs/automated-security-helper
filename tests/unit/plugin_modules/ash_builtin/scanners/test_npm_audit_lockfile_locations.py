@@ -55,7 +55,13 @@ def test_fingerprint_key_matches_the_scanner_constant():
         npm_audit_scanner,
     )
 
-    assert npm_audit_scanner.IDENTITY_FINGERPRINT_KEY == IDENTITY_FINGERPRINT_KEY
+    # getattr, not attribute access: on a tree without the constant this must
+    # fail as an assertion, the way the module docstring above promises, not
+    # error with AttributeError.
+    assert (
+        getattr(npm_audit_scanner, "IDENTITY_FINGERPRINT_KEY", None)
+        == IDENTITY_FINGERPRINT_KEY
+    )
 
 
 def write_npm_lockfile(project: Path, entries: dict) -> Path:

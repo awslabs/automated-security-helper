@@ -2784,7 +2784,13 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
 
         # The place of these results: yarn and pnpm name no install path, so the
         # audited lockfile is what tells one project's finding from another's.
-        lock_shown = _shown_lockfile(lock_file, target_path)
+        # For an npm lockfile, _lock_context above already asked _shown_lockfile,
+        # so its answer is reused: asking again warned twice per out-of-tree
+        # lockfile.
+        if lock_file is not None and Path(lock_file).name in NPM_LOCKFILE_NAMES:
+            lock_shown = lock_rel
+        else:
+            lock_shown = _shown_lockfile(lock_file, target_path)
         # The result already emitted for a (rule id, result URI) pair of this
         # lockfile: one GHSA can come back as several via entries with one URL
         # (one per vulnerable range), which share a rule, and a copy whose

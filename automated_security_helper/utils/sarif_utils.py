@@ -1374,6 +1374,22 @@ def _matching_exclusion(
     return None
 
 
+def _is_install_location_uri(uri: str | None) -> bool:
+    """Whether *uri* is npm-audit's pre-lockfile install location.
+
+    The shape a report converted on its own (no lockfile known) still writes:
+    ``node_modules/<package>/package.json``, the package possibly nested under
+    further ``node_modules/`` segments. No audited lockfile is named
+    ``package.json``, so the tail alone cannot misread a lockfile-located
+    finding.
+    """
+    if not uri:
+        return False
+    return uri.endswith("/package.json") and (
+        uri.startswith("node_modules/") or "/node_modules/" in uri
+    )
+
+
 def _apply_config_suppression(
     result: Result,
     suppressions: list,
@@ -1395,7 +1411,13 @@ def _apply_config_suppression(
     so a rule-less entry whose path scope matches a lockfile (``deploy/**``,
     ``**/package-lock.json``) can newly cover advisories it never covered when it
     was written, with no config change. The warning names the entry once so the
-    operator can audit it; ``None`` (a direct caller) warns nothing.
+    operator can audit it; ``None`` (a direct caller) warns nothing. An entry
+    that names a ``package_name`` is scoped on purpose, which is exactly the
+    acknowledgment the warning's remedy asks for, so it is not warned about.
+    Neither is a match on a finding still located at
+    ``node_modules/<package>/package.json`` (a report converted on its own, with
+    no lockfile known): that is the pre-move shape, which a rule-less entry
+    covered before the move too, so nothing is newly widened there.
     ``written_reasons`` (``suppression_matcher.written_suppression_reasons``) gives
     the reason quoted for a suppression whose reason was read from the environment.
     ``recorded_fields`` (``suppression_matcher.recorded_suppressions``) gives the
@@ -1415,7 +1437,9 @@ def _apply_config_suppression(
         warned_rule_less is not None
         and matching_suppression is not None
         and not (getattr(matching_suppression, "rule_id", None) or "").strip()
+        and not (getattr(matching_suppression, "package_name", None) or "").strip()
         and flat_finding.scanner == "npm-audit"
+        and not _is_install_location_uri(flat_finding.file_path)
         and id(matching_suppression) not in warned_rule_less
     ):
         warned_rule_less.add(id(matching_suppression))
