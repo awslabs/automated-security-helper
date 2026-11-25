@@ -161,6 +161,16 @@ _ALLOWED_SIZED_READS = {
     "of a refused symlink target from it; not tool output (the work behind "
     "set_source_zip_finalize, whose own body holds no read)",
     (
+        "cli/mcp/source_delivery.py",
+        "set_source_image_archive_finalize",
+    ): "1 MiB sha chunks over the operator's own uploaded image archive; hashed, "
+    "never shown, and not tool output",
+    (
+        "utils/image_payload_refusals.py",
+        "image_archive_refusal",
+    ): "the 2-byte gzip head and the 8-byte tar magic of the operator's own saved "
+    "image, compared with fixed byte strings; bytes compared, not shown",
+    (
         "cli/scan.py",
         "_marker_head",
     ): "a 64 KiB head of an output-directory file compared with the ASH marker "

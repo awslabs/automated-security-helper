@@ -27,6 +27,8 @@ import stat
 from enum import Enum
 from typing import Mapping, Optional
 
+from automated_security_helper.utils.process_env import snapshot_environ
+
 
 class ContainerEngine(str, Enum):
     """The engines ASH can delegate image preparation to."""
@@ -73,7 +75,7 @@ def detect_container_engine(
     *environment* defaults to ``os.environ``; tests pass their own mapping so
     no probe ever depends on the suite's host.
     """
-    env = os.environ if environment is None else environment
+    env = snapshot_environ() if environment is None else environment
 
     docker_host = env.get("DOCKER_HOST", "").strip()
     if docker_host:

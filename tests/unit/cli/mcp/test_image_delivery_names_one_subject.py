@@ -35,7 +35,11 @@ IMAGE_REF = "registry.example.com/team/app@sha256:" + "a" * 64
 
 
 @pytest.fixture
-def workspace(tmp_path):
+def workspace(tmp_path, monkeypatch):
+    # The default workspace root too, so a call that is given no root cannot touch
+    # the developer's own MCP workspace, and a "nothing was created" check looks
+    # where the call would have created it.
+    monkeypatch.setattr(sd, "resolve_workspace_root", lambda: tmp_path)
     yield tmp_path
     sd.clear_source(_SESSION, workspace_root=tmp_path)
 
@@ -113,6 +117,8 @@ class TestImageArchiveFinalize:
     def test_a_verified_tar_lands_under_image_and_binds(self, workspace):
         payload = _tar_bytes()
         sha = _upload(payload, "up-tar", workspace)
+        incoming = workspace / _SESSION / "incoming"
+        assert any(incoming.iterdir()), "the assembled upload exists before finalize"
 
         archive = sd.set_source_image_archive_finalize(
             upload_id="up-tar",
@@ -128,10 +134,12 @@ class TestImageArchiveFinalize:
         assert locator.oci_archive == archive
         assert locator.ref is None
         # The assembled upload was consumed by the move.
-        assert not (workspace / _SESSION / "incoming" / "up-tar.zip").exists()
+        assert not list(incoming.iterdir())
 
     def test_a_sha_mismatch_is_refused_and_binds_nothing(self, workspace):
         _upload(_tar_bytes(), "up-bad-sha", workspace)
+        incoming = workspace / _SESSION / "incoming"
+        assert any(incoming.iterdir()), "the assembled upload exists before finalize"
         with pytest.raises(ValueError, match="sha256 mismatch"):
             sd.set_source_image_archive_finalize(
                 upload_id="up-bad-sha",
@@ -141,7 +149,7 @@ class TestImageArchiveFinalize:
             )
         assert sd.get_session_image_locator(_SESSION) is None
         # The refused upload was removed, as the zip channel removes one.
-        assert not (workspace / _SESSION / "incoming" / "up-bad-sha.zip").exists()
+        assert not list(incoming.iterdir())
 
     def test_bytes_that_are_not_a_tar_are_refused_with_the_gate_text(self, workspace):
         payload = b"not a tar at all" + b"\x00" * 600

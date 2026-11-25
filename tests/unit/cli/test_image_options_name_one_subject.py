@@ -90,7 +90,6 @@ class TestWhatTheCliHandsRunAshScan:
             # The module-dict binding _deferred reads first, which is the seam
             # cli/scan.py documents for a test's patch of `cli.scan.<name>`.
             "automated_security_helper.cli.scan.run_ash_scan",
-            create=True,
         ) as run:
             result = _scan("--image", IMAGE_REF)
         assert result.exit_code == 0, result.output
@@ -106,7 +105,6 @@ class TestWhatTheCliHandsRunAshScan:
             # The module-dict binding _deferred reads first, which is the seam
             # cli/scan.py documents for a test's patch of `cli.scan.<name>`.
             "automated_security_helper.cli.scan.run_ash_scan",
-            create=True,
         ) as run:
             result = _scan("--source-dir", str(tmp_path))
         assert result.exit_code == 0, result.output
