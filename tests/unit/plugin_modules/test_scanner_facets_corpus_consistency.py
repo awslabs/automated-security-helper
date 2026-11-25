@@ -443,6 +443,31 @@ def _prep_cfn_nag(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]]
             yield report, [r for run in report.runs or [] for r in run.results or []]
 
 
+def _report_with_rules(tool_name: str, rules: list[Any]) -> SarifReport:
+    """A report whose one run declares *rules* on its driver and holds no
+    results: the results are yielded beside it, and the rule-level facets
+    (help link, tags) are read from the run."""
+    return SarifReport.model_validate(
+        {
+            "version": "2.1.0",
+            "runs": [
+                {
+                    "tool": {
+                        "driver": {
+                            "name": tool_name,
+                            "rules": [
+                                rule.model_dump(mode="json", exclude_none=True)
+                                for rule in rules
+                            ],
+                        }
+                    },
+                    "results": [],
+                }
+            ],
+        }
+    )
+
+
 def _prep_guarddog(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]]]:
     from automated_security_helper.plugin_modules.ash_guarddog_plugins.guarddog_scanner import (
         convert_guarddog_scan_result,
@@ -456,8 +481,10 @@ def _prep_guarddog(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]
         converted = convert_guarddog_scan_result(
             document, uri_prefix="", ecosystem=ecosystem, include_capabilities=True
         )
-        report = SarifReport.model_validate({"version": "2.1.0", "runs": []})
-        yield report, list(converted.results)
+        yield (
+            _report_with_rules("guarddog", list(converted.rules.values())),
+            list(converted.results),
+        )
     # Verify mode is where the adapter writes package identity: each committed
     # verify capture is a list of {dependency, version, result} entries over
     # the manifest committed beside it, converted the way the scanner's own
@@ -476,8 +503,10 @@ def _prep_guarddog(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]
                 manifest_uri=manifest.name,
                 manifest_line=manifest_line_for(manifest_text, entry["dependency"]),
             )
-            report = SarifReport.model_validate({"version": "2.1.0", "runs": []})
-            yield report, list(converted.results)
+            yield (
+                _report_with_rules("guarddog", list(converted.rules.values())),
+                list(converted.results),
+            )
 
 
 def _prep_checkov(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]]]:
@@ -640,6 +669,9 @@ def _prep_npm_audit(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result
 def _prep_cdk_nag(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]]]:
     import csv
 
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.cdk_nag_scanner import (
+        _reporting_descriptor_for,
+    )
     from automated_security_helper.utils.cdk_nag_wrapper import (
         _NagFinding,
         build_nag_results,
@@ -681,8 +713,17 @@ def _prep_cdk_nag(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]]
             template_path,
             template_text.splitlines(),
         )
-        report = SarifReport.model_validate({"version": "2.1.0", "runs": []})
-        yield report, [r for results in per_pack.values() for r in results]
+        nag_results = [r for results in per_pack.values() for r in results]
+        # The run the scanner writes carries one descriptor per rule, which is
+        # where the rule's help link lives; build it the way scan() does.
+        representatives: dict[Any, Result] = {}
+        for result in nag_results:
+            representatives.setdefault(result.ruleId, result)
+        rules = [
+            _reporting_descriptor_for(rep, tool_name="cdk-nag", tool_type="IAC")
+            for rep in representatives.values()
+        ]
+        yield _report_with_rules("ash-cdk-nag-wrapper", rules), nag_results
 
 
 #: Registered preps: native, non-SARIF or adapter-normalized fixtures through
