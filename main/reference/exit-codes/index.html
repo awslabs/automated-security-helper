@@ -4137,7 +4137,7 @@ SOFTWARE.
 <tr>
 <td><code>ash config validate</code></td>
 <td>0</td>
-<td>A scan accepts the config, apart from the options of plugins loaded from <code>ash_plugin_modules</code>, which only a scan checks. Warnings may be printed, for example for a missing <code>project_name</code>, which a scan does not need, or for an ignore or suppression path that names an existing directory and matches no file in it (<a href="../../how-to/configure/#check">Check a config</a>).</td>
+<td>A scan accepts the config, apart from the options of plugins loaded from <code>ash_plugin_modules</code>, which only a scan checks. Warnings may be printed, for example for a missing <code>project_name</code>, which a scan does not need, or for a path that starts with <code>./</code> and so matches nothing (<a href="../../how-to/configure/#check">Check a config</a>).</td>
 </tr>
 <tr>
 <td></td>

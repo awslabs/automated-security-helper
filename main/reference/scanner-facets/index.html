@@ -3968,11 +3968,12 @@ SOFTWARE.
 
 <h1 id="scanner-facets-reference">Scanner facets reference<a class="headerlink" href="#scanner-facets-reference" title="Permanent link">&para;</a></h1>
 <p>This page is generated from the scanner facets register in the ASH source code by <code>scripts/generate_facets_reference.py</code>. Edits made to this file by hand are overwritten the next time it is generated.</p>
-<p>ASH ships 22 scanners, and every one declares, per facet of the shared vocabulary, whether its native output maps into the shared pipeline. The register is production code (<code>automated_security_helper/base/scanner_facets.py</code>): the declaration has runtime consumers, and a scanner without one is refused by the registry totality test. The three states:</p>
+<p>ASH ships 22 scanners, and every one declares, per facet of the shared vocabulary, whether its native output maps into the shared pipeline. The register is production code (<code>automated_security_helper/base/scanner_facets.py</code>): the declaration has runtime consumers, and a scanner without one is refused by the registry totality test. The four states:</p>
 <ul>
 <li><code>mapped</code>: the facet lands where the shared pipeline reads it, and the cell names the native field it comes from. The corpus-consistency gate (<code>tests/unit/plugin_modules/test_scanner_facets_corpus_consistency.py</code>) holds these cells against the committed fixtures.</li>
 <li><code>mappable-dropped</code>: the native output carries the value and ASH discards it today: a roadmap record, not a promise. The cell names the native field and why it is dropped.</li>
-<li><code>n/a</code>: this scanner class cannot have the facet (or its output was not read), with the reason.</li>
+<li><code>n/a</code>: this scanner class cannot have the facet, with the reason. The corpus gate treats a populated column here as contamination.</li>
+<li><code>unconfirmed</code>: no real run of the tool has been read for the facet, so the register claims neither that it maps nor that it cannot exist. The cell says what was read instead and the run that would settle it. The corpus gate lists it as a fixture owed and fails nothing.</li>
 </ul>
 <p>The facet vocabulary, in declaration order: <code>rule_id</code>, <code>severity</code>, <code>file_path</code>, <code>line_range</code>, <code>column</code>, <code>message</code>, <code>resource_id</code>, <code>resource_type</code>, <code>package_name</code>, <code>package_version</code>, <code>package_path</code>, <code>taxonomy_cve</code>, <code>taxonomy_cwe</code>, <code>fingerprints</code>, <code>fix_available</code>, <code>remediation_text</code>, <code>snippet</code>, <code>references</code>, <code>tags</code>, <code>extras</code>.</p>
 <h2 id="summary">Summary<a class="headerlink" href="#summary" title="Permanent link">&para;</a></h2>
@@ -3983,140 +3984,163 @@ SOFTWARE.
 <th>Mapped</th>
 <th>Mappable, dropped</th>
 <th>Not applicable</th>
+<th>Unconfirmed</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td><a href="#actionlint"><code>actionlint</code></a></td>
-<td>10</td>
-<td>1</td>
+<td>11</td>
+<td>0</td>
 <td>9</td>
+<td>0</td>
 </tr>
 <tr>
 <td><a href="#bandit"><code>bandit</code></a></td>
+<td>11</td>
+<td>0</td>
 <td>9</td>
-<td>2</td>
-<td>9</td>
+<td>0</td>
 </tr>
 <tr>
 <td><a href="#cdk-nag"><code>cdk-nag</code></a></td>
-<td>11</td>
-<td>1</td>
+<td>12</td>
+<td>0</td>
 <td>8</td>
+<td>0</td>
 </tr>
 <tr>
 <td><a href="#cfn-guard"><code>cfn-guard</code></a></td>
 <td>7</td>
 <td>1</td>
 <td>12</td>
+<td>0</td>
 </tr>
 <tr>
 <td><a href="#cfn-lint"><code>cfn-lint</code></a></td>
-<td>7</td>
-<td>1</td>
+<td>8</td>
+<td>0</td>
 <td>12</td>
+<td>0</td>
 </tr>
 <tr>
 <td><a href="#cfn-nag"><code>cfn-nag</code></a></td>
 <td>6</td>
 <td>0</td>
 <td>14</td>
+<td>0</td>
 </tr>
 <tr>
 <td><a href="#checkov"><code>checkov</code></a></td>
 <td>7</td>
 <td>0</td>
 <td>13</td>
+<td>0</td>
 </tr>
 <tr>
 <td><a href="#detect-secrets"><code>detect-secrets</code></a></td>
 <td>8</td>
 <td>0</td>
 <td>12</td>
+<td>0</td>
 </tr>
 <tr>
 <td><a href="#gitleaks"><code>gitleaks</code></a></td>
 <td>9</td>
 <td>1</td>
 <td>10</td>
+<td>0</td>
 </tr>
 <tr>
 <td><a href="#grype"><code>grype</code></a></td>
-<td>1</td>
-<td>1</td>
-<td>18</td>
+<td>12</td>
+<td>0</td>
+<td>4</td>
+<td>4</td>
 </tr>
 <tr>
 <td><a href="#npm-audit"><code>npm-audit</code></a></td>
-<td>11</td>
-<td>2</td>
-<td>7</td>
+<td>14</td>
+<td>0</td>
+<td>5</td>
+<td>1</td>
 </tr>
 <tr>
 <td><a href="#opengrep"><code>opengrep</code></a></td>
-<td>10</td>
-<td>2</td>
+<td>11</td>
+<td>0</td>
 <td>8</td>
+<td>1</td>
 </tr>
 <tr>
 <td><a href="#semgrep"><code>semgrep</code></a></td>
+<td>10</td>
+<td>0</td>
 <td>9</td>
-<td>2</td>
-<td>9</td>
+<td>1</td>
 </tr>
 <tr>
 <td><a href="#syft"><code>syft</code></a></td>
 <td>0</td>
 <td>2</td>
-<td>18</td>
+<td>17</td>
+<td>1</td>
 </tr>
 <tr>
 <td><a href="#trivy"><code>trivy</code></a></td>
-<td>13</td>
+<td>15</td>
+<td>0</td>
+<td>3</td>
 <td>2</td>
-<td>5</td>
 </tr>
 <tr>
 <td><a href="#zizmor"><code>zizmor</code></a></td>
-<td>8</td>
-<td>2</td>
 <td>10</td>
+<td>0</td>
+<td>10</td>
+<td>0</td>
 </tr>
 <tr>
 <td><a href="#betterleaks"><code>betterleaks</code></a></td>
 <td>9</td>
 <td>1</td>
 <td>10</td>
+<td>0</td>
 </tr>
 <tr>
 <td><a href="#ferret-scan"><code>ferret-scan</code></a></td>
-<td>2</td>
+<td>8</td>
 <td>0</td>
-<td>18</td>
+<td>12</td>
+<td>0</td>
 </tr>
 <tr>
 <td><a href="#guarddog"><code>guarddog</code></a></td>
-<td>10</td>
-<td>2</td>
+<td>12</td>
+<td>0</td>
 <td>8</td>
+<td>0</td>
 </tr>
 <tr>
 <td><a href="#hadolint"><code>hadolint</code></a></td>
 <td>7</td>
 <td>0</td>
 <td>13</td>
+<td>0</td>
 </tr>
 <tr>
 <td><a href="#snyk-code"><code>snyk-code</code></a></td>
+<td>10</td>
 <td>2</td>
+<td>6</td>
 <td>2</td>
-<td>16</td>
 </tr>
 <tr>
 <td><a href="#trivy-repo"><code>trivy-repo</code></a></td>
-<td>13</td>
+<td>15</td>
+<td>0</td>
+<td>3</td>
 <td>2</td>
-<td>5</td>
 </tr>
 </tbody>
 </table>
@@ -4238,9 +4262,9 @@ SOFTWARE.
 </tr>
 <tr>
 <td><code>references</code></td>
-<td><code>mappable-dropped</code></td>
-<td>errors[].kind (ASH builds the pinned checks.md helpUri; no native URL field)</td>
-<td>the helpUri is written at rule level only: the flat reader takes references from result relatedLocations, so the help link is discarded today</td>
+<td><code>mapped</code></td>
+<td>errors[].kind (ASH builds the pinned checks.md helpUri; no native URL field), read into the flat references when the result carries no relatedLocations</td>
+<td></td>
 </tr>
 <tr>
 <td><code>tags</code></td>
@@ -4374,15 +4398,15 @@ SOFTWARE.
 </tr>
 <tr>
 <td><code>references</code></td>
-<td><code>mappable-dropped</code></td>
-<td>tool.driver.rules[].helpUri</td>
-<td>rule-level only: the flat reader takes references from result relatedLocations, so the help link is discarded today</td>
+<td><code>mapped</code></td>
+<td>tool.driver.rules[].helpUri, read into the flat references when the result carries no relatedLocations</td>
+<td></td>
 </tr>
 <tr>
 <td><code>tags</code></td>
-<td><code>mappable-dropped</code></td>
-<td>tool.driver.rules[].properties.tags</td>
-<td>rule-level only: the flat reader takes tags from result properties, so the rule tags are discarded today (they still feed the CWE read)</td>
+<td><code>mapped</code></td>
+<td>tool.driver.rules[].properties.tags, read into the flat tags when the result carries none (they also feed the CWE read)</td>
+<td></td>
 </tr>
 <tr>
 <td><code>extras</code></td>
@@ -4510,9 +4534,9 @@ SOFTWARE.
 </tr>
 <tr>
 <td><code>references</code></td>
-<td><code>mappable-dropped</code></td>
-<td>per-pack rule help URI (_rule_help_uri, ReportingDescriptor.helpUri)</td>
-<td>rule-level only: the flat reader takes references from result relatedLocations, so the help link is discarded today</td>
+<td><code>mapped</code></td>
+<td>per-pack rule help URI (_rule_help_uri, ReportingDescriptor.helpUri), read into the flat references when the result carries no relatedLocations</td>
+<td></td>
 </tr>
 <tr>
 <td><code>tags</code></td>
@@ -4782,9 +4806,9 @@ SOFTWARE.
 </tr>
 <tr>
 <td><code>references</code></td>
-<td><code>mappable-dropped</code></td>
-<td>driver rules[].helpUri</td>
-<td>rule-level only: the flat reader takes references from result relatedLocations, so the help link is discarded today</td>
+<td><code>mapped</code></td>
+<td>driver rules[].helpUri, read into the flat references when the result carries no relatedLocations</td>
+<td></td>
 </tr>
 <tr>
 <td><code>tags</code></td>
@@ -4978,7 +5002,7 @@ SOFTWARE.
 <td><code>column</code></td>
 <td><code>n/a</code></td>
 <td></td>
-<td>UNCONFIRMED: the side report carries a line range only and no checkov SARIF golden is committed; one SARIF run settles whether a column is emitted</td>
+<td>the committed checkov-3.4.6 capture's six SARIF regions carry startLine, endLine and snippet only, and the side report carries a line range only</td>
 </tr>
 <tr>
 <td><code>message</code></td>
@@ -5032,7 +5056,7 @@ SOFTWARE.
 <td><code>fingerprints</code></td>
 <td><code>n/a</code></td>
 <td></td>
-<td>UNCONFIRMED: the side report carries no fingerprint and no checkov SARIF golden is committed; one SARIF run settles it</td>
+<td>none of the committed checkov-3.4.6 capture's six SARIF results carries fingerprints or partialFingerprints, and the side report carries no fingerprint</td>
 </tr>
 <tr>
 <td><code>fix_available</code></td>
@@ -5068,7 +5092,7 @@ SOFTWARE.
 <td><code>extras</code></td>
 <td><code>n/a</code></td>
 <td></td>
-<td>UNCONFIRMED: no checkov SARIF golden is committed, so whether results carry a property bag is open; one SARIF run settles it</td>
+<td>none of the committed checkov-3.4.6 capture's six SARIF results carries a properties bag</td>
 </tr>
 </tbody>
 </table>
@@ -5360,39 +5384,39 @@ SOFTWARE.
 <tbody>
 <tr>
 <td><code>rule_id</code></td>
-<td><code>n/a</code></td>
+<td><code>mapped</code></td>
+<td>SARIF result ruleId (the vulnerability id plus the package name)</td>
 <td></td>
-<td>UNCONFIRMED: the survey reads the SARIF result ruleId (the vulnerability id) off the conformance tests' presenter shape; no grype SARIF fixture from a real run is committed, so a <code>grype -o sarif</code> capture settles it</td>
 </tr>
 <tr>
 <td><code>severity</code></td>
-<td><code>n/a</code></td>
+<td><code>mapped</code></td>
+<td>SARIF rule properties "security-severity" (CVSS), else the result "level"</td>
 <td></td>
-<td>UNCONFIRMED: the survey reads the SARIF rule properties "security-severity" (CVSS), else the result "level", off the conformance tests' presenter shape; no grype SARIF fixture from a real run is committed, so a <code>grype -o sarif</code> capture settles it</td>
 </tr>
 <tr>
 <td><code>file_path</code></td>
-<td><code>n/a</code></td>
+<td><code>mapped</code></td>
+<td>SARIF locations[].physicalLocation.artifactLocation.uri (the manifest or lockfile)</td>
 <td></td>
-<td>UNCONFIRMED: the survey reads SARIF locations[].physicalLocation.artifactLocation.uri (the manifest or lockfile) off the conformance tests' presenter shape; no grype SARIF fixture from a real run is committed, so a <code>grype -o sarif</code> capture settles it</td>
 </tr>
 <tr>
 <td><code>line_range</code></td>
-<td><code>n/a</code></td>
+<td><code>mapped</code></td>
+<td>SARIF region.startLine (grype writes line 1 of the manifest)</td>
 <td></td>
-<td>UNCONFIRMED: the survey reads SARIF region.startLine (grype always writes line 1 of the manifest) off the conformance tests' presenter shape; no grype SARIF fixture from a real run is committed, so a <code>grype -o sarif</code> capture settles it</td>
 </tr>
 <tr>
 <td><code>column</code></td>
-<td><code>n/a</code></td>
+<td><code>mapped</code></td>
+<td>SARIF region.startColumn / region.endColumn (always 1 in the capture, as the finding is the manifest's line 1)</td>
 <td></td>
-<td>UNCONFIRMED: no grype SARIF fixture in-repo; a <code>grype -o sarif</code> run settles whether results carry a startColumn</td>
 </tr>
 <tr>
 <td><code>message</code></td>
-<td><code>n/a</code></td>
+<td><code>mapped</code></td>
+<td>SARIF result message.text</td>
 <td></td>
-<td>UNCONFIRMED: the survey reads SARIF result message.text off the conformance tests' presenter shape; no grype SARIF fixture from a real run is committed, so a <code>grype -o sarif</code> capture settles it</td>
 </tr>
 <tr>
 <td><code>resource_id</code></td>
@@ -5408,25 +5432,25 @@ SOFTWARE.
 </tr>
 <tr>
 <td><code>package_name</code></td>
-<td><code>n/a</code></td>
+<td><code>mapped</code></td>
+<td>SARIF message "package: &lt;name&gt;, version &lt;version&gt; was found at:" parsed by _GRYPE_PACKAGE_MESSAGE</td>
 <td></td>
-<td>UNCONFIRMED: the adapter parses the SARIF message "package: &lt;name&gt;, version &lt;version&gt; was found at:" (_GRYPE_PACKAGE_MESSAGE), pinned over the conformance tests' presenter shape only; no grype SARIF fixture from a real run is committed, so a <code>grype -o sarif</code> capture settles it</td>
 </tr>
 <tr>
 <td><code>package_version</code></td>
-<td><code>n/a</code></td>
+<td><code>mapped</code></td>
+<td>SARIF message "package: &lt;name&gt;, version &lt;version&gt; was found at:" parsed by _GRYPE_PACKAGE_MESSAGE</td>
 <td></td>
-<td>UNCONFIRMED: the adapter parses the SARIF message "package: &lt;name&gt;, version &lt;version&gt; was found at:" (_GRYPE_PACKAGE_MESSAGE), pinned over the conformance tests' presenter shape only; no grype SARIF fixture from a real run is committed, so a <code>grype -o sarif</code> capture settles it</td>
 </tr>
 <tr>
 <td><code>package_path</code></td>
-<td><code>n/a</code></td>
+<td><code>unconfirmed</code></td>
 <td></td>
 <td>UNCONFIRMED: the adapter resolves an npm lockfile entry by name and version beside the manifest (set only when exactly one copy matches), pinned over the conformance tests' presenter shape only; no grype SARIF fixture from a real run (over a committed npm tree) is committed, so a <code>grype -o sarif</code> capture settles it</td>
 </tr>
 <tr>
 <td><code>taxonomy_cve</code></td>
-<td><code>n/a</code></td>
+<td><code>unconfirmed</code></td>
 <td></td>
 <td>UNCONFIRMED: the SARIF result ruleId is the vulnerability id (matches[].vulnerability.id, a CVE or GHSA id; the committed native JSON's eight matches are all GHSA ids, which the flat CVE column never reads); no grype SARIF fixture from a real run with a CVE-named match is committed, so a <code>grype -o sarif</code> capture settles it</td>
 </tr>
@@ -5434,23 +5458,23 @@ SOFTWARE.
 <td><code>taxonomy_cwe</code></td>
 <td><code>n/a</code></td>
 <td></td>
-<td>UNCONFIRMED: the committed native grype JSON (vulnerability keys advisories, cvss, dataSource, description, epss, fix, id, namespace, severity, urls) carries no CWE; a <code>grype -o sarif</code> run settles whether rule properties do</td>
+<td>the committed native grype JSON (vulnerability keys advisories, cvss, dataSource, description, epss, fix, id, namespace, severity, urls) carries no CWE, and the captured SARIF rule properties hold only purls and security-severity</td>
 </tr>
 <tr>
 <td><code>fingerprints</code></td>
-<td><code>n/a</code></td>
+<td><code>mapped</code></td>
+<td>SARIF result partialFingerprints.primaryLocationLineHash (a hash of the manifest line, so findings at one manifest line share a value; 6 distinct values over 21 results in the capture)</td>
 <td></td>
-<td>UNCONFIRMED: no grype SARIF fixture in-repo; a <code>grype -o sarif</code> run settles whether results carry fingerprints or partialFingerprints</td>
 </tr>
 <tr>
 <td><code>fix_available</code></td>
-<td><code>n/a</code></td>
+<td><code>mapped</code></td>
+<td>the SARIF rule help.text line "Fix Version: &lt;versions&gt;" (grype's rendering of matches[].vulnerability.fix.versions); fix_available=True is written only for a non-empty list on a uniquely named rule whose Package and Version lines match the result's own message</td>
 <td></td>
-<td>UNCONFIRMED: the adapter reads the SARIF rule help.text line "Fix Version: &lt;versions&gt;" (grype's rendering of matches[].vulnerability.fix.versions) and writes fix_available=True only for a non-empty list on a uniquely named rule whose Package and Version lines match the result's own message, pinned over the conformance tests' presenter shape only; no grype SARIF fixture from a real run is committed, so a <code>grype -o sarif</code> capture settles it</td>
 </tr>
 <tr>
 <td><code>remediation_text</code></td>
-<td><code>n/a</code></td>
+<td><code>unconfirmed</code></td>
 <td></td>
 <td>UNCONFIRMED: not classified by the survey; the flat model has no remediation column, and matchDetails[].fix.suggestedVersion is a version, not text</td>
 </tr>
@@ -5462,13 +5486,13 @@ SOFTWARE.
 </tr>
 <tr>
 <td><code>references</code></td>
-<td><code>mappable-dropped</code></td>
-<td>matches[].vulnerability.urls</td>
-<td>the native urls (and relatedVulnerabilities[].urls, dataSource) are never read into references</td>
+<td><code>mapped</code></td>
+<td>tool.driver.rules[].helpUri, read into the flat references by the shared rule read when the result carries none of its own</td>
+<td>grype writes the advisory dataSource as the rule helpUri; the native match urls (matches[].vulnerability.urls, relatedVulnerabilities[].urls) are still never read</td>
 </tr>
 <tr>
 <td><code>tags</code></td>
-<td><code>n/a</code></td>
+<td><code>unconfirmed</code></td>
 <td></td>
 <td>UNCONFIRMED: the survey reads SARIF rule properties.tags off the conformance tests' presenter shape (rule-level, which the flat reader never takes as the tags column anyway); no grype SARIF fixture from a real run is committed, so a <code>grype -o sarif</code> capture settles whether results carry tags</td>
 </tr>
@@ -5520,9 +5544,9 @@ SOFTWARE.
 </tr>
 <tr>
 <td><code>column</code></td>
-<td><code>n/a</code></td>
+<td><code>mapped</code></td>
+<td>(no native column) the adapter writes column 1 of the synthesized manifest location on every result, beside the line_range cell's line 1</td>
 <td></td>
-<td>npm audit output carries no column; the adapter synthesizes 1:1, so there is no native column to map</td>
 </tr>
 <tr>
 <td><code>message</code></td>
@@ -5586,7 +5610,7 @@ SOFTWARE.
 </tr>
 <tr>
 <td><code>remediation_text</code></td>
-<td><code>n/a</code></td>
+<td><code>unconfirmed</code></td>
 <td></td>
 <td>UNCONFIRMED: not classified by the survey; the adapter writes a composed "recommendation" property, but the flat model has no remediation column to read it and npm audit's native fixAvailable is a flag or a fix object, not text</td>
 </tr>
@@ -5598,15 +5622,15 @@ SOFTWARE.
 </tr>
 <tr>
 <td><code>references</code></td>
-<td><code>mappable-dropped</code></td>
-<td>vulnerabilities.&lt;name&gt;.via[]."url" (rule helpUri)</td>
-<td>written at rule level only: the flat reader takes references from result relatedLocations, so the advisory link is discarded today</td>
+<td><code>mapped</code></td>
+<td>vulnerabilities.&lt;name&gt;.via[]."url" (rule helpUri), read into the flat references when the result carries no relatedLocations</td>
+<td></td>
 </tr>
 <tr>
 <td><code>tags</code></td>
-<td><code>mappable-dropped</code></td>
-<td>rule properties.tags (ASH-composed: security, npm-audit, the severity word)</td>
-<td>written at rule level only: the flat reader takes tags from result properties, so the rule tags are discarded today</td>
+<td><code>mapped</code></td>
+<td>rule properties.tags (ASH-composed: security, npm-audit, the severity word), read into the flat tags when the result carries none</td>
+<td></td>
 </tr>
 <tr>
 <td><code>extras</code></td>
@@ -5734,15 +5758,15 @@ SOFTWARE.
 </tr>
 <tr>
 <td><code>references</code></td>
-<td><code>mappable-dropped</code></td>
-<td>tool.driver.rules[].help.markdown</td>
-<td>rule-level only: the flat reader takes references from result relatedLocations, so the rule help is discarded today</td>
+<td><code>unconfirmed</code></td>
+<td></td>
+<td>UNCONFIRMED: the committed captures' SARIF rules carry no helpUri (the rule help is help.markdown text, not a link). A rule helpUri would be read into the flat references by the shared rule read (FlatVulnerability.from_sarif_result); redeclare MAPPED when a capture carrying one is committed (the corpus gate lists this cell as a fixture owed until then)</td>
 </tr>
 <tr>
 <td><code>tags</code></td>
-<td><code>mappable-dropped</code></td>
-<td>tool.driver.rules[].properties.tags</td>
-<td>rule-level only: the flat reader takes tags from result properties, so the rule tags are discarded today (they still feed the CWE read)</td>
+<td><code>mapped</code></td>
+<td>tool.driver.rules[].properties.tags, read into the flat tags when the result carries none (they also feed the CWE read)</td>
+<td></td>
 </tr>
 <tr>
 <td><code>extras</code></td>
@@ -5870,15 +5894,15 @@ SOFTWARE.
 </tr>
 <tr>
 <td><code>references</code></td>
-<td><code>mappable-dropped</code></td>
-<td>tool.driver.rules[].helpUri (registry rules; a local rule carries none)</td>
-<td>rule-level only: the flat reader takes references from result relatedLocations, so the help link is discarded today</td>
+<td><code>unconfirmed</code></td>
+<td></td>
+<td>UNCONFIRMED: the committed captures are local-rule runs, whose SARIF rules carry no helpUri. A registry rule's helpUri is read into the flat references by the shared rule read (FlatVulnerability.from_sarif_result); redeclare MAPPED when a registry-rule capture is committed (the corpus gate lists this cell as a fixture owed until then)</td>
 </tr>
 <tr>
 <td><code>tags</code></td>
-<td><code>mappable-dropped</code></td>
-<td>tool.driver.rules[].properties.tags</td>
-<td>rule-level only: the flat reader takes tags from result properties, so the rule tags are discarded today (they still feed the CWE read)</td>
+<td><code>mapped</code></td>
+<td>tool.driver.rules[].properties.tags, read into the flat tags when the result carries none (they also feed the CWE read)</td>
+<td></td>
 </tr>
 <tr>
 <td><code>extras</code></td>
@@ -5964,7 +5988,7 @@ SOFTWARE.
 </tr>
 <tr>
 <td><code>package_path</code></td>
-<td><code>n/a</code></td>
+<td><code>unconfirmed</code></td>
 <td></td>
 <td>UNCONFIRMED: syft's native artifacts[].locations[].path (fixture syft.src.json) has a CycloneDX counterpart this adapter has not been read against; a cyclonedx-json run settles it</td>
 </tr>
@@ -6112,7 +6136,7 @@ SOFTWARE.
 </tr>
 <tr>
 <td><code>taxonomy_cwe</code></td>
-<td><code>n/a</code></td>
+<td><code>unconfirmed</code></td>
 <td></td>
 <td>UNCONFIRMED: trivy's SARIF rules carry no CWE (tags are vulnerability, security, &lt;severity&gt;); the JSON format's CweIDs has no committed vulnerability fixture, and a <code>trivy fs --format json</code> run over a lockfile settles it</td>
 </tr>
@@ -6130,7 +6154,7 @@ SOFTWARE.
 </tr>
 <tr>
 <td><code>remediation_text</code></td>
-<td><code>n/a</code></td>
+<td><code>unconfirmed</code></td>
 <td></td>
 <td>UNCONFIRMED: not classified by the survey; the flat model has no remediation column, and the rule help text carries the fixed version already declared under fix_available</td>
 </tr>
@@ -6142,15 +6166,15 @@ SOFTWARE.
 </tr>
 <tr>
 <td><code>references</code></td>
-<td><code>mappable-dropped</code></td>
-<td>SARIF rule helpUri</td>
-<td>rule-level only: the flat reader takes references from result relatedLocations, so the help link is discarded today</td>
+<td><code>mapped</code></td>
+<td>SARIF rule helpUri, read into the flat references by FlatVulnerability.from_sarif_result when the result carries no relatedLocations</td>
+<td></td>
 </tr>
 <tr>
 <td><code>tags</code></td>
-<td><code>mappable-dropped</code></td>
-<td>SARIF rule properties.tags</td>
-<td>rule-level only: the flat reader takes tags from result properties, so the rule tags are discarded today (the severity word among them still feeds issue_severity)</td>
+<td><code>mapped</code></td>
+<td>SARIF rule properties.tags, read into the flat tags by FlatVulnerability.from_sarif_result when the result carries none (the severity word among them still feeds issue_severity)</td>
+<td></td>
 </tr>
 <tr>
 <td><code>extras</code></td>
@@ -6278,15 +6302,15 @@ SOFTWARE.
 </tr>
 <tr>
 <td><code>references</code></td>
-<td><code>mappable-dropped</code></td>
-<td>tool.driver.rules[].helpUri</td>
-<td>rule-level only: the flat reader takes references from result relatedLocations, so the help link is discarded today</td>
+<td><code>mapped</code></td>
+<td>tool.driver.rules[].helpUri, read into the flat references when the result carries no relatedLocations</td>
+<td></td>
 </tr>
 <tr>
 <td><code>tags</code></td>
-<td><code>mappable-dropped</code></td>
-<td>tool.driver.rules[].properties.tags</td>
-<td>rule-level only: the flat reader takes tags from result properties, so the rule tags are discarded today</td>
+<td><code>mapped</code></td>
+<td>tool.driver.rules[].properties.tags, read into the flat tags when the result carries none</td>
+<td></td>
 </tr>
 <tr>
 <td><code>extras</code></td>
@@ -6448,27 +6472,27 @@ SOFTWARE.
 <tbody>
 <tr>
 <td><code>rule_id</code></td>
-<td><code>n/a</code></td>
+<td><code>mapped</code></td>
+<td>result "ruleId" (the detected data type, e.g. CREDIT_CARD)</td>
 <td></td>
-<td>output not read: the survey reads result "ruleId" off the tests' hand-written SARIF shape, and no ferret-scan SARIF from a real run is committed; one <code>ferret-scan --format sarif</code> run over the committed samples would settle it</td>
 </tr>
 <tr>
 <td><code>severity</code></td>
-<td><code>n/a</code></td>
+<td><code>mapped</code></td>
+<td>result "level" (the tool's own rating)</td>
 <td></td>
-<td>output not read: the survey reads result "level" (the tool's own rating) off the tests' hand-written SARIF shape, and no ferret-scan SARIF from a real run is committed; one <code>ferret-scan --format sarif</code> run would settle it</td>
 </tr>
 <tr>
 <td><code>file_path</code></td>
-<td><code>n/a</code></td>
+<td><code>mapped</code></td>
+<td>locations[].physicalLocation.artifactLocation.uri (uriBaseId resolved by the adapter)</td>
 <td></td>
-<td>output not read: the survey reads locations[].physicalLocation.artifactLocation.uri (uriBaseId resolved by the adapter) off the tests' hand-written SARIF shape, and no ferret-scan SARIF from a real run is committed; one <code>ferret-scan --format sarif</code> run would settle it</td>
 </tr>
 <tr>
 <td><code>line_range</code></td>
-<td><code>n/a</code></td>
+<td><code>mapped</code></td>
+<td>region.startLine</td>
 <td></td>
-<td>output not read: the survey reads region.startLine / region.endLine off the tests' hand-written SARIF shape, and no ferret-scan SARIF from a real run is committed; one <code>ferret-scan --format sarif</code> run would settle it</td>
 </tr>
 <tr>
 <td><code>column</code></td>
@@ -6478,9 +6502,9 @@ SOFTWARE.
 </tr>
 <tr>
 <td><code>message</code></td>
-<td><code>n/a</code></td>
+<td><code>mapped</code></td>
+<td>result "message.text" (matched values masked by the shared secret-masking pass downstream)</td>
 <td></td>
-<td>output not read: the survey reads result "message.text" (matched values masked by the shared secret-masking pass downstream) off the tests' hand-written SARIF shape, and no ferret-scan SARIF from a real run is committed; one <code>ferret-scan --format sarif</code> run would settle it</td>
 </tr>
 <tr>
 <td><code>resource_id</code></td>
@@ -6528,7 +6552,7 @@ SOFTWARE.
 <td><code>fingerprints</code></td>
 <td><code>n/a</code></td>
 <td></td>
-<td>UNCONFIRMED: no ferret-scan SARIF fixture is committed; one <code>ferret-scan --format sarif</code> run over a sample with a finding settles whether partialFingerprints is emitted</td>
+<td>the captured 2.5.3 SARIF (108 results over sample.txt) carries no fingerprints or partialFingerprints on any result</td>
 </tr>
 <tr>
 <td><code>fix_available</code></td>
@@ -6546,13 +6570,13 @@ SOFTWARE.
 <td><code>snippet</code></td>
 <td><code>n/a</code></td>
 <td></td>
-<td>output not read: the survey reads region.snippet.text (matched values masked by the shared secret-masking pass downstream) off the tests' hand-written SARIF shape, and no ferret-scan SARIF from a real run is committed; one <code>ferret-scan --format sarif</code> run would settle it</td>
+<td>the captured 2.5.3 SARIF regions carry startLine, startColumn and endColumn and no snippet, and the flat snippet column is empty across all 108 results</td>
 </tr>
 <tr>
 <td><code>references</code></td>
-<td><code>n/a</code></td>
-<td></td>
-<td>ferret-scan results carry no reference URLs</td>
+<td><code>mapped</code></td>
+<td>tool.driver.rules[].helpUri, read into the flat references by the shared rule read when the result carries none of its own</td>
+<td>ferret-scan results carry no reference URLs of their own; the rule-level helpUri is what the flat row carries</td>
 </tr>
 <tr>
 <td><code>tags</code></td>
@@ -6686,15 +6710,15 @@ SOFTWARE.
 </tr>
 <tr>
 <td><code>references</code></td>
-<td><code>mappable-dropped</code></td>
-<td>rule helpUri https://github.com/DataDog/guarddog#heuristics (adapter-written, not per-heuristic)</td>
-<td>rule-level only: the flat reader takes references from result relatedLocations, so the help link is discarded today</td>
+<td><code>mapped</code></td>
+<td>rule helpUri https://github.com/DataDog/guarddog#heuristics (adapter-written, not per-heuristic), read into the flat references when the result carries no relatedLocations</td>
+<td></td>
 </tr>
 <tr>
 <td><code>tags</code></td>
-<td><code>mappable-dropped</code></td>
-<td>rule-level PropertyBag tags guarddog and malicious-package, written by the adapter</td>
-<td>rule-level only: the flat reader takes tags from result properties, so the rule tags are discarded today</td>
+<td><code>mapped</code></td>
+<td>rule-level PropertyBag tags guarddog and malicious-package, written by the adapter, read into the flat tags when the result carries none</td>
+<td></td>
 </tr>
 <tr>
 <td><code>extras</code></td>
@@ -6856,27 +6880,27 @@ SOFTWARE.
 <tbody>
 <tr>
 <td><code>rule_id</code></td>
-<td><code>n/a</code></td>
+<td><code>mapped</code></td>
+<td>result "ruleId"</td>
 <td></td>
-<td>output not read: the survey reads result "ruleId" off the in-test double's shape, and no snyk SARIF from a real run is committed (M0 item e); a licensed <code>snyk code test --sarif</code> run would settle it</td>
 </tr>
 <tr>
 <td><code>severity</code></td>
-<td><code>n/a</code></td>
+<td><code>mapped</code></td>
+<td>result "level" (no security-severity on rules, so a bare error reads as CRITICAL)</td>
 <td></td>
-<td>output not read: the survey reads result "level" (no security-severity on rules, so a bare error reads as CRITICAL) off the in-test double's shape, and no snyk SARIF from a real run is committed (M0 item e); a licensed run would settle it</td>
 </tr>
 <tr>
 <td><code>file_path</code></td>
-<td><code>n/a</code></td>
+<td><code>mapped</code></td>
+<td>locations[].physicalLocation.artifactLocation.uri (%SRCROOT% base)</td>
 <td></td>
-<td>output not read: the survey reads locations[].physicalLocation.artifactLocation.uri (%SRCROOT% base) off the in-test double's shape, and no snyk SARIF from a real run is committed (M0 item e); a licensed run would settle it</td>
 </tr>
 <tr>
 <td><code>line_range</code></td>
-<td><code>n/a</code></td>
+<td><code>mapped</code></td>
+<td>region.startLine / region.endLine</td>
 <td></td>
-<td>output not read: the survey reads region.startLine / region.endLine off the in-test double's shape, and no snyk SARIF from a real run is committed (M0 item e); a licensed run would settle it</td>
 </tr>
 <tr>
 <td><code>column</code></td>
@@ -6886,9 +6910,9 @@ SOFTWARE.
 </tr>
 <tr>
 <td><code>message</code></td>
-<td><code>n/a</code></td>
+<td><code>mapped</code></td>
+<td>result "message.text"</td>
 <td></td>
-<td>output not read: the survey reads result "message.text" off the in-test double's shape, and no snyk SARIF from a real run is committed (M0 item e); a licensed run would settle it</td>
 </tr>
 <tr>
 <td><code>resource_id</code></td>
@@ -6928,15 +6952,15 @@ SOFTWARE.
 </tr>
 <tr>
 <td><code>taxonomy_cwe</code></td>
-<td><code>n/a</code></td>
+<td><code>mapped</code></td>
+<td>rule properties "cwe" (e.g. ["CWE-798"]), normalized by normalize_rule_cwe_into_tags into the rule's tags as external/cwe/cwe-&lt;n&gt;, which the shared flat reader reads</td>
 <td></td>
-<td>output not read: rules' properties "cwe" (e.g. ["CWE-798"]) is normalized by normalize_rule_cwe_into_tags into the rule's tags as external/cwe/cwe-&lt;n&gt;, which the shared flat reader reads -- pinned over the in-test double's shape only, since no snyk SARIF from a real run is committed (M0 item e); a licensed run would settle it</td>
 </tr>
 <tr>
 <td><code>fingerprints</code></td>
-<td><code>n/a</code></td>
+<td><code>mapped</code></td>
+<td _0_="&quot;0&quot;," _1_="&quot;1&quot;">result "fingerprints"</td>
 <td></td>
-<td>output not read: the survey reads result "fingerprints" {"0", "1"} off the in-test double's shape, and no snyk SARIF from a real run is committed (M0 item e); a licensed run would settle it</td>
 </tr>
 <tr>
 <td><code>fix_available</code></td>
@@ -6946,13 +6970,13 @@ SOFTWARE.
 </tr>
 <tr>
 <td><code>remediation_text</code></td>
-<td><code>n/a</code></td>
+<td><code>unconfirmed</code></td>
 <td></td>
 <td>UNCONFIRMED: the survey classified rule help.markdown under references only; a <code>snyk code test --sarif</code> run settles whether remediation text is separate</td>
 </tr>
 <tr>
 <td><code>snippet</code></td>
-<td><code>n/a</code></td>
+<td><code>unconfirmed</code></td>
 <td></td>
 <td>the survey read no snippet in the native regions; UNCONFIRMED against a real tool run</td>
 </tr>
@@ -6964,9 +6988,9 @@ SOFTWARE.
 </tr>
 <tr>
 <td><code>tags</code></td>
-<td><code>n/a</code></td>
-<td></td>
-<td>UNCONFIRMED: the survey records ASH-added tags, but no tag write exists in this adapter at this checkout; a <code>snyk code test --sarif</code> run through the pipeline settles it</td>
+<td><code>mapped</code></td>
+<td>tool.driver.rules[].properties.tags, read into the flat tags by the shared rule read when the result carries none of its own</td>
+<td>no tag write exists in this adapter at this checkout; the rule-level tags are what the flat row carries</td>
 </tr>
 <tr>
 <td><code>extras</code></td>
@@ -7064,7 +7088,7 @@ SOFTWARE.
 </tr>
 <tr>
 <td><code>taxonomy_cwe</code></td>
-<td><code>n/a</code></td>
+<td><code>unconfirmed</code></td>
 <td></td>
 <td>UNCONFIRMED: trivy's SARIF rules carry no CWE (tags are vulnerability, security, &lt;severity&gt;); the JSON format's CweIDs has no committed vulnerability fixture, and a <code>trivy fs --format json</code> run over a lockfile settles it</td>
 </tr>
@@ -7082,7 +7106,7 @@ SOFTWARE.
 </tr>
 <tr>
 <td><code>remediation_text</code></td>
-<td><code>n/a</code></td>
+<td><code>unconfirmed</code></td>
 <td></td>
 <td>UNCONFIRMED: not classified by the survey; the flat model has no remediation column, and the rule help text carries the fixed version already declared under fix_available</td>
 </tr>
@@ -7094,15 +7118,15 @@ SOFTWARE.
 </tr>
 <tr>
 <td><code>references</code></td>
-<td><code>mappable-dropped</code></td>
-<td>SARIF rule helpUri</td>
-<td>rule-level only: the flat reader takes references from result relatedLocations, so the help link is discarded today</td>
+<td><code>mapped</code></td>
+<td>SARIF rule helpUri, read into the flat references by FlatVulnerability.from_sarif_result when the result carries no relatedLocations</td>
+<td></td>
 </tr>
 <tr>
 <td><code>tags</code></td>
-<td><code>mappable-dropped</code></td>
-<td>SARIF rule properties.tags</td>
-<td>rule-level only: the flat reader takes tags from result properties, so the rule tags are discarded today (the severity word among them still feeds issue_severity)</td>
+<td><code>mapped</code></td>
+<td>SARIF rule properties.tags, read into the flat tags by FlatVulnerability.from_sarif_result when the result carries none (the severity word among them still feeds issue_severity)</td>
+<td></td>
 </tr>
 <tr>
 <td><code>extras</code></td>

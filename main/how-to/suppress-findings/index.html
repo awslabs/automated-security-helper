@@ -1098,6 +1098,17 @@ SOFTWARE.
 </li>
       
         <li class="md-nav__item">
+  <a href="#exclusions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Drop one rule under a path (exclusions)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#unused" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3593,6 +3604,17 @@ SOFTWARE.
 </li>
       
         <li class="md-nav__item">
+  <a href="#exclusions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Drop one rule under a path (exclusions)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#unused" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3765,7 +3787,7 @@ SOFTWARE.
 </tbody>
 </table>
 <ul>
-<li>Paths match case-sensitively: <code>tests/**</code> does not match <code>Tests/</code>. In a pattern without <code>**</code>, <code>*</code> also matches across directory separators, so <code>src/*.py</code> matches <code>src/sub/app.py</code>; <code>**</code> matches any depth. A path that starts with <code>./</code> matches nothing, and neither does an empty path, <code>.</code> or <code>./</code>. A trailing slash is literal, unlike in an ignore path: <code>tests/</code> matches no finding, and the scan warns that it matched nothing and gives <code>tests/**/*</code>, the pattern for the files under the directory. A bare directory name such as <code>tests</code> names only the path <code>tests</code> itself and matches nothing inside it. When the directory exists in the scanned directory, <code>ash config validate</code> and <code>ash config lint</code> warn about either one with that pattern and exit 0. They warn in the same way, saying what to write instead, about a path that starts with <code>./</code> (<code>./src/app.py</code> is <code>src/app.py</code>) and about an empty path or <code>.</code>. A path whose leading names match the tree only in another case (<code>tests/**</code> against <code>Tests/</code>) gets a warning that names the tree's spelling and says that patterns match case-sensitively.</li>
+<li>Paths match case-sensitively: <code>tests/**</code> does not match <code>Tests/</code>. In a pattern without <code>**</code>, <code>*</code> also matches across directory separators, so <code>src/*.py</code> matches <code>src/sub/app.py</code>; <code>**</code> matches any depth. A path that starts with <code>./</code> matches nothing, and neither does an empty path, <code>.</code> or <code>./</code>. A path with no glob character names a file and the directory of that name: <code>tests</code> and <code>tests/</code> both match every finding below <code>tests/</code>, and the bare <code>tests</code> also matches a file named <code>tests</code>. Both are anchored at the top of the scanned directory, so neither matches anything in <code>pkg/tests/</code>; write <code>**/tests/**</code> for a <code>tests</code> directory at any depth. <code>ash config validate</code> and <code>ash config lint</code> warn, saying what to write instead, about a path that starts with <code>./</code> (<code>./src/app.py</code> is <code>src/app.py</code>) and about an empty path or <code>.</code>, and exit 0. A path whose leading names match the tree only in another case (<code>tests/**</code> against <code>Tests/</code>) gets a warning that names the tree's spelling and says that patterns match case-sensitively.</li>
 <li>A file whose name is not valid UTF-8 is reported with each such byte written as <code>\udcNN</code> (a latin-1 <code>secr\xe9t.py</code> as <code>secr\udce9t.py</code>). A <code>path</code> matches it written that way, since the <code>\</code> of a <code>\udcNN</code> escape is part of the name and not a separator, or with <code>?</code> for that <code>\</code> (<code>secr?udce9t.py</code>), or by a glob such as <code>secr*t.py</code>. An ignore path matches such a file the same way when ASH lists the files to scan. A UTF-8 file name that spells the same <code>\udcNN</code> text reads as the same name, so in a tree that holds both files, both are reported under that name, and a path that matches one matches both.</li>
 <li><code>rule_id</code> is a case-insensitive pattern with no scanner prefix. It matches any scanner that reports that rule ID.</li>
 <li>Quote the <code>expires</code> date. YAML reads an unquoted <code>2027-01-31</code> as a date, not a string, and ASH then refuses the whole config (exit 3). <code>ash config lint</code> and <code>ash config get</code> name the problem.</li>
@@ -3917,6 +3939,16 @@ SOFTWARE.
 </span><span id="__span-11-5"><a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>rm<span class="w"> </span>-r<span class="w"> </span>vendor
 </span></code></pre></div>
 <p>ASH does not read a <code>.ashignore</code> file. It does apply the repository's <code>.gitignore</code> and <code>.ignore</code> files to the files it hands several scanners; see <a href="../../reference/coverage/#what-decides-the-files">Coverage</a>. Several scanners also have their own exclusion options, such as bandit's <code>excluded_paths</code>, checkov's <code>skip_path</code>, and semgrep's <code>exclude</code>; the <a href="../../reference/scanners/">scanner reference</a> lists them.</p>
+<h2 id="exclusions">Drop one rule under a path (exclusions)<a class="headerlink" href="#exclusions" title="Permanent link">&para;</a></h2>
+<p>A suppression keeps the result in SARIF marked suppressed, and an ignore path drops every rule under the path. When one rule is always benign in one place -- bandit B101 (<code>assert</code>) under <code>tests/</code>, say -- a rule+path exclusion drops just that rule's results there, so they do not pile up as suppressed noise in SARIF consumers while B105 or B108 under <code>tests/</code> are still reported:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="nt">global_settings</span><span class="p">:</span>
+</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="w">  </span><span class="nt">exclusions</span><span class="p">:</span>
+</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">rule_id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">B101</span>
+</span><span id="__span-12-4"><a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="w">      </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;**/tests/**&quot;</span>
+</span><span id="__span-12-5"><a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="w">      </span><span class="nt">scanner</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">bandit</span>
+</span><span id="__span-12-6"><a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a><span class="w">      </span><span class="nt">reason</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;pytest</span><span class="nv"> </span><span class="s">assert</span><span class="nv"> </span><span class="s">idiom;</span><span class="nv"> </span><span class="s">tests</span><span class="nv"> </span><span class="s">are</span><span class="nv"> </span><span class="s">not</span><span class="nv"> </span><span class="s">shipped&quot;</span>
+</span></code></pre></div>
+<p><code>rule_id</code>, <code>path</code>, and <code>reason</code> are required. The rule ID matches the finding's exact ID case-insensitively, or as a glob (<code>B1*</code>); the path matches the way a suppression's does, every file-naming location of the result included; <code>scanner</code> (optional) bounds the exclusion to one scanner's results by its registered name; <code>expires</code> works the way a suppression's does. Each dropped result is logged when the scan runs with <code>--verbose</code>. <a href="../../concepts/suppressions/">Suppressions, ignore paths, and scanner exclusions</a> places exclusions among the other mechanisms.</p>
 <h2 id="unused">Find suppressions that no longer match<a class="headerlink" href="#unused" title="Permanent link">&para;</a></h2>
 <p>The <code>unused-suppressions</code> reporter, on by default, writes <code>.ash/ash_output/reports/ash.unused-suppressions.json</code> and <code>ash.unused-suppressions.md</code>. They list each entry in <code>global_settings.suppressions</code> that matched no finding in the scan, including expired ones. They do not cover ignore paths or inline suppressions.</p>
 <p>After a scan, <code>ash config lint --fix-unused</code> comments out the entries that the report lists, with the date. When it comments out every entry, it leaves <code>suppressions: []</code> above them, so the file still loads; remove the <code>[]</code> when you turn an entry back on. A suppression can look unused in one environment and still be needed in another, for example when a scanner whose finding it covers is not installed locally but runs in CI. Check the report before you remove entries.</p>
@@ -3925,8 +3957,8 @@ SOFTWARE.
 <h2 id="ignore-suppressions">See every finding<a class="headerlink" href="#ignore-suppressions" title="Permanent link">&para;</a></h2>
 <p><code>--ignore-suppressions</code> reports findings as if no suppression existed, so you can review what the suppressions hide. With the suppression from the earlier example, the finding fails the scan again:</p>
 <!-- doctest: run expect-exit=2 -->
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>ash<span class="w"> </span>--source-dir<span class="w"> </span>.<span class="w"> </span>--scanners<span class="w"> </span>detect-secrets<span class="w"> </span>--offline<span class="w"> </span>--no-progress<span class="w"> </span>--ignore-suppressions<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="w">  </span>--config-overrides<span class="w"> </span><span class="s1">&#39;global_settings.suppressions+=[{&quot;path&quot;: &quot;app.py&quot;, &quot;rule_id&quot;: &quot;SECRET-SECRET-KEYWORD&quot;, &quot;reason&quot;: &quot;Fixture value, not a real password&quot;}]&#39;</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>ash<span class="w"> </span>--source-dir<span class="w"> </span>.<span class="w"> </span>--scanners<span class="w"> </span>detect-secrets<span class="w"> </span>--offline<span class="w"> </span>--no-progress<span class="w"> </span>--ignore-suppressions<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="w">  </span>--config-overrides<span class="w"> </span><span class="s1">&#39;global_settings.suppressions+=[{&quot;path&quot;: &quot;app.py&quot;, &quot;rule_id&quot;: &quot;SECRET-SECRET-KEYWORD&quot;, &quot;reason&quot;: &quot;Fixture value, not a real password&quot;}]&#39;</span>
 </span></code></pre></div>
 <p>It lifts config suppressions, ignore paths, <code>ash-ignore</code> comments, and cdk-nag's <code>Metadata</code> suppressions. Every scanner reads the files under an ignore path, and their findings are reported; to drop only the ignore paths for one run, pass <code>--config-overrides 'global_settings.ignore_paths=[]'</code> instead. It does not bring back what a scanner never reported (findings hidden by the scanner's own comments or its exclusion options), and findings that semgrep and checkov report as suppressed stay suppressed. The repository's <code>.gitignore</code> and <code>.ignore</code> files still apply, and findings in ASH's own output directory stay out of the results. In container mode the flag reaches the scan inside the container and works there as in a local scan.</p>
 <p>When an MCP client delivers the config, its suppressions, ignore paths, and scanner exclusions are marked client-supplied in the results; see <a href="../../concepts/trust-model/#client-supplied">Configuration trust model</a>. ASH applies all of them itself, so in a local scan with <code>--ignore-suppressions</code> none of them applies, and the findings they would have marked are ordinary findings.</p>
