@@ -51,8 +51,8 @@ package is imported, and ``note`` when only the module is required. ASH rates
 them HIGH, MEDIUM and LOW, and sets the SARIF level so both agree. They are not
 CRITICAL: the report carries no CVSS score, and a called symbol is evidence of
 reachability, not of exploitability. A result with no level is MEDIUM, and a
-level that is not one of the three is HIGH, so an unknown value is never
-under-reported.
+level of ``none`` is INFO, and any other level is HIGH, so an unknown value
+is never under-reported.
 
 Offline and sandbox
 -------------------
@@ -654,8 +654,11 @@ class GovulncheckScanner(ScannerPluginBase[GovulncheckScannerConfig]):
             if merged is None:  # pragma: no cover - modules is non-empty here
                 raise ScannerError("govulncheck produced no report")
             driver = merged.runs[0].tool.driver
-            if driver.version:
-                self.tool_version = driver.version
+            # govulncheck's SARIF writer sets ``semanticVersion``; ``version``
+            # is the fallback for a writer that uses the other field.
+            detected_version = driver.semanticVersion or driver.version
+            if detected_version:
+                self.tool_version = detected_version
             self.apply_severity_mapping(merged)
             with open_for_write(results_file) as handle:
                 handle.write(

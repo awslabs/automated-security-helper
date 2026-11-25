@@ -65,7 +65,7 @@ govulncheck writes one SARIF level per finding, by how precisely it could place 
 | `warning` | the vulnerable package is imported, the function is not called | MEDIUM | warning |
 | `note` | only the module is required | LOW | note |
 
-No finding is CRITICAL: the report carries no CVSS score, and a reachable function shows exposure, not exploitability. A result with no level is MEDIUM. A level that is none of these is HIGH, so an unexpected value is never under-reported.
+No finding is CRITICAL: the report carries no CVSS score, and a reachable function shows exposure, not exploitability. A result with no level is MEDIUM. A level of `none` is INFO, and any other level is HIGH, so an unexpected value is never under-reported.
 
 ## Exit status
 

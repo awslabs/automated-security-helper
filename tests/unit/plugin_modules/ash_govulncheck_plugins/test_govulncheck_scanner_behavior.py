@@ -315,6 +315,26 @@ class TestReport:
         )
         assert _findings(report) == [("GO-2023-0009", "warning", "MEDIUM")]
 
+    def test_tool_version_is_read_from_semantic_version(
+        self, tree, tmp_path, on_path, monkeypatch
+    ):
+        scanner = _scanner(tree, tmp_path)
+        before = scanner.tool_version
+        _run(scanner, FakeGovulncheck(stdout=_sarif(version="v9.8.7")), monkeypatch)
+        assert scanner.tool_version == "v9.8.7"
+        assert scanner.tool_version != before
+
+    def test_tool_version_falls_back_to_driver_version(
+        self, tree, tmp_path, on_path, monkeypatch
+    ):
+        document = json.loads(_sarif())
+        driver = document["runs"][0]["tool"]["driver"]
+        del driver["semanticVersion"]
+        driver["version"] = "v6.5.4"
+        scanner = _scanner(tree, tmp_path)
+        _run(scanner, FakeGovulncheck(stdout=json.dumps(document)), monkeypatch)
+        assert scanner.tool_version == "v6.5.4"
+
     def test_the_report_is_written_to_the_results_directory(
         self, tree, tmp_path, on_path, monkeypatch
     ):
