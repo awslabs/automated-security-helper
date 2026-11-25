@@ -7,8 +7,8 @@ from __future__ import annotations
 
 import pytest
 
+from automated_security_helper.models.vocab import TargetType
 from automated_security_helper.utils.finding_identity import (
-    CONVERTED_TREE,
     finding_identity,
     identity_key,
     secret_location_key,
@@ -76,7 +76,8 @@ def test_the_run_project_is_folded_in_as_the_identity_key_folds_it():
 
 def test_a_converted_file_is_told_from_a_source_file_of_the_same_path():
     converted = secret_location_key(_identity(converted=True))
-    assert converted["tree"] == CONVERTED_TREE
+    assert converted["tree"] == "converted"
+    assert converted["tree"] == TargetType.CONVERTED.value
     assert "tree" not in secret_location_key(_identity())
 
 
