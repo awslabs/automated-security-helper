@@ -62,6 +62,11 @@ and the SARIF level agree.
 | `privileged-container`, `privilege-escalation-container`, `host-network`, `host-pid`, `host-ipc`, `docker-sock`, `sensitive-host-mounts`, `privileged-ports`, `access-to-create-pods`, `access-to-secrets`, `cluster-admin-role-binding`, `wildcard-in-rules` | HIGH | error |
 | every other check | MEDIUM | warning |
 
+`privileged-ports`, `access-to-create-pods`, `access-to-secrets`, `cluster-admin-role-binding`
+and `wildcard-in-rules` are not among the 31 checks KubeLinter 0.8.3 enables by default. ASH runs
+only the defaults, so a scan does not report them; the rows stay so a future config change
+rates them correctly.
+
 The HIGH checks are the settings that widen what a compromised workload or identity can
 reach. Nothing is CRITICAL: these are configuration findings, not a vulnerability in a
 running service. A check name KubeLinter adds later is MEDIUM until it is added to the

@@ -50,6 +50,15 @@ Severity
     findings, not a vulnerability in a running service. ``issue_severity`` and the SARIF
     level agree: HIGH is ``error``, MEDIUM is ``warning``.
 
+    Five HIGH entries (``access-to-create-pods``, ``access-to-secrets``,
+    ``cluster-admin-role-binding``, ``privileged-ports``, ``wildcard-in-rules``) are not
+    among the 31 checks v0.8.3 enables by default, and ASH's empty stub config adds none,
+    so they never fire in an ASH scan (a run over a cluster-admin binding and a wildcard
+    ClusterRole with the stub config printed "No lint errors found!"; the same files with
+    ``--do-not-auto-add-defaults --include=...`` reported both). They stay in the table so
+    that a future change to the stub config rates them correctly. Turning those checks on
+    changes what a scan reports, so it is not done here.
+
 Locations
     KubeLinter writes every result at line 1 of the manifest (its source says this is
     to satisfy GitHub's code-scanning rules; real positions are a TODO upstream). ASH

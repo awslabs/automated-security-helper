@@ -545,8 +545,15 @@ class TestCapturedFixture:
         captured = json.loads(_CAPTURED.joinpath("negative.sarif").read_text())
         rules = {r["id"] for r in captured["runs"][0]["tool"]["driver"]["rules"]}
         assert len(rules) == 31
-        # A HIGH entry that KubeLinter does not ship would never fire.
-        assert HIGH_SEVERITY_CHECKS <= rules
+        # The HIGH entries the default checks do not include never fire under ASH's stub
+        # config; the docs and the module docstring say so, and this pins the set.
+        assert HIGH_SEVERITY_CHECKS - rules == {
+            "access-to-create-pods",
+            "access-to-secrets",
+            "cluster-admin-role-binding",
+            "privileged-ports",
+            "wildcard-in-rules",
+        }
         for rule in rules:
             assert severity_for_check(rule)[0] in {"HIGH", "MEDIUM"}
 

@@ -32,7 +32,10 @@ cannot switch checks off. Tune findings with ASH suppressions.
 KubeLinter has no severity. ASH rates by check name: privileged containers, host
 namespaces, the Docker socket, privilege escalation, sensitive host mounts and
 wildcard, secret-reading, pod-creating or cluster-admin RBAC are HIGH (SARIF `error`);
-every other check is MEDIUM (`warning`).
+every other check is MEDIUM (`warning`). The five RBAC and port checks in the HIGH list
+(`access-to-create-pods`, `access-to-secrets`, `cluster-admin-role-binding`,
+`privileged-ports`, `wildcard-in-rules`) are not among KubeLinter's default checks, and ASH
+runs only the defaults, so a scan does not report them.
 
 ## Documentation
 

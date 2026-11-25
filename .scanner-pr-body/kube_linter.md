@@ -16,7 +16,11 @@ alpha, opt-in. `tool_type` IAC.
 KubeLinter's SARIF has no level. ASH rates by check name: the checks in
 `HIGH_SEVERITY_CHECKS` (privileged containers, host namespaces, the Docker socket,
 privilege escalation, wildcard and cluster-admin RBAC) are HIGH and every other check is
-MEDIUM. Nothing is CRITICAL.
+MEDIUM. Nothing is CRITICAL. Five of the HIGH entries (`access-to-create-pods`,
+`access-to-secrets`, `cluster-admin-role-binding`, `privileged-ports`, `wildcard-in-rules`)
+are not among KubeLinter 0.8.3's 31 default checks, so a scan with ASH's stub config never
+reports them (measured: a cluster-admin binding and a wildcard ClusterRole read "No lint
+errors found!"). Enabling them would change what a scan reports and is left to the owner.
 
 ### Facets declared
 
