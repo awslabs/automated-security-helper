@@ -43,6 +43,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 from typing import (
+    TYPE_CHECKING,
     Annotated,
     Any,
     ClassVar,
@@ -609,7 +610,13 @@ class ReporterPluginBase(PluginBase, Generic[T]):
     implemented for convenience.
     """
 
-    config: T | ReporterPluginConfigBase | None = None
+    if TYPE_CHECKING:
+        # Every concrete reporter fills its config in ``model_post_init`` when
+        # none was given, so the methods read it as the plugin's own config
+        # type; the runtime field below still accepts None until then.
+        config: T
+    else:
+        config: T | ReporterPluginConfigBase | None = None
     dependencies_satisfied: bool = True
 
     #: What this reporter does with a multi-project model. See the module

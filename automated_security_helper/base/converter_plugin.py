@@ -3,6 +3,7 @@
 from abc import abstractmethod
 from pathlib import Path
 from typing import (
+    TYPE_CHECKING,
     Annotated,
     Any,
     BinaryIO,
@@ -70,7 +71,13 @@ class ConverterPluginBase(PluginBase, Generic[T]):
     implemented for convenience.
     """
 
-    config: T | ConverterPluginConfigBase | None = None
+    if TYPE_CHECKING:
+        # Every concrete converter fills its config in ``model_post_init`` when
+        # none was given, so the methods read it as the plugin's own config
+        # type; the runtime field below still accepts None until then.
+        config: T
+    else:
+        config: T | ConverterPluginConfigBase | None = None
     dependencies_satisfied: bool = True
     # Why the dependency check failed, when the converter knows more than that its tool
     # is absent: for example, that the copy on PATH does not satisfy its tool_version.

@@ -11,6 +11,7 @@ import re
 import threading
 from pathlib import Path
 from typing import (
+    TYPE_CHECKING,
     Annotated,
     Any,
     Callable,
@@ -963,7 +964,14 @@ class PluginBase(UVToolMixin, BaseModel):
         # environment, and an error's text goes wherever the error is shown.
         hide_input_in_errors=True,
     )
-    context: PluginContext | None = None
+    if TYPE_CHECKING:
+        # A phase hands every plugin its context before any method that reads
+        # a directory from it runs; the few that can be reached without one
+        # check ``is None`` first. The runtime field below accepts None so a
+        # plugin can still be built on its own.
+        context: PluginContext
+    else:
+        context: PluginContext | None = None
     config: PluginConfigBase | None = None
 
     output: List[str] = []

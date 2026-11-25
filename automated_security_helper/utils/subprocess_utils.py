@@ -5348,17 +5348,21 @@ def _spawn_failure_response(
     }
 
 
+#: What a run does with one of its output streams.
+OutputPreference = Literal["return", "write", "both", "none"]
+
+
 def run_command_with_output_handling(
     command: List[str],
     results_dir: Optional[Union[str, Path]] = None,
-    stdout_preference: Literal["return", "write", "both", "none"] = "write",
-    stderr_preference: Literal["return", "write", "both", "none"] = "write",
+    stdout_preference: OutputPreference = "write",
+    stderr_preference: OutputPreference = "write",
     cwd: Optional[Union[str, Path]] = None,
     env: Optional[Dict[str, str]] = None,
     shell: bool = False,
-    class_name: str = None,
+    class_name: Optional[str] = None,
     encoding: Optional[str] = None,
-    errors: str = "replace",
+    errors: Optional[str] = "replace",
     timeout: Optional[float] = None,
     values: Iterable[str] = (),
 ) -> Dict[str, Any]:

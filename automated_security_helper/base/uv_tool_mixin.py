@@ -29,6 +29,7 @@ from typing import (
     Iterable,
     Iterator,
     List,
+    Literal,
     NamedTuple,
     Optional,
     Tuple,
@@ -44,6 +45,7 @@ from automated_security_helper.utils.error_text import error_text, text_without_
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
 from automated_security_helper.utils.subprocess_utils import (
     RESPONSE_FLAGS,
+    OutputPreference,
     TIMEOUT_RETURNCODE,
     StartWatch,
     could_not_stop_default,
@@ -305,6 +307,31 @@ class UVToolMixin:
         # assign them. exit_code is None until the plugin starts a tool.
         exit_code: Optional[int]
         uv_tool_install_commands: List[str]
+        # Also PluginBase's: the tool's executable name and the package that
+        # provides it (None means "named like the command"), and the error
+        # stream the install and run arms append to.
+        command: Optional[str]
+        uv_tool_package_name: Optional[str]
+        errors: List[str]
+
+        def _plugin_log(
+            self,
+            *msg: str,
+            level: int = 15,
+            target_type: Optional[str] = "source",
+            append_to_stream: Literal["stderr", "stdout", "none"] = "none",
+        ) -> None: ...
+
+        def _process_command_response(self, response: dict) -> None: ...
+
+    def _tool_command(self) -> str:
+        """The tool's executable name, ``""`` for a plugin that sets none.
+
+        ``command`` is ``None`` on a plugin that has no tool to run; every uv
+        arm below is reached only for a plugin that names one, so the empty
+        string is the type-level stand-in, never a name that gets looked up.
+        """
+        return self.command or ""
 
     # ------------------------------------------------------------------
     # Version detection
@@ -346,7 +373,7 @@ class UVToolMixin:
         built around, and the ``package`` the runner's requirement check holds
         each spec to, so a constraint glued onto the name cannot name another
         package (``checked_requirement``)."""
-        return self.uv_tool_package_name or self.command
+        return self.uv_tool_package_name or self._tool_command()
 
     def _uv_probe_from_spec(self) -> Optional[str]:
         """:meth:`_uv_from_spec` as the dependency check hands it to the probe.
@@ -449,7 +476,7 @@ class UVToolMixin:
         ``uv_tool_runner.uv_install_inputs``, instead of this one.
         """
         return (
-            self._uv_from_spec() or self.command,
+            self._uv_from_spec() or self._tool_command(),
             *(self._get_tool_with_dependencies() or []),
         )
 
@@ -649,8 +676,8 @@ class UVToolMixin:
         command: List[str],
         working_dir: Path,
         results_dir: Optional[Path] = None,
-        stdout_preference: str = "write",
-        stderr_preference: str = "write",
+        stdout_preference: OutputPreference = "write",
+        stderr_preference: OutputPreference = "write",
         env: Optional[Dict[str, str]] = None,
         timeout: Optional[float] = None,
         values: Iterable[str] = (),
@@ -763,7 +790,7 @@ class UVToolMixin:
                     f"Executing {self.command} via UV tool run with args: {tool_args}",
                     record_values,
                     plugin_inputs=record_inputs,
-                    tool_name=self.command,
+                    tool_name=self._tool_command(),
                     limit=None,
                 ),
                 level=logging.DEBUG,
@@ -787,10 +814,10 @@ class UVToolMixin:
             # is.
             with (
                 launch.watching(),
-                uv_record_inputs(record_values, record_inputs, self.command),
+                uv_record_inputs(record_values, record_inputs, self._tool_command()),
             ):
                 result = uv_runner.run_tool(
-                    tool_name=self.command,
+                    tool_name=self._tool_command(),
                     # The package that provides the command, when it is named
                     # apart from it: the --from spec is built on it, so the
                     # run resolves the package the install named, not one
@@ -934,7 +961,7 @@ class UVToolMixin:
             text,
             record_values,
             plugin_inputs=record_inputs,
-            tool_name=self.command,
+            tool_name=self._tool_command(),
             limit=None,
         )
 
@@ -942,7 +969,7 @@ class UVToolMixin:
         self,
         launch: StartWatch,
         error: BaseException,
-        stdout_preference: str = "write",
+        stdout_preference: OutputPreference = "write",
         *,
         record_values: Tuple[str, ...],
     ) -> Optional[Dict[str, Any]]:
@@ -1378,7 +1405,7 @@ class UVToolMixin:
             repr(requirement),
             values,
             plugin_inputs=inputs,
-            tool_name=self.command,
+            tool_name=self._tool_command(),
             limit=None,
         )
         # Stripped only AFTER the redaction: a whole-text strip first eats
@@ -1388,7 +1415,7 @@ class UVToolMixin:
             stderr,
             values,
             plugin_inputs=inputs,
-            tool_name=self.command,
+            tool_name=self._tool_command(),
             limit=None,
         ).strip()
         head_keep, tail_keep = 500, 300
@@ -1672,7 +1699,7 @@ class UVToolMixin:
             return True
 
         executable = installation_info.get("pre_installed_path") or find_executable(
-            self.command
+            self._tool_command()
         )
         if executable is None:
             # Only reachable for source == "uv" offline with nothing on PATH.
@@ -1687,7 +1714,7 @@ class UVToolMixin:
         # The package that provides the command, when named apart from it: the
         # requirement verified against the copy's environment is the one the
         # scan runs under, not one named after the executable.
-        package = self.uv_tool_package_name or self.command
+        package = self._uv_package()
         requirement = build_requirement(package, extras, constraint)
         # The values hook is read ONCE, guarded, for the verify and every
         # record below: it is overridable, two reads can disagree with each
@@ -1729,7 +1756,7 @@ class UVToolMixin:
                 text,
                 values,
                 plugin_inputs=self._uv_run_inputs_for_records(),
-                tool_name=self.command,
+                tool_name=self._tool_command(),
                 limit=None,
             )
 

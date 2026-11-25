@@ -411,7 +411,13 @@ class ScannerPluginBase(PluginBase, Generic[T]):
     Plugin implementations
     """
 
-    config: T | ScannerPluginConfigBase | None = None
+    if TYPE_CHECKING:
+        # Every concrete scanner fills its config in ``model_post_init`` when
+        # none was given, so the methods read it as the plugin's own config
+        # type; the runtime field below still accepts None until then.
+        config: T
+    else:
+        config: T | ScannerPluginConfigBase | None = None
     dependencies_satisfied: bool = False
 
     #: Human-readable target coverage ("Terraform", "Python"), for the docs graphics.
