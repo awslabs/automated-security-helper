@@ -80,7 +80,7 @@ def test_config_wizard_from_defaults(host, project_dir, monkeypatch, text_snapsh
 
     assert run.exit_code == 0, run.output
     # With no config yet, the wizard creates ASH_DEFAULT_CONFIG_FILE_NAME.
-    written = (project_dir / ".ashrc.yaml").read_text(encoding="utf-8")
+    written = (project_dir / ".ash.yaml").read_text(encoding="utf-8")
     assert "project_name: wizard-demo" in written
     assert "- my_org_ash_plugins" in written
     assert text_snapshot("txt")(name="stdout") == run.document

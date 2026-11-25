@@ -5,9 +5,10 @@
 The precedence under test, highest first:
 
 1. an explicit config path;
-2. ASH_CONFIG_FILE_NAMES, each at the scan root and then in .ash/;
-3. ASH_RC_FILE_NAMES at the scan root;
-4. pyproject.toml at the scan root, only when it has a [tool.ash] table.
+2. .ash.yaml at the scan root, the canonical file;
+3. ASH_CONFIG_FILE_NAMES, each at the scan root and then in .ash/;
+4. ASH_RC_FILE_NAMES at the scan root;
+5. pyproject.toml at the scan root, only when it has a [tool.ash] table.
 
 Exactly one source is used. The rest are logged as ignored and never merged.
 """
@@ -219,6 +220,7 @@ class TestPrecedenceMatrix:
             ([".ash/.ash.yaml", "ashrc"], ".ash/.ash.yaml"),
             ([".ash/.ash.yaml", "ashrc", "pyproject"], ".ash/.ash.yaml"),
             ([".ash.yaml", ".ash/.ash.yaml", "ashrc", "pyproject"], ".ash.yaml"),
+            ([".ash.yaml", ".ash.yml"], ".ash.yaml"),
             (["ash.json", "ashrc", "pyproject"], "ash.json"),
         ],
     )
@@ -273,28 +275,35 @@ class TestPrecedenceMatrix:
         # Neither of these is a deprecated name.
         assert "deprecated" not in ignored[0]
 
-    def test_dedicated_file_shadowing_a_newer_source_warns_deprecation(
+    def test_legacy_file_shadowing_a_pyproject_table_warns_once_about_the_legacy_file(
         self, tmp_path, ash_log
     ):
         _source_file(tmp_path / ".ash", ".ash.yaml", "legacy")
         _pyproject(tmp_path, 'project_name = "p"\n')
         config = resolve_config(source_dir=tmp_path)
         assert config.project_name == "legacy"
-        ignored = [w for w in _warnings(ash_log) if "Ignoring ASH configuration" in w]
+        warnings = _warnings(ash_log)
+        ignored = [w for w in warnings if "Ignoring ASH configuration" in w]
         assert len(ignored) == 1
-        assert "deprecated" in ignored[0]
-        assert "[tool.ash]" in ignored[0]
+        # The pyproject table is not a deprecated location; the file read is.
+        assert "deprecated" not in ignored[0]
+        deprecated = [w for w in warnings if "deprecated" in w]
+        assert len(deprecated) == 1
+        assert ".ash/.ash.yaml" in deprecated[0]
 
-    def test_dedicated_file_alone_logs_no_deprecation(self, tmp_path, ash_log):
+    def test_legacy_file_alone_logs_one_deprecation(self, tmp_path, ash_log):
         _source_file(tmp_path / ".ash", ".ash.yaml", "legacy")
         resolve_config(source_dir=tmp_path)
-        assert not [w for w in _warnings(ash_log) if "deprecated" in w]
+        assert len([w for w in _warnings(ash_log) if "deprecated" in w]) == 1
 
     def test_existing_dedicated_name_order_is_unchanged(self, tmp_path):
-        # Name-major, root before .ash/, exactly as before #313.
+        # Name-major, root before .ash/, exactly as before #313, with the
+        # canonical root .ash.yaml read before all of it (see
+        # test_the_canonical_config_file_is_ash_yaml_at_the_root.py).
         for name in ASH_CONFIG_FILE_NAMES:
-            _source_file(tmp_path / ".ash", name, "x")
-        _source_file(tmp_path, ASH_CONFIG_FILE_NAMES[1], "y")
+            if name != ".ash.yaml":
+                _source_file(tmp_path / ".ash", name, "x")
+        _source_file(tmp_path, ASH_CONFIG_FILE_NAMES[2], "y")
         assert (
             find_config_file(tmp_path) == tmp_path / ".ash" / ASH_CONFIG_FILE_NAMES[0]
         )
