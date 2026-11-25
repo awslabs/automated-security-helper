@@ -365,7 +365,7 @@ version_files = [
     "ash-agent-plugins/agentic-coding/transpiler/_base/mcp.json:automated-security-helper@",
     "ash-agent-plugins/agentic-coding/transpiler/_base/commands/scan.md:automated-security-helper@",
     "ash-agent-plugins/agentic-coding/transpiler/_base/references/troubleshooting.md:automated-security-helper@",
-    "docs/content/docs/plugins/community/trivy-plugin.md:automated-security-helper.git@",
+    "docs/content/docs/plugins/alpha/trivy-plugin.md:automated-security-helper.git@",
     "docs/content/index.md:ash_version:",
     "docs/content/index.md:automated-security-helper.git@",
     "docs/content/index.md:--branch v",

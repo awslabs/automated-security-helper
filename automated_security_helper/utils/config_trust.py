@@ -80,13 +80,14 @@ from pathlib import Path, PurePath
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, Union
 
 from automated_security_helper.config.confinement_remedy import KEEP_A_SETTING
+from automated_security_helper.models.vocab import PluginKind
 
 PathLike = Union[str, "os.PathLike[str]"]
 
 _MISSING = object()
 
 #: The top-level sections whose second segment names a plugin.
-_PLUGIN_SEGMENTS = frozenset({"scanners", "converters", "reporters"})
+_PLUGIN_SEGMENTS = frozenset(PluginKind.sections())
 
 
 @dataclass

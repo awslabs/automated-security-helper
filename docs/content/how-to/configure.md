@@ -228,7 +228,7 @@ The first line `ash config init` writes points editors that use the YAML languag
 # yaml-language-server: $schema=https://raw.githubusercontent.com/awslabs/automated-security-helper/refs/heads/main/automated_security_helper/schemas/AshConfig.json
 ```
 
-The editor then completes keys and checks values as you type. ASH itself treats the line as a comment. The URL follows the `main` branch, not the ASH version you have installed, so the schema can list keys your version does not have. The schema flags an unknown key only where ASH itself refuses one (the unknown-key rows of the table in [Which mistakes ASH catches](#typos) that end in exit 3, plus `build` and `mcp-resource-management`), and it does not include the community plugins' sections.
+The editor then completes keys and checks values as you type. ASH itself treats the line as a comment. The URL follows the `main` branch, not the ASH version you have installed, so the schema can list keys your version does not have. The schema flags an unknown key only where ASH itself refuses one (the unknown-key rows of the table in [Which mistakes ASH catches](#typos) that end in exit 3, plus `build` and `mcp-resource-management`), and it does not include the alpha plugins' sections.
 
 ## Check a config {#check}
 

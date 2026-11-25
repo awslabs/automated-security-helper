@@ -60,4 +60,4 @@ scanners:
 
 ## Documentation
 
-Severity mapping, suppressions, offline use and every option: [the GuardDog plugin page](https://awslabs.github.io/automated-security-helper/docs/plugins/community/guarddog-plugin/).
+Severity mapping, suppressions, offline use and every option: [the GuardDog plugin page](https://awslabs.github.io/automated-security-helper/docs/plugins/alpha/guarddog-plugin/).

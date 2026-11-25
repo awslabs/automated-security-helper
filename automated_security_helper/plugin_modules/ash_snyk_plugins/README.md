@@ -228,8 +228,8 @@ scanners:
 # Use Snyk Code alongside other ASH scanners
 uv run ash --scanners snyk-code,bandit,semgrep --output-dir ../ash_output
 
-# Use with community plugins
-uv run ash --scanners snyk-code,trivy-repo --output-dir ../ash_output --config .ash/.ash_community_plugins.yaml --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins
+# Use with alpha plugins
+uv run ash --scanners snyk-code,trivy-repo --output-dir ../ash_output --config .ash/.ash_alpha_plugins.yaml --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins
 ```
 
 ### CI/CD Integration
@@ -437,7 +437,7 @@ Full list of supported languages is available at the [Snyk Documentation](https:
 ## Documentation
 
 For comprehensive documentation and advanced configuration options, see:
-- [ASH Community Plugins Documentation](../../../docs/content/docs/plugins/community/snyk-plugin.md)
+- [ASH Alpha Plugins Documentation](../../../docs/content/docs/plugins/alpha/snyk-plugin.md)
 - [Snyk CLI Documentation](https://docs.snyk.io/cli-ide-and-ci-cd-integrations/snyk-cli)
 - [Snyk Code Documentation](https://docs.snyk.io/products/snyk-code)
 

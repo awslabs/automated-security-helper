@@ -9261,14 +9261,9 @@
           "title": "Accepted Reason"
         },
         "kind": {
+          "$ref": "#/$defs/FailureKind",
           "default": "tool",
-          "description": "What failed: 'input' when the file is not one the converter could hand to its tool (for the jupyter converter, not a notebook), 'tool' when the tool could not convert it. The completeness gate's trust in 'accepted' rides on the kind, so any other value is read as 'tool', which is never accepted, rather than as 'input' or as a refusal to load the record.",
-          "enum": [
-            "input",
-            "tool"
-          ],
-          "title": "Kind",
-          "type": "string"
+          "description": "What failed: 'input' when the file is not one the converter could hand to its tool (for the jupyter converter, not a notebook), 'tool' when the tool could not convert it. The completeness gate's trust in 'accepted' rides on the kind, so any other value is read as 'tool', which is never accepted, rather than as 'input' or as a refusal to load the record."
         },
         "path": {
           "description": "The input's path relative to the scanned tree, with '/' separators.",
@@ -9287,6 +9282,15 @@
       ],
       "title": "FailedInputInfo",
       "type": "object"
+    },
+    "FailureKind": {
+      "description": "What failed when a converter could not convert an input.\n\n``INPUT`` is the file not being one the converter could hand to its tool;\n``TOOL`` is the tool, or the run, failing. The kind decides who may waive\nthe completeness gate: only an ``INPUT`` failure can be accepted by an\n``ash-unconverted-input`` suppression. Any value this version does not know\nreads as ``TOOL``, the side that is never accepted.",
+      "enum": [
+        "input",
+        "tool"
+      ],
+      "title": "FailureKind",
+      "type": "string"
     },
     "FairnessAssessment": {
       "additionalProperties": false,
@@ -19988,27 +19992,8 @@
           "type": "array"
         },
         "mode": {
-          "anyOf": [
-            {
-              "enum": [
-                "off",
-                "auto",
-                "bwrap",
-                "firejail",
-                "landlock",
-                "sandbox-exec"
-              ],
-              "type": "string"
-            },
-            {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
-              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
-              "type": "string"
-            }
-          ],
-          "default": "off",
           "description": "How scanner subprocesses are confined. 'off' runs them as plain subprocesses. 'auto' uses the best sandbox available (Linux: bwrap, then firejail, then landlock; macOS: sandbox-exec). Any other value requires that backend. A scanner that cannot be sandboxed as requested is recorded MISSING with the reason; it is never run unsandboxed. A mode that --sandbox, ASH_CONFIG or the operator's config file sets is a floor: a config file inside a git checkout or the scanned directory cannot turn it off or switch backends. Not applied in container mode, where the container is the boundary; ASH logs a warning when it is set there.",
-          "title": "Mode"
+          "type": "string"
         },
         "network_scanners": {
           "anyOf": [
@@ -27458,14 +27443,9 @@
           "type": "array"
         },
         "status": {
+          "$ref": "#/$defs/WorkspaceRunStatus",
           "default": "completed",
-          "description": "Whether projects were scanned at all. The discriminator for the code-2 collision -- see the module docstring.",
-          "enum": [
-            "completed",
-            "refused"
-          ],
-          "title": "Status",
-          "type": "string"
+          "description": "Whether projects were scanned at all. The discriminator for the code-2 collision -- see the module docstring."
         },
         "unconvertible_finding_paths": {
           "default": 0,
@@ -27501,6 +27481,15 @@
       ],
       "title": "WorkspaceResults",
       "type": "object"
+    },
+    "WorkspaceRunStatus": {
+      "description": "Whether a workspace run scanned projects at all.\n\nThe discriminator for the code-2 collision (see the module docstring). Distinct\nfrom ``ProjectRunStatus`` (one project's outcome) and the MCP registry's scan\nstatus, which share the word ``completed`` and stay separate vocabularies.",
+      "enum": [
+        "completed",
+        "refused"
+      ],
+      "title": "WorkspaceRunStatus",
+      "type": "string"
     },
     "YAMLReporterConfig": {
       "additionalProperties": true,

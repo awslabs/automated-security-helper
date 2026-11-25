@@ -1222,7 +1222,7 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
                 kinds=(opsf.TargetKind.SECRETS_CONTENTS,),
                 tool_type=ScannerToolType.SECRETS,
                 selection="the scan set, with local confidence validators under a time budget",
-                covers_note="a community scanner; it declares no covers display string",
+                covers_note="an alpha scanner; it declares no covers display string",
             ),
             runtime=opsf.RuntimeFacet(
                 kind=opsf.RuntimeKind.PYPI_PACKAGE,
@@ -1259,7 +1259,7 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
                 semantics="exit 3 is an accepted coverage-accounting outcome",
             ),
             provenance=opsf.ProvenanceFacet(
-                tier=opsf.Tier.COMMUNITY_OPTIN,
+                tier=opsf.Tier.ALPHA_OPTIN,
                 source=opsf.ProvenanceSource.PYPI_PINNED_DEPENDENCY,
                 selection_surfaces=("ash_ferret_plugins in ash_plugin_modules",),
                 upstream_license=(

@@ -89,6 +89,7 @@ from automated_security_helper.config.ash_config import (
     AshConfig,
     RuntimeOverridesConfig,
 )
+from automated_security_helper.core.enums import SandboxMode
 from automated_security_helper.utils.import_caches import invalidate_import_caches
 from automated_security_helper.utils.log import ASH_LOGGER
 
@@ -1226,11 +1227,12 @@ def _widenings(
                     )
                 )
         listed, mode = _walk(section, ["mode"])
-        if listed and trusted.mode != "off" and mode != trusted.mode:
+        if listed and trusted.mode != SandboxMode.off and mode != trusted.mode:
             # The server's mode can be a value its config read from the
-            # environment, and this reason is returned to the client.
+            # environment, and this reason is returned to the client. Named by
+            # its value: the repr of a member is not the mode's spelling.
             server_mode = redact_values(
-                repr(trusted.mode), config_environment_values(base)
+                repr(SandboxMode(trusted.mode).value), config_environment_values(base)
             )
             found.append(
                 DocumentDenial(
@@ -1431,7 +1433,7 @@ def _mark_client_supplied(
 
     delivered = is_delivered or config_is_client_supplied
 
-    models = {
+    models: Dict[str, Any] = {
         "suppressions": AshSuppression,
         "ignore_paths": IgnorePathWithReason,
         "exclusions": AshExclusion,

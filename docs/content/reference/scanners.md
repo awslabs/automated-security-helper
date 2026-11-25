@@ -12,7 +12,7 @@
 
 This page is generated from the scanner plugins in the ASH source code by `scripts/generate_scanner_reference.py`. Edits made to this file by hand are overwritten the next time it is generated.
 
-ASH ships 22 scanners. The built-in ones are loaded on every scan. The others are community scanners, each in a plugin module that `ash scan` loads only when the configuration's `ash_plugin_modules` (or `--ash-plugin-modules`) names the module; for the MCP server, see [What a plugin can do](../plugins/index.md#what-a-plugin-can-do).
+ASH ships 22 scanners. The built-in ones are loaded on every scan. The others are alpha scanners, each in a plugin module that `ash scan` loads only when the configuration's `ash_plugin_modules` (or `--ash-plugin-modules`) names the module; for the MCP server, see [What a plugin can do](../plugins/index.md#what-a-plugin-can-do).
 
 <!-- doctest: options of=scanners -->
 | Scanner | Tool type | Enabled by default | Provided by | Command | Runs with `--python-only` |
@@ -33,12 +33,12 @@ ASH ships 22 scanners. The built-in ones are loaded on every scan. The others ar
 | [`syft`](#syft) | SBOM | yes | built in | `syft` | no |
 | [`trivy`](#trivy) | SCA | yes | built in | `trivy` | no |
 | [`zizmor`](#zizmor) | SAST | yes | built in | `zizmor` | yes |
-| [`betterleaks`](#betterleaks) | SECRETS | yes | community module `ash_betterleaks_plugins` | `betterleaks` | no |
-| [`ferret-scan`](#ferret-scan) | SECRETS | yes | community module `ash_ferret_plugins` | `ferret-scan` | no |
-| [`guarddog`](#guarddog) | SCA | yes | community module `ash_guarddog_plugins` | `guarddog` | yes |
-| [`hadolint`](#hadolint) | IAC | yes | community module `ash_hadolint_plugins` | `hadolint` | no |
-| [`snyk-code`](#snyk-code) | SAST | yes | community module `ash_snyk_plugins` | `snyk` | no |
-| [`trivy-repo`](#trivy-repo) | SCA | yes | community module `ash_trivy_plugins` | `trivy` | no |
+| [`betterleaks`](#betterleaks) | SECRETS | yes | alpha module `ash_betterleaks_plugins` | `betterleaks` | no |
+| [`ferret-scan`](#ferret-scan) | SECRETS | yes | alpha module `ash_ferret_plugins` | `ferret-scan` | no |
+| [`guarddog`](#guarddog) | SCA | yes | alpha module `ash_guarddog_plugins` | `guarddog` | yes |
+| [`hadolint`](#hadolint) | IAC | yes | alpha module `ash_hadolint_plugins` | `hadolint` | no |
+| [`snyk-code`](#snyk-code) | SAST | yes | alpha module `ash_snyk_plugins` | `snyk` | no |
+| [`trivy-repo`](#trivy-repo) | SCA | yes | alpha module `ash_trivy_plugins` | `trivy` | no |
 
 Tool type is the scanner's own `ScannerToolType`. `--python-only` keeps a scanner when its `is_python_only()` is true: the scanner class's own `python_only` when it states one; otherwise only when the scanner runs its tool through uv, declares no install commands, and has only pip dependencies. A scanner it does not keep is SKIPPED.
 
@@ -483,9 +483,9 @@ Options, under `scanners.zizmor.options`. An option not listed here refuses the 
 
 ## `betterleaks`
 
-- Scanner page: [`betterleaks` scanner page](../docs/plugins/community/betterleaks-plugin.md)
+- Scanner page: [`betterleaks` scanner page](../docs/plugins/alpha/betterleaks-plugin.md)
 - Class: `automated_security_helper.plugin_modules.ash_betterleaks_plugins.betterleaks_scanner.BetterleaksScanner`
-- Provided by: community module `ash_betterleaks_plugins`, which `ash scan` loads when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_betterleaks_plugins`
+- Provided by: alpha module `ash_betterleaks_plugins`, which `ash scan` loads when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_betterleaks_plugins`
 - Enabled by default: yes
 - Tool type: SECRETS
 - Command: `betterleaks`
@@ -511,9 +511,9 @@ Options, under `scanners.betterleaks.options`. An option not listed here refuses
 
 Ferret Scan is a sensitive data detection tool that scans files for potential sensitive information such as credit card numbers, passport numbers, SSNs, API keys, and other secrets.
 
-- Scanner page: [`ferret-scan` scanner page](../docs/plugins/community/ferret-scan-plugin.md)
+- Scanner page: [`ferret-scan` scanner page](../docs/plugins/alpha/ferret-scan-plugin.md)
 - Class: `automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner.FerretScanScanner`
-- Provided by: community module `ash_ferret_plugins`, which `ash scan` loads when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_ferret_plugins`
+- Provided by: alpha module `ash_ferret_plugins`, which `ash scan` loads when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_ferret_plugins`
 - Enabled by default: yes
 - Tool type: SECRETS
 - Command: `ferret-scan`
@@ -556,9 +556,9 @@ Options, under `scanners.ferret-scan.options`. An option not listed here refuses
 
 GuardDog detects malicious-package heuristics in PyPI, npm, Go, GitHub Action, RubyGems and crates packages.
 
-- Scanner page: [`guarddog` scanner page](../docs/plugins/community/guarddog-plugin.md)
+- Scanner page: [`guarddog` scanner page](../docs/plugins/alpha/guarddog-plugin.md)
 - Class: `automated_security_helper.plugin_modules.ash_guarddog_plugins.guarddog_scanner.GuardDogScanner`
-- Provided by: community module `ash_guarddog_plugins`, which `ash scan` loads when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_guarddog_plugins`
+- Provided by: alpha module `ash_guarddog_plugins`, which `ash scan` loads when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_guarddog_plugins`
 - Enabled by default: yes
 - Tool type: SCA
 - Command: `guarddog`
@@ -591,9 +591,9 @@ Options, under `scanners.guarddog.options`. An option not listed here refuses th
 
 ## `hadolint`
 
-- Scanner page: [`hadolint` scanner page](../docs/plugins/community/hadolint-plugin.md)
+- Scanner page: [`hadolint` scanner page](../docs/plugins/alpha/hadolint-plugin.md)
 - Class: `automated_security_helper.plugin_modules.ash_hadolint_plugins.hadolint_scanner.HadolintScanner`
-- Provided by: community module `ash_hadolint_plugins`, which `ash scan` loads when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_hadolint_plugins`
+- Provided by: alpha module `ash_hadolint_plugins`, which `ash scan` loads when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_hadolint_plugins`
 - Enabled by default: yes
 - Tool type: IAC
 - Command: `hadolint`
@@ -615,9 +615,9 @@ Options, under `scanners.hadolint.options`. An option not listed here refuses th
 
 ## `snyk-code`
 
-- Scanner page: [`snyk-code` scanner page](../docs/plugins/community/snyk-plugin.md)
+- Scanner page: [`snyk-code` scanner page](../docs/plugins/alpha/snyk-plugin.md)
 - Class: `automated_security_helper.plugin_modules.ash_snyk_plugins.snyk_code_scanner.SnykCodeScanner`
-- Provided by: community module `ash_snyk_plugins`, which `ash scan` loads when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_snyk_plugins`
+- Provided by: alpha module `ash_snyk_plugins`, which `ash scan` loads when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_snyk_plugins`
 - Enabled by default: yes
 - Tool type: SAST
 - Command: `snyk`
@@ -639,9 +639,9 @@ Options, under `scanners.snyk-code.options`. An option not listed here refuses t
 
 ## `trivy-repo`
 
-- Scanner page: [`trivy-repo` scanner page](../docs/plugins/community/trivy-plugin.md)
+- Scanner page: [`trivy-repo` scanner page](../docs/plugins/alpha/trivy-plugin.md)
 - Class: `automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scanner.TrivyRepoScanner`
-- Provided by: community module `ash_trivy_plugins`, which `ash scan` loads when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_trivy_plugins`
+- Provided by: alpha module `ash_trivy_plugins`, which `ash scan` loads when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_trivy_plugins`
 - Enabled by default: yes
 - Tool type: SCA
 - Command: `trivy`

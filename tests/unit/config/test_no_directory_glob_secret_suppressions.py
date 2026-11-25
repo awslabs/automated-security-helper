@@ -96,7 +96,7 @@ def broad_guarded_suppressions(config: dict) -> list[dict]:
 def test_the_repository_ships_config_files_to_check():
     # Without this the parametrized test below collects zero cases and passes.
     names = {p.name for p in _config_files()}
-    assert {".ash.yaml", ".ash_community_plugins.yaml"} <= names
+    assert {".ash.yaml", ".ash_alpha_plugins.yaml"} <= names
 
 
 @pytest.mark.parametrize("config_path", _config_files(), ids=lambda p: p.name)

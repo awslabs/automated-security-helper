@@ -42,6 +42,7 @@ from typing import (
 from automated_security_helper.utils.error_text import ESCAPE_CODES as _ANSI_ESCAPE
 from automated_security_helper.utils.error_text import error_text, text_without_values
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
+from automated_security_helper.utils.pre_installed_tool import ToolInstallStatus
 from automated_security_helper.utils.subprocess_utils import (
     RESPONSE_FLAGS,
     TIMEOUT_RETURNCODE,
@@ -1733,7 +1734,7 @@ class UVToolMixin:
                 limit=None,
             )
 
-        if verdict.status == "satisfied":
+        if verdict.status == ToolInstallStatus.SATISFIED:
             self._plugin_log(
                 _shown(
                     f"Using pre-installed {self.command} at {executable} directly; "
@@ -1758,7 +1759,9 @@ class UVToolMixin:
             # value an earlier uv probe wrote names an environment the scan
             # does not run (#955, the probe resolved 3.4.5 while the PATH copy
             # was 3.3.15), and the uv probe is no longer owed on this route.
-            self.tool_version = getattr(verdict, "version", None) or None
+            # mypy reads this mixin's tool_version as the str the first assignment above
+            # gave it; PluginBase declares it ``str | None``, which is what this holds.
+            self.tool_version = getattr(verdict, "version", None) or None  # type: ignore[assignment]
             self._deferred_tool_version_probe = None
             return True
 
@@ -1778,8 +1781,8 @@ class UVToolMixin:
             offline
             and source == "pre_installed"
             and (
-                verdict.status == "unsatisfied"
-                or (verdict.status == "unverifiable" and from_nix)
+                verdict.status == ToolInstallStatus.UNSATISFIED
+                or (verdict.status == ToolInstallStatus.UNVERIFIABLE and from_nix)
             )
         ):
             if from_nix:
@@ -1797,7 +1800,7 @@ class UVToolMixin:
                 )
             cannot = (
                 "cannot be used"
-                if verdict.status == "unsatisfied"
+                if verdict.status == ToolInstallStatus.UNSATISFIED
                 else "could not be verified"
             )
             # The log gets the full story: the copy's path and the verdict's
@@ -1832,7 +1835,7 @@ class UVToolMixin:
                     f"not directly: {verdict.detail}"
                 ),
                 level=logging.WARNING
-                if verdict.status == "unsatisfied"
+                if verdict.status == ToolInstallStatus.UNSATISFIED
                 else logging.INFO,
             )
         self.dependencies_satisfied = True

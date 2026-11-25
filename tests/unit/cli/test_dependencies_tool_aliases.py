@@ -38,7 +38,7 @@ runner = CliRunner()
 # Measured, not derived from the table under test: the `Available:` list of
 # `ash dependencies install --tool <unknown>` at 3aa74305 (just before #766) and at
 # 5fe35b33 (#766), for each plugin type, with every bundled plugin module loaded
-# (ash_builtin, ash_aws_plugins, and the snyk, trivy and ferret community modules).
+# (ash_builtin, ash_aws_plugins, and the snyk, trivy and ferret alpha modules).
 # This is the only name that differs. Written out here so that emptying the table
 # fails these tests instead of collecting none of them.
 ALIASES = [("ArchiveConverter", "archive")]

@@ -358,7 +358,7 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
                 ),
                 tool_type=ScannerToolType.SCA,
                 selection="`trivy repository` over the target; scanners default to vuln, secret, misconfig and license",
-                covers_note="a community scanner; it declares no covers display string",
+                covers_note="an alpha scanner; it declares no covers display string",
                 tool_type_note=(
                     "was SAST, which contradicted what it runs (vuln, secret, misconfig "
                     "and license scanners, no source analysis) and fed the reporter-side "
@@ -418,7 +418,7 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
                 semantics="trivy reports findings in the file, not through its exit code",
             ),
             provenance=opsf.ProvenanceFacet(
-                tier=opsf.Tier.COMMUNITY_OPTIN,
+                tier=opsf.Tier.ALPHA_OPTIN,
                 source=opsf.ProvenanceSource.PINNED_RELEASE_BINARY,
                 selection_surfaces=(
                     "ash_trivy_plugins in ash_plugin_modules",

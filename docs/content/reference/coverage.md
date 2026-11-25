@@ -6,12 +6,12 @@ reports `SKIPPED` or `PASSED` with no findings. [Scanners](scanners.md) lists ea
 scanner's tool, version, and options, and [Choose scanners](../how-to/choose-scanners.md)
 shows how to turn them on and off.
 
-Community plugins run only when you load their module with `ash_plugin_modules` or
-`--ash-plugin-modules`; see [Community plugins](../docs/plugins/community/index.md).
+Alpha plugins run only when you load their module with `ash_plugin_modules` or
+`--ash-plugin-modules`; see [Alpha plugins](../docs/plugins/alpha/index.md).
 
 ## By stack {#by-stack}
 
-| What your repository has | Built-in scanners | Community plugins |
+| What your repository has | Built-in scanners | Alpha plugins |
 |---|---|---|
 | Python code | bandit, semgrep, opengrep | snyk-code |
 | JavaScript and TypeScript code | semgrep, opengrep | snyk-code |
@@ -76,7 +76,7 @@ them to the tool.
 | zizmor | SAST | Selected files: GitHub Actions workflows and composite actions | yes | no |
 | betterleaks | Secrets | Whole directory: the files on disk, not git history | no | no |
 | ferret-scan | Secrets | Whole directory, including files `.gitignore` excludes | no | no |
-| guarddog | SCA | Selected files: for each directory that holds a package manifest (`setup.py`, `package.json`, `go.mod`, `action.yml`, a `*.gemspec`, `Cargo.toml`, and the others the [GuardDog page](../docs/plugins/community/guarddog-plugin.md) lists), a temporary copy of the files in the scan set under it | yes | no |
+| guarddog | SCA | Selected files: for each directory that holds a package manifest (`setup.py`, `package.json`, `go.mod`, `action.yml`, a `*.gemspec`, `Cargo.toml`, and the others the [GuardDog page](../docs/plugins/alpha/guarddog-plugin.md) lists), a temporary copy of the files in the scan set under it | yes | no |
 | hadolint | IaC | Selected files: Dockerfiles, named `Dockerfile`, `Containerfile`, `*.Dockerfile`, or `Dockerfile.*`, with that exact capitalization | no | no |
 | snyk-code | SAST | Whole directory, sent to Snyk's service | no | no |
 | trivy-repo | SCA | Whole directory: `trivy repository` with the vulnerability, secret, misconfiguration, and license scanners | no | no |

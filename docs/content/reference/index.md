@@ -16,6 +16,7 @@ current for the branch the site is built from. Each generated page names its gen
 | [Exit codes](exit-codes.md) | what each exit code means and which wins when several apply | written by hand |
 | [Output files](output-files.md) | the output directory layout and the results file | written by hand |
 | [Coverage by language](coverage.md) | which scanners look at which languages and file types | written by hand |
+| [Symbol resolution](symbol-resolution.md) | how a suppression's `symbol` resolves to line spans: the API, the qualified-name grammar, the fail-closed rules, languages, limits | written by hand |
 | [Python API](python-api.md) | running a scan from Python | written by hand |
 
 To regenerate a page after changing the code, run its script with `uv run python`, for example

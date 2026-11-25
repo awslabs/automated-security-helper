@@ -69,6 +69,8 @@ from typing import (
     Tuple,
 )
 
+from automated_security_helper.core.enums import Transport
+
 if TYPE_CHECKING:
     from automated_security_helper.utils.log import ASHLogger
 
@@ -76,9 +78,9 @@ if TYPE_CHECKING:
 #: can collide with it.
 CALLER_SCOPE_KEY = "ash.mcp.caller"
 
-#: ``HttpCaller.transport`` values.
-SSE = "sse"
-STREAMABLE_HTTP = "streamable-http"
+#: ``HttpCaller.transport`` values: the two networked members of :class:`Transport`.
+SSE = Transport.SSE
+STREAMABLE_HTTP = Transport.STREAMABLE_HTTP
 
 #: The app shapes :class:`SessionBoundary` serves.
 MODE_SSE = "sse"
@@ -124,7 +126,7 @@ class HttpCaller:
             client cannot learn from "not issued".
     """
 
-    transport: str
+    transport: Transport
     session_id: Optional[str]
     protocol_version_is_cause: bool = False
     server_mode: Optional[str] = None

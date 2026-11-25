@@ -125,13 +125,13 @@ def test_an_installed_module_named_by_an_in_tree_config_is_kept(tmp_path, monkey
     assert config.ash_plugin_modules == [INSTALLED]
 
 
-def test_ash_community_plugins_config_keeps_its_modules(tmp_path, monkeypatch):
+def test_ash_alpha_plugins_config_keeps_its_modules(tmp_path, monkeypatch):
     repo_config = (
-        Path(__file__).resolve().parents[3] / ".ash" / ".ash_community_plugins.yaml"
+        Path(__file__).resolve().parents[3] / ".ash" / ".ash_alpha_plugins.yaml"
     )
     source = tmp_path / "repo"
     (source / ".ash").mkdir(parents=True)
-    copied = source / ".ash" / ".ash_community_plugins.yaml"
+    copied = source / ".ash" / ".ash_alpha_plugins.yaml"
     copied.write_text(repo_config.read_text())
     expected = resolve_config(config_path=repo_config, source_dir=tmp_path / "x")
     config = resolve_config(config_path=copied, source_dir=source)

@@ -10,6 +10,7 @@ import logging
 from pathlib import Path
 from typing import Annotated, List
 import typer
+from automated_security_helper.core.enums import AshExitCode
 from automated_security_helper.utils.ui_theme import rich_theme
 from rich.table import Table
 
@@ -42,6 +43,7 @@ from automated_security_helper.plugins.loader import (
 )
 from automated_security_helper.utils.console import ash_console, secho
 from automated_security_helper.utils.error_text import error_text, text_without_values
+from automated_security_helper.models.vocab import PluginKind
 from automated_security_helper.utils.log import (
     escape_markup,
     get_logger,
@@ -51,10 +53,9 @@ from automated_security_helper.utils.terminal_text import shown_on_one_line
 from automated_security_helper.utils.uv_tool_runner import checking_only
 
 #: The table titles, by the plugin type the registry and a scan use.
-_PLUGIN_TYPES = (
-    ("scanner", "scanners"),
-    ("converter", "converters"),
-    ("reporter", "reporters"),
+_PLUGIN_TYPES = tuple(
+    (kind, kind.section)
+    for kind in (PluginKind.SCANNER, PluginKind.CONVERTER, PluginKind.REPORTER)
 )
 
 
@@ -289,7 +290,7 @@ def list_plugins(
                 list_scanner_inventory,
             )
 
-            scanner_classes = list(plugin_types["scanners"])
+            scanner_classes = list(plugin_types[PluginKind.SCANNER.section])
             try:
                 inventory = list_scanner_inventory(
                     scanner_classes_provider=lambda: scanner_classes
@@ -345,7 +346,7 @@ def list_plugins(
             err=True,
             fg=typer.colors.RED if color else None,
         )
-        raise typer.Exit(3)
+        raise typer.Exit(AshExitCode.INVALID_CONFIG)
     except PluginModuleError as e:
         # In the listing's own closing words: the default closing speaks of a
         # scan this command does not make and of option spellings it does not
@@ -364,7 +365,7 @@ def list_plugins(
             err=True,
             fg=typer.colors.RED if color else None,
         )
-        raise typer.Exit(3)
+        raise typer.Exit(AshExitCode.INVALID_CONFIG)
     except ASHConfigValidationError as e:
         # Exit 3, the code every ASH command uses for an unusable configuration:
         # listing the plugins of the default config instead would describe a
@@ -382,13 +383,13 @@ def list_plugins(
                 err=True,
                 fg=typer.colors.RED if color else None,
             )
-        raise typer.Exit(3)
+        raise typer.Exit(AshExitCode.INVALID_CONFIG)
     except Exception as e:
         secho(
             f"Error: {error_text(e)}",
             err=True,
         )
-        raise typer.Exit(1)
+        raise typer.Exit(AshExitCode.SCAN_ERRORS)
 
 
 def _print_tables(
@@ -404,7 +405,7 @@ def _print_tables(
 ) -> None:
     """Print one table per plugin type, a row per plugin, as list_plugins lays them out."""
     for plugin_type, plugin_list in plugin_types.items():
-        show_version_cols = show_versions and plugin_type == "scanners"
+        show_version_cols = show_versions and plugin_type == PluginKind.SCANNER.section
 
         columns = ["Name", "Enabled", "Class", "Module"]
         if show_version_cols:
@@ -430,8 +431,9 @@ def _print_tables(
 
                 # Build the plugin from its section, as a scan builds it
                 try:
-                    kind = plugin_type.rstrip("s")  # Remove 's' from end
-                    if kind == "reporter":
+                    # ``plugin_type`` is the section key here (the table title).
+                    kind = PluginKind.from_section(plugin_type)
+                    if kind is PluginKind.REPORTER:
                         # The section a scan builds the reporter from: for a
                         # reporter that sends findings off the host, the
                         # operator's when the scanned repository's file wrote
@@ -449,7 +451,7 @@ def _print_tables(
                     # (base/reporter_plugin.off_host_reporter_refused); the
                     # report phase builds a refused one turned off, so the
                     # listing shows it turned off.
-                    refused = kind == "reporter" and off_host_reporter_refused(
+                    refused = kind is PluginKind.REPORTER and off_host_reporter_refused(
                         plugin_class, plugin_config
                     )
                     if refused and isinstance(plugin_config, dict):

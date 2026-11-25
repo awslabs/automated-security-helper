@@ -9,8 +9,10 @@ community scanner added to the image was checked only after someone remembered t
 edit the action. This script answers both questions from two things the plugins
 and the image already declare:
 
-* the image's list of community plugin modules, the ``ASH_COMMUNITY_PLUGIN_MODULES``
-  build argument of the Dockerfile (every copy of it, which must agree), and
+* the image's list of alpha plugin modules, the ``ASH_ALPHA_PLUGIN_MODULES``
+  build argument of the Dockerfile (every copy of it, which must agree; the old
+  ``ASH_COMMUNITY_PLUGIN_MODULES`` argument stays in the Dockerfile as an override
+  that is empty by default, so it carries no list to read), and
 * each module's own ``ASH_SCANNERS``, the scanner classes the plugin package
   declares.
 
@@ -38,7 +40,7 @@ import sys
 from pathlib import Path
 
 DOCKERFILE = Path(__file__).resolve().parents[2] / "Dockerfile"
-_ARG = re.compile(r'^ARG\s+ASH_COMMUNITY_PLUGIN_MODULES="([^"]*)"\s*$', re.MULTILINE)
+_ARG = re.compile(r'^ARG\s+ASH_ALPHA_PLUGIN_MODULES="([^"]*)"\s*$', re.MULTILINE)
 
 
 class LegError(Exception):
@@ -46,17 +48,17 @@ class LegError(Exception):
 
 
 def image_modules(dockerfile: Path = DOCKERFILE) -> list[str]:
-    """Module paths from every ``ARG ASH_COMMUNITY_PLUGIN_MODULES`` line, which must agree."""
+    """Module paths from every ``ARG ASH_ALPHA_PLUGIN_MODULES`` line, which must agree."""
     values = _ARG.findall(dockerfile.read_text(encoding="utf-8"))
     if not values:
-        raise LegError(f"{dockerfile} has no ARG ASH_COMMUNITY_PLUGIN_MODULES line")
+        raise LegError(f"{dockerfile} has no ARG ASH_ALPHA_PLUGIN_MODULES line")
     lists = [[m.strip() for m in v.split(",") if m.strip()] for v in values]
     if any(entry != lists[0] for entry in lists):
         raise LegError(
-            f"the ASH_COMMUNITY_PLUGIN_MODULES copies in {dockerfile} disagree: {lists}"
+            f"the ASH_ALPHA_PLUGIN_MODULES copies in {dockerfile} disagree: {lists}"
         )
     if not lists[0]:
-        raise LegError("ASH_COMMUNITY_PLUGIN_MODULES lists no module")
+        raise LegError("ASH_ALPHA_PLUGIN_MODULES lists no module")
     return lists[0]
 
 

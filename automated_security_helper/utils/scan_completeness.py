@@ -701,7 +701,9 @@ def incomplete_converters(
                     tuple(
                         sorted(
                             {
-                                known_failed_input_kind(getattr(record, "kind", None))
+                                known_failed_input_kind(
+                                    getattr(record, "kind", None)
+                                ).value
                                 for record in failed_inputs
                             }
                             | ({"limit"} if over_limit else set())

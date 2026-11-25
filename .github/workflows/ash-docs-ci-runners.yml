@@ -104,9 +104,9 @@ on:
       - "examples/AWSCodeBuild/README.md" # the runner census lists its buildspec; an edit can change which leg runs it
       - "docs/content/docs/advanced-usage.md" # the runner census lists its CI blocks; an edit can change which leg runs them
       - "docs/content/docs/advanced-usage.md.template" # advanced-usage.md is generated from it
-      - "docs/content/docs/plugins/community/ferret-scan-plugin.md" # the runner census lists its CI blocks; an edit can change which leg runs them
-      - "docs/content/docs/plugins/community/snyk-plugin.md" # the runner census lists its CI blocks; an edit can change which leg runs them
-      - "docs/content/docs/plugins/community/trivy-plugin.md" # the runner census lists its CI blocks; an edit can change which leg runs them
+      - "docs/content/docs/plugins/alpha/ferret-scan-plugin.md" # the runner census lists its CI blocks; an edit can change which leg runs them
+      - "docs/content/docs/plugins/alpha/snyk-plugin.md" # the runner census lists its CI blocks; an edit can change which leg runs them
+      - "docs/content/docs/plugins/alpha/trivy-plugin.md" # the runner census lists its CI blocks; an edit can change which leg runs them
       - "automated_security_helper/plugin_modules/ash_snyk_plugins/README.md" # the runner census lists its CI blocks; an edit can change which leg runs them
       - "automated_security_helper/plugin_modules/ash_trivy_plugins/README.md" # the runner census lists its CI blocks; an edit can change which leg runs them
       - ".github/workflows/run-ash-security-scan.yml" # the reusable workflow ci.md calls, run from this checkout
@@ -265,7 +265,7 @@ jobs:
 
       - name: Install uv
         if: ${{ !env.ACT && (github.event_name == 'pull_request' || inputs.legs == 'all' || inputs.legs == matrix.runner) }}
-        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
         with:
           enable-cache: false
 

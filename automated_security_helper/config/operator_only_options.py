@@ -88,7 +88,6 @@ from typing import (
     Collection,
     Dict,
     List,
-    Literal,
     NamedTuple,
     Optional,
     Sequence,
@@ -108,6 +107,7 @@ from automated_security_helper.config.plugin_section_names import (
     declared_section_names,
     folded_section_name,
 )
+from automated_security_helper.models.vocab import PluginKind
 from automated_security_helper.config.sandbox_grants import (
     checkout_judgment,
     confined_files,
@@ -960,7 +960,9 @@ def _set_scanner_option(options: Any, option: str, value: Any) -> None:
 
 
 def _trusted_value(trusted: "AshConfig", section_key: str, option: str) -> Any:
-    section = trusted.get_plugin_config(plugin_type="reporter", plugin_name=section_key)
+    section = trusted.get_plugin_config(
+        plugin_type=PluginKind.REPORTER, plugin_name=section_key
+    )
     options = section.get("options") if isinstance(section, dict) else None
     if isinstance(options, dict) and option in options:
         return options[option]
@@ -1469,7 +1471,7 @@ def record_operator_reporters(
 
 def operator_wrote_value(
     config: Optional["AshConfig"],
-    plugin_type: Literal["converter", "scanner", "reporter"],
+    plugin_type: PluginKind | str,
     plugin_name: str,
     option_keys: Sequence[str],
     value: Any,
@@ -1511,7 +1513,7 @@ def operator_wrote_value(
     # (the file view has no reporters/converters segments to answer with).
     views = (
         getattr(config, "_operator_scanner_views", None)
-        if plugin_type == "scanner"
+        if plugin_type == PluginKind.SCANNER
         else None
     ) or [recorded]
     wanted = _comparable(value)
@@ -1611,7 +1613,7 @@ def _path_shaped(value: str) -> bool:
 
 def _option_values(
     config: "AshConfig",
-    plugin_type: Literal["converter", "scanner", "reporter"],
+    plugin_type: PluginKind | str,
     plugin_name: str,
     option_keys: Sequence[str],
 ) -> List[Any]:
@@ -1635,7 +1637,7 @@ def _option_values(
 def _reporter_section_of(config: Optional["AshConfig"], key: str) -> Any:
     if config is None:
         return None
-    return config.get_plugin_config(plugin_type="reporter", plugin_name=key)
+    return config.get_plugin_config(plugin_type=PluginKind.REPORTER, plugin_name=key)
 
 
 def _section_within(section: Any, operator_section: Any) -> bool:

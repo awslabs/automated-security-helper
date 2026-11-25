@@ -87,6 +87,7 @@ import re
 from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any, Dict, Iterator, Mapping, Optional, cast
 
+from automated_security_helper.cli.mcp.error_types import McpErrorType
 from automated_security_helper.utils.terminal_text import raw_controls_on_one_line
 
 if TYPE_CHECKING:
@@ -104,9 +105,6 @@ MCP_SESSION_ID_HEADER = "mcp-session-id"
 #: a client.
 UNIDENTIFIED_SESSION_ID = "__unidentified__"
 
-#: ``error_type`` of the refusal a session-dependent tool returns for
-#: :data:`UNIDENTIFIED_SESSION_ID`.
-SESSION_IDENTITY_REQUIRED = "session_identity_required"
 
 #: Set while the caller is the local client; see :func:`serving_local_client`.
 _LOCAL_CLIENT: ContextVar[bool] = ContextVar("ash_mcp_local_client", default=False)
@@ -501,14 +499,13 @@ def session_identity_refusal(
     return {
         "success": False,
         "operation": operation,
-        "error_type": SESSION_IDENTITY_REQUIRED,
+        "error_type": McpErrorType.SESSION_IDENTITY_REQUIRED.value,
         "error": raw_controls_on_one_line(error),
     }
 
 
 __all__ = [
     "MCP_SESSION_ID_HEADER",
-    "SESSION_IDENTITY_REQUIRED",
     "UNIDENTIFIED_SESSION_ID",
     "is_reserved_session_id",
     "resolve_caller_session_id",

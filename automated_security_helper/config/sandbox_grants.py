@@ -105,6 +105,7 @@ from automated_security_helper.config.environment_record import (
     ENVIRONMENT_VALUE_SHOWN,
 )
 from automated_security_helper.config.untrusted_source import UntrustedSource
+from automated_security_helper.core.enums import SandboxMode
 from automated_security_helper.utils.log import (
     ASH_LOGGER,
     NO_MARKUP,
@@ -1481,7 +1482,7 @@ def confine_sandbox_grants(
     ):
         if list(getattr(sandbox, key)) != list(getattr(trusted, key)):
             ignored.append(f"sandbox.{key}")
-    if trusted.mode != "off" and sandbox.mode != trusted.mode:
+    if trusted.mode != SandboxMode.off and sandbox.mode != trusted.mode:
         ignored.append("sandbox.mode")
         sandbox.mode = trusted.mode
     limit = sandbox.network_scanners

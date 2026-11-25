@@ -8,8 +8,9 @@ import threading
 from pathlib import Path, PurePath
 from typing import Any, Dict, List, Optional, Set, Tuple
 
+from automated_security_helper.core.enums import AshExitCode, ExportFormat
+from automated_security_helper.models.vocab import SEVERITY_VALUES, SeverityThreshold
 from automated_security_helper.utils.severity_ladder import (
-    SEVERITIES,
     SEVERITY_THRESHOLDS,
     normalize_threshold,
 )
@@ -339,7 +340,7 @@ ASH_BIN_PATH: Optional[Path] = _bin_path_at_import()
 #: Used when ``ASH_DEFAULT_SEVERITY_LEVEL`` is unset or names no threshold. MEDIUM
 #: is what ASH has always shipped, so an unusable value behaves as though the
 #: variable were absent rather than moving the gate somewhere new.
-_FALLBACK_SEVERITY_LEVEL = "MEDIUM"
+_FALLBACK_SEVERITY_LEVEL = SeverityThreshold.MEDIUM.value
 #: The threshold ASH ships, as a schema or a help text says it. Those are written
 #: from the models, so a text built from ``ASH_DEFAULT_SEVERITY_LEVEL`` would carry
 #: the environment of whichever process generated it; this value does not move.
@@ -472,7 +473,7 @@ ASH_CONFIG_EXTENDS_MAX_DEPTH = 10
 ASH_CONFIG_EXTENDS_MAX_FILES = 50
 
 # The most ASH reads from one config file: 1 MiB. A config is text a person edits;
-# ASH's own .ash/.ash.yaml is about 160 KiB, so this is six times that. The bound
+# ASH's own .ash.yaml is about 160 KiB, so this is six times that. The bound
 # stops a file, or a device at a config name, from being read into memory without
 # limit, and it bounds what parsing one costs: a flat 15 MiB YAML list took about
 # 230 s and 4.3 GiB to resolve, where 1 MiB takes a fraction of that. It does not
@@ -511,8 +512,8 @@ PRECOMMIT_MODE_SCANNERS: Tuple[str, ...] = (
 # configures `reporters` at all each keep today's behavior
 # (run_ash_scan._precommit_output_formats applies this).
 PRECOMMIT_MODE_OUTPUT_FORMATS: Tuple[str, ...] = (
-    "text",
-    "sarif",
+    ExportFormat.TEXT.value,
+    ExportFormat.SARIF.value,
 )
 
 # The environment variable names an ASH config file may interpolate.
@@ -1138,7 +1139,7 @@ KNOWN_SCANNABLE_EXTENSIONS = [
     # "sqlite3db",
     # "sqlite3db",
 ]
-VALID_SEVERITY_VALUES = frozenset(SEVERITIES)
+VALID_SEVERITY_VALUES = frozenset(SEVERITY_VALUES)
 
 #: The command line could not be used, so nothing ran: an unknown command, option
 #: or argument, a missing required option, an option value ASH does not accept, or
@@ -1147,19 +1148,19 @@ VALID_SEVERITY_VALUES = frozenset(SEVERITIES)
 #: flag as a scan that found problems. Every command reaches it through this name:
 #: click's errors are mapped in cli/main.py, and ASH's own refusals of an invocation
 #: exit with it directly.
-ASH_EXIT_USAGE_ERROR = 5
+ASH_EXIT_USAGE_ERROR = AshExitCode.USAGE_ERROR.value
 
 #: A scan stopped by Ctrl-C, in any mode: 128 + SIGINT, the shell's convention. Not in
 #: ASH_EXIT_CODES below, which lists the outcomes a scan reports; an interrupted scan
 #: reports none.
-ASH_EXIT_INTERRUPTED = 130
+ASH_EXIT_INTERRUPTED = AshExitCode.INTERRUPTED.value
 
 #: A scan stopped by SIGTERM: 128 + SIGTERM, the code the default disposition would
 #: have exited with, so a supervisor that sent the signal reads the same verdict it
 #: always has -- the difference is that the scan's own stop path ran first
 #: (core/cancellation.py, "SIGTERM on the CLI"). Not in ASH_EXIT_CODES, for
 #: ASH_EXIT_INTERRUPTED's reason: a terminated scan reports no outcome.
-ASH_EXIT_TERMINATED = 143
+ASH_EXIT_TERMINATED = AshExitCode.TERMINATED.value
 
 #: The code one command, `ash dependencies install`, exits with for a --tool it cannot
 #: select (a name no plugin has, or a plugin of a type --plugin-type leaves out), and
@@ -1178,18 +1179,20 @@ ASH_EXIT_BAD_SELECTION_MEANING = (
 )
 
 ASH_EXIT_CODES: Dict[int, str] = {
-    0: "success",
-    1: "scan errors / scanner failures",
-    2: "actionable findings at or above threshold",
+    AshExitCode.SUCCESS.value: "success",
+    AshExitCode.SCAN_ERRORS.value: "scan errors / scanner failures",
+    AshExitCode.ACTIONABLE_FINDINGS.value: (
+        "actionable findings at or above threshold"
+    ),
     # A config ASH cannot use, or an input it refuses before it scans, such as a
     # linked output directory or a container mount path the runner cannot take.
-    3: "invalid config or refused input",
+    AshExitCode.INVALID_CONFIG.value: "invalid config or refused input",
     # 4 is workspace-mode only. It is deliberately NOT an overload of 2: a
     # workspace definition error means nothing was scanned, whereas 2 means a
     # scan completed and found something. See models/workspace.py for why the
     # RFC's original assignment of 2 was not used.
-    4: "workspace definition or policy error",
-    ASH_EXIT_USAGE_ERROR: "usage error",
+    AshExitCode.WORKSPACE_ERROR.value: "workspace definition or policy error",
+    AshExitCode.USAGE_ERROR.value: "usage error",
 }
 
 
