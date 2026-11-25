@@ -12,8 +12,9 @@ What is a frame expression and what is not, and why:
 
 * The line-range overlap and the conjunction of the predicate columns are
   polars expressions. Line numbers are rank-encoded first (see
-  :func:`_line_ranks`), because they are unbounded Python ints and a frame
-  column is 64-bit.
+  :func:`~automated_security_helper.utils.frame_text.ranks`), because they are
+  unbounded Python ints and a frame column is 64-bit; every comparison the
+  overlap makes is on order alone.
 * Every string predicate (rule id, path, package, resource glob) is a Python
   callable per row, not a frame expression. They are ``fnmatch`` and
   ``path_matching`` semantics (``[`` classes, ``**`` components, a backslash
@@ -46,8 +47,7 @@ from typing import (
     Tuple,
 )
 
-import polars as pl
-
+from automated_security_helper.utils import frame_text
 from automated_security_helper.utils.path_matching import _path_pattern_matches
 from automated_security_helper.utils.suppression_scope_registry import (
     engine_hooks_for,
@@ -57,6 +57,8 @@ from automated_security_helper.utils.suppression_scope_registry import (
 from automated_security_helper.utils.symbol_spans import is_valid_symbol
 
 if TYPE_CHECKING:
+    import polars as pl
+
     from automated_security_helper.models.core import AshSuppression
     from automated_security_helper.models.flat_vulnerability import FlatVulnerability
     from automated_security_helper.utils.symbol_spans import SymbolResolver
@@ -184,19 +186,7 @@ def _engine_block_matches(
     return hooks.suppression_scope_matches(engines[scanner], finding)
 
 
-def _line_ranks(values: Sequence[Optional[int]]) -> Dict[int, int]:
-    """Dense ranks of the distinct line numbers, so order and ties survive.
-
-    Line numbers are unbounded Python ints; an Int64 frame column would raise
-    on a huge one. Every comparison the overlap makes is on order alone.
-    """
-    return {
-        value: rank
-        for rank, value in enumerate(sorted({v for v in values if v is not None}))
-    }
-
-
-def _line_ok(finding: "FlatVulnerability", ranks: Dict[int, int]) -> pl.Expr:
+def _line_ok(finding: "FlatVulnerability", ranks: Dict[int, int]) -> "pl.Expr":
     """The line-range overlap as a frame expression over columns ``s`` and ``e``.
 
     No entry range: any line. An entry range and a finding without a line:
@@ -204,6 +194,8 @@ def _line_ok(finding: "FlatVulnerability", ranks: Dict[int, int]) -> pl.Expr:
     alone bounds the finding's end, both mean overlap. A finding with no end is
     a one-line finding.
     """
+    import polars as pl
+
     s, e = pl.col("s"), pl.col("e")
     unbounded = s.is_null() & e.is_null()
     if finding.line_start is None:
@@ -226,7 +218,9 @@ def line_range_overlaps(
     finding: "FlatVulnerability", entries: Sequence["AshSuppression"]
 ) -> List[bool]:
     """Per entry, whether the finding's line range overlaps the entry's."""
-    ranks = _line_ranks(
+    import polars as pl
+
+    ranks = frame_text.ranks(
         [finding.line_start, finding.line_end]
         + [v for e in entries for v in (e.line_start, e.line_end)]
     )
@@ -244,8 +238,10 @@ def line_range_overlaps(
 
 def _chunk_frame(
     finding: "FlatVulnerability", chunk: Sequence["AshSuppression"]
-) -> pl.DataFrame:
+) -> "pl.DataFrame":
     """One row per entry: the predicate columns that have no side effect."""
+    import polars as pl
+
     live, rule, base, rest, engine = [], [], [], [], []
     for entry in chunk:
         is_live = not _inert(entry)
@@ -269,7 +265,7 @@ def _chunk_frame(
     # (every entry inert, or ruled out by rule id, path, package or scope) need
     # not carry any.
     reached = rest
-    ranks = _line_ranks(
+    ranks = frame_text.ranks(
         ([finding.line_start, finding.line_end] if any(reached) else [])
         + [v for e, r in zip(chunk, reached) if r for v in (e.line_start, e.line_end)]
     )
@@ -376,6 +372,8 @@ def matches(
 
 def _first_true(flags: Sequence[bool]) -> Optional[int]:
     """The index of the first True of ``flags``, decided by a frame."""
+    import polars as pl
+
     frame = pl.DataFrame({"hit": list(flags)}, schema={"hit": pl.Boolean})
     first = frame.with_row_index("i").filter(pl.col("hit"))["i"].head(1).to_list()
     return first[0] if first else None
@@ -415,6 +413,8 @@ def ignore_verdict(
     client's, the result is kept and marked by the LAST such path; otherwise
     (some location is outside every ignore path) it is left as it is.
     """
+    import polars as pl
+
     frame = pl.DataFrame({"client": list(client_flags)}, schema={"client": pl.Boolean})
     under = frame.height
     all_under = located > 0 and under == located

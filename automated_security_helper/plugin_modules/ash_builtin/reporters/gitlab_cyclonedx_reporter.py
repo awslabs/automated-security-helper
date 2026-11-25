@@ -55,6 +55,7 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.cyclonedx_re
     conforming_bom,
 )
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
+from automated_security_helper.utils.frame_ops import ordered_counts, stable_top
 from automated_security_helper.utils.frame_text import unwire, wire
 from automated_security_helper.utils.log import ASH_LOGGER
 
@@ -574,11 +575,14 @@ def _winner(frame: pl.DataFrame, columns: list[str]) -> tuple | None:
     Ties go to the combination seen first: the group-by keeps first-seen order
     and the sort is stable, which is what ``Counter.most_common(1)`` gave.
     """
-    counted = (
-        frame.filter(pl.all_horizontal(pl.col(c).is_not_null() for c in columns))
-        .group_by(columns, maintain_order=True)
-        .len()
-        .sort("len", descending=True, maintain_order=True)
+    counted = stable_top(
+        ordered_counts(
+            frame.filter(pl.all_horizontal(pl.col(c).is_not_null() for c in columns)),
+            columns,
+        ),
+        "n",
+        1,
+        descending=True,
     )
     if counted.height == 0:
         return None

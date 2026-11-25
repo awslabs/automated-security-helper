@@ -43,7 +43,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
 from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional, Tuple, Union
 
-from automated_security_helper.utils.frame_text import unwire, wire
+from automated_security_helper.utils.frame_text import unwire_cell, wire
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.undecodable_text import (
     path_in_record_form,
@@ -520,9 +520,9 @@ def identity_properties_from_frame(frame: "pl.DataFrame") -> List[Dict[str, str]
     for name, version, path in frame.select(*_PACKAGE_COLUMNS).iter_rows():
         out.append(
             identity_properties(
-                unwire(name) if name is not None else None,
-                unwire(version) if version is not None else None,
-                unwire(path) if path is not None else None,
+                unwire_cell(name),
+                unwire_cell(version),
+                unwire_cell(path),
             )
         )
     return out
@@ -533,7 +533,7 @@ def package_identities_from_frame(
 ) -> List[Tuple[Optional[str], Optional[str], Optional[str]]]:
     """The ``(name, version, path)`` tuples a :func:`package_identity_frame` holds."""
     return [
-        tuple(unwire(cell) if cell is not None else None for cell in row)  # type: ignore[misc]
+        tuple(unwire_cell(cell) for cell in row)  # type: ignore[misc]
         for row in frame.select(*_PACKAGE_COLUMNS).iter_rows()
     ]
 
@@ -543,6 +543,6 @@ def resource_identities_from_frame(
 ) -> List[Tuple[Optional[str], Optional[str]]]:
     """The ``(resource_id, resource_type)`` tuples a :func:`resource_identity_frame` holds."""
     return [
-        tuple(unwire(cell) if cell is not None else None for cell in row)  # type: ignore[misc]
+        tuple(unwire_cell(cell) for cell in row)  # type: ignore[misc]
         for row in frame.select(*_RESOURCE_COLUMNS).iter_rows()
     ]
