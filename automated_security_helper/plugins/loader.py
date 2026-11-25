@@ -1084,11 +1084,16 @@ def refuse_plugin_modules_outside_namespace(
         entries = plugin_modules
     else:
         entries = (plugin_modules,)
-    pieces = [
-        piece
-        for entry in entries
-        for piece in (entry.split(",") if isinstance(entry, str) else (entry,))
-    ]
+    # An entry that is not a string is read by its text, so it is refused as a
+    # misnamed path like any other spelling that imports nothing; a falsy one
+    # names nothing and is dropped, as an empty piece is below.
+    pieces: List[str] = []
+    raw_entries: List[object] = list(entries)
+    for entry in raw_entries:
+        if isinstance(entry, str):
+            pieces.extend(entry.split(","))
+        elif entry:
+            pieces.append(str(entry))
     # Deduplicated after the split, in first-seen order, so a name repeated
     # across entries is named once in the refusal (the dict.fromkeys the loop
     # ran over before the split did this for whole entries).
