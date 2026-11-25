@@ -21,18 +21,28 @@ name: ASH - Dependabot Auto-Merge
 #
 #   * It approved before any check had run, so the approval said nothing about
 #     the PR's gates. It now approves only AFTER them.
-#   * It left majors, grouped majors and every github_actions bump (the bump of
-#     an action pin, such as the "actions group" PRs) waiting for a human, and the
-#     step skipped without a word on them. The policy is now that every dependabot
-#     bump is auto-approved, with the all-gates-green condition as the protection:
-#     the PR's required checks (build, tests, the action-pinning check, the
-#     dependency review, the scans) have all passed on the exact head being
-#     approved, and the merge queue then re-runs them on the queued commit.
+#   * It left every github_actions bump (the bump of an action pin, such as the
+#     "actions group" PRs) waiting for a human, and the step skipped without a
+#     word on them, although a grouped actions bump of patch and minor updates is
+#     exactly as routine as any other. The ecosystem filter is gone.
 #
-# So the scope filter on the update type and the ecosystem is gone, and with it
-# the dependabot/fetch-metadata step that read them: the only eligibility facts
-# left are who authored the PR, whether it lives in this repository, and whether
-# the gates are green.
+# The policy is now: patch and minor bumps, and grouped bumps, are auto-approved
+# in every ecosystem, and a bump with a MAJOR upgrade is not. dependabot.yml files
+# every major in a group of its own so that a human reads the upstream changelog
+# before merge, and auto-merging one would undo that file's point. A grouped bump
+# is eligible only when no update inside it is a major, and an update with no
+# semver level (dependabot.yml documents the extras-requirement shape that arrives
+# with no from/to version) stays manual too. The protection on top is the
+# all-gates-green condition: the PR's required checks (build, tests, the
+# action-pinning check, the dependency review, the scans) have all passed on the
+# exact head being approved, and the merge queue then re-runs them on the queued
+# commit.
+#
+# The update types come from the metadata block dependabot writes into its commit
+# message, one `update-type:` line per update, which is the block
+# dependabot/fetch-metadata parses. That action cannot run on workflow_run, so the
+# decision step parses the block itself, from every commit on the PR, and only
+# when every commit is dependabot's.
 #
 # HOW THE DECISION IS RE-ARMED
 #
@@ -63,7 +73,8 @@ name: ASH - Dependabot Auto-Merge
 # interpolated into a script. The PR's author, head repository and head sha are
 # re-read from the API rather than taken from the triggering event, so a fork PR
 # (a different head repository) is excluded and a newer push (a different head
-# sha) leaves the approval to that push's own run.
+# sha) leaves the approval to that push's own run. The commit text is parsed with
+# sed and grep only and is never echoed or evaluated.
 #
 # WHY AN APP TOKEN AND NOT GITHUB_TOKEN FOR THE WRITES
 #
@@ -180,6 +191,25 @@ jobs:
           [ "$(jq -r '.state' <<<"$pull")" = "open" ] || deny "PR $pr is not open"
           [ "$(jq -r '.head.repo.full_name' <<<"$pull")" = "$REPO" ] || deny "PR $pr comes from a fork"
           [ "$(jq -r '.head.sha' <<<"$pull")" = "$HEAD_SHA" ] || deny "PR $pr has a newer head than the completed run"
+
+          # No single major upgrade, and no major inside a group. The update types
+          # are read from the metadata block dependabot writes into its commit
+          # message (one `update-type:` line per update in the PR, the same block
+          # dependabot/fetch-metadata parses, which cannot run on workflow_run).
+          # Every commit on the PR must be dependabot's, so a human commit cannot
+          # add a line of its own; a PR whose commits carry no update-type, or any
+          # type other than patch or minor (a major, or the empty type of an update
+          # dependabot computed no semver level for), stays manual. The offending
+          # text is counted, never echoed, so commit text cannot reach the log as a
+          # workflow command.
+          commits=$(gh api --paginate "repos/$REPO/pulls/$pr/commits" | jq -s '[.[][]]')
+          foreign=$(jq '[.[] | select(.author.login != "dependabot[bot]")] | length' <<<"$commits")
+          [ "$foreign" = "0" ] || deny "PR $pr has $foreign commit(s) not authored by dependabot"
+          lines=$(jq -r '.[].commit.message' <<<"$commits" | grep -E '^  update-type:' || true)
+          total=$(grep -c . <<<"$lines" || true)
+          [ "$total" != "0" ] || deny "PR $pr carries no update-type metadata"
+          minor_or_patch=$(grep -c -x -E '  update-type: version-update:semver-(patch|minor)' <<<"$lines" || true)
+          [ "$total" = "$minor_or_patch" ] || deny "PR $pr has $((total - minor_or_patch)) of $total update(s) that are not patch or minor (a major waits for a human)"
 
           # Every check context on the head with its required flag. GraphQL is
           # the only API that reports isRequired, and it covers both branch
