@@ -7168,13 +7168,32 @@ def _refuse_an_image_scan_scope(
             "results already name their subject, and nothing would be scanned.",
             one_line=True,
         )
-    if changed_files_only:
-        _printed_refusal(
-            ASH_EXIT_USAGE_ERROR,
-            "an image option cannot be combined with changed_files_only, which "
-            "scopes a scan by git history: an image has none.",
-            one_line=True,
-        )
+    # changed_files_only is not refused: an image has no diff base, so the scope
+    # means nothing there, and run_ash_scan says so once and drops it
+    # (_drop_changed_files_only_for_an_image) rather than refusing or ignoring it.
+
+
+def _drop_changed_files_only_for_an_image(
+    asset: "Asset | None", changed_files_only: bool
+) -> bool:
+    """*changed_files_only* as an image scan runs it: False, with one warning.
+
+    ``--changed-files-only`` scopes a scan by git history, and an image has no
+    history and no diff base. The whole image is scanned either way; the warning
+    is what makes the flag's inertness visible, since a scan that quietly
+    ignored it would read as scoped. Any other subject keeps the flag as given.
+    """
+    if (
+        not changed_files_only
+        or asset is None
+        or asset.kind != AssetKind.CONTAINER_IMAGE
+    ):
+        return changed_files_only
+    ASH_LOGGER.warning(
+        "changed_files_only has no meaning for a container image scan: an image "
+        "has no diff base, so the whole image is scanned."
+    )
+    return False
 
 
 def _image_asset_or_refusal(
@@ -7399,6 +7418,9 @@ def run_ash_scan(
             shard_index=shard_index,
             shard_count=shard_count,
         )
+    changed_files_only = _drop_changed_files_only_for_an_image(
+        asset, changed_files_only
+    )
     if asset is not None and asset.kind == AssetKind.CONTAINER_IMAGE:
         # An image asset runs no convert phase: converters read source files,
         # which an image asset does not present (the design's C7). The caller's

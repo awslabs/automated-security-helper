@@ -1792,7 +1792,6 @@ def run_ash_scan_cli_command(
             ("--staged", staged),
             ("--baseline", baseline is not None),
             ("--use-existing", use_existing),
-            ("--changed-files-only", changed_files_only),
         ):
             if other_given:
                 _fail_usage(
@@ -1800,6 +1799,17 @@ def run_ash_scan_cli_command(
                     f"{other_flag} reads the working directory, which an image "
                     "scan does not scan. Scan the image on its own."
                 )
+        if changed_files_only:
+            # An image has no diff base, so the scope means nothing there. It is
+            # said once and then dropped, so no git process starts for it and the
+            # whole image is scanned (the run's own warning, below the CLI, is
+            # not reached: the flag no longer arrives).
+            echo(
+                f"Warning: --changed-files-only has no meaning for {image_flag}: "
+                "an image has no diff base, so the whole image is scanned.",
+                err=True,
+            )
+            changed_files_only = False
 
     if baseline is not None:
         from automated_security_helper.express.runtime import CHILD_ENV
