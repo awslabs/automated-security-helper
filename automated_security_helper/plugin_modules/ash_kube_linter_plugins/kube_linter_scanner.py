@@ -290,7 +290,7 @@ class KubeLinterScanner(ScannerPluginBase[KubeLinterScannerConfig]):
     #: kube-linter asset yet; it becomes PINNED_BINARY with the central pin.
     operational_facets: ClassVar[opsf.ScannerOperationalFacets] = (
         opsf.ScannerOperationalFacets(
-            scanner_name="kube-linter",
+            scanner_name="kube_linter",
             network=opsf.NetworkFacet(
                 fetch_kind=opsf.FetchKind.NONE,
                 fetches=(),
