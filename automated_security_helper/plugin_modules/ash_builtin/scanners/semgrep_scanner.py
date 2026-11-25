@@ -232,10 +232,12 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
             "opengrep fork is the build that emits one",
         ),
         fix_available=FacetDecl(
-            state=FacetState.DROPPED,
-            native_field="results[].fixes",
-            reason="SARIF fixes survive the report model and die at the flat "
-            "reader, which reads only fix_available",
+            state=FacetState.NA,
+            reason="semgrep 1.187.0's SARIF has no fixes key even for a rule "
+            "that carries `fix:` (tests/test_data/scanners/semgrep/captured/"
+            "semgrep-1.187.0-fix-rule.sarif: result keys are exactly "
+            "fingerprints, locations, message, properties, ruleId), so there "
+            "is nothing in the SARIF ASH reads to map",
         ),
         remediation_text=FacetDecl(
             state=FacetState.NA,

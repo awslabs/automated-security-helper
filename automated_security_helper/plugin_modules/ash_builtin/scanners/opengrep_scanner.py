@@ -362,10 +362,12 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
             native_field='results[].fingerprints."matchBasedId/v1"',
         ),
         fix_available=FacetDecl(
-            state=FacetState.DROPPED,
-            native_field="results[].fixes",
-            reason="SARIF fixes survive the report model and die at the flat "
-            "reader, which reads only fix_available",
+            state=FacetState.NA,
+            reason="opengrep 2.0.0's SARIF has no fixes key even for a rule "
+            "that carries `fix:` (tests/test_data/scanners/opengrep/captured/"
+            "opengrep-2.0.0-fix-rule.sarif: result keys are exactly "
+            "fingerprints, locations, message, properties, ruleId), so there "
+            "is nothing in the SARIF ASH reads to map",
         ),
         remediation_text=FacetDecl(
             state=FacetState.NA,

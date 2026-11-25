@@ -1,0 +1,74 @@
+{
+  "version": "2.1.0",
+  "runs": [
+    {
+      "invocations": [
+        {
+          "executionSuccessful": true,
+          "toolExecutionNotifications": []
+        }
+      ],
+      "results": [
+        {
+          "fingerprints": {
+            "matchBasedId/v1": "requires login"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "fix.py",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "endColumn": 17,
+                  "endLine": 2,
+                  "snippet": {
+                    "text": "    if x == None:"
+                  },
+                  "startColumn": 8,
+                  "startLine": 2
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "compare to None with is"
+          },
+          "properties": {},
+          "ruleId": "m0-eq-none"
+        }
+      ],
+      "tool": {
+        "driver": {
+          "name": "Semgrep OSS",
+          "rules": [
+            {
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "fullDescription": {
+                "text": "compare to None with is"
+              },
+              "help": {
+                "markdown": "compare to None with is",
+                "text": "compare to None with is"
+              },
+              "id": "m0-eq-none",
+              "name": "m0-eq-none",
+              "properties": {
+                "precision": "very-high",
+                "tags": []
+              },
+              "shortDescription": {
+                "text": "Semgrep Finding: m0-eq-none"
+              }
+            }
+          ],
+          "semanticVersion": "1.187.0"
+        }
+      }
+    }
+  ],
+  "$schema": "https://docs.oasis-open.org/sarif/sarif/v2.1.0/os/schemas/sarif-schema-2.1.0.json"
+}
