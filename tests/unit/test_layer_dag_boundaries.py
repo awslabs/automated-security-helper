@@ -88,7 +88,9 @@ KNOWN_VIOLATIONS: Dict[Tuple[str, str], int] = {
     ("models", "core"): 10,
     # 68 -> 69: the one plugin -> cli edge (the grep scanner base asking whether a
     # config file is client-supplied) now reads the rule where it moved to, in config.
-    ("plugin_modules", "config"): 69,
+    # 69 -> 70: npm_audit_scanner reads config.default_config (landed on main with
+    # the flat-frame/facets work this branch was rebased onto).
+    ("plugin_modules", "config"): 70,
     ("plugin_modules", "core"): 70,
     ("plugin_modules", "interactions"): 2,
     ("plugin_modules", "workspace"): 1,
@@ -97,7 +99,9 @@ KNOWN_VIOLATIONS: Dict[Tuple[str, str], int] = {
     ("schemas", "utils"): 8,
     ("utils", "config"): 27,
     ("utils", "core"): 35,
-    ("utils", "interactions"): 2,
+    # 2 -> 3: utils/scan_history reads interactions.run_ash_scan (landed on main
+    # with the scan trend/history work this branch was rebased onto).
+    ("utils", "interactions"): 3,
     ("utils", "plugin_modules"): 2,
 }
 
