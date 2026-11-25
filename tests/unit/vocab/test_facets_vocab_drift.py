@@ -157,6 +157,12 @@ VOCABULARIES: tuple[Vocabulary, ...] = (
         ambiguous=frozenset({"none", "both"}),
     ),
     Vocabulary(ops_register.ProvenanceSource, _OPS_HOME),
+    # "python" and "node" are the names of the runtimes and of tools all over
+    # the package, so only a POSITIVE pin could tell a stray spelling.
+    Vocabulary(
+        ops_register.RuntimeName, _OPS_HOME, ambiguous=frozenset({"python", "node"})
+    ),
+    Vocabulary(ops_register.CompatResolution, _OPS_HOME),
     Vocabulary(
         ops_register.Prerequisite,
         _OPS_HOME,
