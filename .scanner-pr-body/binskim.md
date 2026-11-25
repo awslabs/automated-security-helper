@@ -23,8 +23,18 @@ Microsoft BinSkim (`BinSkim analyze --recurse`) over compiled PE, ELF and Mach-O
 - HIGH: timeout test could not pass. Rewritten to match the base's actual message.
 - HIGH: `dependency_unavailable_reason` test patched the class, not the instance. Rewritten to set the field on the instance and to assert True first.
 - HIGH: no sandbox-requirements test. Added.
-- HIGH: no captured fixture. Not fixable here (no BinSkim available). Added `tests/test_data/scanners/binskim/reference.sarif` clearly labelled hand-written, a severity-mapping test over it, and a README stating what a real capture would replace.
-- Also added: facets register tests.
+- HIGH: no captured fixture. Fixed by running BinSkim 4.4.9.14 (the self-contained `linux-x64` build from the NuGet package, no .NET install) on a desk with the scanner's exact argv. The hand-written reference log is deleted; `tests/test_data/scanners/binskim/captured/` holds a positive and a negative log with a README (argv, version, trees). Rows in `TestCapturedLog` read them.
+- HIGH (found by the capture): the real log writes artifact URIs percent-encoded (`sp%20ace/app%202`), and `_relative_uri` never decoded them, so a path with a space or other escaped character named no file. It now decodes (`binskim_scanner.py`, `_relative_uri`).
+- HIGH (found by the capture): the hand-written log gave `message.text`; the real one gives `{"id": "Error", "arguments": [...]}` and no text. The base resolves it through the rule's `messageStrings`; a row pins that the resolved text reads "The stack protector was not found in 'app'".
+- Java class files share the fat Mach-O magic number, so a tree of class files was run instead of SKIPPED. `_looks_like_binary` now reads the next four bytes (architecture count versus class version).
+- The missing-tool warning, the plugin README and the docs page named `ash dependencies install --tool binskim`, which does nothing while no pin is registered. They now say how to install BinSkim by hand.
+- Also added: facets register tests. The register cells stay n/a (the consistency gate wants a corpus-table row, a central file); their reasons now say the capture is committed and the row is owed.
+
+### Measured with the real tool (BinSkim 4.4.9.14, linux-x64, Amazon Linux 2023)
+
+- Exit 0 on a tree with findings, on a clean tree, and on a tree holding only a Java class file (each writes a log; the last has an empty `results`).
+- Results carry `level` (`error` for BA3001, BA3003, BA3010, BA3011 on an unhardened ELF), no `kind`, and `ruleIndex`; rules that cannot run on Linux appear as `toolConfigurationNotifications`.
+- NuGet package `Microsoft.CodeAnalysis.BinSkim` 4.4.9.14: sha256 `ea2f48ed02e6d7ff569614d0895b80c2669fbc261c8b386639de551af049bcf4`, 153,894,969 bytes, with `tools/{linux-x64,linux-arm64,osx-x64,win-x64}`. Input for the owed pin, not a pin.
 
 ### Central registration owed (integration lane, not made here)
 
@@ -33,7 +43,14 @@ Microsoft BinSkim (`BinSkim analyze --recurse`) over compiled PE, ELF and Mach-O
 3. `tests/unit/walked_package.py`: `"plugin_modules/ash_binskim_plugins"` in `PACKAGE_DIRS`.
 4. The universe counts (22) in `test_scanner_operational_facets_consistency.py` and `test_scanner_facets_registry_totality.py`, and the corpus table in `test_scanner_facets_corpus_consistency.py` (once a captured log exists).
 
-### Desk validation
+### Desk validation (fix round)
+
+Desk d14420e2, repository extract of this branch, `uv sync --frozen --all-extras --group dev`, env -i, -n 4:
+- binskim module tests: 57 passed, 1 skipped, 0 failed.
+- Facets families plus the link-handling table (5 files): 25 failed, 517 passed. The 20 `test_declared_facets_agree_with_the_observed_corpus[...]` failures name other scanners (pre-existing on main); the other 5 are the central items: universe counts (2), corpus-table agreement, `SCANNER_TOOL_TYPES` KeyError, and `test_every_registered_scanner_has_a_link_handling` (owed row; the probe and BinSkim's `--recurse` link handling are not measured here).
+- ruff format --check and ruff check (whole tree, the repo hook): green. Conflict-marker scan with a planted control: zero. Identity audit over origin/main..HEAD: one noreply line.
+
+### Desk validation (earlier round)
 
 Desk cbc4ff77, repository extract at main e0aac6c3aff plus this branch, `uv sync --frozen --all-extras --group dev`, env -i, -n 4:
 - binskim module tests: 44 passed, 1 skipped, 0 failed.
