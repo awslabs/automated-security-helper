@@ -56,11 +56,14 @@ Declaration rules, fail closed:
 from __future__ import annotations
 
 from enum import Enum
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
+
+if TYPE_CHECKING:
+    from automated_security_helper.core.asset import AssetKind
 
 #: The class attribute a scanner declares its operational row under. Read from
 #: ``vars(cls)``, so an inherited declaration never satisfies it.
@@ -296,10 +299,9 @@ UNCLAIMED_TARGET_KINDS: dict[TargetKind, str] = {
         "'answers a different question', gitleaks_scanner module header), and "
         "no other secrets scanner reads git history"
     ),
-    TargetKind.CONTAINER_IMAGE: (
-        "grype is wired to a `dir:` scan of the source tree; its covers text "
-        "used to say container images, which no code path scans"
-    ),
+    # CONTAINER_IMAGE left this list with the asset-targets wiring: grype,
+    # syft and trivy claim it on their rows and override the image dispatch
+    # (_execute_image_scan / scan_image), which the iff-test holds together.
     TargetKind.SBOM_DOCUMENT: (
         "no scanner consumes an SBOM document as input; syft produces one and "
         "grype scans the directory, so syft-to-grype is a potential pipeline, "
@@ -337,9 +339,12 @@ TOOL_TYPE_SERVED_BY: dict[ScannerToolType, frozenset[TargetKind]] = {
             TargetKind.DEPENDENCY_LOCKFILES,
             TargetKind.PACKAGE_SOURCES,
             TargetKind.PACKAGE_INVENTORY,
+            TargetKind.CONTAINER_IMAGE,
         }
     ),
-    ScannerToolType.SBOM: frozenset({TargetKind.PACKAGE_INVENTORY}),
+    ScannerToolType.SBOM: frozenset(
+        {TargetKind.PACKAGE_INVENTORY, TargetKind.CONTAINER_IMAGE}
+    ),
 }
 
 
@@ -764,3 +769,56 @@ class ScannerOperationalFacets(_Frozen):
     exit_codes: ExitCodesFacet
     provenance: ProvenanceFacet
     prerequisites: PrerequisitesFacet
+
+
+# --------------------------------------------------------------------------
+# Asset routing: which asset kinds a declaration serves
+# --------------------------------------------------------------------------
+
+#: Every target kind a scanner reads out of a filesystem tree.
+#: ``CONTAINER_IMAGE`` is the one kind whose subject is not presented as files
+#: under the source directory, so the filesystem side is its complement:
+#: ``SECRETS_GIT_HISTORY`` reads the tree's ``.git`` and ``SBOM_DOCUMENT`` a
+#: document in the tree, both files under the root.
+FILESYSTEM_SIDE_KINDS: frozenset[TargetKind] = frozenset(TargetKind) - {
+    TargetKind.CONTAINER_IMAGE
+}
+
+
+def declared_operational_facets(
+    scanner_class: type,
+) -> Optional[ScannerOperationalFacets]:
+    """*scanner_class*'s own register row, or None where it declares none.
+
+    Read from the class's own ``vars()`` exactly as the registry-totality test
+    reads it, so an inherited declaration never answers for a subclass. A
+    third-party plugin predating the register has no row; its caller decides
+    what that means (for asset routing below: filesystem-only, today's
+    behavior).
+    """
+    facets = vars(scanner_class).get(OPERATIONAL_FACETS_ATTR)
+    return facets if isinstance(facets, ScannerOperationalFacets) else None
+
+
+def serves_asset_kind(scanner_class: type, kind: "AssetKind") -> bool:
+    """Whether *scanner_class* declares that it scans assets of *kind*.
+
+    The register is the one place capability lives, so routing asks the
+    declaration rather than a scattered conditional:
+
+    - ``AssetKind.CONTAINER_IMAGE`` is served iff the declared target kinds
+      include :attr:`TargetKind.CONTAINER_IMAGE`. No declaration means no
+      claim, so an undeclared scanner is never handed an image.
+    - ``AssetKind.FILESYSTEM`` is served by every scanner that declares any
+      filesystem-side kind -- all of them today -- and by a scanner with no
+      declaration at all, which keeps today's behavior for third-party
+      plugins the register has never seen.
+    """
+    from automated_security_helper.core.asset import AssetKind
+
+    facets = declared_operational_facets(scanner_class)
+    if kind == AssetKind.CONTAINER_IMAGE:
+        return facets is not None and TargetKind.CONTAINER_IMAGE in facets.targets.kinds
+    if facets is None:
+        return True
+    return any(k in FILESYSTEM_SIDE_KINDS for k in facets.targets.kinds)

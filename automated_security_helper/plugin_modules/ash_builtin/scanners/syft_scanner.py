@@ -307,9 +307,18 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
                 consumed_by_deviation="no SARIF Result exists; the SBOM is consumed outside the flat findings path",
             ),
             targets=opsf.TargetsFacet(
-                kinds=(opsf.TargetKind.PACKAGE_INVENTORY,),
+                kinds=(
+                    opsf.TargetKind.PACKAGE_INVENTORY,
+                    opsf.TargetKind.CONTAINER_IMAGE,
+                ),
                 tool_type=ScannerToolType.SBOM,
-                selection="the whole directory, cataloged into an SBOM",
+                selection=(
+                    "the whole directory, cataloged into an SBOM; a "
+                    "container-image asset through a stereoscope target "
+                    "(scan_image: oci-archive:/oci-dir: for a payload, "
+                    "docker:/podman:/registry: for a reference by the "
+                    "detected engine)"
+                ),
             ),
             runtime=opsf.RuntimeFacet(
                 kind=opsf.RuntimeKind.PINNED_BINARY,
@@ -860,6 +869,169 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
         # is not redacted, is attached to the new one neither as __context__ nor
         # as __cause__: `raise ... from None` would only hide it from the default
         # traceback while leaving it readable on the object.
+        raise ScannerError(failure)
+
+    def scan_image(
+        self,
+        image,
+        config: SyftScannerConfig | None = None,
+        *args,
+        **kwargs,
+    ) -> CycloneDXReport | bool:
+        """Catalog a container image into an SBOM.
+
+        syft overrides the whole image dispatch, as it overrides ``scan()``:
+        its result is a CycloneDX document, which the base image template
+        would try to grade as SARIF. The flow is this scanner's own scan flow
+        with the image differences and nothing else -- the target is a
+        stereoscope string (utils/image_tool_targets.py) instead of a
+        directory, there is no --base-path and no exclude set because nothing
+        of the source tree is read, and the results land under the scanner's
+        ``image`` results directory.
+        """
+        image_target_type = "image"
+        anchor = Path(os.path.abspath(self.context.source_dir))
+
+        self.exit_code = 0
+        self.start_time = None
+        self.end_time = None
+        self.output = []
+        self._reset_errors()
+        self._nothing_scanned_reason = None
+
+        not_scanned = self._image_not_scanned_reason(image)
+        if not_scanned is not None:
+            self._nothing_scanned_reason = not_scanned
+            self._plugin_log(
+                f"{not_scanned}. Not running the tool.",
+                target_type=image_target_type,
+                level=logging.INFO,
+                append_to_stream="stderr",
+            )
+            self._post_scan(target=anchor, target_type=image_target_type)
+            return True
+
+        validated = self._pre_scan(
+            target=anchor,
+            target_type=image_target_type,
+            config=config,
+        )
+        if not validated:
+            self._post_scan(target=anchor, target_type=image_target_type)
+            return False
+        if not self.dependencies_satisfied:
+            self._post_scan(target=anchor, target_type=image_target_type)
+            return False
+
+        flagged_refusal: ScannerError | None = None
+        try:
+            from automated_security_helper.utils.image_tool_targets import (
+                stereoscope_target,
+            )
+
+            target_results_dir = Path(os.path.abspath(self.results_dir)).joinpath(
+                image_target_type
+            )
+            target_results_dir.mkdir(parents=True, exist_ok=True)
+            results_file = target_results_dir.joinpath("syft.cdx.json")
+            self.args = ToolArgs(
+                format_arg="--output",
+                format_arg_value=(
+                    f"cyclonedx-json@{CYCLONEDX_SPEC_VERSION}={results_file.as_posix()}"
+                ),
+                scan_path_arg=None,
+                extra_args=[],
+            )
+            # Re-apply config options (config file, additional outputs) that
+            # the ToolArgs rebuild above dropped, as scan() re-applies them.
+            self._process_config_options()
+            if not any(arg.key == "--config" for arg in self.args.extra_args):
+                empty = empty_tool_config(
+                    "syft-empty.yaml", "{}\n", context=self.context
+                )
+                self.args.extra_args.append(
+                    ToolExtraArg(key="--config", value=empty.as_posix())
+                )
+            conf: SyftScannerConfig = self.config
+            opts: SyftScannerConfigOptions = conf.options
+            for out in opts.additional_outputs:
+                out_ext = "txt"
+                if "json" in out:
+                    out_ext = "json"
+                elif "xml" in out:
+                    out_ext = "xml"
+                self.args.extra_args.append(
+                    ToolExtraArg(
+                        key="--output",
+                        value=f"{out}={results_file.as_posix()}.{out}.{out_ext}",
+                    )
+                )
+            final_args = self._resolve_arguments(
+                target=stereoscope_target(image),
+            )
+            subprocess_env = (
+                {**snapshot_environ(), **self.extra_env} if self.extra_env else None
+            )
+            effective_timeout = self._effective_scan_timeout()
+            response = self._run_subprocess(
+                command=final_args,
+                results_dir=target_results_dir,
+                cwd=self._working_directory(anchor, target_results_dir),
+                env=subprocess_env,
+                timeout=effective_timeout,
+            )
+
+            self._post_scan(target=anchor, target_type=image_target_type)
+            try:
+                self._refuse_flagged_response(response, effective_timeout)
+            except ScannerError as refusal:
+                flagged_refusal = refusal
+                raise
+            self._record_target_exit_code(response)
+            self._refuse_rejected_exit_code(results_file)
+
+            with open(results_file, mode="r", encoding="utf-8") as f:
+                syft_results = json.load(f)
+            try:
+                sbom_report = CycloneDXReport.model_validate(syft_results)
+            except ValidationError as e:
+                raise ScannerError(
+                    f"{self.__class__.__name__} wrote a results file that is not "
+                    f"CycloneDX ASH can read ({e.error_count()} validation "
+                    "error(s)), so its SBOM could not be recorded"
+                )
+
+            return sbom_report
+
+        except Exception as e:
+            # The mirror of scan()'s handler: the run is over, a flagged run is
+            # reported as the base method worded it, and everything else is
+            # redacted through the one guarded read of the values hook.
+            self.end_time = datetime.now(timezone.utc)
+            if e is flagged_refusal:
+                raise
+            read = guarded_values_read(self)
+            if read.values is None:
+                failure = (
+                    f"{self.__class__.__name__} image scan failed (the error text "
+                    f"is not shown: the plugin's values hook {read.failure()})"
+                )
+                ASH_LOGGER.debug(
+                    f"{self.__class__.__name__} image scan failed; the original "
+                    f"traceback is not shown: the plugin's values hook "
+                    f"{read.failure()}",
+                    extra=NO_MARKUP,
+                )
+            else:
+                failure = text_without_values(
+                    f"{self.__class__.__name__} image scan failed: {str(e)}",
+                    read.values,
+                )
+                ASH_LOGGER.debug(
+                    f"{self.__class__.__name__} image scan failed; the original "
+                    "traceback:\n" + traceback_text(e, values=read.values),
+                    extra=NO_MARKUP,
+                )
         raise ScannerError(failure)
 
 

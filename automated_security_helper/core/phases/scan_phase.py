@@ -17,6 +17,10 @@ from automated_security_helper.core.constants import (
     PYTHON_ONLY_SKIPPED_REASON,
     SHARD_SPLIT_REASON_PREFIX,
 )
+from automated_security_helper.base.scanner_operational_facets import (
+    serves_asset_kind,
+)
+from automated_security_helper.core.asset import Asset, AssetKind
 from automated_security_helper.core.enums import ExecutionPhase, ScannerStatus
 from automated_security_helper.core.exceptions import ScannerSelectionError
 from automated_security_helper.core.scanner_selection import (
@@ -864,6 +868,171 @@ class ScanPhase(EnginePhase):
         )
         return aggregated_results
 
+    def _record_asset_kind_not_served(
+        self,
+        display_name: str,
+        asset: Asset,
+        nothing_to_scan_names: List[str],
+        aggregated_results: AshAggregatedResults,
+    ) -> AshAggregatedResults:
+        """Record *display_name* as SKIPPED: it does not scan this asset's kind.
+
+        The mirror of :meth:`_record_nothing_to_scan` for the asset routing
+        decision: the scanner was selected, but the scan's subject is an asset
+        kind its operational-facets row does not declare (today, a container
+        image offered to a filesystem scanner), so it has nothing it scans
+        here. A sibling method rather than a third caller of
+        ``_record_nothing_to_scan`` because that method's docstring names the
+        two decisions it records, and this is a different decision: not "its
+        own selection found no files" but "the subject is not files at all".
+
+        The bookkeeping is byte-for-byte the nothing-to-scan shape -- SKIPPED,
+        ``excluded=False`` (nothing deselected it), ``dependencies_satisfied=
+        True`` (the tool was never needed), ``targets_attempted=0`` -- so the
+        completeness gate, the unified metrics and a sharded merge read the
+        row exactly as they read a nothing-to-scan row. The reason names the
+        asset kind and the register, so an image scan's report says which
+        scanners did not look rather than looking clean.
+        """
+        reason = (
+            f"does not declare {asset.kind.value} targets in its operational "
+            "facets, so it cannot scan this asset"
+        )
+        ASH_LOGGER.info(
+            f"Scanner {display_name} skipped: {reason}",
+            extra=NO_MARKUP,
+        )
+        nothing_to_scan_names.append(display_name)
+        self.validation_manager.update_scanner_state(
+            display_name,
+            registration_status="registered",
+            enablement_status="excluded",
+            enablement_reason=f"Asset kind not served: {reason}",
+            queued_for_execution=False,
+            execution_completed=False,
+        )
+        aggregated_results = self._write_results_guarded(
+            display_name,
+            ScanResultsContainer(
+                scanner_name=display_name,
+                status=ScannerStatus.SKIPPED,
+                duration=None,
+                targets_attempted=0,
+                targets_failed=0,
+                skipped_reason=reason,
+            ),
+            aggregated_results,
+        )
+        aggregated_results.scanner_results[display_name] = ScannerTargetStatusInfo(
+            status=ScannerStatus.SKIPPED,
+            dependencies_satisfied=True,
+            excluded=False,
+            skipped_reason=reason,
+        )
+        return aggregated_results
+
+    #: The SARIF rule id of the one informational result an image scan gets when
+    #: nothing scanned its image. Stable, so a reader or a suppression can key
+    #: on it; the "ASH-" prefix says ASH itself, not a tool, wrote it.
+    IMAGE_NOT_SCANNED_RULE_ID = "ASH-container-image-not-scanned"
+
+    def _record_unscanned_image_asset(
+        self,
+        aggregated_results: AshAggregatedResults,
+    ) -> None:
+        """One informational SARIF result when the image asset was not scanned.
+
+        An image scan on which no queued scanner serves CONTAINER_IMAGE -- every
+        scanner before the first image-capable one is wired, or an offline host
+        with no engine once wiring lands -- would otherwise end green and read
+        exactly like a clean scan of the image. The per-scanner SKIPPED rows say
+        which scanners did not look; this is the one line that says the IMAGE
+        was not looked at, on the report itself.
+
+        ``kind=informational`` with ``level=note``, which SARIF 3.27.9 defines
+        as information only: every reporter reads it as not-a-finding
+        (utils/sarif_utils.NON_FINDING_KINDS), so it can never grade, never
+        fail a threshold and never put a vulnerability row in a SIEM -- the
+        green-by-contract half -- while it stays in ash.sarif and the
+        aggregated results for any reader -- the visibly-incomplete half.
+
+        Appended to the model's own ASH run (the default ``sarif`` skeleton's
+        one run); when a caller supplied a model with no SARIF or no runs,
+        nothing is appended, because inventing a report to carry a note into
+        is not this method's call to make.
+        """
+        asset = getattr(self.plugin_context, "asset", None)
+        if not isinstance(asset, Asset) or asset.kind != AssetKind.CONTAINER_IMAGE:
+            return
+        image_capable = [
+            name
+            for (name, instance, _tasks) in self._scanner_tasks
+            if serves_asset_kind(instance.__class__, AssetKind.CONTAINER_IMAGE)
+        ]
+        shown = asset.image.shown() if asset.image is not None else "<unknown>"
+        if not image_capable:
+            # What is known here is that nothing queued reads images; why is not:
+            # no selected scanner declares the kind, or the ones that do were
+            # excluded, could not run on this host, or are not installed. The
+            # sentence says only what holds in every one of those cases.
+            reason = (
+                "no scanner that was selected and able to run reads container images"
+            )
+        else:
+            # Queued image scanners exist; the note is owed only when every
+            # one of them ended SKIPPED (each cleanly declined the image: an
+            # offline host with no engine, an unreadable locator shape), which
+            # is known only after the executor ran -- the second call site.
+            rows = [
+                aggregated_results.scanner_results.get(name) for name in image_capable
+            ]
+            if any(row is None for row in rows):
+                return
+            if any(row.status != ScannerStatus.SKIPPED for row in rows):
+                return
+            reason = (
+                "every image-capable scanner declined it cleanly (typically "
+                "no container engine was detected and network fetching is "
+                "unavailable, or the locator shape is one the tool cannot read)"
+            )
+        text = (
+            f"container image {shown} was not scanned: {reason}. This scan "
+            "is complete by contract and has not looked at the image."
+        )
+        sarif = aggregated_results.sarif
+        if sarif is None or not sarif.runs:
+            ASH_LOGGER.warning(text, extra=NO_MARKUP)
+            return
+        for run in sarif.runs:
+            for result in run.results or []:
+                if result.ruleId == self.IMAGE_NOT_SCANNED_RULE_ID:
+                    # One note per scan: the method runs before the executor
+                    # (nothing queued) and after it (everything skipped), and
+                    # the second call must not double the first's note.
+                    return
+        ASH_LOGGER.warning(text, extra=NO_MARKUP)
+        from automated_security_helper.schemas.sarif_schema_model import (
+            Kind,
+            Level,
+            Message,
+            Message1,
+            PropertyBag,
+            Result,
+        )
+
+        run = sarif.runs[0]
+        if run.results is None:
+            run.results = []
+        run.results.append(
+            Result(
+                ruleId=self.IMAGE_NOT_SCANNED_RULE_ID,
+                kind=Kind.informational,
+                level=Level.note,
+                message=Message(root=Message1(text=text)),
+                properties=PropertyBag.model_validate({"image": shown}),
+            )
+        )
+
     def _execute_phase(
         self,
         aggregated_results: AshAggregatedResults,
@@ -969,7 +1138,18 @@ class ScanPhase(EnginePhase):
 
         # Compute the source file list once so scanners don't each re-glob. The
         # walk skips an entry it cannot stat instead of aborting the scan.
-        source_files = list(_regular_files_under(self.plugin_context.source_dir))
+        # An image scan's source directory only anchors it (the working directory
+        # unless the caller named one) and is not its subject: walking it listed
+        # unrelated files, and from a large directory cost a full walk for nothing.
+        subject = getattr(self.plugin_context, "asset", None)
+        image_subject = (
+            isinstance(subject, Asset) and subject.kind == AssetKind.CONTAINER_IMAGE
+        )
+        source_files = (
+            []
+            if image_subject
+            else list(_regular_files_under(self.plugin_context.source_dir))
+        )
         if self._include_work_dir:
             # Each file once: a work directory inside the source tree (an output
             # directory under the project) was walked by both listings.
@@ -1010,6 +1190,10 @@ class ScanPhase(EnginePhase):
             # validation. Started here, before construction, so a scanner the run
             # did not select whose constructor raised is counted with the others.
             excluded_scanner_names: List[str] = []
+            # Scanners whose tool is absent and that have nothing to scan, or that
+            # do not scan this asset's kind; SKIPPED. Started here, as the list
+            # above is, because the construction loop records the second kind.
+            nothing_to_scan_names: List[str] = []
             # The operator's names, compared as everywhere in this phase.
             operator_allowlist = {name.lower().strip() for name in enabled_scanners}
             if scanner_classes:
@@ -1129,6 +1313,31 @@ class ScanPhase(EnginePhase):
                                 ", ".join(not_selected_reasons),
                                 aggregated_results,
                                 excluded_scanner_names,
+                            )
+                            continue
+                        # Asset routing, as the filter loop does it: a scanner
+                        # that does not scan this asset's kind was never going to
+                        # look at the image, so its constructor raising is not a
+                        # failure of this scan either. The class is in hand and
+                        # needs no instance to be asked.
+                        constructing_for = getattr(self.plugin_context, "asset", None)
+                        if (
+                            isinstance(constructing_for, Asset)
+                            and constructing_for.kind == AssetKind.CONTAINER_IMAGE
+                            and not serves_asset_kind(
+                                plugin_class, AssetKind.CONTAINER_IMAGE
+                            )
+                        ):
+                            ASH_LOGGER.debug(
+                                f"Scanner {failed_name} could not be constructed "
+                                f"({type(e).__name__}), and does not scan this "
+                                "asset's kind"
+                            )
+                            aggregated_results = self._record_asset_kind_not_served(
+                                failed_name,
+                                constructing_for,
+                                nothing_to_scan_names,
+                                aggregated_results,
                             )
                             continue
                         # With the config's environment values: a constructor's
@@ -1565,8 +1774,6 @@ class ScanPhase(EnginePhase):
 
             # Initialize lists to track scanner states for validation.
             # excluded_scanner_names was started above the construction loop.
-            # Scanners whose tool is absent and that have nothing to scan; SKIPPED.
-            nothing_to_scan_names: List[str] = []
             dependency_error_scanners = {}
             # Scanners this run INTENDED to execute, recorded for the shard
             # provenance below. Collected here rather than derived from
@@ -1761,6 +1968,43 @@ class ScanPhase(EnginePhase):
                         # merge-time question "did any shard ask for this"
                         # indistinguishable from "could any shard run it".
                         selected_scanner_names.append(display_name)
+
+                        # ASSET ROUTING, right after selection and before every
+                        # diagnosis, for the selection-before-diagnosis reason
+                        # above: a scanner that does not scan this asset's KIND
+                        # does not need its dependencies, its platform or its
+                        # tool, and asking any of those first would give two
+                        # scanners in the identical position different statuses
+                        # by tool presence. The register row is the one place
+                        # capability lives (base/scanner_operational_facets),
+                        # so routing asks the declaration: an undeclared or
+                        # filesystem-only scanner offered a container image is
+                        # SKIPPED with a row naming why, the reported sibling
+                        # of the log-only empty-target skip, rather than run
+                        # against a directory that is not the scan's subject.
+                        # A FILESYSTEM asset (or none, which is every caller
+                        # that predates assets) changes nothing: every scanner
+                        # serves it, by declaration or by default.
+                        scan_asset = getattr(self.plugin_context, "asset", None)
+                        if (
+                            isinstance(scan_asset, Asset)
+                            and scan_asset.kind == AssetKind.CONTAINER_IMAGE
+                            and not serves_asset_kind(
+                                # __class__, not type(): it is the class the
+                                # rest of this loop records (see
+                                # enabled_scanner_classes below), and the one
+                                # a test double assigns.
+                                plugin_instance.__class__,
+                                AssetKind.CONTAINER_IMAGE,
+                            )
+                        ):
+                            aggregated_results = self._record_asset_kind_not_served(
+                                display_name,
+                                scan_asset,
+                                nothing_to_scan_names,
+                                aggregated_results,
+                            )
+                            continue
 
                         # A scanner that declares this PLATFORM unsupported is SKIPPED,
                         # not MISSING, and this has to be asked before the dependency
@@ -2071,20 +2315,37 @@ class ScanPhase(EnginePhase):
 
                         # Every selection filter and the dependency check have passed.
                         # Add a single task per scanner that will handle both source
-                        # and converted directories.
-                        task_list = [
-                            {
-                                "path": self.plugin_context.source_dir,
-                                "type": "source",
-                            },
-                        ]
-                        if self._include_work_dir:
-                            task_list.append(
+                        # and converted directories -- or, for a container-image
+                        # asset, ONE image task: the routing above let only a
+                        # scanner that serves the kind reach this line, and an
+                        # image presents no source or converted directory to
+                        # scan beside itself. The task's path is the anchoring
+                        # source directory, which exists (the executor's
+                        # existence probe reads it) and is never the subject.
+                        if (
+                            isinstance(scan_asset, Asset)
+                            and scan_asset.kind == AssetKind.CONTAINER_IMAGE
+                        ):
+                            task_list = [
                                 {
-                                    "path": self.plugin_context.work_dir,
-                                    "type": "converted",
-                                }
-                            )
+                                    "path": self.plugin_context.source_dir,
+                                    "type": "image",
+                                },
+                            ]
+                        else:
+                            task_list = [
+                                {
+                                    "path": self.plugin_context.source_dir,
+                                    "type": "source",
+                                },
+                            ]
+                            if self._include_work_dir:
+                                task_list.append(
+                                    {
+                                        "path": self.plugin_context.work_dir,
+                                        "type": "converted",
+                                    }
+                                )
                         self._scanner_tasks.append(
                             (
                                 display_name,
@@ -2276,6 +2537,12 @@ class ScanPhase(EnginePhase):
                         execution_completed=False,
                         failure_reason=unclassified_reason,
                     )
+
+            # The one informational result an image scan gets when nothing was
+            # queued that scans images: after the filter loop, because "nothing"
+            # is not known before it, and before the executor, so the note is on
+            # the model whether or not any scanner runs.
+            self._record_unscanned_image_asset(aggregated_results)
 
             # Record the completeness denominator, and the plugins that never
             # arrived to be counted in it.
@@ -2514,6 +2781,12 @@ class ScanPhase(EnginePhase):
 
             # Validate execution completion after scanner execution
             self._validate_execution_completion(aggregated_results)
+
+            # The second call site of the image note: queued image scanners
+            # that ALL declined cleanly (offline with no engine, a locator
+            # shape a tool cannot read) are known only now. The method emits
+            # one note per scan whichever call site owes it.
+            self._record_unscanned_image_asset(aggregated_results)
 
             self.progress_display.update_task(
                 phase=ExecutionPhase.SCAN,

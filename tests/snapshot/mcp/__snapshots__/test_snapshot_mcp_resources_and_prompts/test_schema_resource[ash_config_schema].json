@@ -1651,6 +1651,19 @@
           "description": "(Optional) Expiration date (YYYY-MM-DD). The entry stops applying on this date, by the local clock of the host running the scan. 'expiration' is accepted as a deprecated alias when a config is read; the alias is removed in ASH v4.",
           "title": "Expires"
         },
+        "image": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "(Optional) Only suppress findings inside a container image whose submitted reference or resolved digest matches this pattern (glob, case-insensitive), e.g. 'alpine:*' or 'sha256:abc*'. Omit it to match any asset; filesystem findings and image findings alike. Findings that carry no image never match an image-scoped suppression.",
+          "title": "Image"
+        },
         "line_end": {
           "anyOf": [
             {
@@ -1794,6 +1807,62 @@
       ],
       "title": "AshSuppression",
       "type": "object"
+    },
+    "Asset": {
+      "additionalProperties": false,
+      "description": "The subject of one scan: its kind, and the one locator that kind uses.",
+      "properties": {
+        "filesystem": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FilesystemLocator"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "image": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ImageLocator"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "kind": {
+          "$ref": "#/$defs/AssetKind"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "Asset",
+      "type": "object"
+    },
+    "AssetKind": {
+      "anyOf": [
+        {
+          "description": "What kind of subject a scan is about.",
+          "enum": [
+            "filesystem",
+            "container_image"
+          ],
+          "title": "AssetKind",
+          "type": "string"
+        },
+        {
+          "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+          "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+          "type": "string"
+        }
+      ],
+      "description": "What kind of subject a scan is about.",
+      "title": "AssetKind"
     },
     "BanditScannerConfig": {
       "additionalProperties": false,
@@ -3759,6 +3828,22 @@
       "description": "A report format name, as --output-formats and output_formats take it.\n\nEach names the reporter that writes it, except aggregated, dict and\ncustom: no reporter writes those, so asking for one writes nothing for it and\nlogs why.",
       "title": "ExportFormat"
     },
+    "FilesystemLocator": {
+      "additionalProperties": false,
+      "description": "A local directory, exactly today's source directory.",
+      "properties": {
+        "root": {
+          "format": "path",
+          "title": "Root",
+          "type": "string"
+        }
+      },
+      "required": [
+        "root"
+      ],
+      "title": "FilesystemLocator",
+      "type": "object"
+    },
     "FlatJSONReporterConfig": {
       "additionalProperties": false,
       "description": "Configuration for the Flat JSON reporter.",
@@ -4543,6 +4628,64 @@
         "reason"
       ],
       "title": "IgnorePathWithReason",
+      "type": "object"
+    },
+    "ImageLocator": {
+      "additionalProperties": false,
+      "description": "Where a container image is, in exactly one of three shapes.\n\nThe three shapes are the submission contract's: an indirect reference\n(``ref``, resolved by an engine or a tool's own registry client) and the\ntwo direct-payload shapes that need no engine at all (``oci_layout``,\n``oci_archive``). Exactly one is set; a locator naming none would send a\nscanner nowhere, and one naming two would leave which subject was meant to\nthe reader.",
+      "properties": {
+        "oci_archive": {
+          "anyOf": [
+            {
+              "format": "path",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Oci Archive"
+        },
+        "oci_layout": {
+          "anyOf": [
+            {
+              "format": "path",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Oci Layout"
+        },
+        "ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ref"
+        },
+        "resolved_digest": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resolved Digest"
+        }
+      },
+      "title": "ImageLocator",
       "type": "object"
     },
     "JUnitXMLReporterConfig": {
@@ -5594,6 +5737,18 @@
       "additionalProperties": true,
       "description": "Context container for plugins to ensure consistent path information.",
       "properties": {
+        "asset": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Asset"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The subject of this scan, when the caller named one that is not the source directory: a CONTAINER_IMAGE asset carries the image locator the scan was submitted with. None (the default) means the subject is source_dir, exactly as it always was, so every existing caller and every filesystem scan is unchanged. source_dir stays set either way: it is where the output tree and the config are anchored, and the scan phase routes by the asset's kind, not by which directory fields exist."
+        },
         "config": {
           "$ref": "#/$defs/AshConfig",
           "default": null,

@@ -289,6 +289,7 @@ ash_config:
     suppressions:
     - client_supplied: false
       expires: null
+      image: null
       line_end: 5
       line_start: 5
       package_name: null
@@ -302,6 +303,7 @@ ash_config:
       symbol: null
     - client_supplied: false
       expires: '2099-12-31'
+      image: null
       line_end: null
       line_start: null
       package_name: null

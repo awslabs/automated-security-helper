@@ -355,6 +355,14 @@ class TestRunAshScan:
         assert result == mock_result
         mock_ctx.error.assert_called()
 
+    def test_run_ash_scan_has_no_execution_selector(self):
+        """One execution path exists, so the tool takes no argument that names one."""
+        import inspect
+
+        from automated_security_helper.cli.mcp_server import run_ash_scan
+
+        assert "execution" not in inspect.signature(run_ash_scan).parameters
+
     @pytest.mark.asyncio
     async def test_scan_exception_handling(self, mock_ctx, tmp_path):
         """Exceptions raised during scan start produce error result."""

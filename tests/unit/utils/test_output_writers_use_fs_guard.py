@@ -533,6 +533,14 @@ WRITES_OUTSIDE_THE_OUTPUT_DIRECTORY: Dict[Site, Tuple[int, str]] = {
         "_set_aside_for_removal",
         "os.rename",
     ): (1, _MCP_SESSION_WORKSPACE),
+    # The image-archive finalize moves the assembled upload into the session's
+    # own image directory, after the sha and the same-file check, under the
+    # upload lock: the move of a file the session workspace already holds.
+    (
+        f"{_ASH}/cli/mcp/source_delivery.py",
+        "set_source_image_archive_finalize",
+        "os.replace",
+    ): (1, "the MCP upload workspace, where a client's image archive is assembled"),
     (f"{_ASH}/cli/mcp_tools.py", "mcp_validate_config", "write_text"): (
         1,
         "a TemporaryDirectory of its own",

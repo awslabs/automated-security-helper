@@ -1604,12 +1604,39 @@ class ScannerExecutor:
                                         # ended.
                                         heartbeat.start()
                                         scan_called = True
-                                        raw_results = scanner_plugin.scan(
-                                            target=scan_target,
-                                            config=scanner_config,
-                                            target_type=target_type,
-                                            global_ignore_paths=self._global_ignore_paths,
-                                        )
+                                        if target_type == "image":
+                                            # The image dispatch (design C5): a
+                                            # separate method, not a widened
+                                            # scan(). The scan phase queues an
+                                            # image task only for a scanner
+                                            # whose register row serves the
+                                            # kind, and only when the context
+                                            # carries an image asset; a task
+                                            # without one is ASH's own defect,
+                                            # reported as itself.
+                                            image_asset = getattr(
+                                                self.plugin_context, "asset", None
+                                            )
+                                            image_locator = getattr(
+                                                image_asset, "image", None
+                                            )
+                                            if image_locator is None:
+                                                raise ScannerError(
+                                                    "an image task was queued "
+                                                    "with no image asset on the "
+                                                    "plugin context"
+                                                )
+                                            raw_results = scanner_plugin.scan_image(
+                                                image=image_locator,
+                                                config=scanner_config,
+                                            )
+                                        else:
+                                            raw_results = scanner_plugin.scan(
+                                                target=scan_target,
+                                                config=scanner_config,
+                                                target_type=target_type,
+                                                global_ignore_paths=self._global_ignore_paths,
+                                            )
                                     finally:
                                         heartbeat.stop()
                                     # A tool that never started found nothing, so the
@@ -2101,6 +2128,22 @@ class ScannerExecutor:
                             # file and span before suppressions are applied, so a
                             # suppression written against the original matches.
                             map_back_converted_results(raw_results, self.plugin_context)
+                            if target_type == "image":
+                                # Before suppressions and flattening: an
+                                # image:-scoped suppression matches on these
+                                # properties, and the identity keys on them.
+                                from automated_security_helper.utils.image_attribution import (
+                                    mark_image_results,
+                                )
+
+                                mark_image_results(
+                                    raw_results,
+                                    getattr(
+                                        getattr(self.plugin_context, "asset", None),
+                                        "image",
+                                        None,
+                                    ),
+                                )
                             if not self.plugin_context.ignore_suppressions:
                                 raw_results = apply_suppressions_to_sarif(
                                     sarif_report=raw_results,

@@ -50,7 +50,14 @@ if TYPE_CHECKING:
     from automated_security_helper.config.client_scanner_exclusions import (
         EvaluationBudget,
     )
-from automated_security_helper.models.flat_vulnerability import FlatVulnerability
+from automated_security_helper.models.flat_vulnerability import (
+    FlatVulnerability,
+    _string_property,
+)
+from automated_security_helper.utils.finding_identity import (
+    IMAGE_DIGEST_PROPERTY,
+    IMAGE_REF_PROPERTY,
+)
 from automated_security_helper.utils.package_identity import (
     extract_package_identity,
     extract_resource_identity,
@@ -2391,6 +2398,10 @@ def _apply_suppressions_within_budget(
                         file_path=uri,
                         line_start=line_start,
                         line_end=line_end,
+                        # An image finding's subject, for an ``image:``-scoped
+                        # suppression (stamped by the scanner executor).
+                        image_ref=_string_property(result, IMAGE_REF_PROPERTY),
+                        image_digest=_string_property(result, IMAGE_DIGEST_PROPERTY),
                     )
 
                 if flat_finding:
