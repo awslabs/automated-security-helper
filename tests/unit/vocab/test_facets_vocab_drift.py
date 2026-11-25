@@ -120,7 +120,13 @@ VOCABULARIES: tuple[Vocabulary, ...] = (
             {"native", "constant", "derived", "degraded", "not_applicable"}
         ),
     ),
-    Vocabulary(ops_register.SilencingLayerKind, _OPS_HOME),
+    Vocabulary(
+        ops_register.SilencingLayerKind,
+        _OPS_HOME,
+        # "ignore_file" names the ignore-file concept all over the config
+        # layer (a path-class label there), so it cannot be scanned for.
+        ambiguous=frozenset({"ignore_file"}),
+    ),
     Vocabulary(
         ops_register.SilencingWriter,
         _OPS_HOME,
