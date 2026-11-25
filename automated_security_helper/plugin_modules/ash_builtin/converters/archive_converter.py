@@ -42,6 +42,7 @@ import zlib
 from pydantic import Field, PositiveInt
 
 from automated_security_helper.models.core import ignore_paths_that_skip_scanning
+from automated_security_helper.models.vocab import FailureKind
 from automated_security_helper.core.constants import (
     KNOWN_SCANNABLE_EXTENSIONS,
 )
@@ -875,7 +876,7 @@ def _first_decompressed_block(
         with opener(handle) as inner:
             return inner.read(tarfile.BLOCKSIZE)
     except Exception as error:
-        if _failure_kind(error) == "tool":
+        if _failure_kind(error) is FailureKind.TOOL:
             raise
         return None
     finally:
@@ -1151,7 +1152,7 @@ def _holds_a_tar(handle: BinaryIO) -> bool:
         with _tar_stream(handle) as stream:
             block = stream.read(tarfile.BLOCKSIZE)
     except Exception as error:
-        if _failure_kind(error) == "tool":
+        if _failure_kind(error) is FailureKind.TOOL:
             raise
         return False
     finally:
@@ -1545,7 +1546,7 @@ _ARCHIVE_ERRNOS = frozenset(
 _DECOMPRESSOR_ERROR_NAMES = frozenset({"ZstdError"})
 
 
-def _failure_kind(error: Exception) -> Literal["input", "tool"]:
+def _failure_kind(error: Exception) -> FailureKind:
     """Whether a failure to extract an archive is about the archive ("input") or
     about the run ("tool").
 
@@ -1561,14 +1562,14 @@ def _failure_kind(error: Exception) -> Literal["input", "tool"]:
     otherwise.
     """
     if isinstance(error, _ARCHIVE_UNREADABLE_ERRORS):
-        return "input"
+        return FailureKind.INPUT
     if type(error).__name__ in _DECOMPRESSOR_ERROR_NAMES:
-        return "input"
+        return FailureKind.INPUT
     if isinstance(error, OSError):
         if error.errno is None or error.errno in _ARCHIVE_ERRNOS:
-            return "input"
-        return "tool"
-    return "tool"
+            return FailureKind.INPUT
+        return FailureKind.TOOL
+    return FailureKind.TOOL
 
 
 #: The most bytes of UTF-8 an archive's folded path may take in the name of the
@@ -2471,7 +2472,9 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
         self.record_failed_input(
             archive if archive_file is None else archive_file,
             f"it was extracted only in part: {detail}",
-            kind="tool" if (stopped and budget_spent) else "input",
+            kind=(
+                FailureKind.TOOL if (stopped and budget_spent) else FailureKind.INPUT
+            ),
         )
 
     def inspect_members(
@@ -2785,7 +2788,7 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                 f"{too_long} {noun} not extracted: each would be written to a "
                 "path past this host's path length limit, so no scanner reads "
                 f"{'it' if too_long == 1 else 'them'}",
-                kind="input",
+                kind=FailureKind.INPUT,
             )
         return filtered_members
 
@@ -3115,7 +3118,7 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                                 "with a tar header, which was read as the tar "
                                 "instead, so no scanner reads what the compression "
                                 "holds",
-                                kind="input",
+                                kind=FailureKind.INPUT,
                             )
                     elif _named_kind(archive_file) is not None:
                         # Named as an archive the converter extracts, and none can
@@ -3135,7 +3138,7 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                             archive_file,
                             f"it is named as {_named_kind(archive_file)} but "
                             "could not be read as one",
-                            kind="input",
+                            kind=FailureKind.INPUT,
                         )
                         continue
                     elif plain_gzip is not None:
@@ -3151,7 +3154,7 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                             "it is named as a gzip-compressed file but its "
                             "bytes do not start a gzip stream, so it could not "
                             "be read as one",
-                            kind="input",
+                            kind=FailureKind.INPUT,
                         )
                         continue
                     else:
@@ -3210,7 +3213,9 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                     if created_target is not None:
                         shutil.rmtree(created_target, ignore_errors=True)
                     self.record_failed_input(
-                        archive_file, _failure_reason(e, created_target), kind="input"
+                        archive_file,
+                        _failure_reason(e, created_target),
+                        kind=FailureKind.INPUT,
                     )
             except Exception as e:
                 # Named for the converter, a .zip, .tar or .gz it could not read: a

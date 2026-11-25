@@ -684,8 +684,10 @@ class TestARaisingProbeContextHook:
         declared database instead of failing the finished scan. This pins
         the catch assess_scanner's docstring promises, which is why the
         builder itself carries no guard."""
+        from automated_security_helper.utils.content_databases import (
+            StalenessPolicy,
+        )
         from automated_security_helper.utils.content_db_staleness import (
-            STALENESS_FAIL,
             assess_scanner,
         )
 
@@ -701,7 +703,7 @@ class TestARaisingProbeContextHook:
             def content_database_probe_context(self):
                 raise TypeError("hook drift")
 
-        records = assess_scanner(_Scanner(), None, STALENESS_FAIL)
+        records = assess_scanner(_Scanner(), None, StalenessPolicy.FAIL)
 
         assert records, "grype declares a database, so a record must exist"
         for record in records:

@@ -22,13 +22,18 @@ from pydantic import (
 
 from automated_security_helper.base.forward_refs import OnceOnlyResolver
 from automated_security_helper.core.constants import ASH_DOCS_URL, ASH_REPO_URL
-from automated_security_helper.core.enums import ExportFormat, ScannerStatus
+from automated_security_helper.core.enums import (
+    ExportFormat,
+    ScannerStatus,
+    ScannerToolType,
+)
 from automated_security_helper.core.sharding import ShardAssignment
 from automated_security_helper.utils.severity_ladder import (
     SEVERITY_COUNT_KEYS,
     SUPPRESSED_COUNT_KEY,
 )
 from automated_security_helper.models.core import IgnoreFileExclusions
+from automated_security_helper.models.vocab import FailureKind
 from automated_security_helper.models.flat_vulnerability import (
     FlatVulnerability,
     assign_correlation_ids,
@@ -43,7 +48,6 @@ from typing import (
     Dict,
     Any,
     Iterator,
-    Literal,
     Optional,
     Union,
     List,
@@ -82,6 +86,15 @@ __all__ = ["AshAggregatedResults"]
 _SEVERITY_ORDER = SEVERITY_COUNT_KEYS
 _VALID_INCREMENT_FIELDS = _SEVERITY_ORDER + (SUPPRESSED_COUNT_KEY,)
 _SUMMARY_SEVERITY_FIELDS = frozenset((*SEVERITY_COUNT_KEYS, SUPPRESSED_COUNT_KEY))
+
+#: The tool types a SARIF driver's ``tags`` can name: every ``ScannerToolType``
+#: but ``CUSTOM`` and ``UNKNOWN``, which no tag states (a tag that spells either
+#: leaves the run's type ``UNKNOWN``).
+_TAGGED_TOOL_TYPES = frozenset(
+    member.value
+    for member in ScannerToolType
+    if member not in (ScannerToolType.CUSTOM, ScannerToolType.UNKNOWN)
+)
 
 
 class ScannerSeverityCount(StrippedRecordModel):
@@ -527,18 +540,21 @@ class RefusedInputInfo(StrippedRecordModel):
     ] = None
 
 
-def known_failed_input_kind(value: Any) -> str:
-    """*value* read as a failed-input record's kind: itself when it is "input" or
-    "tool", and "tool" for anything else.
+def known_failed_input_kind(value: Any) -> FailureKind:
+    """*value* read as a failed-input record's kind: the member it names when it
+    is "input" or "tool", and ``FailureKind.TOOL`` for anything else.
 
-    The one reading of the kind. FailedInputInfo's validator applies it to every
-    record built through the model; a reader of a record that skipped validation
-    (one built with model_construct, a kind assigned after the record was made, a
-    row ``ash merge`` assembled) applies it itself. "tool" is the fail-closed
-    reading: a tool failure is never accepted, so an unknown kind can never waive
-    the completeness gate.
+    The one reading of the kind, and the ingest site for it. FailedInputInfo's
+    validator applies it to every record built through the model; a reader of a
+    record that skipped validation (one built with model_construct, a kind
+    assigned after the record was made, a row ``ash merge`` assembled) applies it
+    itself. TOOL is the fail-closed reading: a tool failure is never accepted, so
+    an unknown kind can never waive the completeness gate.
     """
-    return value if value in ("input", "tool") else "tool"
+    try:
+        return FailureKind(value)
+    except (ValueError, TypeError):
+        return FailureKind.TOOL
 
 
 class FailedInputInfo(StrippedRecordModel):
@@ -566,7 +582,7 @@ class FailedInputInfo(StrippedRecordModel):
     ]
     reason: Annotated[str, Field(description="Why it was not converted.")]
     kind: Annotated[
-        Literal["input", "tool"],
+        FailureKind,
         Field(
             description=(
                 "What failed: 'input' when the file is not one the converter "
@@ -578,7 +594,7 @@ class FailedInputInfo(StrippedRecordModel):
                 "the record."
             ),
         ),
-    ] = "tool"
+    ] = FailureKind.TOOL
 
     @field_validator("kind", mode="before")
     @classmethod
@@ -1598,7 +1614,7 @@ class AshAggregatedResults(RecordModel):
                     continue
 
                 tool_name = "Unknown"
-                tool_type = "UNKNOWN"
+                tool_type = ScannerToolType.UNKNOWN.value
                 if run.tool and run.tool.driver:
                     tool_name = run.tool.driver.name
                     driver_props = getattr(run.tool.driver, "properties", None)
@@ -1607,15 +1623,7 @@ class AshAggregatedResults(RecordModel):
                     )
                     if driver_tags:
                         for tag in driver_tags:
-                            if tag.upper() in {
-                                "SAST",
-                                "DAST",
-                                "SCA",
-                                "IAC",
-                                "SECRETS",
-                                "CONTAINER",
-                                "SBOM",
-                            }:
+                            if tag.upper() in _TAGGED_TOOL_TYPES:
                                 tool_type = tag.upper()
                                 break
 

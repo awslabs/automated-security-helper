@@ -102,6 +102,7 @@ import argparse
 import re
 import sys
 from datetime import datetime, timedelta, timezone
+from enum import Enum
 from types import MappingProxyType
 from typing import Mapping
 
@@ -135,10 +136,29 @@ BUCKETS_PER_MAX_AGE = 5
 #: ``content_db_staleness`` config field or ``--allow-stale-content-db``. ``fail`` is the
 #: default: a scan whose database is past its bound exits 1. ``warn`` lets it proceed and
 #: carries a warning into the log and every report.
-STALENESS_FAIL = "fail"
-STALENESS_WARN = "warn"
-STALENESS_POLICIES = (STALENESS_FAIL, STALENESS_WARN)
-DEFAULT_STALENESS_POLICY = STALENESS_FAIL
+class StalenessPolicy(str, Enum):
+    """What a scan does about a stale content database: ``FAIL`` or ``WARN``."""
+
+    FAIL = "fail"
+    WARN = "warn"
+
+    @classmethod
+    def from_text(cls, value: object) -> "StalenessPolicy | None":
+        """The member *value* names, case-folded, or None for anything else.
+
+        The one ingest site for text read from a config, an environment or a
+        results file; past it the policy is a member.
+        """
+        value = getattr(value, "value", value)
+        if isinstance(value, str):
+            try:
+                return cls(value.lower())
+            except ValueError:
+                return None
+        return None
+
+
+DEFAULT_STALENESS_POLICY = StalenessPolicy.FAIL
 STALENESS_CONFIG_FIELD = "content_db_staleness"
 #: Per-database exceptions to ``content_db_staleness``, each with a required expiration date.
 STALENESS_OVERRIDES_CONFIG_FIELD = "content_db_staleness_overrides"
@@ -167,8 +187,8 @@ OFFLINE_IMAGE_ENV = "ASH_OFFLINE_AT_BUILD_TIME"
 #: another database. ``OFFLINE_IMAGE_ENV`` turns it on; ``content_db_staleness_offline_image_default:
 #: false``, either form of ``--allow-stale-content-db``, or a ``content_db_staleness_overrides``
 #: entry naming the database outranks it; ``content_db_staleness: warn`` makes it moot.
-OFFLINE_IMAGE_POLICIES: Mapping[str, str] = MappingProxyType(
-    {"trivy-db": STALENESS_WARN}
+OFFLINE_IMAGE_POLICIES: Mapping[str, StalenessPolicy] = MappingProxyType(
+    {"trivy-db": StalenessPolicy.WARN}
 )
 
 
@@ -182,9 +202,8 @@ def built_offline(environ: Mapping[str, str]) -> bool:
 
 def content_db_staleness_override(allow_stale: bool) -> str:
     """The ``--config-overrides`` entry ``--allow-stale-content-db`` (or its ``--no-`` form) means."""
-    return (
-        f"{STALENESS_CONFIG_FIELD}={STALENESS_WARN if allow_stale else STALENESS_FAIL}"
-    )
+    policy = StalenessPolicy.WARN if allow_stale else StalenessPolicy.FAIL
+    return f"{STALENESS_CONFIG_FIELD}={policy.value}"
 
 
 def content_db_staleness_flag_overrides(allow_stale: bool) -> list[str]:

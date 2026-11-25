@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from automated_security_helper.cli.mcp.error_types import McpErrorType
 import pytest
 from mcp.server.mcpserver import Context
 
@@ -30,7 +31,6 @@ from automated_security_helper.cli.mcp.http_sessions import (
     HttpCaller,
 )
 from automated_security_helper.cli.mcp.session_identity import (
-    SESSION_IDENTITY_REQUIRED,
     UNIDENTIFIED_SESSION_ID,
     session_identity_refusal,
 )
@@ -49,7 +49,7 @@ def _sdk_context_carrying(caller: HttpCaller) -> Context:
 def _refusal(ctx: object) -> dict:
     refusal = session_identity_refusal(UNIDENTIFIED_SESSION_ID, "clear_source", ctx=ctx)
     assert refusal is not None
-    assert refusal["error_type"] == SESSION_IDENTITY_REQUIRED
+    assert refusal["error_type"] == McpErrorType.SESSION_IDENTITY_REQUIRED.value
     return refusal
 
 

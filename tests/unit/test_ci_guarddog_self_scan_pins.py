@@ -29,16 +29,21 @@ What this checks
 ----------------
 * The self-scan config sets ``max_hits: 0`` for GuardDog.
 * Every GuardDog suppression (``threat-*`` and ``capability-*`` rule ids) in either
-  ``.ash`` config names one rule, one file and one line, so a new hit anywhere
-  else, even in the same file, is still reported.
-* Every such pin names a line that holds at least one of the markers for its rule
-  id. A rule id with no row in ``_RULE_LINE_MARKERS`` fails, so the first pin for a
-  new rule adds its row.
-* The two configs agree on their GuardDog suppressions: every pin in the alpha config
-  is also in ``.ash/.ash.yaml``, and every pin only ``.ash/.ash.yaml`` holds sits under
-  a path the alpha config excludes from GuardDog, where a pin could never match. The
-  self-scan reads only the alpha config; ``.ash/.ash.yaml`` keeps the full set for a
-  scan that lists the GuardDog module there without the exclusion.
+  ``.ash`` config names one rule, one file, and either one line or one symbol, so a
+  new hit anywhere else, even in the same file, is still reported.
+* Every line pin names a line, and every symbol entry a definition span, that holds
+  at least one of the markers for its rule id. A rule id with no row in
+  ``_RULE_LINE_MARKERS`` fails, so the first entry for a new rule adds its row.
+* The two configs agree on their GuardDog suppressions: every entry in the alpha
+  config is also in ``.ash/.ash.yaml``, and every entry only ``.ash/.ash.yaml``
+  holds sits under a path the alpha config excludes from GuardDog, where an entry
+  could never match. The self-scan reads only the alpha config; ``.ash/.ash.yaml``
+  keeps the full set for a scan that lists the GuardDog module there without the
+  exclusion.
+
+The symbol spans come from tree-sitter, the optional ``symbols`` extra. Without it
+the span checks skip, unless ``ASH_REQUIRE_SYMBOLS_EXTRA`` is set, as CI sets it,
+in which case a missing extra is a failure rather than a skip.
 """
 
 import os

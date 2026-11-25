@@ -60,6 +60,7 @@ import html as html_escape
 import re
 from typing import Any, Dict, List, Optional, Sequence, TYPE_CHECKING
 
+from automated_security_helper.core.enums import ScannerStatus
 from automated_security_helper.models.workspace import (
     ProjectRunStatus,
     SkippedProjectReason,
@@ -247,13 +248,15 @@ def workspace_project_rows(model: "AshAggregatedResults") -> List[Dict[str, Any]
             # Read from the text alone it fell through to PASSED; read after the
             # skip_reason arm, a FAILED project that also carried a skip reason
             # read SKIPPED.
-            result = "FAILED"
+            verdict = ScannerStatus.FAILED
+            result = verdict.value
         elif project.status == ProjectRunStatus.SKIPPED:
             # A SKIPPED project was never scanned: its counts are zero because
             # nothing ran, not because nothing was found. The status decides
             # ahead of the error text, so a skipped project that also carries an
             # error text reads SKIPPED, as workspace_exit_code reads it.
-            result = f"SKIPPED ({reason})" if reason else "SKIPPED"
+            verdict = ScannerStatus.SKIPPED
+            result = f"{verdict.value} ({reason})" if reason else verdict.value
         elif read_as_skip:
             # Fallbacks for a record whose status does not say: the text fields.
             # A COMPLETED record that carries a skip reason is read by its
@@ -262,9 +265,11 @@ def workspace_project_rows(model: "AshAggregatedResults") -> List[Dict[str, Any]
             # threshold or its scan is incomplete, so a row that read SKIPPED
             # for it would hide what the run fails for. The arms below then
             # give it FAILED.
-            result = f"SKIPPED ({reason})"
+            verdict = ScannerStatus.SKIPPED
+            result = f"{verdict.value} ({reason})"
         elif project.error:
-            result = "FAILED"
+            verdict = ScannerStatus.FAILED
+            result = verdict.value
         elif project.scan_incomplete:
             # Ahead of the threshold arm, in the order workspace_exit_code reads a
             # project (incomplete before findings, as a single-directory scan
@@ -276,15 +281,16 @@ def workspace_project_rows(model: "AshAggregatedResults") -> List[Dict[str, Any]
             # workspace_exit_code failed the run for that same project. The table
             # was the optimistic half of two disagreeing verdicts.
             #
-            # The suffix is not decoration: the row's ``state`` below is derived
-            # from result.startswith("FAILED"), so a name that does not start
-            # with it changes the text and leaves the row green. Renaming this
-            # string means changing that predicate in the same edit.
-            result = "FAILED (incomplete)"
+            # The row's ``state`` below is derived from ``verdict``, the structured
+            # field, and not from this text, so the suffix is only for the reader.
+            verdict = ScannerStatus.FAILED
+            result = f"{verdict.value} (incomplete)"
         elif project.exceeds_threshold:
-            result = "FAILED"
+            verdict = ScannerStatus.FAILED
+            result = verdict.value
         else:
-            result = "PASSED"
+            verdict = ScannerStatus.PASSED
+            result = verdict.value
 
         label = project.display_label
         # ``display_label`` already carries the key when two projects share a
@@ -370,11 +376,11 @@ def workspace_project_rows(model: "AshAggregatedResults") -> List[Dict[str, Any]
         # a skip that is a successful no-op. Whether a skip is an error is the
         # reason's own answer (``SkippedProjectReason.is_error``), as the
         # headline's coverage count reads it, not the rendered text of the row.
-        if result.startswith("FAILED") or (
-            result.startswith("SKIPPED") and _skip_is_error(project.skip_reason)
+        if verdict is ScannerStatus.FAILED or (
+            verdict is ScannerStatus.SKIPPED and _skip_is_error(project.skip_reason)
         ):
             state = "failed"
-        elif result.startswith("SKIPPED"):
+        elif verdict is ScannerStatus.SKIPPED:
             state = "skipped"
         else:
             state = "passed"

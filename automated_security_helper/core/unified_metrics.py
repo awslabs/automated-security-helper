@@ -1265,7 +1265,7 @@ def _populate_scanner_results_from_unified_metrics(
             info=metrics.info,
         )
 
-        # Convert status from string to enum
+        # Convert status from string to enum (the ingest point for the row's text)
         try:
             status = ScannerStatus(metrics.status)
         except (ValueError, TypeError):

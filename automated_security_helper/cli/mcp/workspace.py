@@ -151,6 +151,7 @@ from typing import (
     Union,
 )
 
+from automated_security_helper.cli.mcp.error_types import McpErrorType
 from automated_security_helper.config.session_profiles import session_client_rules
 from automated_security_helper.cli.mcp.progress_monitor import (
     ResultsFileState,
@@ -172,7 +173,6 @@ from automated_security_helper.cli.mcp.sessions import (
     get_default_registry,
 )
 from automated_security_helper.cli.mcp.source_delivery import (
-    SOURCE_DELIVERY_BUSY,
     SourceDeliveryBusyError,
 )
 from automated_security_helper.cli.mcp.scan_target import (
@@ -222,6 +222,7 @@ from automated_security_helper.interactions.run_ash_scan import (
     incomplete_scanner_reason,
     resolve_workspace_execution_config,
 )
+from automated_security_helper.models.vocab import SeverityThreshold
 from automated_security_helper.models.workspace import (
     ProjectRunStatus,
     WorkspaceExitCode,
@@ -294,7 +295,7 @@ AGGREGATED_RESULTS_FILENAME = "ash_aggregated_results.json"
 #: Matches ``ScanRegistry.register_scan``'s own default. Reachable only for a
 #: hand-built plan, which ``workspace/plan.py`` documents can exist; every plan
 #: ``resolve_workspace`` produces gives each active project a threshold.
-_UNSTATED_SEVERITY_THRESHOLD = "MEDIUM"
+_UNSTATED_SEVERITY_THRESHOLD = SeverityThreshold.MEDIUM.value
 
 #: The key a workspace scan with no active project registers its output root
 #: under. A project key is never empty (``ProjectPlan.key`` has a minimum length
@@ -388,10 +389,6 @@ def _error_response(
     the server unstoppable mid-scan.
     """
     from automated_security_helper.cli.mcp_tools import (
-        CONFIG_ENV_NOT_RESOLVED,
-        CONFIG_INPUT_NOT_PERMITTED,
-        ENV_VALUE_IN_LONGER_STRING,
-        OUTPUT_DIR_NOT_USABLE,
         config_load_category,
     )
     from automated_security_helper.config.environment_record import (
@@ -413,13 +410,13 @@ def _error_response(
     if isinstance(error, WorkspaceSessionBusy):
         # Another scan of the session held its lock for the whole wait allowed;
         # nothing of this scan ran. Named so a client can retry on it.
-        response["error_type"] = "session_busy"
+        response["error_type"] = McpErrorType.SESSION_BUSY.value
     if isinstance(error, OutputDirectoryNotUsableError):
-        response["error_type"] = OUTPUT_DIR_NOT_USABLE
+        response["error_type"] = McpErrorType.OUTPUT_DIR_NOT_USABLE.value
     if _caused_by(error, EnvironmentValueInPath):
         # A profile whose environment value sits inside a longer string, under
         # the error_type select_profile answers the same refusal with.
-        response["error_type"] = ENV_VALUE_IN_LONGER_STRING
+        response["error_type"] = McpErrorType.ENV_VALUE_IN_LONGER_STRING.value
     if isinstance(error, WorkspacePathNotUtf8Error):
         # Its message names its paths as they are, and the response is JSON,
         # which cannot hold a lone surrogate: shown once, as a whole, on one
@@ -430,7 +427,7 @@ def _error_response(
         # A project config an MCP client delivered that reads from the
         # environment (config_sources.refuse_environment_in_a_delivered_file),
         # under the error_type every other tool reports it with.
-        response["error_type"] = CONFIG_ENV_NOT_RESOLVED
+        response["error_type"] = McpErrorType.CONFIG_ENV_NOT_RESOLVED.value
     elif _caused_by(error, ASHConfigInputNotPermittedError):
         # A workspace definition or policy the caller names, a discovered
         # workspace policy, or a project config, outside the directories the
@@ -439,7 +436,7 @@ def _error_response(
         # tools report it with: 3,
         # as run_ash_scan gives it and the CLI exits for a config whose chain
         # leaves its root. One refusal, one code, whichever tool refused it.
-        response["error_type"] = CONFIG_INPUT_NOT_PERMITTED
+        response["error_type"] = McpErrorType.CONFIG_INPUT_NOT_PERMITTED.value
         if exit_code is None:
             exit_code = int(WorkspaceExitCode.INVALID_PROJECT_CONFIG)
     resolved = int(exit_code) if exit_code is not None else _exit_code_for(error)
@@ -1068,7 +1065,6 @@ def _session_config_refusal(error: Exception, operation: str) -> Dict[str, Any]:
 
         return _bound_profile_unavailable(error, operation)
     from automated_security_helper.cli.mcp.sessions import (
-        SESSION_WORKSPACE_BUSY,
         SessionWorkspaceBusyError,
     )
 
@@ -1080,7 +1076,7 @@ def _session_config_refusal(error: Exception, operation: str) -> Dict[str, Any]:
         response = _error_response(
             error, operation, exit_code=REFUSED_INTERNAL_EXIT_CODE
         )
-        response["error_type"] = SESSION_WORKSPACE_BUSY
+        response["error_type"] = McpErrorType.SESSION_WORKSPACE_BUSY.value
         return response
     return _error_response(
         error,
@@ -3381,7 +3377,7 @@ async def mcp_scan_workspace(
             ),
             "scan_workspace",
         )
-        response["error_type"] = SOURCE_DELIVERY_BUSY
+        response["error_type"] = McpErrorType.SOURCE_DELIVERY_BUSY.value
         return response
     counted: Optional[Union[MCPSession, ScanCount]] = None
     if limit is not None:

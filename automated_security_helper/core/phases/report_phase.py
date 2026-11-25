@@ -404,9 +404,9 @@ class ReportPhase(EnginePhase):
         )
 
     @property
-    def phase_name(self) -> str:
+    def phase_name(self) -> ExecutionPhase:
         """Return the name of this phase."""
-        return "report"
+        return ExecutionPhase.REPORT
 
     def _reporters_that_name_their_files(self, reporters: List[Any]) -> List[Any]:
         """*reporters* without the ones whose file names cannot be read.
@@ -1021,7 +1021,7 @@ class ReportPhase(EnginePhase):
                                 message=error_msg,
                                 reporter=display_name,
                                 reporter_class=plugin_instance.__class__.__name__,
-                                phase="report",
+                                phase=ExecutionPhase.REPORT.value,
                             )
                         except Exception as event_error:
                             ASH_LOGGER.error(
@@ -1105,7 +1105,7 @@ class ReportPhase(EnginePhase):
                             message=f"Error in reporter {plugin_name}: {described}",
                             reporter=display_name,
                             reporter_class=plugin_instance.__class__.__name__,
-                            phase="report",
+                            phase=ExecutionPhase.REPORT.value,
                         )
                     except Exception as event_error:
                         ASH_LOGGER.error(

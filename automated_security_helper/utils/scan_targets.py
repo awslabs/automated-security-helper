@@ -14,7 +14,9 @@ to the task list ScanPhase builds.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, List, Literal, Tuple
+from typing import TYPE_CHECKING, List, Tuple
+
+from automated_security_helper.models.vocab import TargetType
 
 if TYPE_CHECKING:
     from automated_security_helper.base.plugin_context import PluginContext
@@ -22,12 +24,12 @@ if TYPE_CHECKING:
 
 def scan_targets(
     context: "PluginContext",
-) -> List[Tuple[Literal["source", "converted"], Path]]:
+) -> List[Tuple[TargetType, Path]]:
     """``(target_type, directory)`` for each tree ScanPhase hands a scanner."""
-    targets: List[Tuple[Literal["source", "converted"], Path]] = [
-        ("source", Path(context.source_dir))
+    targets: List[Tuple[TargetType, Path]] = [
+        (TargetType.SOURCE, Path(context.source_dir))
     ]
     work_dir = Path(context.work_dir)
     if work_dir.is_dir() and any(work_dir.rglob("*.*")):
-        targets.append(("converted", work_dir))
+        targets.append((TargetType.CONVERTED, work_dir))
     return targets

@@ -262,6 +262,10 @@ from automated_security_helper.config.ash_config import (
     resolve_env_references,
     sandbox_mode_in_document,
 )
+from automated_security_helper.config.patch_ops import (
+    CONFIG_SOURCE_OPS,
+    VALUE_WRITING_OPS,
+)
 from automated_security_helper.config.plugin_section_names import (
     PLUGIN_SEGMENT_KEYS,
     AmbiguousPluginSpellings,
@@ -344,7 +348,7 @@ SOURCE_KIND_DEDICATED = "dedicated"
 SOURCE_KIND_ASHRC = "ashrc"
 SOURCE_KIND_PYPROJECT = "pyproject"
 
-_PATCH_OPS = {"add", "remove", "replace", "test"}
+_PATCH_OPS = CONFIG_SOURCE_OPS
 _URL_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*://")
 # The `tool` and `ash` keys as TOML lets them be written: bare, or as a basic or
 # a literal string (`"tool"`, `'ash'`), which name the same key.
@@ -4464,7 +4468,7 @@ def _split_references(
             and 0 <= index < len(ops)
             and reference.path[2] == "value"
             and isinstance(ops[index], dict)
-            and ops[index].get("op") in ("add", "replace")
+            and ops[index].get("op") in VALUE_WRITING_OPS
         ):
             from_ops.append((index, tuple(reference.path[3:]), reference))
     return own, from_ops

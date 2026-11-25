@@ -5694,7 +5694,16 @@ def _outputs_known_file_names() -> Set[str]:
     import automated_security_helper.plugin_modules as plugin_modules
     from automated_security_helper.core.constants import ASH_CONFIG_FILE_NAMES
 
-    known = {"ash.log", "ash.log.jsonl", "ash.txt", *ASH_CONFIG_FILE_NAMES}
+    # ash.lock is the committed suppression lock (utils/ash_lock.py), an input
+    # ASH reads and ``ash suppress`` writes under .ash/, not a report.
+    known = {
+        "ash.log",
+        "ash.log.jsonl",
+        "ash.txt",
+        "ash.lock",
+        ".ash.lock",
+        *ASH_CONFIG_FILE_NAMES,
+    }
     for module_info in pkgutil.iter_modules(plugin_modules.__path__):
         module = importlib.import_module(
             f"{plugin_modules.__name__}.{module_info.name}"
@@ -11911,9 +11920,9 @@ def test_an_unquoted_off_sandbox_mode_is_read_as_the_mode_off(
     and so names no mode, and a mode that is not lowercase must exit 3.
     """
     assert_on_page(_SANDBOX_HOW_TO, _SANDBOX_MODES_SENTENCE)
-    from automated_security_helper.config.ash_config import SandboxConfig
+    from automated_security_helper.core.enums import SandboxMode
 
-    allowed = typing.get_args(SandboxConfig.model_fields["mode"].annotation)
+    allowed = [mode.value for mode in SandboxMode]
     listed = re.findall(r"`([^`]+)`", _SANDBOX_MODES_SENTENCE.split(", lowercase")[0])
     assert list(allowed) == listed, (allowed, listed)
 

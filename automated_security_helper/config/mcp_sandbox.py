@@ -114,8 +114,9 @@ import os
 import platform
 from dataclasses import dataclass
 from pathlib import Path, PurePath
-from typing import Any, Callable, List, Optional, Tuple
+from typing import Any, Callable, List, Optional, Tuple, Union
 
+from automated_security_helper.core.enums import DEFAULT_TRANSPORT, Transport
 from automated_security_helper.core.resource_management.error_handling import (
     ErrorCategory,
 )
@@ -170,10 +171,10 @@ CONFIG_DIR_NAME = "config"
 CLIENT_CONFIG_DIR_NAME = "client-config"
 
 #: Transports that carry callers the server does not otherwise trust.
-_NETWORKED_TRANSPORTS = frozenset({"streamable-http", "sse"})
+_NETWORKED_TRANSPORTS = frozenset(t for t in Transport if t.is_networked)
 
 #: Every value ``ASH_MCP_TRANSPORT`` may hold, once stripped and lower-cased.
-KNOWN_TRANSPORTS = frozenset({"stdio"}) | _NETWORKED_TRANSPORTS
+KNOWN_TRANSPORTS = frozenset(Transport)
 
 #: Which transport this process serves. The operator sets it in the environment
 #: before launching the server (``mcp_command`` only reads it); it is held there
@@ -195,14 +196,13 @@ KNOWN_TRANSPORTS = frozenset({"stdio"}) | _NETWORKED_TRANSPORTS
 #: different mechanism from them.
 ASH_MCP_TRANSPORT_ENV = "ASH_MCP_TRANSPORT"
 
-#: What an unset ``ASH_MCP_TRANSPORT`` means. stdio, deliberately, so that
-#: importing this module cannot tighten behavior for an in-process caller that is
-#: not a server at all -- a unit test, or a library consumer calling the tool
-#: functions directly.
-DEFAULT_TRANSPORT = "stdio"
+# What an unset ``ASH_MCP_TRANSPORT`` means is ``DEFAULT_TRANSPORT`` (imported from
+# ``core.enums``). stdio, deliberately, so that importing this module cannot
+# tighten behavior for an in-process caller that is not a server at all -- a unit
+# test, or a library consumer calling the tool functions directly.
 
 
-def set_server_transport(name: str) -> None:
+def set_server_transport(name: Union[Transport, str]) -> None:
     """Record which transport this process serves, for a test or an operator tool.
 
     Nothing in the server calls it: ``mcp_command`` only reads
@@ -211,9 +211,16 @@ def set_server_transport(name: str) -> None:
     sets the variable and nothing else, so a process that calls it leaves every
     later call evaluated under that transport; a test undoes it with its own
     environment fixture.
+
+    Raises:
+        ValueError: when *name* is None. ``str(None)`` would be written as the
+            text ``"None"``, which names no transport and so reads as networked.
     """
 
-    set_environ(ASH_MCP_TRANSPORT_ENV, name)
+    if name is None:
+        raise ValueError("set_server_transport needs a transport, not None")
+    text = name.value if isinstance(name, Transport) else str(name)
+    set_environ(ASH_MCP_TRANSPORT_ENV, text)
 
 
 def get_server_transport() -> str:
@@ -224,7 +231,7 @@ def get_server_transport() -> str:
     """
 
     return (os.environ.get(ASH_MCP_TRANSPORT_ENV) or "").strip().lower() or (
-        DEFAULT_TRANSPORT
+        DEFAULT_TRANSPORT.value
     )
 
 
@@ -239,13 +246,18 @@ def transport_is_networked() -> bool:
     (:func:`unknown_transport_override`).
     """
 
-    return get_server_transport() != DEFAULT_TRANSPORT
+    transport = Transport.parse(get_server_transport())
+    # An unknown spelling (``None``) is networked, the stricter reading of a typo.
+    # Asked of the transport itself, not of "is it the default": the default is
+    # what an unset variable means, and a change of it must not change what
+    # counts as trusted.
+    return transport is None or transport.is_networked
 
 
 def unknown_transport_override() -> Optional[str]:
     """The raw ``ASH_MCP_TRANSPORT`` value when it names no known transport."""
 
-    if get_server_transport() in KNOWN_TRANSPORTS:
+    if Transport.parse(get_server_transport()) in KNOWN_TRANSPORTS:
         return None
     return os.environ.get(ASH_MCP_TRANSPORT_ENV)
 

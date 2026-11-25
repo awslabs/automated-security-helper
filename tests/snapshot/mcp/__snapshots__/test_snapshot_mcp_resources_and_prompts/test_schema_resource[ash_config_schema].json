@@ -6588,27 +6588,9 @@
           "type": "array"
         },
         "mode": {
-          "anyOf": [
-            {
-              "enum": [
-                "off",
-                "auto",
-                "bwrap",
-                "firejail",
-                "landlock",
-                "sandbox-exec"
-              ],
-              "type": "string"
-            },
-            {
-              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
-              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
-              "type": "string"
-            }
-          ],
+          "$ref": "#/$defs/SandboxMode",
           "default": "off",
-          "description": "How scanner subprocesses are confined. 'off' runs them as plain subprocesses. 'auto' uses the best sandbox available (Linux: bwrap, then firejail, then landlock; macOS: sandbox-exec). Any other value requires that backend. A scanner that cannot be sandboxed as requested is recorded MISSING with the reason; it is never run unsandboxed. A mode that --sandbox, ASH_CONFIG or the operator's config file sets is a floor: a config file inside a git checkout or the scanned directory cannot turn it off or switch backends. Not applied in container mode, where the container is the boundary; ASH logs a warning when it is set there.",
-          "title": "Mode"
+          "description": "How scanner subprocesses are confined. 'off' runs them as plain subprocesses. 'auto' uses the best sandbox available (Linux: bwrap, then firejail, then landlock; macOS: sandbox-exec). Any other value requires that backend. A scanner that cannot be sandboxed as requested is recorded MISSING with the reason; it is never run unsandboxed. A mode that --sandbox, ASH_CONFIG or the operator's config file sets is a floor: a config file inside a git checkout or the scanned directory cannot turn it off or switch backends. Not applied in container mode, where the container is the boundary; ASH logs a warning when it is set there."
         },
         "network_scanners": {
           "anyOf": [
@@ -6638,6 +6620,30 @@
       },
       "title": "SandboxConfig",
       "type": "object"
+    },
+    "SandboxMode": {
+      "anyOf": [
+        {
+          "description": "How scanner subprocesses are confined. See docs/content/docs/scanner-sandbox.md.",
+          "enum": [
+            "off",
+            "auto",
+            "bwrap",
+            "firejail",
+            "landlock",
+            "sandbox-exec"
+          ],
+          "title": "SandboxMode",
+          "type": "string"
+        },
+        {
+          "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+          "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+          "type": "string"
+        }
+      ],
+      "description": "How scanner subprocesses are confined. See docs/content/docs/scanner-sandbox.md.",
+      "title": "SandboxMode"
     },
     "ScannerConfigSegment": {
       "additionalProperties": {

@@ -18,6 +18,7 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+from automated_security_helper.models.vocab import PluginKind, SeverityThresholdText
 from typing import (
     TYPE_CHECKING,
     Annotated,
@@ -34,11 +35,11 @@ from typing import (
     Set,
     Tuple,
     cast,
-    get_args,
 )
 
 import yaml
 import yaml.composer
+from pydantic_core import PydanticCustomError
 from automated_security_helper.utils.redacted_model import (
     env_resolved_scalar,
     RedactedSection,
@@ -75,7 +76,8 @@ from automated_security_helper.utils.unknown_keys import (
     UNKNOWN_ENTRY_KEYS_ARE_FATAL_BY_DEFAULT,
 )
 from automated_security_helper.core.exceptions import ASHConfigUnsetVariableError
-from automated_security_helper.core.enums import ExportFormat
+from automated_security_helper.core.enums import ExportFormat, SandboxMode
+from automated_security_helper.utils.content_databases import StalenessPolicy
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.models.core import (
     AshExclusion,
@@ -796,7 +798,6 @@ class _ConverterConfigSegmentBase(_PluginConfigSegment):
     model_config = ConfigDict(
         str_strip_whitespace=True,
         arbitrary_types_allowed=True,
-        use_enum_values=True,
         extra="allow",
     )
 
@@ -811,7 +812,6 @@ class _ScannerConfigSegmentBase(_PluginConfigSegment):
     model_config = ConfigDict(
         str_strip_whitespace=True,
         arbitrary_types_allowed=True,
-        use_enum_values=True,
         extra="allow",
     )
 
@@ -826,7 +826,6 @@ class _ReporterConfigSegmentBase(_PluginConfigSegment):
     model_config = ConfigDict(
         str_strip_whitespace=True,
         arbitrary_types_allowed=True,
-        use_enum_values=True,
         extra="allow",
     )
 
@@ -1515,7 +1514,7 @@ def sandbox_mode_from_yaml(value: Any) -> Any:
     if value is False:
         return "off"
     if value is True:
-        modes = get_args(SandboxConfig.model_fields["mode"].annotation)
+        modes = [mode.value for mode in SandboxMode]
         raise ValueError(
             "the value was read as a YAML boolean; write the mode in quotes "
             f"(the modes are {', '.join(modes)})"
@@ -1547,6 +1546,32 @@ SandboxModeName = Literal[
 ]
 
 
+def _sandbox_mode_name(value: Any) -> Any:
+    """``sandbox.mode``: a name becomes its ``SandboxMode``.
+
+    Config files are validated with strict=True, which accepts only a
+    SandboxMode instance for a SandboxMode field, so a name read from YAML would
+    be refused; converting here keeps the enum type. Anything that is no mode,
+    a boolean included, is refused with the error the field's Literal gave
+    before it was an enum (type ``literal_error``, the same text), so a refusal
+    reads as it always has. A name read from an environment reference arrives as
+    the loader's carrier ``str`` subclass and leaves as the plain member.
+    """
+    if isinstance(value, SandboxMode):
+        return value
+    if isinstance(value, str):
+        try:
+            return SandboxMode(str(value))
+        except ValueError:
+            pass
+    names = [f"'{mode.value}'" for mode in SandboxMode]
+    raise PydanticCustomError(
+        "literal_error",
+        "Input should be {expected}",
+        {"expected": f"{', '.join(names[:-1])} or {names[-1]}"},
+    )
+
+
 class SandboxConfig(RedactedSection):
     """OS-level sandboxing of scanner subprocesses. Off by default.
 
@@ -1557,7 +1582,8 @@ class SandboxConfig(RedactedSection):
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
     mode: Annotated[
-        SandboxModeName,
+        SandboxMode,
+        BeforeValidator(_sandbox_mode_name),
         Field(
             description=(
                 "How scanner subprocesses are confined. 'off' runs them as plain "
@@ -1572,7 +1598,16 @@ class SandboxConfig(RedactedSection):
                 "ASH logs a warning when it is set there."
             )
         ),
-    ] = "off"
+    ] = SandboxMode.off
+
+    @field_serializer("mode")
+    def _sandbox_mode_value(self, v: SandboxMode) -> str:
+        # The name, not the member, in every dump mode, for the reason
+        # ``AshConfig._output_format_values`` gives: a Python-mode dump of a member
+        # is refused by yaml.safe_dump and written by yaml.dump as a tag no later
+        # load reads. Read through SandboxMode so a mode assigned as a plain str
+        # (the model does not validate assignment) is written the same way.
+        return SandboxMode(v).value
 
     network_scanners: Annotated[
         Optional[List[str]],
@@ -1806,7 +1841,7 @@ class AshConfigGlobalSettingsSection(RedactedSection):
     )
 
     severity_threshold: Annotated[
-        Literal["ALL", "LOW", "MEDIUM", "HIGH", "CRITICAL"],
+        SeverityThresholdText,
         Field(
             description="Global minimum severity level to consider findings as failures across all scanners",
             # The default below is the process environment's. The schema says the
@@ -2169,6 +2204,10 @@ class ContentDbStalenessOverride(RedactedSection):
         ),
     ]
     policy: Annotated[
+        # A Literal, not StalenessPolicy: the config models validate strictly
+        # and the loader dumps them with yaml.safe_dump, which cannot write an
+        # enum member. The accepted set is pinned to the enum in
+        # tests/unit/vocab/test_vocab_drift_e7.py.
         Literal["fail", "warn"],
         Field(
             description="The policy this database is held to while the entry is in effect."
@@ -2681,6 +2720,7 @@ class AshConfig(RedactedSection):
     ] = SandboxConfig()
 
     content_db_staleness: Annotated[
+        # A Literal for the reason given on ContentDbStalenessOverride.policy.
         Literal["fail", "warn"],
         Field(
             description=(
@@ -2696,7 +2736,7 @@ class AshConfig(RedactedSection):
                 "precedence over this value; --no-allow-stale-content-db sets 'fail'."
             )
         ),
-    ] = "fail"
+    ] = StalenessPolicy.FAIL.value
 
     content_db_staleness_overrides: Annotated[
         List[ContentDbStalenessOverride],
@@ -3082,15 +3122,17 @@ class AshConfig(RedactedSection):
 
     def get_plugin_config(
         self,
-        plugin_type: Literal["converter", "scanner", "reporter"],
+        plugin_type: PluginKind | str,
         plugin_name: str,
     ):
-        match plugin_type:
-            case "scanner":
+        # An unknown kind has no section and reads as no config.
+        kind = PluginKind.coerce(plugin_type)
+        match kind:
+            case PluginKind.SCANNER:
                 item_dict = self.scanners.model_dump(by_alias=True)
-            case "reporter":
+            case PluginKind.REPORTER:
                 item_dict = self.reporters.model_dump(by_alias=True)
-            case "converter":
+            case PluginKind.CONVERTER:
                 item_dict = self.converters.model_dump(by_alias=True)
             case _:
                 item_dict = {}

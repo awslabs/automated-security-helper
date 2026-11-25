@@ -18,7 +18,6 @@ from typing import (
     Any,
     Iterable,
     List,
-    Literal,
     NoReturn,
     Optional,
     Tuple,
@@ -69,6 +68,7 @@ from automated_security_helper.core.constants import (
     is_blank_bin_path,
     usable_home,
 )
+from automated_security_helper.models.vocab import PluginKind
 from automated_security_helper.core.exceptions import (
     ASHConfigFileNotFoundError,
     ASHConfigValidationError,
@@ -192,8 +192,7 @@ DEPRECATED_TOOL_ALIASES: dict[str, str] = {
 
 #: The plugin types --plugin-type selects, each the plugin manager's own name for
 #: that kind of plugin.
-PluginKind = Literal["converter", "scanner", "reporter"]
-PLUGIN_KINDS: tuple[PluginKind, ...] = ("converter", "scanner", "reporter")
+PLUGIN_KINDS = PluginKind.values()
 
 
 def _plugin_kind(plugin_type: str) -> PluginKind:
@@ -203,10 +202,10 @@ def _plugin_kind(plugin_type: str) -> PluginKind:
     anything is selected, so a value reaching here is one of them; any other is a
     programming error, not a kind to guess.
     """
-    for kind in PLUGIN_KINDS:
-        if plugin_type == kind:
-            return kind
-    raise ValueError(f"not a plugin type: {plugin_type!r}")
+    kind = PluginKind.coerce(plugin_type)
+    if kind is None:
+        raise ValueError(f"not a plugin type: {plugin_type!r}")
+    return kind
 
 
 def _selection_key(name: str) -> str:
@@ -1043,7 +1042,7 @@ def install_dependencies(
         metavar="<path>",
     ),
     plugin_types: List[str] = typer.Option(
-        ["converter", "scanner", "reporter"],
+        list(PluginKind.values()),
         "--plugin-type",
         "-t",
         help="Plugin types to install dependencies for",

@@ -557,9 +557,9 @@ class ConvertPhase(EnginePhase):
     """Implementation of the Convert phase."""
 
     @property
-    def phase_name(self) -> str:
+    def phase_name(self) -> ExecutionPhase:
         """Return the name of this phase."""
-        return "convert"
+        return ExecutionPhase.CONVERT
 
     def _record_filtered_out_converters(
         self,
@@ -1377,7 +1377,7 @@ class ConvertPhase(EnginePhase):
                         message=f"Error in converter {row_key}: {failure}",
                         converter=row_key,
                         converter_class=plugin_instance.__class__.__name__,
-                        phase="convert",
+                        phase=ExecutionPhase.CONVERT.value,
                     )
                 except Exception as event_error:
                     ASH_LOGGER.error(

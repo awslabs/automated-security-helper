@@ -116,8 +116,7 @@ _RANDOM_CALL = (
 #: Entries scoped by ``symbol`` instead of a line range have no rows here: the
 #: resolver finds the definition wherever it moves, and
 #: tests/unit/config/test_symbol_migration_record.py holds each one to a symbol
-#: that resolves (the B603/B607 ferret_scanner entries and the docx generator's
-#: SECRET-HEX-HIGH-ENTROPY-STRING entry migrated there).
+#: that resolves.
 _RANGED_PIN_MARKERS: dict[tuple[str, str], list[_Marker]] = {
     # The three ferret_scanner.py bandit pins are gone: the import and the call carry
     # nosec comments, bandit reports nothing for either, and the pins excused nothing

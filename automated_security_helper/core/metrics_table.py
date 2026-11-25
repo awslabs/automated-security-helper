@@ -2,14 +2,16 @@
 
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Dict, Optional
 from rich.console import Console
 from rich.table import Table
 from rich.text import Text
 from rich.panel import Panel
 
 from automated_security_helper.config.environment_record import reads_as_reference
+from automated_security_helper.core.enums import ScannerStatus
 from automated_security_helper.models.asharp_model import AshAggregatedResults
+from automated_security_helper.models.vocab import SeverityThreshold
 from automated_security_helper.core.unified_metrics import (
     coverage_shortfalls,
     get_unified_scanner_metrics,
@@ -24,6 +26,15 @@ from automated_security_helper.utils.terminal_text import shown_not_obeyed
 from automated_security_helper.utils.log import escape_markup as escape
 import platform
 
+
+#: The rich color each scanner status is drawn in.
+_STATUS_COLOR: Dict[ScannerStatus, str] = {
+    ScannerStatus.PASSED: "green",
+    ScannerStatus.FAILED: "red",
+    ScannerStatus.ERROR: "red",
+    ScannerStatus.SKIPPED: "blue",
+    ScannerStatus.MISSING: "yellow",
+}
 
 #: The help panel printed above the metrics table. Its threshold sources are the
 #: three ScannerStatisticsCalculator.get_scanner_threshold_info produces, and its
@@ -149,7 +160,7 @@ def generate_metrics_table_from_unified_data(
                 # one, or a name it refuses such as ``${HOME}``. The same four
                 # characters would cut it mid-reference, so it gets a token too.
                 threshold_display = "REF"
-            elif metrics.threshold == "MEDIUM":
+            elif metrics.threshold == SeverityThreshold.MEDIUM:
                 threshold_display = "MED"
             else:
                 threshold_display = metrics.threshold[:4].upper()
@@ -171,32 +182,25 @@ def generate_metrics_table_from_unified_data(
             )
 
         # Format the result status based on terminal width
+        # The ingest point for the row's status text; None for a word that is no
+        # ScannerStatus (a results file read back can give one).
+        try:
+            row_status: Optional[ScannerStatus] = ScannerStatus(metrics.status)
+        except ValueError:
+            row_status = None
         if use_short_headers:
             # Use text-only format with color for small terminals
-            if metrics.status == "PASSED":
-                status_text = Text("PASSED", style="green bold")
-            elif metrics.status == "FAILED":
-                status_text = Text("FAILED", style="red bold")
-            elif metrics.status == "ERROR":
-                status_text = Text("ERROR", style="red bold")
-            elif metrics.status == "SKIPPED":
-                status_text = Text("SKIPPED", style="blue bold")
-            elif metrics.status == "MISSING":
-                status_text = Text("MISSING", style="yellow bold")
+            if row_status is not None:
+                status_text = Text(
+                    row_status.value, style=f"{_STATUS_COLOR[row_status]} bold"
+                )
             else:
                 status_text = Text(metrics.status, style="white bold")
         else:
             # Use emoji format for larger terminals
-            if metrics.status == "PASSED":
-                status_text = "[bold green]PASSED[/bold green]"
-            elif metrics.status == "FAILED":
-                status_text = "[bold red]FAILED[/bold red]"
-            elif metrics.status == "ERROR":
-                status_text = "[bold red]ERROR[/bold red]"
-            elif metrics.status == "SKIPPED":
-                status_text = "[bold blue]SKIPPED[/bold blue]"
-            elif metrics.status == "MISSING":
-                status_text = "[bold yellow]MISSING[/bold yellow]"
+            if row_status is not None:
+                color = _STATUS_COLOR[row_status]
+                status_text = f"[bold {color}]{row_status.value}[/bold {color}]"
             else:
                 # Not a status of ASH's: a results file read back gives it.
                 status_text = f"[bold white]{escape(metrics.status)}[/bold white]"

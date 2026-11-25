@@ -26,14 +26,17 @@ Declaring ``tool_type`` on the class, or tagging results, makes it known.
 
 from __future__ import annotations
 
-from typing import Any, Iterable, Optional, Set
+from typing import TYPE_CHECKING, Any, Iterable, Optional, Set
 
 from automated_security_helper.core.enums import ScannerToolType
 from automated_security_helper.utils.scanner_names import SCANNER_TOOL_TYPES
 
+if TYPE_CHECKING:
+    from automated_security_helper.base.scanner_facets import FacetState
+
 TOOL_TYPE_TAG_PREFIX = "tool_type::"
-SECRETS_TOOL_TYPE = "SECRETS"  # pragma: allowlist secret
-UNKNOWN_TOOL_TYPE = "UNKNOWN"
+SECRETS_TOOL_TYPE = ScannerToolType.SECRETS.value
+UNKNOWN_TOOL_TYPE = ScannerToolType.UNKNOWN.value
 
 #: The types a scanner can declare (``ScannerToolType``'s values), UNKNOWN left out.
 KNOWN_TOOL_TYPES = frozenset(member.value for member in ScannerToolType) - {
@@ -159,8 +162,8 @@ def result_tool_types(result: Any) -> Set[str]:
     return types
 
 
-def scanner_resource_id_state(scanner_name: Any) -> Optional[str]:
-    """The declared ``resource_id`` facet state (``"mapped"``, ``"n/a"``, ...)
+def scanner_resource_id_state(scanner_name: Any) -> Optional["FacetState"]:
+    """The declared ``resource_id`` facet state (a :class:`FacetState` member)
     of the loaded scanner class named ``scanner_name``, or None if unknown.
 
     Read from the class's ``facets`` declaration, found the way
@@ -172,6 +175,7 @@ def scanner_resource_id_state(scanner_name: Any) -> Optional[str]:
     if not isinstance(scanner_name, str) or not scanner_name:
         return None
     try:
+        from automated_security_helper.base.scanner_facets import FacetState
         from automated_security_helper.base.scanner_plugin import ScannerPluginBase
     except ImportError:
         return None
@@ -187,6 +191,6 @@ def scanner_resource_id_state(scanner_name: Any) -> Optional[str]:
             continue
         decl = getattr(getattr(cls, "facets", None), "resource_id", None)
         state = getattr(decl, "state", None)
-        if state is not None:
-            return str(getattr(state, "value", state))
+        if isinstance(state, FacetState):
+            return state
     return None

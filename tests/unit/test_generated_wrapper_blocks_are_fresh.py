@@ -84,8 +84,8 @@ def test_every_block_has_its_markers_in_its_file(generator):
         (
             "ash",
             "sh-subcommands",
-            ' plugin express"',
-            ' plugin"',
+            ' suppress express"',
+            ' suppress"',
         ),
         (
             "ash",
@@ -126,7 +126,7 @@ def test_regenerating_a_perturbed_copy_restores_the_committed_text(generator, tm
     root = _copy_of_the_wrappers(tmp_path, generator)
     path = root / "ash"
     text = path.read_text(encoding="utf-8")
-    path.write_text(text.replace(' plugin express"', ' plugin"'), encoding="utf-8")
+    path.write_text(text.replace(' suppress express"', ' suppress"'), encoding="utf-8")
     assert generator.check(root)
 
     written = generator.write(root)

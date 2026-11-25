@@ -60,6 +60,18 @@
   `scripts/generate_wrapper_tables.py` into marked blocks, and the lint job and a unit
   test fail when a block is stale. The generated text is the text the wrappers already
   held, so no option, exit code or message changes.
+- Module-level string constants that spelled a wire vocabulary are replaced by enum
+  members, so a caller that imported one of them by name must import the member
+  instead. The `error_type` spellings of the MCP tools (`CONFIG_INPUT_NOT_PERMITTED`,
+  `CONFIG_ENV_NOT_RESOLVED`, `CLONE_TOO_LARGE`, `SESSION_WORKSPACE_BUSY` and the other
+  names that `cli/mcp_tools.py`, `cli/mcp/source_delivery.py`, `cli/mcp/sessions.py` and
+  `cli/mcp/session_identity.py` exported) are now `McpErrorType` members in
+  `automated_security_helper/cli/mcp/error_types.py`; use `McpErrorType.X.value` for the
+  text. `DEFAULT_TRANSPORT` in `cli/mcp/sandbox.py` is `core.enums.DEFAULT_TRANSPORT`, a
+  `Transport` member. `STALENESS_FAIL`, `STALENESS_WARN` and `STALENESS_POLICIES` in
+  `utils/content_databases.py` are `StalenessPolicy` members, and the three
+  `*_CHECKPOINT` constants of `utils/inner_run_outcome.py` are `InnerRunRecordType`
+  members. The wire spellings themselves do not change.
 
 ### Deprecations
 
@@ -68,11 +80,13 @@
   Snyk Code, Trivy and the rest of the `ash_*_plugins` modules) are alpha scanners:
   the name says maturity, not provenance. Behavior is unchanged. The plugin pages moved
   from `docs/plugins/community/` to `docs/plugins/alpha/` (the old URLs redirect), the
-  repository's own scan config is now `.ash/.ash_alpha_plugins.yaml`, each scanner's
-  tier is declared in its manifest as `alpha`, and the CI config variant is
-  `alpha`. Two old spellings are accepted for one release and warn: the manifest tier
-  value `community` and the `Community plugins` / `Community scanners` column headings
-  the docs checks read. ASH 3.9.0 stops accepting them.
+  repository's own scan config is now `.ash/.ash_alpha_plugins.yaml`, the register's
+  tier value is `alpha_optin`, and the CI config variant is `alpha`. Two old spellings
+  are accepted for one release: the register tier value `community_optin` (it warns)
+  and the Dockerfile build argument `ASH_COMMUNITY_PLUGIN_MODULES`, now
+  `ASH_ALPHA_PLUGIN_MODULES` (a value given for the old name wins). The docs checks
+  refuse the old `Community plugins` / `Community scanners` column headings and name
+  the new one. ASH 3.9.0 stops accepting the old spellings.
 
 ### Fixes
 
@@ -88,6 +102,28 @@
 
 ### Features
 
+- **Symbol suppressions are bound to their file's content hash in `.ash.lock`.**
+  A symbol-scoped suppression whose file has no lock entry is refused when the config is
+  validated (`ash scan`, `ash config validate`), with a message that names the command to
+  run. When a locked file's bytes change, its symbol suppressions stop applying, their
+  findings return, and the scan prints one notice naming the file, the suppressions and
+  `ash suppress refresh`. The new `ash suppress add`, `refresh` and `verify` commands
+  write the suppression and its lock entry together, record a reviewed change, and fail
+  CI when the lock is out of date. Line-range suppressions are unchanged. This
+  repository's own symbol suppressions are locked in the same change. The lock is the
+  root dotfile `.ash.lock`; a lock still at `.ash/ash.lock` is read with a deprecation
+  warning (deprecated in v3.9, removed in v4.0) and rewritten to `.ash.lock` by
+  `ash suppress add` or `refresh`. See
+  [Lock a symbol suppression to its file](docs/content/how-to/suppress-findings.md#lock).
+- **ASFF findings of one secret carry one `ash/correlationId`.** ASH does not
+  deduplicate, so a secret that two scanners find is two findings with two Ids in
+  Security Hub, and nothing said they were about one secret. Each secret detection now
+  has a `ProductFields` value derived from `findings_scope`, the file, the start line and
+  the workspace project, without the scanner or the rule, so the findings of one secret
+  share it and can be filtered or grouped on it. Every finding is still sent, with the
+  `Id` it had. Only secret detections have the value: for another kind of finding the
+  place alone does not say which problem it is. In the `asff` and `aws-security-hub`
+  reporters.
 - **`default_scanners` sets the default scanners in a trusted config.** `only`
   replaces a mode's default selection in every mode and `add` extends a fixed one such as
   precommit's; a repository config, an MCP client or a patch cannot set it. The command
@@ -143,7 +179,7 @@
   `scanners.betterleaks.options.honor_tree_ignore_files`. The container image ships
   Betterleaks, pinned and digest-verified; `ash dependencies install --tool betterleaks`,
   with the module loaded, installs the same build locally. See
-  [Betterleaks Plugin](docs/content/docs/plugins/community/betterleaks-plugin.md).
+  [Betterleaks Plugin](docs/content/docs/plugins/alpha/betterleaks-plugin.md).
 - **Engine-scoped suppressions for ferret-scan** (`scope.engines.ferret-scan`): a
   suppression entry can now be narrowed to the confidence band ferret-scan reported
   (`confidence_level: low|medium|high`, or a list) and/or the detector that produced
@@ -560,7 +596,7 @@ The commits below also carry breaking-change notes, listed under BREAKING CHANGE
   gets an explicit `--config`, the operator's `config_file` (from
   `--config-overrides` or a config outside the scanned tree, for a file outside
   it) or an empty one, so a `.hadolint.yaml` in the scanned repository is not read.
-  See [hadolint Plugin](docs/content/docs/plugins/community/hadolint-plugin.md).
+  See [hadolint Plugin](docs/content/docs/plugins/alpha/hadolint-plugin.md).
 - **A GuardDog community plugin, `ash_guarddog_plugins`, pending licensing review.** It
   runs GuardDog 3.2.0
   over every PyPI, npm, Go, GitHub Action, RubyGems and crates package root,
@@ -578,7 +614,7 @@ The commits below also carry breaking-change notes, listed under BREAKING CHANGE
   GuardDog's own CLI in its interpreter with the limit set; from a config in the
   scanned tree it can only raise a rule's limit, since a lower one hides matches.
   See
-  [GuardDog Plugin](docs/content/docs/plugins/community/guarddog-plugin.md).
+  [GuardDog Plugin](docs/content/docs/plugins/alpha/guarddog-plugin.md).
 - **`--scanners` names the module to add for a community scanner that is not loaded.**
   `--scanners snyk-code` without `ash_snyk_plugins` listed is refused with a message
   naming the module, rather than reading as a typo; a selection in which other names
@@ -3296,7 +3332,7 @@ The commits below also carry breaking-change notes, listed under BREAKING CHANGE
   copy cannot be written, or when `TMPDIR` is inside the scanned or the output
   directory (a CI job that points `TMPDIR` into its workspace hits this on
   upgrade), snyk-code reports ERROR and the scan exits 1 as incomplete. See
-  [What ASH sends to Snyk](docs/content/docs/plugins/community/snyk-plugin.md#what-ash-sends-to-snyk).
+  [What ASH sends to Snyk](docs/content/docs/plugins/alpha/snyk-plugin.md#what-ash-sends-to-snyk).
 
 - **An ignore path names an archive member in the scanned tree's terms.** A
   member was extracted to `archive/<the archive's folded name>/<member>`, and
