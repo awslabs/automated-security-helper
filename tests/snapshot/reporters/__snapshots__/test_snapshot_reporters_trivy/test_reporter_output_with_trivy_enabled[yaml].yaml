@@ -719,6 +719,7 @@ sarif:
             id: CVE-2021-23337
           rule_index: 0
           version: 1
+        fix_available: true
         issue_severity: HIGH
         package_name: lodash
         package_path: node_modules/lodash
@@ -850,6 +851,7 @@ sarif:
             id: CVE-2026-4800
           rule_index: 1
           version: 1
+        fix_available: true
         issue_severity: HIGH
         package_name: lodash
         package_path: node_modules/lodash
@@ -981,6 +983,7 @@ sarif:
             id: CVE-2020-28500
           rule_index: 2
           version: 1
+        fix_available: true
         issue_severity: MEDIUM
         package_name: lodash
         package_path: node_modules/lodash
@@ -1112,6 +1115,7 @@ sarif:
             id: CVE-2025-13465
           rule_index: 3
           version: 1
+        fix_available: true
         issue_severity: MEDIUM
         package_name: lodash
         package_path: node_modules/lodash
@@ -1243,6 +1247,7 @@ sarif:
             id: CVE-2026-2950
           rule_index: 4
           version: 1
+        fix_available: true
         issue_severity: MEDIUM
         package_name: lodash
         package_path: node_modules/lodash
@@ -1374,6 +1379,7 @@ sarif:
             id: CVE-2018-18074
           rule_index: 5
           version: 1
+        fix_available: true
         issue_severity: HIGH
         package_name: requests
         package_version: 2.19.1
@@ -1504,6 +1510,7 @@ sarif:
             id: CVE-2023-32681
           rule_index: 6
           version: 1
+        fix_available: true
         issue_severity: MEDIUM
         package_name: requests
         package_version: 2.19.1
@@ -1634,6 +1641,7 @@ sarif:
             id: CVE-2024-35195
           rule_index: 7
           version: 1
+        fix_available: true
         issue_severity: MEDIUM
         package_name: requests
         package_version: 2.19.1
@@ -1764,6 +1772,7 @@ sarif:
             id: CVE-2024-47081
           rule_index: 8
           version: 1
+        fix_available: true
         issue_severity: MEDIUM
         package_name: requests
         package_version: 2.19.1
@@ -1894,6 +1903,7 @@ sarif:
             id: CVE-2026-25645
           rule_index: 9
           version: 1
+        fix_available: true
         issue_severity: MEDIUM
         package_name: requests
         package_version: 2.19.1
