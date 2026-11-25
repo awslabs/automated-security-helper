@@ -1,0 +1,103 @@
+{
+  "critical": [
+    {
+      "cwe_ids": [
+        "798"
+      ],
+      "description": "Hard-coded secrets are a risk if the code is shared.",
+      "documentation_url": "https://docs.bearer.com/reference/rules/javascript_lang_hardcoded_secret",
+      "filename": "src/app.js",
+      "fingerprint": "fp-critical-3",
+      "full_filename": "/work/src/app.js",
+      "id": "javascript_lang_hardcoded_secret",
+      "line_number": 3,
+      "sink": {
+        "column": {
+          "end": 30,
+          "start": 14
+        },
+        "content": "the sink",
+        "end": 3,
+        "start": 3
+      },
+      "snippet": "the code",
+      "source": {
+        "column": {
+          "end": 30,
+          "start": 14
+        },
+        "end": 3,
+        "start": 3
+      },
+      "title": "Usage of hard-coded secret"
+    }
+  ],
+  "high": [
+    {
+      "cwe_ids": [
+        "89"
+      ],
+      "description": "Unsanitized input in a query allows injection.",
+      "documentation_url": "https://docs.bearer.com/reference/rules/python_django_sql_injection",
+      "filename": "./app.py",
+      "fingerprint": "fp-high-12",
+      "full_filename": "/work/app.py",
+      "id": "python_django_sql_injection",
+      "line_number": 12,
+      "sink": {
+        "column": {
+          "end": 40,
+          "start": 9
+        },
+        "content": "the sink",
+        "end": 12,
+        "start": 12
+      },
+      "snippet": "the code",
+      "source": {
+        "column": {
+          "end": 20,
+          "start": 5
+        },
+        "end": 10,
+        "start": 10
+      },
+      "title": "Unsanitized user input in SQL query"
+    }
+  ],
+  "low": [
+    {
+      "cwe_ids": [
+        "327"
+      ],
+      "description": "MD5 is a weak hash.",
+      "documentation_url": "https://docs.bearer.com/reference/rules/ruby_lang_weak_hash_md5",
+      "filename": "lib/h.rb",
+      "fingerprint": "fp-low-7",
+      "full_filename": "/work/lib/h.rb",
+      "id": "ruby_lang_weak_hash_md5",
+      "line_number": 7,
+      "sink": {
+        "column": {
+          "end": 12,
+          "start": 1
+        },
+        "content": "the sink",
+        "end": 7,
+        "start": 7
+      },
+      "snippet": "the code",
+      "source": {
+        "column": {
+          "end": 12,
+          "start": 1
+        },
+        "end": 7,
+        "start": 7
+      },
+      "title": "Usage of weak hashing library (MD5)"
+    }
+  ],
+  "medium": [],
+  "warning": []
+}
