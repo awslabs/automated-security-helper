@@ -11815,9 +11815,11 @@ def test_while_a_scan_of_the_session_runs_delivery_is_refused_and_chunks_accepte
     """
     assert_on_page(
         MCP_SERVER,
-        "While a scan of a session runs, `clear_source`, `set_source_git`, and "
-        "`set_source_zip_finalize` are refused with `error_type` `source_delivery_busy`, "
-        "because each would remove or replace the tree the scan is reading.",
+        "While a scan of a session runs, `clear_source`, `set_source_git`, "
+        "`set_source_zip_finalize`, `set_source_image`, and "
+        "`set_source_image_archive_finalize` are refused with `error_type` "
+        "`source_delivery_busy`, because each would remove or replace the subject "
+        "the scan is reading.",
     )
     assert_on_page(
         MCP_SERVER, "Chunks are still accepted, because they land beside the tree."
@@ -11834,6 +11836,9 @@ def test_while_a_scan_of_the_session_runs_delivery_is_refused_and_chunks_accepte
         refused = {
             "set_source_zip_finalize": _delivery_finalize(data, "during"),
             "set_source_git": _delivery_tool("set_source_git", url=url),
+            "set_source_image": _delivery_tool(
+                "set_source_image", image_ref="registry.example.com/team/app:1"
+            ),
             "clear_source": _delivery_tool("clear_source"),
         }
 

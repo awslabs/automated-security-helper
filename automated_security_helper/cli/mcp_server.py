@@ -3115,8 +3115,8 @@ async def set_source_image(
     at scan start. Digest-pinned refs are preferred; a tag-only ref is resolved
     where an engine is present. run_ash_scan with no source_dir then scans this
     image; scanners that do not declare container_image targets are reported
-    SKIPPED, and until an image-capable scanner is wired the report carries one
-    informational note that the image was not scanned.
+    SKIPPED, and when nothing scanned the image the report carries one
+    informational note saying so.
 
     A later set_source_git or set_source_zip_finalize replaces the subject with
     the delivered tree (the latest delivery wins), and a later set_source_image
