@@ -74,14 +74,23 @@ from typing import Annotated, Any, ClassVar, Dict, List, Literal, Optional, Set
 
 from pydantic import AnyUrl, Field, model_validator
 
+from automated_security_helper.base import scanner_operational_facets as opsf
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.plugin_context import PluginContext
+from automated_security_helper.base.scanner_facets import (
+    FacetDecl,
+    FacetState,
+    ScannerFacets,
+)
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
 )
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
-from automated_security_helper.core.exceptions import ScannerError
+from automated_security_helper.core.exceptions import (
+    ScannerError,
+    ToolNotProvisionableError,
+)
 from automated_security_helper.models.core import IgnorePathWithReason, ToolArgs
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.schemas.sarif_schema_model import (
@@ -93,6 +102,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
 )
 from automated_security_helper.utils.download_utils import (
     pinned_tool_install_commands,
+    refusing_install_command,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
@@ -114,6 +124,13 @@ MAX_SAMPLE_BYTES = 256 * 1024 * 1024
 #: ATT&CK or MBC. See "Severity" in the module docstring.
 MAPPED_SEVERITY = ("LOW", "note")
 UNMAPPED_SEVERITY = ("INFO", "none")
+
+#: Why ``ash dependencies install`` cannot fetch capa yet.
+NO_PIN_REASON = (
+    "capa has no pinned release asset in ASH's download table yet, so ASH cannot "
+    "install it. Install capa v10 or newer from "
+    "https://github.com/mandiant/capa/releases and put it on PATH."
+)
 
 #: Why a capa run produced no analysis, by exit code (capa/main.py).
 CAPA_EXIT_MEANINGS: Dict[int, str] = {
@@ -255,6 +272,197 @@ class CapaScanner(ScannerPluginBase[CapaScannerConfig]):
     # grants wait for the sandbox grant gates; capa needs neither.
     sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements()
 
+    #: The facets register row (base/scanner_facets.py). Declaration only: no
+    #: behavior changes. Native fields name capa's own JSON (fixtures in
+    #: tests/test_data/scanners/capa/captured), which this adapter converts to SARIF.
+    facets: ClassVar[ScannerFacets] = ScannerFacets(
+        rule_id=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='rules.<name>.meta."name" (the "rules" key)',
+        ),
+        severity=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="(no native severity) LOW/note when rules.<name>.meta "
+            '"attack" or "mbc" is non-empty, else INFO/none, written by '
+            "convert_capa_document",
+        ),
+        file_path=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='meta."sample"."path" (the analyzed file); the adapter '
+            "writes the argv spelling as artifactLocation.uri",
+        ),
+        line_range=FacetDecl(
+            state=FacetState.NA,
+            reason="a compiled program has no source lines; the adapter writes a "
+            "constant startLine 1 and keeps the match addresses in properties",
+        ),
+        column=FacetDecl(
+            state=FacetState.NA,
+            reason="a compiled program has no source columns",
+        ),
+        message=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='rules.<name>.meta "name" and "namespace", assembled '
+            "with the match count and the ATT&CK/MBC ids into the result text",
+        ),
+        resource_id=FacetDecl(
+            state=FacetState.NA,
+            reason="a capability belongs to an executable file, not a deployable "
+            "resource; the file is the location",
+        ),
+        resource_type=FacetDecl(
+            state=FacetState.NA,
+            reason="a capability belongs to an executable file, not a deployable "
+            "resource",
+        ),
+        package_name=FacetDecl(
+            state=FacetState.NA,
+            reason="capa reports no package identity",
+        ),
+        package_version=FacetDecl(
+            state=FacetState.NA,
+            reason="capa reports no package identity",
+        ),
+        package_path=FacetDecl(
+            state=FacetState.NA,
+            reason="capa reports no package identity",
+        ),
+        taxonomy_cve=FacetDecl(
+            state=FacetState.NA,
+            reason="capabilities carry no CVE taxonomy",
+        ),
+        taxonomy_cwe=FacetDecl(
+            state=FacetState.NA,
+            reason="capa maps rules to ATT&CK and MBC, not CWE; the ids go to "
+            "properties attack_ids and mbc_ids",
+        ),
+        fingerprints=FacetDecl(
+            state=FacetState.NA,
+            reason="capa emits no per-result fingerprint (only per-sample hashes "
+            "in meta.sample)",
+        ),
+        fix_available=FacetDecl(
+            state=FacetState.NA,
+            reason="a capability is not a defect with a fix",
+        ),
+        remediation_text=FacetDecl(
+            state=FacetState.NA,
+            reason="capa rules carry no remediation text",
+        ),
+        snippet=FacetDecl(
+            state=FacetState.NA,
+            reason="a compiled program has no source snippet",
+        ),
+        references=FacetDecl(
+            state=FacetState.DROPPED,
+            native_field='rules.<name>.meta."references" (a list, empty in the '
+            "captured rules)",
+            reason="the adapter does not carry rule references into the SARIF",
+        ),
+        tags=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result properties "tags" (adapter-written: capability)',
+        ),
+        extras=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result properties "issue_severity", "match_count", '
+            '"match_addresses", "namespace", "attack_ids", "mbc_ids" written by '
+            "the adapter",
+        ),
+    )
+
+    #: The operational register row (base/scanner_operational_facets.py),
+    #: checked against the production declarations it mirrors by
+    #: tests/unit/plugin_modules/test_scanner_operational_facets_consistency.py.
+    #: capa has no pin in utils/tool_downloads.py yet, so the runtime is declared
+    #: user-installed; the pin is a central edit (see the PR body).
+    operational_facets: ClassVar[opsf.ScannerOperationalFacets] = (
+        opsf.ScannerOperationalFacets(
+            scanner_name="capa",
+            network=opsf.NetworkFacet(
+                fetch_kind=opsf.FetchKind.NONE,
+                fetches=(),
+                prefetch=(),
+                offline_outcome=opsf.OfflineOutcome.UNCHANGED,
+                offline_strategy=OfflineStrategy.BUNDLED,
+                sandbox_network=opsf.SandboxNetwork.NONE,
+                source=(
+                    "capa_scanner.py offline_strategy, sandbox_requirements; module "
+                    "header: rules and signatures are embedded and ASH passes no -r or -s"
+                ),
+            ),
+            output=opsf.OutputFacet(
+                native_formats=(opsf.OutputFormat.TOOL_JSON,),
+                side_reports=(),
+                non_finding_artifacts=(),
+                note="capa's ResultDocument JSON on stdout, converted to SARIF",
+            ),
+            targets=opsf.TargetsFacet(
+                kinds=(opsf.TargetKind.SOURCE_CODE,),
+                tool_type=ScannerToolType.SAST,
+                selection=(
+                    "PE and ELF files in the scan set, chosen by their first bytes "
+                    "(is_supported_executable); one capa run per file"
+                ),
+                covers_note="a community scanner; it declares no covers display string",
+                tool_type_note="the nearest target kind: the register has no "
+                "executable-binary kind, and capa analyzes compiled programs",
+            ),
+            runtime=opsf.RuntimeFacet(
+                kind=opsf.RuntimeKind.USER_INSTALLED_CLI,
+                external_programs=(),
+                invocations=opsf.Invocations.PER_TARGET,
+                invocation_note="capa analyzes exactly one input file per run",
+                python_only=False,
+                use_uv_tool=False,
+            ),
+            platforms=opsf.PlatformsFacet(
+                provisionable=(),
+                note="no pin in utils/tool_downloads.py yet, so ASH provisions "
+                "nothing; the install command refuses with that reason",
+            ),
+            severity=opsf.SeverityFacet(
+                severity_class=opsf.SeverityClass.DERIVED,
+                note="LOW when the rule maps to ATT&CK or MBC, else INFO; never higher",
+            ),
+            silencing=opsf.SilencingFacet(
+                tool_side=(),
+                none_reason="no tool-side silencing surface was surveyed for capa; "
+                "ASH suppressions are the surface this register records",
+            ),
+            identity=opsf.IdentityFacet(
+                fingerprint_class=opsf.FingerprintClass.POSITIONAL_ONLY,
+                note="no native fingerprint; identity is the file and the rule",
+            ),
+            extensibility=opsf.ExtensibilityFacet(
+                custom_rules=opsf.CustomRules.NONE,
+                env_prefixes=(),
+                options_surface="no scanner options; ASH passes no -r or -s",
+            ),
+            exit_codes=opsf.ExitCodesFacet(
+                success_exit_codes=(0,),
+                semantics="0 is success; capa's 10 to 26 mean the file was not "
+                "analyzed, so that file is a failed target, not a finding",
+            ),
+            provenance=opsf.ProvenanceFacet(
+                tier=opsf.Tier.COMMUNITY_OPTIN,
+                source=opsf.ProvenanceSource.USER_INSTALLED,
+                selection_surfaces=("ash_capa_plugins in ash_plugin_modules",),
+                upstream_license="Apache-2.0 (capa's repository LICENSE.txt; not in "
+                "THIRD_PARTY_LICENSES until the pin lands)",
+            ),
+            prerequisites=opsf.PrerequisitesFacet(
+                kinds=(opsf.Prerequisite.NONE,),
+                note="needs at least one PE or ELF file in the scan set",
+            ),
+        )
+    )
+
+    # capa's stderr can quote the analyzed file, so the base class keeps it out of
+    # ``errors`` and out of the failure text. It stays in the log file.
+    quote_tool_stderr: ClassVar[bool] = False
+    unquoted_failure_tool_name: ClassVar[Optional[str]] = "capa"
+
     def model_post_init(self, context: Any) -> None:
         if self.config is None:
             self.config = CapaScannerConfig()
@@ -265,8 +473,22 @@ class CapaScanner(ScannerPluginBase[CapaScannerConfig]):
 
     @model_validator(mode="after")
     def setup_custom_install_commands(self) -> "CapaScanner":
-        """Install capa from the pinned release asset (see tool_downloads)."""
-        self.custom_install_commands.update(pinned_tool_install_commands("capa"))
+        """Install capa from the pinned release asset (see tool_downloads).
+
+        The pin lives in ``utils/tool_downloads.py``, a shared file this module does
+        not edit. Until the pin is registered there, the install command refuses
+        with a reason instead of raising, so constructing the scanner (which a scan
+        does) never fails and ``ash dependencies install`` reports why nothing was
+        installed.
+        """
+        try:
+            self.custom_install_commands.update(pinned_tool_install_commands("capa"))
+        except ToolNotProvisionableError:
+            refusal = refusing_install_command(NO_PIN_REASON)
+            for platform in ("linux", "darwin", "windows"):
+                self.custom_install_commands.setdefault(platform, {})["amd64"] = [
+                    refusal
+                ]
         return self
 
     def _execute_scan(
@@ -385,12 +607,6 @@ class CapaScanner(ScannerPluginBase[CapaScannerConfig]):
             ],
         )
 
-    def _process_command_response(self, response: Dict[str, Any]) -> None:
-        """Keep capa's stderr, which can quote the analyzed file, out of ``errors``."""
-        super()._process_command_response(
-            {key: value for key, value in response.items() if key != "stderr"}
-        )
-
     def _run_one(
         self, argv: List[str], results_dir: Path, deadline: Optional[float]
     ) -> Dict[str, Any]:
@@ -470,6 +686,10 @@ class CapaScanner(ScannerPluginBase[CapaScannerConfig]):
             for path in files:
                 spelled = self._argv_path(path)
                 final_args = self._argv(spelled)
+                # The base class folds every run's code into ``exit_code`` (the
+                # worst wins), so a file read after an earlier failure would
+                # inherit that failure. Reset it so ``code`` is this run's alone.
+                self.exit_code = 0
                 response = self._run_one(final_args, results_dir, deadline)
                 if response.get("timed_out"):
                     self._post_scan(target=target, target_type=target_type)
@@ -485,8 +705,9 @@ class CapaScanner(ScannerPluginBase[CapaScannerConfig]):
                 results.extend(self._results_of(response, spelled))
             self._post_scan(target=target, target_type=target_type)
 
-            if self.targets_failed == len(files):
-                self.exit_code = 1
+            # A file capa could not analyze is a failed target, named in ``errors``;
+            # the scan itself fails only when no file was analyzed at all.
+            self.exit_code = 1 if self.targets_failed == len(files) else 0
 
             report = self._empty_report()
             report.runs[0].results = [Result.model_validate(r) for r in results]
@@ -536,12 +757,7 @@ class CapaScanner(ScannerPluginBase[CapaScannerConfig]):
             return False
         found = find_executable(self.command or "capa")
         if not found:
-            ASH_LOGGER.warning(
-                "capa executable not found in PATH. Install it with "
-                "`ash dependencies install --config-overrides "
-                "'ash_plugin_modules+=[\"automated_security_helper.plugin_modules."
-                "ash_capa_plugins\"]' --tool capa`."
-            )
+            ASH_LOGGER.warning(f"capa executable not found in PATH. {NO_PIN_REASON}")
         return found is not None
 
 

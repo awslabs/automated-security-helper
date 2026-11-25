@@ -3,21 +3,29 @@
 
 """CapaScanner: capability conversion, target selection and failure handling.
 
-The capa documents below are written by hand to the shape of
-``capa.render.result_document.ResultDocument`` (``meta`` and ``rules``; a rule is
-``{"meta", "source", "matches": [[address, match], ...]}``) read from capa's source at
-v10.0.0. They are not captures of a real run: no capa binary was run when these tests
-were written. scan() runs with the subprocess replaced by a fake, so the tests need no
-binary and run on every platform.
+Two kinds of document are used. ``TestCapturedReports`` reads real capa 10.0.0 output
+from ``tests/test_data/scanners/capa/captured`` (see its README). The hand-written
+documents elsewhere follow the shape of ``capa.render.result_document.ResultDocument``
+(``meta`` and ``rules``) and exercise shapes a capture does not hold. scan() runs with
+the subprocess replaced by a fake, so the tests need no binary and run on every
+platform.
 """
 
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import pytest
+
+from automated_security_helper.base.scanner_facets import FacetState, ScannerFacets
+from automated_security_helper.utils import tool_downloads
+from automated_security_helper.utils.sandbox.policy import (
+    SandboxRequirements,
+    build_scanner_policy,
+)
 
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.default_config import get_default_config
@@ -34,6 +42,15 @@ from automated_security_helper.plugin_modules.ash_capa_plugins.capa_scanner impo
 )
 
 pytestmark = pytest.mark.unit
+
+_CAPTURED = (
+    Path(__file__).resolve().parents[3] / "test_data" / "scanners" / "capa" / "captured"
+)
+
+
+def _captured(name: str) -> Dict[str, Any]:
+    return json.loads((_CAPTURED / f"{name}.json").read_text())
+
 
 ELF = b"\x7fELF" + b"\x00" * 60
 PE = b"MZ" + b"\x00" * 62
@@ -103,7 +120,10 @@ class FakeCapa:
                 scanner.exit_code = -9
                 return {"timed_out": True}
             code = self.per_file_exit.get(command[-1], self.exit_code)
-            scanner.exit_code = code
+            # The real _run_subprocess folds each run's code into the accumulated
+            # one (the worst wins); a fake that overwrote it would hide a scan that
+            # reads the accumulated value as the current file's.
+            scanner.exit_code = scanner._worse_exit_code(scanner.exit_code, code)
             return {
                 "returncode": code,
                 "stdout": self.stdout if code == 0 else "",
@@ -265,12 +285,35 @@ class TestScan:
         assert {f[0] for f in _findings(report)} == {"create process", "get hostname"}
         assert any("win.exe" in e and "14" in e for e in scanner.errors)
 
+    def test_a_failure_on_an_early_file_does_not_fail_the_files_after_it(
+        self, tree, tmp_path, on_path, monkeypatch
+    ):
+        # bin/tool sorts first and fails; win.exe (exit 0) must still be read.
+        scanner = _scanner(tree, tmp_path)
+        report = _run(scanner, FakeCapa(per_file_exit={"bin/tool": 13}), monkeypatch)
+        assert scanner.targets_failed == 1
+        assert {f[0] for f in _findings(report)} == {"create process", "get hostname"}
+        assert not any("win.exe" in e for e in scanner.errors)
+        assert scanner.exit_code in scanner.success_exit_codes
+
     def test_stderr_is_not_copied_into_errors(
         self, tree, tmp_path, on_path, monkeypatch
     ):
+        # Through the base class's own response handling, which the fake bypasses.
         scanner = _scanner(tree, tmp_path)
-        _run(scanner, FakeCapa(exit_code=13), monkeypatch)
+        assert CapaScanner.quote_tool_stderr is False
+        scanner._process_command_response(
+            {"returncode": 13, "stderr": "stderr naming a file in the tree"}
+        )
         assert not any("stderr naming a file" in e for e in scanner.errors)
+
+    def test_the_failure_text_does_not_quote_stderr(self, tree, tmp_path):
+        scanner = _scanner(tree, tmp_path)
+        scanner.exit_code = 13
+        text = scanner._describe_scan_failure(
+            RuntimeError("boom stderr naming a file in the tree"), None
+        )
+        assert "stderr naming a file" not in text
 
     def test_every_target_failing_makes_the_scan_exit_nonzero(
         self, tree, tmp_path, on_path, monkeypatch
@@ -331,7 +374,109 @@ class TestDependencyCheck:
 
 
 class TestInstall:
-    def test_install_commands_cover_every_published_platform(self, tree, tmp_path):
+    def test_constructing_the_scanner_does_not_raise_without_a_pin(
+        self, tree, tmp_path
+    ):
+        # utils/tool_downloads.py has no capa pin yet; the install table is built
+        # on every construction, so it must refuse, not raise.
         scanner = _scanner(tree, tmp_path)
         platforms = set(scanner.custom_install_commands)
         assert {"linux", "darwin", "windows"} <= platforms
+
+    def test_an_unpinned_install_refuses_with_the_reason(self, tree, tmp_path):
+        scanner = _scanner(tree, tmp_path)
+        try:
+            tool_downloads_has_pin = bool(tool_downloads.supported_platforms("capa"))
+        except Exception:
+            tool_downloads_has_pin = False
+        if tool_downloads_has_pin:
+            pytest.skip("capa is pinned; the pinned install is tested by the pin")
+        command = scanner.custom_install_commands["linux"]["amd64"][0]
+        assert command.args[-1] == cs.NO_PIN_REASON
+        assert "github.com/mandiant/capa/releases" in cs.NO_PIN_REASON
+
+
+class TestCapturedReports:
+    """The pinned capa 10.0.0 JSON, captured (see the fixtures' README)."""
+
+    def test_mapped_rules_are_low_and_unmapped_are_info_over_a_real_report(self):
+        results = convert_capa_document(_captured("mapped"), "sample.elf")
+        by_rule = {r["ruleId"]: r for r in results}
+        # ATT&CK and MBC mapped, ATT&CK only (via mbc empty), MBC only, unmapped.
+        assert by_rule["encode data using XOR"]["properties"]["issue_severity"] == "LOW"
+        assert by_rule["get current user on Linux"]["level"] == "note"
+        assert by_rule["write file on Linux"]["properties"]["mbc_ids"] == ["C0052"]
+        assert by_rule["get password database entry on Linux"]["level"] == "none"
+        assert (
+            by_rule["get password database entry on Linux"]["properties"][
+                "issue_severity"
+            ]
+            == "INFO"
+        )
+        assert {r["properties"]["issue_severity"] for r in results} <= {"LOW", "INFO"}
+
+    def test_the_library_rule_in_the_capture_is_not_reported(self):
+        document = _captured("mapped")
+        assert document["rules"]["contain loop"]["meta"]["lib"] is True
+        names = {r["ruleId"] for r in convert_capa_document(document, "x")}
+        assert "contain loop" not in names
+        assert len(names) == len(document["rules"]) - 1
+
+    def test_match_counts_and_addresses_follow_the_capture(self):
+        document = _captured("mapped")
+        env = next(
+            r
+            for r in convert_capa_document(document, "x")
+            if r["ruleId"] == "query environment variable"
+        )
+        assert env["properties"]["match_count"] == 3
+        assert len(env["properties"]["match_addresses"]) == 3
+        assert env["properties"]["attack_ids"] == ["T1082"]
+
+    def test_the_smaller_capture_converts_to_mbc_only_lows(self):
+        results = convert_capa_document(_captured("positive"), "clean.elf")
+        assert {r["ruleId"] for r in results} == {
+            "write file on Linux",
+            "terminate process",
+        }
+        assert {r["level"] for r in results} == {"note"}
+
+    def test_scan_over_a_captured_report(self, tree, tmp_path, on_path, monkeypatch):
+        stdout = json.dumps(_captured("positive"))
+        report = _run(_scanner(tree, tmp_path), FakeCapa(stdout=stdout), monkeypatch)
+        assert {f[0] for f in _findings(report)} == {
+            "write file on Linux",
+            "terminate process",
+        }
+
+
+class TestFacetsDeclared:
+    def test_the_register_row_is_declared_and_names_the_scanner(self):
+        assert isinstance(CapaScanner.facets, ScannerFacets)
+        assert CapaScanner.operational_facets.scanner_name == "capa"
+        assert CapaScanner.operational_facets.exit_codes.success_exit_codes == (0,)
+        assert CapaScanner.facets.resource_id.state is FacetState.NA
+        assert CapaScanner.facets.resource_id.reason
+
+
+class TestSandboxRequirements:
+    def test_the_strict_default_is_declared(self):
+        assert CapaScanner.sandbox_requirements == SandboxRequirements()
+
+    def test_a_policy_built_from_it_has_no_network(self, tmp_path):
+        source = tmp_path / "src"
+        output = source / ".ash" / "ash_output"
+        output.mkdir(parents=True)
+        policy = build_scanner_policy(
+            "capa",
+            CapaScanner.sandbox_requirements,
+            argv0=sys.executable,
+            source_dir=source,
+            output_dir=output,
+            results_dir=output / "scanners" / "capa",
+            scan_target=source,
+            cwd=source,
+            offline=False,
+            network_scanners=None,
+        )
+        assert policy.network is False
