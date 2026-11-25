@@ -1,9 +1,51 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+"""The GitLab SAST report.
+
+What is relational here is what a finding's id and severity depend on: two
+findings that fell back to one legacy id are told apart by how many came before
+them with it, and a suppressed finding is graded Info whatever its own grade.
+Those are a projection of the run's drafts as a frame (:func:`_projection`), whose
+columns are:
+
+========================  =========  =============================================
+``i``                     Int64      the draft's position among the kept results
+``id``                    String     the id the result was given, before the
+                                     collision count
+``legacy``                Boolean    whether the id is the legacy rule-file-line
+                                     one, the only kind that is counted
+``suppressed``            Boolean    whether a suppression is in effect
+``severity``              String     the gate's grade, in GitLab's spelling; null
+                                     when there is none
+``occurrence``            Int64      how many drafts before this one, in the frame's
+                                     order, have the same legacy id; 0 for a
+                                     non-legacy draft
+``severity_out``          String     ``Info`` for a suppressed draft, else
+                                     ``severity``
+========================  =========  =============================================
+
+Every String column holds text through
+:func:`~automated_security_helper.utils.frame_text.wire`: an id can carry a rule
+or a scanner a lone surrogate, and polars strings are UTF-8.
+
+What stays Python is what is a document or an effect for one result, not a
+relation across results. A vulnerability is a nested JSON object assembled from
+the result's own SARIF tree (its locations, its properties dumped by alias, its
+message resolved against the rule descriptor, a raw dump of the result), and each
+of those reads is a walk of one pydantic object that may raise, which is why a
+result that cannot be transformed costs that result and not the report
+(:meth:`GitLabSASTReporter._draft_for` runs per result, inside its own guard). The
+suppression's justification is text taken from that one result; the scan section
+and coverage messages read the model's recorded state and go to the document as it
+was. A frame holds no such object, and a finding's hash id is a Python UUID seed,
+not an expression.
+"""
+
 import json
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Literal, Tuple, TYPE_CHECKING
+from typing import Any, Dict, List, Literal, Optional, Tuple, TYPE_CHECKING
 
 from automated_security_helper.models.flat_vulnerability import (
     recorded_artifact_path,
@@ -18,6 +60,8 @@ from automated_security_helper.utils.sarif_utils import (
 )
 
 if TYPE_CHECKING:
+    import polars as pl
+
     from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.base.options import ReporterOptionsBase
 from automated_security_helper.base.reporter_plugin import (
@@ -28,6 +72,7 @@ from automated_security_helper.base.reporter_plugin import (
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 
 from automated_security_helper.utils.error_text import error_text
+from automated_security_helper.utils.frame_text import unwire, wire
 from automated_security_helper.utils.get_ash_version import get_ash_version
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.sarif_rule_descriptors import (
@@ -68,6 +113,60 @@ _SECRET_RULE_PREFIX = "SECRET-"  # pragma: allowlist secret
 # Bumping it means checking the new schema against what build_sast_report emits,
 # because the version string is a claim about this file's output and not a preference.
 GITLAB_SAST_SCHEMA_VERSION = "15.2.2"
+
+
+@dataclass
+class _Draft:
+    """One transformed result, before the run decides its id and severity.
+
+    *vulnerability* holds every field in the document's order up to ``name``;
+    ``severity`` and ``solution`` are added after the projection, in that order.
+    """
+
+    vulnerability: Dict[str, Any]
+    #: The id the result was given: the shared one, else the legacy hash.
+    finding_id: str
+    #: Whether *finding_id* is the legacy one, which collisions are counted on.
+    legacy: bool
+    suppressed: bool
+    #: The gate's grade in GitLab's spelling; empty when there is none.
+    severity: str
+    #: The text for a suppressed finding's ``solution``.
+    solution: Optional[str]
+
+
+def _projection(drafts: List[_Draft]) -> "pl.DataFrame":
+    """*drafts* as a frame, with each one's collision count and final severity
+    (the columns are in the module docstring)."""
+    import polars as pl
+
+    frame = pl.DataFrame(
+        {
+            "i": list(range(len(drafts))),
+            "id": [wire(draft.finding_id) for draft in drafts],
+            "legacy": [draft.legacy for draft in drafts],
+            "suppressed": [draft.suppressed for draft in drafts],
+            "severity": [wire(draft.severity) or None for draft in drafts],
+        },
+        schema={
+            "i": pl.Int64,
+            "id": pl.String,
+            "legacy": pl.Boolean,
+            "suppressed": pl.Boolean,
+            "severity": pl.String,
+        },
+    )
+    return frame.with_columns(
+        pl.when(pl.col("legacy"))
+        .then(pl.int_range(pl.len()).over(["id", "legacy"]))
+        .otherwise(0)
+        .cast(pl.Int64)
+        .alias("occurrence"),
+        pl.when(pl.col("suppressed"))
+        .then(pl.lit("Info"))
+        .otherwise(pl.col("severity"))
+        .alias("severity_out"),
+    )
 
 
 class GitLabSASTReporterConfigOptions(ReporterOptionsBase):
@@ -149,14 +248,13 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
                 model, f"ASH could not read the SARIF results: {error_text(e)}"
             )
 
-        vulnerabilities: List[Dict[str, Any]] = []
+        drafts: List[_Draft] = []
         skipped_results = 0
         if all_results:
             shared_ids = shared_finding_ids(model, all_results)
             # Read once: the rule each result's message given by id is resolved
             # against, in the run and component the result sits in.
             descriptors = rule_descriptors_by_result(recorded_sarif)
-            legacy_ids_seen: Dict[str, int] = {}
             ASH_LOGGER.trace("Creating rule dict")
             for index, result in enumerate(all_results):
                 if is_not_a_finding(result):
@@ -168,7 +266,7 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
                 # alternative is enumerating the ways one result can be
                 # malformed, and missing one of them loses the run again.
                 try:
-                    vuln = self._vulnerability_for(
+                    draft = self._draft_for(
                         result,
                         model,
                         shared_ids[index],
@@ -181,13 +279,13 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
                         f"report, which could not be transformed: {error_text(e)}"
                     )
                     continue
-                if vuln is not None:
-                    if shared_ids[index] is None:
-                        self._distinct_legacy_id(vuln, legacy_ids_seen)
-                    vulnerabilities.append(vuln)
+                if draft is not None:
+                    drafts.append(draft)
 
         try:
-            return self._assemble_report(model, vulnerabilities, skipped_results)
+            return self._assemble_report(
+                model, self._vulnerabilities(drafts), skipped_results
+            )
         except Exception as e:
             ASH_LOGGER.error(f"Failed to create GitLab SAST report: {error_text(e)}")
             return self._failure_report(
@@ -195,10 +293,33 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
                 f"ASH could not assemble the GitLab SAST report: {error_text(e)}",
             )
 
+    @classmethod
+    def _vulnerabilities(cls, drafts: List[_Draft]) -> List[Dict[str, Any]]:
+        """The vulnerabilities of *drafts*, in their order, with the id and the
+        severity the run gives each (:func:`_projection`)."""
+        if not drafts:
+            return []
+        vulnerabilities: List[Dict[str, Any]] = []
+        for draft, (occurrence, severity) in zip(
+            drafts,
+            _projection(drafts).select("occurrence", "severity_out").iter_rows(),
+        ):
+            vuln = draft.vulnerability
+            if occurrence:
+                cls._distinct_legacy_id(vuln, occurrence)
+            # The key is omitted for a result with no severity, as for one with
+            # no rule id.
+            if severity is not None:
+                vuln["severity"] = unwire(severity)
+            if draft.solution:
+                vuln["solution"] = draft.solution
+            vulnerabilities.append(vuln)
+        return vulnerabilities
+
     @staticmethod
-    def _distinct_legacy_id(vuln: Dict[str, Any], seen: Dict[str, int]) -> None:
+    def _distinct_legacy_id(vuln: Dict[str, Any], count: int) -> None:
         """Give the second and later findings that fell back to one legacy id an
-        id of their own.
+        id of their own, *count* being how many findings before it had that id.
 
         The legacy id hashes the rule, the file and the line, so two distinct
         findings of one rule at one line (a flattening this could not pair them
@@ -217,25 +338,25 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
         keep apart the findings that carry no rule identifier, a result with no
         rule id or one with no scanner name.
         """
-        identifier = vuln["id"]
-        count = seen.get(identifier, 0)
-        seen[identifier] = count + 1
-        if not count:
-            return
-        distinct = get_finding_id(rule_id=f"{identifier}::occurrence::{count}")
+        distinct = get_finding_id(rule_id=f"{vuln['id']}::occurrence::{count}")
         vuln["id"] = distinct
         for entry in vuln.get("identifiers", []):
             if entry.get("type") == "ash-finding-id":
                 entry["value"] = distinct
 
-    def _vulnerability_for(
+    def _draft_for(
         self,
         result,
         model: "AshAggregatedResults",
         shared_id: str | None = None,
         rule: Any = None,
-    ) -> Dict[str, Any] | None:
-        """One SARIF result as a GitLab vulnerability, or None to omit it.
+    ) -> _Draft | None:
+        """One SARIF result as a draft of its GitLab vulnerability, or None to
+        omit it.
+
+        The draft holds the vulnerability without its ``severity`` and
+        ``solution``, and without a collision count on its id: those depend on the
+        run (:func:`_projection`).
 
         None means "deliberately excluded" -- a suppressed finding under
         ``exclude_suppressed`` -- and is the only omission that is not counted as
@@ -287,13 +408,12 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
         # scanner declared counts.
         severity = result_severity(result).title()
 
-        # Suppressed findings: downgrade to Info with solution. The reason is
-        # the first suppression in effect that gives one: ASH's own reasoned
-        # suppression can sit after a scanner's bare one, and reading the first
-        # entry alone said "No reason provided" beside it.
+        # Suppressed findings: downgraded to Info by the projection, with a
+        # solution. The reason is the first suppression in effect that gives one:
+        # ASH's own reasoned suppression can sit after a scanner's bare one, and
+        # reading the first entry alone said "No reason provided" beside it.
         suppression_solution = None
         if is_suppressed:
-            severity = "Info"
             justification = next(
                 (
                     str(getattr(s, "justification", None)).strip()
@@ -539,15 +659,14 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
         if rule_id:
             vuln["name"] = rule_id
 
-        # Only add severity if it's not None
-        if severity:
-            vuln["severity"] = severity
-
-        # Add solution for suppressed findings
-        if suppression_solution:
-            vuln["solution"] = suppression_solution
-
-        return vuln
+        return _Draft(
+            vulnerability=vuln,
+            finding_id=finding_id,
+            legacy=shared_id is None,
+            suppressed=is_suppressed,
+            severity=severity,
+            solution=suppression_solution,
+        )
 
     def _assemble_report(
         self,

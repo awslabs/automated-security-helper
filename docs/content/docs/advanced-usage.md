@@ -736,7 +736,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.10'
+          python-version: '3.11'
       - name: Install ASH
         run: pip install git+https://github.com/awslabs/automated-security-helper.git@v4.0.0
       - name: Run ASH scan
@@ -771,7 +771,7 @@ jobs:
 <!-- doctest: config kind=gitlab-ci runner=none reason="a pipeline for the reader's own project, which installs ASH from GitHub" -->
 ```yaml
 ash-scan:
-  image: python:3.10
+  image: python:3.11
   script:
     - pip install git+https://github.com/awslabs/automated-security-helper.git@v4.0.0
     - ashx --mode local

@@ -495,6 +495,8 @@ def _policy_for(
     overrides: Sequence[Any],
     now: datetime,
     offline_image: bool = False,
+    *,
+    log_diagnostics: bool = True,
 ) -> tuple[str, Optional[str]]:
     """The policy one database is held to, and which override or default chose it, if any."""
     default, default_source = _default_policy_for(entry, policy, offline_image)
@@ -508,36 +510,48 @@ def _policy_for(
             continue
         expires = _iso(override.expires_at)
         if override.is_expired(now):
-            ASH_LOGGER.warning(
-                f"The content_db_staleness_overrides entry for {entry.name} expired at "
-                f"{expires} and is ignored; {entry.name} is held to {held_to}. "
-                "Remove the entry from the ASH config."
-            )
+            if log_diagnostics:
+                ASH_LOGGER.warning(
+                    f"The content_db_staleness_overrides entry for {entry.name} expired at "
+                    f"{expires} and is ignored; {entry.name} is held to {held_to}. "
+                    "Remove the entry from the ASH config."
+                )
             break
         chosen = str(getattr(override.policy, "value", override.policy)).lower()
         if chosen not in STALENESS_POLICIES:
             break
-        # The reason is a config field, which an operator can fill from the
-        # environment: cut to a line's worth here and shown once, controls
-        # escaped, by the line that logs it.
-        reason = head_and_tail(str(override.reason), 300)
-        ASH_LOGGER.info(
-            shown_on_one_line(
-                f"Content database {entry.name} is held to {chosen} rather than "
-                f"{held_to} by a content_db_staleness_overrides entry "
-                f"until {expires}: {reason}"
+        if log_diagnostics:
+            reason = head_and_tail(str(override.reason), 300)
+            ASH_LOGGER.info(
+                shown_on_one_line(
+                    f"Content database {entry.name} is held to {chosen} rather than "
+                    f"{held_to} by a content_db_staleness_overrides entry "
+                    f"until {expires}: {reason}"
+                )
             )
-        )
         return chosen, (
             f"content_db_staleness_overrides entry for {entry.name}, which expires at "
             f"{expires}"
         )
-    if default_source:
+    if default_source and log_diagnostics:
         ASH_LOGGER.info(
             f"Content database {entry.name} is held to {default} rather than "
             f"content_db_staleness ({policy}): it is the {default_source}."
         )
     return default, default_source
+
+
+def cache_check_policy(
+    entry: ContentDatabase, config: Any, now: datetime, environ: Mapping[str, str]
+) -> tuple[str, Optional[str]]:
+    return _policy_for(
+        entry,
+        resolve_policy(config),
+        resolve_overrides(config),
+        now,
+        resolve_offline_image_default(config, environ),
+        log_diagnostics=False,
+    )
 
 
 # --------------------------------------------------------------------------- measurement

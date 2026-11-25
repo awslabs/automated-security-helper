@@ -69,6 +69,49 @@ that names a file inside the scan root by an absolute path, and for a result of
 the same scanner and rule that names that file by its relative path and carries
 one of its fingerprint values: the reporter counts that value as shared between
 the two, and the flattened findings do not.
+
+The frame boundary
+------------------
+
+A run's keys are derived on a polars frame (:func:`identity_keys`): which
+fingerprint values are shared is a group-by over every result's values, which
+kind of fingerprint a result is keyed by is a min over what is left, and the
+occurrence and ordinal are a count over the key and a cumulative count within the
+key and the occurrence. The per-result parts stay on the host: the result's
+:class:`FindingIdentity` is built one result at a time by the extractors, its
+occurrence digest is a SHA-256 of that result's own column and message, and the
+key is a mapping with arbitrary nesting. A run of one result takes no frame
+(:func:`identity_key`): nothing it holds can be shared or collide.
+
+:func:`_identity_frame` is the run as a frame, for the consumers that group,
+join or count findings by identity. It has one row per identity, in the order
+given, with these columns:
+
+========================  =========  =============================================
+``i``                     Int64      the identity's position in the run
+``scanner``               String     the key's scanner
+``rule``                  String     the key's rule (``"unknown"`` for none)
+``file``                  String     the key's file; null for none
+``key``                   String     :func:`canonical` of the whole key, with its
+                                     ``occurrence`` and ``ordinal``
+``fingerprinted``         Boolean    whether the key is keyed by a fingerprint
+                                     (:func:`key_is_fingerprinted`)
+``occurrence``            String     the key's occurrence; null when the identity
+                                     is alone with its key
+``ordinal``               Int64      the key's ordinal; null for the first of its
+                                     exact duplicates
+``id``                    String     :func:`finding_id` of the key; present only
+                                     for ``ids=True``
+========================  =========  =============================================
+
+Every String column holds text through :func:`~automated_security_helper.utils.
+frame_text.wire`, because a path can hold a lone surrogate (an ``os.fsdecode`` of
+undecodable bytes) and polars strings are UTF-8: ``wire`` is one-to-one, so two
+columns are equal exactly when the texts are, and ``unwire`` gives the text back.
+A mapping key's line numbers and columns, which are unbounded Python ints, appear
+only inside ``key``. The frame is built from the same keys :func:`identity_keys`
+returns, so a consumer never recomputes an identity: ``key`` joins with the
+``key`` of another run's frame as the old ``canonical(key)`` compared.
 """
 
 from __future__ import annotations
@@ -77,15 +120,18 @@ import hashlib
 import json
 import posixpath
 import re
-from collections import defaultdict
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
+from automated_security_helper.utils.frame_text import wire
 from automated_security_helper.utils.uri_separators import (
     root_text,
     sanitized_uri_text,
 )
+
+if TYPE_CHECKING:
+    import polars as pl
 
 #: Hex digits of the digest in a flattened finding's id. 48 bits: two findings of
 #: one scanner and rule collide with odds near n**2 / 2**49, about 1 in 5 million
@@ -306,17 +352,119 @@ def relative_to_scan_root(
     return replace(identity, base={**identity.base, "file": file})
 
 
-def _shared_fingerprint_values(
-    identities: Sequence[FindingIdentity], bases: Sequence[str]
-) -> Set[Tuple[str, str, str, str]]:
-    """``(base, kind, key, value)`` that results with that base carry at more
-    than one location; *bases* is the canonical base of each of *identities*."""
-    locations: Dict[Tuple[str, str, str, str], Set[Tuple[Any, ...]]] = defaultdict(set)
-    for identity, base in zip(identities, bases):
-        for kind, pairs in identity.fingerprints:
-            for name, value in pairs:
-                locations[(base, kind, name, value)].add(identity.location)
-    return {entry for entry, where in locations.items() if len(where) > 1}
+def _run_bases(
+    identities: Sequence[FindingIdentity], default_project: Optional[str]
+) -> List[Dict[str, Any]]:
+    """Each identity's base with the run's default project folded in."""
+    bases: List[Dict[str, Any]] = []
+    for identity in identities:
+        base = dict(identity.base)
+        if base.get("project") is None and default_project:
+            base["project"] = default_project
+        bases.append(base)
+    return bases
+
+
+def _fingerprint_choices(
+    identities: Sequence[FindingIdentity], canonical_bases: Sequence[str]
+) -> Dict[int, Tuple[int, List[int]]]:
+    """Which fingerprints key each result of the run: ``index -> (rank, positions)``.
+
+    ``rank`` is the place of the chosen kind in the identity's own order of kinds
+    and ``positions`` the places, in the kind's sorted pairs, of the pairs that
+    are not shared. A result with no entry is keyed by its lines.
+
+    A value is shared when results with the same base, kind and name carry it at
+    more than one location: a group-by over every result's pairs. The kind a
+    result is keyed by is the first one with a pair left, a minimum over the
+    pairs that are not shared.
+    """
+    import polars as pl
+
+    columns: Dict[str, List[Any]] = {
+        name: []
+        for name in ("i", "rank", "pos", "kind", "name", "value", "base", "loc")
+    }
+    for index, identity in enumerate(identities):
+        if not identity.fingerprints:
+            continue
+        base = wire(canonical_bases[index])
+        # The location as one text: a tuple of a path, lines that can be larger
+        # than 64 bits and a column cannot be a column of its own, and the text
+        # is equal exactly when the tuple is.
+        location = wire(json.dumps(list(identity.location), ensure_ascii=False))
+        for rank, (kind, pairs) in enumerate(identity.fingerprints):
+            for pos, (name, value) in enumerate(pairs):
+                columns["i"].append(index)
+                columns["rank"].append(rank)
+                columns["pos"].append(pos)
+                columns["kind"].append(wire(kind))
+                columns["name"].append(wire(name))
+                columns["value"].append(wire(value))
+                columns["base"].append(base)
+                columns["loc"].append(location)
+    if not columns["i"]:
+        return {}
+    schema = {
+        "i": pl.Int64,
+        "rank": pl.Int64,
+        "pos": pl.Int64,
+        "kind": pl.String,
+        "name": pl.String,
+        "value": pl.String,
+        "base": pl.String,
+        "loc": pl.String,
+    }
+    values = pl.DataFrame(columns, schema=schema)
+    counted = ["base", "kind", "name", "value"]
+    shared = (
+        values.group_by(counted)
+        .agg(pl.col("loc").n_unique().alias("places"))
+        .filter(pl.col("places") > 1)
+        .select(counted)
+    )
+    usable = values.join(shared, on=counted, how="anti")
+    chosen = (
+        usable.join(usable.group_by("i").agg(pl.col("rank").min()), on=["i", "rank"])
+        .sort(["i", "pos"])
+        .group_by("i", maintain_order=True)
+        .agg(pl.col("rank").first(), pl.col("pos"))
+    )
+    return {index: (rank, positions) for index, rank, positions in chosen.iter_rows()}
+
+
+def _located_keys(
+    identities: Sequence[FindingIdentity], keys: List[Dict[str, Any]]
+) -> None:
+    """Give *keys*, which are one run's keys before any occurrence, their
+    ``occurrence`` and ``ordinal``, in place.
+
+    Keys that are equal (:func:`canonical`) are a group; a group of more than
+    one gives each member its identity's occurrence, and a member that repeats an
+    earlier member's occurrence the count of members before it with that
+    occurrence. Every key, fingerprinted or not: two results of one scanner and
+    rule that carry the same fingerprint value at the same lines and column are
+    not told apart by the value (it is shared only across locations), so without
+    this they got one key, one finding id and one Security Hub Id.
+    """
+    import polars as pl
+
+    placed = pl.DataFrame(
+        {
+            "i": list(range(len(keys))),
+            "key": [wire(canonical(key)) for key in keys],
+            "occurrence": [wire(identity.occurrence) for identity in identities],
+        },
+        schema={"i": pl.Int64, "key": pl.String, "occurrence": pl.String},
+    )
+    shared = placed.with_columns(
+        pl.len().over("key").alias("members"),
+        pl.int_range(pl.len()).over(["key", "occurrence"]).alias("ordinal"),
+    ).filter(pl.col("members") > 1)
+    for index, ordinal in shared.select("i", "ordinal").iter_rows():
+        keys[index]["occurrence"] = identities[index].occurrence
+        if ordinal:
+            keys[index]["ordinal"] = ordinal
 
 
 def identity_keys(
@@ -331,54 +479,91 @@ def identity_keys(
     duplicates among those an ``ordinal``. *default_project* is the workspace
     project the run's results were written for, used for a result that names
     none, before the fingerprint values are counted.
+
+    Derived on a frame (see the module docstring); the keys are the mappings
+    this function has always returned, with their fields in the same order.
     """
-    bases: List[Dict[str, Any]] = []
-    for identity in identities:
-        base = dict(identity.base)
-        if base.get("project") is None and default_project:
-            base["project"] = default_project
-        bases.append(base)
-    canonical_bases = [canonical(base) for base in bases]
-    shared = _shared_fingerprint_values(identities, canonical_bases)
+    if not identities:
+        return []
+    bases = _run_bases(identities, default_project)
+    choices = _fingerprint_choices(identities, [canonical(base) for base in bases])
     keys: List[Dict[str, Any]] = []
-    by_location: Dict[str, List[int]] = defaultdict(list)
     for index, identity in enumerate(identities):
         key = dict(bases[index])
-        for kind, pairs in identity.fingerprints:
-            usable = [
-                [name, value]
-                for name, value in pairs
-                if (canonical_bases[index], kind, name, value) not in shared
-            ]
-            if usable:
-                key[kind] = usable
-                break
+        if index in choices:
+            rank, positions = choices[index]
+            kind, pairs = identity.fingerprints[rank]
+            key[kind] = [[pairs[pos][0], pairs[pos][1]] for pos in positions]
         else:
             key["startLine"], key["endLine"] = identity.lines
-        # Every key, fingerprinted or not: two results of one scanner and rule
-        # that carry the same fingerprint value at the same lines and column are
-        # not told apart by the value (it is shared only across locations), so
-        # without this they got one key, one finding id and one Security Hub Id.
-        by_location[canonical(key)].append(index)
         keys.append(key)
-    for members in by_location.values():
-        if len(members) < 2:
-            continue
-        seen: Dict[str, int] = defaultdict(int)
-        for index in members:
-            occurrence = identities[index].occurrence
-            keys[index]["occurrence"] = occurrence
-            if seen[occurrence]:
-                keys[index]["ordinal"] = seen[occurrence]
-            seen[occurrence] += 1
+    _located_keys(identities, keys)
     return keys
+
+
+def _identity_frame(
+    identities: Sequence[FindingIdentity],
+    default_project: Optional[str] = None,
+    *,
+    ids: bool = False,
+) -> "pl.DataFrame":
+    """The run of *identities* as a frame; the columns are in the module docstring.
+
+    *ids* adds the ``id`` column, :func:`finding_id` of each key, which
+    raises for a key holding a lone surrogate as :func:`finding_id` does.
+    """
+    import polars as pl
+
+    keys = identity_keys(identities, default_project)
+
+    def text(value: Any) -> Optional[str]:
+        return None if value is None else wire(str(value))
+
+    columns: Dict[str, List[Any]] = {
+        "i": list(range(len(keys))),
+        "scanner": [text(key.get("scanner")) for key in keys],
+        "rule": [text(key.get("rule")) for key in keys],
+        "file": [text(key.get("file")) for key in keys],
+        "key": [wire(canonical(key)) for key in keys],
+        "fingerprinted": [key_is_fingerprinted(key) for key in keys],
+        "occurrence": [text(key.get("occurrence")) for key in keys],
+        "ordinal": [key.get("ordinal") for key in keys],
+    }
+    schema: Dict[str, Any] = {
+        "i": pl.Int64,
+        "scanner": pl.String,
+        "rule": pl.String,
+        "file": pl.String,
+        "key": pl.String,
+        "fingerprinted": pl.Boolean,
+        "occurrence": pl.String,
+        "ordinal": pl.Int64,
+    }
+    if ids:
+        columns["id"] = [wire(finding_id(key)) for key in keys]
+        schema["id"] = pl.String
+    return pl.DataFrame(columns, schema=schema)
 
 
 def identity_key(
     identity: FindingIdentity, default_project: Optional[str] = None
 ) -> Dict[str, Any]:
-    """*identity*'s key as if its result were the only one in its run."""
-    return identity_keys([identity], default_project)[0]
+    """*identity*'s key as if its result were the only one in its run.
+
+    Nothing a lone result holds can be shared with another or collide with one,
+    so its key is the first of its fingerprint kinds that has a pair, else its
+    lines, with no frame: this runs for every result the extractors flatten.
+    ``identity_keys([identity], default_project)[0]`` is the same mapping.
+    """
+    key = _run_bases([identity], default_project)[0]
+    for kind, pairs in identity.fingerprints:
+        usable = [[name, value] for name, value in pairs]
+        if usable:
+            key[kind] = usable
+            break
+    else:
+        key["startLine"], key["endLine"] = identity.lines
+    return key
 
 
 def canonical(key: Mapping[str, Any]) -> str:
@@ -386,6 +571,28 @@ def canonical(key: Mapping[str, Any]) -> str:
     return json.dumps(
         key, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str
     )
+
+
+#: Key fields that say where a result is or which of several it is, not what it is.
+_LOCATION_KEY_FIELDS = frozenset(
+    {"startLine", "endLine", "occurrence", "ordinal", *FINGERPRINT_KINDS}
+)
+
+
+def key_is_fingerprinted(key: Optional[Mapping[str, Any]]) -> bool:
+    """Whether the assigned identity *key* is keyed by a fingerprint, not by lines."""
+    return any(kind in (key or {}) for kind in FINGERPRINT_KINDS)
+
+
+def key_base(key: Mapping[str, Any]) -> Dict[str, Any]:
+    """*key* without its location fields: scanner, rule, file, package, project, tree.
+
+    The project is the one :func:`identity_keys` folded in, so a caller does not
+    re-apply the run's default project.
+    """
+    return {
+        name: value for name, value in key.items() if name not in _LOCATION_KEY_FIELDS
+    }
 
 
 def finding_id(key: Mapping[str, Any]) -> str:

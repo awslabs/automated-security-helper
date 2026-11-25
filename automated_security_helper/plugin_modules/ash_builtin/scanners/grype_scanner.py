@@ -20,6 +20,12 @@ import yaml
 from pydantic import Field, model_validator
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.base.options import ScannerOptionsBase
+from automated_security_helper.base import scanner_operational_facets as opsf
+from automated_security_helper.base.scanner_facets import (
+    FacetDecl,
+    FacetState,
+    ScannerFacets,
+)
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.core.constants import SHIPPED_SEVERITY_LEVEL
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
@@ -108,6 +114,52 @@ _GRYPE_PACKAGE_MESSAGE = re.compile(
     r"vulnerability in \S+ package: (?P<name>[^,\s]+), version (?P<version>\S+) "
     r"was found at: "
 )
+
+#: One ``Key: value`` line of the help text grype's SARIF presenter writes on each
+#: rule ("Vulnerability <id>\nSeverity: ...\nPackage: ...\nVersion: ...\nFix
+#: Version: ...\nType: ...").
+_GRYPE_HELP_LINE = re.compile(
+    r"^(?P<key>Package|Version|Fix Version):[ \t]*(?P<value>.*?)[ \t]*$"
+)
+
+
+def _rule_fix_statements(run) -> dict[str, tuple[str, str, str]]:
+    """Each rule's ``(package, version, fix versions)`` from its help text.
+
+    Only a rule whose id is unique in the run and whose help text names exactly
+    one ``Package``, one ``Version`` and one ``Fix Version`` line is read; the
+    fix versions are the (possibly empty) text after ``Fix Version:``. A rule
+    with a repeated id, a repeated or missing line, or no help text is left out,
+    so a result naming it gets nothing attached.
+    """
+    driver = run.tool.driver if run.tool else None
+    rules = (driver.rules if driver else None) or []
+    seen: dict[str, int] = {}
+    for rule in rules:
+        seen[rule.id] = seen.get(rule.id, 0) + 1
+    statements: dict[str, tuple[str, str, str]] = {}
+    for rule in rules:
+        if seen[rule.id] != 1 or rule.help is None:
+            continue
+        found: dict[str, list[str]] = {}
+        for line in rule.help.text.splitlines():
+            line_match = _GRYPE_HELP_LINE.match(line)
+            if line_match:
+                found.setdefault(line_match.group("key"), []).append(
+                    line_match.group("value")
+                )
+        if any(
+            len(found.get(key, [])) != 1
+            for key in ("Package", "Version", "Fix Version")
+        ):
+            continue
+        statements[rule.id] = (
+            found["Package"][0],
+            found["Version"][0],
+            found["Fix Version"][0],
+        )
+    return statements
+
 
 #: What grype writes for a file-name byte that is not UTF-8: Go strings hold the
 #: replacement character (U+FFFD) where such a byte sits, so grype's SARIF cannot
@@ -325,7 +377,7 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
 
     display_name = "Grype"
     docs_summary = "Vulnerability matching"
-    covers = ("Packages and container images",)
+    covers = ("Packages and dependency files",)
 
     #: grype is a native binary. See ScannerPluginBase.python_only.
     python_only: ClassVar[bool | None] = False
@@ -349,6 +401,266 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
     )
 
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.CACHE_FLAGS
+
+    #: The facets register row (base/scanner_facets.py). Declaration only.
+    #: grype is a package-vulnerability matcher: its findings are packages, and
+    #: the one place a finding names where it was found is the manifest, a
+    #: locator and not a resource, so resource_id is n/a and the register's
+    #: must-not row holds the adapter to never writing ``ash_resource_id``.
+    #: Native fields are quoted from the committed native JSON
+    #: (tests/test_data/scanners/grype/grype.src.json) and from ASH's own
+    #: reading of grype's SARIF in this module (``_GRYPE_PACKAGE_MESSAGE``).
+    facets: ClassVar[ScannerFacets] = ScannerFacets(
+        rule_id=FacetDecl(
+            state=FacetState.NA,
+            reason="UNCONFIRMED: the survey reads the SARIF result ruleId (the "
+            "vulnerability id) off the conformance tests' presenter shape; no "
+            "grype SARIF fixture from a real run is committed, so a "
+            "`grype -o sarif` capture settles it",
+        ),
+        severity=FacetDecl(
+            state=FacetState.NA,
+            reason="UNCONFIRMED: the survey reads the SARIF rule properties "
+            '"security-severity" (CVSS), else the result "level", off the '
+            "conformance tests' presenter shape; no grype SARIF fixture from "
+            "a real run is committed, so a `grype -o sarif` capture settles it",
+        ),
+        file_path=FacetDecl(
+            state=FacetState.NA,
+            reason="UNCONFIRMED: the survey reads SARIF locations[]."
+            "physicalLocation.artifactLocation.uri (the manifest or lockfile) "
+            "off the conformance tests' presenter shape; no grype SARIF "
+            "fixture from a real run is committed, so a `grype -o sarif` "
+            "capture settles it",
+        ),
+        line_range=FacetDecl(
+            state=FacetState.NA,
+            reason="UNCONFIRMED: the survey reads SARIF region.startLine "
+            "(grype always writes line 1 of the manifest) off the conformance "
+            "tests' presenter shape; no grype SARIF fixture from a real run "
+            "is committed, so a `grype -o sarif` capture settles it",
+        ),
+        column=FacetDecl(
+            state=FacetState.NA,
+            reason="UNCONFIRMED: no grype SARIF fixture in-repo; a "
+            "`grype -o sarif` run settles whether results carry a "
+            "startColumn",
+        ),
+        message=FacetDecl(
+            state=FacetState.NA,
+            reason="UNCONFIRMED: the survey reads SARIF result message.text "
+            "off the conformance tests' presenter shape; no grype SARIF "
+            "fixture from a real run is committed, so a `grype -o sarif` "
+            "capture settles it",
+        ),
+        resource_id=FacetDecl(
+            state=FacetState.NA,
+            reason="LOCATOR-ONLY: grype reports packages; the only location "
+            "is the manifest at line 1, a file locator and package identity "
+            "(artifact.purl), not a resource with its own lifecycle",
+        ),
+        resource_type=FacetDecl(
+            state=FacetState.NA,
+            reason="grype output names no resource; artifact.type is a "
+            "package ecosystem (gem, npm), not a resource type",
+        ),
+        package_name=FacetDecl(
+            state=FacetState.NA,
+            reason="UNCONFIRMED: the adapter parses the SARIF message "
+            '"package: <name>, version <version> was found at:" '
+            "(_GRYPE_PACKAGE_MESSAGE), pinned over the conformance tests' "
+            "presenter shape only; no grype SARIF fixture from a real run is "
+            "committed, so a `grype -o sarif` capture settles it",
+        ),
+        package_version=FacetDecl(
+            state=FacetState.NA,
+            reason="UNCONFIRMED: the adapter parses the SARIF message "
+            '"package: <name>, version <version> was found at:" '
+            "(_GRYPE_PACKAGE_MESSAGE), pinned over the conformance tests' "
+            "presenter shape only; no grype SARIF fixture from a real run is "
+            "committed, so a `grype -o sarif` capture settles it",
+        ),
+        package_path=FacetDecl(
+            state=FacetState.NA,
+            reason="UNCONFIRMED: the adapter resolves an npm lockfile entry "
+            "by name and version beside the manifest (set only when exactly "
+            "one copy matches), pinned over the conformance tests' presenter "
+            "shape only; no grype SARIF fixture from a real run (over a "
+            "committed npm tree) is committed, so a `grype -o sarif` capture "
+            "settles it",
+        ),
+        taxonomy_cve=FacetDecl(
+            state=FacetState.NA,
+            reason="UNCONFIRMED: the SARIF result ruleId is the vulnerability "
+            "id (matches[].vulnerability.id, a CVE or GHSA id; the committed "
+            "native JSON's eight matches are all GHSA ids, which the flat CVE "
+            "column never reads); no grype SARIF fixture from a real run with "
+            "a CVE-named match is committed, so a `grype -o sarif` capture "
+            "settles it",
+        ),
+        taxonomy_cwe=FacetDecl(
+            state=FacetState.NA,
+            reason="UNCONFIRMED: the committed native grype JSON "
+            "(vulnerability keys advisories, cvss, dataSource, description, "
+            "epss, fix, id, namespace, severity, urls) carries no CWE; a "
+            "`grype -o sarif` run settles whether rule properties do",
+        ),
+        fingerprints=FacetDecl(
+            state=FacetState.NA,
+            reason="UNCONFIRMED: no grype SARIF fixture in-repo; a "
+            "`grype -o sarif` run settles whether results carry "
+            "fingerprints or partialFingerprints",
+        ),
+        fix_available=FacetDecl(
+            state=FacetState.NA,
+            reason="UNCONFIRMED: the adapter reads the SARIF rule help.text "
+            'line "Fix Version: <versions>" (grype\'s rendering of '
+            "matches[].vulnerability.fix.versions) and writes "
+            "fix_available=True only for a non-empty list on a uniquely named "
+            "rule whose Package and Version lines match the result's own "
+            "message, pinned over the conformance tests' presenter shape "
+            "only; no grype SARIF fixture from a real run is committed, so a "
+            "`grype -o sarif` capture settles it",
+        ),
+        remediation_text=FacetDecl(
+            state=FacetState.NA,
+            reason="UNCONFIRMED: not classified by the survey; the flat "
+            "model has no remediation column, and matchDetails[].fix."
+            "suggestedVersion is a version, not text",
+        ),
+        snippet=FacetDecl(
+            state=FacetState.NA,
+            reason="a package match has no source code snippet",
+        ),
+        references=FacetDecl(
+            state=FacetState.DROPPED,
+            native_field="matches[].vulnerability.urls",
+            reason="the native urls (and relatedVulnerabilities[].urls, "
+            "dataSource) are never read into references",
+        ),
+        tags=FacetDecl(
+            state=FacetState.NA,
+            reason="UNCONFIRMED: the survey reads SARIF rule properties.tags "
+            "off the conformance tests' presenter shape (rule-level, which "
+            "the flat reader never takes as the tags column anyway); no grype "
+            "SARIF fixture from a real run is committed, so a `grype -o "
+            "sarif` capture settles whether results carry tags",
+        ),
+        extras=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="SARIF result properties bag (package identity keys "
+            "this adapter writes) passed through to the flat properties",
+        ),
+    )
+
+    #: The operational register row (base/scanner_operational_facets.py),
+    #: checked against the production declarations it mirrors by
+    #: tests/unit/plugin_modules/test_scanner_operational_facets_consistency.py.
+    operational_facets: ClassVar[opsf.ScannerOperationalFacets] = (
+        opsf.ScannerOperationalFacets(
+            scanner_name="grype",
+            network=opsf.NetworkFacet(
+                fetch_kind=opsf.FetchKind.CONTENT_FETCH,
+                fetches=(opsf.Fetched.VULN_DB,),
+                prefetch=(
+                    opsf.Prefetch.CONTENT_DB_REFRESH,
+                    opsf.Prefetch.CI_CACHE,
+                ),
+                offline_outcome=opsf.OfflineOutcome.DEGRADED,
+                offline_reason=(
+                    "GRYPE_DB_AUTO_UPDATE=false and GRYPE_DB_VALIDATE_AGE=false against a "
+                    "pre-checked local database; the scan-time staleness check holds the "
+                    "database to the age bound declared in utils/content_databases.py "
+                    "after the scan"
+                ),
+                offline_strategy=OfflineStrategy.CACHE_FLAGS,
+                sandbox_network=opsf.SandboxNetwork.ONLINE,
+                content_database="grype-db",
+                source=(
+                    "grype_scanner.py offline_strategy and sandbox_requirements; "
+                    "utils/content_databases.py grype-db; utils/content_db_refresh.py "
+                    "refreshes it outside the sandbox before an online scan"
+                ),
+            ),
+            output=opsf.OutputFacet(
+                native_formats=(opsf.OutputFormat.SARIF,),
+                side_reports=(),
+                non_finding_artifacts=(),
+            ),
+            targets=opsf.TargetsFacet(
+                kinds=(
+                    opsf.TargetKind.PACKAGE_INVENTORY,
+                    opsf.TargetKind.DEPENDENCY_LOCKFILES,
+                ),
+                tool_type=ScannerToolType.SCA,
+                selection="a dir: scan of the source tree, with a lockfile join for locations",
+                covers_note=(
+                    "covers said 'Packages and container images', but only a dir: scan "
+                    "is wired and no SBOM document or image is consumed; the display "
+                    "string now reads 'Packages and dependency files' and the register "
+                    "declares the wired truth (UNCLAIMED_TARGET_KINDS names the rest)"
+                ),
+            ),
+            runtime=opsf.RuntimeFacet(
+                kind=opsf.RuntimeKind.PINNED_BINARY,
+                external_programs=(),
+                invocations=opsf.Invocations.ONE,
+                tool_versions_key="grype",
+                python_only=False,
+                use_uv_tool=False,
+            ),
+            platforms=opsf.PlatformsFacet(
+                provisionable=opsf.PLATFORMS_NO_WINDOWS_ARM64,
+                note="no windows/arm64 asset (tool_downloads.py docstring)",
+            ),
+            severity=opsf.SeverityFacet(
+                severity_class=opsf.SeverityClass.NATIVE,
+                note="the generic CVSS path; the per-result severity word is a dropped cell in the mapping register",
+            ),
+            silencing=opsf.SilencingFacet(
+                tool_side=(
+                    opsf.SilencingLayer(
+                        layer=opsf.SilencingLayerKind.IGNORE_FILE,
+                        writer=opsf.SilencingWriter.REPOSITORY,
+                        honored=opsf.Honored.UNCONFIRMED,
+                        surface="a grype configuration file with ignore rules in the scanned tree",
+                        cite="tool feature; grype_scanner.py was not read for whether ASH passes a config that stops it",
+                        reason=(
+                            "whether a repository-written grype config can silence "
+                            "findings under ASH was not read; one adapter read settles it"
+                        ),
+                    ),
+                ),
+            ),
+            identity=opsf.IdentityFacet(
+                fingerprint_class=opsf.FingerprintClass.UNCONFIRMED,
+                note="no fixture read classifies grype's fingerprints; reads as positional-only until one does",
+            ),
+            extensibility=opsf.ExtensibilityFacet(
+                custom_rules=opsf.CustomRules.NONE,
+                env_prefixes=("GRYPE_",),
+                options_surface="typed options only; the tool's vulnerability database is not operator-replaceable through ASH",
+            ),
+            exit_codes=opsf.ExitCodesFacet(
+                success_exit_codes=(0, 2),
+                semantics="per the adapter's own comment at the success_exit_codes declaration",
+            ),
+            provenance=opsf.ProvenanceFacet(
+                tier=opsf.Tier.BUILTIN_DEFAULT,
+                source=opsf.ProvenanceSource.PINNED_RELEASE_BINARY,
+                selection_surfaces=(),
+                upstream_license=(
+                    "Apache-2.0 (source: utils/tool_downloads.py "
+                    "THIRD_PARTY_LICENSES['grype'], pinned commit 8f3dded)"
+                ),
+            ),
+            prerequisites=opsf.PrerequisitesFacet(
+                kinds=(opsf.Prerequisite.NONE,),
+                note="a directory; no SBOM document input is wired",
+            ),
+        )
+    )
+
     check_conf: str = "NOT_PROVIDED"
     # Env vars to layer onto the subprocess. Populated by
     # _process_config_options (e.g. offline-mode flags). Kept local to the
@@ -927,10 +1239,57 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
     ) -> SarifReport:
         """Strip leading slashes from artifact URIs and attach package identity."""
         lock_index = NpmLockIndex(target)
-        for result in sarif_report.get_all_results():
-            self._normalize_result_uris(result, target)
-            self._attach_package_identity(result, lock_index)
+        for run in sarif_report.runs or []:
+            fixes = _rule_fix_statements(run)
+            for result in run.results or []:
+                self._normalize_result_uris(result, target)
+                self._attach_package_identity(result, lock_index)
+                self._attach_fix_available(result, run, fixes)
         return sarif_report
+
+    @staticmethod
+    def _attach_fix_available(
+        result, run, fixes: Mapping[str, tuple[str, str, str]]
+    ) -> None:
+        """Record ``fix_available = True`` for a result grype says has a fix.
+
+        grype's presenter writes the vulnerability's native ``fix.versions`` into
+        the rule's help text as ``Fix Version: <versions>``, one rule per
+        (vulnerability, package) pair; ``fixes`` holds each uniquely named rule's
+        statement (see ``_rule_fix_statements``). Only a non-empty list is
+        written, and only as True: an empty ``Fix Version:`` is what grype writes
+        for every non-``fixed`` state (``not-fixed``, ``wont-fix``, ``unknown``),
+        so it cannot say that no fix exists and nothing is attached.
+
+        The result must match its rule, or nothing is attached: the rule is the
+        one the result's ``ruleId`` names, any ``ruleIndex`` points at that same
+        rule, and the package and version the rule's help names are the ones the
+        result's own message names. grype keys a rule by vulnerability and
+        package name alone, so a second copy of the package at another version
+        shares the rule and would carry the first copy's statement.
+        """
+        rule_id = result.ruleId
+        statement = fixes.get(rule_id) if rule_id else None
+        if statement is None:
+            return
+        index = result.ruleIndex
+        if index is not None and index >= 0:
+            rules = run.tool.driver.rules or []
+            if index >= len(rules) or rules[index].id != rule_id:
+                return
+        message = result.message.root.text if result.message else None
+        match = _GRYPE_PACKAGE_MESSAGE.search(message or "")
+        if not match:
+            return
+        name, version, fix_versions = statement
+        if (name, version) != (match.group("name"), match.group("version")):
+            return
+        if not fix_versions:
+            return
+        if result.properties is None:
+            result.properties = PropertyBag(fix_available=True)
+        else:
+            setattr(result.properties, "fix_available", True)
 
     @staticmethod
     def _attach_package_identity(result, lock_index: NpmLockIndex) -> None:

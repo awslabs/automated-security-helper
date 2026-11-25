@@ -74,6 +74,16 @@ ash --source-dir . --scanners detect-secrets --offline --no-progress --no-fail-o
 
 The flag takes precedence over the config, and `--fail-on-findings` turns the gate back on whatever the config says. The scan still exits 1 when it is incomplete or a database is stale.
 
+## Gate only on new findings {#baseline}
+
+`--baseline PATH`, or `ASH_BASELINE`, changes what the gate counts and leaves its order alone. ASH reads the `ash_aggregated_results.json` of an earlier full scan, usually of the default branch, and removes the SARIF findings the baseline already holds before it writes the reports, the summary, and the verdict. Row 6 and `--min-severity` then see only the findings the baseline lacks: a scan whose findings are all in the baseline exits 0, and a new finding at or above its threshold exits 2. Findings a scanner reports outside SARIF are not filtered, so they still count.
+
+A baseline does not hide a finding that got worse. A finding stays in the scan when its severity rose above its baseline entry, when the baseline suppressed it and the scan does not, or when its scanner did not complete in the baseline's scan.
+
+Matching has a tradeoff that comes with the option. For findings without usable fingerprints, if one old finding is fixed and another appears with the same scanner, rule, file, package, message and severity, the new finding can be treated as the old one, and the gate does not count it. A new finding with a different message is not matched. Use a baseline from a trusted, regularly refreshed full scan, and read the coverage warnings it produces.
+
+`--baseline` works with `--mode local` and `--mode precommit` only; it exits 5 with `--use-existing`, `--express`, container or Nix mode, a workspace, shards, or `--phases` that leave out both scan and report ([Exit codes](../reference/exit-codes.md#scan)). It can be combined with [`--changed-files-only`](scale-large-repos.md#changed-files). [Gate on new findings](ci/github-actions.md#baseline) shows how to fetch a baseline in GitHub Actions.
+
 ## Incomplete scans {#incomplete}
 
 With `fail_on_incomplete_scanners` on, the default, a scan exits 1 when a scanner it selected did not finish: ERROR (it failed, or its tool could not start, as when a sandbox the configuration asks for cannot be provided), MISSING (its tool is not installed), or a scanner that lost some of its targets. It also exits 1 when no scanner ran or a converter failed. The message names each scanner and its status.

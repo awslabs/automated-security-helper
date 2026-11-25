@@ -64,7 +64,7 @@ class TestTrivyRepoScannerConfig:
         assert isinstance(scanner.config, TrivyRepoScannerConfig)
         assert scanner.command == "trivy"
         assert scanner.subcommands == ["repository"]
-        assert scanner.tool_type == ScannerToolType.SAST
+        assert scanner.tool_type == ScannerToolType.SCA
 
     def test_scanner_initialization_with_custom_config(
         self, mock_plugin_context, custom_trivy_config

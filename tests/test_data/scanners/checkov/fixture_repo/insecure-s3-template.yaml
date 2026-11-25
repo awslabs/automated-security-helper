@@ -1,0 +1,11 @@
+# Benign test fixture for the facets corpus gate (never deployed).
+# A copy of tests/test_data/scanners/cdk/insecure-s3-template.yaml: one plain
+# S3 bucket with no hardening, so a captured `checkov --output sarif --output
+# json` run over this directory holds real failed checks with resources.
+AWSTemplateFormatVersion: '2010-09-09'
+Resources:
+  InsecureS3Bucket:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      BucketName: insecure-s3-bucket
+      # Missing encryption, versioning, and other security settings

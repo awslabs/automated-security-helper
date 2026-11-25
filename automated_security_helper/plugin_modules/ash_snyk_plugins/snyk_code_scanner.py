@@ -6,6 +6,7 @@ from contextlib import ExitStack
 from datetime import datetime, timezone
 import logging
 import os
+import re
 import shutil
 import time
 from pathlib import Path
@@ -16,6 +17,12 @@ from pydantic import Field, PrivateAttr
 
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.base.options import ScannerOptionsBase
+from automated_security_helper.base import scanner_operational_facets as opsf
+from automated_security_helper.base.scanner_facets import (
+    FacetDecl,
+    FacetState,
+    ScannerFacets,
+)
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.config.confinement_remedy import SET_BY_THE_OPERATOR
 from automated_security_helper.models.core import ToolArgs
@@ -50,6 +57,7 @@ from automated_security_helper.utils.scanned_tree import (
     open_in_scanned_tree,
     relative_display,
 )
+from automated_security_helper.utils.taxonomy_ids import cwes_of_tags
 from automated_security_helper.utils.subprocess_utils import (
     find_executable,
     in_tree_refusal,
@@ -268,6 +276,64 @@ def _sarif_result_count(document: Any) -> int:
     )
 
 
+#: A CWE as snyk writes it in a rule's ``properties.cwe``: ``CWE-798``.
+_NATIVE_CWE = re.compile(r"^cwe-(\d+)$", re.IGNORECASE)
+
+
+def normalize_rule_cwe_into_tags(document: Any) -> Any:
+    """Name each rule's native CWE in its tags, the form the flat reader reads.
+
+    ``snyk code test --sarif`` states a rule's CWE in ``properties.cwe`` (for
+    example ``["CWE-798"]``) and keeps language and category words in the tags.
+    The shared reader (``utils/taxonomy_ids``) reads tags only and leaves a
+    scanner that encodes a CWE another way to normalize its own SARIF, so this
+    adds ``external/cwe/cwe-<n>`` to the rule's tags before the report is built.
+
+    Rule-local and fail-closed: the source is the rule's own ``cwe`` list, an
+    entry that is not exactly ``CWE-<n>`` is skipped, a value that is not a list
+    attaches nothing, and a CWE the tags already name is not added again. The
+    native ``cwe`` value stays where snyk put it. A document of any other shape
+    is returned as it came. The document is edited in place and returned.
+    """
+    if not isinstance(document, dict):
+        return document
+    for run in document.get("runs") or []:
+        if not isinstance(run, dict):
+            continue
+        tool = run.get("tool")
+        driver = tool.get("driver") if isinstance(tool, dict) else None
+        rules = driver.get("rules") if isinstance(driver, dict) else None
+        if not isinstance(rules, list):
+            continue
+        for rule in rules:
+            properties = rule.get("properties") if isinstance(rule, dict) else None
+            if not isinstance(properties, dict):
+                continue
+            native = properties.get("cwe")
+            if not isinstance(native, list):
+                continue
+            tags = properties.get("tags")
+            if tags is not None and not isinstance(tags, list):
+                continue
+            tags = list(tags or [])
+            named = set(cwes_of_tags(tags))
+            added = []
+            for entry in native:
+                if not isinstance(entry, str):
+                    continue
+                match = _NATIVE_CWE.match(entry.strip())
+                if match is None:
+                    continue
+                cwe = f"CWE-{match.group(1)}"
+                if cwe in named:
+                    continue
+                named.add(cwe)
+                added.append(f"external/cwe/cwe-{match.group(1)}")
+            if added:
+                properties["tags"] = [*tags, *added]
+    return document
+
+
 class SnykCodeScannerConfigOptions(ScannerOptionsBase):
     honor_tree_exclusions: Annotated[
         bool,
@@ -310,6 +376,225 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
     )
 
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.SKIP_OFFLINE
+
+    #: The facets register row (base/scanner_facets.py). Declaration only: no
+    #: behavior changes. snyk code is a pure SARIF pass-through. UNCONFIRMED
+    #: for the whole row: no snyk SARIF fixture from a real tool run is
+    #: committed (the tests' in-test double generates the shape), so the
+    #: native fields below are the survey's reading of that shape; a
+    #: `snyk code test --sarif` run over a sample with a finding settles them.
+    facets: ClassVar[ScannerFacets] = ScannerFacets(
+        rule_id=FacetDecl(
+            state=FacetState.NA,
+            reason='output not read: the survey reads result "ruleId" off the '
+            "in-test double's shape, and no snyk SARIF from a real run is "
+            "committed (M0 item e); a licensed `snyk code test --sarif` run "
+            "would settle it",
+        ),
+        severity=FacetDecl(
+            state=FacetState.NA,
+            reason='output not read: the survey reads result "level" (no '
+            "security-severity on rules, so a bare error reads as CRITICAL) "
+            "off the in-test double's shape, and no snyk SARIF from a real "
+            "run is committed (M0 item e); a licensed run would settle it",
+        ),
+        file_path=FacetDecl(
+            state=FacetState.NA,
+            reason="output not read: the survey reads locations[]."
+            "physicalLocation.artifactLocation.uri (%SRCROOT% base) off the "
+            "in-test double's shape, and no snyk SARIF from a real run is "
+            "committed (M0 item e); a licensed run would settle it",
+        ),
+        line_range=FacetDecl(
+            state=FacetState.NA,
+            reason="output not read: the survey reads region.startLine / "
+            "region.endLine off the in-test double's shape, and no snyk "
+            "SARIF from a real run is committed (M0 item e); a licensed run "
+            "would settle it",
+        ),
+        column=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="region.startColumn / region.endColumn",
+        ),
+        message=FacetDecl(
+            state=FacetState.NA,
+            reason='output not read: the survey reads result "message.text" '
+            "off the in-test double's shape, and no snyk SARIF from a real "
+            "run is committed (M0 item e); a licensed run would settle it",
+        ),
+        resource_id=FacetDecl(
+            state=FacetState.NA,
+            reason="pure SAST: findings are source locators, not deployable "
+            "resources; the result carries a uri and a region only",
+        ),
+        resource_type=FacetDecl(
+            state=FacetState.NA,
+            reason="pure SAST: findings are source locators, not deployable resources",
+        ),
+        package_name=FacetDecl(
+            state=FacetState.NA,
+            reason="snyk code findings are source defects and carry no package",
+        ),
+        package_version=FacetDecl(
+            state=FacetState.NA,
+            reason="snyk code findings are source defects and carry no package",
+        ),
+        package_path=FacetDecl(
+            state=FacetState.NA,
+            reason="snyk code findings are source defects and carry no package",
+        ),
+        taxonomy_cve=FacetDecl(
+            state=FacetState.NA,
+            reason="snyk code rules are source-defect classes, not CVEs",
+        ),
+        taxonomy_cwe=FacetDecl(
+            state=FacetState.NA,
+            reason='output not read: rules\' properties "cwe" (e.g. '
+            '["CWE-798"]) is normalized by normalize_rule_cwe_into_tags into '
+            "the rule's tags as external/cwe/cwe-<n>, which the shared flat "
+            "reader reads -- pinned over the in-test double's shape only, "
+            "since no snyk SARIF from a real run is committed (M0 item e); a "
+            "licensed run would settle it",
+        ),
+        fingerprints=FacetDecl(
+            state=FacetState.NA,
+            reason="output not read: the survey reads result "
+            '"fingerprints" {"0", "1"} off the in-test double\'s shape, and '
+            "no snyk SARIF from a real run is committed (M0 item e); a "
+            "licensed run would settle it",
+        ),
+        fix_available=FacetDecl(
+            state=FacetState.DROPPED,
+            native_field='rule properties "isAutofixable"',
+            reason="no flat fix_available write exists for snyk; weak signal "
+            "(autofix availability, not a fixed version); UNCONFIRMED "
+            "against a real tool run",
+        ),
+        remediation_text=FacetDecl(
+            state=FacetState.NA,
+            reason="UNCONFIRMED: the survey classified rule help.markdown "
+            "under references only; a `snyk code test --sarif` run settles "
+            "whether remediation text is separate",
+        ),
+        snippet=FacetDecl(
+            state=FacetState.NA,
+            reason="the survey read no snippet in the native regions; "
+            "UNCONFIRMED against a real tool run",
+        ),
+        references=FacetDecl(
+            state=FacetState.DROPPED,
+            native_field='rule "help.markdown" and properties "exampleCommitFixes"',
+            reason="the rule help survives the SARIF model and dies at the "
+            "flat reader; UNCONFIRMED against a real tool run",
+        ),
+        tags=FacetDecl(
+            state=FacetState.NA,
+            reason="UNCONFIRMED: the survey records ASH-added tags, but no tag "
+            "write exists in this adapter at this checkout; a "
+            "`snyk code test --sarif` run through the pipeline settles it",
+        ),
+        extras=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="result and rule properties bags, passed through the "
+            "SARIF model untouched",
+        ),
+    )
+
+    #: The operational register row (base/scanner_operational_facets.py),
+    #: checked against the production declarations it mirrors by
+    #: tests/unit/plugin_modules/test_scanner_operational_facets_consistency.py.
+    operational_facets: ClassVar[opsf.ScannerOperationalFacets] = (
+        opsf.ScannerOperationalFacets(
+            scanner_name="snyk-code",
+            network=opsf.NetworkFacet(
+                fetch_kind=opsf.FetchKind.SERVICE_UPLOAD,
+                fetches=(opsf.Fetched.SOURCE_UPLOAD,),
+                prefetch=(),
+                offline_outcome=opsf.OfflineOutcome.NOT_RUN,
+                offline_reason=(
+                    "the scan is the upload, so an offline run is skipped; the skip's "
+                    "validation carries a TODO at the adapter, and the register's "
+                    "offline-agreement row is what asserts the declared outcome"
+                ),
+                offline_strategy=OfflineStrategy.SKIP_OFFLINE,
+                sandbox_network=opsf.SandboxNetwork.ONLINE,
+                source=(
+                    "snyk_code_scanner.py offline_strategy, sandbox_requirements "
+                    "(network plus the token file and SNYK_TOKEN pass-throughs) and the "
+                    "module statement that the Snyk CLI uploads the source to Snyk"
+                ),
+                unconfirmed=(
+                    "the upload surface beyond 'uploads the source to Snyk' (endpoint "
+                    "granularity); one Snyk CLI documentation read settles it"
+                ),
+            ),
+            output=opsf.OutputFacet(
+                native_formats=(opsf.OutputFormat.SARIF,),
+                side_reports=(),
+                non_finding_artifacts=(),
+            ),
+            targets=opsf.TargetsFacet(
+                kinds=(opsf.TargetKind.SOURCE_CODE,),
+                tool_type=ScannerToolType.SAST,
+                selection="a staged copy of the scan set outside the tree (_stage_source); exit 3 means no supported project",
+                covers_note="a community scanner; it declares no covers display string",
+            ),
+            runtime=opsf.RuntimeFacet(
+                kind=opsf.RuntimeKind.USER_INSTALLED_CLI,
+                external_programs=("snyk",),
+                invocations=opsf.Invocations.ONE,
+                python_only=False,
+                use_uv_tool=False,
+            ),
+            platforms=opsf.PlatformsFacet(
+                provisionable=(),
+                note="the user's installed Snyk CLI; absent from TOOL_VERSIONS and the platform matrix is unread",
+            ),
+            severity=opsf.SeverityFacet(
+                severity_class=opsf.SeverityClass.DEGRADED,
+                note="rules carry no security-severity, so the bare level maps (error to CRITICAL)",
+                dropped_native="priorityScore",
+            ),
+            silencing=opsf.SilencingFacet(
+                tool_side=(
+                    opsf.SilencingLayer(
+                        layer=opsf.SilencingLayerKind.IGNORE_FILE,
+                        writer=opsf.SilencingWriter.REPOSITORY,
+                        honored=opsf.Honored.UNCONFIRMED,
+                        surface="a .snyk policy file in the staged source",
+                        cite="tool feature; snyk_code_scanner.py was not read for whether the staged copy carries it",
+                        reason=(
+                            "whether a repository-written policy file silences findings "
+                            "under ASH was not read; one adapter read settles it"
+                        ),
+                    ),
+                ),
+            ),
+            identity=opsf.IdentityFacet(
+                fingerprint_class=opsf.FingerprintClass.STABLE_NATIVE,
+                note="the SARIF fingerprints '0' and '1'",
+            ),
+            extensibility=opsf.ExtensibilityFacet(
+                custom_rules=opsf.CustomRules.NONE,
+                env_prefixes=("SNYK_",),
+                options_surface="typed options only; the rules are the service's",
+            ),
+            exit_codes=opsf.ExitCodesFacet(
+                success_exit_codes=(0, 1),
+                semantics="from the CLI's exit codes: 0 no issues, 1 issues found, 2 an error, 3 no supported project (read through the staged-refusal logic)",
+            ),
+            provenance=opsf.ProvenanceFacet(
+                tier=opsf.Tier.COMMUNITY_OPTIN,
+                source=opsf.ProvenanceSource.USER_INSTALLED,
+                selection_surfaces=("ash_snyk_plugins in ash_plugin_modules",),
+                upstream_license=opsf.LICENSE_NOT_READ,
+            ),
+            prerequisites=opsf.PrerequisitesFacet(
+                kinds=(opsf.Prerequisite.AUTH_TOKEN,),
+                note="an authenticated Snyk CLI: SNYK_TOKEN or the token file, the declared sandbox pass-throughs",
+            ),
+        )
+    )
 
     # src/cli/exit-codes.ts: 0 no issues, 1 issues found, 2 an error, 3 no supported
     # project detected.
@@ -811,7 +1096,7 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
                     )
                 try:
                     sarif_report: SarifReport = SarifReport.model_validate(
-                        scanner_results
+                        normalize_rule_cwe_into_tags(scanner_results)
                     )
 
                     # Attach scanner details for proper identification

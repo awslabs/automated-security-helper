@@ -10,7 +10,7 @@ the full set. See [Pre-commit and CI together](../pre-commit.md#with-ci).
 Prerequisites:
 
 - A runner with the Docker executor, or any runner whose job image is based on Debian or
-  Ubuntu, runs as root, and has Python 3.10 or later and git. The `before_script` below
+  Ubuntu, runs as root, and has Python 3.11 or later and git. The `before_script` below
   installs packages with `apt-get`.
 - Network access from the job to GitHub, PyPI, and the scanners' download sites.
 
@@ -286,7 +286,7 @@ the pip recipe when you want a plain `ash` executable on `PATH`.
 
 Nix mode (`--mode nix`) runs the scan inside a Nix shell whose scanner tools come from
 ASH's `flake.nix`, so the job needs no `apt-get` packages for the scanners and no
-`ashx dependencies install` step. The job image needs Nix on `PATH`, Python 3.10 or later,
+`ashx dependencies install` step. The job image needs Nix on `PATH`, Python 3.11 or later,
 and git; set the CI/CD variable `NIX_IMAGE` to an image that has them. ASH passes
 `nix-command` and `flakes` on each invocation, so you do not have to enable them in
 `nix.conf`. Nix mode does not install ASH, and cdk-nag runs on the Python environment ASH

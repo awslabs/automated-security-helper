@@ -46,7 +46,57 @@
 
 ## Unreleased
 
+### Maintenance
+
+- Removed the ASH v2 in-container scanner scripts `utils/common.sh`,
+  `utils/git-docker-execute.sh`, `utils/grype-docker-execute.sh`,
+  `utils/js-docker-execute.sh`, and `utils/yaml-docker-execute.sh`. ASH v3 has not run
+  them: their scanners live in `automated_security_helper/plugin_modules/ash_builtin/`.
+  No supported invocation changes; `./ash`, `utils/ash_helpers.sh` (`invoke-ash`) and
+  `utils/ash_helpers.ps1` (`Invoke-ASH`) are unchanged.
+- The subcommand and option tables that `./ash` and `utils/ash_helpers.ps1` carry
+  (subcommand names, the root options that take a value, which subcommands take the
+  options a wrapper adds, the OCI runner order) are now generated from the `ash` CLI by
+  `scripts/generate_wrapper_tables.py` into marked blocks, and the lint job and a unit
+  test fail when a block is stale. The generated text is the text the wrappers already
+  held, so no option, exit code or message changes.
+
+### Fixes
+
+- **`Invoke-ASH` now matches `./ash` and the `ash` CLI on two container-run details.**
+  It passes `GITHUB_ACTIONS`, `TF_BUILD` and `TEAMCITY_VERSION` into the container when
+  set (by name, or with their values when `OCI_RUNNER_WRAPPER` is set; a value that holds
+  a newline is refused with exit 3 before anything is built), so a scan started by
+  `Invoke-ASH` inside GitHub Actions sees the runner's variable as the other two
+  entrypoints do. And a relative path in the `OCI_RUNNER` environment variable (or the
+  deprecated `ASH_OCI_RUNNER`), such as `./bin/docker`, is refused with exit 3 instead of
+  being run from the working directory, which is usually the repository being scanned.
+  The same path given as `-OCIRunner` is used as written, as before.
+
 ### Features
+
+- **`default_scanners` sets the default scanners in a trusted config.** `only`
+  replaces a mode's default selection in every mode and `add` extends a fixed one such as
+  precommit's; a repository config, an MCP client or a patch cannot set it. The command
+  line still wins (`--only-scanners` replaces, `--add-scanners` adds, `--exclude-scanners`
+  applies last), workspace projects share one selection plus the scanners the workspace
+  policy requires, and a nonempty `scanners` argument of the MCP workspace tool limits the
+  run. A container scan relying on it needs an image built from this release; an older
+  image refuses with exit 3 before any scanner starts. Without the section nothing changes.
+
+- `ash dependencies check --offline` checks the local Grype and Trivy vulnerability
+  database metadata against the configured age policy without running either tool.
+
+- **`ash diff BEFORE AFTER` compares two saved scans.** It lists new, absent, moved and
+  changed findings. A finding that only moved lines is paired only when the match is
+  unambiguous. The MCP diff tool uses the same matching, so moved findings are no longer
+  in its new and resolved lists.
+
+- **`ash scan --baseline PATH` gates on new findings.** A trusted full-scan artifact
+  outside the checkout is matched against the scan, including findings that moved
+  lines, and matched SARIF findings are left out of reports, summary counts and the exit
+  code. Local and precommit modes support it; Security Hub will not archive absent
+  findings from these partial results.
 
 - **`ash --mode precommit --staged` scans the staged files instead of the whole repository.**
   The list comes from `git diff --cached` (no deletions; a rename is scanned at its new
@@ -93,6 +143,56 @@
   semantics, exit codes); note its new detectors (NHS/CHI numbers, GB/Ontario/Quebec
   licenses, ITINs, card track data) can surface new findings in previously clean
   scans. The recommended version stays 2.5.3 until the full fixture-matrix pass runs.
+- **A checkov finding names its resource.** checkov's SARIF report says which rule
+  failed and where, and not on which resource, so a finding's `resource_id` was empty
+  and a suppression scoped to a resource (`resource_id`) never matched a checkov
+  finding. Two instances of one module, or two resources of a Terraform plan (every
+  plan finding is on the plan file), gave findings that differed in nothing. ASH now
+  reads the resource from checkov's JSON report, for Terraform, Terraform plans,
+  Terraform JSON, CloudFormation, Kubernetes, ARM and Bicep: `aws_db_instance.this`,
+  `module.db.aws_db_instance.this`, `AWS::S3::Bucket.Bucket`, `Deployment.shop.web`,
+  `Microsoft.Storage/storageAccounts.st`.
+  It is in the `resource_id` of the flat JSON and CSV reports, and a `resource_id`
+  suppression now binds to it. checkov is always asked for its JSON report for this,
+  so `results_json.json` is in checkov's results directory on every run, not only when
+  `additional_formats` lists `json`. Dockerfile and secrets findings name no resource
+  and are unchanged.
+- **Scanner findings carry their CVE and CWE.** The `cve_id` and `cwe_id` of a finding
+  were empty for every finding a scanner reported, so the CVE and CWE lines of the HTML,
+  Markdown and text reports, the two CSV and flat JSON columns, and the same two fields
+  of the MCP `explain_finding` tool never showed a value. The CVE is now read from the
+  head of the rule id (`CVE-2019-20477` from trivy, `CVE-2022-40897-setuptools` from
+  grype), as the OCSF reporter already reads it. The CWE is read from the tags of the
+  finding and of its rule: bandit's `external/cwe/cwe-78` gives `CWE-78`, semgrep's and
+  opengrep's `CWE-798: Use of Hard-coded Credentials` gives `CWE-798`, and a rule that
+  names several lists each once (`CWE-1357, CWE-353`). A finding whose rule id is
+  an advisory id (`GHSA-...`) or whose rule has no CWE tag keeps both empty.
+- **The reports say why a scanner did not run.** The scanner table of the HTML, Markdown
+  and text reports showed `SKIPPED` or `MISSING` and nothing else; the reason was only in
+  `ash.log` and in the scanner's row of `ash_aggregated_results.json`. Each report now
+  lists it under the table, as "Scanners that did not run", for example
+  `npm-audit (SKIPPED): no lockfile ... beside a package.json in the scanned files`.
+  Scanners that share a reason share a line, so a run with `--scanners` names the ones it
+  left out once. A report in which every scanner ran is unchanged, and the compact
+  Markdown report lists the reason of `MISSING` scanners only, as it leaves `SKIPPED`
+  rows out of its table.
+
+### Fixes
+
+- cfn-nag evaluates templates containing `AWS::EKS::AccessEntry` without passing
+  EKS access policy associations to the OpenSearch and Elasticsearch policy rules.
+- checkov no longer fails with `PermissionError: '/gitlab_conf'` in a GitLab CI job run
+  by a user that is not root, which ended the scan as incomplete. Its GitLab, GitHub
+  and Bitbucket configuration frameworks write the settings they fetch below the
+  scanner's results directory instead of below checkov's working directory, the
+  filesystem root. A directory set in `CKV_GITLAB_CONF_DIR_NAME`,
+  `CKV_GITHUB_CONF_DIR_NAME` or `CKV_BITBUCKET_CONF_DIR_NAME` is used as set.
+- checkov leaves its GitLab, GitHub and Bitbucket configuration frameworks out when
+  `frameworks` is `all`, the default. They read the repository host's settings through
+  its API rather than files in the scanned tree, and GitLab's CI job token is not
+  documented to reach the project approvals API that checkov's GitLab check reads.
+  Name a framework in `frameworks`, with or without `all`, to run it. In an offline
+  scan their settings are not fetched.
 
 ## v3.8.0 (2026-11-12)
 

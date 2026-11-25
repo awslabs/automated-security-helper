@@ -105,6 +105,9 @@ from automated_security_helper.config.restrictions_kept import keep_restrictions
 from automated_security_helper.config.secret_verification_trust import (
     confine_detect_secrets_settings,
 )
+from automated_security_helper.config.default_scanners_trust import (
+    confine_default_scanners,
+)
 from automated_security_helper.config.staleness_trust import (
     confine_content_db_staleness,
 )
@@ -2993,6 +2996,31 @@ def resolve_config(
     confine_content_db_staleness(
         config, trusted, tier_two_overrides, list(in_tree), source=tier_two_source
     )
+    selection_chains: List[_SelectionChain] = []
+    selection_default_chain, _, selection_default_paths = default_views()
+    if (
+        operator is None
+        and default_in_tree
+        and list(selection_default_chain) != list(view_chain)
+    ):
+        selection_chains.append(
+            (
+                selection_default_chain,
+                default_in_tree,
+                reads,
+                selection_default_paths,
+                1,
+            )
+        )
+    selection_chains.append((view_chain, in_tree, reads, environment_paths, view_roots))
+    confine_default_scanners(
+        config,
+        _with_operator_chain_selection(trusted, selection_chains),
+        tier_two_overrides,
+        list(in_tree),
+        source=tier_two_source,
+        repository=repository,
+    )
     tier_two_reason = CLIENT_SUPPLIED if client_supplied else REPOSITORY_WRITTEN
     honor_reason = tier_two_reason
     # The overrides entry stands for a client's overrides in the warnings of
@@ -3881,6 +3909,7 @@ def _operator_patch_reporters(
     ops: Any,
     settle: Callable[[str], str],
     fold_value: Callable[[Dict[str, Any]], Dict[str, Any]],
+    section: str = "reporters",
 ) -> Dict[str, Any]:
     """*merged*, the owned chain files' ``reporters`` view, with one owned
     file's ``patch`` operations that target ``/reporters`` applied. The
@@ -3928,7 +3957,7 @@ def _operator_patch_reporters(
             part.replace("~1", "/").replace("~0", "~")
             for part in pointer[1:].split("/")
         ]
-        if segments[0] != "reporters":
+        if segments[0] != section:
             continue
         name = op.get("op")
         if name not in ("add", "replace", "remove"):
@@ -3972,7 +4001,7 @@ def _operator_patch_reporters(
                 resolved_steps.append(segment)
             shaped: Dict[str, Any] = {
                 "op": name,
-                "path": "/reporters/"
+                "path": f"/{section}/"
                 + "/".join(
                     segment.replace("~", "~0").replace("/", "~1")
                     for segment in resolved_steps
@@ -3981,9 +4010,7 @@ def _operator_patch_reporters(
             if name != "remove":
                 shaped["value"] = copy.deepcopy(op.get("value"))
             try:
-                merged = jsonpatch.JsonPatch([shaped]).apply({"reporters": merged})[
-                    "reporters"
-                ]
+                merged = jsonpatch.JsonPatch([shaped]).apply({section: merged})[section]
             except (
                 jsonpatch.JsonPatchException,
                 jsonpatch.JsonPointerException,
@@ -4143,6 +4170,78 @@ def _with_operator_chain_reporters(
     combined = deep_merge(dict(extra), merged)
     extra.clear()
     extra.update(combined)
+    return operator
+
+
+_SelectionChain = Tuple[
+    Sequence[Path], Sequence[Path], Dict[Path, Any], Collection[Path], int
+]
+
+
+def _operator_chain_selection_writes(
+    chain: Sequence[Path],
+    repository_files: Sequence[Path],
+    reads: Dict[Path, Any],
+    environment_paths: Collection[Path],
+    roots: int,
+) -> Optional[Dict[str, Any]]:
+    from automated_security_helper.config.config_sources import PATCH_KEY, deep_merge
+    from automated_security_helper.config.operator_only_options import (
+        DEFAULT_SCANNERS_FIELD,
+    )
+
+    pointer = f"/{DEFAULT_SCANNERS_FIELD}"
+    merged: Any = None
+    for file in _operator_chain_occurrences(
+        chain, repository_files, reads, environment_paths, warn=False, roots=roots
+    ):
+        own = reads.get(Path(file).resolve())
+        if not isinstance(own, dict):
+            continue
+        if DEFAULT_SCANNERS_FIELD in own:
+            merged = deep_merge(
+                {} if merged is None else merged,
+                copy.deepcopy(own[DEFAULT_SCANNERS_FIELD]),
+            )
+        ops = own.get(PATCH_KEY)
+        if not any(
+            isinstance(op, dict)
+            and isinstance(op.get("path"), str)
+            and (op["path"] == pointer or op["path"].startswith(pointer + "/"))
+            for op in (ops if isinstance(ops, list) else ())
+        ):
+            continue
+        merged = _operator_patch_reporters(
+            merged if isinstance(merged, dict) else {},
+            ops,
+            lambda key: key,
+            lambda value: value,
+            section=DEFAULT_SCANNERS_FIELD,
+        )
+    if merged is None:
+        return None
+    return merged if isinstance(merged, dict) else {}
+
+
+def _with_operator_chain_selection(
+    trusted: AshConfig, chains: Sequence[_SelectionChain]
+) -> AshConfig:
+    from automated_security_helper.config.ash_config import DefaultScannersConfig
+
+    selection: Optional[Dict[str, Any]] = None
+    for chain in chains:
+        written = _operator_chain_selection_writes(*chain)
+        if written is not None:
+            selection = written
+    if selection is None:
+        return trusted
+    operator = trusted.model_copy(deep=True)
+    try:
+        operator.default_scanners = DefaultScannersConfig.model_validate(selection)
+    except ValidationError as exc:
+        raise ASHConfigValidationError(
+            f"The operator's default_scanners does not load: {error_text(exc)}"
+        ) from None
     return operator
 
 

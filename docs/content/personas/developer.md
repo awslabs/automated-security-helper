@@ -101,6 +101,10 @@ Actions, and [the other CI pages](../how-to/ci/other-ci.md) for the rest.
   `--base-ref`, which is what a pull request gate should count. Every scanner
   still scans the whole tree, so it cleans the verdict rather than speeding up
   the scan ([Gate on the files a change touches](../how-to/scale-large-repos.md#changed-files)).
+- `--baseline PATH`, in local and precommit mode, leaves out the findings a
+  saved full scan of the default branch already holds, so a local scan fails
+  only on what your change added, as CI does when it gates against the same
+  baseline ([Gate only on new findings](../how-to/set-the-gate.md#baseline)).
 
 When a finding is right but the risk is accepted, suppress it in configuration
 with a reason and an expiration date rather than reformulating the code around

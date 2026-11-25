@@ -262,12 +262,175 @@ def result_scanner_labels(result: object) -> frozenset[str]:
     return frozenset(labels)
 
 
-def _first_rule_with_id(rules: list[Any], identifier: object) -> object:
-    """The first rule in *rules* whose ``id`` is *identifier*, or None."""
-    for rule in rules:
-        if getattr(rule, "id", None) == identifier:
-            return rule
-    return None
+#: A rule's place in a run: (index of its component in the driver-then-extensions
+#: list, index within that component's rules).
+_RulePosition = Tuple[int, int]
+
+
+def _locate_rule(
+    result: object, components: list[Any]
+) -> Tuple[Optional[_RulePosition], object, Optional[int]]:
+    """Read what *result* says about its rule, and take the positional route.
+
+    Returns ``(position, stated_id, named)``. *position* is set when the
+    ``rule`` reference's ``index`` (in the component its ``toolComponent.index``
+    names, else the driver's) or ``ruleIndex`` (driver) points at a rule whose id
+    does not disagree with the stated one; the result is then settled and the id
+    join is not needed. Otherwise *named* is the component the reference names
+    (None when it names none, or one past the end of *components*, which holds no
+    rules) and the id join reads *stated_id*.
+
+    Row-wise by constraint: every read here is a ``getattr`` on a SARIF model or a
+    duck-typed stand-in, and the positional route is one list index.
+    """
+    reference = getattr(result, "rule", None)
+    body = getattr(reference, "root", reference)
+    stated_id = getattr(result, "ruleId", None) or getattr(body, "id", None)
+    named: Optional[int] = None
+    if body is not None:
+        component_ref = getattr(body, "toolComponent", None)
+        component_index = getattr(component_ref, "index", -1)
+        if component_index is None or component_index < 0:
+            named = 0
+        elif component_index + 1 < len(components):
+            named = component_index + 1
+        index = getattr(body, "index", -1)
+        component = named
+    else:
+        index = getattr(result, "ruleIndex", None)
+        component = 0
+    if (
+        component is not None
+        and index is not None
+        and 0 <= index < len(components[component])
+    ):
+        rule = components[component][index]
+        if not stated_id or getattr(rule, "id", None) == stated_id:
+            return (component, index), stated_id, named
+    return None, stated_id, named
+
+
+def _join_by_stated_id(
+    pending: list[Tuple[int, Any, Optional[int], frozenset[str]]],
+    components: list[Any],
+    component_names: Optional[list[Any]],
+) -> Dict[int, _RulePosition]:
+    """The id join: for each ``(row, stated_id, named, scanner_labels)`` in
+    *pending*, the position of the rule its id names, for the rows that have one.
+
+    A candidate id is the stated id, then each shorter prefix at a ``/``. Every
+    candidate is tried within the result's scope before any is tried across every
+    component: a prefix tried globally as soon as it missed in scope let another
+    scanner's exact ``CA1001/sub`` win over the result's own component's
+    ``CA1001``, the bleed between scanners the scope exists to prevent. Within a
+    candidate the scopes are the named component, then the components whose labels
+    share a name with the scanner, in order; the global scope is the first copy of
+    the id across all components. The winner of a row is the match that sorts
+    first on (phase, candidate, scope, component, position).
+
+    The three scopes are three equi-joins of the candidates against the rules
+    frame, and the winner is a sort and a first-per-row.
+    """
+    import polars as pl  # lazy: this module is on the hot import path of the models
+
+    ids: Dict[Any, int] = {}
+    rule_rows = [
+        (c, p, ids.setdefault(getattr(rule, "id", None), len(ids)))
+        for c, rules in enumerate(components)
+        for p, rule in enumerate(rules)
+    ]
+    candidate_rows: list[Tuple[int, int, int, Optional[int]]] = []
+    scope_rows: list[Tuple[int, str]] = []
+    for row, stated_id, named, scanner in pending:
+        candidates = []
+        candidate = stated_id
+        while candidate:
+            candidates.append(candidate)
+            if "/" not in candidate:
+                break
+            candidate = candidate.rsplit("/", 1)[0]
+        for k, candidate in enumerate(candidates):
+            code = ids.get(candidate)
+            if code is not None:
+                candidate_rows.append((row, k, code, named))
+        scope_rows.extend((row, label) for label in scanner)
+    if not candidate_rows:
+        return {}
+
+    int_schema = {"comp": pl.Int64, "pos": pl.Int64, "rid": pl.Int64}
+    rules_frame = pl.DataFrame(rule_rows, schema=int_schema, orient="row")
+    candidates_frame = pl.DataFrame(
+        candidate_rows,
+        schema={"row": pl.Int64, "k": pl.Int64, "rid": pl.Int64, "named": pl.Int64},
+        orient="row",
+    )
+    labels_frame = pl.DataFrame(
+        [
+            (c, label)
+            for c, labels in enumerate(component_names or [])
+            if c < len(components)
+            for label in labels
+        ],
+        schema={"comp": pl.Int64, "label": pl.Utf8},
+        orient="row",
+    )
+    scanner_frame = pl.DataFrame(
+        scope_rows, schema={"row": pl.Int64, "label": pl.Utf8}, orient="row"
+    ).join(labels_frame, on="label")  # (row, comp) pairs that share a name
+
+    keep = ["row", "k", "tier", "comp", "pos"]
+    in_named = candidates_frame.join(
+        rules_frame, left_on=["rid", "named"], right_on=["rid", "comp"]
+    ).select("row", "k", pl.lit(0).alias("tier"), pl.col("named").alias("comp"), "pos")
+    in_scanner = (
+        candidates_frame.join(scanner_frame, on="row")
+        .join(rules_frame, on=["rid", "comp"])
+        .select("row", "k", pl.lit(1).alias("tier"), "comp", "pos")
+    )
+    anywhere = candidates_frame.join(rules_frame, on="rid").select(
+        "row", "k", pl.lit(0).alias("tier"), "comp", "pos"
+    )
+    found = (
+        pl.concat(
+            [
+                pl.concat([in_named.select(keep), in_scanner.select(keep)])
+                .cast(dict.fromkeys(keep, pl.Int64))
+                .with_columns(phase=pl.lit(0)),
+                anywhere.select(keep)
+                .cast(dict.fromkeys(keep, pl.Int64))
+                .with_columns(phase=pl.lit(1)),
+            ]
+        )
+        .sort(["row", "phase", "k", "tier", "comp", "pos"])
+        .unique(subset="row", keep="first", maintain_order=True)
+    )
+    return {
+        row: (comp, pos)
+        for row, comp, pos in found.select("row", "comp", "pos").iter_rows()
+    }
+
+
+def _rule_positions(
+    results: list[Any],
+    components: list[Any],
+    component_names: Optional[list[Any]] = None,
+) -> list[Optional[_RulePosition]]:
+    """The position of the rule each of *results* names (see :func:`_rule_of`), or
+    None, in input order: the positional route per result, then one id join for
+    the results it did not settle."""
+    positions: list[Optional[_RulePosition]] = []
+    pending: list[Tuple[int, Any, Optional[int], frozenset[str]]] = []
+    for row, result in enumerate(results):
+        position, stated_id, named = _locate_rule(result, components)
+        positions.append(position)
+        if position is None:
+            scanner = result_scanner_labels(result) if component_names else frozenset()
+            pending.append((row, stated_id, named, scanner))
+    for row, position in _join_by_stated_id(
+        pending, components, component_names
+    ).items():
+        positions[row] = position
+    return positions
 
 
 def _rule_of(
@@ -290,81 +453,19 @@ def _rule_of(
     parallel list of each component's :func:`component_labels`. An id is looked
     for first in the component the reference names, then in the component whose
     labels share a name with the result's scanner (:func:`result_scanner_labels`),
-    and only then across every component in order (*by_id*, first copy wins,
-    which is SARIF's reading of a bare ``ruleId``: the driver's rule). Two
+    and only then across every component in order (first copy wins, which is
+    SARIF's reading of a bare ``ruleId``: the driver's rule). Two
     scanners can share a rule id (grype and trivy both name a CVE), and the
     merge that aggregates their runs keeps each scanner's rules in its own
     extension while dropping the result's component reference; read across every
     component first-wins, a level-less copy of the id in one scanner's extension
     graded another scanner's result "warning" where its own rule said "error".
+
+    *by_id* (the first copy of each id across *components*) is accepted for the
+    signature's sake; the join derives it from *components*.
     """
-    reference = getattr(result, "rule", None)
-    body = getattr(reference, "root", reference)
-    stated_id = getattr(result, "ruleId", None) or getattr(body, "id", None)
-    named_rules: Optional[list[Any]] = None
-    scanner = result_scanner_labels(result) if component_names else frozenset()
-
-    def in_scope(candidate: Any) -> object:
-        """The rule with id *candidate* in the component the reference names, else
-        in the component of the result's scanner; None when neither holds it."""
-        if named_rules is not None:
-            found = _first_rule_with_id(named_rules, candidate)
-            if found is not None:
-                return found
-        if scanner:
-            for rules, labels in zip(components, component_names or []):
-                if labels and not labels.isdisjoint(scanner):
-                    found = _first_rule_with_id(rules, candidate)
-                    if found is not None:
-                        return found
-        return None
-
-    def by_stated_id() -> object:
-        # The stated id, then each shorter prefix at a "/".
-        candidates = []
-        candidate = stated_id
-        while candidate:
-            candidates.append(candidate)
-            if "/" not in candidate:
-                break
-            candidate = candidate.rsplit("/", 1)[0]
-        # Every prefix is tried within the result's own scope before any is tried
-        # across every component. A prefix tried globally as soon as it missed in
-        # scope let another scanner's exact ``CA1001/sub`` win over the result's
-        # own component's ``CA1001``: the bleed between scanners the scope exists
-        # to prevent.
-        for candidate in candidates:
-            found = in_scope(candidate)
-            if found is not None:
-                return found
-        for candidate in candidates:
-            found = by_id.get(candidate)
-            if found is not None:
-                return found
-        return None
-
-    if body is not None:
-        component_ref = getattr(body, "toolComponent", None)
-        component_index = getattr(component_ref, "index", -1)
-        if component_index is None or component_index < 0:
-            rules = components[0]
-        elif component_index + 1 < len(components):
-            rules = components[component_index + 1]
-        else:
-            rules = []
-        named_rules = rules
-        index = getattr(body, "index", -1)
-        if index is not None and 0 <= index < len(rules):
-            rule = rules[index]
-            if not stated_id or getattr(rule, "id", None) == stated_id:
-                return rule
-        return by_stated_id()
-    rule_index = getattr(result, "ruleIndex", None)
-    if rule_index is not None and 0 <= rule_index < len(components[0]):
-        rule = components[0][rule_index]
-        if not stated_id or getattr(rule, "id", None) == stated_id:
-            return rule
-    return by_stated_id()
+    (position,) = _rule_positions([result], components, component_names)
+    return None if position is None else components[position[0]][position[1]]
 
 
 def resolve_missing_levels(sarif_report: object) -> None:
@@ -381,6 +482,8 @@ def resolve_missing_levels(sarif_report: object) -> None:
     state a level keep it. Run where a scanner's report enters the results, so
     the level is explicit in memory, in ``ash.sarif`` and in the saved results.
     """
+    import polars as pl  # lazy: this module is on the hot import path of the models
+
     for run in getattr(sarif_report, "runs", None) or []:
         tool = getattr(run, "tool", None)
         tool_components = [getattr(tool, "driver", None)] + list(
@@ -391,23 +494,46 @@ def resolve_missing_levels(sarif_report: object) -> None:
             for component in tool_components
         ]
         component_names = [component_labels(c) for c in tool_components]
-        # First copy wins across components: the global fallback of _rule_of,
-        # which looks in the named and the scanner's component before it.
-        by_id: Dict[Any, object] = {}
-        for rules in components:
-            for rule in rules:
-                by_id.setdefault(getattr(rule, "id", None), rule)
-        for result in getattr(run, "results", None) or []:
-            if "level" in getattr(result, "model_fields_set", ("level",)):
-                continue
+        unlevelled = [
+            result
+            for result in getattr(run, "results", None) or []
+            if "level" not in getattr(result, "model_fields_set", ("level",))
+        ]
+        is_fail = []
+        for result in unlevelled:
             kind = getattr(result, "kind", None)
-            kind = str(getattr(kind, "value", kind) or "fail")
-            if kind != "fail":
-                result.level = "none"
-                continue
-            rule = _rule_of(result, components, by_id, component_names)
-            level = _rule_default_level(rule) if rule is not None else None
-            result.level = level or MISSING_SARIF_LEVEL
+            is_fail.append(str(getattr(kind, "value", kind) or "fail") == "fail")
+        fails = [result for result, fail in zip(unlevelled, is_fail) if fail]
+        # Row-wise by constraint: a rule's level is read off a model object, once
+        # per distinct rule, and the level is written back onto each result.
+        rule_levels: Dict[_RulePosition, Optional[str]] = {}
+        found: list[Optional[str]] = []
+        for position in _rule_positions(fails, components, component_names):
+            if position is not None and position not in rule_levels:
+                rule_levels[position] = _rule_default_level(
+                    components[position[0]][position[1]]
+                )
+            found.append(None if position is None else rule_levels[position])
+        levels = iter(found)
+        # SARIF 3.27.10: a non-"fail" kind is "none"; "fail" takes the rule's
+        # default level, else "warning".
+        resolved = (
+            pl.DataFrame(
+                {
+                    "fail": is_fail,
+                    "rule_level": [next(levels) if fail else None for fail in is_fail],
+                },
+                schema={"fail": pl.Boolean, "rule_level": pl.Utf8},
+            )
+            .select(
+                pl.when("fail")
+                .then(pl.coalesce("rule_level", pl.lit(MISSING_SARIF_LEVEL)))
+                .otherwise(pl.lit("none"))
+            )
+            .to_series()
+        )
+        for result, level in zip(unlevelled, resolved):
+            result.level = level
 
 
 def result_severity(result: object) -> str:

@@ -84,6 +84,8 @@ def test_a_job_builds_the_default_stage_and_probes_it():
     assert build < probe
     probe_step = job["steps"][probe]
     assert "--run-container-snapshots" in _words(probe_step)
+    # The probe module is e2e-marked: without this flag every test in it is skipped.
+    assert "--run-integration" in _words(probe_step)
     runner = (probe_step.get("env") or {}).get("OCI_RUNNER")
     assert runner == "docker", sorted(probe_step.get("env") or {})
 
@@ -106,6 +108,7 @@ def test_the_scan_legs_probe_the_ci_stage_too():
 
     assert len(probing) == 1, [step.get("name") for step in probing]
     assert "--run-container-snapshots" in _words(probing[0])
+    assert "--run-integration" in _words(probing[0])
 
 
 def test_a_ci_build_is_not_mistaken_for_the_default_stage():

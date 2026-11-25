@@ -48,6 +48,7 @@ from automated_security_helper.core.scanner_statistics_calculator import (
     ScannerStatisticsCalculator,
 )
 from automated_security_helper.core.enums import ScannerStatus
+from automated_security_helper.core.status_order import grade as grade_status
 from automated_security_helper.models.workspace import is_workspace_scan
 from automated_security_helper.utils.log import ASH_LOGGER
 
@@ -808,16 +809,10 @@ def get_unified_scanner_metrics(
         # measured, a stored report with a string, negative or orphaned counter beside a
         # recorded PASSED came out PASSED. They are never graded on findings either, as in
         # ``ScanResultsContainer.determine_status``.
-        if stats["error"] or unusable_counters:
-            status = "ERROR"
-        elif stats["actionable"] > 0:
-            status = "FAILED"
-        elif stats["excluded"]:
-            status = "SKIPPED"
-        elif stats["dependencies_missing"]:
-            status = "MISSING"
-        elif stats["evaluated_nothing"]:
-            status = "SKIPPED"
+        # The order of the branches is core.status_order's, shared with the summary.
+        graded = grade_status(stats, unusable_counters, default_flags=False)
+        if graded is not None:
+            status = graded
         else:
             scan_result: ScannerTargetStatusInfo | None = (
                 asharp_model.scanner_results.get(scanner_name, None)

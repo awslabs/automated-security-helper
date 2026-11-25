@@ -24,7 +24,13 @@ sits at and no other, instead of the whole report falling back to its legacy ids
 (which changed every id between two pipelines of the same tree for one stray row).
 """
 
-from typing import Any, List, Optional
+from bisect import bisect_left
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+
+from automated_security_helper.utils.frame_text import ranks, wire
+
+if TYPE_CHECKING:
+    import polars as pl
 
 __all__ = ["shared_ids_by_position", "flat_describes_result"]
 
@@ -43,23 +49,155 @@ def shared_ids_by_position(flat: List[Any], results: List[Any]) -> List[Optional
     at a position whose row carries no usable id or describes another result.
     """
     rows = [item for item in flat if getattr(item, "source_report", None) is None]
+    pairs = _describing_pairs(rows, results)
     ids: List[Optional[str]] = []
     if len(rows) == len(results):
-        for item, result in zip(rows, results):
-            ids.append(
-                _usable_id(item) if flat_describes_result(item, result) else None
-            )
+        # By position: result ``i`` takes row ``i`` when that pair describes it.
+        agreed = {result for result, row in pairs if result == row}
+        for position, item in enumerate(rows):
+            ids.append(_usable_id(item) if position in agreed else None)
         return ids
+    # Walked: each result takes the first row, at or after the last one taken,
+    # that describes it. The frame says which rows describe each result; the
+    # cursor, which depends on the answer before it, stays a loop.
+    candidates: Dict[int, List[int]] = {}
+    for result, row in pairs:
+        candidates.setdefault(result, []).append(row)
     cursor = 0
-    for result in results:
-        paired = None
-        for offset in range(cursor, len(rows)):
-            if flat_describes_result(rows[offset], result):
-                paired = rows[offset]
-                cursor = offset + 1
-                break
-        ids.append(_usable_id(paired) if paired is not None else None)
+    for position in range(len(results)):
+        listed = candidates.get(position, [])
+        at = bisect_left(listed, cursor)
+        if at < len(listed):
+            cursor = listed[at] + 1
+            ids.append(_usable_id(rows[listed[at]]))
+        else:
+            ids.append(None)
     return ids
+
+
+# A key cell is text or an object, told apart by its first character, and a missing
+# part is the empty string (a part that is present is never empty: ``_stripped``
+# turns an empty one into None). A line is a rank, and a missing line is -1.
+_MISSING = ""
+_NO_LINE = -1
+
+
+def _cell(value: Any, objects: Dict[Any, int]) -> str:
+    """One text part of a pairing key, as a string a polars column can hold.
+
+    Text goes through ``frame_text.wire`` (a lone surrogate is carried, not
+    refused). A value that is not text is compared by equality, as the walk
+    compared it, so equal values share one code. An unhashable one raises
+    ``TypeError``, which the caller reads as "describes nothing".
+    """
+    if value is None:
+        return _MISSING
+    if isinstance(value, str):
+        return "t" + (wire(value) or "")
+    return "o" + str(objects.setdefault(value, len(objects)))
+
+
+def _line_value(value: Any) -> Optional[int]:
+    """*value* as the int it compares equal to, None for no line.
+
+    Raises ``ValueError`` for what equals no int and no None (text, a float with a
+    fraction, any other object), so the caller reads it as "describes nothing".
+    """
+    if value is None:
+        return None
+    if isinstance(value, int):
+        return int(value)
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    raise ValueError("not a line")
+
+
+def _flat_parts(item: Any) -> Optional[Tuple[Any, Any, Optional[int]]]:
+    """What the flattened row says about its rule, file and first line."""
+    try:
+        return (
+            _stripped(getattr(item, "rule_id", None)),
+            _stripped(getattr(item, "file_path", None)),
+            _line_value(getattr(item, "line_start", None)),
+        )
+    except Exception:  # noqa: BLE001 -- a row that cannot be read describes nothing
+        return None
+
+
+def _result_parts(result: Any) -> Optional[Tuple[Any, Any, Optional[int]]]:
+    """What the result says about its rule, file and first line."""
+    try:
+        return (
+            _stripped(getattr(result, "ruleId", None)),
+            _stripped(_first_file_path(result)),
+            _first_start_line(result),
+        )
+    except Exception:  # noqa: BLE001 -- a result that cannot be read pairs with nothing
+        return None
+
+
+def _keyed_frame(
+    parts: List[Optional[Tuple[Any, Any, Optional[int]]]],
+    line_rank: Dict[int, int],
+    objects: Dict[Any, int],
+    name: str,
+) -> "pl.DataFrame":
+    """One row per readable item: ``name`` its position, and its rule, file, line."""
+    import polars as pl
+
+    index: List[int] = []
+    rules: List[str] = []
+    files: List[str] = []
+    lines: List[int] = []
+    for position, part in enumerate(parts):
+        if part is None:
+            continue
+        try:
+            rule, path = _cell(part[0], objects), _cell(part[1], objects)
+        except TypeError:
+            continue
+        index.append(position)
+        rules.append(rule)
+        files.append(path)
+        lines.append(_NO_LINE if part[2] is None else line_rank[part[2]])
+    return pl.DataFrame(
+        {name: index, "rule": rules, "file": files, "line": lines},
+        schema={
+            name: pl.Int64,
+            "rule": pl.String,
+            "file": pl.String,
+            "line": pl.Int64,
+        },
+    )
+
+
+def _describing_pairs(rows: List[Any], results: List[Any]) -> List[Tuple[int, int]]:
+    """Every ``(result, row)`` position pair where the row describes the result.
+
+    Reading a row or a result is the host's (they are objects; a read can raise,
+    and a read that raises describes nothing). What each said about its rule, file
+    and first line becomes a row of a frame, and the pairs are an inner join on
+    the three. Sorted by result, then row.
+    """
+    flat_parts = [_flat_parts(item) for item in rows]
+    result_parts = [_result_parts(result) for result in results]
+    # The frame column is 64-bit and a line is not, so a line goes in as its rank
+    # (equal lines have equal ranks, which is all the join asks).
+    line_rank = ranks(
+        part[2]
+        for parts in (flat_parts, result_parts)
+        for part in parts
+        if part is not None and part[2] is not None
+    )
+    objects: Dict[Any, int] = {}
+    row_frame = _keyed_frame(flat_parts, line_rank, objects, "row")
+    result_frame = _keyed_frame(result_parts, line_rank, objects, "result")
+    joined = (
+        result_frame.join(row_frame, on=["rule", "file", "line"], how="inner")
+        .select("result", "row")
+        .sort("result", "row")
+    )
+    return [(result, row) for result, row in joined.iter_rows()]
 
 
 def _usable_id(item: Any) -> Optional[str]:

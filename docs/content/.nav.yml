@@ -27,6 +27,7 @@ nav:
       - Suppress findings: how-to/suppress-findings.md
       - Read scan results: how-to/read-results.md
       - Export reports: how-to/export-reports.md
+      - Deduplicate findings: how-to/deduplicate-findings.md
       - Enable the scanner sandbox: docs/scanner-sandbox.md
       - Run in a container: how-to/run-in-a-container.md
       - Run offline: how-to/run-offline.md
@@ -59,6 +60,7 @@ nav:
       - Configuration: reference/configuration.md
       - Environment variables: reference/environment-variables.md
       - Scanners: reference/scanners.md
+      - Scanner facets: reference/scanner-facets.md
       - Reporters: reference/reporters.md
       - Converters: reference/converters.md
       - MCP tools: reference/mcp-tools.md

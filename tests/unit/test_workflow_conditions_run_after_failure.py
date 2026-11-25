@@ -63,9 +63,11 @@ UPLOADS = re.compile(
     r"actions/upload-artifact@|github/codeql-action/upload-sarif@|"
     r"mikepenz/action-junit-report@|mshick/add-pr-comment@"
 )
-# A step that runs ASH: the `ash` command (directly, or through uv/uvx), Invoke-ASH, or
-# this repository's scan action.
-RUNS_ASH = re.compile(r"(?<![\w./-])ashx?(?=\s|$)|\bInvoke-ASH\b|/run-scan-test\b")
+# A step that runs ASH: the `ash` or `ashx` command (directly, or through uv/uvx),
+# Invoke-ASH, an invoke-ash helper, or this repository's scan action.
+RUNS_ASH = re.compile(
+    r"(?<![\w./-])ashx?(?=\s|$)|\bInvoke-ASH\b|\binvoke[-_]ash\b|/run-scan-test\b"
+)
 
 
 def workflow_files() -> list[Path]:
@@ -418,6 +420,22 @@ def test_the_upload_checker_flags_an_upload_skipped_after_a_failed_scan():
                 {"run": "ash scan --no-fail-on-findings"},
                 {"uses": "actions/upload-artifact@v4"},
             ]
+        )
+        == []
+    )
+
+
+def test_the_upload_checker_sees_the_sh_helpers_invoke_ash():
+    upload = {"name": "Upload", "uses": "actions/upload-artifact@v4"}
+    steps = [
+        {"run": ". utils/ash_helpers.sh && invoke-ash --mode container"},
+        upload,
+    ]
+    assert uploads_after_ash_without_status(steps) == ["Upload"]
+    # A name that merely contains the words is not a call.
+    assert (
+        uploads_after_ash_without_status(
+            [{"uses": "./.github/actions/test_invoke_ash_callers"}, upload]
         )
         == []
     )

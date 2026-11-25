@@ -94,6 +94,30 @@ cache under a system directory such as `/opt`, or add it to `sandbox.extra_read_
 a config file outside every git checkout ([Who may grant](../docs/scanner-sandbox.md#who-may-grant)) or with `--config-overrides`. Then check that a
 sandboxed offline scan of a file with a known finding reports it.
 
+### Check cached database ages {#check-caches}
+
+Run [`ash dependencies check --offline`](../reference/cli.md#dependencies-check)
+from the project directory on the host that will scan it:
+
+<!-- doctest: illustrative reason="checks databases already provisioned on the scan host" -->
+```bash
+ash dependencies check --offline
+ash dependencies check --offline --tool grype
+```
+
+The check reads Grype's schema 6 SQLite metadata and Trivy's schema 2 `metadata.json`.
+It reports the database path, build or update time, and ASH's age policy. Copying a
+stale database does not make it fresh. Name the same `--config`, `--source-dir`,
+and stale-database flag you will use on the scan if those differ from the defaults.
+The `GRYPE_DB_CACHE_DIR` and `TRIVY_CACHE_DIR` values are resolved the same way as
+for the local scanners.
+
+Exit 0 means the checked cache metadata meets the policy, including a stale cache
+permitted by `warn`. Exit 1 means a cache is missing, its metadata cannot be read,
+or policy blocks its age. The check neither downloads data nor starts a scanner.
+It does not verify the installed tools, database integrity, the Trivy Java index,
+or that the scan will cover every input.
+
 ## The offline image {#offline-image}
 
 `ashx build-image --offline` and `ashx scan --mode container --offline` build the image with

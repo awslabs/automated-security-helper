@@ -12,7 +12,7 @@ lists what changes for a v2 user and what to do about each.
 | Configuration | none | a config file, `.ashrc.yaml` in a new project, with ignore paths, suppressions, thresholds, and scanner settings |
 | Output | `ash_output/aggregated_results.txt` | `.ash/ash_output/`, with a JSON results file and a `reports/` directory |
 | Exit code | the highest exit code of any scanner | 0, 1, 2, 3, 4, or 5, each with one meaning |
-| Requirements | a container runtime | Python 3.10 to 3.14, plus scanner tools or a container runtime |
+| Requirements | a container runtime | Python 3.11 to 3.14, plus scanner tools or a container runtime |
 
 ## Install v3
 

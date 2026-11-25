@@ -10,6 +10,12 @@ from typing import Annotated, Any, ClassVar, List, Literal, Set
 from pydantic import Field, PrivateAttr, ValidationError, model_validator
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.base.options import ScannerOptionsBase
+from automated_security_helper.base import scanner_operational_facets as opsf
+from automated_security_helper.base.scanner_facets import (
+    FacetDecl,
+    FacetState,
+    ScannerFacets,
+)
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.config.confinement_remedy import SET_BY_THE_OPERATOR
@@ -119,6 +125,190 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
     )
 
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.CACHE_FLAGS
+
+    #: The facets register row (base/scanner_facets.py). Declaration only.
+    #: syft is an SBOM generator: it returns a CycloneDXReport and writes no
+    #: SARIF Result at all, so no finding facet exists. The component
+    #: inventory is the package identity, carried in the CycloneDX document
+    #: outside the flat-vulnerability path. Every other cell is n/a because
+    #: there are no findings to carry it.
+    facets: ClassVar[ScannerFacets] = ScannerFacets(
+        rule_id=FacetDecl(
+            state=FacetState.NA,
+            reason="SBOM scanner: no findings exist, so no rule id",
+        ),
+        severity=FacetDecl(
+            state=FacetState.NA,
+            reason="SBOM scanner: no findings exist, so no severity",
+        ),
+        file_path=FacetDecl(
+            state=FacetState.NA,
+            reason="SBOM scanner: no findings exist; component locations are "
+            "inventory evidence, not a finding location",
+        ),
+        line_range=FacetDecl(
+            state=FacetState.NA,
+            reason="SBOM scanner: no findings exist, so no line range",
+        ),
+        column=FacetDecl(
+            state=FacetState.NA,
+            reason="SBOM scanner: no findings exist, so no column",
+        ),
+        message=FacetDecl(
+            state=FacetState.NA,
+            reason="SBOM scanner: no findings exist, so no message",
+        ),
+        resource_id=FacetDecl(
+            state=FacetState.NA,
+            reason="no findings exist; the SBOM names packages (package "
+            "identity), not infrastructure resources, and writes no "
+            "ash_resource_id",
+        ),
+        resource_type=FacetDecl(
+            state=FacetState.NA,
+            reason="no findings exist; component types (library, "
+            "application) are package kinds, not resource types",
+        ),
+        package_name=FacetDecl(
+            state=FacetState.DROPPED,
+            native_field="CycloneDX components[].name",
+            reason="carried in the CycloneDX document the scanner returns, "
+            "outside the flat-vulnerability path: syft writes no SARIF "
+            "result, so no flat row ever holds it",
+        ),
+        package_version=FacetDecl(
+            state=FacetState.DROPPED,
+            native_field="CycloneDX components[].version",
+            reason="carried in the CycloneDX document the scanner returns, "
+            "outside the flat-vulnerability path: syft writes no SARIF "
+            "result, so no flat row ever holds it",
+        ),
+        package_path=FacetDecl(
+            state=FacetState.NA,
+            reason="UNCONFIRMED: syft's native artifacts[].locations[].path "
+            "(fixture syft.src.json) has a CycloneDX counterpart this "
+            "adapter has not been read against; a cyclonedx-json run "
+            "settles it",
+        ),
+        taxonomy_cve=FacetDecl(
+            state=FacetState.NA,
+            reason="SBOM scanner: inventory only, no vulnerability matching",
+        ),
+        taxonomy_cwe=FacetDecl(
+            state=FacetState.NA,
+            reason="SBOM scanner: inventory only, no vulnerability matching",
+        ),
+        fingerprints=FacetDecl(
+            state=FacetState.NA,
+            reason="SBOM scanner: no findings exist to fingerprint",
+        ),
+        fix_available=FacetDecl(
+            state=FacetState.NA,
+            reason="SBOM scanner: no vulnerabilities, so no fix state",
+        ),
+        remediation_text=FacetDecl(
+            state=FacetState.NA,
+            reason="SBOM scanner: no findings exist, so no remediation",
+        ),
+        snippet=FacetDecl(
+            state=FacetState.NA,
+            reason="SBOM scanner: no findings exist, so no snippet",
+        ),
+        references=FacetDecl(
+            state=FacetState.NA,
+            reason="SBOM scanner: no findings exist, so no references",
+        ),
+        tags=FacetDecl(
+            state=FacetState.NA,
+            reason="SBOM scanner: no findings exist, so no tags",
+        ),
+        extras=FacetDecl(
+            state=FacetState.NA,
+            reason="SBOM scanner: no SARIF property bag; the CycloneDX "
+            "document is passed through whole outside the flat path",
+        ),
+    )
+
+    #: The operational register row (base/scanner_operational_facets.py),
+    #: checked against the production declarations it mirrors by
+    #: tests/unit/plugin_modules/test_scanner_operational_facets_consistency.py.
+    operational_facets: ClassVar[opsf.ScannerOperationalFacets] = (
+        opsf.ScannerOperationalFacets(
+            scanner_name="syft",
+            network=opsf.NetworkFacet(
+                fetch_kind=opsf.FetchKind.TOOL_UPDATES_ONLY,
+                fetches=(),
+                prefetch=(),
+                offline_outcome=opsf.OfflineOutcome.UNCHANGED,
+                offline_strategy=OfflineStrategy.CACHE_FLAGS,
+                sandbox_network=opsf.SandboxNetwork.NONE,
+                source=(
+                    "syft_scanner.py offline_strategy and sandbox_requirements; "
+                    "utils/content_databases.py SCANNERS_WITHOUT_CONTENT_DATABASE['syft']: "
+                    "it catalogs packages and matches nothing against advisories; the "
+                    "remote license, maven and vcpkg lookups are forced off by "
+                    "OFFLINE_TOOL_ENVIRONMENT"
+                ),
+            ),
+            output=opsf.OutputFacet(
+                native_formats=(opsf.OutputFormat.CYCLONEDX,),
+                side_reports=(),
+                non_finding_artifacts=("CycloneDXReport (the SBOM)",),
+                consumed_by_deviation="no SARIF Result exists; the SBOM is consumed outside the flat findings path",
+            ),
+            targets=opsf.TargetsFacet(
+                kinds=(opsf.TargetKind.PACKAGE_INVENTORY,),
+                tool_type=ScannerToolType.SBOM,
+                selection="the whole directory, cataloged into an SBOM",
+            ),
+            runtime=opsf.RuntimeFacet(
+                kind=opsf.RuntimeKind.PINNED_BINARY,
+                external_programs=(),
+                invocations=opsf.Invocations.ONE,
+                tool_versions_key="syft",
+                python_only=False,
+                use_uv_tool=False,
+            ),
+            platforms=opsf.PlatformsFacet(
+                provisionable=opsf.PLATFORMS_ALL,
+                note="asset table lists all six platform/arch pairs",
+            ),
+            severity=opsf.SeverityFacet(
+                severity_class=opsf.SeverityClass.NOT_APPLICABLE,
+                note="an SBOM has no findings",
+            ),
+            silencing=opsf.SilencingFacet(
+                tool_side=(),
+                none_reason="syft produces an SBOM, not findings; there is nothing to silence",
+            ),
+            identity=opsf.IdentityFacet(
+                fingerprint_class=opsf.FingerprintClass.NOT_APPLICABLE,
+                note="no findings to identify",
+            ),
+            extensibility=opsf.ExtensibilityFacet(
+                custom_rules=opsf.CustomRules.NONE,
+                env_prefixes=("SYFT_",),
+                options_surface="typed options only; no rules surface",
+            ),
+            exit_codes=opsf.ExitCodesFacet(
+                success_exit_codes=(0,),
+                semantics="a completed run exits 0; syft installs no findings-found exit",
+            ),
+            provenance=opsf.ProvenanceFacet(
+                tier=opsf.Tier.BUILTIN_DEFAULT,
+                source=opsf.ProvenanceSource.PINNED_RELEASE_BINARY,
+                selection_surfaces=(),
+                upstream_license=(
+                    "Apache-2.0 (source: utils/tool_downloads.py "
+                    "THIRD_PARTY_LICENSES['syft'], pinned commit 1a72047)"
+                ),
+            ),
+            prerequisites=opsf.PrerequisitesFacet(
+                kinds=(opsf.Prerequisite.NONE,),
+                note="a directory",
+            ),
+        )
+    )
 
     # syft exits 0 for a completed run; cmd/syft/main.go runs clio, whose Run exits 1
     # on any error, and syft installs no other exit-code mapping. An SBOM has no

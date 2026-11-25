@@ -737,6 +737,23 @@ ALLOWLIST: tuple[Entry, ...] = (
         ),
     ),
     Entry(
+        file=".github/workflows/ash-offline-scanners.yml",
+        kind=KIND_UPLOAD,
+        action=_UPLOAD,
+        publishes=(
+            "name=offline-capable-scanners "
+            "path=${{ runner.temp }}/offline-scanners.json"
+            "|${{ runner.temp }}/ash-sandbox-parity-*"
+        ),
+        reason=(
+            "Debugging evidence from a failed run of the non-blocking offline "
+            "scanner check (`if: failure()`, 7-day retention): the parity report "
+            "JSON and the scan output of scanning this repository's own public "
+            "tree and the parity fixture. Findings and logs about public code, "
+            "not a wheel, image, binary or bundle this project distributes."
+        ),
+    ),
+    Entry(
         file=".github/workflows/ash-docs-ci-runners.yml",
         kind=KIND_UPLOAD,
         action=_UPLOAD,

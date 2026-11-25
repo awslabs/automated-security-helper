@@ -137,7 +137,7 @@ ashx dependencies install --tool cfn-guard
 
 installs two pinned artifacts, each verified against a SHA256 recorded in ASH's source (`automated_security_helper/utils/tool_downloads.py`):
 
-- the cfn-guard 3.2.1 release binary for your platform (Linux, macOS and Windows, amd64 and arm64), into `ASH_BIN_PATH`;
+- the cfn-guard 3.3.0 release binary for your platform (Linux, macOS and Windows, amd64 and arm64), into `ASH_BIN_PATH`;
 - the AWS Guard Rules Registry release 1.0.2 rules archive. Its `output/*.guard` files are extracted into `aws-guard-rules-registry-1.0.2/` under `$ASH_CFN_GUARD_RULES_DIR`, or under `<ASH_BIN_PATH>/../share/cfn-guard-rules` when that is unset. ASH's source also pins what the archive extracts to: one SHA256 over the names and digests of all 50 rule files. The extracted files are checked against it before they are moved into place. A `.ash-rules-manifest.json` beside them records what was installed; no check relies on it.
 
 A download whose bytes do not match the pinned digest is refused. The ASH container image ships both, installed read-only for the scan user: the rules are in `/usr/share/ash/cfn-guard-rules`, which the image checks at build time is owned by root, as is every directory above it. nixpkgs has no cfn-guard package, so the nix flake packages the same pinned release binary (`nix/cfn-guard.nix`), and the nix shell installs the rules bundle into `ASH_CFN_GUARD_RULES_DIR` on first entry, and again on any entry where the bundle there is not the pinned one: after an ASH upgrade that changes the pin, or when the rule files there no longer match the pinned contents.

@@ -17856,9 +17856,9 @@ def test_every_python_range_the_pages_give_is_requires_python() -> None:
     """
     assert_on_page(
         INSTALL_PAGE,
-        "- Python 3.10 to 3.14. uv and pipx can fetch a matching Python for you.",
+        "- Python 3.11 to 3.14. uv and pipx can fetch a matching Python for you.",
     )
-    assert_on_page(INSTALL_PAGE, "Use any Python 3.10 to 3.14 in place of 3.12.")
+    assert_on_page(INSTALL_PAGE, "Use any Python 3.11 to 3.14 in place of 3.12.")
     minors = _install_supported_minors()
     assert minors and minors == list(range(minors[0], minors[-1] + 1)), minors
     ranges = [
@@ -17989,7 +17989,7 @@ def test_ci_installs_ash_on_the_pythons_and_runners_the_page_names() -> None:
     control is that the matrix holds all three methods.
     """
     sentence = (
-        "CI installs ASH with pip and pipx on Python 3.10 to 3.14 and with uvx on 3.12, "
+        "CI installs ASH with pip and pipx on Python 3.11 to 3.14 and with uvx on 3.12, "
         "on Ubuntu (x86-64 and arm64), macOS on Apple silicon, and Windows."
     )
     assert_on_page(INSTALL_PAGE, sentence)
@@ -18567,6 +18567,7 @@ _PAGES_STEPS_THAT_RUN_A_TOOL = {
         "Install scanner tools",
         "Run ASH",
         "Run ASH",
+        "Run ASH",
         "Install ASH",
         "Scan in Nix mode",
     ],
@@ -18630,9 +18631,9 @@ def _commands_acted_on(output: str) -> List[str]:
 def test_the_pages_ash_steps_stop_workflow_commands_as_the_scan_workflow_does(
     tmp_path: Path, stopped: bool
 ) -> None:
-    """github-actions.md (Write the steps yourself, Cache tools and databases, and Scan
-    only the files a pull request changes) and scale-large-repos.md (Sharding in
-    GitHub Actions).
+    """github-actions.md (Write the steps yourself, Cache tools and databases, Scan
+    only the files a pull request changes, and Gate on new findings) and
+    scale-large-repos.md (Sharding in GitHub Actions).
 
     Every GitHub Actions block of every page is read. Each step that runs ``uv`` or
     ``ash`` makes its token, and prints its stop and resume lines, the way the scan

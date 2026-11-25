@@ -12,7 +12,10 @@ function Invoke-ASH {
     an image name or ASH_BASE_IMAGE_OVERRIDE that starts with '-' or holds a character
     other than A-Z, a-z, 0-9 and . _ : / @ -, an -AshArgs it cannot read, a
     --workspace or --workspace-config among ASH's arguments (Invoke-ASH scans one
-    directory), no OCI runner, and a malformed ASH_BASE_OCI_LAYOUT. The exceptions are
+    directory), no OCI runner, an OCI_RUNNER environment variable that is a relative path
+    (the same path given as -OCIRunner is used as written), a GITHUB_ACTIONS, TF_BUILD or
+    TEAMCITY_VERSION that holds a newline while OCI_RUNNER_WRAPPER is set, and a malformed
+    ASH_BASE_OCI_LAYOUT. The exceptions are
     the usage errors `ash` itself refuses with 5, refused the same way with 5 and its
     text: a --sandbox among ASH's arguments with a mode other than off, because the
     scanners run unsandboxed inside the container; a parameter given an empty or blank
@@ -848,12 +851,17 @@ function Invoke-ASH {
         # the tables against the real commands, and
         # tests/unit/test_sandbox_refused_by_every_container_entrypoint.py checks these
         # lists against ./ash's and the real commands and options.
-        $ashSubcommands = @('scan', 'build-image', 'report', 'merge', 'mcp', 'get-genai-guide', 'config', 'dependencies', 'inspect', 'plugin', 'express')
+        # BEGIN generated: ps1-subcommands (scripts/generate_wrapper_tables.py)
+        $ashSubcommands = @('scan', 'build-image', 'report', 'diff', 'trend', 'merge', 'mcp', 'get-genai-guide', 'config', 'dependencies', 'inspect', 'plugin', 'express')
         $ashTakesSandbox = @('scan')
+        # END generated: ps1-subcommands
         # The root ash options that take a value, ASH_ROOT_VALUE_OPTIONS in ./ash. A value
         # can be a subcommand's name (`--phases report`, `--source-dir report`), so the
         # word after one of these is the option's value, not the subcommand.
-        $ashRootValueOptions = @('--add-scanners', '--ash-config-from-host', '--ash-plugin-modules', '--ash-revision', '--ash-revision-to-install', '--base-ref', '--build-target', '--config', '--config-file-from-another-checkout', '--config-file-from-scanned-repository', '--config-overrides', '--container-gid', '--container-uid', '--custom-build-arg', '--custom-containerfile', '--exclude-scanners', '--format', '--formats', '--log-level', '--min-severity', '--mode', '--oci', '--oci-runner', '--offline-rulesets', '--offline-semgrep-rulesets', '--only-scanners', '--output-dir', '--output-format', '--output-formats', '--phases', '--runner', '--sandbox', '--scanners', '--shard-count', '--shard-index', '--source-dir', '--strategy', '--workspace', '--workspace-config', '-c', '-f', '-g', '-o', '-rev', '-u')
+        # BEGIN generated: ps1-root-value-options (scripts/generate_wrapper_tables.py)
+        $ashRootValueOptions = @('--add-scanners', '--ash-config-from-host', '--ash-plugin-modules', '--ash-revision', '--ash-revision-to-install', '--base-ref', '--baseline', '--build-target', '--config', '--config-file-from-another-checkout', '--config-file-from-scanned-repository', '--config-overrides', '--container-gid', '--container-uid', '--custom-build-arg', '--custom-containerfile', '--exclude-scanners', '--format', '--formats', '--log-level', '--min-severity', '--mode', '--oci', '--oci-runner', '--offline-rulesets', '--offline-semgrep-rulesets', '--only-scanners', '--output-dir', '--output-format', '--output-formats', '--phases', '--require-scanner-selection', '--runner', '--sandbox', '--scanners', '--shard-count', '--shard-index', '--source-dir', '--strategy', '--workspace', '--workspace-config', '-c', '-f', '-g', '-o', '-rev', '-u')
+        # END generated: ps1-root-value-options
+        # BEGIN generated: ps1-option-subcommands (scripts/generate_wrapper_tables.py)
         $ashOptionSubcommands = @{
             '--quiet'                = 'scan build-image mcp'
             '--no-color'             = 'scan build-image report merge mcp'
@@ -871,6 +879,7 @@ function Invoke-ASH {
             '--exclude-scanners'     = 'scan'
             '--ignore-suppressions'  = 'scan merge'
         }
+        # END generated: ps1-option-subcommands
         $subcommandAt = -1
         $subcommand = ''
         $skipValue = $false
@@ -1713,9 +1722,13 @@ function Invoke-ASH {
         # OCI_RUNNER is what ./ash and the ash CLI read. ASH_OCI_RUNNER, a deprecated name
         # only this function reads, applies when OCI_RUNNER is unset and no -OCIRunner
         # was passed, so a profile that sets it keeps the runner it chose.
+        # $ociRunnerSource names the variable the value came from, for the refusal of a
+        # relative path below.
+        $ociRunnerSource = 'OCI_RUNNER'
         if (-not $PSBoundParameters.ContainsKey('OCIRunner') -and [string]::IsNullOrEmpty($OCIRunner) -and -not [string]::IsNullOrEmpty($env:ASH_OCI_RUNNER)) {
             Write-Warning "ASH_OCI_RUNNER is deprecated; set OCI_RUNNER instead, which ./ash and the ash CLI also read."
             $OCIRunner = $env:ASH_OCI_RUNNER
+            $ociRunnerSource = 'ASH_OCI_RUNNER'
         }
 
         # Resolve OCI runner. IsNullOrEmpty, not `$null -ne`: $OCIRunner is a [string]
@@ -1724,12 +1737,14 @@ function Invoke-ASH {
         # empty name. An unbound -OCIRunner whose OCI_RUNNER default is empty falls back
         # to discovery, in the order ./ash and the ash CLI use; an explicit -OCIRunner ''
         # was refused with 5, the usage-error code, when Invoke-ASH started.
+        # BEGIN generated: ps1-runner-discovery (scripts/generate_wrapper_tables.py)
         $runners = if (-not [string]::IsNullOrEmpty($OCIRunner)) {
             @($OCIRunner)
         }
         else {
             @('finch', 'docker', 'nerdctl', 'podman')
         }
+        # END generated: ps1-runner-discovery
 
         # Resolve source and output directories
         $sourceDirFull = Get-Item -LiteralPath $SourceDir | Select-Object -ExpandProperty FullName
@@ -1935,6 +1950,23 @@ function Invoke-ASH {
     }
     process {
         try {
+            # A relative path that came from the OCI_RUNNER environment variable (or the
+            # deprecated ASH_OCI_RUNNER) names a file under the working directory, usually
+            # the repository being scanned. It is refused, as ./ash and the ash CLI refuse
+            # it: not run, and not replaced by looking for another runtime. The same path
+            # given as -OCIRunner is the caller's own, typed where they stand, and is used
+            # as written. A leading ~ is not expanded from the environment, so ~/bin/docker
+            # is refused as a relative path, as ./ash refuses it. A value holding a
+            # character a path cannot hold is refused the same way: Windows PowerShell
+            # 5.1's IsPathRooted throws on one, which would end in a generic exception
+            # with no exit code set. Thrown from a variable, with $LASTEXITCODE set first.
+            if (-not $PSBoundParameters.ContainsKey('OCIRunner') -and -not [string]::IsNullOrEmpty($OCIRunner) -and
+                $OCIRunner -match '[\\/]' -and
+                ($OCIRunner.IndexOfAny([System.IO.Path]::GetInvalidPathChars()) -ge 0 -or -not [System.IO.Path]::IsPathRooted($OCIRunner))) {
+                $envRunnerRefusal = "$ociRunnerSource starts with the relative path $(Format-AshShownValue $OCIRunner), which names a file under the working directory (usually the repository being scanned), so it is not run, and no other runtime is looked for in its place. Set OCI_RUNNER to a command name or an absolute path."
+                $global:LASTEXITCODE = $refusalExitCode
+                throw $envRunnerRefusal
+            }
             $RESOLVED_OCI_RUNNER = $null
             foreach ($runner in $runners) {
                 if ($FOUND = Get-Command $runner -ErrorAction SilentlyContinue) {
@@ -1975,10 +2007,46 @@ function Invoke-ASH {
                 # $LASTEXITCODE set first, as the runner refusal above.
                 if ($OCI_WRAPPER.Count -gt 0) {
                     $wrapperWord = [string]$OCI_WRAPPER[0]
-                    if ($wrapperWord -match '[\\/]' -and -not [System.IO.Path]::IsPathRooted($wrapperWord)) {
+                    if ($wrapperWord -match '[\\/]' -and
+                        ($wrapperWord.IndexOfAny([System.IO.Path]::GetInvalidPathChars()) -ge 0 -or -not [System.IO.Path]::IsPathRooted($wrapperWord))) {
                         $wrapperRefusal = "OCI_RUNNER_WRAPPER starts with the relative path $(Format-AshShownValue $wrapperWord), which names a file under the working directory (usually the repository being scanned), so it is not run, and the OCI runner does not start without the wrapper. Start OCI_RUNNER_WRAPPER with a command name or an absolute path."
                         $global:LASTEXITCODE = $refusalExitCode
                         throw $wrapperRefusal
+                    }
+                }
+
+                # Under a runner that reads workflow commands from the job's output (GitHub
+                # Actions, Azure Pipelines, TeamCity), ash checks a terminal's lines too, but
+                # only when it sees the runner's variable, so each one that is set goes into
+                # the container, as ./ash and the ash CLI pass it: by name, or with its value
+                # when OCI_RUNNER_WRAPPER is set, which need not pass this session's
+                # environment on (sudo does not by default). These are public markers of the
+                # CI system, not secrets, and no other variable's value goes on the command
+                # line. A value holding a newline is refused before anything is built, as
+                # ./ash refuses it. Only a run that will happen passes them.
+                $ciRunnerMarkerArgs = @()
+                if (-not $NoRun) {
+                    $ciRunnerMarkers = [ordered]@{
+                        GITHUB_ACTIONS   = $env:GITHUB_ACTIONS
+                        TF_BUILD         = $env:TF_BUILD
+                        TEAMCITY_VERSION = $env:TEAMCITY_VERSION
+                    }
+                    foreach ($markerName in $ciRunnerMarkers.Keys) {
+                        $markerValue = $ciRunnerMarkers[$markerName]
+                        if ([string]::IsNullOrEmpty($markerValue)) {
+                            continue
+                        }
+                        elseif ($OCI_WRAPPER.Count -eq 0) {
+                            $ciRunnerMarkerArgs += '-e', $markerName
+                        }
+                        elseif ($markerValue -match "`n") {
+                            $markerRefusal = "$markerName holds a newline, so it is not passed to the container: with OCI_RUNNER_WRAPPER set, GITHUB_ACTIONS, TF_BUILD and TEAMCITY_VERSION go on the runner's command line with their values. Remove the newline from $markerName, or unset OCI_RUNNER_WRAPPER so the container gets the variable by name."
+                            $global:LASTEXITCODE = $refusalExitCode
+                            throw $markerRefusal
+                        }
+                        else {
+                            $ciRunnerMarkerArgs += '-e', "$markerName=$markerValue"
+                        }
                     }
                 }
 
@@ -2110,6 +2178,7 @@ function Invoke-ASH {
                         "-e", "ASH_SOURCE_DIR=/src"
                         "-e", "ASH_OUTPUT_DIR=/out"
                     )
+                    $runCmd += $ciRunnerMarkerArgs
 
                     # Add source directory mount, read-only wherever the output
                     # directory is: the output has its own mount at /out and the scan
@@ -2336,7 +2405,9 @@ Register-ArgumentCompleter -CommandName Invoke-ASH -ParameterName 'OCIRunner' -S
 # checks the value in its body, so a stage it does not have is refused with exit 3.
 Register-ArgumentCompleter -CommandName Invoke-ASH -ParameterName 'BuildTarget' -ScriptBlock {
     param($commandName, $parameterName, $wordToComplete, $commandAst, $fakeBoundParameter)
+    # BEGIN generated: ps1-build-target-completer (scripts/generate_wrapper_tables.py)
     @('ci', 'non-root') | Where-Object { $_ -like "$wordToComplete*" } | ForEach-Object {
+    # END generated: ps1-build-target-completer
         [System.Management.Automation.CompletionResult]::new(
             $_, $_, 'ParameterValue', $_)
     }

@@ -1,10 +1,10 @@
 
- Usage: ashx report [OPTIONS]
+ Usage: ash report [OPTIONS]
 
  Generate a report from ASH scan results using the specified reporter plugin.
 
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --format                                <str>                        Report format to generate:  │
+│ --format                                 <str>                       Report format to generate:  │
 │                                                                      a reporter's name. Defaults │
 │                                                                      to 'markdown'. Values:      │
 │                                                                      text, flat-json, yaml, csv, │
@@ -25,12 +25,12 @@
 │                                                                      there adds is named the     │
 │                                                                      same way.                   │
 │                                                                      [default: markdown]         │
-│ --output-dir                            <str>                        The directory to output     │
+│ --output-dir                             <str>                       The directory to output     │
 │                                                                      results to                  │
 │                                                                      [env var: ASH_OUTPUT_DIR]   │
-│ --log-level                             <QUIET|SIMPLE|ERROR|INFO|VE  Set the log level.          │
-│                                         RBOSE|DEBUG|TRACE>           [default: INFO]             │
-│ --config            -c                  <str>                        The path to the             │
+│ --log-level                              <QUIET|SIMPLE|ERROR|INFO|V  Set the log level.          │
+│                                          ERBOSE|DEBUG|TRACE>         [default: INFO]             │
+│ --config               -c                <str>                       The path to the             │
 │                                                                      configuration file. By      │
 │                                                                      default, ASH looks for the  │
 │                                                                      following config file names │
@@ -57,16 +57,39 @@
 │                                                                      variable before running     │
 │                                                                      ASH.                        │
 │                                                                      [env var: ASH_CONFIG]       │
-│ --config-overrides                      <str>                        Configuration overrides     │
+│ --config-overrides                       <str>                       Configuration overrides     │
 │                                                                      specified as key-value      │
 │                                                                      pairs (e.g.,                │
 │                                                                      'reporters.cloudwatch-logs… │
-│ --verbose           -v                                               Enable verbose logging      │
-│ --debug             -d                                               Enable debug logging        │
-│ --color                 --no-color  -C                               Enable/disable colorized    │
+│ --annotate-duplicates                                                Add `cluster_id`,           │
+│                                                                      `duplicate_of` and          │
+│                                                                      `duplicate_sources` columns │
+│                                                                      to the csv and flat-json    │
+│                                                                      reports, naming findings    │
+│                                                                      that two scanners report    │
+│                                                                      for one defect. Rows, ids   │
+│                                                                      and counts are unchanged.   │
+│                                                                      Adds three columns to the   │
+│                                                                      CSV header, so it is off by │
+│                                                                      default. Sets               │
+│                                                                      `global_settings.deduplica… │
+│ --fold-duplicates                                                    Show one row per duplicate  │
+│                                                                      cluster in the HTML,        │
+│                                                                      Markdown and text reports,  │
+│                                                                      with a note naming the      │
+│                                                                      other scanners that         │
+│                                                                      reported it, and add        │
+│                                                                      deduplicated counts beside  │
+│                                                                      the per-scanner counts. Off │
+│                                                                      by default because it       │
+│                                                                      changes row counts. Sets    │
+│                                                                      `global_settings.deduplica… │
+│ --verbose              -v                                            Enable verbose logging      │
+│ --debug                -d                                            Enable debug logging        │
+│ --color                    --no-color                                Enable/disable colorized    │
 │                                                                      output                      │
 │                                                                      [default: color]            │
-│ --help              -h                                               Show this message and exit. │
+│ --help                                                               Show this message and exit. │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Structured input ───────────────────────────────────────────────────────────────────────────────╮
 │ --cli-json-input               PATH  Read parameter values from a JSON object: a path, a file:// │

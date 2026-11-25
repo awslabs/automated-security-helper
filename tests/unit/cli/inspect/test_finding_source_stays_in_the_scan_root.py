@@ -437,3 +437,40 @@ def test_the_scan_root_is_the_directory_the_results_were_written_in(
 
     expected = None if scan_root is None else (tmp_path / scan_root).absolute()
     assert app_class.call_args.kwargs["scan_root"] == expected
+
+
+@pytest.mark.unit
+def test_baseline_filtered_results_do_not_show_secrets_from_live_source(
+    tmp_path, monkeypatch
+):
+    from automated_security_helper.cli.inspect import inspect_findings_app as tui
+
+    root = tmp_path / "repo"
+    output = root / ".ash" / "ash_output"
+    output.mkdir(parents=True)
+    (root / "src").mkdir()
+    live_text = "ONLY_IN_THE_LIVE_SOURCE_FILE"
+    (root / "src" / "app.py").write_text(
+        f"value = '{live_text}'\nx = 1\n", encoding="utf-8"
+    )
+    data = _results("src/app.py", 2)
+    data.setdefault("metadata", {})["baseline"] = {
+        "sha256": "abc",
+        "matched": 1,
+        "matched_without_lines": 0,
+    }
+    (output / RESULTS).write_text(json.dumps(data), encoding="utf-8")
+    shown = []
+
+    def run(app):
+        app.push_screen = lambda *args, **kwargs: None
+        finding = app.filtered_findings[0]
+        app._show_detail(finding)
+        shown.append(finding.get("code_snippet", ""))
+
+    monkeypatch.setattr(tui.FindingsExplorerApp, "run", run)
+    tui.findings_command(
+        output_dir=root, report_file=RESULTS, config=root / ".ash.yaml"
+    )
+    assert shown and live_text not in shown[0]
+    assert not shown[0]

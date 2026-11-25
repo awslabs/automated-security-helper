@@ -17,7 +17,7 @@ Automated Security Helper, the agentic security harness: open-source orchestrati
 
 ## Quick start
 
-Use Python 3.10 to 3.14 and [pipx](https://pipx.pypa.io/).
+Use Python 3.11 to 3.14 and [pipx](https://pipx.pypa.io/).
 For container mode, also install an OCI-compatible runtime such as Docker,
 Finch, or Podman.
 
@@ -265,7 +265,7 @@ repos:
 
 Run `pre-commit run ash --all-files` to check the project.
 
-The `ash` hook runs precommit mode (bandit, detect-secrets, checkov, cdk-nag and npm-audit) and installs the `cdk` extra into its environment. It needs pre-commit running on Python 3.10 to 3.14, and Node.js and npm on `PATH` for cdk-nag and npm-audit. `ash-simple-scan` is the same hook under its earlier id, and `ash-full-scan` scans in the ASH container image instead. See [Run ASH with pre-commit](docs/content/how-to/pre-commit.md) for running without Node.js and for the container hook.
+The `ash` hook runs precommit mode (bandit, detect-secrets, checkov, cdk-nag and npm-audit) and installs the `cdk` extra into its environment. It needs pre-commit running on Python 3.11 to 3.14, and Node.js and npm on `PATH` for cdk-nag and npm-audit. `ash-simple-scan` is the same hook under its earlier id, and `ash-full-scan` scans in the ASH container image instead. See [Run ASH with pre-commit](docs/content/how-to/pre-commit.md) for running without Node.js and for the container hook.
 
 <a id="configuration"></a>
 
@@ -358,4 +358,4 @@ For security concerns, follow [Security issue notifications](CONTRIBUTING.md#sec
 Licensed under [Apache 2.0](LICENSE). Bundled fonts and icons retain their
 respective licenses alongside their assets.
 
-Build with <3 at Amazon Web Services
+Built with <3 at Amazon Web Services

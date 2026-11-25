@@ -106,10 +106,11 @@ EVENTS = {
 }
 
 
-def _context(event: str, collect: bool) -> dict:
+def _context(event: str, collect: bool, baseline: str = "false") -> dict:
     return {
         "github.repository": "org/repo",
         "inputs.collect-sarif-report": collect,
+        "needs.ash.outputs.baseline": baseline,
         **EVENTS[event],
     }
 
@@ -124,6 +125,16 @@ def test_the_upload_runs_only_where_it_can_succeed(event, collect, status):
     uploads = evaluate(condition, _context(event, collect), status)
 
     assert uploads == (collect and event.endswith("pull request")), condition
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("baseline", ["true", "unknown", ""])
+def test_the_upload_needs_verified_full_results(baseline):
+    condition = _steps()["Upload ASH SARIF file"]["if"]
+
+    assert not evaluate(
+        condition, _context("same-repo pull request", True, baseline), "success"
+    )
 
 
 @pytest.mark.unit

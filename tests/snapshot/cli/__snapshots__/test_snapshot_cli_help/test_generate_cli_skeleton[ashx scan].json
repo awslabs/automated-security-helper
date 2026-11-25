@@ -35,6 +35,8 @@
   "honor_ignore_files": null,
   "min_severity": "low",
   "compact_report": false,
+  "annotate_duplicates": false,
+  "fold_duplicates": false,
   "changed_files_only": null,
   "base_ref": null,
   "staged": null,
@@ -54,5 +56,6 @@
   "container_gid": null,
   "ash_revision_to_install": null,
   "custom_containerfile": null,
-  "custom_build_arg": null
+  "custom_build_arg": null,
+  "baseline": null
 }

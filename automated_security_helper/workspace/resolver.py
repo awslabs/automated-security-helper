@@ -1206,6 +1206,7 @@ def _resolve_project_config(
     trusted_config: Optional[Path] = None,
     remote_client: bool = False,
     permit_base: Optional[Callable[[Path], bool]] = None,
+    operator_fallback_out: Optional[List[bool]] = None,
 ) -> Tuple[AshConfig, Optional[Path], Optional[Path]]:
     """Load one project's config through ASH's ordinary resolution path.
 
@@ -1324,6 +1325,10 @@ def _resolve_project_config(
             overlay = operator if config_path is not None else None
         if config_path is None and default_config is not None:
             config_path = Path(default_config)
+            if operator_fallback_out is not None and (
+                trusted_config is None or str(trusted_config) == str(default_config)
+            ):
+                operator_fallback_out.append(True)
         config = resolve_config(
             config_path=config_path,
             source_dir=candidate.resolved,
@@ -1670,6 +1675,7 @@ def _apply_workspace_policy(
     remote_client: bool = False,
     permit_base: Optional[Callable[[Path], bool]] = None,
     scanner_twins: Optional[Dict[str, Dict[str, str]]] = None,
+    required_scanners_out: Optional[List[str]] = None,
 ) -> Optional[Path]:
     """Resolve the workspace policy and fold it into every active project.
 
@@ -1840,6 +1846,12 @@ def _apply_workspace_policy(
         ]
         project.policy_scanners = list(resolved.policy_scanners)
         project.policy_scanners_gate = resolved.policy_scanners_gate
+
+    if required_scanners_out is not None and workspace_policy is not None:
+        by_name: Dict[str, str] = {}
+        for name in workspace_policy.additional_scanners:
+            by_name.setdefault(normalise_scanner_name(name), name)
+        required_scanners_out.extend(by_name.values())
 
     return source
 
@@ -2114,6 +2126,7 @@ def resolve_workspace(
             )
             continue
 
+        operator_fallback: List[bool] = []
         config, config_path, operator_config = _resolve_project_config(
             candidate,
             config_overrides,
@@ -2123,6 +2136,7 @@ def resolve_workspace(
             trusted_config=Path(trusted_config) if trusted_config else None,
             remote_client=remote_client,
             permit_base=permit_base,
+            operator_fallback_out=operator_fallback,
         )
         scanners, pins, twins = _scanner_state(config)
         disabled_pins[candidate.key] = _disabled_scanner_pins(config)
@@ -2162,6 +2176,7 @@ def resolve_workspace(
         )
         # Private: no dump of the plan shows it (ProjectPlan._environment_values).
         project._environment_values = config_environment_values(config)
+        project._config_source_is_operator_fallback = bool(operator_fallback)
         projects.append(project)
 
     active = [project for project in projects if not project.skipped]
@@ -2169,6 +2184,7 @@ def resolve_workspace(
     _validate_unresolved_pins(active, unresolved_pins)
     _validate_plugin_modules(definition, active)
     _assign_display_labels(projects)
+    required_scanners: List[str] = []
     policy_source = _apply_workspace_policy(
         definition,
         projects,
@@ -2179,6 +2195,7 @@ def resolve_workspace(
         remote_client=remote_client,
         permit_base=permit_base,
         scanner_twins=scanner_twins,
+        required_scanners_out=required_scanners,
     )
     # A scanner the policy switches on keeps the pin of its off section, and the
     # comparisons above ran before the policy was known: the pairs a project's
@@ -2196,4 +2213,5 @@ def resolve_workspace(
         ),
         projects=projects,
         allow_missing_projects=allow_missing_projects,
+        required_scanners=required_scanners,
     )

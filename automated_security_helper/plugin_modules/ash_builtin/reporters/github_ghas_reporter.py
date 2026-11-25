@@ -43,6 +43,28 @@ URI, through the same helper the aggregator uses for
 ``properties.workspace_uri``. A URI that cannot be expressed that way (absolute
 and outside its project) is left as the scanner wrote it, which is what the
 aggregator does too.
+
+What runs on a frame, and what does not
+----------------------------------------
+The per-result bookkeeping that is relational runs on a polars frame of one row
+per emitted result, a column of rank on the gate's severity ladder, the rule id
+and whether the result carries a location: each rule's most severe result (a
+group-by minimum), the results kept under GitHub's cap on a run (a stable sort
+on rank), the rules a result names kept ahead of those none does (a semi-join
+flag and a stable sort) and the rules whose results carry no location (a filter
+and a distinct). Every rule id enters a column through ``wire``, because a
+scanner's rule id can hold a lone surrogate and a polars string is UTF-8.
+
+Everything else reads one result's nested object and stays Python, because it
+is not rows: the kind, suppression and qualified-rule tests (a model's
+properties, with a fallback chain at each step), the slim copy of a result and
+its locations (per-location URI rebasing against the project's base ids, whose
+answer for the first placeable location is the aggregator's own and not
+recomputed), the rule table (collisions are decided across components by name
+and description, a handful of rows per scanner), the table of base ids and
+every log line. The upload itself is done by the caller. The counts of open and
+review results are two counters over a scan that has to call ``result_kind``
+per result anyway, so a frame would add a copy and remove nothing.
 """
 
 import json
@@ -61,6 +83,7 @@ from automated_security_helper.base.reporter_plugin import (
     ReporterWorkspaceBehaviour,
 )
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
+from automated_security_helper.utils.frame_text import unwire, wire
 from automated_security_helper.utils.get_ash_version import get_ash_version
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.sarif_utils import (
@@ -225,6 +248,35 @@ def _string_map(value: Any) -> Dict[str, str]:
     return {str(key): str(item) for key, item in value.items() if item is not None}
 
 
+def _wire_id(rule_id: Optional[str]) -> Optional[str]:
+    """A rule id as a frame cell: null for none or empty, else the id through
+    :func:`wire` (a scanner's rule id can hold a lone surrogate, which a UTF-8
+    string column refuses)."""
+    return wire(str(rule_id)) if rule_id else None
+
+
+def _min_severity_by_rule(pairs: Iterable[Tuple[Optional[str], str]]) -> Dict[str, str]:
+    """The most severe grade among *pairs* (rule id, severity) of each rule id;
+    a pair with no rule id counts for no rule. A group-by over one row per
+    result, taking the lowest rank on :data:`SEVERITIES` (most severe first)."""
+    import polars as pl
+
+    ids: List[Optional[str]] = []
+    ranks: List[int] = []
+    for rule_id, severity in pairs:
+        ids.append(_wire_id(rule_id))
+        ranks.append(SEVERITIES.index(severity))
+    frame = pl.DataFrame(
+        {"rule_id": ids, "rank": ranks}, schema={"rule_id": pl.String, "rank": pl.Int64}
+    )
+    grouped = (
+        frame.filter(pl.col("rule_id").is_not_null())
+        .group_by("rule_id", maintain_order=True)
+        .agg(pl.col("rank").min())
+    )
+    return {unwire(rule_id): SEVERITIES[rank] for rule_id, rank in grouped.iter_rows()}
+
+
 def _most_severe(
     graded: List[Tuple[str, Dict[str, Any]]], count: int
 ) -> List[Tuple[str, Dict[str, Any]]]:
@@ -236,23 +288,67 @@ def _most_severe(
     before the level). The slim copy carries only the SARIF level, where
     CRITICAL and HIGH are both ``error``, so ranking on the copy would tie
     them and could drop a later CRITICAL while an earlier HIGH stays.
+
+    The ranking is a stable sort of a rank column; the pairs themselves, which
+    hold nested dicts, stay on the host and are picked by position.
     """
-    ranked = sorted(graded, key=lambda item: SEVERITIES.index(item[0]))
-    return ranked[:count]
+    import polars as pl
+
+    frame = pl.DataFrame(
+        {
+            "i": list(range(len(graded))),
+            "rank": [SEVERITIES.index(severity) for severity, _ in graded],
+        },
+        schema={"i": pl.Int64, "rank": pl.Int64},
+    )
+    kept = frame.sort("rank", maintain_order=True).head(count)["i"].to_list()
+    return [graded[index] for index in kept]
 
 
 def _rule_severities(graded: List[Tuple[str, Dict[str, Any]]]) -> Dict[str, str]:
     """The most severe grade among the results of each emitted rule id in
     *graded*."""
-    levels: Dict[str, str] = {}
-    for severity, slim in graded:
-        rule_id = slim.get("ruleId")
-        if not rule_id:
-            continue
-        current = levels.get(rule_id)
-        if current is None or SEVERITIES.index(severity) < SEVERITIES.index(current):
-            levels[rule_id] = severity
-    return levels
+    return _min_severity_by_rule((slim.get("ruleId"), sev) for sev, slim in graded)
+
+
+def _unlocated(slim_results: List[Dict[str, Any]]) -> Tuple[int, List[str]]:
+    """How many of *slim_results* carry no ``locations``, and the sorted
+    distinct rule ids of those (``<no rule>`` for one with no rule)."""
+    import polars as pl
+
+    frame = pl.DataFrame(
+        {
+            "rule_id": [_wire_id(slim.get("ruleId")) for slim in slim_results],
+            "located": ["locations" in slim for slim in slim_results],
+        },
+        schema={"rule_id": pl.String, "located": pl.Boolean},
+    )
+    missing = frame.filter(~pl.col("located"))
+    names = (
+        missing.select(pl.col("rule_id").fill_null("<no rule>"))
+        .unique()
+        .sort("rule_id")["rule_id"]
+    )
+    return missing.height, [unwire(name) for name in names]
+
+
+def _named_first(
+    rule_ids: List[str], referenced: Iterable[Optional[str]]
+) -> Tuple[List[int], int]:
+    """The positions of *rule_ids*, those a result names (in *referenced*)
+    first, each group in its original order, and how many are named. A
+    semi-join flag and a stable sort on it."""
+    import polars as pl
+
+    named_ids = pl.Series(
+        [wire(str(rule_id)) for rule_id in referenced if rule_id], dtype=pl.String
+    )
+    frame = pl.DataFrame(
+        {"i": list(range(len(rule_ids))), "rule_id": [wire(r) for r in rule_ids]},
+        schema={"i": pl.Int64, "rule_id": pl.String},
+    ).with_columns(named=pl.col("rule_id").is_in(named_ids))
+    ordered = frame.sort("named", descending=True, maintain_order=True)
+    return ordered["i"].to_list(), int(frame["named"].sum())
 
 
 #: The base id the aggregator anchors each project's run to; the same spelling as
@@ -449,18 +545,16 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
             #    Critical on GitHub. A rule all of whose results are left out
             #    keeps the score it would have with none (its default level,
             #    else 6.0); no alert in the file carries it.
-            rule_level_from_results: Dict[str, str] = {}
+            emitted_grades: List[Tuple[str, str]] = []
             for run in runs:
                 for result in run.results or []:
                     rule_id = self._emitted_rule_id(result, qualified)
                     if not rule_id or self._left_out(result):
                         continue
-                    severity = result_severity(result)
-                    current = rule_level_from_results.get(rule_id)
-                    if current is None or SEVERITIES.index(severity) < SEVERITIES.index(
-                        current
-                    ):
-                        rule_level_from_results[rule_id] = severity
+                    emitted_grades.append((rule_id, result_severity(result)))
+            rule_level_from_results: Dict[str, str] = _min_severity_by_rule(
+                emitted_grades
+            )
 
             # 3. Build slim results (excluding suppressed if configured). First,
             #    because a result naming a rule the run does not declare adds
@@ -505,16 +599,10 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
             # "At least one location is required for code scanning to display
             # a result", so the operator is told which rules' alerts will not
             # appear.
-            unlocated = sorted(
-                {
-                    str(result.get("ruleId") or "<no rule>")
-                    for result in slim_results
-                    if "locations" not in result
-                }
-            )
+            unlocated_count, unlocated = _unlocated(slim_results)
             if unlocated:
                 ASH_LOGGER.warning(
-                    f"GHAS report: {sum(1 for r in slim_results if 'locations' not in r)} "
+                    f"GHAS report: {unlocated_count} "
                     "result(s) carry no location with a file, which GitHub code "
                     f"scanning does not display; rules: {', '.join(unlocated)}"
                 )
@@ -539,14 +627,15 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
             # 4. Ensure every rule has security-severity
             slim_rules = self._build_slim_rules(rules_map, rule_level_from_results)
             if len(slim_rules) > _MAX_RULES_PER_RUN:
-                referenced = {result.get("ruleId") for result in slim_results}
-                named = [rule for rule in slim_rules if rule["id"] in referenced]
-                unnamed = [rule for rule in slim_rules if rule["id"] not in referenced]
-                slim_rules = (named + unnamed)[:_MAX_RULES_PER_RUN]
+                order, named_count = _named_first(
+                    [rule["id"] for rule in slim_rules],
+                    (result.get("ruleId") for result in slim_results),
+                )
+                slim_rules = [slim_rules[i] for i in order][:_MAX_RULES_PER_RUN]
                 ASH_LOGGER.warning(
                     f"GHAS report: more than {_MAX_RULES_PER_RUN} rules, GitHub's "
                     "limit per run; rules no emitted result names are left out "
-                    f"first ({len(named)} named, {len(slim_rules) - len(named)} "
+                    f"first ({named_count} named, {len(slim_rules) - named_count} "
                     "unnamed kept)"
                 )
 

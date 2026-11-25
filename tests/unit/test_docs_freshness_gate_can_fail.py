@@ -86,6 +86,7 @@ def _own_repository(root: Path) -> Path:
 NON_VACUITY_COVERAGE = {
     "Reporter list in docs matches code": "test_reporter_check_can_fail_in_both_directions",
     "Scanner list in docs matches code": "test_scanner_check_can_fail",
+    "Scanner facets reference lists the scanners ASH ships": "test_scanner_facets_check_can_fail",
     "Plugin data behind the home page graphics matches code": "test_plugin_data_check_can_fail",
     "MCP tool names in docs match code": "test_mcp_tool_check_can_fail",
     "Version consistency": "test_version_check_can_fail",
@@ -448,6 +449,26 @@ def test_scanner_check_can_fail(gate, tmp_path, monkeypatch):
         return gate.check_scanners()
 
     assert publish(names) == [], "the complete scanner table was rejected"
+    assert publish(names[1:]), "a scanner missing from the table was accepted"
+    assert publish(names + ["gosec"]), "a row naming a nonexistent scanner was accepted"
+
+
+@pytest.mark.unit
+def test_scanner_facets_check_can_fail(gate, tmp_path, monkeypatch):
+    names = sorted(gate.scanner_names())
+    doc = tmp_path / "scanner-facets.md"
+
+    def publish(rows):
+        lines = [
+            "| Scanner | Mapped | Mappable, dropped | Not applicable |",
+            "|---------|--------|-------------------|----------------|",
+        ]
+        lines += [f"| [`{r}`](#{r}) | 1 | 2 | 17 |" for r in rows]
+        doc.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        monkeypatch.setattr(gate, "SCANNER_FACETS_REFERENCE_MD", doc)
+        return gate.check_scanner_facets_page()
+
+    assert publish(names) == [], "the complete facets summary table was rejected"
     assert publish(names[1:]), "a scanner missing from the table was accepted"
     assert publish(names + ["gosec"]), "a row naming a nonexistent scanner was accepted"
 
@@ -1537,6 +1558,10 @@ def test_index_name_install_check_can_fail(gate, name_rule_tree):
 GATE_WIRING = {
     "Reporter list in docs matches code": ("gate", "check_reporters"),
     "Scanner list in docs matches code": ("gate", "check_scanners"),
+    "Scanner facets reference lists the scanners ASH ships": (
+        "gate",
+        "check_scanner_facets_page",
+    ),
     "Plugin data behind the home page graphics matches code": (
         "gate",
         "check_plugin_data",

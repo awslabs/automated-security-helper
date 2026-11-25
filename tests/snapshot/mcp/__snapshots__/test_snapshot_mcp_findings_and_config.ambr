@@ -656,12 +656,26 @@
           }),
         }),
       }),
+      'default_scanners': dict({
+        'add': list([
+        ]),
+        'only': list([
+        ]),
+      }),
       'external_reports_to_include': list([
       ]),
       'fail_on_findings': False,
       'fail_on_incomplete_scanners': True,
       'fail_on_unknown_keys': False,
       'global_settings': dict({
+        'deduplication': dict({
+          'annotate': False,
+          'fold': False,
+        }),
+        'history': dict({
+          'enabled': False,
+          'keep_runs': 50,
+        }),
         'ignore_paths': list([
         ]),
         'mcp': dict({
@@ -679,6 +693,8 @@
               '/sandbox/**',
               '/ash_plugin_modules',
               '/ash_plugin_modules/**',
+              '/default_scanners',
+              '/default_scanners/**',
               '/scanners/detect-secrets/options/scan_settings/filters_used',
               '/scanners/detect-secrets/options/scan_settings/filters_used/**',
               '/scanners/detect-secrets/options/scan_settings/plugins_used',
@@ -1175,7 +1191,7 @@
             'severity_threshold': None,
             'sha256': dict({
             }),
-            'version': 'v1.33.1',
+            'version': 'v2.0.0',
           }),
         }),
         'syft': dict({
@@ -1267,12 +1283,26 @@
           }),
         }),
       }),
+      'default_scanners': dict({
+        'add': list([
+        ]),
+        'only': list([
+        ]),
+      }),
       'external_reports_to_include': list([
       ]),
       'fail_on_findings': True,
       'fail_on_incomplete_scanners': True,
       'fail_on_unknown_keys': False,
       'global_settings': dict({
+        'deduplication': dict({
+          'annotate': False,
+          'fold': False,
+        }),
+        'history': dict({
+          'enabled': False,
+          'keep_runs': 50,
+        }),
         'ignore_paths': list([
         ]),
         'mcp': dict({
@@ -1290,6 +1320,8 @@
               '/sandbox/**',
               '/ash_plugin_modules',
               '/ash_plugin_modules/**',
+              '/default_scanners',
+              '/default_scanners/**',
               '/scanners/detect-secrets/options/scan_settings/filters_used',
               '/scanners/detect-secrets/options/scan_settings/filters_used/**',
               '/scanners/detect-secrets/options/scan_settings/plugins_used',
@@ -1786,7 +1818,7 @@
             'severity_threshold': None,
             'sha256': dict({
             }),
-            'version': 'v1.33.1',
+            'version': 'v2.0.0',
           }),
         }),
         'syft': dict({

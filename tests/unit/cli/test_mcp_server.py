@@ -318,7 +318,7 @@ class TestRunAshScan:
         assert Path(call_kwargs["directory_path"]) == Path("/workspace/subdir")
 
     @pytest.mark.asyncio
-    async def test_scan_start_failure(self, mock_ctx):
+    async def test_scan_start_failure(self, mock_ctx, tmp_path):
         """A refusal from mcp_scan_directory is passed on as it was given."""
         from automated_security_helper.cli.mcp_server import run_ash_scan
 
@@ -333,9 +333,12 @@ class TestRunAshScan:
 
         with (
             # The directory this test names does not exist on every runner
-            # (/tmp is no directory on Windows); the source directory check has
+            # (a fixed /tmp is no directory on Windows); the source directory check has
             # its own tests, and this one is about the refusal mcp_scan_directory
             # gives, so the check is stood down as the start tests above do.
+            # The target is a per-test directory, not /tmp: /tmp contains the MCP
+            # session workspace area, which resolve_scan_target refuses first
+            # (scan_target_not_permitted, exit 4) before mcp_scan_directory runs.
             patch(
                 "automated_security_helper.cli.mcp_server.source_directory_refusal",
                 return_value=None,
@@ -345,22 +348,23 @@ class TestRunAshScan:
                 new_callable=AsyncMock,
                 return_value=dict(mock_result),
             ),
-            patch("pathlib.Path.cwd", return_value=Path("/tmp")),  # nosec B108
+            patch("pathlib.Path.cwd", return_value=tmp_path),
         ):
-            result = await run_ash_scan(ctx=mock_ctx, source_dir="/tmp")  # nosec B108
+            result = await run_ash_scan(ctx=mock_ctx, source_dir=str(tmp_path))
 
         assert result == mock_result
         mock_ctx.error.assert_called()
 
     @pytest.mark.asyncio
-    async def test_scan_exception_handling(self, mock_ctx):
+    async def test_scan_exception_handling(self, mock_ctx, tmp_path):
         """Exceptions raised during scan start produce error result."""
         from automated_security_helper.cli.mcp_server import run_ash_scan
 
         with (
-            # As in test_scan_start_failure: /tmp is no directory on Windows,
-            # and the exception under test is mcp_scan_directory's, so the
-            # source directory check is stood down.
+            # As in test_scan_start_failure: the target is a per-test directory (a
+            # fixed /tmp holds the MCP workspace area and is refused first), and
+            # the exception under test is mcp_scan_directory's, so the source
+            # directory check is stood down.
             patch(
                 "automated_security_helper.cli.mcp_server.source_directory_refusal",
                 return_value=None,
@@ -370,9 +374,9 @@ class TestRunAshScan:
                 new_callable=AsyncMock,
                 side_effect=RuntimeError("Connection refused"),
             ),
-            patch("pathlib.Path.cwd", return_value=Path("/tmp")),  # nosec B108
+            patch("pathlib.Path.cwd", return_value=tmp_path),
         ):
-            result = await run_ash_scan(ctx=mock_ctx, source_dir="/tmp")  # nosec B108
+            result = await run_ash_scan(ctx=mock_ctx, source_dir=str(tmp_path))
 
         assert result["success"] is False
         assert "Connection refused" in result["error"]

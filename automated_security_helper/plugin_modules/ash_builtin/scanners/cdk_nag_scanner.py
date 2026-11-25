@@ -23,6 +23,12 @@ from automated_security_helper.cli.deprecations import CANONICAL_CLI_NAME
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.core.constants import ASH_DOCS_URL, ASH_REPO_URL
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
+from automated_security_helper.base import scanner_operational_facets as opsf
+from automated_security_helper.base.scanner_facets import (
+    FacetDecl,
+    FacetState,
+    ScannerFacets,
+)
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.plugin_base import CustomCommand
@@ -1126,6 +1132,207 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
     #: Homebrew, Debian without python-is-python3) has none on PATH. The installer
     #: counts ``sys.executable`` as cdk-nag's tool instead of looking the name up.
     runs_in_ash_interpreter: ClassVar[bool] = True
+
+    #: The facets register row (base/scanner_facets.py). Declaration only: the
+    #: attachment itself has shipped for as long as the wrapper has -- cdk-nag
+    #: writes ``ash_resource_id``/``ash_resource_type`` (plus the legacy
+    #: ``cdk_nag_finding``/``cfn_resource`` bags) while GENERATING its report
+    #: (utils/cdk_nag_wrapper.py), which is why the native fields below name
+    #: the wrapper's own inputs: cdk-nag has no tool output file; the report
+    #: is synthesized from the nag packs' violations and the template text.
+    facets: ClassVar[ScannerFacets] = ScannerFacets(
+        rule_id=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='violation "ruleName"',
+        ),
+        severity=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='violation "severity" (normalized rule level)',
+        ),
+        file_path=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="the scanned template's path (the wrapper's own scan input)",
+        ),
+        line_range=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="template text line of the resource's logical id",
+        ),
+        column=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="template text column of the resource's logical id",
+        ),
+        message=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='violation "description"',
+        ),
+        resource_id=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='construct "constructPath"',
+            example="test-yaml/--src--test.yaml/S3Bucket3",
+        ),
+        resource_type=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='template Resources[<logical id>]."Type"',
+        ),
+        package_name=FacetDecl(
+            state=FacetState.NA,
+            reason="findings are CloudFormation template resources; no "
+            "package exists in nag pack output",
+        ),
+        package_version=FacetDecl(
+            state=FacetState.NA,
+            reason="findings are CloudFormation template resources; no "
+            "package exists in nag pack output",
+        ),
+        package_path=FacetDecl(
+            state=FacetState.NA,
+            reason="findings are CloudFormation template resources; no "
+            "package exists in nag pack output",
+        ),
+        taxonomy_cve=FacetDecl(
+            state=FacetState.NA,
+            reason="nag packs publish their own rule ids; no CVE taxonomy "
+            "in the violations",
+        ),
+        taxonomy_cwe=FacetDecl(
+            state=FacetState.NA,
+            reason="nag packs publish their own rule ids; no CWE taxonomy "
+            "in the violations",
+        ),
+        fingerprints=FacetDecl(
+            state=FacetState.NA,
+            reason="the synthesized report writes no fingerprints; finding "
+            "identity keys on scanner/rule/file",
+        ),
+        fix_available=FacetDecl(
+            state=FacetState.NA,
+            reason="nag violations carry no fix state or fixed version",
+        ),
+        remediation_text=FacetDecl(
+            state=FacetState.NA,
+            reason='violation "description" states the rule, not a '
+            "remediation; no remediation field exists",
+        ),
+        snippet=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="the matched resource's template block, "
+            "YAML-rendered into Region.snippet",
+        ),
+        references=FacetDecl(
+            state=FacetState.DROPPED,
+            native_field="per-pack rule help URI (_rule_help_uri, "
+            "ReportingDescriptor.helpUri)",
+            reason="rule-level only: the flat reader takes references from "
+            "result relatedLocations, so the help link is discarded today",
+        ),
+        tags=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="pack name, rule id, logical id and CFN type, "
+            "written as PropertyBag tags",
+        ),
+        extras=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='"cdk_nag_finding" and "cfn_resource" property bags '
+            "(the legacy bags extract_resource_identity also reads)",
+        ),
+    )
+
+    #: The operational register row (base/scanner_operational_facets.py),
+    #: checked against the production declarations it mirrors by
+    #: tests/unit/plugin_modules/test_scanner_operational_facets_consistency.py.
+    operational_facets: ClassVar[opsf.ScannerOperationalFacets] = (
+        opsf.ScannerOperationalFacets(
+            scanner_name="cdk-nag",
+            network=opsf.NetworkFacet(
+                fetch_kind=opsf.FetchKind.NONE,
+                fetches=(),
+                prefetch=(),
+                offline_outcome=opsf.OfflineOutcome.UNCHANGED,
+                offline_strategy=OfflineStrategy.BUNDLED,
+                sandbox_network=opsf.SandboxNetwork.NONE,
+                source=(
+                    "cdk_nag_scanner.py offline_strategy and sandbox_requirements; the "
+                    "nag packs ship with the pinned Python packages and jsii's shared "
+                    "package cache is disabled under sandbox-exec"
+                ),
+            ),
+            output=opsf.OutputFacet(
+                native_formats=(opsf.OutputFormat.SYNTHESIZED,),
+                side_reports=(),
+                non_finding_artifacts=(),
+                consumed_by_deviation=(
+                    "the report is generated, not parsed: synthesized SARIF plus the "
+                    "legacy property bags the extractor reads"
+                ),
+            ),
+            targets=opsf.TargetsFacet(
+                kinds=(opsf.TargetKind.IAC_CLOUDFORMATION,),
+                tool_type=ScannerToolType.IAC,
+                selection=(
+                    "each CloudFormation template through run_cdk_nag_against_cfn_template "
+                    "(utils/cdk_nag_worker.py); it does not synthesize a CDK application"
+                ),
+            ),
+            runtime=opsf.RuntimeFacet(
+                kind=opsf.RuntimeKind.IN_PROCESS,
+                external_programs=("node",),
+                invocations=opsf.Invocations.PER_TARGET,
+                invocation_note="a jsii child process evaluates each template through the nag packs",
+                python_only=False,
+                use_uv_tool=False,
+            ),
+            platforms=opsf.PlatformsFacet(
+                provisionable=(),
+                note="runs in ASH's own interpreter plus a jsii child that needs node on PATH; ASH installs neither",
+            ),
+            severity=opsf.SeverityFacet(
+                severity_class=opsf.SeverityClass.NATIVE,
+                note="the violation's normalized rule level",
+            ),
+            silencing=opsf.SilencingFacet(
+                tool_side=(
+                    opsf.SilencingLayer(
+                        layer=opsf.SilencingLayerKind.INLINE_COMMENT,
+                        writer=opsf.SilencingWriter.REPOSITORY,
+                        honored=opsf.Honored.UNCONFIRMED,
+                        surface="template Metadata suppressions read by the wrapper",
+                        cite="utils/cdk_nag_wrapper.py was not re-read for this row",
+                        reason=(
+                            "the wrapper reads template Metadata suppressions per the "
+                            "design survey; the honored state was not re-verified here"
+                        ),
+                    ),
+                ),
+            ),
+            identity=opsf.IdentityFacet(
+                fingerprint_class=opsf.FingerprintClass.POSITIONAL_ONLY,
+                note="identity is file and line through the shared floor",
+            ),
+            extensibility=opsf.ExtensibilityFacet(
+                custom_rules=opsf.CustomRules.NONE,
+                env_prefixes=("JSII_",),
+                options_surface="nag pack selection; no operator rules path",
+            ),
+            exit_codes=opsf.ExitCodesFacet(
+                success_exit_codes=(0, 1),
+                semantics="the base default {0, 1}; the evaluation is in-process, so there is no tool exit",
+            ),
+            provenance=opsf.ProvenanceFacet(
+                tier=opsf.Tier.BUILTIN_DEFAULT,
+                source=opsf.ProvenanceSource.PYPI_PINNED_DEPENDENCY,
+                selection_surfaces=("options nag packs",),
+                upstream_license=(
+                    "Apache-2.0 (source: the cdk-nag row of the 2026-11-24 "
+                    "scanner license check, a live GitHub license read; not pinned to the version ASH installs and not in "
+                    "THIRD_PARTY_LICENSES)"
+                ),
+            ),
+            prerequisites=opsf.PrerequisitesFacet(
+                kinds=(opsf.Prerequisite.TEMPLATE, opsf.Prerequisite.NODE_RUNTIME),
+                note="a CloudFormation template (not a CDK app) and node on PATH",
+            ),
+        )
+    )
 
     def _environment_values(self) -> Tuple[str, ...]:
         """The configuration's environment values, plus the node path ``JSII_NODE``

@@ -1,47 +1,55 @@
 #!/usr/bin/env python3
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""Combine the coverage data of one set of unit-test artifacts and apply the threshold.
+"""Combine the coverage data of every leg of the unit tier and apply the threshold once.
 
 The unit tier runs in shards per OS and Python version (six on Linux, eight on macOS
-and Windows), so a set is that pool's count of artifacts (``...-shard1of8`` to
-``...-shard8of8``); a set of one (``...-shard1of1``) is still a
-complete set, for a run of the tier that was not split. The check below is what makes the
-split safe: no single shard of a split run can meet the 80% total-coverage gate, so a
-missing shard is a failure, never a lower number. A run measures coverage, writes
+and Windows), and every leg measures coverage. A set is the artifacts of one OS and one
+Python version: that pool's count of them (``...-shard1of8`` to ``...-shard8of8``); a set
+of one (``...-shard1of1``) is still a complete set, for a run of the tier that was not
+split. No single shard of a split run can meet the 80% total-coverage gate, so the check
+below is what makes the split safe: a missing shard, or a whole set that never uploaded,
+is a failure, never a lower number. A run measures coverage, writes
 ``test-results/coverage.data`` and uploads it with the rest of its test results. This
 script runs in the ``unit-coverage`` job after they are downloaded, one subdirectory per
 artifact, and does what a single whole-suite "Run PyTest" step did in one process:
 
-1. Check that every shard of the set is there. The shard names carry their own count
-   (``...-shard3of8``), so a shard that crashed before uploading, or a matrix entry that
-   was deleted, shows as a missing index. Combining the shards that happen to exist would
-   report coverage for a subset and could pass. A single ``shard1of1`` artifact is a
-   complete set of one. Each data file must also read back and hold measured files,
-   because ``coverage combine`` skips a file it cannot read with a warning.
-2. ``coverage combine`` their data files.
+1. Check that every expected set (the product of ``--os`` and ``--python-version``) is
+   there and whole. The shard names carry their own count (``...-shard3of8``), so a shard
+   that crashed before uploading, or a matrix entry that was deleted, shows as a missing
+   index, and a set with no artifact at all is its own problem. Combining what happens to
+   exist would report coverage for a subset and could pass. Each data file must also read
+   back and hold measured files, because ``coverage combine`` skips a file it cannot read
+   with a warning.
+2. ``coverage combine`` every data file of every set into one. The recorded source paths
+   differ by operating system (``/home/runner/work/...``, ``/Users/runner/work/...``,
+   ``D:\\a\\...``); the ``[paths]`` section of ``.coveragerc`` folds them into the
+   checkout's own ``automated_security_helper/``, so one file is one entry in the
+   combined data, and a path that matched no alias would fail ``coverage report`` with
+   "No source for code" instead of being counted as a second file.
 3. Print the Markdown table to the step summary when asked.
-4. ``coverage report --fail-under=<threshold>``, whose exit status is this script's.
+4. ``coverage report --fail-under=<threshold>`` on the combined data, whose exit status is
+   this script's. This is the one place the threshold is applied.
 
-The set is named by the artifact name up to the shard suffix, which the run-unit-tests
+A set is named by the artifact name up to the shard suffix, which the run-unit-tests
 action builds from the operating system, the architecture, the Python version and the
-tier marker. This script rebuilds that name from ``--os``, ``--python-version``,
-``--marker`` and the runner's own ``RUNNER_ARCH``, so it must run on the same kind of
-runner as the runs it combines. ``--marker`` is required, with no default: without it the
+tier marker. The architecture label is the runner's own statement about itself, so this
+script reads it from the artifact names it finds (one per set; two for one set is a
+problem) instead of naming it. ``--marker`` is required, with no default: without it the
 name would have no tier segment, so a combine that named no tier would look for the
 untiered artifact name no job uploads, or combine whatever set it found under it, and a
 gate run over an unmarked shard set could pass without having read the unit tier at all.
-That is also what makes path remapping unnecessary: coverage data records absolute source
-paths, and a runner of the same image has the same workspace path, so the combine finds
-every source file where the shard recorded it. A path that did not match would make
-``coverage report`` fail with "No source for code", not pass.
 
 Usage::
 
     combine-unit-coverage.py --results-dir shard-results \\
-        --os ubuntu-latest --python-version 3.12 --marker unit --fail-under 80 \\
+        --os "ubuntu-latest ubuntu-24.04-arm macos-latest windows-latest" \\
+        --python-version "3.11 3.12 3.13 3.14" --marker unit --fail-under 80 \\
         --summary "$GITHUB_STEP_SUMMARY"
     combine-unit-coverage.py --self-test
+
+``--os`` and ``--python-version`` each take one value or a list separated by commas or
+spaces.
 
 Exit codes: 0 success, 1 shards missing or malformed, 2 coverage below the threshold
 (coverage.py's own status), 64 a usage error.
@@ -50,7 +58,6 @@ Exit codes: 0 success, 1 shards missing or malformed, 2 coverage below the thres
 from __future__ import annotations
 
 import argparse
-import os
 import re
 import subprocess
 import sys
@@ -193,31 +200,76 @@ def self_test() -> list[str]:
             failures.append(
                 f"{label}: expected {'problems' if should_fail else 'none'}, got {problems}"
             )
+    for text, want in [
+        ("3.12", ["3.12"]),
+        ("3.10, 3.12  3.14", ["3.10", "3.12", "3.14"]),
+        ("a a,b", ["a", "b"]),
+        ("  ", []),
+    ]:
+        if split_list(text) != want:
+            failures.append(f"split_list({text!r}) is {split_list(text)}, not {want}")
     return failures
 
 
-#: The name a flat download is read as. actions/download-artifact extracts straight into
-#: its path, with no per-artifact directory, whenever exactly one artifact matched the
-#: pattern (its source: ``isSingleArtifactDownload || mergeMultiple || artifacts.length
-#: === 1``), and an unsharded run uploads exactly one artifact, shard1of1. The data file
-#: carries no shard name, so a flat download is read as that complete set of one. The
-#: limit: one shard of a multi-shard set that was the only artifact found would pass as
-#: whole; the unit-coverage job needs every unit job, so that set is not reached.
-FLAT_SHARD_SUFFIX = "-shard1of1"
-
-
 def find_shard_dirs(results: Path, prefix: str) -> list[tuple[str, Path]]:
-    """(artifact name, directory holding its files) per shard, in both layouts.
+    """(artifact name, directory holding its files) per shard of one set.
 
-    One artifact per directory named after it, or, when only one artifact matched, its
-    files directly under ``results``.
+    download-artifact extracts straight into its path, with no per-artifact directory,
+    only when exactly one artifact matched its pattern. The unit-coverage job expects
+    several sets, so that layout is a failure here: the files of a lone artifact cannot
+    be told from any one of them, and it is reported as an absent set.
     """
     dirs = sorted(p for p in results.glob(f"{prefix}-shard*") if p.is_dir())
-    if dirs:
-        return [(p.name, p) for p in dirs]
-    if (results / DATA_FILE).is_file():
-        return [(prefix + FLAT_SHARD_SUFFIX, results)]
-    return []
+    return [(p.name, p) for p in dirs]
+
+
+def set_prefix(os_name: str, label: str, python_version: str, marker: str) -> str:
+    """The artifact name a set of this OS, architecture label, Python and tier shares."""
+    return f"test-results-{os_name}-{label}-py{python_version}-{marker}"
+
+
+def discover_labels(
+    results: Path, os_name: str, python_version: str, marker: str
+) -> tuple[list[str], list[str]]:
+    """The architecture labels one (OS, Python, tier) set was uploaded under, and problems.
+
+    The label sits between the OS and the Python version and is the runner's own
+    statement (``runner.arch``), so it is read from the names found, not named here.
+    A directory under the set's glob whose name does not fit the shape is a problem.
+    """
+    labels: set[str] = set()
+    problems: list[str] = []
+    known = "|".join(re.escape(label) for label in sorted(set(ARCH_LABELS.values())))
+    pattern = re.compile(
+        rf"test-results-{re.escape(os_name)}-({known})"
+        rf"-py{re.escape(python_version)}-{re.escape(marker)}"
+    )
+    glob = f"test-results-{os_name}-*-py{python_version}-{marker}-shard*"
+    for path in sorted(p for p in results.glob(glob) if p.is_dir()):
+        suffix = _SHARD_SUFFIX.search(path.name)
+        stem = path.name[: suffix.start()] if suffix else path.name
+        match = pattern.fullmatch(stem)
+        if match is None:
+            problems.append(
+                f"{path.name!r} does not fit the artifact name of a unit set"
+            )
+        else:
+            labels.add(match.group(1))
+    if len(labels) > 1:
+        problems.append(
+            f"{os_name} py{python_version} was uploaded under more than one "
+            f"architecture label: {sorted(labels)}"
+        )
+    return sorted(labels), problems
+
+
+def split_list(text: str) -> list[str]:
+    """The values of a comma or space separated option, in order, without repeats."""
+    seen: list[str] = []
+    for value in re.split(r"[,\s]+", text.strip()):
+        if value and value not in seen:
+            seen.append(value)
+    return seen
 
 
 def describe_root(results: Path) -> str:
@@ -259,13 +311,17 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument(
         "--results-dir",
-        help="directory holding one subdirectory per artifact, or the one artifact's "
-        "files directly when download-artifact matched exactly one",
+        help="directory holding one subdirectory per artifact",
     )
     parser.add_argument(
-        "--os", help="the runs-on value of the shards, e.g. macos-latest"
+        "--os",
+        help="the runs-on value of the legs, e.g. macos-latest; several separated by "
+        "commas or spaces",
     )
-    parser.add_argument("--python-version", help="the Python version of the shards")
+    parser.add_argument(
+        "--python-version",
+        help="the Python version of the legs; several separated by commas or spaces",
+    )
     parser.add_argument(
         "--marker",
         help="the tier marker in the artifact names, e.g. unit (required, no default)",
@@ -304,40 +360,57 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 64
-    try:
-        prefix = artifact_prefix(
-            args.os,
-            args.python_version,
-            os.environ.get("RUNNER_ARCH", ""),
-            args.marker,
+    os_names = split_list(args.os)
+    python_versions = split_list(args.python_version)
+    if not os_names or not python_versions:
+        print(
+            "combine-unit-coverage: --os and --python-version name no value",
+            file=sys.stderr,
         )
-    except ValueError as error:
-        print(f"combine-unit-coverage: {error}", file=sys.stderr)
         return 64
 
     results = Path(args.results_dir)
-    shard_dirs = find_shard_dirs(results, prefix)
-    problems = check_shards([name for name, _ in shard_dirs], prefix)
-    if problems == [f"no shard artifacts found for {prefix!r}"]:
-        problems = [f"{problems[0]}; {describe_root(results)}"]
-    data_files = []
-    for name, shard_dir in shard_dirs:
-        data = shard_dir / DATA_FILE
-        if not data.is_file():
-            problems.append(f"{name} has no {DATA_FILE}")
-            continue
-        problem = data_problem(data)
-        if problem:
-            problems.append(problem)
-        else:
-            data_files.append(str(data))
+    problems: list[str] = []
+    data_files: list[str] = []
+    sets = 0
+    for os_name in os_names:
+        for python_version in python_versions:
+            labels, label_problems = discover_labels(
+                results, os_name, python_version, args.marker
+            )
+            problems += label_problems
+            if not labels:
+                if not label_problems:
+                    problems.append(
+                        f"no shard artifacts found for {os_name} py{python_version} "
+                        f"{args.marker}; {describe_root(results)}"
+                    )
+                continue
+            if len(labels) > 1:
+                continue
+            sets += 1
+            prefix = set_prefix(os_name, labels[0], python_version, args.marker)
+            shard_dirs = find_shard_dirs(results, prefix)
+            problems += check_shards([name for name, _ in shard_dirs], prefix)
+            for name, shard_dir in shard_dirs:
+                data = shard_dir / DATA_FILE
+                if not data.is_file():
+                    problems.append(f"{name} has no {DATA_FILE}")
+                    continue
+                problem = data_problem(data)
+                if problem:
+                    problems.append(problem)
+                else:
+                    data_files.append(str(data))
     if problems:
         for problem in problems:
             print(f"combine-unit-coverage: {problem}", file=sys.stderr)
         return 1
 
     combined = results / "combined.data"
-    print(f"combining {len(data_files)} shard data files into {combined}")
+    print(
+        f"combining {len(data_files)} shard data files of {sets} sets into {combined}"
+    )
     done = _coverage("combine", "--keep", f"--data-file={combined}", *data_files)
     if done.returncode != 0:
         print("combine-unit-coverage: coverage combine failed", file=sys.stderr)
@@ -362,7 +435,7 @@ def main(argv: list[str] | None = None) -> int:
         if table.returncode == 0:
             with open(args.summary, "a", encoding="utf-8") as handle:
                 handle.write(
-                    f"## Code coverage ({args.os}, Python {args.python_version})\n\n"
+                    f"## Code coverage (unit tier, {sets} OS and Python sets combined)\n\n"
                     + table.stdout
                     + "\n"
                 )

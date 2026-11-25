@@ -185,7 +185,7 @@ severity threshold and suppressions; see [Set the gate](../set-the-gate.md).
 
 ## Jenkins {#jenkins}
 
-A declarative pipeline for an agent that has Python 3.10 or later, git, Node.js, npm, and
+A declarative pipeline for an agent that has Python 3.11 or later, git, Node.js, npm, and
 Ruby:
 
 <!-- doctest: config kind=jenkinsfile -->

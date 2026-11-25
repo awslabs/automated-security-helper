@@ -1673,6 +1673,14 @@
           },
           "description": "Converter configurations by name."
         },
+        "default_scanners": {
+          "$ref": "#/$defs/DefaultScannersConfig",
+          "default": {
+            "add": [],
+            "only": []
+          },
+          "description": "The operator's default scanners, read in every run mode: only replaces the mode's default selection, add extends a mode whose default is a fixed set (today precommit's) and has no effect in a mode with an unbounded default; setting both is refused. Settable only from the defaults, a config file outside every checkout or --config-overrides. The command line and the precommit keys take precedence."
+        },
         "external_reports_to_include": {
           "default": [],
           "description": "List of external reports to include in the final report. These can be paths to SARIF or CycloneDX reports produced by other tools.",
@@ -1703,6 +1711,14 @@
         "global_settings": {
           "$ref": "#/$defs/AshConfigGlobalSettingsSection",
           "default": {
+            "deduplication": {
+              "annotate": false,
+              "fold": false
+            },
+            "history": {
+              "enabled": false,
+              "keep_runs": 50
+            },
             "ignore_paths": [],
             "mcp": {
               "runtime_overrides": {
@@ -1718,6 +1734,8 @@
                   "/sandbox/**",
                   "/ash_plugin_modules",
                   "/ash_plugin_modules/**",
+                  "/default_scanners",
+                  "/default_scanners/**",
                   "/scanners/detect-secrets/options/scan_settings/filters_used",
                   "/scanners/detect-secrets/options/scan_settings/filters_used/**",
                   "/scanners/detect-secrets/options/scan_settings/plugins_used",
@@ -2273,7 +2291,7 @@
                 "severity": [],
                 "severity_threshold": null,
                 "sha256": {},
-                "version": "v1.33.1"
+                "version": "v2.0.0"
               }
             },
             "syft": {
@@ -2341,6 +2359,22 @@
     "AshConfigGlobalSettingsSection": {
       "additionalProperties": false,
       "properties": {
+        "deduplication": {
+          "$ref": "#/$defs/AshDeduplicationConfig",
+          "default": {
+            "annotate": false,
+            "fold": false
+          },
+          "description": "Cross-scanner duplicate annotation in the flat reports (opt-in; off by default)."
+        },
+        "history": {
+          "$ref": "#/$defs/AshHistoryConfig",
+          "default": {
+            "enabled": false,
+            "keep_runs": 50
+          },
+          "description": "Run history recording (a compact record of each completed scan)."
+        },
         "ignore_paths": {
           "default": [],
           "description": "Global list of IgnorePaths. Each path requires a reason for ignoring, e.g. 'Folder contains test data only and is not committed'.",
@@ -2366,6 +2400,8 @@
                 "/sandbox/**",
                 "/ash_plugin_modules",
                 "/ash_plugin_modules/**",
+                "/default_scanners",
+                "/default_scanners/**",
                 "/scanners/detect-secrets/options/scan_settings/filters_used",
                 "/scanners/detect-secrets/options/scan_settings/filters_used/**",
                 "/scanners/detect-secrets/options/scan_settings/plugins_used",
@@ -2510,6 +2546,57 @@
       "title": "AshConfigGlobalSettingsSection",
       "type": "object"
     },
+    "AshDeduplicationConfig": {
+      "additionalProperties": false,
+      "description": "Cross-scanner duplicate annotation (opt-in).\n\nFindings that two scanners report for one defect are grouped into a\nduplicate cluster (``utils/finding_clusters``). This section only chooses\nwhether the flat reports say so. Finding ids, SARIF results, metrics,\nsuppressions and baselines never change either way.",
+      "properties": {
+        "annotate": {
+          "default": false,
+          "description": "When true, the CSV and flat-JSON reports gain three columns that name each finding's duplicate cluster: `cluster_id`, `duplicate_of` (the primary finding's id, on every non-primary member) and `duplicate_sources` (on the primary: the other members' scanner, rule, id and severity). Rows and counts are unchanged. Off by default because the columns change the CSV header. CLI: `--annotate-duplicates` on `ash scan` and `ash report`.",
+          "title": "Annotate",
+          "type": "boolean"
+        },
+        "fold": {
+          "default": false,
+          "description": "When true, the HTML, Markdown and text reports show one row per duplicate cluster (the primary finding, with a note naming the other scanners that reported it) in their findings tables, detailed findings, finding cards and hotspots, and add deduplicated counts beside, never in place of, the per-scanner counts. Only clusters of the same CVE and package, or the same line and CWE, fold; IaC resource clusters are annotated only. Finding ids, SARIF, per-scanner metrics, suppressions, baselines, the CSV, flat-JSON and JUnit reports and the exit code are unchanged. Off by default because it changes row counts. CLI: `--fold-duplicates` on `ash scan` and `ash report`.",
+          "title": "Fold",
+          "type": "boolean"
+        }
+      },
+      "title": "AshDeduplicationConfig",
+      "type": "object"
+    },
+    "AshHistoryConfig": {
+      "additionalProperties": false,
+      "description": "Run history: a compact record of each completed scan, for ``ash trend``.",
+      "properties": {
+        "enabled": {
+          "default": false,
+          "description": "Append a compact run record to '<output dir>/history/' after each completed scan. Off by default: it adds files to the output directory on every scan.",
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "keep_runs": {
+          "anyOf": [
+            {
+              "maximum": 10000,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
+          "default": 50,
+          "description": "How many run records to keep when history is enabled; the oldest are removed when a new one is written.",
+          "title": "Keep Runs"
+        }
+      },
+      "title": "AshHistoryConfig",
+      "type": "object"
+    },
     "AshMcpConfig": {
       "additionalProperties": false,
       "description": "MCP-server-specific config bundle (transport-agnostic).",
@@ -2529,6 +2616,8 @@
               "/sandbox/**",
               "/ash_plugin_modules",
               "/ash_plugin_modules/**",
+              "/default_scanners",
+              "/default_scanners/**",
               "/scanners/detect-secrets/options/scan_settings/filters_used",
               "/scanners/detect-secrets/options/scan_settings/filters_used/**",
               "/scanners/detect-secrets/options/scan_settings/plugins_used",
@@ -4036,7 +4125,7 @@
           "default": [
             "cyclonedx_json"
           ],
-          "description": "List of additional formats to output. Defaults to including CycloneDX JSON",
+          "description": "List of additional formats to output. Defaults to including CycloneDX JSON. checkov's JSON report is written whatever this lists: ASH reads the resource of each finding from it.",
           "items": {
             "anyOf": [
               {
@@ -7096,6 +7185,32 @@
         }
       },
       "title": "Declarations",
+      "type": "object"
+    },
+    "DefaultScannersConfig": {
+      "additionalProperties": false,
+      "description": "The operator's default scanners (``default_scanners``).\n\n``only`` replaces the mode's default selection in every run mode; a mode\nwith no fixed default (such as local) then runs exactly these scanners.\n``add`` extends a mode whose default is a fixed set, which today is\nprecommit's five scanners, and has no effect in a mode whose default is\nunbounded: it adds to nothing and cannot narrow anything. Empty or omitted\nchanges nothing, and naming a scanner does not install or enable it.\n\nRead from the defaults, a config file outside every checkout, or\n``--config-overrides``; a file inside the scanned tree or a client's patch\ncannot set it. Precedence, lowest to highest: the mode default, this\nsection, the ``precommit`` keys (read only in precommit mode), the command\nline.",
+      "properties": {
+        "add": {
+          "default": [],
+          "description": "Scanner names to run in addition to a mode whose default is a fixed set, which today is precommit's. Has no effect in a mode with an unbounded default, and does not narrow one. Cannot be set together with only.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Add",
+          "type": "array"
+        },
+        "only": {
+          "default": [],
+          "description": "Run exactly these scanners instead of the mode's default selection, in every run mode. The command line's --only-scanners replaces this list; --add-scanners and the deprecated --scanners add to it; --exclude-scanners removes names from it. Cannot be set together with add.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Only",
+          "type": "array"
+        }
+      },
+      "title": "DefaultScannersConfig",
       "type": "object"
     },
     "Definitions": {
@@ -14559,7 +14674,7 @@
             "severity": [],
             "severity_threshold": null,
             "sha256": {},
-            "version": "v1.33.1"
+            "version": "v2.0.0"
           },
           "description": "Configure Opengrep scanner"
         }
@@ -14729,7 +14844,7 @@
           "type": "object"
         },
         "version": {
-          "default": "v1.33.1",
+          "default": "v2.0.0",
           "description": "Version of OpenGrep to use.",
           "title": "Version",
           "type": "string"
@@ -15934,7 +16049,7 @@
     },
     "PrecommitModeConfig": {
       "additionalProperties": false,
-      "description": "Scanner selection for ``ash scan --mode precommit``.\n\nPrecommit mode starts from a fixed default set\n(``run_ash_scan.PRECOMMIT_MODE_SCANNERS``: bandit, detect-secrets, checkov,\ncdk-nag, npm-audit). These two keys change that selection from the config\nfile, so a repository can state once what its hook runs instead of every\ncommitter spelling flags in ``.pre-commit-config.yaml``.\n\nPrecedence, lowest to highest (``run_ash_scan._selected_scanners`` applies\nit): the mode default; then ``only_scanners`` (replaces the default) and\n``add_scanners`` (adds to it); then the command line, where\n``--only-scanners`` replaces everything this section and the mode give, and\n``--add-scanners`` (or the deprecated ``--scanners``) adds to it.\n``--exclude-scanners`` applies after all of them: an excluded name wins over\nany inclusion. Read only by ``--mode precommit``; other modes ignore this\nsection.",
+      "description": "Scanner selection for ``ash scan --mode precommit``.\n\nPrecommit mode starts from a fixed default set\n(``run_ash_scan.PRECOMMIT_MODE_SCANNERS``: bandit, detect-secrets, checkov,\ncdk-nag, npm-audit). These two keys change that selection from the config\nfile, so a repository can state once what its hook runs instead of every\ncommitter spelling flags in ``.pre-commit-config.yaml``.\n\nPrecedence, lowest to highest (``SelectionLayers.fold`` in\n``core/scanner_selection.py`` applies it): the mode default; then the\noperator's ``default_scanners`` section (read in every mode, see\n``DefaultScannersConfig``); then this section's ``only_scanners`` (replaces\nwhat is below) and ``add_scanners`` (adds to it); then the command line, where\n``--only-scanners`` replaces everything this section and the mode give, and\n``--add-scanners`` (or the deprecated ``--scanners``) adds to it.\n``--exclude-scanners`` applies after all of them: an excluded name wins over\nany inclusion. The ``precommit`` section is read only by ``--mode precommit``;\nother modes ignore it (``default_scanners`` is not ignored there).",
       "properties": {
         "add_scanners": {
           "default": [],
@@ -20103,7 +20218,7 @@
               "severity": [],
               "severity_threshold": null,
               "sha256": {},
-              "version": "v1.33.1"
+              "version": "v2.0.0"
             }
           },
           "description": "Configure the options for Opengrep"

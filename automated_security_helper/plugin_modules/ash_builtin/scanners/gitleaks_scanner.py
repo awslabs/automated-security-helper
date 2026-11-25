@@ -150,7 +150,6 @@ from typing import (
     Annotated,
     Any,
     BinaryIO,
-    Callable,
     ClassVar,
     Dict,
     List,
@@ -163,6 +162,12 @@ from typing import (
 from pydantic import Field, PrivateAttr, model_validator
 
 from automated_security_helper.base.options import ScannerOptionsBase
+from automated_security_helper.base import scanner_operational_facets as opsf
+from automated_security_helper.base.scanner_facets import (
+    FacetDecl,
+    FacetState,
+    ScannerFacets,
+)
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
@@ -194,14 +199,12 @@ from automated_security_helper.utils.config_trust import (
     LEADS_OUT_OF_THE_TREE,
     operator_path,
     refusal_warning,
-    set_by_operator,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.process_env import snapshot_environ
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.utils.sandbox.scope import active_scope
-from automated_security_helper.utils.scan_output_dirs import committed_output_files
 from automated_security_helper.utils.scanned_tree import (
     TreeInputRefused,
     open_in_scanned_tree,
@@ -538,6 +541,198 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
 
     # gitleaks' rules are compiled into the binary and it makes no network calls.
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
+
+    #: The facets register row (base/scanner_facets.py). Declaration only: no
+    #: behavior changes. Native fields name gitleaks' own SARIF (fixture
+    #: tests/test_data/scanners/gitleaks/gitleaks-8.30.1.sarif).
+    facets: ClassVar[ScannerFacets] = ScannerFacets(
+        rule_id=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result "ruleId" (e.g. github-pat)',
+        ),
+        severity=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="(no native severity) constant level error plus "
+            'properties "issue_severity" CRITICAL, both set by _post_process_sarif',
+        ),
+        file_path=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="locations[].physicalLocation.artifactLocation.uri",
+        ),
+        line_range=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="region.startLine / region.endLine",
+        ),
+        column=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="region.startColumn / region.endColumn",
+        ),
+        message=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result "message.text"',
+        ),
+        resource_id=FacetDecl(
+            state=FacetState.NA,
+            reason="secret findings name a file location, not a deployable "
+            "resource; the SARIF carries a rule id and a region only",
+        ),
+        resource_type=FacetDecl(
+            state=FacetState.NA,
+            reason="secret findings name a file location, not a deployable resource",
+        ),
+        package_name=FacetDecl(
+            state=FacetState.NA,
+            reason="secret findings carry no package",
+        ),
+        package_version=FacetDecl(
+            state=FacetState.NA,
+            reason="secret findings carry no package",
+        ),
+        package_path=FacetDecl(
+            state=FacetState.NA,
+            reason="secret findings carry no package",
+        ),
+        taxonomy_cve=FacetDecl(
+            state=FacetState.NA,
+            reason="secret findings carry no CVE taxonomy",
+        ),
+        taxonomy_cwe=FacetDecl(
+            state=FacetState.NA,
+            reason="gitleaks rules carry no CWE taxonomy in the SARIF",
+        ),
+        fingerprints=FacetDecl(
+            state=FacetState.DROPPED,
+            native_field='result "partialFingerprints" (commitSha, author, '
+            "email, date, commitMessage)",
+            reason="dir mode emits empty-string git metadata, which "
+            "_post_process_sarif drops because an empty fingerprint is "
+            "identical across every result; git-mode values pass through",
+        ),
+        fix_available=FacetDecl(
+            state=FacetState.NA,
+            reason="secret findings carry no fix state",
+        ),
+        remediation_text=FacetDecl(
+            state=FacetState.NA,
+            reason="the SARIF rules carry id and shortDescription only",
+        ),
+        snippet=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="region.snippet.text, forced to REDACTED by "
+            "--redact=100 and again by _post_process_sarif",
+        ),
+        references=FacetDecl(
+            state=FacetState.NA,
+            reason="the SARIF rules carry id and shortDescription only; no "
+            "reference URLs",
+        ),
+        tags=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result properties "tags" (empty natively); the '
+            "adapter appends secret and security",
+        ),
+        extras=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result properties "issue_severity" written by the adapter',
+        ),
+    )
+
+    #: The operational register row (base/scanner_operational_facets.py),
+    #: checked against the production declarations it mirrors by
+    #: tests/unit/plugin_modules/test_scanner_operational_facets_consistency.py.
+    operational_facets: ClassVar[opsf.ScannerOperationalFacets] = (
+        opsf.ScannerOperationalFacets(
+            scanner_name="gitleaks",
+            network=opsf.NetworkFacet(
+                fetch_kind=opsf.FetchKind.NONE,
+                fetches=(),
+                prefetch=(),
+                offline_outcome=opsf.OfflineOutcome.UNCHANGED,
+                offline_strategy=OfflineStrategy.BUNDLED,
+                sandbox_network=opsf.SandboxNetwork.NONE,
+                source="gitleaks_scanner.py offline_strategy, sandbox_requirements",
+            ),
+            output=opsf.OutputFacet(
+                native_formats=(opsf.OutputFormat.SARIF,),
+                side_reports=(),
+                non_finding_artifacts=(),
+            ),
+            targets=opsf.TargetsFacet(
+                kinds=(opsf.TargetKind.SECRETS_CONTENTS,),
+                tool_type=ScannerToolType.SECRETS,
+                selection=(
+                    "`gitleaks dir` over the target (subcommands = ['dir']); history "
+                    "scanning is deliberately not offered (module header)"
+                ),
+                covers_note=(
+                    "no scanner claims git-history secrets: gitleaks and betterleaks run "
+                    "dir mode only (UNCLAIMED_TARGET_KINDS)"
+                ),
+            ),
+            runtime=opsf.RuntimeFacet(
+                kind=opsf.RuntimeKind.PINNED_BINARY,
+                external_programs=(),
+                invocations=opsf.Invocations.MULTI_PASS,
+                invocation_note="a second run over a copy of the files a .gitleaksignore names, to add back what the ignore file dropped",
+                tool_versions_key="gitleaks",
+                python_only=False,
+                use_uv_tool=False,
+            ),
+            platforms=opsf.PlatformsFacet(
+                provisionable=opsf.PLATFORMS_ALL,
+                note="asset table lists all six platform/arch pairs",
+            ),
+            severity=opsf.SeverityFacet(
+                severity_class=opsf.SeverityClass.CONSTANT,
+                note="every finding is CRITICAL",
+            ),
+            silencing=opsf.SilencingFacet(
+                tool_side=(
+                    opsf.SilencingLayer(
+                        layer=opsf.SilencingLayerKind.IGNORE_FILE,
+                        writer=opsf.SilencingWriter.REPOSITORY,
+                        honored=opsf.Honored.NO,
+                        surface=".gitleaksignore in the scan root",
+                        cite="gitleaks_scanner.py module header: gitleaks reads it whatever flag is passed; ASH re-scans a copy and adds every dropped finding back",
+                    ),
+                    opsf.SilencingLayer(
+                        layer=opsf.SilencingLayerKind.INLINE_COMMENT,
+                        writer=opsf.SilencingWriter.REPOSITORY,
+                        honored=opsf.Honored.NO,
+                        surface="gitleaks:allow comments; options.honor_inline_ignores turns them back on when the operator sets it",
+                        cite="gitleaks_scanner.py module header: ASH passes --ignore-gitleaks-allow",
+                    ),
+                ),
+            ),
+            identity=opsf.IdentityFacet(
+                fingerprint_class=opsf.FingerprintClass.POSITIONAL_ONLY,
+                note="the git-metadata fingerprints are empty and dropped in dir mode; identity is file and line",
+            ),
+            extensibility=opsf.ExtensibilityFacet(
+                custom_rules=opsf.CustomRules.OPERATOR_PATHS,
+                env_prefixes=(),
+                options_surface="an operator .gitleaks.toml whose rules and allowlists apply on top of ASH suppressions; a repository-written config is refused with a note",
+            ),
+            exit_codes=opsf.ExitCodesFacet(
+                success_exit_codes=(0, 2),
+                semantics="ASH passes --exit-code=2 because the tool's default 1 means both leaks and some errors",
+            ),
+            provenance=opsf.ProvenanceFacet(
+                tier=opsf.Tier.BUILTIN_DEFAULT,
+                source=opsf.ProvenanceSource.PINNED_RELEASE_BINARY,
+                selection_surfaces=("options.honor_inline_ignores",),
+                upstream_license=(
+                    "MIT (source: utils/tool_downloads.py "
+                    "THIRD_PARTY_LICENSES['gitleaks'], pinned commit 83d9cd6)"
+                ),
+            ),
+            prerequisites=opsf.PrerequisitesFacet(
+                kinds=(opsf.Prerequisite.NONE,),
+                note="no git repository is required and no history is read",
+            ),
+        )
+    )
+
     success_exit_codes: ClassVar[Set[int]] = {0, LEAKS_EXIT_CODE}
     # The strict default: no network, and no variables or paths beyond the
     # baseline. GITLEAKS_CONFIG and GITLEAKS_CONFIG_TOML are not passed into a
@@ -563,10 +758,13 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
     # _describe_scan_failure, which otherwise describes the first run's exit
     # code and log. None until a re-scan fails; reset per target.
     _rescan_failure_log: Optional[Path] = PrivateAttr(default=None)
-    # Whether the tree-set honor_inline_ignores refusal was already logged.
-    _ignores_refusal_logged: bool = PrivateAttr(default=False)
-    # Whether the tree-set max_target_megabytes refusal was already logged.
-    _size_refusal_logged: bool = PrivateAttr(default=False)
+
+    # gitleaks' stderr can quote the scanned tree's .gitleaksignore (see
+    # _mask_quoted_ignore_entries), and the scanner executor copies errors into
+    # the scan's results: the base class keeps the stream out of both and out of
+    # the failure text. It stays in the log file.
+    quote_tool_stderr: ClassVar[bool] = False
+    unquoted_failure_tool_name: ClassVar[Optional[str]] = "gitleaks"
 
     def model_post_init(self, context: Any) -> None:
         if self.config is None:
@@ -668,22 +866,16 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
         """
         if not self._options().honor_inline_ignores:
             return False
-        config = self.context.config if self.context is not None else None
-        if set_by_operator(
-            config, "scanners.gitleaks.options.honor_inline_ignores", True
-        ):
-            return True
-        if not self._ignores_refusal_logged:
-            self._ignores_refusal_logged = True
-            self._plugin_log(
-                "scanners.gitleaks.options.honor_inline_ignores is true in a config "
-                "inside a git checkout or the scanned directory, or from an MCP "
-                "client, so it is ignored: gitleaks runs with --ignore-gitleaks-allow "
-                "and gitleaks:allow comments do not apply; suppress findings with "
-                f"ASH suppressions. {KEEP_A_SETTING}",
-                level=logging.WARNING,
-            )
-        return False
+        return self._operator_gated(
+            "scanners.gitleaks.options.honor_inline_ignores",
+            True,
+            False,
+            "scanners.gitleaks.options.honor_inline_ignores is true in a config "
+            "inside a git checkout or the scanned directory, or from an MCP "
+            "client, so it is ignored: gitleaks runs with --ignore-gitleaks-allow "
+            "and gitleaks:allow comments do not apply; suppress findings with "
+            f"ASH suppressions. {KEEP_A_SETTING}",
+        )
 
     def _max_target_megabytes(self) -> Optional[int]:
         """The size above which gitleaks skips a file, when the operator set one.
@@ -694,21 +886,16 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
         value = self._options().max_target_megabytes
         if not value:
             return None
-        config = self.context.config if self.context is not None else None
-        if set_by_operator(
-            config, "scanners.gitleaks.options.max_target_megabytes", value
-        ):
-            return int(value)
-        if not self._size_refusal_logged:
-            self._size_refusal_logged = True
-            self._plugin_log(
-                f"scanners.gitleaks.options.max_target_megabytes ({value}) is set "
-                "in a config inside a git checkout or the scanned directory, or "
-                "from an MCP client, so it is ignored and gitleaks scans files of "
-                f"every size. {KEEP_A_SETTING}",
-                level=logging.WARNING,
-            )
-        return None
+        granted = self._operator_gated(
+            "scanners.gitleaks.options.max_target_megabytes",
+            value,
+            None,
+            f"scanners.gitleaks.options.max_target_megabytes ({value}) is set "
+            "in a config inside a git checkout or the scanned directory, or "
+            "from an MCP client, so it is ignored and gitleaks scans files of "
+            f"every size. {KEEP_A_SETTING}",
+        )
+        return None if granted is None else int(granted)
 
     def _resolve_config_file(self) -> Optional[Path]:
         """The config to pass as ``--config``; None leaves it to the environment.
@@ -992,17 +1179,6 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
             )
         return data
 
-    def _process_command_response(self, response: Dict[str, Any]) -> None:
-        """Count the exit code, and keep gitleaks' stderr out of ``self.errors``.
-
-        gitleaks' stderr can quote the scanned tree's ``.gitleaksignore`` (see
-        ``_mask_quoted_ignore_entries``), and the scanner executor copies
-        ``errors`` into the scan's results. The stream stays in the log file.
-        """
-        super()._process_command_response(
-            {key: value for key, value in response.items() if key != "stderr"}
-        )
-
     def _run_subprocess(  # type: ignore[override]
         self,
         command: List[str],
@@ -1025,42 +1201,27 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
     ) -> str:
         """The failure and where gitleaks' log is, without quoting the log.
 
-        The base class quotes the tool's stderr. gitleaks' can quote the scanned
-        tree's ``.gitleaksignore``, and this message reaches ``ash.log``, the
-        console and every results file. A failure before gitleaks started gives
-        no exit code, as the base class's does, and so does a tool ASH could not
-        stop: it may still be running, and the code the timeout recorded is not
-        one gitleaks returned. A re-scan that failed names its own log beside
-        the first run's: ``self.exit_code`` is the first run's, which was
-        accepted, so that reading alone misdescribed the failure.
+        The base class says it for a scanner with ``quote_tool_stderr`` False
+        (``_describe_scan_failure_unquoted``). A re-scan that failed names its
+        own log beside the first run's: ``self.exit_code`` is the first run's,
+        which was accepted, so that reading alone misdescribed the failure.
         """
-        detail = f"{self.__class__.__name__} scan failed: {exc}"
-        if not tool_started or results_file is None:
-            # _execute_scan raised: gitleaks was not run, so there is no exit code.
-            return f"{detail} (gitleaks was not started)"
-        log_path = Path(results_file).parent / f"{self.__class__.__name__}.stderr.log"
-        if self._rescan_failure_log is not None:
+        if (
+            tool_started
+            and results_file is not None
+            and self._rescan_failure_log is not None
+        ):
+            detail = f"{self.__class__.__name__} scan failed: {exc}"
+            log_path = (
+                Path(results_file).parent / f"{self.__class__.__name__}.stderr.log"
+            )
             return (
                 f"{detail} (the first gitleaks run exited {self.exit_code}; the "
                 f"re-scan of the files the tree's {IGNORE_FILE_NAME} names failed). "
                 "gitleaks' logs are not quoted here; see "
                 f"{self._rescan_failure_log.as_posix()} and {log_path.as_posix()}"
             )
-        if self.scan_could_not_stop is not None:
-            return (
-                f"{detail} (no exit code: ASH could not stop gitleaks). gitleaks' "
-                f"log is not quoted here; see {log_path.as_posix()}"
-            )
-        verdict = (
-            "an accepted exit code for this scanner"
-            if self._exit_code_accepted()
-            else "not an accepted exit code; success_exit_codes="
-            f"{sorted(self.success_exit_codes)}"
-        )
-        return (
-            f"{detail} (exit code {self.exit_code}: {verdict}). gitleaks' log is "
-            f"not quoted here; see {log_path.as_posix()}"
-        )
+        return super()._describe_scan_failure(exc, results_file, tool_started)
 
     def _gitleaksignore_files(
         self, target: Path, data: Optional[bytes] = None
@@ -1662,125 +1823,6 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
                 # Cleaned, as gitleaks' filepath.Join cleans each path it walks.
                 artifact["uri"] = posixpath.normpath(f"{scan_path}/{uri}")
 
-    def _committed_file_test(self) -> Callable[[Path], bool]:
-        """A test, of a path, for a file the repository committed under ASH's output.
-
-        The output directory is a path inside the scanned tree, and a repository
-        can commit files to it. Those files are the tree's own, so a finding in
-        one is about the tree and not a copy of something ASH wrote. They are the
-        files ``scan_output_dirs.committed_output_files`` reads: the files of the
-        scan set that are under ASH's output directories, which in a git checkout
-        are the ones git tracks. The executor's drop and the suppression step read
-        the same set, and keep the results located in those files.
-
-        The set is read when the test is first asked, so a run with nothing under
-        the output directory reads nothing, and a path is compared resolved, as
-        the set is. Outside a checkout, and where git cannot say what is tracked,
-        the set is empty: every file under the output directory is then ASH's.
-
-        A path that cannot be resolved, such as a symlink loop or a name holding a
-        null byte, which an entry in the tree's ``.gitleaksignore`` can spell, is
-        not committed. The file stays treated as ASH's own, as it was before.
-        """
-        committed: Optional[Set[Path]] = None
-
-        def is_committed(path: Path) -> bool:
-            nonlocal committed
-            if committed is None:
-                committed = committed_output_files(self.context)
-            try:
-                return path.resolve() in committed
-            except (OSError, RuntimeError, ValueError):
-                return False
-
-        return is_committed
-
-    def _drop_results_under_output_dir(
-        self, sarif_report: SarifReport, target: Path
-    ) -> None:
-        """Remove the results located under ASH's output directory inside ``target``.
-
-        See "Paths" in the module docstring. Nothing is removed when the output
-        directory is not inside ``target`` (``_output_dir_inside``): when it is
-        outside, and for the converted target, which lives under it. A location
-        is joined to the target and normalized lexically, without resolving
-        symlinks, as ``_output_dir_inside`` compares the two directories.
-
-        A result in a file the repository committed under the output directory is
-        kept (``_committed_file_test``): only what ASH wrote there is dropped.
-
-        Every ASH output directory inside the target counts
-        (``_output_dirs_inside_target``): this run's, and the default
-        ``.ash/ash_output`` an earlier run left in the tree, as every other
-        directory-walking scanner skips both.
-
-        A URI's backslashes are read as separators only where the platform
-        writes them (Windows, where gitleaks joins paths with ``\\``). On POSIX
-        a backslash is a character of a file's name, and reading it as a
-        separator let a file named like ``out\\x`` read as a path under the
-        output directory, and its findings were dropped.
-        """
-        if self.context is None:
-            return
-        outputs_inside = self._output_dirs_inside_target(target)
-        if not outputs_inside:
-            return
-        target_abs = Path(target).absolute()
-        output_roots = [Path(os.path.normpath(target_abs / o)) for o in outputs_inside]
-        committed = self._committed_file_test()
-
-        def under_output_dir(result: Any) -> bool:
-            for location in result.locations or []:
-                physical = location.physicalLocation
-                artifact = physical.root.artifactLocation if physical else None
-                uri = artifact.uri if artifact else None
-                if not uri:
-                    continue
-                if os.sep == "\\":
-                    uri = uri.replace("\\", "/")
-                path = Path(os.path.normpath(target_abs / uri))
-                if any(path.is_relative_to(root) for root in output_roots) and (
-                    not committed(path)
-                ):
-                    return True
-            return False
-
-        dropped = 0
-        for run in sarif_report.runs or []:
-            if not run.results:
-                continue
-            kept = [result for result in run.results if not under_output_dir(result)]
-            dropped += len(run.results) - len(kept)
-            run.results = kept
-        if dropped:
-            self._plugin_log(
-                f"Dropped {dropped} finding(s) under ASH's output directory: copies "
-                "of the files ASH converted, which the converted target's run "
-                "reports, or files ASH wrote.",
-                level=logging.DEBUG,
-            )
-
-    def _output_dirs_inside_target(self, target: Path) -> List[Path]:
-        """ASH's output directories inside ``target``, relative to it.
-
-        This run's output directory when it sits inside the target
-        (``_output_dir_inside``), whole, and the directories
-        ``_ash_output_dirs_inside`` names: the default ``.ash/ash_output`` an
-        earlier run left in the tree, and for a directory holding committed
-        files ASH's own directories in it. The first keeps the drop of every
-        uncommitted file under this run's output, the files at its root
-        included, which the second lists only in part. Empty for the converted
-        target, which lives under the output directory.
-        """
-        found: List[Path] = []
-        own = self._output_dir_inside(target)
-        if own is not None:
-            found.append(own)
-        for relative in self._ash_output_dirs_inside(target):
-            if relative not in found:
-                found.append(relative)
-        return found
-
     def _report_rescan_skipped(self, sarif_report: SarifReport) -> None:
         """Record the names the re-scan did not reach as a run that is incomplete.
 
@@ -1833,10 +1875,23 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
         final_args: List[str],
         target: Path,
     ) -> SarifReport:
-        """Drop ASH's own files, rate every result, drop empty fingerprints, keep
-        snippets redacted, and report the files the re-scan did not reach."""
+        """Drop ASH's own files, report the files the re-scan did not reach, and
+        normalize every result (:meth:`normalize_results`)."""
         self._drop_results_under_output_dir(sarif_report, target)
         self._report_rescan_skipped(sarif_report)
+        return self.normalize_results(sarif_report)
+
+    @staticmethod
+    def normalize_results(sarif_report: SarifReport) -> SarifReport:
+        """Rate every result, tag it, drop empty fingerprints, keep snippets redacted.
+
+        The result-level half of the adapter's post-processing, separated from
+        the instance-bound half (output-directory dropping, re-scan reporting)
+        so that conformance tests can drive gitleaks' own normalization over a
+        committed capture without a scanner instance, the way
+        ``CfnGuardScanner.normalize_results`` is driven. Pure over the report:
+        no tool is run and nothing outside the report is read.
+        """
         for result in sarif_report.get_all_results():
             # See "Severity" in the module docstring.
             result.level = Level.error

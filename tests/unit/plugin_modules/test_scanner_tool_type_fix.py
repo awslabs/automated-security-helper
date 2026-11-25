@@ -74,13 +74,19 @@ class TestGrypeIsSCA:
 
 @pytest.mark.unit
 class TestTrivyToolType:
-    """Trivy repo scanner should be classified as SAST."""
+    """Trivy repo scanner runs vuln, secret, misconfig and license scanners.
 
-    def test_trivy_repo_scanner_is_sast(self, _mock_context):
+    It is SCA, the type the builtin trivy scanner declares. It was SAST, which
+    named source analysis it does not run and fed the reporter-side
+    exclude_scanner_types the wrong type (E3 of the operational register).
+    """
+
+    def test_trivy_repo_scanner_is_sca_not_sast(self, _mock_context):
         from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scanner import (
             TrivyRepoScanner,
         )
 
         scanner = TrivyRepoScanner(context=_mock_context)
-        assert scanner.tool_type == ScannerToolType.SAST
-        assert scanner.tool_type is ScannerToolType.SAST
+        assert scanner.tool_type == ScannerToolType.SCA
+        assert scanner.tool_type is ScannerToolType.SCA
+        assert scanner.tool_type is not ScannerToolType.SAST

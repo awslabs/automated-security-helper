@@ -109,7 +109,7 @@ This plugin follows ASH conventions for consistent behavior across all scanners:
 
 The following ferret-scan CLI options are **NOT supported** in the ASH plugin. Setting one under `scanners.ferret-scan.options` stops the scan with exit code 3 when ASH loads the plugins, before anything is scanned, and the error gives the reason below (for `debug`: "Use 'ferret_debug: true' instead..."). An option the plugin does not declare at all is refused the same way, as `Unknown key`. `ash config validate` and `ash config lint` do not import the plugin and do not catch these.
 
-| Option | Reason |
+| Unsupported option | Reason |
 |--------|--------|
 | `format`, `output_format` | ASH requires SARIF format. Use ASH reporter plugins for other formats. |
 | `debug` | Use `ferret_debug: true` instead. Bare `debug` is blocked to avoid confusion with ASH's `--debug`. |

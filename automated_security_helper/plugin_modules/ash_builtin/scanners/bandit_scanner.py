@@ -36,6 +36,12 @@ from automated_security_helper.models.core import (
     IgnorePathWithReason,
     ToolExtraArg,
 )
+from automated_security_helper.base import scanner_operational_facets as opsf
+from automated_security_helper.base.scanner_facets import (
+    FacetDecl,
+    FacetState,
+    ScannerFacets,
+)
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginConfigBase,
 )
@@ -802,6 +808,185 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
     # The uv --from spec the install command and the version probe were built
     # for; _apply_config rebuilds both only when a new configuration changes it.
     _applied_from_spec: Optional[str] = PrivateAttr(default=None)
+
+    #: The facets register row (base/scanner_facets.py). Declaration only, zero
+    #: behavior change. Native fields are those of bandit's own SARIF formatter,
+    #: read from the M0 capture (tests/test_data/scanners/bandit/captured/
+    #: bandit-1.9.4-m0.sarif): every result carries a property bag
+    #: {issue_confidence, issue_severity} and a structured region snippet. Pure
+    #: Python code SAST: the only locators are file paths, never resource ids.
+    facets: ClassVar[ScannerFacets] = ScannerFacets(
+        rule_id=FacetDecl(state=FacetState.MAPPED, native_field="results[].ruleId"),
+        severity=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="results[].properties.issue_severity (and results[].level)",
+        ),
+        file_path=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="results[].locations[].physicalLocation.artifactLocation.uri",
+        ),
+        line_range=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="results[].locations[].physicalLocation.region."
+            "startLine/endLine",
+        ),
+        column=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="results[].locations[].physicalLocation.region."
+            "startColumn/endColumn",
+        ),
+        message=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="results[].message.text (ASH masks secret-shaped "
+            "values in it)",
+        ),
+        resource_id=FacetDecl(
+            state=FacetState.NA,
+            reason="pure Python code SAST; the only locators in its output are "
+            "file paths, which are never resource ids",
+        ),
+        resource_type=FacetDecl(
+            state=FacetState.NA,
+            reason="pure Python code SAST; no deployable resource exists in the output",
+        ),
+        package_name=FacetDecl(
+            state=FacetState.NA,
+            reason="code findings name a file and a rule, not a package",
+        ),
+        package_version=FacetDecl(
+            state=FacetState.NA,
+            reason="code findings name a file and a rule, not a package",
+        ),
+        package_path=FacetDecl(
+            state=FacetState.NA,
+            reason="code findings name a file and a rule, not a package",
+        ),
+        taxonomy_cve=FacetDecl(
+            state=FacetState.NA,
+            reason="code rules carry no CVE ids",
+        ),
+        taxonomy_cwe=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="tool.driver.rules[].properties.tags (external/cwe/cwe-<n>)",
+        ),
+        fingerprints=FacetDecl(
+            state=FacetState.NA,
+            reason="bandit SARIF results carry no fingerprints (0 in the M0 "
+            "capture); finding identity keys on scanner/rule/file",
+        ),
+        fix_available=FacetDecl(
+            state=FacetState.NA,
+            reason="bandit findings carry no fix or fixed-version data",
+        ),
+        remediation_text=FacetDecl(
+            state=FacetState.NA,
+            reason="bandit publishes the issue text and a docs link, no "
+            "remediation field",
+        ),
+        snippet=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="results[].locations[].physicalLocation.region."
+            "snippet.text (settled by the M0 capture)",
+        ),
+        references=FacetDecl(
+            state=FacetState.DROPPED,
+            native_field="tool.driver.rules[].helpUri",
+            reason="rule-level only: the flat reader takes references from "
+            "result relatedLocations, so the help link is discarded today",
+        ),
+        tags=FacetDecl(
+            state=FacetState.DROPPED,
+            native_field="tool.driver.rules[].properties.tags",
+            reason="rule-level only: the flat reader takes tags from result "
+            "properties, so the rule tags are discarded today (they still "
+            "feed the CWE read)",
+        ),
+        extras=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="results[].properties (issue_confidence, issue_severity)",
+        ),
+    )
+
+    #: The operational register row (base/scanner_operational_facets.py). Each
+    #: mirrored field is checked against the production declaration it names
+    #: by tests/unit/plugin_modules/test_scanner_operational_facets_consistency.py.
+    operational_facets: ClassVar[opsf.ScannerOperationalFacets] = (
+        opsf.ScannerOperationalFacets(
+            scanner_name="bandit",
+            network=opsf.NetworkFacet(
+                fetch_kind=opsf.FetchKind.NONE,
+                fetches=(),
+                prefetch=(),
+                offline_outcome=opsf.OfflineOutcome.UNCHANGED,
+                offline_strategy=OfflineStrategy.BUNDLED,
+                sandbox_network=opsf.SandboxNetwork.NONE,
+                source="bandit_scanner.py offline_strategy, sandbox_requirements",
+            ),
+            output=opsf.OutputFacet(
+                native_formats=(opsf.OutputFormat.SARIF,),
+                side_reports=(),
+                non_finding_artifacts=(),
+                note="a JSON capture also exists as a fixture (tests/test_data/scanners/bandit/captured)",
+            ),
+            targets=opsf.TargetsFacet(
+                kinds=(opsf.TargetKind.SOURCE_CODE,),
+                tool_type=ScannerToolType.SAST,
+                selection="tool-side over the directory; staged_scope_patterns ('*.py',) in precommit",
+            ),
+            runtime=opsf.RuntimeFacet(
+                kind=opsf.RuntimeKind.UV_PYTHON,
+                external_programs=(),
+                invocations=opsf.Invocations.ONE,
+                python_only=True,
+                use_uv_tool=True,
+            ),
+            platforms=opsf.PlatformsFacet(
+                provisionable=(),
+                note="a PyPI package run through uv; platform support is the package's and was not read here",
+            ),
+            severity=opsf.SeverityFacet(
+                severity_class=opsf.SeverityClass.NATIVE,
+                note="the tool's own per-finding severity is mapped",
+            ),
+            silencing=opsf.SilencingFacet(
+                tool_side=(
+                    opsf.SilencingLayer(
+                        layer=opsf.SilencingLayerKind.INLINE_COMMENT,
+                        writer=opsf.SilencingWriter.REPOSITORY,
+                        honored=opsf.Honored.YES,
+                        surface="# nosec comments; options.ignore_nosec turns them off",
+                        cite="bandit_scanner.py ignore_nosec option and its --ignore-nosec flag",
+                    ),
+                ),
+            ),
+            identity=opsf.IdentityFacet(
+                fingerprint_class=opsf.FingerprintClass.POSITIONAL_ONLY,
+                note="identity is file and line through the shared floor",
+            ),
+            extensibility=opsf.ExtensibilityFacet(
+                custom_rules=opsf.CustomRules.NONE,
+                env_prefixes=("BANDIT_",),
+                options_surface="--ini config and construction-time excludes; ignore_nosec",
+            ),
+            exit_codes=opsf.ExitCodesFacet(
+                success_exit_codes=(0, 1),
+                semantics="0 clean, 1 findings: the native-tool convention",
+            ),
+            provenance=opsf.ProvenanceFacet(
+                tier=opsf.Tier.BUILTIN_DEFAULT,
+                source=opsf.ProvenanceSource.PYPI_VIA_UV,
+                selection_surfaces=("options.ignore_nosec",),
+                upstream_license=(
+                    "Apache-2.0 (source: utils/tool_downloads.py "
+                    "THIRD_PARTY_LICENSES['bandit'], pinned commit 92ae8b8)"
+                ),
+            ),
+            prerequisites=opsf.PrerequisitesFacet(
+                kinds=(opsf.Prerequisite.NONE,),
+                note="Python files in the scan set",
+            ),
+        )
+    )
 
     def model_post_init(self, context):
         if self.config is None:

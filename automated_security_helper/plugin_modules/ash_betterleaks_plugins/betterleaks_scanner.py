@@ -132,7 +132,6 @@ from pathlib import Path
 from typing import (
     Annotated,
     Any,
-    Callable,
     ClassVar,
     Dict,
     List,
@@ -142,9 +141,15 @@ from typing import (
     Tuple,
 )
 
-from pydantic import Field, PrivateAttr, model_validator
+from pydantic import Field, model_validator
 
 from automated_security_helper.base.options import ScannerOptionsBase
+from automated_security_helper.base import scanner_operational_facets as opsf
+from automated_security_helper.base.scanner_facets import (
+    FacetDecl,
+    FacetState,
+    ScannerFacets,
+)
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
@@ -168,7 +173,6 @@ from automated_security_helper.utils.config_trust import (
     LEADS_OUT_OF_THE_TREE,
     operator_path,
     refusal_warning,
-    set_by_operator,
 )
 from automated_security_helper.utils.download_utils import (
     pinned_tool_install_commands,
@@ -178,7 +182,6 @@ from automated_security_helper.utils.process_env import snapshot_environ
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.utils.sandbox.scope import active_scope
-from automated_security_helper.utils.scan_output_dirs import committed_output_files
 from automated_security_helper.utils.subprocess_utils import find_executable
 
 #: The text Betterleaks writes in place of a secret under ``--redact``.
@@ -323,13 +326,212 @@ class BetterleaksScanner(ScannerPluginBase[BetterleaksScannerConfig]):
 
     # Betterleaks' rules are compiled into the binary and `dir` makes no network calls.
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
+
+    #: The facets register row (base/scanner_facets.py). Declaration only: no
+    #: behavior changes. Native fields name betterleaks' own SARIF (fixture
+    #: tests/test_data/scanners/betterleaks/captured/positive.sarif).
+    facets: ClassVar[ScannerFacets] = ScannerFacets(
+        rule_id=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result "ruleId"',
+        ),
+        severity=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="(no native severity) constant level error plus "
+            'properties "issue_severity" CRITICAL, both set by _post_process_sarif',
+        ),
+        file_path=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="locations[].physicalLocation.artifactLocation.uri",
+        ),
+        line_range=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="region.startLine / region.endLine",
+        ),
+        column=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="region.startColumn / region.endColumn",
+        ),
+        message=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result "message.text"',
+        ),
+        resource_id=FacetDecl(
+            state=FacetState.NA,
+            reason="secret findings name a file location, not a deployable "
+            "resource; the SARIF carries a rule id and a region only",
+        ),
+        resource_type=FacetDecl(
+            state=FacetState.NA,
+            reason="secret findings name a file location, not a deployable resource",
+        ),
+        package_name=FacetDecl(
+            state=FacetState.NA,
+            reason="secret findings carry no package",
+        ),
+        package_version=FacetDecl(
+            state=FacetState.NA,
+            reason="secret findings carry no package",
+        ),
+        package_path=FacetDecl(
+            state=FacetState.NA,
+            reason="secret findings carry no package",
+        ),
+        taxonomy_cve=FacetDecl(
+            state=FacetState.NA,
+            reason="secret findings carry no CVE taxonomy",
+        ),
+        taxonomy_cwe=FacetDecl(
+            state=FacetState.NA,
+            reason="betterleaks rules carry no CWE taxonomy in the SARIF",
+        ),
+        fingerprints=FacetDecl(
+            state=FacetState.DROPPED,
+            native_field='result "partialFingerprints" (commitSha, author, '
+            "email, date, commitMessage)",
+            reason="dir mode emits empty-string git metadata, which "
+            "_post_process_sarif drops because an empty fingerprint is "
+            "identical across every result; git-mode values pass through",
+        ),
+        fix_available=FacetDecl(
+            state=FacetState.NA,
+            reason="secret findings carry no fix state",
+        ),
+        remediation_text=FacetDecl(
+            state=FacetState.NA,
+            reason="the SARIF rules carry id and shortDescription only",
+        ),
+        snippet=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="region.snippet.text, forced to REDACTED by "
+            "_post_process_sarif",
+        ),
+        references=FacetDecl(
+            state=FacetState.NA,
+            reason="the SARIF rules carry id and shortDescription only; no "
+            "reference URLs",
+        ),
+        tags=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result properties "tags" (empty natively); the '
+            "adapter appends secret and security",
+        ),
+        extras=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result properties "issue_severity" written by the adapter',
+        ),
+    )
+
+    #: The operational register row (base/scanner_operational_facets.py),
+    #: checked against the production declarations it mirrors by
+    #: tests/unit/plugin_modules/test_scanner_operational_facets_consistency.py.
+    operational_facets: ClassVar[opsf.ScannerOperationalFacets] = (
+        opsf.ScannerOperationalFacets(
+            scanner_name="betterleaks",
+            network=opsf.NetworkFacet(
+                fetch_kind=opsf.FetchKind.NONE,
+                fetches=(),
+                prefetch=(),
+                offline_outcome=opsf.OfflineOutcome.UNCHANGED,
+                offline_strategy=OfflineStrategy.BUNDLED,
+                sandbox_network=opsf.SandboxNetwork.NONE,
+                source=(
+                    "betterleaks_scanner.py offline_strategy, sandbox_requirements; "
+                    "module header: `betterleaks dir` makes no network calls and ASH "
+                    "never passes --validation"
+                ),
+            ),
+            output=opsf.OutputFacet(
+                native_formats=(opsf.OutputFormat.SARIF,),
+                side_reports=(),
+                non_finding_artifacts=(),
+            ),
+            targets=opsf.TargetsFacet(
+                kinds=(opsf.TargetKind.SECRETS_CONTENTS,),
+                tool_type=ScannerToolType.SECRETS,
+                selection="`betterleaks dir` over the target; contents, not history (module header)",
+                covers_note=(
+                    "the community scanners declare no covers display string; no scanner "
+                    "claims git-history secrets (UNCLAIMED_TARGET_KINDS)"
+                ),
+            ),
+            runtime=opsf.RuntimeFacet(
+                kind=opsf.RuntimeKind.PINNED_BINARY,
+                external_programs=(),
+                invocations=opsf.Invocations.ONE,
+                tool_versions_key="betterleaks",
+                python_only=False,
+                use_uv_tool=False,
+            ),
+            platforms=opsf.PlatformsFacet(
+                provisionable=opsf.PLATFORMS_ALL,
+                note="asset table lists all six platform/arch pairs",
+            ),
+            severity=opsf.SeverityFacet(
+                severity_class=opsf.SeverityClass.CONSTANT,
+                note="every finding is CRITICAL",
+            ),
+            silencing=opsf.SilencingFacet(
+                tool_side=(
+                    opsf.SilencingLayer(
+                        layer=opsf.SilencingLayerKind.IGNORE_FILE,
+                        writer=opsf.SilencingWriter.REPOSITORY,
+                        honored=opsf.Honored.NO,
+                        surface=".betterleaksignore or .gitleaksignore in the scan root",
+                        cite="betterleaks_scanner.py module header (Ignore files): the scan fails before the tool runs unless the operator sets options.honor_tree_ignore_files",
+                    ),
+                    opsf.SilencingLayer(
+                        layer=opsf.SilencingLayerKind.INLINE_COMMENT,
+                        writer=opsf.SilencingWriter.REPOSITORY,
+                        honored=opsf.Honored.NO,
+                        surface="betterleaks:allow and gitleaks:allow comments; options.honor_inline_ignores turns them back on when the operator sets it",
+                        cite="betterleaks_scanner.py module header (Inline allow comments): ASH passes --ignore-gitleaks-allow",
+                    ),
+                ),
+            ),
+            identity=opsf.IdentityFacet(
+                fingerprint_class=opsf.FingerprintClass.POSITIONAL_ONLY,
+                note="the git-metadata fingerprints are empty and dropped in dir mode; identity is file and line",
+            ),
+            extensibility=opsf.ExtensibilityFacet(
+                custom_rules=opsf.CustomRules.OPERATOR_PATHS,
+                env_prefixes=(),
+                options_surface="an operator config file or TOML content, resolved against ASH's working directory; a repository-written config is ignored with a warning",
+            ),
+            exit_codes=opsf.ExitCodesFacet(
+                success_exit_codes=(0, 2),
+                semantics="ASH passes --exit-code=2 because the tool's default 1 means both leaks and some errors",
+            ),
+            provenance=opsf.ProvenanceFacet(
+                tier=opsf.Tier.COMMUNITY_OPTIN,
+                source=opsf.ProvenanceSource.PINNED_RELEASE_BINARY,
+                selection_surfaces=(
+                    "ash_betterleaks_plugins in ash_plugin_modules",
+                    "options.honor_tree_ignore_files",
+                    "options.honor_inline_ignores",
+                ),
+                upstream_license=(
+                    "MIT (source: utils/tool_downloads.py "
+                    "THIRD_PARTY_LICENSES['betterleaks'], pinned commit 39d5bdc)"
+                ),
+            ),
+            prerequisites=opsf.PrerequisitesFacet(
+                kinds=(opsf.Prerequisite.NONE,),
+                note="no git repository is required and no history is read",
+            ),
+        )
+    )
+
     success_exit_codes: ClassVar[Set[int]] = {0, LEAKS_EXIT_CODE}
     # The strict default; see "Sandbox" in the module docstring.
     sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements()
 
-    # Whether each tree-set option refusal was already logged.
-    _ignores_refusal_logged: bool = PrivateAttr(default=False)
-    _tree_ignore_refusal_logged: bool = PrivateAttr(default=False)
+    # With honor_tree_ignore_files on, Betterleaks' stderr can quote the scanned
+    # tree's ignore file (see _mask_quoted_ignore_entries), and the scanner
+    # executor copies errors into the scan's results: the base class keeps the
+    # stream out of both and out of the failure text. It stays in the log file.
+    quote_tool_stderr: ClassVar[bool] = False
+    unquoted_failure_tool_name: ClassVar[Optional[str]] = "betterleaks"
 
     def model_post_init(self, context: Any) -> None:
         if self.config is None:
@@ -426,42 +628,30 @@ class BetterleaksScanner(ScannerPluginBase[BetterleaksScannerConfig]):
         """Whether Betterleaks may apply ``betterleaks:allow`` comments in the tree."""
         if not self._options().honor_inline_ignores:
             return False
-        config = self.context.config if self.context is not None else None
-        if set_by_operator(
-            config, "scanners.betterleaks.options.honor_inline_ignores", True
-        ):
-            return True
-        if not self._ignores_refusal_logged:
-            self._ignores_refusal_logged = True
-            self._plugin_log(
-                "scanners.betterleaks.options.honor_inline_ignores is true in a "
-                "config inside a git checkout or the scanned directory, or from an "
-                "MCP client, so it is ignored: Betterleaks runs with "
-                "--ignore-gitleaks-allow and allow comments do not apply; suppress "
-                f"findings with ASH suppressions. {KEEP_A_SETTING}",
-                level=logging.WARNING,
-            )
-        return False
+        return self._operator_gated(
+            "scanners.betterleaks.options.honor_inline_ignores",
+            True,
+            False,
+            "scanners.betterleaks.options.honor_inline_ignores is true in a "
+            "config inside a git checkout or the scanned directory, or from an "
+            "MCP client, so it is ignored: Betterleaks runs with "
+            "--ignore-gitleaks-allow and allow comments do not apply; suppress "
+            f"findings with ASH suppressions. {KEEP_A_SETTING}",
+        )
 
     def _honor_tree_ignore_files(self) -> bool:
         """Whether a tree's ignore file may stand, when the operator said so."""
         if not self._options().honor_tree_ignore_files:
             return False
-        config = self.context.config if self.context is not None else None
-        if set_by_operator(
-            config, "scanners.betterleaks.options.honor_tree_ignore_files", True
-        ):
-            return True
-        if not self._tree_ignore_refusal_logged:
-            self._tree_ignore_refusal_logged = True
-            self._plugin_log(
-                "scanners.betterleaks.options.honor_tree_ignore_files is true in a "
-                "config inside a git checkout or the scanned directory, or from an "
-                "MCP client, so it is ignored: a tree that holds a .betterleaksignore "
-                f"or .gitleaksignore still fails the scan. {KEEP_A_SETTING}",
-                level=logging.WARNING,
-            )
-        return False
+        return self._operator_gated(
+            "scanners.betterleaks.options.honor_tree_ignore_files",
+            True,
+            False,
+            "scanners.betterleaks.options.honor_tree_ignore_files is true in a "
+            "config inside a git checkout or the scanned directory, or from an "
+            "MCP client, so it is ignored: a tree that holds a .betterleaksignore "
+            f"or .gitleaksignore still fails the scan. {KEEP_A_SETTING}",
+        )
 
     def _resolve_config_file(self) -> Optional[Path]:
         """The config to pass as ``--config``; None leaves it to Betterleaks.
@@ -634,17 +824,6 @@ class BetterleaksScanner(ScannerPluginBase[BetterleaksScannerConfig]):
             )
         return super()._read_results_file(results_file)
 
-    def _process_command_response(self, response: Dict[str, Any]) -> None:
-        """Count the exit code, and keep Betterleaks' stderr out of ``self.errors``.
-
-        With ``honor_tree_ignore_files`` on, the stderr can quote the scanned tree's
-        ignore file (see ``_mask_quoted_ignore_entries``), and the scanner executor
-        copies ``errors`` into the scan's results. The stream stays in the log file.
-        """
-        super()._process_command_response(
-            {key: value for key, value in response.items() if key != "stderr"}
-        )
-
     def _run_subprocess(  # type: ignore[override]
         self,
         command: List[str],
@@ -659,120 +838,9 @@ class BetterleaksScanner(ScannerPluginBase[BetterleaksScannerConfig]):
             )
         return response
 
-    def _describe_scan_failure(
-        self,
-        exc: Exception,
-        results_file: Optional[Path],
-        tool_started: bool = True,
-    ) -> str:
-        """The failure and where Betterleaks' log is, without quoting the log."""
-        detail = f"{self.__class__.__name__} scan failed: {exc}"
-        if not tool_started or results_file is None:
-            return f"{detail} (betterleaks was not started)"
-        log_path = Path(results_file).parent / f"{self.__class__.__name__}.stderr.log"
-        if self.scan_could_not_stop is not None:
-            return (
-                f"{detail} (no exit code: ASH could not stop betterleaks). "
-                f"betterleaks' log is not quoted here; see {log_path.as_posix()}"
-            )
-        verdict = (
-            "an accepted exit code for this scanner"
-            if self._exit_code_accepted()
-            else "not an accepted exit code; success_exit_codes="
-            f"{sorted(self.success_exit_codes)}"
-        )
-        return (
-            f"{detail} (exit code {self.exit_code}: {verdict}). betterleaks' log is "
-            f"not quoted here; see {log_path.as_posix()}"
-        )
-
     # ------------------------------------------------------------------
     # The report
     # ------------------------------------------------------------------
-
-    def _committed_file_test(self) -> Callable[[Path], bool]:
-        """A test, of a path, for a file the repository committed under ASH's output.
-
-        The files ``scan_output_dirs.committed_output_files`` reads, as the executor's
-        drop and the suppression step read them. Read when the test is first asked.
-        Where git cannot say what is tracked the set is empty, and every file under the
-        output directory is treated as ASH's.
-        """
-        committed: Optional[Set[Path]] = None
-
-        def is_committed(path: Path) -> bool:
-            nonlocal committed
-            if committed is None:
-                committed = committed_output_files(self.context)
-            try:
-                return path.resolve() in committed
-            except (OSError, RuntimeError, ValueError):
-                return False
-
-        return is_committed
-
-    def _output_dirs_inside_target(self, target: Path) -> List[Path]:
-        """ASH's output directories inside ``target``, relative to it."""
-        found: List[Path] = []
-        own = self._output_dir_inside(target)
-        if own is not None:
-            found.append(own)
-        for relative in self._ash_output_dirs_inside(target):
-            if relative not in found:
-                found.append(relative)
-        return found
-
-    def _drop_results_under_output_dir(
-        self, sarif_report: SarifReport, target: Path
-    ) -> None:
-        """Remove the results located under ASH's output directory inside ``target``.
-
-        Betterleaks has no exclude flag, so when the output directory is inside the
-        source target (the default ``.ash/ash_output``) it reads ASH's own files,
-        including the converted copies the converted target's run reports. A result in
-        a file the repository committed there is kept. Nothing is removed when the
-        output directory is not inside ``target``. A URI is joined to the target and
-        normalized lexically, and its backslashes are separators only on Windows.
-        """
-        if self.context is None:
-            return
-        outputs_inside = self._output_dirs_inside_target(target)
-        if not outputs_inside:
-            return
-        target_abs = Path(target).absolute()
-        output_roots = [Path(os.path.normpath(target_abs / o)) for o in outputs_inside]
-        committed = self._committed_file_test()
-
-        def under_output_dir(result: Any) -> bool:
-            for location in result.locations or []:
-                physical = location.physicalLocation
-                artifact = physical.root.artifactLocation if physical else None
-                uri = artifact.uri if artifact else None
-                if not uri:
-                    continue
-                if os.sep == "\\":
-                    uri = uri.replace("\\", "/")
-                path = Path(os.path.normpath(target_abs / uri))
-                if any(path.is_relative_to(root) for root in output_roots) and (
-                    not committed(path)
-                ):
-                    return True
-            return False
-
-        dropped = 0
-        for run in sarif_report.runs or []:
-            if not run.results:
-                continue
-            kept = [result for result in run.results if not under_output_dir(result)]
-            dropped += len(run.results) - len(kept)
-            run.results = kept
-        if dropped:
-            self._plugin_log(
-                f"Dropped {dropped} finding(s) under ASH's output directory: copies "
-                "of the files ASH converted, which the converted target's run "
-                "reports, or files ASH wrote.",
-                level=logging.DEBUG,
-            )
 
     def _post_process_sarif(
         self,
@@ -780,9 +848,22 @@ class BetterleaksScanner(ScannerPluginBase[BetterleaksScannerConfig]):
         final_args: List[str],
         target: Path,
     ) -> SarifReport:
-        """Drop ASH's own files, rate every result, drop empty fingerprints, keep
-        snippets redacted."""
+        """Drop ASH's own files, then normalize every result
+        (:meth:`normalize_results`)."""
         self._drop_results_under_output_dir(sarif_report, target)
+        return self.normalize_results(sarif_report)
+
+    @staticmethod
+    def normalize_results(sarif_report: SarifReport) -> SarifReport:
+        """Rate every result, tag it, drop empty fingerprints, keep snippets redacted.
+
+        The result-level half of the adapter's post-processing, separated from
+        the instance-bound half (output-directory dropping) so that conformance
+        tests can drive betterleaks' own normalization over a committed capture
+        without a scanner instance, the way ``CfnGuardScanner.normalize_results``
+        is driven. Pure over the report: no tool is run and nothing outside the
+        report is read.
+        """
         for result in sarif_report.get_all_results():
             # See "Severity" in the module docstring.
             result.level = Level.error

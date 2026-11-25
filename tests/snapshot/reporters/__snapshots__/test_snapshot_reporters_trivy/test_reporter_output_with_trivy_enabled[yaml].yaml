@@ -37,11 +37,20 @@ ash_config:
       options:
         install_timeout: 300
         tool_version: '>=7.16.0,<8.0.0'
+  default_scanners:
+    add: []
+    only: []
   external_reports_to_include: []
   fail_on_findings: true
   fail_on_incomplete_scanners: true
   fail_on_unknown_keys: false
   global_settings:
+    deduplication:
+      annotate: false
+      fold: false
+    history:
+      enabled: false
+      keep_runs: 50
     ignore_paths: []
     mcp:
       runtime_overrides:
@@ -57,6 +66,8 @@ ash_config:
         - /sandbox/**
         - /ash_plugin_modules
         - /ash_plugin_modules/**
+        - /default_scanners
+        - /default_scanners/**
         - /scanners/detect-secrets/options/scan_settings/filters_used
         - /scanners/detect-secrets/options/scan_settings/filters_used/**
         - /scanners/detect-secrets/options/scan_settings/plugins_used
@@ -461,7 +472,23 @@ ash_config:
         severity: []
         severity_threshold: null
         sha256: {}
-        version: v1.33.1
+        version: v2.0.0
+    semgrep:
+      enabled: true
+      name: semgrep
+      options:
+        config: p/ci
+        exclude:
+        - '*-converted.py'
+        - '*_report_result.txt'
+        exclude_rule: []
+        install_timeout: 300
+        metrics: auto
+        offline: false
+        scan_timeout: 1800
+        severity: []
+        severity_threshold: null
+        tool_version: null
     syft:
       enabled: true
       name: syft
@@ -2239,7 +2266,7 @@ sarif:
           fullDescription:
             markdown: null
             properties: null
-            text: "Lodash versions <ASH_VERSION> through 4.17.22 are vulnerable to prototype\
+            text: "Lodash versions 4.0.0 through 4.17.22 are vulnerable to prototype\
               \ pollution in the _.unset\_and _.omit\_functions. An attacker can pass\
               \ crafted paths which cause Lodash to delete methods from global prototypes.\n\
               \nThe issue permits deletion of properties but does not allow overwriting\
@@ -2248,7 +2275,7 @@ sarif:
           help:
             markdown: "**Vulnerability CVE-2025-13465**\n| Severity | Package | Fixed\
               \ Version | Link |\n| --- | --- | --- | --- |\n|MEDIUM|lodash|4.17.23|[CVE-2025-13465](https://avd.aquasec.com/nvd/cve-2025-13465)|\n\
-              \nLodash versions <ASH_VERSION> through 4.17.22 are vulnerable to prototype\
+              \nLodash versions 4.0.0 through 4.17.22 are vulnerable to prototype\
               \ pollution in the _.unset\_and _.omit\_functions. An attacker can pass\
               \ crafted paths which cause Lodash to delete methods from global prototypes.\n\
               \nThe issue permits deletion of properties but does not allow overwriting\
@@ -2256,7 +2283,7 @@ sarif:
             properties: null
             text: "Vulnerability CVE-2025-13465\nSeverity: MEDIUM\nPackage: lodash\n\
               Fixed Version: 4.17.23\nLink: [CVE-2025-13465](https://avd.aquasec.com/nvd/cve-2025-13465)\n\
-              Lodash versions <ASH_VERSION> through 4.17.22 are vulnerable to prototype pollution\
+              Lodash versions 4.0.0 through 4.17.22 are vulnerable to prototype pollution\
               \ in the _.unset\_and _.omit\_functions. An attacker can pass crafted\
               \ paths which cause Lodash to delete methods from global prototypes.\n\
               \nThe issue permits deletion of properties but does not allow overwriting\

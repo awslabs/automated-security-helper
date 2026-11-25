@@ -1526,7 +1526,7 @@ jobs:
 ```yaml
 security-scan:
   stage: test
-  image: python:3.10
+  image: python:3.11
   script:
     - pip install git+https://github.com/awslabs/automated-security-helper.git@v4.0.0
     - ashx --scanners trivy-repo --formats sarif,markdown

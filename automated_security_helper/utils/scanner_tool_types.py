@@ -157,3 +157,36 @@ def result_tool_types(result: Any) -> Set[str]:
     if from_name:
         types.add(from_name)
     return types
+
+
+def scanner_resource_id_state(scanner_name: Any) -> Optional[str]:
+    """The declared ``resource_id`` facet state (``"mapped"``, ``"n/a"``, ...)
+    of the loaded scanner class named ``scanner_name``, or None if unknown.
+
+    Read from the class's ``facets`` declaration, found the way
+    :func:`_loaded_class_tool_type` finds a class: among the already-imported
+    subclasses of ``ScannerPluginBase``, importing and instantiating nothing
+    else. A scanner that is not loaded or declares no facets answers None, and
+    the caller treats that as "cannot decide", not as a declaration.
+    """
+    if not isinstance(scanner_name, str) or not scanner_name:
+        return None
+    try:
+        from automated_security_helper.base.scanner_plugin import ScannerPluginBase
+    except ImportError:
+        return None
+    pending = list(ScannerPluginBase.__subclasses__())
+    seen: Set[type] = set()
+    while pending:
+        cls = pending.pop()
+        if cls in seen:
+            continue
+        seen.add(cls)
+        pending.extend(cls.__subclasses__())
+        if _class_config_name(cls) != scanner_name:
+            continue
+        decl = getattr(getattr(cls, "facets", None), "resource_id", None)
+        state = getattr(decl, "state", None)
+        if state is not None:
+            return str(getattr(state, "value", state))
+    return None

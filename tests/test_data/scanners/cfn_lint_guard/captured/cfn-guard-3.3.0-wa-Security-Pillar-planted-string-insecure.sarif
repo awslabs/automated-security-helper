@@ -1,0 +1,70 @@
+{
+  "$schema": "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "cfn-guard",
+          "semanticVersion": "3.3.0",
+          "fullName": "cfn-guard 3.3.0",
+          "organization": "Amazon Web Services",
+          "downloadUri": "https://github.com/aws-cloudformation/cloudformation-guard",
+          "informationUri": "https://github.com/aws-cloudformation/cloudformation-guard",
+          "shortDescription": {
+            "text": "AWS CloudFormation Guard is an open-source general-purpose policy-as-code evaluation tool. It provides developers with a simple-to-use, yet powerful and expressive domain-specific language (DSL) to define policies and enables developers to validate JSON- or YAML- formatted structured data with those policies."
+          }
+        }
+      },
+      "artifacts": [
+        {
+          "location": {
+            "uri": "srv/templates/planted.yaml"
+          }
+        }
+      ],
+      "results": [
+        {
+          "ruleId": "API_GW_EXECUTION_LOGGING_ENABLED",
+          "level": "error",
+          "message": {
+            "text": "Check was not compliant as property value [Path=/Resources/ApiStage/Properties/MethodSettings/0/LoggingLevel[L:8,C:24] Value=\"Value traversed to [Path=/Resources/VictimResource/Properties\"] not equal to value [Path=[L:0,C:0] Value=\"ERROR\"]. "
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "srv/templates/planted.yaml"
+                },
+                "region": {
+                  "startLine": 1,
+                  "startColumn": 1
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "API_GW_EXECUTION_LOGGING_ENABLED",
+          "level": "error",
+          "message": {
+            "text": "Check was not compliant as property value [Path=/Resources/ApiStage/Properties/MethodSettings/0/LoggingLevel[L:8,C:24] Value=\"Value traversed to [Path=/Resources/VictimResource/Properties\"] not equal to value [Path=[L:0,C:0] Value=\"INFO\"]. \n    Guard Rule Set: wa-Security-Pillar\n    Controls: SEC-4.2    \n      Violation: Logging Level for API GW Method Setting not set\n      Fix: API GW Stage Method Setting logging level must be set to \"ERROR\" or \"INFO\"\n    "
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "srv/templates/planted.yaml"
+                },
+                "region": {
+                  "startLine": 1,
+                  "startColumn": 1
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

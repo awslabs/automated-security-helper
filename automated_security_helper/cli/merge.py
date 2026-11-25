@@ -1718,6 +1718,8 @@ def merge_shard_results(
         ShardCoverageError: If the shards do not reconstruct exactly one whole
             scan.
     """
+    if any(result.baseline_filtered for _, result in loaded):
+        raise ShardCoverageError("cannot merge results filtered by --baseline")
     _refuse_shards_without_a_config(loaded)
     shards = _collect_assignments(loaded)
     verify_shard_coverage([assignment for _, _, assignment in shards])

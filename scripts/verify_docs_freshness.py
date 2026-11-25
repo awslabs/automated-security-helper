@@ -56,6 +56,7 @@ RELEASE_ASSETS_PY = PACKAGING_DIR / "release-assets.py"
 # (the config models, the plugin registry, the @mcp.tool decorators).
 REFERENCE_DIR = DOCS_DIR / "content" / "reference"
 SCANNERS_REFERENCE_MD = REFERENCE_DIR / "scanners.md"
+SCANNER_FACETS_REFERENCE_MD = REFERENCE_DIR / "scanner-facets.md"
 REPORTERS_REFERENCE_MD = REFERENCE_DIR / "reporters.md"
 MCP_TOOLS_REFERENCE_MD = REFERENCE_DIR / "mcp-tools.md"
 
@@ -168,6 +169,11 @@ _EXCLUDED_MD_PATHS = (
     # and as current claims. The plugin's README.md and DEVELOPMENT.md beside
     # them are documentation and stay in the corpus.
     "automated_security_helper/plugin_modules/ash_ferret_plugins/spec/",
+    # hatch_build.py copies docs/content/docs/genai-steering-guide.md here for the
+    # wheel. The copy is gitignored, but a tree with no effective ignore rule lists
+    # it, and its relative links (../how-to/...) resolve from docs/content/docs/, not
+    # from assets/. The source page is in the corpus and holds the same text.
+    "automated_security_helper/assets/genai-steering-guide.md",
 )
 
 
@@ -750,6 +756,23 @@ def check_scanners() -> list[str]:
         read_text(SCANNERS_REFERENCE_MD),
         "Scanner",
         "docs/content/reference/scanners.md",
+    )
+
+
+def check_scanner_facets_page() -> list[str]:
+    """The facets reference's summary table and the scanners ASH ships are the same set.
+
+    The page itself is generated from the register and held current by
+    ``tests/unit/test_generated_docs_freshness.py``; this is the second source:
+    the generator could drop or invent a scanner, and here the page is held
+    against the config models the way the scanners reference is.
+    """
+    return compare_inventories(
+        "Scanner facets",
+        scanner_names(),
+        read_text(SCANNER_FACETS_REFERENCE_MD),
+        "Scanner",
+        "docs/content/reference/scanner-facets.md",
     )
 
 
@@ -2431,6 +2454,10 @@ def main(argv: list[str] | None = None) -> int:
     checks = [
         ("Reporter list in docs matches code", check_reporters),
         ("Scanner list in docs matches code", check_scanners),
+        (
+            "Scanner facets reference lists the scanners ASH ships",
+            check_scanner_facets_page,
+        ),
         (
             "Plugin data behind the home page graphics matches code",
             check_plugin_data,

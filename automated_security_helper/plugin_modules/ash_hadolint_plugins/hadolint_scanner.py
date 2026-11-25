@@ -144,6 +144,12 @@ from pydantic import AnyUrl, Field, model_validator
 
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.plugin_context import PluginContext
+from automated_security_helper.base import scanner_operational_facets as opsf
+from automated_security_helper.base.scanner_facets import (
+    FacetDecl,
+    FacetState,
+    ScannerFacets,
+)
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
@@ -275,6 +281,186 @@ class HadolintScanner(ScannerPluginBase[HadolintScannerConfig]):
     """Lints Dockerfiles with hadolint."""
 
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
+
+    #: The facets register row (base/scanner_facets.py). Declaration only: no
+    #: behavior changes. Native fields name hadolint's own SARIF and JSON
+    #: (fixtures tests/test_data/scanners/hadolint/captured/positive.sarif and
+    #: positive.json).
+    facets: ClassVar[ScannerFacets] = ScannerFacets(
+        rule_id=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result "ruleId" (DLxxxx / SCxxxx)',
+        ),
+        severity=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result "level", refined through two lookup tables '
+            "and a second --format json pass",
+        ),
+        file_path=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="locations[].physicalLocation.artifactLocation.uri",
+        ),
+        line_range=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="region.startLine / region.endLine",
+        ),
+        column=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="region.startColumn / region.endColumn",
+        ),
+        message=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result "message.text"',
+        ),
+        resource_id=FacetDecl(
+            state=FacetState.NA,
+            reason="Dockerfile findings are locators; even the base image "
+            "named by a DL3007 finding lives only in message text "
+            "(captured/positive.sarif), and an image locator is not a "
+            "resource id",
+        ),
+        resource_type=FacetDecl(
+            state=FacetState.NA,
+            reason="Dockerfile findings are locators, not deployable resources",
+        ),
+        package_name=FacetDecl(
+            state=FacetState.NA,
+            reason="Dockerfile lint findings carry no package",
+        ),
+        package_version=FacetDecl(
+            state=FacetState.NA,
+            reason="Dockerfile lint findings carry no package",
+        ),
+        package_path=FacetDecl(
+            state=FacetState.NA,
+            reason="Dockerfile lint findings carry no package",
+        ),
+        taxonomy_cve=FacetDecl(
+            state=FacetState.NA,
+            reason="Dockerfile lint rules carry no CVE taxonomy",
+        ),
+        taxonomy_cwe=FacetDecl(
+            state=FacetState.NA,
+            reason="Dockerfile lint rules carry no CWE taxonomy",
+        ),
+        fingerprints=FacetDecl(
+            state=FacetState.NA,
+            reason="the native SARIF result carries ruleId, level, message and "
+            "region only",
+        ),
+        fix_available=FacetDecl(
+            state=FacetState.NA,
+            reason="Dockerfile lint findings carry no fix state",
+        ),
+        remediation_text=FacetDecl(
+            state=FacetState.NA,
+            reason="the rule's advice is the message text itself; no separate "
+            "remediation field exists",
+        ),
+        snippet=FacetDecl(
+            state=FacetState.NA,
+            reason="the native SARIF region carries no snippet",
+        ),
+        references=FacetDecl(
+            state=FacetState.NA,
+            reason="the native SARIF driver has no rules array, so no help "
+            "URIs (captured/positive.sarif)",
+        ),
+        tags=FacetDecl(
+            state=FacetState.NA,
+            reason="the native SARIF has no rules array and results carry no tags",
+        ),
+        extras=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result properties "issue_severity" and '
+            '"hadolint_level" written by the adapter',
+        ),
+    )
+
+    #: The operational register row (base/scanner_operational_facets.py),
+    #: checked against the production declarations it mirrors by
+    #: tests/unit/plugin_modules/test_scanner_operational_facets_consistency.py.
+    operational_facets: ClassVar[opsf.ScannerOperationalFacets] = (
+        opsf.ScannerOperationalFacets(
+            scanner_name="hadolint",
+            network=opsf.NetworkFacet(
+                fetch_kind=opsf.FetchKind.NONE,
+                fetches=(),
+                prefetch=(),
+                offline_outcome=opsf.OfflineOutcome.UNCHANGED,
+                offline_strategy=OfflineStrategy.BUNDLED,
+                sandbox_network=opsf.SandboxNetwork.NONE,
+                source="hadolint_scanner.py offline_strategy, sandbox_requirements",
+            ),
+            output=opsf.OutputFacet(
+                native_formats=(opsf.OutputFormat.SARIF,),
+                side_reports=(),
+                non_finding_artifacts=(),
+                note="a second --format json invocation feeds the severity refinement join; it is an invocation, not a side report",
+            ),
+            targets=opsf.TargetsFacet(
+                kinds=(opsf.TargetKind.DOCKERFILES,),
+                tool_type=ScannerToolType.IAC,
+                selection="its own discovery over the scan set: Dockerfile, *.Dockerfile, Dockerfile.* and Containerfile; unparseable files are failed targets, not skipped",
+                covers_note="a community scanner; it declares no covers display string",
+            ),
+            runtime=opsf.RuntimeFacet(
+                kind=opsf.RuntimeKind.PINNED_BINARY,
+                external_programs=(),
+                invocations=opsf.Invocations.MULTI_PASS,
+                invocation_note="a second JSON pass for the severity refinement join; file arguments are chunked under the Windows argv cap",
+                tool_versions_key="hadolint",
+                python_only=False,
+                use_uv_tool=False,
+            ),
+            platforms=opsf.PlatformsFacet(
+                provisionable=opsf.PLATFORMS_NO_WINDOWS_ARM64,
+                note="no windows/arm64 asset (tool_downloads.py docstring)",
+            ),
+            severity=opsf.SeverityFacet(
+                severity_class=opsf.SeverityClass.DERIVED,
+                note="two tables plus a second-pass refinement join",
+            ),
+            silencing=opsf.SilencingFacet(
+                tool_side=(
+                    opsf.SilencingLayer(
+                        layer=opsf.SilencingLayerKind.INLINE_COMMENT,
+                        writer=opsf.SilencingWriter.REPOSITORY,
+                        honored=opsf.Honored.YES,
+                        surface="# hadolint ignore=DLxxxx pragmas, applied inside hadolint before ASH sees the report",
+                        cite="hadolint_scanner.py module header",
+                    ),
+                ),
+            ),
+            identity=opsf.IdentityFacet(
+                fingerprint_class=opsf.FingerprintClass.POSITIONAL_ONLY,
+                note="identity is file and line through the shared floor",
+            ),
+            extensibility=opsf.ExtensibilityFacet(
+                custom_rules=opsf.CustomRules.NONE,
+                env_prefixes=(),
+                options_surface="typed options only; the rules surface was not surveyed beyond them",
+            ),
+            exit_codes=opsf.ExitCodesFacet(
+                success_exit_codes=(0,),
+                semantics="with --no-fail, 0 is the only status a completed run gives; DL1000 unparseable files become target failures",
+            ),
+            provenance=opsf.ProvenanceFacet(
+                tier=opsf.Tier.COMMUNITY_OPTIN,
+                source=opsf.ProvenanceSource.PINNED_RELEASE_BINARY,
+                selection_surfaces=("ash_hadolint_plugins in ash_plugin_modules",),
+                upstream_license=(
+                    "GPL-3.0-only (source: utils/tool_downloads.py "
+                    "THIRD_PARTY_LICENSES['hadolint'], pinned commit 2eece55)"
+                ),
+            ),
+            prerequisites=opsf.PrerequisitesFacet(
+                kinds=(opsf.Prerequisite.NONE,),
+                note="Dockerfiles in the scan set",
+            ),
+        )
+    )
+
     # With --no-fail, 0 is the only status hadolint gives a run that completed.
     success_exit_codes: ClassVar[Set[int]] = {0}
     # The strict default: no network, and no variables or paths beyond the baseline.

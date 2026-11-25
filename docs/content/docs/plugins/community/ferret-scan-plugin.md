@@ -49,7 +49,7 @@ Note: Bare `debug` and `verbose` are blocked to avoid confusion with ASH's `--de
 
 The following ferret-scan CLI options are **NOT supported** and will raise an error:
 
-| Option | Reason |
+| Unsupported option | Reason |
 |--------|--------|
 | `format`, `output_format` | ASH requires SARIF format |
 | `debug`, `verbose` | Use `ferret_debug`/`ferret_verbose` instead (avoids confusion with ASH flags) |
@@ -228,7 +228,7 @@ key '<option>'` with the accepted options listed. `ashx config validate` and `as
 config lint` do not import the plugin, so they do not catch either kind; both say
 its section is not checked there, and a scan checks it.
 
-| Option | Error Message |
+| Unsupported option | Error Message |
 |--------|--------------|
 | `format`, `output_format` | "ASH requires SARIF format for result aggregation" |
 | `debug` | "Use 'ferret_debug: true' instead. Bare 'debug' is blocked to avoid confusion with ASH's --debug flag." |

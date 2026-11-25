@@ -58,7 +58,7 @@ which checks a pull request needs to merge.
 
 ## Set up and run the tests
 
-You need git, [uv](https://docs.astral.sh/uv/getting-started/installation/), and Python 3.10 to 3.14. From a clone of your
+You need git, [uv](https://docs.astral.sh/uv/getting-started/installation/), and Python 3.11 to 3.14. From a clone of your
 fork:
 
 <!-- doctest: illustrative reason="installs packages from the network and runs the full test suite" -->
@@ -70,7 +70,7 @@ uv run pytest tests/unit/config
 
 The first command installs ASH, its development tools, and both optional extras into `.venv`. The second runs the whole
 suite, and the third runs part of it. Neither measures coverage: CI shards the unit tests eight ways, and its
-`unit-coverage` job applies an 80% threshold to the combined coverage of each operating system family at Python 3.12.
+`unit-coverage` job applies an 80% threshold to the combined coverage of every unit-test leg, across all operating systems and Python versions.
 [Test your change](docs/content/contributing/testing.md#measure-coverage) shows how to run the whole suite with the same
 options and threshold. For integration and snapshot tests, see [Test your change](docs/content/contributing/testing.md);
 for documentation changes, see [Test the documentation](docs/content/contributing/documentation.md).

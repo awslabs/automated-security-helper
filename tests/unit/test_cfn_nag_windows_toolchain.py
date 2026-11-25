@@ -233,7 +233,7 @@ def _runs_on_python_local(step: dict) -> bool:
     # Only a top-level conjunct can exclude the leg; an `||` could re-admit it.
     if "inputs.method != 'python-local'" in condition and "||" not in condition:
         return False
-    for method in ("python-container", "bash", "powershell"):
+    for method in ("python-container", "bash", "powershell", "sh-helper"):
         if f"inputs.method == '{method}'" in condition:
             return False
     return True

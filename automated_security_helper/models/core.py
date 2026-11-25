@@ -36,12 +36,8 @@ from automated_security_helper.utils.path_matching import (
     _path_pattern_matches,
     ignore_path_pattern,
 )
+from automated_security_helper.utils import suppression_frame
 from automated_security_helper.utils.redacted_model import RedactedSection
-from automated_security_helper.utils.suppression_scope_registry import (
-    engine_hooks_for,
-    split_rule_qualifier_for,
-    warn_once_unmatched_engine,
-)
 from automated_security_helper.utils.symbol_spans import is_valid_symbol
 from automated_security_helper.utils.unknown_keys import (
     refuse_unknown_keys,
@@ -1280,8 +1276,9 @@ class AshSuppression(IgnorePathWithReason):
         """Return True if ``finding`` is covered by this suppression rule.
 
         Checks rule_id (exact or glob), path (supports ``**``), optional line
-        range overlap, the optional package fields, and the optional symbol.
-        Expired suppressions never match.
+        range overlap, the optional package fields, the optional scope and the
+        optional symbol. Expired suppressions, and ones kept from a results file
+        with unknown keys, never match.
 
         Each package field that is set must match the finding's corresponding
         field. A finding that does not carry that field does not match: the
@@ -1293,176 +1290,12 @@ class AshSuppression(IgnorePathWithReason):
         reads the scanned source; without one a symbol-scoped suppression
         matches nothing, and so does a finding with no line number or in a
         file the resolver cannot parse.
+
+        The predicates are evaluated by ``utils/suppression_frame``; ``scope``
+        fails closed on every gap (``_scope_gate`` there).
         """
-        if self.is_expired or self.has_unknown_keys:
-            return False
-        # A symbol kept from a results file as the environment reference its
-        # config wrote (validate_symbol under the tolerance) names no definition,
-        # so the entry does not apply, as the load warning says.
-        if self.symbol is not None and not is_valid_symbol(self.symbol):
-            return False
-        # A blank rule id kept from a results file (validate_rule_id_not_blank
-        # under the tolerance) names no rule and is not "any rule" either: the
-        # entry does not apply, as the load warning says.
-        if self.rule_id is not None and not self.rule_id.strip():
-            return False
-
-        if self.rule_id:
-            if finding.rule_id is None:
-                return False
-            # The finding's exact rule id first, then the case-insensitive glob.
-            # fnmatch reads '[' as a character class, so a suppression saved
-            # for a rule id that holds glob characters (cdk-nag's granular
-            # 'Rule[Resource::*]' ids, as the TUI saves them) never matched the
-            # finding it was saved for through the glob alone.
-            if finding.rule_id.lower() != self.rule_id.lower() and not fnmatch.fnmatch(
-                finding.rule_id.lower(), self.rule_id.lower()
-            ):
-                # A scoped entry also matches on the engine's BASE rule id
-                # (split_rule_qualifier), so `rule_id: AwsSolutions-IAM5` plus
-                # a scope covers the granular `AwsSolutions-IAM5[Resource::..]`
-                # finding without a hand-written bracket-escaped glob. Only
-                # with a scope: an unscoped entry keeps today's comparison.
-                if self.scope is None:
-                    return False
-                base, qualifier = split_rule_qualifier_for(
-                    finding.scanner, finding.rule_id
-                )
-                if qualifier is None or (
-                    base.lower() != self.rule_id.lower()
-                    and not fnmatch.fnmatch(base.lower(), self.rule_id.lower())
-                ):
-                    return False
-
-        if not _path_pattern_matches(finding.file_path, self.path):
-            return False
-
-        if not self._line_range_matches(finding):
-            return False
-
-        if not self._package_matches(finding):
-            return False
-
-        if not self._scope_matches(finding, warned_engines):
-            return False
-
-        if self.symbol is not None:
-            if symbol_resolver is None:
-                return False
-            return symbol_resolver.contains(
-                finding.file_path, finding.line_start, finding.line_end, self.symbol
-            )
-
-        return True
-
-    def _scope_matches(
-        self,
-        finding: "FlatVulnerability",
-        warned_engines: Optional[Set[str]] = None,
-    ) -> bool:
-        """Whether this suppression's ``scope`` covers ``finding``.
-
-        No scope: today's behavior, unchanged. A scope fails closed on every
-        gap: a scope that selects nothing or kept unknown keys from a results
-        file matches nothing; a resource-scoped entry never matches a finding
-        that carries no resource identity (the same safe direction as "a
-        finding with no line never matches a line-scoped suppression"); and
-        ``engines`` ENUMERATES the engines the entry covers, so a finding from
-        a scanner not listed, or one whose listed plugin does not accept its
-        block, does not match. ``resource_id`` is case-sensitive,
-        ``resource_type`` case-insensitive; both are literal-first, then glob
-        with brackets escaped (``scope_value_matches``).
-        """
-        if self._scope_conflict:
-            return False
-        scope = self.scope
-        if scope is None:
-            return True
-        if scope.selects_nothing or scope.has_unknown_keys:
-            return False
-        if scope.resource_id is not None:
-            if finding.resource_id is None:
-                return False
-            if not scope_value_matches(
-                finding.resource_id, scope.resource_id, case_sensitive=True
-            ):
-                return False
-        if scope.resource_type is not None:
-            if finding.resource_type is None:
-                return False
-            if not scope_value_matches(
-                finding.resource_type, scope.resource_type, case_sensitive=False
-            ):
-                return False
-        if scope.engines is not None:
-            if finding.scanner is None or finding.scanner not in scope.engines:
-                return False
-            if not self._engine_block_matches(
-                finding.scanner,
-                scope.engines[finding.scanner],
-                finding,
-                warned_engines,
-            ):
-                return False
-        return True
-
-    def _engine_block_matches(
-        self,
-        scanner_name: str,
-        block: Dict[str, Any],
-        finding: "FlatVulnerability",
-        warned_engines: Optional[Set[str]] = None,
-    ) -> bool:
-        """Whether the named scanner's plugin accepts ``block`` for ``finding``.
-
-        Dispatched through the suppression-scope registry
-        (utils/suppression_scope_registry.py). Fails closed, with a warn-once
-        note naming the engine: with no plugin registered for ``scanner_name``
-        (not installed, not enabled, or one that does not support engine-scoped
-        suppressions), the block matches nothing.
-        """
-        hooks = engine_hooks_for(scanner_name)
-        if hooks is None:
-            warn_once_unmatched_engine(scanner_name, warned_engines)
-            return False
-        return hooks.suppression_scope_matches(block, finding)
-
-    def _package_matches(self, finding: "FlatVulnerability") -> bool:
-        """Return True if every package field set here matches ``finding``."""
-        for pattern, value in (
-            (self.package_name, finding.package_name),
-            (self.package_version, finding.package_version),
-        ):
-            if pattern is None:
-                continue
-            if value is None or not fnmatch.fnmatch(value.lower(), pattern.lower()):
-                return False
-        if self.package_path is not None:
-            if finding.package_path is None:
-                return False
-            if not _path_pattern_matches(finding.package_path, self.package_path):
-                return False
-        return True
+        return suppression_frame.matches(self, finding, symbol_resolver, warned_engines)
 
     def _line_range_matches(self, finding: "FlatVulnerability") -> bool:
         """Return True if ``finding``'s line range overlaps with this suppression."""
-        if self.line_start is None and self.line_end is None:
-            return True
-
-        if finding.line_start is None:
-            return False
-
-        finding_end = (
-            finding.line_end if finding.line_end is not None else finding.line_start
-        )
-
-        if self.line_start is not None and self.line_end is None:
-            return finding_end >= self.line_start
-
-        if self.line_start is None and self.line_end is not None:
-            return finding_end <= self.line_end
-
-        finding_start = finding.line_start
-        return (finding_start <= (self.line_end or 0)) and (
-            finding_end >= (self.line_start or 0)
-        )
+        return suppression_frame.line_range_overlaps(finding, [self])[0]

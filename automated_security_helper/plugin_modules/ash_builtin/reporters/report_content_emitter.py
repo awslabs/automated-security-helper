@@ -6,6 +6,8 @@ import json
 import re
 from typing import Dict, List, Any, TYPE_CHECKING
 
+import polars as pl
+
 from automated_security_helper.models.flat_vulnerability import (
     FlatVulnerability,
     _extract_snippet_from_message,
@@ -25,9 +27,22 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.workspace_se
     workspace_project_scanner_thresholds,
     workspace_project_thresholds,
 )
+from automated_security_helper.utils.finding_clusters import (
+    clusters_by_project,
+    fold_enabled,
+    fold_positions,
+    provenance_entries,
+    provenance_note,
+)
 from automated_security_helper.utils.policy_origin import is_policy_origin
 from automated_security_helper.utils.severity_ladder import severity_fails_threshold
-from collections import Counter
+from automated_security_helper.plugin_modules.ash_builtin.reporters._report_frames import (
+    active_level_counts,
+    flag_total,
+    graded_frame,
+    severity_order,
+    top_locations,
+)
 
 
 def coverage_shortfall_text(attempted: int | None, failed: int | None) -> str:
@@ -56,6 +71,25 @@ def coverage_shortfall_text(attempted: int | None, failed: int | None) -> str:
     return (
         f"evaluated {max(attempted - failed, 0)} of {attempted} target(s); "
         f"{failed} could not be evaluated"
+    )
+
+
+def deduplicated_summary_text(summary: Dict[str, Any]) -> str | None:
+    """The line that gives the fold's counts, or None when the fold is off.
+
+    One sentence for the HTML, Markdown and text reports. It follows the
+    per-scanner figures and says they are unchanged: the fold's counts sit
+    beside them, never in their place.
+    """
+    folded = summary.get("deduplicated")
+    if not folded:
+        return None
+    rows = folded["folded_rows"]
+    noun = "row" if rows == 1 else "rows"
+    return (
+        f"Deduplicated: {folded['actionable']} actionable, {folded['active']} active "
+        f"({rows} duplicate {noun} folded into the finding that stands for it). "
+        "The per-scanner counts are unchanged."
     )
 
 
@@ -92,6 +126,15 @@ _SEVERITY_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "INFO": 4}
 _UNLISTED_SEVERITY_PLACE = len(_SEVERITY_ORDER)
 
 
+def _severity_level(severity: Any) -> str:
+    """The bucket name a finding of *severity* is counted under.
+
+    A row with no severity is ``unknown``, the name the grading and the finding
+    lists give it, not an empty name.
+    """
+    return str(severity or "UNKNOWN").lower()
+
+
 def _count_severity(counts: Dict[str, int], severity: Any) -> None:
     """Count one finding under its severity's bucket.
 
@@ -105,8 +148,14 @@ def _count_severity(counts: Dict[str, int], severity: Any) -> None:
     A row with no severity counts under ``unknown``, the name the grading and
     the finding lists give it, not under an empty name.
     """
-    level = str(severity or "UNKNOWN").lower()
+    level = _severity_level(severity)
     counts[level] = counts.get(level, 0) + 1
+
+
+def _add_level_counts(counts: Dict[str, int], graded: pl.DataFrame) -> None:
+    """Add the unsuppressed findings of *graded* to *counts* by severity bucket."""
+    for level, found in active_level_counts(graded):
+        counts[level] = counts.get(level, 0) + found
 
 
 def parse_scan_time(text: str) -> datetime | None:
@@ -173,6 +222,17 @@ class ReportContentEmitter:
         if human_presentation:
             self.flat_vulns = [vuln.model_copy() for vuln in self.flat_vulns]
         self.ash_conf = model.ash_config
+        # Opt-in fold of duplicate clusters (``global_settings.deduplication.fold``),
+        # for the human reports only: the machine-readable exports built on this
+        # emitter never fold. The clusters are computed once, over the whole list,
+        # and each view (hotspots, findings tables, cards) folds what it shows.
+        self.fold = human_presentation and fold_enabled(model)
+        self._clusters = clusters_by_project(self.flat_vulns) if self.fold else []
+        self._positions = (
+            {id(vuln): position for position, vuln in enumerate(self.flat_vulns)}
+            if self.fold
+            else {}
+        )
         # Each project's recorded gate, read once: is_finding_actionable runs
         # several times per finding (summary, hotspots, cards, detailed
         # findings), and the project list is scanned here instead of there.
@@ -204,6 +264,60 @@ class ReportContentEmitter:
             and hasattr(self.ash_conf.global_settings, "severity_threshold")
         ):
             self.global_threshold = self.ash_conf.global_settings.severity_threshold
+
+    def fold_findings(
+        self, vulns: List[FlatVulnerability]
+    ) -> tuple[List[FlatVulnerability], Dict[int, str]]:
+        """*vulns* with each foldable duplicate cluster shown once.
+
+        Returns the rows that stay, in the order given, and a note for each row
+        that stands for others, keyed by ``id(row)``. With the fold off the rows
+        come back as they are and there are no notes. Only the rows in *vulns*
+        fold, so a view that is already filtered (the actionable findings) folds
+        what it holds; the note names those rows only.
+        """
+        if not self.fold:
+            return list(vulns), {}
+        shown = [self._positions[id(vuln)] for vuln in vulns]
+        kept = fold_positions(self.flat_vulns, self._clusters, shown)
+        notes = {}
+        for position, others in kept:
+            note = provenance_note(provenance_entries(self.flat_vulns, others))
+            if note:
+                notes[id(self.flat_vulns[position])] = note
+        return [self.flat_vulns[position] for position, _ in kept], notes
+
+    def actionable_finding_count(self) -> int:
+        """How many actionable rows the findings lists draw from.
+
+        The figure of a "Showing N of M" note: one per duplicate cluster when the
+        fold is on, so it matches the rows the list can show.
+        """
+        actionable = [v for v in self.flat_vulns if self.is_finding_actionable(v)]
+        return len(self.fold_findings(actionable)[0])
+
+    def _deduplicated_counts(self) -> Dict[str, Any]:
+        """The fold's counts, for the line beside the per-scanner counts.
+
+        Active (unsuppressed) rows and actionable rows, each counting a cluster
+        once at its representative's severity, with how many rows were folded
+        away and into how many clusters. Counted over the finding rows, so they
+        sit beside the scanner figures and never replace them.
+        """
+        live = [v for v in self.flat_vulns if not v.is_suppressed]
+        active_rows, _ = self.fold_findings(live)
+        actionable_rows, _ = self.fold_findings(
+            [v for v in live if self.is_finding_actionable(v)]
+        )
+        counts = dict.fromkeys(("critical", "high", "medium", "low", "info"), 0)
+        for vuln in active_rows:
+            _count_severity(counts, vuln.severity)
+        return {
+            "counts": counts,
+            "active": len(active_rows),
+            "actionable": len(actionable_rows),
+            "folded_rows": len(live) - len(active_rows),
+        }
 
     def get_metadata(self) -> Dict[str, Any]:
         """Get report metadata as a dictionary."""
@@ -305,6 +419,40 @@ class ReportContentEmitter:
 
         return results
 
+    def get_scanners_not_run(self) -> List[Dict[str, Any]]:
+        """Why the scanners that did not run did not, in scanner-results order.
+
+        The SKIPPED and MISSING rows of :meth:`get_scanner_results` that record
+        a reason, grouped by status and reason: each entry has the ``scanners``
+        that share them, the ``status``, and the ``reason``, which is the
+        ``skipped_reason`` or ``missing_reason`` of their rows in
+        ``ash_aggregated_results.json``. The scanner table shows only the
+        status, so without this list a report says that npm-audit was skipped
+        and leaves "no lockfile beside a package.json" in the log.
+
+        Scanners are grouped because one option often leaves many out: a run
+        with ``--scanners npm-audit`` skips every other scanner for the one
+        reason, which is one line here and not fifteen. A row that records no
+        reason has no entry: the table already says all there is.
+        """
+        groups: Dict[tuple[str, str], Dict[str, Any]] = {}
+        for result in self.get_scanner_results():
+            status = result["status"]
+            if status == "SKIPPED":
+                reason = result["skipped_reason"] or result["missing_reason"]
+            elif status == "MISSING":
+                reason = result["missing_reason"] or result["skipped_reason"]
+            else:
+                continue
+            if not reason:
+                continue
+            group = groups.setdefault(
+                (status, str(reason)),
+                {"scanners": [], "status": status, "reason": str(reason)},
+            )
+            group["scanners"].append(result["scanner_name"])
+        return list(groups.values())
+
     def get_scan_summary(self) -> Dict[str, Any]:
         """Describe the outcome for people without changing the scan's exit policy.
 
@@ -390,27 +538,24 @@ class ReportContentEmitter:
             # Imported SARIF can contain findings without execution metadata.
             # Count those findings while making no completion claim.
             counts = dict.fromkeys(counts, 0)
-            for vuln in self.flat_vulns:
-                if not vuln.is_suppressed:
-                    _count_severity(counts, vuln.severity)
-            actionable = sum(
-                self.is_finding_actionable(vuln) for vuln in self.flat_vulns
-            )
-            suppressed = sum(vuln.is_suppressed for vuln in self.flat_vulns)
+            every = self._graded_frame(self.flat_vulns, actionable=True)
+            _add_level_counts(counts, every)
+            actionable = flag_total(every, "actionable")
+            suppressed = flag_total(every, "suppressed")
         else:
             # The scanner rows count SARIF results. Findings an additional
             # report lists (a plugin's own list of finding dicts) reach the
             # cards and the hotspots, and a headline that left them out read
             # "No actionable findings" above cards marked Actionable.
-            extras = self._additional_report_findings()
-            for vuln in extras:
-                if vuln.is_suppressed:
-                    suppressed += 1
-                else:
-                    _count_severity(counts, vuln.severity)
+            extras = self._graded_frame(
+                self._additional_report_findings(),
+                actionable=not is_workspace_scan(self.model),
+            )
+            _add_level_counts(counts, extras)
+            suppressed += flag_total(extras, "suppressed")
             if not is_workspace_scan(self.model):
                 # A workspace scan counted every finding above, these included.
-                actionable += sum(self.is_finding_actionable(vuln) for vuln in extras)
+                actionable += flag_total(extras, "actionable")
         completed = sum(ran(result) for result in results)
         skipped = sum(result["status"] == "SKIPPED" for result in results)
         unavailable = [
@@ -441,9 +586,7 @@ class ReportContentEmitter:
         active = sum(counts.values())
         # Policy-scanner findings the project's outcome left out are counted
         # apart: they are active, not actionable, and not below any threshold.
-        policy_not_gating = sum(
-            self.is_policy_not_gating(vuln) for vuln in self.flat_vulns
-        )
+        policy_not_gating = flag_total(self._graded_frame(self.flat_vulns), "left_out")
         # A tool ASH could not stop fails the run whatever the gate says, and it
         # may still be writing into the output directory after this report is
         # rendered, so the report is not final. The exit code reads it from the
@@ -513,7 +656,7 @@ class ReportContentEmitter:
                 description = "Completed scanners reported no findings at or above their configured thresholds."
                 next_step = "Review scanner coverage and findings below the threshold."
 
-        return {
+        summary = {
             "title": title,
             "tone": tone,
             "description": description,
@@ -538,6 +681,31 @@ class ReportContentEmitter:
             # (scanner, reason) rows, the reason naming the process id.
             "could_not_stop": could_not_stop,
         }
+        if self.fold:
+            # Beside the figures above, which stay as the scanners counted them.
+            summary["deduplicated"] = self._deduplicated_counts()
+        return summary
+
+    def _graded_frame(
+        self, vulns: List[FlatVulnerability], *, actionable: bool = False
+    ) -> pl.DataFrame:
+        """The findings as a frame of severity bucket and yes/no gradings.
+
+        Each finding's grading is one lookup against the model's recorded
+        gates (:meth:`is_finding_actionable`, :meth:`is_policy_not_gating`),
+        made here row by row; the counting over the result is the frame's.
+        ``actionable`` is asked for only by the callers that read it.
+        """
+        return graded_frame(
+            levels=[_severity_level(vuln.severity) for vuln in vulns],
+            suppressed=[bool(vuln.is_suppressed) for vuln in vulns],
+            left_out=[self.is_policy_not_gating(vuln) for vuln in vulns],
+            actionable=(
+                [self.is_finding_actionable(vuln) for vuln in vulns]
+                if actionable
+                else None
+            ),
+        )
 
     def _additional_report_findings(self) -> List[FlatVulnerability]:
         """The flattened findings that came from list-form additional reports.
@@ -566,17 +734,13 @@ class ReportContentEmitter:
             return []
 
         # Count findings by file location, but only include actionable findings
-        location_counts = Counter()
-        for vuln in self.flat_vulns:
-            # Check if the finding is actionable based on severity threshold
-            if vuln.file_path and self.is_finding_actionable(vuln):
-                location_counts[vuln.file_path] += 1
-
-        # Get top hotspots
-        top_hotspots = location_counts.most_common(limit)
-
+        actionable, _ = self.fold_findings(
+            [vuln for vuln in self.flat_vulns if self.is_finding_actionable(vuln)]
+        )
+        locations = [vuln.file_path for vuln in actionable if vuln.file_path]
         return [
-            {"location": location, "count": count} for location, count in top_hotspots
+            {"location": location, "count": count}
+            for location, count in top_locations(locations, limit)
         ]
 
     def is_finding_actionable(self, vuln: FlatVulnerability) -> bool:
@@ -708,9 +872,34 @@ class ReportContentEmitter:
             vuln.rule_id or "",
         )
 
+    @classmethod
+    def _by_severity(cls, vulns: List[FlatVulnerability]) -> List[FlatVulnerability]:
+        """*vulns* most severe first; findings equal on every key keep their order."""
+        return [
+            vulns[position]
+            for position in severity_order([cls._severity_sort_key(v) for v in vulns])
+        ]
+
     def get_findings_overview(self) -> List[Dict[str, Any]]:
         """Get overview of all findings."""
-        return [self._overview_row(vuln) for vuln in self.flat_vulns]
+        shown, notes = self.fold_findings(self.flat_vulns)
+        return [
+            self._with_note(self._overview_row(vuln), vuln, notes) for vuln in shown
+        ]
+
+    @staticmethod
+    def _with_note(
+        row: Dict[str, Any], vuln: FlatVulnerability, notes: Dict[int, str]
+    ) -> Dict[str, Any]:
+        """*row* with the fold's note under ``duplicate_note`` when *vuln* has one.
+
+        A row with no note is returned as it is, so with the fold off no row has
+        the key.
+        """
+        note = notes.get(id(vuln))
+        if note:
+            row["duplicate_note"] = note
+        return row
 
     def get_detailed_findings(self, max_findings: int = 20) -> List[Dict[str, Any]]:
         """Get detailed information for actionable findings, limited to max_findings."""
@@ -721,15 +910,19 @@ class ReportContentEmitter:
         actionable_findings = [
             vuln for vuln in self.flat_vulns if self.is_finding_actionable(vuln)
         ]
+        actionable_findings, notes = self.fold_findings(actionable_findings)
 
         # Limit the number of detailed findings
-        actionable_findings.sort(key=self._severity_sort_key)
+        actionable_findings = self._by_severity(actionable_findings)
         # A negative limit would slice from the end and drop the last findings
         # instead of none; the reporters refuse one, and a caller that passes
         # one anyway gets none.
         findings_to_show = actionable_findings[: max(max_findings, 0)]
 
-        return [self._create_detailed_finding(vuln) for vuln in findings_to_show]
+        return [
+            self._with_note(self._create_detailed_finding(vuln), vuln, notes)
+            for vuln in findings_to_show
+        ]
 
     def get_policy_not_gating_findings(
         self, max_findings: int = 20
@@ -743,8 +936,12 @@ class ReportContentEmitter:
         in its summary names none of them.
         """
         left_out = [vuln for vuln in self.flat_vulns if self.is_policy_not_gating(vuln)]
-        left_out.sort(key=self._severity_sort_key)
-        return [self._overview_row(vuln) for vuln in left_out[: max(max_findings, 0)]]
+        left_out, notes = self.fold_findings(left_out)
+        left_out = self._by_severity(left_out)
+        return [
+            self._with_note(self._overview_row(vuln), vuln, notes)
+            for vuln in left_out[: max(max_findings, 0)]
+        ]
 
     def _create_detailed_finding(self, vuln: FlatVulnerability) -> Dict[str, Any]:
         """Create a detailed finding dictionary from a vulnerability."""

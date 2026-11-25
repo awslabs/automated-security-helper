@@ -157,7 +157,7 @@ wheels = [
 
 [[package]]
 name = "datamodel-code-generator"
-version = "0.95.0"
+version = "0.96.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "argcomplete" },
@@ -170,9 +170,9 @@ dependencies = [
     { name = "pyyaml" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/0b/f6/c26bab1339e56606d1d61c25f3fa22e4241516ad02e894e32c07e0a821d3/datamodel_code_generator-0.95.0.tar.gz", hash = "sha256:81971c2cb0a219d5cbcd98b25fc9d6045cdd781bd85ae6416cacc39c2bf2373d", size = 9795993, upload-time = "2026-11-12T09:08:59.021Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/40/5c/76a04752c0690bbce18fd29150e2902b708354573230b824ed829b75f1e3/datamodel_code_generator-0.96.0.tar.gz", hash = "sha256:2f5ac503a569bdc545ea557e3e414b18516e907597fc9fd4568b6ff24f77fef3", size = 9817537, upload-time = "2026-11-13T20:52:40.589Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/51/8f/1a443487a88d72a16182a265de593557e034500ba9822d3e4aa3bd369a2c/datamodel_code_generator-0.95.0-py3-none-any.whl", hash = "sha256:7b5d5071de4f66c60ed56c2232338bb8db888dd308bb1ac9611104184ee271cd", size = 2445615, upload-time = "2026-11-12T09:08:57.002Z" },
+    { url = "https://files.pythonhosted.org/packages/ae/7c/75dbba69f175f2b5cb25850db4e829f65936269ec77b0bca23ea0296c4d2/datamodel_code_generator-0.96.0-py3-none-any.whl", hash = "sha256:e20cef521142283c4bc0fd695d44379dcd912475e654a9a2d3003064da9f14f1", size = 2450399, upload-time = "2026-11-13T20:52:37.906Z" },
 ]
 
 [[package]]
@@ -186,15 +186,15 @@ wheels = [
 
 [[package]]
 name = "email-validator"
-version = "2.3.0"
+version = "2.4.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "dnspython" },
     { name = "idna" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/f5/22/900cb125c76b7aaa450ce02fd727f452243f2e91a61af068b40adba60ea9/email_validator-2.3.0.tar.gz", hash = "sha256:9fc05c37f2f6cf439ff414f8fc46d917929974a82244c20eb10231ba60c54426", size = 51238, upload-time = "2025-08-26T13:09:06.831Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c0/4d/f5e9d9de19f4b8f9e33d802fe3efb0ef96e88d4d6d45d604f335bef2f1ef/email_validator-2.4.0.tar.gz", hash = "sha256:be487bc50bc3bd832a98515a55a15649d9bec06d954fa178663190714b6c4ee1", size = 55168, upload-time = "2026-11-14T20:21:28.125Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/de/15/545e2b6cf2e3be84bc1ed85613edd75b8aea69807a71c26f4ca6a9258e82/email_validator-2.3.0-py3-none-any.whl", hash = "sha256:80f13f623413e6b197ae73bb10bf4eb0908faf509ad8362c5edeb0be7fd450b4", size = 35604, upload-time = "2025-08-26T13:09:05.858Z" },
+    { url = "https://files.pythonhosted.org/packages/b8/8b/99e715c59560afa0bf68f21ed16eec794d94293945f57934b70c5255d741/email_validator-2.4.0-py3-none-any.whl", hash = "sha256:4454e41c4e1c6b6caee34a1dc71d5e736791562be8fd179b02e298f796522684", size = 36810, upload-time = "2026-11-14T20:21:27.14Z" },
 ]
 
 [[package]]

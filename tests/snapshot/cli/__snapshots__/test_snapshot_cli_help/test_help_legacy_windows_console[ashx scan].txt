@@ -196,6 +196,39 @@
 │                                                                  and rows for scanners that     │
 │                                                                  were skipped or had zero       │
 │                                                                  findings.                      │
+│ --annotate-duplicates                                            Add `cluster_id`,              │
+│                                                                  `duplicate_of` and             │
+│                                                                  `duplicate_sources` columns to │
+│                                                                  the CSV and flat-JSON reports, │
+│                                                                  naming findings that two       │
+│                                                                  scanners report for one defect │
+│                                                                  (same CVE and package, same    │
+│                                                                  IaC resource, or same line and │
+│                                                                  CWE). Rows, ids, counts,       │
+│                                                                  SARIF, suppressions and        │
+│                                                                  baselines are unchanged. Adds  │
+│                                                                  three columns to the CSV       │
+│                                                                  header, so it is off by        │
+│                                                                  default. Sets                  │
+│                                                                  `global_settings.deduplicatio… │
+│ --fold-duplicates                                                Show one row per duplicate     │
+│                                                                  cluster in the HTML, Markdown  │
+│                                                                  and text reports, with a note  │
+│                                                                  naming the other scanners that │
+│                                                                  reported it, and add           │
+│                                                                  deduplicated counts beside the │
+│                                                                  per-scanner counts. Only the   │
+│                                                                  same CVE and package, or the   │
+│                                                                  same line and CWE, fold.       │
+│                                                                  Finding ids, SARIF,            │
+│                                                                  per-scanner counts,            │
+│                                                                  suppressions, baselines, the   │
+│                                                                  CSV, flat-JSON and JUnit       │
+│                                                                  reports and the exit code are  │
+│                                                                  unchanged. Off by default      │
+│                                                                  because it changes row counts. │
+│                                                                  Sets                           │
+│                                                                  `global_settings.deduplicatio… │
 └─────────────────────────────────────────────────────────────────────────────────────────────────┘
 ┌─ Configuration and plugins ─────────────────────────────────────────────────────────────────────┐
 │ --ash-plugin-modules        <str>  List of Python modules to import containing ASH plugins      │
@@ -520,6 +553,14 @@
 │                                    scanner cost, so counts above about four buy little: wall    │
 │                                    clock is bounded by the slowest single scanner.              │
 │                                    [env var: ASH_SHARD_COUNT]                                   │
+│ --baseline                  PATH   Leave out findings already present in this saved             │
+│                                    ash_aggregated_results.json from a full scan (for example    │
+│                                    the default branch's), so the reports, the summary and the   │
+│                                    exit code count only new findings. Matching tolerates        │
+│                                    findings that only moved lines. The file must be outside the │
+│                                    scanned checkout and the output directory. Supported with    │
+│                                    --mode local and precommit only (exit 5 otherwise).          │
+│                                    [env var: ASH_BASELINE]                                      │
 └─────────────────────────────────────────────────────────────────────────────────────────────────┘
 ┌─ Workspace ─────────────────────────────────────────────────────────────────────────────────────┐
 │ --workspace                     <str>  Path to a '.code-workspace' file whose folders are       │

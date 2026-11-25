@@ -408,8 +408,9 @@ class TestSkeleton:
         params = typer.utils.get_params_from_function(run_ash_scan_cli_command)
         # Hidden options are not part of the structured input (json_input_parameters):
         # --config-from-scanned-repository, --config-file-from-scanned-repository,
-        # --config-file-from-another-checkout and --ash-config-from-host are what
-        # container mode passes the scan it starts, not operator settings.
+        # --config-file-from-another-checkout, --ash-config-from-host and
+        # --require-scanner-selection are what container mode passes the scan it
+        # starts, not operator settings.
         hidden = {
             name
             for name, meta in params.items()
@@ -432,6 +433,7 @@ class TestSkeleton:
             "config_file_from_scanned_repository",
             "config_file_from_another_checkout",
             "ash_config_from_host",
+            "require_scanner_selection",
         }
         assert set(skeleton) == expected
 

@@ -104,6 +104,12 @@ from automated_security_helper.config.path_trust import (
     private_cwd_outside_scanned_tree,
 )
 from automated_security_helper.config.tool_config_trust import empty_tool_config
+from automated_security_helper.base import scanner_operational_facets as opsf
+from automated_security_helper.base.scanner_facets import (
+    FacetDecl,
+    FacetState,
+    ScannerFacets,
+)
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
@@ -606,6 +612,203 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
     # templates and ASH's empty config, both mounted. Its resource specs ship in the
     # package. An operator's config_file outside the tree needs extra_read_paths.
     sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements()
+
+    #: The facets register row (base/scanner_facets.py), declaration only. The
+    #: native fields are those of the SARIF format ASH consumes (committed
+    #: fixture tests/test_data/scanners/cfn_lint_guard/captured/
+    #: cfn-lint-1.57.1-insecure.sarif: result keys exactly ruleId, message,
+    #: locations; driver rules carry id, shortDescription, fullDescription,
+    #: helpUri). The JSON format names the resource (M0 item c, fixture
+    #: cfn-lint-1.61.0-m0-bad-property.json) but ASH never requests it, so
+    #: resource_id is MAPPABLE-BUT-DROPPED: the same state cfn-nag and trivy
+    #: carry for the same fact pattern.
+    facets: ClassVar[ScannerFacets] = ScannerFacets(
+        rule_id=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="result ruleId (e.g. W2001)",
+        ),
+        severity=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="result ruleId letter (E/W/I), mapped by "
+            "SEVERITY_BY_RULE_LETTER; the SARIF result carries no level",
+        ),
+        file_path=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="result locations[].physicalLocation.artifactLocation.uri",
+        ),
+        line_range=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="result locations[].physicalLocation.region startLine/endLine",
+        ),
+        column=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="result locations[].physicalLocation.region "
+            "startColumn/endColumn",
+        ),
+        message=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="result message.text",
+        ),
+        resource_id=FacetDecl(
+            state=FacetState.DROPPED,
+            native_field='finding "Location.Path" (the --format json output '
+            'format; Path[1] is the logical id, e.g. ["Resources", '
+            '"M0FixtureBucket", ...])',
+            reason="the SARIF format ASH requests carries the location only "
+            "(artifactLocation.uri, region) and names the resource in "
+            "message prose, so no id is written; the --format json output "
+            "names it (M0 item c, fixture cfn-lint-1.61.0-m0-bad-property"
+            ".json), the same dropped shape as cfn-nag and trivy",
+        ),
+        resource_type=FacetDecl(
+            state=FacetState.NA,
+            reason="no resource is named in the SARIF format ASH consumes, "
+            "so no type is carried either",
+        ),
+        package_name=FacetDecl(
+            state=FacetState.NA,
+            reason="findings are CloudFormation template checks; no package "
+            "exists in cfn-lint output",
+        ),
+        package_version=FacetDecl(
+            state=FacetState.NA,
+            reason="findings are CloudFormation template checks; no package "
+            "exists in cfn-lint output",
+        ),
+        package_path=FacetDecl(
+            state=FacetState.NA,
+            reason="findings are CloudFormation template checks; no package "
+            "exists in cfn-lint output",
+        ),
+        taxonomy_cve=FacetDecl(
+            state=FacetState.NA,
+            reason="cfn-lint publishes its own rule ids; no CVE taxonomy in "
+            "the results",
+        ),
+        taxonomy_cwe=FacetDecl(
+            state=FacetState.NA,
+            reason="cfn-lint publishes its own rule ids; no CWE taxonomy in "
+            "the results",
+        ),
+        fingerprints=FacetDecl(
+            state=FacetState.NA,
+            reason="the SARIF results carry no fingerprints (result keys "
+            "are exactly ruleId, message, locations)",
+        ),
+        fix_available=FacetDecl(
+            state=FacetState.NA,
+            reason="cfn-lint results carry no fix state or fixed version",
+        ),
+        remediation_text=FacetDecl(
+            state=FacetState.NA,
+            reason="rule descriptions state what a rule checks, not a "
+            "remediation; no remediation field exists",
+        ),
+        snippet=FacetDecl(
+            state=FacetState.NA,
+            reason="the SARIF regions carry line and column only, no snippet",
+        ),
+        references=FacetDecl(
+            state=FacetState.DROPPED,
+            native_field="driver rules[].helpUri",
+            reason="rule-level only: the flat reader takes references from "
+            "result relatedLocations, so the help link is discarded today",
+        ),
+        tags=FacetDecl(
+            state=FacetState.NA,
+            reason="the adapter adds no tags and the SARIF rules carry none",
+        ),
+        extras=FacetDecl(
+            state=FacetState.NA,
+            reason="the native results carry no property bag; the only "
+            "property written is the ASH-computed issue_severity",
+        ),
+    )
+
+    #: The operational register row (base/scanner_operational_facets.py),
+    #: checked against the production declarations it mirrors by
+    #: tests/unit/plugin_modules/test_scanner_operational_facets_consistency.py.
+    operational_facets: ClassVar[opsf.ScannerOperationalFacets] = (
+        opsf.ScannerOperationalFacets(
+            scanner_name="cfn-lint",
+            network=opsf.NetworkFacet(
+                fetch_kind=opsf.FetchKind.NONE,
+                fetches=(),
+                prefetch=(),
+                offline_outcome=opsf.OfflineOutcome.UNCHANGED,
+                offline_strategy=OfflineStrategy.BUNDLED,
+                sandbox_network=opsf.SandboxNetwork.NONE,
+                source="cfn_lint_scanner.py offline_strategy, sandbox_requirements",
+            ),
+            output=opsf.OutputFacet(
+                native_formats=(opsf.OutputFormat.SARIF,),
+                side_reports=(),
+                non_finding_artifacts=(),
+            ),
+            targets=opsf.TargetsFacet(
+                kinds=(opsf.TargetKind.IAC_CLOUDFORMATION,),
+                tool_type=ScannerToolType.IAC,
+                selection="shared template discovery (utils/cfn_template_discovery.py)",
+            ),
+            runtime=opsf.RuntimeFacet(
+                kind=opsf.RuntimeKind.UV_PYTHON,
+                external_programs=(),
+                invocations=opsf.Invocations.PER_TARGET,
+                invocation_note="a per-template loop, as cfn-nag and cfn-guard run",
+                python_only=True,
+                use_uv_tool=True,
+            ),
+            platforms=opsf.PlatformsFacet(
+                provisionable=(),
+                note="a PyPI package run through uv; platform support is the package's and was not read here",
+            ),
+            severity=opsf.SeverityFacet(
+                severity_class=opsf.SeverityClass.DERIVED,
+                note="computed from the rule-letter table",
+            ),
+            silencing=opsf.SilencingFacet(
+                tool_side=(
+                    opsf.SilencingLayer(
+                        layer=opsf.SilencingLayerKind.INLINE_COMMENT,
+                        writer=opsf.SilencingWriter.REPOSITORY,
+                        honored=opsf.Honored.UNCONFIRMED,
+                        surface="template Metadata ignore settings",
+                        cite="tool feature; cfn_lint_scanner.py was not read for an ASH-side switch",
+                        reason=(
+                            "whether ASH leaves the template's Metadata suppressions on was "
+                            "not read at the adapter; one adapter read settles it"
+                        ),
+                    ),
+                ),
+            ),
+            identity=opsf.IdentityFacet(
+                fingerprint_class=opsf.FingerprintClass.POSITIONAL_ONLY,
+                note="identity is file and line through the shared floor",
+            ),
+            extensibility=opsf.ExtensibilityFacet(
+                custom_rules=opsf.CustomRules.NONE,
+                env_prefixes=(),
+                options_surface="no rules surface was found at the adapter survey",
+            ),
+            exit_codes=opsf.ExitCodesFacet(
+                success_exit_codes=(0, 1),
+                semantics="the base default {0, 1}; a run-failure probe separates a failed run from findings",
+            ),
+            provenance=opsf.ProvenanceFacet(
+                tier=opsf.Tier.BUILTIN_DEFAULT,
+                source=opsf.ProvenanceSource.PYPI_VIA_UV,
+                selection_surfaces=(),
+                upstream_license=(
+                    "MIT-0 (source: utils/tool_downloads.py "
+                    "THIRD_PARTY_LICENSES['cfn-lint'], pinned commit 720c5cc)"
+                ),
+            ),
+            prerequisites=opsf.PrerequisitesFacet(
+                kinds=(opsf.Prerequisite.TEMPLATE,),
+                note="a .json/.yaml/.yml file the template model reads as CloudFormation",
+            ),
+        )
+    )
 
     # Options already refused with a warning; each is read on every invocation and
     # warned about once per scanner.

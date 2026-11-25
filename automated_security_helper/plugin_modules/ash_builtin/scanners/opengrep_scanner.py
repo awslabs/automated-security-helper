@@ -12,6 +12,7 @@ lives in :mod:`_grep_scanner_base`. This module only customises:
 from __future__ import annotations
 
 import logging
+import os
 import platform
 import sys
 from pathlib import Path
@@ -22,8 +23,14 @@ from pydantic import Field, PrivateAttr, model_validator
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.base.options import ScannerOptionsBase, release_tag
 from automated_security_helper.base.plugin_base import CustomCommand
+from automated_security_helper.base import scanner_operational_facets as opsf
+from automated_security_helper.base.scanner_facets import (
+    FacetDecl,
+    FacetState,
+    ScannerFacets,
+)
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
-from automated_security_helper.core.enums import ScannerToolType
+from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import ToolArgs
 from automated_security_helper.plugin_modules.ash_builtin.scanners._grep_scanner_base import (
@@ -181,6 +188,32 @@ def _refuse_unverified_install_command(
     )
 
 
+def windows_zip_refusal(version: str, asset: str) -> str:
+    """The message a custom opengrep 2.x version on Windows is refused with."""
+    pinned = TOOL_VERSIONS["opengrep"]
+    return (
+        f"Refusing to install opengrep {version} on windows/amd64: from 2.0.0 the "
+        f"Windows release asset is a zip ({asset}) holding opengrep.exe and the DLLs "
+        f"it loads, and a configured version is downloaded as a single file. Drop "
+        f"scanners.opengrep.options.version to use the pinned {pinned}, whose zip ASH "
+        f"extracts and verifies member by member, or install opengrep {version} "
+        f"yourself and put it on PATH."
+    )
+
+
+def _refuse_windows_zip_install_command(version: str, url: str) -> CustomCommand:
+    """An install command that prints ``windows_zip_refusal`` and exits 1."""
+    return CustomCommand(
+        args=[
+            sys.executable,
+            "-c",
+            "import sys; sys.exit(sys.argv[1])",
+            windows_zip_refusal(version, url.rsplit("/", 1)[-1]),
+        ],
+        shell=False,
+    )
+
+
 def _release_number(version: str) -> str:
     """``version`` without the one leading ``v`` a release tag may carry."""
     return version.removeprefix("v")
@@ -255,8 +288,222 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
         # {CACHE_DIR}/opengrep/<version>, which is $XDG_CACHE_HOME when set, and
         # runs opengrep.bin from there.
         unpack_dir_env="XDG_CACHE_HOME",
+        # From 2.0.0 ("Remove python") opengrep downloads rulesets itself, through
+        # OCaml's ca-certs like semgrep-core, which on macOS runs /usr/bin/security
+        # against the system keychains. Without the exported roots a sandboxed run
+        # ends "Error: fatal error" on the p/ci download.
+        system_trust_roots=True,
         # The offline rule cache ASH checked before the scan and passes as --config.
         read_path_env=("OPENGREP_RULES_CACHE_DIR",),
+    )
+
+    #: The facets register row (base/scanner_facets.py). Declaration only, zero
+    #: behavior change: opengrep's own SARIF is validated and passed through
+    #: without result edits, so every native field below is a field of that
+    #: SARIF. Pure code SAST: the only resource-shaped values in its output are
+    #: file paths, which are locators, never resource ids. Fingerprints are
+    #: settled by the M0 capture (tests/test_data/scanners/opengrep/captured/
+    #: opengrep-2.0.0-m0.sarif): the fork emits a real matchBasedId/v1, not the
+    #: semgrep OSS login placeholder.
+    facets: ClassVar[ScannerFacets] = ScannerFacets(
+        rule_id=FacetDecl(state=FacetState.MAPPED, native_field="results[].ruleId"),
+        severity=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="results[].level",
+        ),
+        file_path=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="results[].locations[].physicalLocation.artifactLocation.uri",
+        ),
+        line_range=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="results[].locations[].physicalLocation.region."
+            "startLine/endLine",
+        ),
+        column=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="results[].locations[].physicalLocation.region."
+            "startColumn/endColumn",
+        ),
+        message=FacetDecl(
+            state=FacetState.MAPPED, native_field="results[].message.text"
+        ),
+        resource_id=FacetDecl(
+            state=FacetState.NA,
+            reason="pure code SAST; the only locators in its output are file "
+            "paths, which are never resource ids",
+        ),
+        resource_type=FacetDecl(
+            state=FacetState.NA,
+            reason="pure code SAST; no deployable resource exists in the output",
+        ),
+        package_name=FacetDecl(
+            state=FacetState.NA,
+            reason="code findings name a file and a rule, not a package",
+        ),
+        package_version=FacetDecl(
+            state=FacetState.NA,
+            reason="code findings name a file and a rule, not a package",
+        ),
+        package_path=FacetDecl(
+            state=FacetState.NA,
+            reason="code findings name a file and a rule, not a package",
+        ),
+        taxonomy_cve=FacetDecl(
+            state=FacetState.NA,
+            reason="code rules carry no CVE ids",
+        ),
+        taxonomy_cwe=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="tool.driver.rules[].properties.tags (CWE entries)",
+        ),
+        fingerprints=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='results[].fingerprints."matchBasedId/v1"',
+        ),
+        fix_available=FacetDecl(
+            state=FacetState.DROPPED,
+            native_field="results[].fixes",
+            reason="SARIF fixes survive the report model and die at the flat "
+            "reader, which reads only fix_available",
+        ),
+        remediation_text=FacetDecl(
+            state=FacetState.NA,
+            reason="rule help describes the rule, not a remediation; fixes are "
+            "recorded under fix_available",
+        ),
+        snippet=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="results[].locations[].physicalLocation.region.snippet.text",
+        ),
+        references=FacetDecl(
+            state=FacetState.DROPPED,
+            native_field="tool.driver.rules[].help.markdown",
+            reason="rule-level only: the flat reader takes references from "
+            "result relatedLocations, so the rule help is discarded today",
+        ),
+        tags=FacetDecl(
+            state=FacetState.DROPPED,
+            native_field="tool.driver.rules[].properties.tags",
+            reason="rule-level only: the flat reader takes tags from result "
+            "properties, so the rule tags are discarded today (they still "
+            "feed the CWE read)",
+        ),
+        extras=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="results[].properties (SARIF property bag, passed "
+            "through unmodified)",
+        ),
+    )
+
+    #: The operational register row (base/scanner_operational_facets.py),
+    #: checked against the production declarations it mirrors by
+    #: tests/unit/plugin_modules/test_scanner_operational_facets_consistency.py.
+    operational_facets: ClassVar[opsf.ScannerOperationalFacets] = (
+        opsf.ScannerOperationalFacets(
+            scanner_name="opengrep",
+            network=opsf.NetworkFacet(
+                fetch_kind=opsf.FetchKind.CONTENT_FETCH,
+                fetches=(opsf.Fetched.RULESET_REGISTRY,),
+                prefetch=(opsf.Prefetch.IMAGE_BUILD,),
+                offline_outcome=opsf.OfflineOutcome.DEGRADED,
+                offline_reason=(
+                    "runs against the operator's local rules or the validated offline "
+                    "ruleset cache as --config; a registry fetch that fails online exits "
+                    "2 and ASH reruns once on the local configs only"
+                ),
+                offline_strategy=OfflineStrategy.CACHE_FLAGS,
+                sandbox_network=opsf.SandboxNetwork.ONLINE,
+                content_database="opengrep-offline-rules",
+                source=(
+                    "opengrep_scanner.py sandbox_requirements and default rulesets; "
+                    "_grep_scanner_base.py offline_strategy; utils/content_databases.py"
+                ),
+            ),
+            output=opsf.OutputFacet(
+                native_formats=(opsf.OutputFormat.SARIF,),
+                side_reports=(),
+                non_finding_artifacts=(),
+            ),
+            targets=opsf.TargetsFacet(
+                kinds=(opsf.TargetKind.SOURCE_CODE,),
+                tool_type=ScannerToolType.SAST,
+                selection=(
+                    "whole scan set, languages defined by the ruleset; .semgrepignore "
+                    "normalized to ASH's ignore model (_grep_scanner_base.py)"
+                ),
+            ),
+            runtime=opsf.RuntimeFacet(
+                kind=opsf.RuntimeKind.PINNED_BINARY,
+                external_programs=(),
+                invocations=opsf.Invocations.ONE,
+                tool_versions_key="opengrep",
+                python_only=False,
+                use_uv_tool=False,
+            ),
+            platforms=opsf.PlatformsFacet(
+                provisionable=opsf.PLATFORMS_NO_WINDOWS_ARM64,
+                note=(
+                    "one static Linux build per architecture since v2.0.0; no "
+                    "windows/arm64 asset (tool_downloads.py _OPENGREP_ASSETS)"
+                ),
+            ),
+            severity=opsf.SeverityFacet(
+                severity_class=opsf.SeverityClass.NATIVE,
+                note="the SARIF level only: three grades",
+            ),
+            silencing=opsf.SilencingFacet(
+                tool_side=(
+                    opsf.SilencingLayer(
+                        layer=opsf.SilencingLayerKind.IGNORE_FILE,
+                        writer=opsf.SilencingWriter.REPOSITORY,
+                        honored=opsf.Honored.NO,
+                        surface=".semgrepignore in the scanned tree",
+                        cite="_grep_scanner_base.py:359-375; ASH warns and names global_settings.ignore_paths",
+                    ),
+                ),
+            ),
+            identity=opsf.IdentityFacet(
+                fingerprint_class=opsf.FingerprintClass.STABLE_NATIVE,
+                note=(
+                    "matchBasedId/v1, read in tests/test_data/scanners/opengrep/"
+                    "captured/opengrep-2.0.0-m0.sarif (results[].fingerprints)"
+                ),
+            ),
+            extensibility=opsf.ExtensibilityFacet(
+                custom_rules=opsf.CustomRules.BOTH,
+                env_prefixes=("OPENGREP_", "SEMGREP_"),
+                options_surface=(
+                    "options.config: a registry entry, a URL, or a local rule file or "
+                    "directory through the path-trust resolver; a refused or missing "
+                    "value declines the scanner"
+                ),
+            ),
+            exit_codes=opsf.ExitCodesFacet(
+                success_exit_codes=(0, 1),
+                semantics="the base default {0, 1}; an exit 2 on a failed registry fetch is rerun once locally",
+            ),
+            provenance=opsf.ProvenanceFacet(
+                tier=opsf.Tier.BUILTIN_DEFAULT,
+                source=opsf.ProvenanceSource.PINNED_RELEASE_BINARY,
+                selection_surfaces=("options.config",),
+                upstream_license=(
+                    "LGPL-2.1-only (source: utils/tool_downloads.py "
+                    "THIRD_PARTY_LICENSES['opengrep'], pinned commit 526deaf)"
+                ),
+            ),
+            prerequisites=opsf.PrerequisitesFacet(
+                kinds=(opsf.Prerequisite.GIT_CHECKOUT,),
+                note=(
+                    "opengrep runs git ls-files itself and exits 2 when git refuses the "
+                    "directory; ASH supplies safe.directory"
+                ),
+                unconfirmed=(
+                    "behavior on a tree that is not a git checkout was not read; the "
+                    "declared prerequisite is the conservative reading"
+                ),
+            ),
+        )
     )
 
     def model_post_init(self, context):
@@ -286,6 +533,9 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
     _metrics_decision_pending: bool = PrivateAttr(default=False)
     # The answer, once asked, so the arguments rebuilt with it do not ask again.
     _metrics_flag: bool | None = PrivateAttr(default=None)
+    # The directory this scan was pointed at, set by _resolve_scan_arguments for
+    # extra_subprocess_env.
+    _scan_target_path: Path | None = PrivateAttr(default=None)
 
     @model_validator(mode="after")
     def setup_custom_install_commands(self) -> "OpengrepScanner":
@@ -317,7 +567,8 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
             return self
 
         digests = self.config.options.sha256
-        # TODO: detect manylinux vs musllinux
+        # TODO: detect manylinux vs musllinux. Only matters for a 1.x version: from
+        # 2.0.0 the Linux build is one static executable (get_opengrep_url).
         for target_platform, arch in (
             ("linux", "amd64"),
             ("linux", "arm64"),
@@ -329,7 +580,14 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
                 target_platform, arch, version=version, linux_type="manylinux"
             )
             digest = digests.get(f"{target_platform}/{arch}")
-            if digest is None:
+            if url.endswith(".zip"):
+                # From 2.0.0 the Windows asset is a zip of opengrep.exe and its DLLs.
+                # The URL download installs the file it fetches as the executable, so
+                # a zip would land at opengrep.exe unextracted. Only the pinned
+                # version has the archive handling (tool_downloads.py), so this
+                # refuses whether or not a digest was configured.
+                command = _refuse_windows_zip_install_command(version, url)
+            elif digest is None:
                 command = _refuse_unverified_install_command(
                     version, target_platform, arch, url.rsplit("/", 1)[-1]
                 )
@@ -398,7 +656,30 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
                 self._process_config_options()
                 if self.dependency_unavailable_reason:
                     raise ScannerError(self.dependency_unavailable_reason)
+        self._scan_target_path = target
         return super()._resolve_scan_arguments(target, results_file)
+
+    def extra_subprocess_env(self) -> dict | None:
+        """Git's ``safe.directory`` for the one directory this scan reads.
+
+        opengrep 2.0.0 lists files with ``git ls-files`` itself and exits 2 when git
+        refuses the directory ("Could not get files from git ls-files"), which it
+        does for a mount another user owns (the container scans). 1.33.1 tolerated
+        that. The entry reaches only this child, through ``GIT_CONFIG_*``, and names
+        the real path of the scanned directory, never ``*``; ASH's own git calls
+        and every other process keep the ownership check.
+        """
+        target = self._scan_target_path
+        if target is None:
+            return None
+        # Entries the caller already set keep their places; this one goes after them.
+        existing = snapshot_environ().get("GIT_CONFIG_COUNT", "0")
+        index = int(existing) if existing.isdigit() else 0
+        return {
+            "GIT_CONFIG_COUNT": str(index + 1),
+            f"GIT_CONFIG_KEY_{index}": "safe.directory",
+            f"GIT_CONFIG_VALUE_{index}": os.path.realpath(target),
+        }
 
     # ---------------------------------------------------------------
     # Dependency resolution

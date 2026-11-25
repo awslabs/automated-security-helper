@@ -88,6 +88,8 @@
             "/sandbox/**",
             "/ash_plugin_modules",
             "/ash_plugin_modules/**",
+            "/default_scanners",
+            "/default_scanners/**",
             "/scanners/detect-secrets/options/scan_settings/filters_used",
             "/scanners/detect-secrets/options/scan_settings/filters_used/**",
             "/scanners/detect-secrets/options/scan_settings/plugins_used",
@@ -193,6 +195,14 @@
           "denied_value_patterns": {},
           "replace_default_denied_paths": false
         }
+      },
+      "deduplication": {
+        "annotate": false,
+        "fold": false
+      },
+      "history": {
+        "enabled": false,
+        "keep_runs": 50
       }
     },
     "fail_on_findings": true,
@@ -419,7 +429,7 @@
           "severity": [],
           "metrics": "auto",
           "patterns": [],
-          "version": "v1.33.1",
+          "version": "v2.0.0",
           "sha256": {}
         }
       },
@@ -633,6 +643,10 @@
     "precommit": {
       "only_scanners": [],
       "add_scanners": []
+    },
+    "default_scanners": {
+      "only": [],
+      "add": []
     }
   },
   "scanner_results": {

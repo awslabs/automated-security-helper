@@ -199,6 +199,12 @@ from pydantic import Field, PrivateAttr, model_validator
 
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.plugin_base import worse_exit_code
+from automated_security_helper.base import scanner_operational_facets as opsf
+from automated_security_helper.base.scanner_facets import (
+    FacetDecl,
+    FacetState,
+    ScannerFacets,
+)
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
@@ -1257,6 +1263,190 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
     # workflows and ASH's config file, and needs no network, cache or variables. An
     # enabled shellcheck or pyflakes is found through PATH, which the baseline mounts.
     sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements()
+    #: The facets register row (base/scanner_facets.py). Declaration only, zero
+    #: behavior change. actionlint writes its own JSON (a Go template) and ASH
+    #: converts it to SARIF, so the native fields are the keys of each
+    #: ``errors[]`` record (fixture tests/test_data/scanners/actionlint/
+    #: actionlint-1.7.12-default.json: column, end_column, filepath, kind, line,
+    #: message, snippet). Resource identity is a LOCATOR-ONLY N/A: the output
+    #: names no job or step at all, only a file, a line and a column, and a
+    #: position in a workflow file is a locator, never a resource id.
+    facets: ClassVar[ScannerFacets] = ScannerFacets(
+        rule_id=FacetDecl(state=FacetState.MAPPED, native_field="errors[].kind"),
+        severity=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="errors[].kind (ASH severity table; a message matching "
+            "the untrusted-input pattern raises it to HIGH)",
+        ),
+        file_path=FacetDecl(state=FacetState.MAPPED, native_field="errors[].filepath"),
+        line_range=FacetDecl(state=FacetState.MAPPED, native_field="errors[].line"),
+        column=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="errors[].column / errors[].end_column",
+        ),
+        message=FacetDecl(state=FacetState.MAPPED, native_field="errors[].message"),
+        resource_id=FacetDecl(
+            state=FacetState.NA,
+            reason="locator-only: the output carries file, line and column but "
+            "no job or step identifier; a workflow position is a locator, "
+            "never a resource id",
+        ),
+        resource_type=FacetDecl(
+            state=FacetState.NA,
+            reason="locator-only: no resource exists in the output, so no "
+            "resource type either",
+        ),
+        package_name=FacetDecl(
+            state=FacetState.NA,
+            reason="workflow lint findings name a file position, not a package",
+        ),
+        package_version=FacetDecl(
+            state=FacetState.NA,
+            reason="workflow lint findings name a file position, not a package",
+        ),
+        package_path=FacetDecl(
+            state=FacetState.NA,
+            reason="workflow lint findings name a file position, not a package",
+        ),
+        taxonomy_cve=FacetDecl(
+            state=FacetState.NA,
+            reason="actionlint check kinds carry no CVE ids",
+        ),
+        taxonomy_cwe=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='errors[].kind == "credentials" (ASH writes the '
+            "CWE-798 tag; no native CWE field)",
+        ),
+        fingerprints=FacetDecl(
+            state=FacetState.NA,
+            reason="actionlint's JSON carries no fingerprint; finding "
+            "identity keys on scanner/rule/file",
+        ),
+        fix_available=FacetDecl(
+            state=FacetState.NA,
+            reason="actionlint findings carry no fix data",
+        ),
+        remediation_text=FacetDecl(
+            state=FacetState.NA,
+            reason="actionlint publishes the check message and no separate "
+            "remediation field",
+        ),
+        snippet=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="errors[].snippet (dropped on a line with a "
+            "credentials finding, where it would hold the password)",
+        ),
+        references=FacetDecl(
+            state=FacetState.DROPPED,
+            native_field="errors[].kind (ASH builds the pinned checks.md "
+            "helpUri; no native URL field)",
+            reason="the helpUri is written at rule level only: the flat "
+            "reader takes references from result relatedLocations, so the "
+            "help link is discarded today",
+        ),
+        tags=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='errors[].kind == "credentials" (ASH writes the '
+            "secret/CWE-798 tags; no native tags field)",
+        ),
+        extras=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="ASH-written result properties (issue_severity and "
+            "actionlint_kind, from errors[].kind); no native property bag",
+        ),
+    )
+
+    #: The operational register row (base/scanner_operational_facets.py),
+    #: checked against the production declarations it mirrors by
+    #: tests/unit/plugin_modules/test_scanner_operational_facets_consistency.py.
+    operational_facets: ClassVar[opsf.ScannerOperationalFacets] = (
+        opsf.ScannerOperationalFacets(
+            scanner_name="actionlint",
+            network=opsf.NetworkFacet(
+                fetch_kind=opsf.FetchKind.NONE,
+                fetches=(),
+                prefetch=(),
+                offline_outcome=opsf.OfflineOutcome.UNCHANGED,
+                offline_strategy=OfflineStrategy.BUNDLED,
+                sandbox_network=opsf.SandboxNetwork.NONE,
+                source="actionlint_scanner.py offline_strategy, sandbox_requirements",
+            ),
+            output=opsf.OutputFacet(
+                native_formats=(opsf.OutputFormat.TOOL_JSON,),
+                side_reports=(),
+                non_finding_artifacts=(),
+                note="the tool's JSON through a Go template; SARIF is built by ASH",
+            ),
+            targets=opsf.TargetsFacet(
+                kinds=(opsf.TargetKind.GITHUB_ACTIONS_WORKFLOWS,),
+                tool_type=ScannerToolType.IAC,
+                selection=(
+                    ".github/workflows files chosen by ASH from the scan set; the "
+                    "tool's own nearest-directory discovery is deliberately replaced"
+                ),
+                tool_type_note=(
+                    "actionlint (IAC) and zizmor (SAST) scan the same workflow files; the "
+                    "split is defensible (linting versus security analysis) and changing "
+                    "either moves reporter-side type exclusions, so it is recorded here "
+                    "and changed in neither (design E3)"
+                ),
+            ),
+            runtime=opsf.RuntimeFacet(
+                kind=opsf.RuntimeKind.PINNED_BINARY,
+                external_programs=(),
+                invocations=opsf.Invocations.ONE,
+                tool_versions_key="actionlint",
+                python_only=False,
+                use_uv_tool=False,
+            ),
+            platforms=opsf.PlatformsFacet(
+                provisionable=opsf.PLATFORMS_ALL,
+                note="asset table lists all six platform/arch pairs",
+            ),
+            severity=opsf.SeverityFacet(
+                severity_class=opsf.SeverityClass.DERIVED,
+                note="ASH's own table plus an untrusted-input regex raise",
+            ),
+            silencing=opsf.SilencingFacet(
+                tool_side=(
+                    opsf.SilencingLayer(
+                        layer=opsf.SilencingLayerKind.IGNORE_FILE,
+                        writer=opsf.SilencingWriter.REPOSITORY,
+                        honored=opsf.Honored.NO,
+                        surface=".github/actionlint.yaml or .yml in the scanned tree",
+                        cite="actionlint_scanner.py module header: ignored with a note; the operator's config is staged outside the tree",
+                    ),
+                ),
+            ),
+            identity=opsf.IdentityFacet(
+                fingerprint_class=opsf.FingerprintClass.POSITIONAL_ONLY,
+                note="identity is file and line through the shared floor",
+            ),
+            extensibility=opsf.ExtensibilityFacet(
+                custom_rules=opsf.CustomRules.OPERATOR_PATHS,
+                env_prefixes=(),
+                options_surface="an operator config staged outside the tree",
+            ),
+            exit_codes=opsf.ExitCodesFacet(
+                success_exit_codes=(0, 1),
+                semantics="the base default {0, 1}; an exit code that disagrees with the findings is raised, not read as clean",
+            ),
+            provenance=opsf.ProvenanceFacet(
+                tier=opsf.Tier.BUILTIN_DEFAULT,
+                source=opsf.ProvenanceSource.PINNED_RELEASE_BINARY,
+                selection_surfaces=(),
+                upstream_license=(
+                    "MIT (source: utils/tool_downloads.py "
+                    "THIRD_PARTY_LICENSES['actionlint'], pinned commit 914e7df)"
+                ),
+            ),
+            prerequisites=opsf.PrerequisitesFacet(
+                kinds=(opsf.Prerequisite.NONE,),
+                note="workflow files in the scan set",
+            ),
+        )
+    )
+
     # Integrations already reported as refused, so each is logged once per scan.
     _refused_integrations: Set[str] = PrivateAttr(default_factory=set)
     # actionlint's absolute path, from validate_plugin_dependencies; see

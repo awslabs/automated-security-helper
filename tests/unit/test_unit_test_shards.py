@@ -44,9 +44,9 @@ for the unit tier to stay whole:
   rules still decide what is collected;
 * the ``run-unit-tests`` action, which runs the whole tier for an empty shard and one
   shard otherwise, and names its artifact after the tier and the shard;
-* the ``unit-coverage`` job, which downloads the unit tier's artifacts of one OS family
-  and applies the 80% gate to their data, failing when a shard is missing or
-  unreadable. (An unsharded unit run uploads one artifact, ``shard1of1``, which the
+* the ``unit-coverage`` job, which downloads the unit tier's artifacts of every OS and
+  Python version, combines their data and applies the 80% gate to the one figure,
+  failing when a shard or a whole set is missing or unreadable. (An unsharded unit run uploads one artifact, ``shard1of1``, which the
   gate admits as a complete set of one; the Windows unit set is eight artifacts,
   ``shard1of8`` to ``shard8of8``, and a sharded set is admitted only whole.)
 
@@ -109,8 +109,8 @@ PYTEST_INI = REPO_ROOT / "pytest.ini"
 ROOT_CONFTEST = REPO_ROOT / "tests" / "conftest.py"
 SCRIPTS = REPO_ROOT / ".github" / "scripts"
 
-#: The OS families the unit-coverage job gates, each with the runner.arch GitHub reports for
-#: it, and the Python version it gates. The action names its artifacts
+#: Runner images of the unit tier, each with the runner.arch GitHub reports for it, and
+#: one Python version the combine reads among its five. The action names its artifacts
 #: ``test-results-<os>-<arch label>-py<version>-<tier>-shard<i>of<n>``.
 COVERAGE_RUNNERS = [
     ("ubuntu-latest", "X64"),
@@ -2483,9 +2483,16 @@ class TestTheCoverageJobReadsWhatTheUnitRunsUpload:
         for runner_arch, label in COMBINE.ARCH_LABELS.items():
             assert f"{runner_arch}) label={label} ;;" in script, (runner_arch, label)
 
-    @pytest.mark.parametrize(("os_name", "arch"), COVERAGE_RUNNERS)
+    @pytest.mark.parametrize(
+        ("os_name", "arch", "python"),
+        [
+            (os_name, arch, python)
+            for os_name, arch in [*COVERAGE_RUNNERS, ("macos-15", "ARM64")]
+            for python in ("3.11", "3.12", "3.13", "3.14")
+        ],
+    )
     def test_the_download_pattern_matches_what_the_unit_jobs_upload(
-        self, os_name, arch
+        self, os_name, arch, python
     ):
         job = _workflow_job("unit-coverage")
         download = [
@@ -2494,36 +2501,31 @@ class TestTheCoverageJobReadsWhatTheUnitRunsUpload:
             if str(s.get("uses", "")).startswith("actions/download-artifact@")
         ]
         assert len(download) == 1, job["steps"]
-        pattern = str(download[0]["with"]["pattern"]).replace(
-            "${{ matrix.os }}", os_name
-        )
+        pattern = str(download[0]["with"]["pattern"])
         label = COMBINE.ARCH_LABELS[arch]
-        uploaded = _rendered_artifact_name(os_name, label, COVERAGE_PYTHON, "unit", "")
+        uploaded = _rendered_artifact_name(os_name, label, python, "unit", "")
         assert fnmatch.fnmatchcase(uploaded, pattern), (uploaded, pattern)
         # The same leg's integration shards must not be pulled into the unit gate.
         integration = _rendered_artifact_name(
-            os_name, label, COVERAGE_PYTHON, "integration", "1of4"
+            os_name, label, python, "integration", "1of4"
         )
         assert not fnmatch.fnmatchcase(integration, pattern), (integration, pattern)
 
-    def test_it_gates_one_leg_per_os_family_the_matrix_runs(self):
-        gated = _workflow_job("unit-coverage")["strategy"]["matrix"]["os"]
-        assert sorted(gated) == sorted(os_name for os_name, _ in COVERAGE_RUNNERS)
-        matrices = {
-            job_id: _workflow_job(job_id)["strategy"]["matrix"]
-            for job_id in UNIT_TEST_JOB_IDS
-        }
-        tested_os = {os_name for m in matrices.values() for os_name in m["os"]}
-        assert set(gated) <= tested_os
-        for job_id, tested in matrices.items():
-            assert COVERAGE_PYTHON in tested["python-version"], job_id
-
-    def test_each_leg_runs_where_its_runs_ran(self):
-        """Same runner image, same workspace path: the reason no remapping is needed."""
+    def test_it_is_one_job_over_every_leg_the_matrices_run(self):
+        """One combine, one gate: no matrix, and the sets it requires are the tier's."""
         job = _workflow_job("unit-coverage")
-        assert job["runs-on"] == "${{ matrix.os }}"
+        assert "strategy" not in job
+        for job_id in UNIT_TEST_JOB_IDS:
+            tested = _workflow_job(job_id)["strategy"]["matrix"]
+            for python in ("3.11", "3.12", "3.13", "3.14"):
+                assert python in tested["python-version"], (job_id, python)
 
-    def test_it_downloads_and_combines_its_family(self):
+    def test_it_runs_where_the_combine_needs_no_source_of_its_own(self):
+        """The combine runs on one Linux image; .coveragerc's [paths] folds the others in."""
+        job = _workflow_job("unit-coverage")
+        assert job["runs-on"] == "ubuntu-24.04-arm"
+
+    def test_it_downloads_and_combines_every_leg(self):
         job = _workflow_job("unit-coverage")
         assert isinstance(job["needs"], list), job["needs"]
         # The three unit-test jobs and nothing else: ensure-cache left every `needs`
@@ -2545,20 +2547,16 @@ class TestTheCoverageJobReadsWhatTheUnitRunsUpload:
             if str(s.get("uses", "")).startswith("actions/download-artifact@")
         ]
         assert len(downloads) == 1, steps
-        assert (
-            downloads[0]["with"]["pattern"]
-            == f"test-results-${{{{ matrix.os }}}}-*-py{COVERAGE_PYTHON}-unit-shard*"
-        )
+        assert downloads[0]["with"]["pattern"] == "test-results-*-py*-unit-shard*"
         combine = [
             s for s in steps if "combine-unit-coverage.py" in str(s.get("run", ""))
         ]
         assert len(combine) == 1, steps
         run = str(combine[0]["run"])
-        assert combine[0]["env"]["MATRIX_OS"] == "${{ matrix.os }}"
-        assert '--os "${MATRIX_OS}"' in run
-        assert f"--python-version {COVERAGE_PYTHON}" in run
+        assert '--os "${UNIT_OS}"' in run
+        assert '--python-version "${UNIT_PYTHON}"' in run
         assert "--marker unit" in run
-        assert "--fail-under 80" in run
+        assert run.count("--fail-under 80") == 1
 
     def test_the_gate_still_lists_it(self):
         assert "unit-coverage" in _workflow_job("required-checks")["needs"]
@@ -3075,3 +3073,163 @@ class TestTheCombineGate:
             tmp_path, results, 1, ["a", "b", "c", "d"], marker="integration", count=1
         )
         assert self._gate(tmp_path, monkeypatch, results, marker="unit") == 1
+
+
+@pytest.mark.integration
+class TestTheCombineGateReadsEveryOsAtOnce:
+    """One combine over the Linux, macOS and Windows legs, with the repo's own [paths].
+
+    Each leg records the absolute source path of its runner, so the three layouts below
+    are what a real run's data holds. The planted module has ten statements and each leg
+    runs a slice of them, so the figure only reaches the threshold when the three legs'
+    lines are one file's lines. With the repo's ``.coveragerc`` that holds; with the
+    ``[paths]`` section removed the same data is three files and the combine cannot find
+    them, which is the control that shows the section is what does it.
+    """
+
+    #: (os, runner.arch label, the source path that runner recorded, the lines it ran).
+    LEGS = [
+        (
+            "ubuntu-24.04-arm",
+            "arm64",
+            "/home/runner/work/ash/ash/automated_security_helper/mod.py",
+            [1, 2, 3, 4, 5],
+        ),
+        (
+            "macos-15",
+            "arm64",
+            "/Users/runner/work/ash/ash/automated_security_helper/mod.py",
+            [6, 7, 8],
+        ),
+        (
+            "windows-latest",
+            "x86_64",
+            "D:\\a\\ash\\ash\\automated_security_helper\\mod.py",
+            [9, 10],
+        ),
+    ]
+    OS_LIST = " ".join(leg[0] for leg in LEGS)
+
+    @staticmethod
+    def _plant(tmp_path: Path, rc_text: str) -> Path:
+        """A checkout of one module, its .coveragerc, and the legs' coverage data."""
+        package = tmp_path / "automated_security_helper"
+        package.mkdir()
+        (package / "__init__.py").write_text("", encoding="utf-8")
+        (package / "mod.py").write_text(
+            "".join(f"value_{n} = {n}\n" for n in range(1, 11)), encoding="utf-8"
+        )
+        (tmp_path / ".coveragerc").write_text(rc_text, encoding="utf-8")
+        from coverage import CoverageData
+
+        results = tmp_path / "results"
+        for os_name, label, source, lines in TestTheCombineGateReadsEveryOsAtOnce.LEGS:
+            name = f"test-results-{os_name}-{label}-py3.12-unit-shard1of1"
+            directory = results / name
+            directory.mkdir(parents=True)
+            data = CoverageData(basename=str(directory / COMBINE.DATA_FILE))
+            data.add_lines({source: lines})
+            data.write()
+        return results
+
+    def _gate(self, tmp_path, monkeypatch, results, os_list=None) -> int:
+        for name in list(os.environ):
+            if name.startswith(("COV_CORE_", "COVERAGE_")):
+                monkeypatch.delenv(name)
+        monkeypatch.chdir(tmp_path)
+        return COMBINE.main(
+            [
+                "--results-dir",
+                str(results),
+                "--os",
+                os_list or self.OS_LIST,
+                "--python-version",
+                "3.12",
+                "--marker",
+                "unit",
+                "--fail-under",
+                "100",
+            ]
+        )
+
+    def test_three_operating_systems_combine_into_one_file_and_meet_the_gate(
+        self, tmp_path, monkeypatch
+    ):
+        rc = (REPO_ROOT / ".coveragerc").read_text(encoding="utf-8")
+        results = self._plant(tmp_path, rc)
+        assert self._gate(tmp_path, monkeypatch, results) == 0
+
+    def test_without_the_paths_section_the_same_data_does_not_combine(
+        self, tmp_path, monkeypatch
+    ):
+        rc = (REPO_ROOT / ".coveragerc").read_text(encoding="utf-8")
+        without = rc.split("[paths]")[0]
+        assert "[paths]" in rc and "[paths]" not in without
+        results = self._plant(tmp_path, without)
+        assert self._gate(tmp_path, monkeypatch, results) != 0
+
+    def test_one_operating_system_alone_is_below_the_gate(self, tmp_path, monkeypatch):
+        """Each slice is under 100 percent on its own, so the pass above is the union's."""
+        rc = (REPO_ROOT / ".coveragerc").read_text(encoding="utf-8")
+        results = self._plant(tmp_path, rc)
+        assert self._gate(tmp_path, monkeypatch, results, "windows-latest") == 2
+
+    def test_a_whole_operating_system_that_never_uploaded_fails_the_combine(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        rc = (REPO_ROOT / ".coveragerc").read_text(encoding="utf-8")
+        results = self._plant(tmp_path, rc)
+        asked = self.OS_LIST + " ubuntu-latest"
+        assert self._gate(tmp_path, monkeypatch, results, asked) == 1
+        assert "ubuntu-latest" in capsys.readouterr().err
+
+    def test_a_python_version_that_never_uploaded_fails_the_combine(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        rc = (REPO_ROOT / ".coveragerc").read_text(encoding="utf-8")
+        results = self._plant(tmp_path, rc)
+        monkeypatch.chdir(tmp_path)
+        code = COMBINE.main(
+            [
+                "--results-dir",
+                str(results),
+                "--os",
+                self.OS_LIST,
+                "--python-version",
+                "3.12 3.13",
+                "--marker",
+                "unit",
+                "--fail-under",
+                "0",
+            ]
+        )
+        assert code == 1
+        assert "py3.13" in capsys.readouterr().err
+
+    def test_two_architecture_labels_for_one_set_fail(self, tmp_path, monkeypatch):
+        rc = (REPO_ROOT / ".coveragerc").read_text(encoding="utf-8")
+        results = self._plant(tmp_path, rc)
+        (results / "test-results-macos-15-x86_64-py3.12-unit-shard1of1").mkdir()
+        assert self._gate(tmp_path, monkeypatch, results) == 1
+
+
+@pytest.mark.unit
+class TestTheDiscoveryHelpers:
+    def test_a_list_is_split_on_commas_and_spaces_without_repeats(self):
+        assert COMBINE.split_list("a, b  c,a") == ["a", "b", "c"]
+        assert COMBINE.split_list("") == []
+
+    def test_the_label_is_read_from_the_artifact_names(self, tmp_path):
+        for name in ("ubuntu-latest-x86_64", "ubuntu-24.04-arm-arm64"):
+            (tmp_path / f"test-results-{name}-py3.12-unit-shard1of1").mkdir()
+        assert COMBINE.discover_labels(tmp_path, "ubuntu-latest", "3.12", "unit") == (
+            ["x86_64"],
+            [],
+        )
+        assert COMBINE.discover_labels(
+            tmp_path, "ubuntu-24.04-arm", "3.12", "unit"
+        ) == (["arm64"], [])
+        assert COMBINE.discover_labels(tmp_path, "ubuntu-latest", "3.10", "unit") == (
+            [],
+            [],
+        )

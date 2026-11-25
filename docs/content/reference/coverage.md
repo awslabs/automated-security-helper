@@ -22,6 +22,8 @@ Community plugins run only when you load their module with `ash_plugin_modules` 
 | CloudFormation templates | cfn-nag, cfn-lint, cfn-guard, cdk-nag, checkov | trivy-repo |
 | AWS CDK apps | cfn-nag, cfn-lint, cfn-guard, cdk-nag, checkov (on the templates `cdk synth` writes to `cdk.out`); bandit, opengrep (on the app code; bandit reads only Python) | trivy-repo |
 | Terraform | checkov | trivy-repo |
+| Terraform plans as JSON (`terraform show -json`) | checkov | |
+| Terragrunt units (`terragrunt.hcl`) | detect-secrets, gitleaks (secrets only; see below) | |
 | Kubernetes manifests and the other formats checkov supports | checkov | trivy-repo |
 | Dockerfiles | checkov | hadolint, trivy-repo |
 | GitHub Actions workflows | actionlint, zizmor, checkov | |
@@ -38,6 +40,14 @@ from Python notebooks out by default.
 For a CDK app, synthesize before you scan, so that `cdk.out` holds the templates. ASH
 keeps the synthesized templates in the scan set when your root `.gitignore` excludes
 `cdk.out`; see [What decides the files](#what-decides-the-files).
+
+For Terragrunt, scan a plan. No scanner evaluates the `inputs` of a `terragrunt.hcl`,
+and checkov evaluates a Terraform module without the values a unit passes to it, so a
+scan of the units alone can report their secrets and none of their misconfiguration.
+A plan has the values resolved: write it as JSON with `terraform show -json` and keep
+the file in the scanned directory. checkov reports each finding on the plan file, and
+the finding's `resource_id` names the resource it is about, such as
+`module.db.aws_db_instance.this`, which is what tells two findings of one rule apart.
 
 ## By scanner {#by-scanner}
 
@@ -68,7 +78,7 @@ them to the tool.
 | guarddog | SCA | Selected files: for each directory that holds a package manifest (`setup.py`, `package.json`, `go.mod`, `action.yml`, a `*.gemspec`, `Cargo.toml`, and the others the [GuardDog page](../docs/plugins/community/guarddog-plugin.md) lists), a temporary copy of the files in the scan set under it | yes | no |
 | hadolint | IaC | Selected files: Dockerfiles, named `Dockerfile`, `Containerfile`, `*.Dockerfile`, or `Dockerfile.*`, with that exact capitalization | no | no |
 | snyk-code | SAST | Whole directory, sent to Snyk's service | no | no |
-| trivy-repo | SAST | Whole directory: `trivy repository` with the vulnerability, secret, misconfiguration, and license scanners | no | no |
+| trivy-repo | SCA | Whole directory: `trivy repository` with the vulnerability, secret, misconfiguration, and license scanners | no | no |
 
 `--python-only` runs only the scanners marked yes and reports the rest `SKIPPED`, whether
 or not their tools are installed.

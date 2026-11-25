@@ -1,6 +1,52 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+"""The OCSF reporter: one VulnerabilityFinding per SARIF result.
+
+Two things this report does across its results are algebra over rows and run on
+frames:
+
+* the occurrence number of results that share an identity key (the second and
+  later of identical results are numbered, so each has its own uid), and
+* the tallies of how the results came out: not a finding, failed to build,
+  suppressed or active, and whether the record is degraded.
+
+The identity-key frame, one row per result in the order of the report:
+
+========================  =========  =============================================
+``i``                     Int64      the result's position
+``key``                   String     the result's identity key, through
+                                     :func:`~automated_security_helper.utils.
+                                     frame_text.wire`; null for a result with a
+                                     shared id or no finding
+``occurrence``            Int64      how many results before it, in the report,
+                                     have the same key; null where ``key`` is
+========================  =========  =============================================
+
+The outcome frame, one row per result:
+
+========================  =========  =============================================
+``outcome``               String     ``non_finding``, ``failed``, ``suppressed`` or
+                                     ``active``
+``degraded``              Boolean    whether the record carries the degraded label
+========================  =========  =============================================
+
+The key is built from a scanned file's path and a finding's message, so a lone
+surrogate can be in it, and polars strings are UTF-8: it goes into the column
+through ``wire``, which is one-to-one, so two keys are equal on the frame exactly
+when the texts are. The numbers come back to the host and the key text is never
+read back from the frame.
+
+What stays row-wise Python, and why: building a finding is a pydantic record
+made through a guarded read of each field of one result, with a degraded
+fallback when a read or the model fails, and a failure there is caught per result
+so that one malformed result cannot cost the report the others. That is
+exception-isolated object construction, not algebra over columns, and a frame
+could not carry the isolation. So are the identity key of one result (guarded
+reads of the result's own structure), the serialization of each record
+(``model_dump``), the upload-free formatting of the array, and the log lines.
+"""
+
 from typing import Any, Literal, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -36,11 +82,16 @@ from automated_security_helper.schemas.ocsf.ocsf_vulnerability_finding import (
 from automated_security_helper.schemas.sarif_schema_model import Result, Suppression
 from automated_security_helper.utils.error_text import error_text
 from automated_security_helper.utils.get_ash_version import get_ash_version
+from automated_security_helper.utils.taxonomy_ids import cve_of_rule_id
 import json
 import re
 from datetime import datetime, timezone
 import uuid
-from typing import Dict, Optional, List, Tuple
+from typing import Dict, Optional, List, Sequence, Tuple
+
+import polars as pl
+
+from automated_security_helper.utils.frame_text import wire
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.sarif_utils import (
     is_not_a_finding,
@@ -255,13 +306,6 @@ SKIPPED_PROJECT_UID_PREFIX = "ash-workspace-skipped-project:"
 #: The name was "Scan", which is not an activity of the class, beside the id 1.
 ACTIVITY_NAME = "Create"
 
-#: A CVE identifier at the head of a rule id, the only value OCSF's ``cve.uid``
-#: is defined to hold. Grype names its rules ``<CVE id>-<package>``
-#: (``CVE-2022-40897-setuptools``), so the identifier is read off the front and
-#: the package suffix is left behind; a scanner's own rule id (``B602``), or an
-#: id that only contains a CVE id further in, carries no cve.
-_CVE_ID = re.compile(r"^(CVE-\d{4}-\d{4,})(?:-|$)", re.IGNORECASE)
-
 #: The namespace every finding's ``finding_info.uid`` is derived under. A uid was
 #: a fresh uuid4 on every run, so the same finding reached a SIEM under a new
 #: identifier each scan: the SIEM accumulated duplicates and could never update or
@@ -394,19 +438,60 @@ def _fallback_identities(
     occurrence number of every identical finding after it when a rule stopped
     evaluating, and the uids of those findings changed with it.
     """
-    seen: Dict[str, int] = {}
-    identities: List[Optional[str]] = []
-    for result, shared_id in zip(results, shared_ids):
-        if shared_id or is_not_a_finding(result):
-            identities.append(None)
-            continue
-        key = _identity_key(result, result_rule_id(result) or "Unknown Rule")
-        count = seen.get(key, 0)
-        seen[key] = count + 1
-        if count:
-            key = _IDENTITY_SEPARATOR.join([key, "occurrence", str(count)])
-        identities.append(key)
-    return identities
+    keys: List[Optional[str]] = [
+        None
+        if shared_id or is_not_a_finding(result)
+        else _identity_key(result, result_rule_id(result) or "Unknown Rule")
+        for result, shared_id in zip(results, shared_ids)
+    ]
+    numbers = _occurrence_frame(keys)["occurrence"].to_list()
+    return [
+        key
+        if not number
+        else _IDENTITY_SEPARATOR.join([str(key), "occurrence", str(number)])
+        for key, number in zip(keys, numbers)
+    ]
+
+
+def _occurrence_frame(keys: Sequence[Optional[str]]) -> pl.DataFrame:
+    """The results' identity keys as a frame, each with its occurrence number
+    (see the module docstring for the columns)."""
+    frame = pl.DataFrame(
+        {
+            "i": pl.Series(range(len(keys)), dtype=pl.Int64),
+            "key": pl.Series([wire(key) for key in keys], dtype=pl.String),
+        }
+    )
+    return frame.with_columns(
+        pl.when(pl.col("key").is_not_null())
+        .then(pl.int_range(pl.len(), dtype=pl.Int64).over("key"))
+        .otherwise(None)
+        .alias("occurrence")
+    )
+
+
+def _outcome_counts(
+    outcomes: Sequence[str], degraded: Sequence[bool]
+) -> Dict[str, int]:
+    """How many results had each outcome, and how many records are degraded
+    (the ``degraded`` entry), from the outcome frame (see the module docstring).
+    An outcome none of the results had counts 0."""
+    frame = pl.DataFrame(
+        {
+            "outcome": pl.Series(list(outcomes), dtype=pl.String),
+            "degraded": pl.Series(list(degraded), dtype=pl.Boolean),
+        }
+    )
+    counted = {
+        outcome: int(count)
+        for outcome, count in frame.group_by("outcome").len().iter_rows()
+    }
+    counts = {
+        name: counted.get(name, 0)
+        for name in ("non_finding", "failed", "suppressed", "active")
+    }
+    counts["degraded"] = int(frame["degraded"].sum())
+    return counts
 
 
 def _metadata_with_labels(metadata: Metadata, *labels: str) -> Metadata:
@@ -556,10 +641,12 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
             # rule) published there told a SIEM that every finding was a known
             # CVE. The rule id is the vulnerability's ``title`` either way.
             try:
-                cve_match = _CVE_ID.match(rule_id) if rule_id else None
-                if cve_match:
+                # The reading is shared with the flat model's cve_id
+                # (utils/taxonomy_ids.py).
+                cve_uid = cve_of_rule_id(rule_id)
+                if cve_uid:
                     vuln_dict["cve"] = {
-                        "uid": cve_match.group(1).upper(),
+                        "uid": cve_uid,
                         "desc": desc,
                     }
             except Exception as e:
@@ -1372,11 +1459,10 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
         # Create array of individual VulnerabilityFinding objects
         vulnerability_findings = []
         total_results_count = 0
-        failed_results_count = 0
-        suppressed_findings_count = 0
-        active_findings_count = 0
-        degraded_findings_count = 0
-        non_finding_count = 0
+        # How each result came out, one entry per result in the order of the
+        # report; tallied on a frame after the loop (:func:`_outcome_counts`).
+        outcomes: List[str] = []
+        degraded_flags: List[bool] = []
 
         # Check if we have SARIF data to process
         if not model.sarif:
@@ -1442,7 +1528,8 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
                 # of the conversion. Counted here and taken off the total after
                 # the loop; decremented inside it, the total changed meaning
                 # partway and the per-result line read "5/3".
-                non_finding_count += 1
+                outcomes.append("non_finding")
+                degraded_flags.append(False)
                 ASH_LOGGER.debug(
                     f"Result {rule_id} states no problem (kind "
                     f"{getattr(getattr(result, 'kind', None), 'value', getattr(result, 'kind', None))}); "
@@ -1450,6 +1537,8 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
                 )
                 continue
 
+            outcome = "failed"
+            is_degraded = False
             try:
                 # Create individual VulnerabilityFinding for this result
                 finding = self._create_vulnerability_finding(
@@ -1464,33 +1553,40 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
 
                 labels = getattr(getattr(finding, "metadata", None), "labels", None)
                 if isinstance(labels, list) and DEGRADED_FINDING_LABEL in labels:
-                    degraded_findings_count += 1
+                    is_degraded = True
 
                 # Track finding status for statistics
                 if (
                     hasattr(finding, "status_id")
                     and finding.status_id == StatusId.integer_3
                 ):
-                    suppressed_findings_count += 1
+                    outcome = "suppressed"
                     ASH_LOGGER.debug(
                         f"Created suppressed vulnerability finding for {rule_id}"
                     )
                 else:
-                    active_findings_count += 1
+                    outcome = "active"
                     ASH_LOGGER.debug(
                         f"Created active vulnerability finding for {rule_id}"
                     )
 
             except Exception as e:
-                failed_results_count += 1
+                outcome = "failed"
                 ASH_LOGGER.error(
                     f"Error creating vulnerability finding for result {rule_id}: {str(e)}"
                 )
                 ASH_LOGGER.debug(
                     f"Failed result details - Rule ID: {rule_id}, Level: {getattr(result, 'level', None)}, Suppressions: {len(getattr(result, 'suppressions', []) or [])}"
                 )
-                continue
+            outcomes.append(outcome)
+            degraded_flags.append(is_degraded)
 
+        counts = _outcome_counts(outcomes, degraded_flags)
+        non_finding_count = counts["non_finding"]
+        failed_results_count = counts["failed"]
+        suppressed_findings_count = counts["suppressed"]
+        active_findings_count = counts["active"]
+        degraded_findings_count = counts["degraded"]
         processed_results_count = len(vulnerability_findings)
         # The results that are findings: what the rates below are over.
         finding_results_count = total_results_count - non_finding_count

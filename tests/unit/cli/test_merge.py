@@ -4830,3 +4830,14 @@ class TestScanSetRecordsAcrossShards:
         merge_shard_results(as_loaded(shards))
 
         assert [shard.model_dump_json() for shard in shards] == before
+
+
+def test_merge_refuses_baseline_filtered_shards():
+    shards = build_shards(2)
+    shards[1].metadata.baseline = {
+        "sha256": "abc",
+        "matched": 1,
+        "matched_without_lines": 0,
+    }
+    with pytest.raises(ShardCoverageError, match="baseline"):
+        merge_shard_results(as_loaded(shards))

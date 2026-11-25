@@ -37,7 +37,7 @@ ASH ships 21 scanners. The built-in ones are loaded on every scan. The others ar
 | [`guarddog`](#guarddog) | SCA | yes | community module `ash_guarddog_plugins` | `guarddog` | yes |
 | [`hadolint`](#hadolint) | IAC | yes | community module `ash_hadolint_plugins` | `hadolint` | no |
 | [`snyk-code`](#snyk-code) | SAST | yes | community module `ash_snyk_plugins` | `snyk` | no |
-| [`trivy-repo`](#trivy-repo) | SAST | yes | community module `ash_trivy_plugins` | `trivy` | no |
+| [`trivy-repo`](#trivy-repo) | SCA | yes | community module `ash_trivy_plugins` | `trivy` | no |
 
 Tool type is the scanner's own `ScannerToolType`. `--python-only` keeps a scanner when its `is_python_only()` is true: the scanner class's own `python_only` when it states one; otherwise only when the scanner runs its tool through uv, declares no install commands, and has only pip dependencies. A scanner it does not keep is SKIPPED.
 
@@ -230,7 +230,7 @@ Options, under `scanners.checkov.options`. An option not listed here refuses the
 | <a id="scanners.checkov.options.offline"></a>`offline` | boolean | `false` | Run in offline mode, disabling policy downloads. When true, this scanner runs offline even if ASH does not. ASH's own offline mode (--offline or ASH_OFFLINE) applies whatever this is set to; false follows it. |
 | <a id="scanners.checkov.options.config_file"></a>`config_file` | path, string, or null | `null` | Path to a Checkov configuration file. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. Only a file the operator names and that lies outside the scanned tree is passed to Checkov; a `.checkov.yaml` or `.checkov.yml` found in the scanned tree is not read, and the scan tells Checkov to read none from its working directory either, because such a file can change what is reported. |
 | <a id="scanners.checkov.options.skip_path"></a>`skip_path` | list of mapping | `[]` | Path (file or directory) to skip, as a regular expression Checkov searches for in each path it walks, and also as a substring of that path. The paths Checkov walks start with the absolute path of the scanned directory. Word boundaries are not implicit: "dir1" skips any directory or subdirectory whose path holds "dir1". An entry whose path is empty is ignored (it would skip every file). Can be specified multiple times. |
-| <a id="scanners.checkov.options.additional_formats"></a>`additional_formats` | list of one of `cli`, `csv`, `cyclonedx`, `cyclonedx_json`, `json`, `junitxml`, `github_failed_only`, `gitlab_sast`, `sarif`, `spdx` | `["cyclonedx_json"]` | List of additional formats to output. Defaults to including CycloneDX JSON |
+| <a id="scanners.checkov.options.additional_formats"></a>`additional_formats` | list of one of `cli`, `csv`, `cyclonedx`, `cyclonedx_json`, `json`, `junitxml`, `github_failed_only`, `gitlab_sast`, `sarif`, `spdx` | `["cyclonedx_json"]` | List of additional formats to output. Defaults to including CycloneDX JSON. checkov's JSON report is written whatever this lists: ASH reads the resource of each finding from it. |
 | <a id="scanners.checkov.options.frameworks"></a>`frameworks` | list of one of `all`, `ansible`, `argo_workflows`, `arm`, `azure_pipelines`, `bicep`, `bitbucket_pipelines`, `cdk`, `circleci_pipelines`, `cloudformation`, `dockerfile`, `github_configuration`, `github_actions`, `gitlab_configuration`, `gitlab_ci`, `bitbucket_configuration`, `helm`, `json`, `yaml`, `kubernetes`, `kustomize`, `openapi`, `sca_package`, `sca_image`, `secrets`, `serverless`, `terraform`, `terraform_json`, `terraform_plan`, `sast`, `sast_python`, `sast_java`, `sast_javascript`, `sast_typescript`, `sast_golang`, `3d_policy` | `["all"]` | Specific frameworks to include with Checkov. Defaults to `all`. |
 | <a id="scanners.checkov.options.skip_frameworks"></a>`skip_frameworks` | list of one of `all`, `ansible`, `argo_workflows`, `arm`, `azure_pipelines`, `bicep`, `bitbucket_pipelines`, `cdk`, `circleci_pipelines`, `cloudformation`, `dockerfile`, `github_configuration`, `github_actions`, `gitlab_configuration`, `gitlab_ci`, `bitbucket_configuration`, `helm`, `json`, `yaml`, `kubernetes`, `kustomize`, `openapi`, `sca_package`, `sca_image`, `secrets`, `serverless`, `terraform`, `terraform_json`, `terraform_plan`, `sast`, `sast_python`, `sast_java`, `sast_javascript`, `sast_typescript`, `sast_golang`, `3d_policy` | `[]` | Specific frameworks to exclude with Checkov. Defaults to none. |
 | <a id="scanners.checkov.options.skip_ash_output_dir"></a>`skip_ash_output_dir` | boolean | `true` | Tell Checkov to skip ASH's own output directories inside the scanned directory (this run's output directory and .ash/ash_output), so it does not parse ASH's previous reports. Defaults to true; set to false to let Checkov read them. Either way ASH drops the findings located there after the scan. Has no effect on Windows, where Checkov's --skip-path matching is unreliable. |
@@ -362,7 +362,7 @@ Options, under `scanners.opengrep.options`. An option not listed here refuses th
 | <a id="scanners.opengrep.options.severity"></a>`severity` | list of one of `INFO`, `WARNING`, `ERROR` | `[]` | Report findings only from rules matching the supplied severity level. |
 | <a id="scanners.opengrep.options.metrics"></a>`metrics` | one of `auto`, `on`, `off` | `auto` | Configures how usage metrics are sent to the OpenGrep server. Deprecated in Opengrep v1.7.0+. This configuration is ignored if the installed version is &gt;= 1.7.0. |
 | <a id="scanners.opengrep.options.patterns"></a>`patterns` | list of string | `[]` | Patterns to search for with OpenGrep. |
-| <a id="scanners.opengrep.options.version"></a>`version` | string | `v1.33.1` | Version of OpenGrep to use. |
+| <a id="scanners.opengrep.options.version"></a>`version` | string | `v2.0.0` | Version of OpenGrep to use. |
 | <a id="scanners.opengrep.options.sha256"></a>`sha256` | mapping of one of `linux/amd64`, `linux/arm64`, `darwin/amd64`, `darwin/arm64`, `windows/amd64` to string | `{}` | SHA256 of the OpenGrep release asset for a custom `version`, keyed by platform/arch (e.g. linux/amd64). Required for any version other than the one ASH pins; ignored for the pinned version, whose digests ship with ASH. Get it from GitHub's per-asset digest for the release, or by running sha256sum on the downloaded asset. |
 
 ## `syft`
@@ -613,7 +613,7 @@ Options, under `scanners.snyk-code.options`. An option not listed here refuses t
 - Class: `automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scanner.TrivyRepoScanner`
 - Provided by: community module `ash_trivy_plugins`, which `ashx scan` loads when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_trivy_plugins`
 - Enabled by default: yes
-- Tool type: SAST
+- Tool type: SCA
 - Command: `trivy`
 - Install: pinned, checksum-verified release of `trivy` by `ashx dependencies install`, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64
 - Offline strategy: `cache_flags`

@@ -206,20 +206,20 @@ class TestTheExpansion:
         assert LEGS["lint"] == 1
 
     def test_an_axis_product_less_its_excludes(self):
-        # 25 OS and Python combinations, cut into three jobs by OS: 2 Linux and 2 macOS
-        # images and 1 Windows image, each on 5 Python versions. The unit pools and the
+        # 20 OS and Python combinations, cut into three jobs by OS: 2 Linux and 2 macOS
+        # images and 1 Windows image, each on 4 Python versions. The unit pools and the
         # integration tier split each combination into the pool's shard count -- 6 on
         # Linux, 8 on macOS and Windows (the note above unit-test-linux in the workflow;
         # tests/unit/test_unit_test_shards.py pins those axes per pool); the e2e tier
         # runs once per image, on one Python version.
-        assert LEGS["unit-test-linux"] == 2 * 5 * 6
-        assert LEGS["unit-test-macos"] == 2 * 5 * 8
-        assert LEGS["unit-test-windows"] == 1 * 5 * 8
-        assert UNIT_TEST_LEGS == 60 + 80 + 40
-        assert LEGS["integration-test-linux"] == 2 * 5 * 6
-        assert LEGS["integration-test-macos"] == 2 * 5 * 8
-        assert LEGS["integration-test-windows"] == 1 * 5 * 8
-        assert sum(LEGS[name] for name in INTEGRATION_TEST_JOB_IDS) == 180
+        assert LEGS["unit-test-linux"] == 2 * 4 * 6
+        assert LEGS["unit-test-macos"] == 2 * 4 * 8
+        assert LEGS["unit-test-windows"] == 1 * 4 * 8
+        assert UNIT_TEST_LEGS == 48 + 64 + 32
+        assert LEGS["integration-test-linux"] == 2 * 4 * 6
+        assert LEGS["integration-test-macos"] == 2 * 4 * 8
+        assert LEGS["integration-test-windows"] == 1 * 4 * 8
+        assert sum(LEGS[name] for name in INTEGRATION_TEST_JOB_IDS) == 144
         assert [LEGS[name] for name in E2E_TEST_JOB_IDS] == [2, 2, 1]
         # The standalone integration suite runs in four shards of its own.
         assert LEGS["integration-test"] == 4
@@ -229,13 +229,13 @@ class TestTheExpansion:
         assert sorted(PYTEST_JOB_IDS) == sorted(
             [*UNIT_TEST_JOB_IDS, *INTEGRATION_TEST_JOB_IDS, *E2E_TEST_JOB_IDS]
         ), PYTEST_JOB_IDS
-        assert PYTEST_CHECK_RUNS == 180 + 180 + 5
+        assert PYTEST_CHECK_RUNS == 144 + 144 + 5
 
     def test_no_matrix_is_past_githubs_limit_of_256_jobs(self):
         """GitHub rejects the workflow, not just the leg, past 256 jobs from one matrix.
 
         The limit applies to each matrix. The unit-test matrix was the closest, at 200
-        legs as one job; the tiers are nine matrices now and the largest is 80.
+        legs as one job; the tiers are nine matrices now and the largest is 64.
         """
         too_big = {name: legs for name, legs in LEGS.items() if legs > 256}
         assert not too_big, too_big
@@ -264,11 +264,12 @@ class TestTheExpansion:
 #: 3.13 run on the merge-queue entry and on the push to main instead. When GitHub retires
 #: macos-15, the workflow's five entries and this set move to macos-latest together.
 PR_COVER_IMAGES = {"ubuntu-24.04-arm", "macos-15", "windows-latest"}
-#: The pull-request image unit-coverage cannot gate: its axis names macos-latest and no
-#: pinned macOS image, so a pull request runs no macOS coverage gate (the note on
-#: ensure-cache in the workflow; the merge-queue entry and the push run it).
-PR_IMAGES_WITHOUT_A_COVERAGE_GATE = {"macos-15"}
-PR_COVER_PYTHONS = {"3.10", "3.12", "3.14"}
+#: The shape of the two env lists of the unit-coverage combine step: one quoted list on a
+#: pull request, another on every other event.
+EVENT_LIST = re.compile(
+    r"^\$\{\{ github\.event_name == 'pull_request' && '([^']*)' \|\| '([^']*)' \}\}$"
+)
+PR_COVER_PYTHONS = {"3.12", "3.14"}
 TIER_JOB_IDS = [*UNIT_TEST_JOB_IDS, *INTEGRATION_TEST_JOB_IDS, *E2E_TEST_JOB_IDS]
 
 
@@ -334,15 +335,15 @@ class TestThePullRequestCover:
         }
 
     def test_the_pull_request_tiers_add_up(self):
-        # One image per pool and the 3 cover Pythons; every unit job runs each
+        # One image per pool and the 2 cover Pythons; every unit job runs each
         # combination in its pool's shard count (6 on Linux, 8 on macOS and Windows).
-        unit_linux = 1 * 3 * 6
-        unit_macos_and_windows = 1 * 3 * 8 + 1 * 3 * 8
+        unit_linux = 1 * 2 * 6
+        unit_macos_and_windows = 1 * 2 * 8 + 1 * 2 * 8
         unit = unit_linux + unit_macos_and_windows
-        assert sum(PR_LEGS[n] for n in UNIT_TEST_JOB_IDS) == unit == 66
-        assert sum(PR_LEGS[n] for n in INTEGRATION_TEST_JOB_IDS) == unit == 66
+        assert sum(PR_LEGS[n] for n in UNIT_TEST_JOB_IDS) == unit == 44
+        assert sum(PR_LEGS[n] for n in INTEGRATION_TEST_JOB_IDS) == unit == 44
         assert [PR_LEGS[n] for n in E2E_TEST_JOB_IDS] == [1, 1, 1]
-        assert PR_PYTEST_CHECK_RUNS == unit + 66 + 3
+        assert PR_PYTEST_CHECK_RUNS == unit + 44 + 3
 
     def test_ensure_cache_runs_on_the_two_labels_with_headroom_on_a_pull_request(self):
         """Nothing waits for this job any more, but its save should still land while the
@@ -375,29 +376,54 @@ class TestThePullRequestCover:
         }
         assert "ubuntu-24.04" in {c["os"] for c in _cells(JOBS["ensure-cache"], "push")}
 
-    def test_unit_coverage_gates_the_pull_request_images_its_axis_names(self):
-        """The gate runs where it has shards to combine; macos-15 is the one image it lacks.
+    @staticmethod
+    def _unit_coverage_expectation(event: str) -> tuple[set[str], set[str]]:
+        """The OS images and Python versions the combine step requires on ``event``."""
+        (step,) = [
+            s
+            for s in JOBS["unit-coverage"]["steps"]
+            if "combine-unit-coverage" in str(s.get("run", ""))
+        ]
+        found = {}
+        for name in ("UNIT_OS", "UNIT_PYTHON"):
+            match = EVENT_LIST.match(str(step["env"][name]))
+            assert match, step["env"][name]
+            on_pr, elsewhere = match.groups()
+            found[name] = set((on_pr if event == "pull_request" else elsewhere).split())
+        return found["UNIT_OS"], found["UNIT_PYTHON"]
 
-        A unit-coverage leg on an image the unit tier did not run there would find no
-        artifacts and fail; a unit-tier image the gate's axis does not name goes ungated
-        on a pull request, which is the recorded cost of the macos-15 cover.
+    @pytest.mark.parametrize("event", ["pull_request", "push", "merge_group"])
+    def test_unit_coverage_requires_exactly_the_sets_the_unit_tier_runs(self, event):
+        """The combine reads every unit leg, so its expected sets are the tier's cells.
+
+        A set the lists named and the tier did not run would fail the gate for missing
+        artifacts; a set the tier ran and the lists left out would be combined without
+        being required, and a whole missing OS or Python version would pass unseen. The
+        lists are derived by hand from the three unit-test matrices and the pull-request
+        cover, so this holds them to the matrices' own expansion for every event.
         """
-        gated = {c["os"] for c in _cells(JOBS["unit-coverage"], "pull_request")}
-        tested = {
-            c["os"] for j in UNIT_TEST_JOB_IDS for c in _cells(JOBS[j], "pull_request")
-        }
-        assert gated <= tested, (gated, tested)
-        assert tested - gated == PR_IMAGES_WITHOUT_A_COVERAGE_GATE, (gated, tested)
-        axis = set(JOBS["unit-coverage"]["strategy"]["matrix"]["os"])
-        assert not (PR_IMAGES_WITHOUT_A_COVERAGE_GATE & axis), (
-            "the gate's axis names the image, so the gate could run there"
-        )
-        # 3.12 stays in every pool's cover because this job combines its data.
-        for job_id in UNIT_TEST_JOB_IDS:
-            pythons = {
-                str(c["python-version"]) for c in _cells(JOBS[job_id], "pull_request")
-            }
-            assert "3.12" in pythons, job_id
+        cells = [c for j in UNIT_TEST_JOB_IDS for c in _cells(JOBS[j], event)]
+        want_os = {c["os"] for c in cells}
+        want_python = {str(c["python-version"]) for c in cells}
+        assert self._unit_coverage_expectation(event) == (want_os, want_python)
+        # The product the combine requires is a set the tier really runs, cell by cell.
+        ran = {(c["os"], str(c["python-version"])) for c in cells}
+        required = {(o, p) for o in want_os for p in want_python}
+        assert required == ran, (required - ran, ran - required)
+
+    def test_unit_coverage_is_one_job_on_one_image_that_gates_once(self):
+        job = JOBS["unit-coverage"]
+        assert "strategy" not in job, "a matrix would gate once per leg"
+        assert job["runs-on"] == "ubuntu-24.04-arm"
+        assert LEGS["unit-coverage"] == 1
+        assert PR_LEGS["unit-coverage"] == 1
+        combines = [
+            s
+            for s in job["steps"]
+            if "combine-unit-coverage.py" in str(s.get("run", ""))
+        ]
+        assert len(combines) == 1, job["steps"]
+        assert str(combines[0]["run"]).count("--fail-under 80") == 1
 
     def test_install_validation_keeps_its_container_legs_on_a_pull_request(self):
         cells = _cells(JOBS["install-validation"], "pull_request")
@@ -410,10 +436,10 @@ class TestThePullRequestCover:
         bundle = [c for c in cells if c["method"] == "bundle"]
         assert {c["os"] for c in bundle} == PR_COVER_IMAGES
         assert {str(c["python-version"]) for c in bundle} == PR_COVER_PYTHONS
-        assert len(bundle) == 9
+        assert len(bundle) == 6
         # Homebrew on macOS still runs here on macos-15 (and in homebrew-macos).
         assert [c["os"] for c in cells if c["method"] == "homebrew"] == ["macos-15"]
-        assert PR_LEGS["install-validation"] == 14
+        assert PR_LEGS["install-validation"] == 11
 
     def test_the_pull_request_total_is_smaller_than_the_merge_queue_total(self):
         assert ON_PULL_REQUEST < ON_MERGE_QUEUE < ON_PUSH
@@ -600,16 +626,10 @@ class TestTheCommentsMatchTheWorkflow:
             # ~297."), anchored so an unrelated "~2970" or "~297 s" in a later
             # comment cannot trip it.
             "instead of ~297.",
-            # The figures main carried after the wave change but before the
-            # e2e-express legs merged (push 455, merge-queue 453, the
-            # merge-queue check figure 818).
-            "expands to 455 jobs",
-            "455-job",
-            "~920 runner jobs",
-            "is 818:",
-            "the 818 above",
-            "(818 to a merge-queue run",
-            "Most of the 455 is the",
+            # (The figures main carried after the wave change but before the e2e-express
+            # legs merged, push 455 and merge-queue 453, were current again after the
+            # unit-coverage job's collapse from four legs to one took 458 and 456 back
+            # to them; the sh-helper rows moved them on, see the end of this list.)
             # Before ensure-cache gained the ubuntu-24.04 image (push 457 -> 458,
             # merge-queue 455 -> 456, the merge-queue check figure 820 -> 821).
             "expands to 457 jobs",
@@ -619,6 +639,32 @@ class TestTheCommentsMatchTheWorkflow:
             "the 820 above",
             "(820 to a merge-queue run",
             "Most of the 457 is the",
+            # Before unit-coverage became one job over every unit leg (it was one leg per
+            # OS family: push 458, merge-queue 456, pull request 202).
+            "expands to 458 jobs",
+            "458-job",
+            "~926 runner jobs",
+            "instead of ~462.",
+            "contributes 337 check",
+            "337 is this",
+            "is 821:",
+            "the 821 above",
+            "(821 to a merge-queue run",
+            "Most of the 458 is the",
+            # Before scan-validation gained the sh-helper rows (+5 on every event:
+            # push 455 -> 460, merge-queue 453 -> 458, pull request 201 -> 206). The
+            # history chain keeps "455 on a push" and "201 on a pull request" as its
+            # previous link, so those two phrasings are not listed.
+            "expands to 455 jobs",
+            "455-job",
+            "~920 runner jobs",
+            "instead of ~459.",
+            "contributes 336 check",
+            "336 is this",
+            "is 818:",
+            "the 818 above",
+            "(818 to a merge-queue run",
+            "Most of the 455 is the",
         ):
             assert stale not in COMMENTS
 
@@ -814,16 +860,16 @@ class TestInstallMethodsPullRequestCover:
     def test_a_dispatch_runs_the_full_matrix(self):
         """The overlay is void off a pull request; the static axes are the dispatch."""
         assert (
-            _legs(IM_VALIDATE, "workflow_dispatch") == _legs(IM_VALIDATE, "push") == 116
+            _legs(IM_VALIDATE, "workflow_dispatch") == _legs(IM_VALIDATE, "push") == 96
         )
 
     def test_what_a_pull_request_runs_method_by_method(self):
         by_method = Counter(c["method"] for c in _cells(IM_VALIDATE, "pull_request"))
         assert by_method == {
-            "pip": 9,
-            "pipx": 9,
-            "pre-commit": 9,
-            "mcp": 9,
+            "pip": 6,
+            "pipx": 6,
+            "pre-commit": 6,
+            "mcp": 6,
             "uvx": 3,
             "homebrew": 1,
             "podman": 2,
@@ -831,7 +877,7 @@ class TestInstallMethodsPullRequestCover:
             "nerdctl": 1,
             "nix": 3,
         }, by_method
-        assert sum(by_method.values()) == 47
+        assert sum(by_method.values()) == 35
 
     def test_a_pull_request_leaves_the_saturated_labels_except_sole_coverage(self):
         cells = _cells(IM_VALIDATE, "pull_request")

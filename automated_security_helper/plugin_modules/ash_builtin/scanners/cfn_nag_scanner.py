@@ -16,6 +16,12 @@ from automated_security_helper.base.plugin_base import (
     CustomCommand,
     install_story_is_declared,
 )
+from automated_security_helper.base import scanner_operational_facets as opsf
+from automated_security_helper.base.scanner_facets import (
+    FacetDecl,
+    FacetState,
+    ScannerFacets,
+)
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
@@ -309,6 +315,42 @@ def _ruby_headers_present(system_include: Path = Path("/usr/include")) -> bool:
     return not own_include.is_dir()
 
 
+#: The oldest Ruby cfn-nag 0.8.10 installs on: its gemspec's required_ruby_version
+#: is ``>= 2.5`` (RubyGems API, versions/0.8.10.json, ruby_version) and declares no
+#: upper bound, so this floor is the only range the gem itself states. It is a
+#: probe here and not a ``ruby`` line in assets/Gemfile because ``gem install``
+#: never reads the Gemfile, and the two bundler consumers (the container image on
+#: Debian's ruby 3.1, the reusable workflow on setup-ruby 3.3) already pin their own.
+_CFN_NAG_MIN_RUBY = (2, 5)
+
+
+def _ruby_is_too_old(minimum: tuple[int, int] = _CFN_NAG_MIN_RUBY) -> bool:
+    """Whether the ``ruby`` on PATH is measurably older than cfn-nag supports.
+
+    A filesystem probe, like ``_ruby_headers_present``: the interpreter's library
+    directory holds one ``lib/ruby/<major>.<minor>.0`` entry per language version it
+    carries, and that is the version a gem install resolves against. True only when
+    such entries exist and every one is below ``minimum``. No ``ruby`` on PATH (the
+    RubyGems probe reports that), a version manager's shim whose prefix has no
+    ``lib/ruby``, or an unreadable layout all read False: the answer is that this
+    cannot be told, and the gem install then reports a version mismatch itself.
+    """
+    ruby = find_executable("ruby")
+    if ruby is None:
+        return False
+    lib = Path(os.path.realpath(ruby)).parent.parent / "lib" / "ruby"
+    try:
+        entries = [p.name for p in lib.iterdir() if p.is_dir()]
+    except OSError:
+        return False
+    versions = []
+    for name in entries:
+        found = re.fullmatch(r"(\d+)\.(\d+)\.\d+", name)
+        if found:
+            versions.append((int(found.group(1)), int(found.group(2))))
+    return bool(versions) and max(versions) < minimum
+
+
 def _restore_cfn_nag_uris(
     report: SarifReport, staged: Path, cfn_file: str, run_dir: str | Path
 ) -> None:
@@ -366,6 +408,234 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
     )
 
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
+
+    #: The facets register row (base/scanner_facets.py). Declaration only: this
+    #: adapter writes no ``ash_resource_id`` today. The native-field names below
+    #: are the tool's JSON violation keys (committed fixture
+    #: tests/test_data/scanners/cfn_nag/src.test.yaml.json); ASH validates the
+    #: tool's SARIF rendering of the same violations, and no cfn-nag SARIF
+    #: golden is committed -- the M0 sample run FATALed on cfn-nag 0.8.10 under
+    #: Ruby 3.4 (tests/test_data/scanners/M0-FINDINGS.md, item b), so every cell
+    #: that only a real SARIF read could settle is n/a with an UNCONFIRMED
+    #: reason, never a guess.
+    facets: ClassVar[ScannerFacets] = ScannerFacets(
+        rule_id=FacetDecl(
+            state=FacetState.NA,
+            reason='UNCONFIRMED: the JSON violation "id" (e.g. W51, the '
+            "committed fixture) should render as the SARIF ruleId, but the "
+            "SARIF the pipeline reads was never read to a real result (M0 "
+            "item b FATALed); one cfn_nag_scan --output-format sarif run "
+            "settles it",
+        ),
+        severity=FacetDecl(
+            state=FacetState.NA,
+            reason='UNCONFIRMED: the JSON violation "type" (WARN or FAIL) '
+            "should render as the SARIF result level, but the SARIF the "
+            "pipeline reads was never read to a real result (M0 item b); one "
+            "cfn_nag_scan --output-format sarif run settles it",
+        ),
+        file_path=FacetDecl(
+            state=FacetState.NA,
+            reason='UNCONFIRMED: the JSON file result "filename" should '
+            "render as the SARIF artifact uri (restored from the staged copy "
+            "by _restore_cfn_nag_uris), but the SARIF the pipeline reads was "
+            "never read to a real result (M0 item b); one cfn_nag_scan "
+            "--output-format sarif run settles it",
+        ),
+        line_range=FacetDecl(
+            state=FacetState.NA,
+            reason='UNCONFIRMED: the JSON violation "line_numbers" should '
+            "render as the SARIF region startLine, but the SARIF the "
+            "pipeline reads was never read to a real result (M0 item b); one "
+            "cfn_nag_scan --output-format sarif run settles it",
+        ),
+        column=FacetDecl(
+            state=FacetState.NA,
+            reason="UNCONFIRMED: the tool's JSON carries line_numbers only and "
+            "no cfn-nag SARIF golden is committed; one cfn_nag_scan "
+            "--output-format sarif run settles whether a column is emitted",
+        ),
+        message=FacetDecl(
+            state=FacetState.NA,
+            reason='UNCONFIRMED: the JSON violation "message" should render '
+            "as the SARIF message text, but the SARIF the pipeline reads was "
+            "never read to a real result (M0 item b); one cfn_nag_scan "
+            "--output-format sarif run settles it",
+        ),
+        resource_id=FacetDecl(
+            state=FacetState.DROPPED,
+            native_field='violation "logical_resource_ids" (the JSON output format)',
+            reason="UNCONFIRMED: no SARIF run is committed, so whether the id "
+            "is a structured SARIF field or only one result per id is open "
+            "(M0 item b FATALed); the unit that attaches it (M3a) picks its "
+            "route after one cfn_nag_scan --output-format sarif run",
+        ),
+        resource_type=FacetDecl(
+            state=FacetState.NA,
+            reason='the JSON "element_types" holds the element class '
+            '("resource"), not the CloudFormation Type; the Type would need '
+            "a template read the adapter does not make",
+        ),
+        package_name=FacetDecl(
+            state=FacetState.NA,
+            reason="findings are CloudFormation template resources; no "
+            "package exists in cfn_nag output",
+        ),
+        package_version=FacetDecl(
+            state=FacetState.NA,
+            reason="findings are CloudFormation template resources; no "
+            "package exists in cfn_nag output",
+        ),
+        package_path=FacetDecl(
+            state=FacetState.NA,
+            reason="findings are CloudFormation template resources; no "
+            "package exists in cfn_nag output",
+        ),
+        taxonomy_cve=FacetDecl(
+            state=FacetState.NA,
+            reason="cfn_nag publishes its own rule ids; no CVE taxonomy in "
+            "the violations",
+        ),
+        taxonomy_cwe=FacetDecl(
+            state=FacetState.NA,
+            reason="cfn_nag publishes its own rule ids; no CWE taxonomy in "
+            "the violations",
+        ),
+        fingerprints=FacetDecl(
+            state=FacetState.NA,
+            reason="UNCONFIRMED: the tool's JSON carries no fingerprint and "
+            "no cfn-nag SARIF golden is committed; one SARIF run settles it",
+        ),
+        fix_available=FacetDecl(
+            state=FacetState.NA,
+            reason="cfn_nag violations carry no fix state or fixed version",
+        ),
+        remediation_text=FacetDecl(
+            state=FacetState.NA,
+            reason='violation "message" states the finding, not a '
+            "remediation; no remediation field exists",
+        ),
+        snippet=FacetDecl(
+            state=FacetState.NA,
+            reason="UNCONFIRMED: the tool's JSON carries no source excerpt "
+            "and no cfn-nag SARIF golden is committed; one SARIF run settles "
+            "whether a region snippet is emitted",
+        ),
+        references=FacetDecl(
+            state=FacetState.NA,
+            reason="UNCONFIRMED: the tool's JSON carries no URL and no "
+            "cfn-nag SARIF golden is committed; one SARIF run settles "
+            "whether the rule driver carries a helpUri",
+        ),
+        tags=FacetDecl(
+            state=FacetState.NA,
+            reason="the adapter adds no tags and the tool's JSON carries none",
+        ),
+        extras=FacetDecl(
+            state=FacetState.NA,
+            reason="the adapter writes no result property bag (its only "
+            "PropertyBag is on the Invocation)",
+        ),
+    )
+
+    #: The operational register row (base/scanner_operational_facets.py),
+    #: checked against the production declarations it mirrors by
+    #: tests/unit/plugin_modules/test_scanner_operational_facets_consistency.py.
+    operational_facets: ClassVar[opsf.ScannerOperationalFacets] = (
+        opsf.ScannerOperationalFacets(
+            scanner_name="cfn-nag",
+            network=opsf.NetworkFacet(
+                fetch_kind=opsf.FetchKind.NONE,
+                fetches=(),
+                prefetch=(),
+                offline_outcome=opsf.OfflineOutcome.UNCHANGED,
+                offline_strategy=OfflineStrategy.BUNDLED,
+                sandbox_network=opsf.SandboxNetwork.NONE,
+                source="cfn_nag_scanner.py offline_strategy, sandbox_requirements",
+            ),
+            output=opsf.OutputFacet(
+                native_formats=(opsf.OutputFormat.SARIF,),
+                side_reports=(),
+                non_finding_artifacts=(),
+            ),
+            targets=opsf.TargetsFacet(
+                kinds=(opsf.TargetKind.IAC_CLOUDFORMATION,),
+                tool_type=ScannerToolType.IAC,
+                selection=(
+                    "its own loop over holds_cloudformation_template, held equal to "
+                    "utils/cfn_template_discovery.py by a test"
+                ),
+            ),
+            runtime=opsf.RuntimeFacet(
+                kind=opsf.RuntimeKind.RUBY_GEM,
+                external_programs=("ruby",),
+                invocations=opsf.Invocations.PER_TARGET,
+                invocation_note="a per-template loop",
+                python_only=False,
+                use_uv_tool=False,
+                build_dependency=(
+                    "A portable (prebuilt, relocatable) Ruby BUILD, not a Ruby version. "
+                    "cfn-nag 0.8.10 installed cleanly on a portable Ruby 3.4.5 and every "
+                    "scan then failed with FATAL NoMethodError: undefined method 'parse' "
+                    "for an instance of Psych::Parser (tests/test_data/scanners/"
+                    "M0-FINDINGS.md (b)). The cause is the portable build, not the "
+                    "interpreter version: source-built interpreters are clean (the "
+                    "finding that assigned this row; not re-measured in this unit). The "
+                    "gem closure itself comes from the committed assets/Gemfile.lock."
+                ),
+            ),
+            platforms=opsf.PlatformsFacet(
+                provisionable=(),
+                note="a Ruby gem closure from assets/Gemfile.lock, not a release binary; there is no asset table",
+            ),
+            severity=opsf.SeverityFacet(
+                severity_class=opsf.SeverityClass.NATIVE,
+                note="the tool's own per-finding severity is mapped",
+            ),
+            silencing=opsf.SilencingFacet(
+                tool_side=(
+                    opsf.SilencingLayer(
+                        layer=opsf.SilencingLayerKind.INLINE_COMMENT,
+                        writer=opsf.SilencingWriter.REPOSITORY,
+                        honored=opsf.Honored.UNCONFIRMED,
+                        surface="template Metadata rule suppressions",
+                        cite="tool feature; cfn_nag_scanner.py reads --print-suppression only",
+                        reason=(
+                            "whether ASH leaves the template's Metadata suppressions on was "
+                            "not read at the adapter; one adapter read settles it"
+                        ),
+                    ),
+                ),
+            ),
+            identity=opsf.IdentityFacet(
+                fingerprint_class=opsf.FingerprintClass.POSITIONAL_ONLY,
+                note="the native JSON fixtures (tests/test_data/scanners/cfn_nag/src.test.yaml.json) carry id, line_numbers and logical_resource_ids and no fingerprint key, and the adapter writes none; identity is file and line through the shared floor",
+            ),
+            extensibility=opsf.ExtensibilityFacet(
+                custom_rules=opsf.CustomRules.NONE,
+                env_prefixes=(),
+                options_surface="no rules surface was found at the adapter survey",
+            ),
+            exit_codes=opsf.ExitCodesFacet(
+                success_exit_codes=(0, 1),
+                semantics="the base default {0, 1}; Ruby stderr exception text is sniffed to tell a crash from findings",
+            ),
+            provenance=opsf.ProvenanceFacet(
+                tier=opsf.Tier.BUILTIN_DEFAULT,
+                source=opsf.ProvenanceSource.GEMFILE_LOCK,
+                selection_surfaces=(),
+                upstream_license=(
+                    "MIT (source: the cfn-nag row of the 2026-11-24 "
+                    "scanner license check, a live GitHub license read; not pinned to the gem version ASH builds and not in "
+                    "THIRD_PARTY_LICENSES)"
+                ),
+            ),
+            prerequisites=opsf.PrerequisitesFacet(
+                kinds=(opsf.Prerequisite.TEMPLATE,),
+                note="a .json/.yaml/.yml file the template model reads as CloudFormation",
+            ),
+        )
+    )
 
     def model_post_init(self, context):
         if self.config is None:
@@ -495,6 +765,11 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
         missing: List[str] = []
         if find_executable("gem") is None:
             missing.append("RubyGems (`gem`) is not on PATH")
+        elif _ruby_is_too_old():
+            missing.append(
+                "the ruby on PATH is older than 2.5, the oldest cfn-nag 0.8.10's "
+                "gemspec (required_ruby_version) installs on"
+            )
 
         if platform.system() == "Windows":
             # Windows is checked on RI_DEVKIT rather than on a compiler being present,

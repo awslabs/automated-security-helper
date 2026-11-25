@@ -134,6 +134,12 @@ from automated_security_helper.base.options import (
     tool_version_constraint,
 )
 from automated_security_helper.base.plugin_context import PluginContext
+from automated_security_helper.base import scanner_operational_facets as opsf
+from automated_security_helper.base.scanner_facets import (
+    FacetDecl,
+    FacetState,
+    ScannerFacets,
+)
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
@@ -743,6 +749,205 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
     # gets a network only when sandbox.network_scanners lists it (utils/sandbox/
     # policy.py).
     sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements()
+
+    #: The facets register row (base/scanner_facets.py). Declaration only, zero
+    #: behavior change; native fields are those of zizmor's own SARIF (fixture
+    #: tests/test_data/scanners/zizmor/zizmor-1.30.1.sarif). Resource identity
+    #: is a LOCATOR-ONLY N/A (design D1 default, overturnable): zizmor's logical
+    #: locations carry ``properties.symbolic.route`` (``jobs/greet/steps/0``)
+    #: and ``key.Local.verbatim_path``, a position inside one file's document
+    #: and not a name with a lifecycle independent of the file. The route stays
+    #: verbatim in the property bag for anyone who later disagrees.
+    facets: ClassVar[ScannerFacets] = ScannerFacets(
+        rule_id=FacetDecl(state=FacetState.MAPPED, native_field="results[].ruleId"),
+        severity=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='results[].properties."zizmor/severity" and '
+            '"zizmor/confidence" (ASH rewrites them to a severity band)',
+        ),
+        file_path=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="results[].locations[].physicalLocation.artifactLocation.uri",
+        ),
+        line_range=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="results[].locations[].physicalLocation.region."
+            "startLine/endLine",
+        ),
+        column=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="results[].locations[].physicalLocation.region."
+            "startColumn/endColumn",
+        ),
+        message=FacetDecl(
+            state=FacetState.MAPPED, native_field="results[].message.text"
+        ),
+        resource_id=FacetDecl(
+            state=FacetState.NA,
+            reason="locator-only: logicalLocations[].properties.symbolic.route "
+            "(jobs/greet/steps/0) is a position inside one workflow file, not "
+            "a resource; locators never enter the key (design D1)",
+        ),
+        resource_type=FacetDecl(
+            state=FacetState.NA,
+            reason="locator-only: a workflow position has no resource type",
+        ),
+        package_name=FacetDecl(
+            state=FacetState.NA,
+            reason="workflow findings name a file position, not a package",
+        ),
+        package_version=FacetDecl(
+            state=FacetState.NA,
+            reason="workflow findings name a file position, not a package",
+        ),
+        package_path=FacetDecl(
+            state=FacetState.NA,
+            reason="workflow findings name a file position, not a package",
+        ),
+        taxonomy_cve=FacetDecl(
+            state=FacetState.NA,
+            reason="zizmor audits carry no CVE ids",
+        ),
+        taxonomy_cwe=FacetDecl(
+            state=FacetState.NA,
+            reason="zizmor rule tags are the constant [security]; no CWE "
+            "taxonomy in the output",
+        ),
+        fingerprints=FacetDecl(
+            state=FacetState.NA,
+            reason="zizmor SARIF results carry no fingerprints (0 in the "
+            "committed fixture); finding identity keys on scanner/rule/file",
+        ),
+        fix_available=FacetDecl(
+            state=FacetState.NA,
+            reason="zizmor findings carry no fix data in the SARIF",
+        ),
+        remediation_text=FacetDecl(
+            state=FacetState.NA,
+            reason="the rule help describes the audit, not a remediation, "
+            "and the result message is an annotation of the finding",
+        ),
+        snippet=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="results[].locations[].physicalLocation.region.snippet.text",
+        ),
+        references=FacetDecl(
+            state=FacetState.DROPPED,
+            native_field="tool.driver.rules[].helpUri",
+            reason="rule-level only: the flat reader takes references from "
+            "result relatedLocations, so the help link is discarded today",
+        ),
+        tags=FacetDecl(
+            state=FacetState.DROPPED,
+            native_field="tool.driver.rules[].properties.tags",
+            reason="rule-level only: the flat reader takes tags from result "
+            "properties, so the rule tags are discarded today",
+        ),
+        extras=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='results[].properties ("zizmor/severity", '
+            '"zizmor/confidence", "zizmor/persona"), plus the symbolic '
+            "route in logicalLocations",
+        ),
+    )
+
+    #: The operational register row (base/scanner_operational_facets.py),
+    #: checked against the production declarations it mirrors by
+    #: tests/unit/plugin_modules/test_scanner_operational_facets_consistency.py.
+    operational_facets: ClassVar[opsf.ScannerOperationalFacets] = (
+        opsf.ScannerOperationalFacets(
+            scanner_name="zizmor",
+            network=opsf.NetworkFacet(
+                fetch_kind=opsf.FetchKind.NONE,
+                fetches=(),
+                prefetch=(),
+                offline_outcome=opsf.OfflineOutcome.UNCHANGED,
+                offline_strategy=OfflineStrategy.BUNDLED,
+                sandbox_network=opsf.SandboxNetwork.NONE,
+                source=(
+                    "zizmor_scanner.py module header: always --offline unless the "
+                    "operator sets options.online_audits; GitHub tokens are stripped "
+                    "from the environment unless it is on"
+                ),
+                unconfirmed=(
+                    "with options.online_audits true the tool reaches GitHub, yet the "
+                    "sandbox grants it no network; what that combination does under "
+                    "--sandbox was not read"
+                ),
+            ),
+            output=opsf.OutputFacet(
+                native_formats=(opsf.OutputFormat.SARIF,),
+                side_reports=(),
+                non_finding_artifacts=(),
+            ),
+            targets=opsf.TargetsFacet(
+                kinds=(
+                    opsf.TargetKind.GITHUB_ACTIONS_WORKFLOWS,
+                    opsf.TargetKind.COMPOSITE_ACTIONS,
+                ),
+                tool_type=ScannerToolType.SAST,
+                selection="workflow files and composite actions (action.yml and action.yaml anywhere) from the scan set",
+                tool_type_note=(
+                    "actionlint (IAC) and zizmor (SAST) scan the same workflow files; the "
+                    "split is defensible (linting versus security analysis) and changing "
+                    "either moves reporter-side type exclusions, so it is recorded here "
+                    "and changed in neither (design E3)"
+                ),
+            ),
+            runtime=opsf.RuntimeFacet(
+                kind=opsf.RuntimeKind.UV_PYTHON,
+                external_programs=(),
+                invocations=opsf.Invocations.ONE,
+                python_only=True,
+                use_uv_tool=True,
+            ),
+            platforms=opsf.PlatformsFacet(
+                provisionable=(),
+                note="a PyPI package run through uv; platform support is the package's and was not read here",
+            ),
+            severity=opsf.SeverityFacet(
+                severity_class=opsf.SeverityClass.DERIVED,
+                note="a severity-by-confidence rewrite",
+            ),
+            silencing=opsf.SilencingFacet(
+                tool_side=(
+                    opsf.SilencingLayer(
+                        layer=opsf.SilencingLayerKind.IGNORE_FILE,
+                        writer=opsf.SilencingWriter.REPOSITORY,
+                        honored=opsf.Honored.NO,
+                        surface="an in-tree zizmor.yml, which can disable audits so findings are never reported or counted as suppressed",
+                        cite="zizmor_scanner.py module header: ASH passes --no-config unless the operator set options.config_file",
+                    ),
+                ),
+            ),
+            identity=opsf.IdentityFacet(
+                fingerprint_class=opsf.FingerprintClass.POSITIONAL_ONLY,
+                note="identity is file and line through the shared floor",
+            ),
+            extensibility=opsf.ExtensibilityFacet(
+                custom_rules=opsf.CustomRules.OPERATOR_PATHS,
+                env_prefixes=(),
+                options_surface="options.config_file, operator-gated, passed as --config; otherwise --no-config",
+            ),
+            exit_codes=opsf.ExitCodesFacet(
+                success_exit_codes=(0, 3),
+                semantics="exit 3 is the no-inputs code: success with nothing to scan",
+            ),
+            provenance=opsf.ProvenanceFacet(
+                tier=opsf.Tier.BUILTIN_DEFAULT,
+                source=opsf.ProvenanceSource.PYPI_VIA_UV,
+                selection_surfaces=("options.online_audits (off by default)",),
+                upstream_license=(
+                    "MIT (source: utils/tool_downloads.py "
+                    "THIRD_PARTY_LICENSES['zizmor'], pinned commit 0af0be9)"
+                ),
+            ),
+            prerequisites=opsf.PrerequisitesFacet(
+                kinds=(opsf.Prerequisite.NONE,),
+                note="workflow files or composite actions in the scan set",
+            ),
+        )
+    )
 
     @property
     def _options(self) -> ZizmorScannerConfigOptions:

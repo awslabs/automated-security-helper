@@ -94,6 +94,7 @@ from automated_security_helper.utils.output_dir_links import (
     OUTPUT_RESULT_FILES,
     OUTPUT_WORKING_DIRS,
 )
+from automated_security_helper.core.scanner_selection import SelectionLayers
 from automated_security_helper.utils.terminal_text import shown_on_one_line
 
 if TYPE_CHECKING:
@@ -940,6 +941,9 @@ def _exit_with_workspace_dry_run(
     scanners: tuple[str, ...],
     exclude_scanners: tuple[str, ...],
     ash_plugin_modules: tuple[str, ...],
+    selection_layers: SelectionLayers | None = None,
+    config: str | None = None,
+    config_overrides: tuple[str, ...] = (),
 ) -> None:
     """Print *plan* and exit 0, the ``--dry-run`` answer, after the real run's own
     pre-checks.
@@ -975,6 +979,9 @@ def _exit_with_workspace_dry_run(
         enabled_scanners=tuple(scanners),
         excluded_scanners=tuple(exclude_scanners),
         ash_plugin_modules=tuple(ash_plugin_modules),
+        selection_layers=selection_layers,
+        default_config_path=config,
+        config_overrides=tuple(config_overrides),
     )
     try:
         prewarm_plugin_registry(plan, selection)
@@ -1425,6 +1432,22 @@ def run_ash_scan_cli_command(
             help="Produce a shorter markdown report suitable for PR comments. Omits the severity legend, scan metadata, footer, and rows for scanners that were skipped or had zero findings.",
         ),
     ] = False,
+    annotate_duplicates: Annotated[
+        bool,
+        typer.Option(
+            "--annotate-duplicates",
+            rich_help_panel="Reports",
+            help="Add `cluster_id`, `duplicate_of` and `duplicate_sources` columns to the CSV and flat-JSON reports, naming findings that two scanners report for one defect (same CVE and package, same IaC resource, or same line and CWE). Rows, ids, counts, SARIF, suppressions and baselines are unchanged. Adds three columns to the CSV header, so it is off by default. Sets `global_settings.deduplication.annotate`.",
+        ),
+    ] = False,
+    fold_duplicates: Annotated[
+        bool,
+        typer.Option(
+            "--fold-duplicates",
+            rich_help_panel="Reports",
+            help="Show one row per duplicate cluster in the HTML, Markdown and text reports, with a note naming the other scanners that reported it, and add deduplicated counts beside the per-scanner counts. Only the same CVE and package, or the same line and CWE, fold. Finding ids, SARIF, per-scanner counts, suppressions, baselines, the CSV, flat-JSON and JUnit reports and the exit code are unchanged. Off by default because it changes row counts. Sets `global_settings.deduplication.fold`.",
+        ),
+    ] = False,
     changed_files_only: Annotated[
         bool,
         typer.Option(
@@ -1513,6 +1536,14 @@ def run_ash_scan_cli_command(
             "--config-file-from-another-checkout",
             hidden=True,
             help="Apply the limits ASH puts on a config file inside a git checkout other than the scanned one to this one file of the extends chain of the --config file or of the file ASH_CONFIG names. The file cannot grant, and still sets what only restricts, as it does on the host: a lowered archive extraction limit, a scanner option that sends no usage data, and a network_scanners list as a limit. Container mode passes it, once per file, for each file of those chains that is in such a checkout, by its path inside the container, where the scan inside cannot see the checkout. Refused for a file that is in neither chain.",
+        ),
+    ] = None,
+    require_scanner_selection: Annotated[
+        Optional[str],
+        typer.Option(
+            "--require-scanner-selection",
+            hidden=True,
+            help='Refuse to scan unless the default_scanners this scan settles equals this JSON document ({"only": [...], "add": [...]}, names lower-cased). Container mode passes it, with the lists it read on the host, when the selection comes from the operator\'s config, so an image built from an ASH that does not know it rejects the command and an image that lost the mounted config refuses before any scanner runs.',
         ),
     ] = None,
     ash_config_from_host: Annotated[
@@ -1654,6 +1685,16 @@ def run_ash_scan_cli_command(
             help="Custom build arguments to pass to the container build",
         ),
     ] = None,
+    baseline: Annotated[
+        Optional[str],
+        typer.Option(
+            "--baseline",
+            metavar="PATH",
+            envvar="ASH_BASELINE",
+            rich_help_panel="CI and sharding",
+            help="Leave out findings already present in this saved ash_aggregated_results.json from a full scan (for example the default branch's), so the reports, the summary and the exit code count only new findings. Matching tolerates findings that only moved lines. The file must be outside the scanned checkout and the output directory. Supported with --mode local and precommit only (exit 5 otherwise).",
+        ),
+    ] = None,
 ):
     """Scan code, infrastructure, secrets, and dependencies.
 
@@ -1722,6 +1763,44 @@ def run_ash_scan_cli_command(
             simple=simple,
         ).value
     )
+
+    if baseline is not None:
+        from automated_security_helper.express.runtime import CHILD_ENV
+
+        if os.environ.get(CHILD_ENV):
+            _fail_usage(
+                "--baseline is not supported by the express daemon; "
+                "run the scan again with --no-express"
+            )
+        if use_existing:
+            _fail_usage(
+                "--baseline needs a fresh scan; it cannot be applied to saved results with --use-existing"
+            )
+        if express is True:
+            _fail_usage(
+                shown_on_one_line(
+                    f"Error reading --baseline {baseline}: --express is not supported"
+                )
+            )
+        if (
+            mode not in (None, RunMode.local, RunMode.precommit)
+            or workspace
+            or shard_index is not None
+            or shard_count is not None
+        ):
+            _fail_usage(
+                shown_on_one_line(
+                    f"Error reading --baseline {baseline}: not supported with this scan scope"
+                )
+            )
+        if phases is not None and not (
+            {ExecutionPhase.SCAN, ExecutionPhase.REPORT} & set(phases)
+        ):
+            _fail_usage(
+                shown_on_one_line(
+                    f"Error reading --baseline {baseline}: not supported without scan or report phase"
+                )
+            )
 
     _validate_shard_options(shard_index, shard_count, workspace)
     _refuse_sandbox_in_container_mode(sandbox, mode)
@@ -1908,6 +1987,12 @@ def run_ash_scan_cli_command(
         config_overrides = []
     if compact_report:
         config_overrides.append("reporters.markdown.options.compact=true")
+    # The same route again, for the same reason; only an explicit flag adds it, so
+    # a run without it leaves the config file's value alone.
+    if annotate_duplicates:
+        config_overrides.append("global_settings.deduplication.annotate=true")
+    if fold_duplicates:
+        config_overrides.append("global_settings.deduplication.fold=true")
     # The same route as --compact-report, for the same reason and one more: as a config
     # override it reaches every mode unchanged -- local, nix, workspace, and the container,
     # which is handed config_overrides verbatim -- and overrides are applied after the
@@ -2051,6 +2136,24 @@ def run_ash_scan_cli_command(
         mode=mode,
         workspace=workspace_plan is not None,
     )
+    baseline_data = None
+    if baseline is not None:
+        from automated_security_helper.utils.scan_baseline import (
+            BaselineRefused,
+            read_baseline,
+        )
+
+        try:
+            baseline_data = read_baseline(
+                Path(baseline),
+                source_dir=Path(source_dir),
+                output_dir=Path(str(output_dir)),
+            )
+        except BaselineRefused as exc:
+            _fail_usage(
+                shown_on_one_line(f"Error reading --baseline {baseline}: {exc.reason}")
+            )
+
     if workspace_plan is not None and dry_run:
         # After the preflight above, in the real run's order, so the dry run
         # refuses what the run refuses and names the same first problem.
@@ -2067,6 +2170,14 @@ def run_ash_scan_cli_command(
             ),
             exclude_scanners=tuple(exclude_scanners),
             ash_plugin_modules=tuple(ash_plugin_modules),
+            selection_layers=SelectionLayers(
+                cli_only=None if only_scanners is None else list(only_scanners),
+                cli_additive=[]
+                if only_scanners is not None
+                else [*scanners, *add_scanners],
+            ),
+            config=config,
+            config_overrides=tuple(config_overrides or ()),
         )
 
     # Apply mode presets if specified (precommit_mode is folded into simple
@@ -2117,7 +2228,7 @@ def run_ash_scan_cli_command(
                 err=True,
             )
             raise typer.Exit(ASH_EXIT_USAGE_ERROR)
-        if not staged_for_scan:
+        if not staged_for_scan and baseline is None:
             echo(
                 "--staged: nothing is staged inside the scanned directory, so "
                 "there is nothing to scan. Exiting clean."
@@ -2148,6 +2259,7 @@ def run_ash_scan_cli_command(
                 exclude_scanners=exclude_scanners,
                 only_scanners=only_scanners,
                 add_scanners=add_scanners,
+                required_scanner_selection=require_scanner_selection,
                 progress=cli_final_show_progress,
                 output_formats=parsed_output_formats,
                 cleanup=cleanup,
@@ -2164,6 +2276,11 @@ def run_ash_scan_cli_command(
                 fail_on_incomplete_scanners=fail_on_incomplete_scanners,
                 ignore_suppressions=ignore_suppressions,
                 min_severity=MinSeverity(min_severity).value,
+                **(
+                    {"baseline": str(baseline), "baseline_data": baseline_data}
+                    if baseline is not None
+                    else {}
+                ),
                 changed_files_only=changed_files_only,
                 base_ref=base_ref,
                 staged=staged,

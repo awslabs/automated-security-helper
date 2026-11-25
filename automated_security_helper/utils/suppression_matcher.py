@@ -33,6 +33,7 @@ from automated_security_helper.utils.scanned_tree import (
     TreeInputRefused,
     open_in_scanned_tree,
 )
+from automated_security_helper.utils.suppression_frame import first_match
 from automated_security_helper.utils.symbol_spans import SymbolResolver
 
 # Regex patterns for inline suppression comments.
@@ -484,54 +485,16 @@ def warn_unmatched_directory_suppressions(
 def _line_range_matches(
     finding: FlatVulnerability, suppression: AshSuppression
 ) -> bool:
-    """Check if the finding's line range overlaps with the suppression line range."""
-    # If suppression doesn't specify line range, it matches any line
-    if suppression.line_start is None and suppression.line_end is None:
-        return True
+    """Check if the finding's line range overlaps with the suppression line range.
 
-    # If finding doesn't have line information but suppression requires it, no match
-    if finding.line_start is None:
-        return False
-
-    # If only start line is specified in suppression
-    if suppression.line_start is not None and suppression.line_end is None:
-        # Open-ended on purpose: a suppression with line_start and no line_end
-        # matches every finding from that line to the end of the file, including
-        # findings that do not exist yet. It does not mean "just this line".
-        #
-        # This is the documented contract, not an oversight. The linter used to
-        # describe it as defaulting to a single line, which was the reverse of
-        # what happens here; the message was corrected rather than this
-        # comparison, because narrowing it would stop existing single-line
-        # suppressions from covering the range they cover today. Tests in
-        # tests/unit/config/test_open_ended_suppression_range.py pin it.
-        #
-        # Match if finding overlaps with the suppression start line:
-        # either the finding starts at/after suppression start, or the
-        # finding spans across the suppression start (multi-line finding).
-        finding_end = (
-            finding.line_end if finding.line_end is not None else finding.line_start
-        )
-        return finding_end >= suppression.line_start
-
-    # If only end line is specified in suppression
-    if suppression.line_start is None and suppression.line_end is not None:
-        # Match if finding ends at or before the suppression end line
-        finding_end = (
-            finding.line_end if finding.line_end is not None else finding.line_start
-        )
-        return finding_end <= suppression.line_end
-
-    # Both start and end lines are specified in suppression
-    finding_start = finding.line_start
-    finding_end = (
-        finding.line_end if finding.line_end is not None else finding.line_start
-    )
-
-    # Check if the finding's line range overlaps with the suppression's line range
-    return (finding_start <= (suppression.line_end or 0)) and (
-        finding_end >= (suppression.line_start or 0)
-    )
+    A suppression with ``line_start`` and no ``line_end`` is open-ended on
+    purpose: it matches every finding from that line to the end of the file,
+    including findings that do not exist yet. It does not mean "just this
+    line". That is the documented contract; narrowing it would stop existing
+    single-line suppressions from covering the range they cover today
+    (tests/unit/config/test_open_ended_suppression_range.py pins it).
+    """
+    return suppression._line_range_matches(finding)
 
 
 def should_suppress_finding(
@@ -558,17 +521,22 @@ def should_suppress_finding(
     Returns:
         A tuple of (should_suppress, matching_suppression)
     """
-    for index, suppression in enumerate(suppressions):
+
+    def skip(index: int, suppression: AshSuppression) -> bool:
         location = f"{where}[{index}]"
-        if _has_expired(suppression, location) or _has_unknown_keys(
+        return _has_expired(suppression, location) or _has_unknown_keys(
             suppression, location
-        ):
-            continue
+        )
 
-        if matches_suppression(finding, suppression, symbol_resolver, warned_engines):
-            return True, suppression
-
-    return False, None
+    entries = list(suppressions)
+    hit = first_match(
+        finding,
+        entries,
+        symbol_resolver=symbol_resolver,
+        warned_engines=warned_engines,
+        skip=skip,
+    )
+    return (False, None) if hit is None else (True, entries[hit])
 
 
 #: The entries _has_expired has warned about, by ``id()``. Weak, so the id a

@@ -1255,6 +1255,34 @@ class TestEveryDatabaseIsBoundedAndMeasurable:
     def test_every_entry_has_a_measurer_and_nothing_else_does(self):
         assert set(staleness.MEASURERS) == {e.name for e in cdb.CONTENT_DATABASES}
 
+    def test_every_offline_checker_is_a_declared_database_with_a_measurer(self):
+        from automated_security_helper.utils import offline_cache_check as occ
+
+        declared = {e.name for e in cdb.CONTENT_DATABASES}
+        assert set(occ.OFFLINE_CHECKERS) <= declared
+        assert set(occ.OFFLINE_CHECKERS) <= set(staleness.MEASURERS)
+        assert set(occ.OFFLINE_CHECKERS) == {"grype-db", "trivy-db"}
+
+    def test_the_offline_check_tool_choices_come_from_the_checkers(self):
+        from automated_security_helper.utils import offline_cache_check as occ
+
+        assert [t.value for t in occ.OfflineCacheTool] == [
+            c.tool for c in occ.OFFLINE_CHECKERS.values()
+        ]
+        assert [t.value for t in occ.OfflineCacheTool] == ["grype", "trivy"]
+
+    def test_the_offline_check_tool_enum_and_checkers_cover_each_other(self):
+        from automated_security_helper.utils import offline_cache_check as occ
+
+        enum_tools = {t.value for t in occ.OfflineCacheTool}
+        registry_tools = {c.tool for c in occ.OFFLINE_CHECKERS.values()}
+        # Every registry tool has an enum member, and every member a checker.
+        assert registry_tools <= enum_tools
+        assert enum_tools <= registry_tools
+        assert {t.name for t in occ.OfflineCacheTool} == {
+            c.tool.upper() for c in occ.OFFLINE_CHECKERS.values()
+        }
+
     def test_only_grype_is_cacheable_in_ci(self):
         assert [e.name for e in cdb.CONTENT_DATABASES if e.cacheable] == ["grype-db"]
 
