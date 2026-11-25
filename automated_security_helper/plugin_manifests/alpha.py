@@ -19,6 +19,7 @@ from automated_security_helper.base.plugin_manifest import (
     PluginTier,
     ScannerManifest,
 )
+from automated_security_helper.base.plugin_provisioning import provisioning_for
 
 _BASE = "automated_security_helper.plugin_modules"
 _SOURCES = "automated_security_helper/plugin_modules"
@@ -45,6 +46,7 @@ def _alpha(
         entry_points=EntryPoints(scanner=f"{_BASE}.{package}.{module}:{scanner_class}"),
         options_model=f"{_BASE}.{package}.{module}:{options_class}",
         file_ownership=(f"{_SOURCES}/{package}", *owned),
+        provisioning=provisioning_for(name),
     )
 
 

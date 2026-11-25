@@ -18,6 +18,7 @@ from automated_security_helper.base.plugin_manifest import (
     PluginTier,
     ScannerManifest,
 )
+from automated_security_helper.base.plugin_provisioning import provisioning_for
 
 _PLUGIN = "automated_security_helper.plugin_modules.ash_builtin"
 _SCANNERS = f"{_PLUGIN}.scanners"
@@ -51,6 +52,7 @@ def _builtin(
         entry_points=EntryPoints(scanner=f"{_SCANNERS}.{module}:{scanner_class}"),
         options_model=f"{_SCANNERS}.{module}:{options_class}",
         file_ownership=tuple(owned),
+        provisioning=provisioning_for(name),
     )
 
 

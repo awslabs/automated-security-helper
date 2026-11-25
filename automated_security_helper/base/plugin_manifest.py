@@ -13,7 +13,8 @@ per-scanner descriptors that need the scanner class
 stay on the class; the manifest is the half that must be readable without
 importing it.
 
-Why this module imports nothing from ASH beyond itself: importing a plugin
+Why this module imports nothing from ASH beyond ``base.plugin_provisioning`` (itself
+standard-library only, and the home of each plugin's provisioning declarations): importing a plugin
 package runs its ``@ash_scanner_plugin`` registrations, so answering "which
 module provides scanner X" by importing the plugin loads the very scanner the
 answer is meant to say is not loaded. A manifest is a frozen pydantic value
@@ -48,6 +49,11 @@ from enum import Enum
 from typing import Any, Mapping, Optional
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+
+from automated_security_helper.base.plugin_provisioning import (
+    NO_PROVISIONING,
+    Provisioning,
+)
 
 #: The manifest schema this code reads and writes.
 MANIFEST_SCHEMA_VERSION = 1
@@ -177,6 +183,12 @@ class ScannerManifest(_Frozen):
     #: Repo-relative paths (files or directories) the plugin owns. CI path
     #: filters are generated from these.
     file_ownership: tuple[str, ...]
+    #: What the engine provisions for this plugin: the release pin of the tool it
+    #: owns, the content databases it reads, the offline-mode environment of its
+    #: tool. The engine's ``TOOL_VERSIONS``, ``CONTENT_DATABASES`` and
+    #: ``OFFLINE_TOOL_ENVIRONMENT`` are iterated from these blocks, so a plugin that
+    #: provisions nothing declares nothing.
+    provisioning: Provisioning = NO_PROVISIONING
 
     @field_validator("name")
     @classmethod
@@ -256,6 +268,12 @@ class ScannerManifest(_Frozen):
                 raise ValueError(f"superseded_by {self.superseded_by!r} is not a name")
             if self.superseded_by == self.name:
                 raise ValueError("a scanner cannot supersede itself")
+        for database in self.provisioning.content_databases:
+            if database.scanner != self.name:
+                raise ValueError(
+                    f"content database {database.name!r} is declared by "
+                    f"{self.name!r} but names {database.scanner!r} as its scanner"
+                )
         for label, ref in (
             ("entry_points.scanner", self.entry_points.scanner),
             ("options_model", self.options_model),
