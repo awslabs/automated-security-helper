@@ -72,6 +72,7 @@ import zipfile
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, TypeVar, cast
 
+from automated_security_helper.cli.mcp.error_types import McpErrorType
 from automated_security_helper.cli.mcp.session_identity import (
     UNIDENTIFIED_SESSION_ID,
 )
@@ -187,9 +188,6 @@ CLONE_MAX_WORKERS = 8
 #: (an ``rmtree``) can hold a worker for seconds, so the size bounds how many
 #: of those one tenant's calls can queue another's chunk behind.
 DELIVERY_MAX_WORKERS = 8
-
-#: ``error_type`` the MCP tools return for :class:`SourceDeliveryBusyError`.
-SOURCE_DELIVERY_BUSY = "source_delivery_busy"
 
 
 @contextlib.contextmanager
@@ -394,10 +392,6 @@ def _session_workspace(workspace_root: Path, session_id: str) -> Path:
         raise InvalidSessionIdError(str(e)) from e
 
 
-#: ``error_type`` every delivery tool returns for :class:`SessionWorkspaceError`.
-SESSION_WORKSPACE_UNAVAILABLE = "session_workspace_unavailable"
-
-
 class SessionWorkspaceError(OSError):
     """The session's workspace could not be prepared for, or hold, the new source.
 
@@ -406,7 +400,7 @@ class SessionWorkspaceError(OSError):
     a failed delivery could not fully delete is not one of these: it stays in its
     staging directory, logged, and the delivery reports the failure that ended it.
     An OSError, so a caller that catches OSError catches it. The MCP tools report it as
-    SESSION_WORKSPACE_UNAVAILABLE, an ``error_type`` a client can branch on, not
+    McpErrorType.SESSION_WORKSPACE_UNAVAILABLE, an ``error_type`` a client can branch on, not
     the exception's class name and not the errno's.
     """
 
@@ -1028,17 +1022,13 @@ class CloneRefusedError(RuntimeError):
     subclass's ``error_type``, so a new refusal type needs no other change.
     """
 
-    error_type = "clone_refused"
-
-
-#: ``error_type`` the MCP tool returns for :class:`GitTimeoutError`.
-CLONE_TIMED_OUT = "clone_timed_out"
+    error_type = McpErrorType.CLONE_REFUSED.value
 
 
 class GitTimeoutError(CloneRefusedError):
     """A git command of a delivery ran past ``GIT_TIMEOUT_SECONDS`` and was stopped."""
 
-    error_type = CLONE_TIMED_OUT
+    error_type = McpErrorType.CLONE_TIMED_OUT.value
 
 
 #: Bytes a clone may grow the session's source directory to, the same limit the
@@ -1050,24 +1040,17 @@ MAX_CLONE_BYTES = _MAX_EXTRACTED_BYTES
 #: Seconds between looks at the size of the tree a git command is writing.
 GIT_POLL_SECONDS = 0.5
 
-#: ``error_type`` the MCP tool returns for :class:`CloneTooLargeError`.
-CLONE_TOO_LARGE = "clone_too_large"
-
 
 class CloneTooLargeError(CloneRefusedError):
     """A clone passed ``MAX_CLONE_BYTES`` or ``_MAX_FILES`` entries."""
 
-    error_type = CLONE_TOO_LARGE
-
-
-#: ``error_type`` the MCP tool returns for :class:`CloneTreeUnreadableError`.
-CLONE_TREE_UNREADABLE = "clone_tree_unreadable"
+    error_type = McpErrorType.CLONE_TOO_LARGE.value
 
 
 class CloneTreeUnreadableError(CloneRefusedError):
     """The tree a git command wrote could not be read once the command had exited."""
 
-    error_type = CLONE_TREE_UNREADABLE
+    error_type = McpErrorType.CLONE_TREE_UNREADABLE.value
 
 
 def _walk_failed(error: OSError) -> None:
@@ -1366,15 +1349,6 @@ def _refuse_remote_helper_prefix(url: str) -> None:
             f"transport: git would run that helper rather than connect to a host"
         )
 
-
-#: ``error_type`` values set_source_git returns, besides the scan-target refusal
-#: of a local clone source (scan_target_not_permitted) and invalid_session_id.
-#: A client branches on these, so they are stable; the message is for a person.
-CLONE_URL_NOT_PERMITTED = "clone_url_not_permitted"
-CLONE_REF_NOT_PERMITTED = "clone_ref_not_permitted"
-INVALID_CLONE_DEPTH = "invalid_clone_depth"
-GIT_CLONE_FAILED = "git_clone_failed"
-GIT_CHECKOUT_FAILED = "git_checkout_failed"
 
 #: The most commits of history ``set_source_git`` fetches: a limit on how much history
 #: a delivery fetches. It is not a limit on disk or time (a depth of 1000 is the whole
@@ -2069,7 +2043,11 @@ def _clone(
         program=program,
     )
     result = _run_git_step(
-        cmd, env=env, what="git clone", error_type=GIT_CLONE_FAILED, grows_in=target
+        cmd,
+        env=env,
+        what="git clone",
+        error_type=McpErrorType.GIT_CLONE_FAILED.value,
+        grows_in=target,
     )
     if result.returncode != 0:
         detail = result.stderr.strip() or result.stdout.strip()
@@ -2084,7 +2062,9 @@ def _clone(
             # own after git's text (or the whole detail when git printed none).
             detail = _with_the_redirect_hint(detail)
         message = f"git clone failed (exit {result.returncode}): {detail}"
-        raise GitCommandError(message, GIT_CLONE_FAILED, disk_full=disk_full)
+        raise GitCommandError(
+            message, McpErrorType.GIT_CLONE_FAILED.value, disk_full=disk_full
+        )
     if not ref:
         # A clone of a repository whose HEAD names a branch that does not exist
         # (an empty repository, or one whose default branch was deleted) exits 0
@@ -2104,13 +2084,13 @@ def _clone(
             ),
             env=env,
             what="git rev-parse HEAD",
-            error_type=GIT_CLONE_FAILED,
+            error_type=McpErrorType.GIT_CLONE_FAILED.value,
         )
         if head.returncode != 0:
             raise GitCommandError(
                 "git clone produced no commit: the repository's default branch "
                 "has no commits or does not exist. Name a ref to deliver.",
-                GIT_CLONE_FAILED,
+                McpErrorType.GIT_CLONE_FAILED.value,
             )
         return
 
@@ -2137,7 +2117,7 @@ def _clone(
         ),
         env=env,
         what=f"git fetch {ref!r}",
-        error_type=GIT_CLONE_FAILED,
+        error_type=McpErrorType.GIT_CLONE_FAILED.value,
         grows_in=target,
     )
     if fetch.returncode != 0:
@@ -2145,7 +2125,7 @@ def _clone(
         if _is_disk_full(fetch_detail):
             raise GitCommandError(
                 f"git fetch {ref!r} failed (exit {fetch.returncode}): {fetch_detail}",
-                GIT_CLONE_FAILED,
+                McpErrorType.GIT_CLONE_FAILED.value,
                 disk_full=True,
             )
     revision = "FETCH_HEAD" if fetch.returncode == 0 else ref
@@ -2161,14 +2141,16 @@ def _clone(
         ),
         env=env,
         what=f"git checkout {ref!r}",
-        error_type=GIT_CHECKOUT_FAILED,
+        error_type=McpErrorType.GIT_CHECKOUT_FAILED.value,
         grows_in=target,
     )
     if checkout.returncode != 0:
         detail = checkout.stderr.strip() or checkout.stdout.strip()
         message = f"git checkout {ref!r} failed (exit {checkout.returncode}): {detail}"
         raise GitCommandError(
-            message, GIT_CHECKOUT_FAILED, disk_full=_is_disk_full(detail)
+            message,
+            McpErrorType.GIT_CHECKOUT_FAILED.value,
+            disk_full=_is_disk_full(detail),
         )
 
 
