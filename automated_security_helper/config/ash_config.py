@@ -18,6 +18,7 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+from automated_security_helper.models.vocab import PluginKind
 from typing import (
     Annotated,
     Any,
@@ -3159,15 +3160,17 @@ class AshConfig(RedactedSection):
 
     def get_plugin_config(
         self,
-        plugin_type: Literal["converter", "scanner", "reporter"],
+        plugin_type: PluginKind | str,
         plugin_name: str,
     ):
-        match plugin_type:
-            case "scanner":
+        # An unknown kind has no section and reads as no config.
+        kind = PluginKind.coerce(plugin_type)
+        match kind:
+            case PluginKind.SCANNER:
                 item_dict = self.scanners.model_dump(by_alias=True)
-            case "reporter":
+            case PluginKind.REPORTER:
                 item_dict = self.reporters.model_dump(by_alias=True)
-            case "converter":
+            case PluginKind.CONVERTER:
                 item_dict = self.converters.model_dump(by_alias=True)
             case _:
                 item_dict = {}

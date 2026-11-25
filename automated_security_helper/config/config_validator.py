@@ -55,6 +55,7 @@ from automated_security_helper.config.plugin_section_names import (
     fold_known_plugin_sections,
     folded_section_name,
 )
+from automated_security_helper.models.vocab import PluginKind
 from automated_security_helper.config.config_sources import (
     EXTENDS_KEY,
     PATCH_KEY,
@@ -3620,9 +3621,9 @@ def _built_in_section_classes(segment_name: str) -> Dict[str, type]:
     )
 
     segments: Dict[str, type[BaseModel]] = {
-        "scanners": ScannerConfigSegment,
-        "reporters": ReporterConfigSegment,
-        "converters": ConverterConfigSegment,
+        PluginKind.SCANNER.section: ScannerConfigSegment,
+        PluginKind.REPORTER.section: ReporterConfigSegment,
+        PluginKind.CONVERTER.section: ConverterConfigSegment,
     }
     segment_cls = segments[segment_name]
     classes: Dict[str, type] = {}
@@ -3819,11 +3820,13 @@ class ConfigValidator:
 
     # Fields that should NOT appear in user configs (internal-only). The model
     # refuses those a section does not declare (utils/unknown_keys.py).
-    INTERNAL_SCANNER_FIELDS = set(INTERNAL_SECTION_FIELDS["scanners"])
+    INTERNAL_SCANNER_FIELDS = set(INTERNAL_SECTION_FIELDS[PluginKind.SCANNER.section])
 
-    INTERNAL_REPORTER_FIELDS = set(INTERNAL_SECTION_FIELDS["reporters"])
+    INTERNAL_REPORTER_FIELDS = set(INTERNAL_SECTION_FIELDS[PluginKind.REPORTER.section])
 
-    INTERNAL_CONVERTER_FIELDS = set(INTERNAL_SECTION_FIELDS["converters"])
+    INTERNAL_CONVERTER_FIELDS = set(
+        INTERNAL_SECTION_FIELDS[PluginKind.CONVERTER.section]
+    )
 
     # Top-level fields that should NOT appear in user configs
     INVALID_TOP_LEVEL_FIELDS = {
@@ -3851,10 +3854,9 @@ class ConfigValidator:
         "ash_plugin_modules",
         "external_reports_to_include",
         "global_settings",
-        "scanners",
-        "reporters",
+        # The three plugin sections: scanners, reporters and converters.
+        *PluginKind.sections(),
         "output_formats",
-        "converters",
         # The alias, and the field name, which a scan reads as the alias.
         "mcp-resource-management",
         "mcp_resource_management",
@@ -4967,9 +4969,9 @@ class ConfigValidator:
             shown = config_data
         found: List[Tuple[Tuple[str, str, str], Tuple[str, str, str]]] = []
         for segment_name, internal in (
-            ("scanners", cls.INTERNAL_SCANNER_FIELDS),
-            ("reporters", cls.INTERNAL_REPORTER_FIELDS),
-            ("converters", cls.INTERNAL_CONVERTER_FIELDS),
+            (PluginKind.SCANNER.section, cls.INTERNAL_SCANNER_FIELDS),
+            (PluginKind.REPORTER.section, cls.INTERNAL_REPORTER_FIELDS),
+            (PluginKind.CONVERTER.section, cls.INTERNAL_CONVERTER_FIELDS),
         ):
             segment = config_data.get(segment_name)
             if not isinstance(segment, dict):
