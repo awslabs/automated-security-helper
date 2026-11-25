@@ -34,7 +34,7 @@ Slither needs Python 3.10 or later, and a Solidity compiler (`solc`, for example
 
 ## What it runs
 
-`slither --json=<report> --fail-none --exclude-dependencies -- <target>`, with the source directory as the working directory. `--fail-none` keeps findings out of the exit code, so exit 0 is a finished run and any other code fails the scan. The JSON is converted to SARIF by the plugin because Slither's own SARIF writer marks every result `warning`.
+`slither --json=<report> --config-file=<empty file> --triage-database=<missing file> --fail-none --exclude-dependencies -- <target>`, with the source directory as the working directory. `--fail-none` keeps findings out of the exit code, so exit 0 is a finished run and any other code fails the scan. The JSON is converted to SARIF by the plugin because Slither's own SARIF writer marks every result `warning`. The config and triage database paths keep the scanned tree's `slither.config.json` and `slither.db.json` from hiding findings. A run that analyzes 0 contracts (a directory with no supported project and no `.sol` file at its root) fails the scan, because Slither's JSON reads the same for it as for a clean run.
 
 Given a directory, Slither builds the project with its framework (Hardhat, Foundry and so on), which runs the repository's own build configuration. List this module only for trees you are willing to build. The scanner declares the strict sandbox default (no network), so a build that needs the network fails.
 

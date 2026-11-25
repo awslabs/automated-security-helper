@@ -395,9 +395,11 @@ class SlitherScanner(ScannerPluginBase[SlitherScannerConfig]):
             "matched text, and the adapter reads no source file",
         ),
         references=FacetDecl(
-            state=FacetState.MAPPED,
+            state=FacetState.DROPPED,
             native_field='results.detectors[] "reference" (the detector '
-            "documentation URL), written as the rule helpUri",
+            "documentation URL)",
+            reason="the adapter writes it as the rule helpUri, which the flat "
+            "row does not read (it reads result relatedLocations)",
         ),
         tags=FacetDecl(
             state=FacetState.MAPPED,

@@ -1,0 +1,200 @@
+{
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "Slither",
+          "informationUri": "https://github.com/crytic/slither",
+          "rules": [
+            {
+              "id": "reentrancy-eth",
+              "name": "reentrancy-eth",
+              "shortDescription": {
+                "text": "reentrancy-eth"
+              },
+              "helpUri": "https://github.com/crytic/slither/wiki/Detector-Documentation#reentrancy-vulnerabilities-1",
+              "properties": {
+                "tags": [
+                  "solidity",
+                  "security"
+                ]
+              }
+            },
+            {
+              "id": "suicidal",
+              "name": "suicidal",
+              "shortDescription": {
+                "text": "suicidal"
+              },
+              "helpUri": "https://github.com/crytic/slither/wiki/Detector-Documentation#suicidal",
+              "properties": {
+                "tags": [
+                  "solidity",
+                  "security"
+                ]
+              }
+            },
+            {
+              "id": "solc-version",
+              "name": "solc-version",
+              "shortDescription": {
+                "text": "solc-version"
+              },
+              "helpUri": "https://github.com/crytic/slither/wiki/Detector-Documentation#incorrect-versions-of-solidity",
+              "properties": {
+                "tags": [
+                  "solidity",
+                  "security"
+                ]
+              }
+            },
+            {
+              "id": "low-level-calls",
+              "name": "low-level-calls",
+              "shortDescription": {
+                "text": "low-level-calls"
+              },
+              "helpUri": "https://github.com/crytic/slither/wiki/Detector-Documentation#low-level-calls",
+              "properties": {
+                "tags": [
+                  "solidity",
+                  "security"
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "reentrancy-eth",
+          "level": "error",
+          "kind": "fail",
+          "message": {
+            "text": "Reentrancy in Vault.withdraw() (contracts/Vault.sol#11-16):\n\tExternal calls:\n\t- (ok,None) = msg.sender.call{value: amount}() (contracts/Vault.sol#13)\n\tState variables written after the call(s):\n\t- balances[msg.sender] = 0 (contracts/Vault.sol#15)\n\tVault.balances (contracts/Vault.sol#5) can be used in cross function reentrancies:\n\t- Vault.balances (contracts/Vault.sol#5)\n\t- Vault.deposit() (contracts/Vault.sol#7-9)\n\t- Vault.withdraw() (contracts/Vault.sol#11-16)"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "contracts/Vault.sol"
+                },
+                "region": {
+                  "startLine": 11,
+                  "endLine": 16
+                }
+              }
+            }
+          ],
+          "properties": {
+            "issue_severity": "HIGH",
+            "tags": [
+              "solidity",
+              "security"
+            ],
+            "slither_confidence": "Medium"
+          },
+          "partialFingerprints": {
+            "slither/v1": "24e197f478ab4508cc00195e9822b9b0a69feac863aa961e2c4c1d8630deb507"
+          }
+        },
+        {
+          "ruleId": "suicidal",
+          "level": "error",
+          "kind": "fail",
+          "message": {
+            "text": "Vault.kill() (contracts/Vault.sol#18-20) allows anyone to destruct the contract"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "contracts/Vault.sol"
+                },
+                "region": {
+                  "startLine": 18,
+                  "endLine": 20
+                }
+              }
+            }
+          ],
+          "properties": {
+            "issue_severity": "HIGH",
+            "tags": [
+              "solidity",
+              "security"
+            ],
+            "slither_confidence": "High"
+          },
+          "partialFingerprints": {
+            "slither/v1": "fdf84eb5e078be56730816a39ae8b9cf20ce90edc05477a606e880b4c42edea8"
+          }
+        },
+        {
+          "ruleId": "solc-version",
+          "level": "none",
+          "kind": "fail",
+          "message": {
+            "text": "Version constraint ^0.8.20 contains known severe issues (https://solidity.readthedocs.io/en/latest/bugs.html)\n\t- VerbatimInvalidDeduplication\n\t- FullInlinerNonExpressionSplitArgumentEvaluationOrder\n\t- MissingSideEffectsOnSelectorAccess.\nIt is used by:\n\t- ^0.8.20 (contracts/Vault.sol#2)"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "contracts/Vault.sol"
+                },
+                "region": {
+                  "startLine": 2
+                }
+              }
+            }
+          ],
+          "properties": {
+            "issue_severity": "INFO",
+            "tags": [
+              "solidity",
+              "security"
+            ],
+            "slither_confidence": "High"
+          },
+          "partialFingerprints": {
+            "slither/v1": "32406affb8fccc09f5ca416ce0e1ed002fb38d888dbc1a52363f012863ad0269"
+          }
+        },
+        {
+          "ruleId": "low-level-calls",
+          "level": "none",
+          "kind": "fail",
+          "message": {
+            "text": "Low level call in Vault.withdraw() (contracts/Vault.sol#11-16):\n\t- (ok,None) = msg.sender.call{value: amount}() (contracts/Vault.sol#13)"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "contracts/Vault.sol"
+                },
+                "region": {
+                  "startLine": 11,
+                  "endLine": 16
+                }
+              }
+            }
+          ],
+          "properties": {
+            "issue_severity": "INFO",
+            "tags": [
+              "solidity",
+              "security"
+            ],
+            "slither_confidence": "High"
+          },
+          "partialFingerprints": {
+            "slither/v1": "b816a17493b3166b1acb4313eefb7f69030925c4ec494d694bfd92714be68518"
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -33,7 +33,11 @@ uv tool install slither-analyzer
 
 ## What is scanned
 
-ASH hands Slither the whole target: `slither --json=<report> --fail-none --exclude-dependencies -- <target>`, run from the source directory so paths in the report are source-relative. `--fail-none` keeps the finding count out of Slither's exit code, so exit 0 means Slither finished, and any other code fails the scan. `--exclude-dependencies` leaves out findings in dependency code such as `node_modules`.
+ASH hands Slither the whole target: `slither --json=<report> --config-file=<empty file> --triage-database=<missing file> --fail-none --exclude-dependencies -- <target>`, run from the source directory so paths in the report are source-relative. `--fail-none` keeps the finding count out of Slither's exit code, so exit 0 means Slither finished, and any other code fails the scan. `--exclude-dependencies` leaves out findings in dependency code such as `node_modules`.
+
+`--config-file` and `--triage-database` point into ASH's own results directory, at an empty `{}` file and at a path that does not exist. Without them Slither reads `slither.config.json` and `slither.db.json` from the scanned tree, and either one can hide findings (measured on Slither 0.11.6: a `detectors_to_exclude` entry hid three of four findings and a triage database hid all four). `// slither-disable-next-line` comments in the Solidity source still apply, because Slither has no flag against them.
+
+Slither reports a clean scan and a run that compiled nothing the same way in its JSON (`"results": {}`, exit 0). The log tells them apart, so ASH reads its summary line and fails the scan when it says 0 contracts were analyzed. That is what a bare directory gets when it has no supported project at its root and no `.sol` file directly in it (the sources sit in `contracts/` and the target is `.`): add a Hardhat or Foundry project file, or scan a tree that has `.sol` files at its root.
 
 A tree with no `.sol` file is a no-op: the scanner is reported SKIPPED with the reason "no Solidity (.sol) file in the scan target" and Slither is not started. A `.sol` file that exists only under `node_modules` or `.git`, or only as a link, does not count.
 
