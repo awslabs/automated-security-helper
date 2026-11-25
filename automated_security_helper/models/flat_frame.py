@@ -40,6 +40,8 @@ field projected as it is:
 
 Every String column holds text through :func:`~automated_security_helper.utils.
 frame_text.wire`: a path can hold a lone surrogate and polars strings are UTF-8.
+The one Enum column, ``severity``, holds the ladder's own ASCII words directly and
+bypasses ``wire``; a value that is not one of them stops the build.
 ``wire`` is one-to-one, so two cells are equal exactly when the texts are and
 sort as the texts' code points do; ``unwire`` gives the text back. A finding
 holds its lines as unbounded Python ints; a frame column is 64-bit, so a line that
