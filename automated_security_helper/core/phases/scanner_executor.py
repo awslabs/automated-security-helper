@@ -2122,6 +2122,22 @@ class ScannerExecutor:
                             # So a converted file's finding keeps its id wherever the
                             # output directory is.
                             mark_converted_results(raw_results, self.plugin_context)
+                            if target_type == "image":
+                                # Before suppressions and flattening: an
+                                # image:-scoped suppression matches on these
+                                # properties, and the identity keys on them.
+                                from automated_security_helper.utils.image_attribution import (
+                                    mark_image_results,
+                                )
+
+                                mark_image_results(
+                                    raw_results,
+                                    getattr(
+                                        getattr(self.plugin_context, "asset", None),
+                                        "image",
+                                        None,
+                                    ),
+                                )
                             if not self.plugin_context.ignore_suppressions:
                                 raw_results = apply_suppressions_to_sarif(
                                     sarif_report=raw_results,

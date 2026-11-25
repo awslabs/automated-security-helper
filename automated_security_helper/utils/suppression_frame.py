@@ -129,6 +129,22 @@ def _package_holds(entry: "AshSuppression", finding: "FlatVulnerability") -> boo
     return True
 
 
+def _image_holds(entry: "AshSuppression", finding: "FlatVulnerability") -> bool:
+    """An entry with no ``image`` holds for any finding. One that names an image
+    holds only for a finding inside an image whose submitted reference or
+    resolved digest matches the pattern (case-insensitive glob); a finding that
+    carries no image never matches it, as a finding without a package never
+    matches a package field."""
+    pattern = getattr(entry, "image", None)
+    if pattern is None:
+        return True
+    wanted = pattern.lower()
+    return any(
+        value is not None and fnmatch.fnmatch(value.lower(), wanted)
+        for value in (finding.image_ref, finding.image_digest)
+    )
+
+
 def _scope_gate(
     entry: "AshSuppression", finding: "FlatVulnerability"
 ) -> Tuple[bool, bool]:
@@ -253,6 +269,7 @@ def _chunk_frame(
             if holds or base_pending:
                 gate_ok = _path_pattern_matches(finding.file_path, entry.path)
                 gate_ok = gate_ok and _package_holds(entry, finding)
+                gate_ok = gate_ok and _image_holds(entry, finding)
                 if gate_ok:
                     gate_ok, needs_engine = _scope_gate(entry, finding)
         live.append(is_live)

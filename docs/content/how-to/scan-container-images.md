@@ -49,8 +49,8 @@ is reported **SKIPPED** for an image scan, with a row naming the declaration, be
 its tool or dependencies are ever probed. An image scan's report therefore says which
 scanners did not look, rather than looking clean.
 
-When *nothing* scanned the image -- no selected scanner declares the kind, or (once
-scanners are wired) no engine is present on an offline host -- the report carries one
+When *nothing* scanned the image -- no selected scanner declares the kind, or
+no engine is present on an offline host -- the report carries one
 informational SARIF result (`kind=informational`, `level=note`, rule
 `ASH-container-image-not-scanned`) naming the image. It is information, not a finding:
 it never grades, never fails a threshold and never lands in a SIEM as a vulnerability,
@@ -85,6 +85,48 @@ One session has one subject and the latest delivery wins. `run_ash_scan` with no
 `source_dir` scans the delivered image; its output tree goes under the session's own
 workspace, since an image has no target directory. See
 [Run the MCP server](mcp-server.md).
+
+`run_ash_scan` takes an `execution` argument: `auto` and `in_process` run the scan in
+the server's own process, and `express` asks for the express daemon. The server answers
+`express` with the in-process run today, because the daemon takes over the client's
+standard streams, which on the server are the JSON-RPC transport, and the session's
+sandbox restrictions have no command-line form. The response's `execution_used` says
+which path ran.
+
+## Findings, identity and suppressions
+
+A finding inside an image keeps its in-image path as `file_path`, exactly as the tool
+reports it (`/usr/lib/libssl.so.3`, not a host path), so a suppression `path` matches it
+as written. Three attribution columns say which image it came from:
+
+| Column | Meaning |
+|---|---|
+| `image_ref` | The image as submitted: the reference, or the archive or layout path. |
+| `image_digest` | The image's sha256 digest, when the scan resolved one: the tool's own run output (trivy records the image ID), else the digest an engine answered at scan start. |
+| `layer_digest` | The layer that introduced the finding, for a scanner that reports one. Attribution only. |
+
+A finding's id keys on the in-image path and the image's digest, or on the submitted
+reference when no digest was resolved. Two scans of one pinned image therefore agree
+across machines and output directories, a re-tagged image that resolves to the same
+digest keeps its ids, and an image finding never shares an id with a source finding at
+the same path. The layer digest is not part of the id: a rebuilt layer that still
+carries the same vulnerable file at the same path is the same finding.
+
+To scope a suppression to one image, add `image`, a case-insensitive glob matched
+against the submitted reference and the resolved digest:
+
+```yaml
+global_settings:
+  suppressions:
+    - path: /usr/lib/**
+      rule_id: CVE-2024-*
+      image: registry.example.com/team/app:*
+      reason: Base image CVE, fixed in the next rebuild
+```
+
+A suppression without `image` applies to any finding, image or filesystem, as before.
+One with `image` never applies to a filesystem finding. `ignore_paths` and
+`--changed-files-only` stay filesystem-only: there is no directory walk inside an image.
 
 ## Tests never pull
 

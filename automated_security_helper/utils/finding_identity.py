@@ -18,7 +18,15 @@ The key of a result is:
   different machines agree. A file a converter wrote (a notebook converted to
   Python, a member extracted from an archive) is keyed by its path relative to
   the converted root, with ``"tree": "converted"``, so the key does not depend on
-  where the output directory is;
+  where the output directory is. A finding inside a container image is keyed by
+  the in-image path as the tool reports it, with ``"tree": "image"`` and an
+  ``"image"`` component: the image's sha256 digest when the scan resolved one,
+  else the locator as submitted, so two scans of one pinned image agree across
+  machines and an image finding never collides with a source finding at the same
+  path. The layer digest is deliberately not in the key (a rebuilt layer that
+  still carries the same vulnerable file at the same path is the same finding,
+  the reasoning that keeps the package version out); it travels as attribution
+  only, through the result properties named below;
 * the package name and path, for a dependency finding (grype and npm-audit put
   every package of a lockfile at its line 1);
 * the workspace project;
@@ -159,6 +167,20 @@ CONVERTED_TREE = "converted"
 #: relative to the converted root in (``utils/scan_output_dirs``).
 CONVERTED_PATH_PROPERTY = "converted_path"
 
+#: The ``tree`` of a finding inside a container image.
+IMAGE_TREE = "image"
+
+#: SARIF result properties carrying an image finding's attribution, written by
+#: the scanner executor on every image-scan result (``utils/image_attribution``)
+#: and read back by the flat extractor: the locator as submitted, the image's
+#: resolved sha256 digest where the scan's own output names one, and the layer
+#: digest where the scanner reports one. The digest, or failing it the
+#: reference, is the key's ``image`` component; the ref and layer digest are
+#: attribution only.
+IMAGE_REF_PROPERTY = "imageRef"
+IMAGE_DIGEST_PROPERTY = "imageDigest"
+IMAGE_LAYER_DIGEST_PROPERTY = "layerDigest"
+
 _DRIVE = re.compile(r"^[A-Za-z]:/")
 
 Fingerprints = Tuple[Tuple[str, Tuple[Tuple[str, str], ...]], ...]
@@ -298,13 +320,18 @@ def finding_identity(
     column: Optional[int] = None,
     message: Optional[str] = None,
     converted: bool = False,
+    image: Optional[str] = None,
 ) -> FindingIdentity:
     """One result's identity; see the module docstring for what is in it.
 
     *file_path* is used as given: pass it through :func:`relative_path` first, or,
     with *converted*, pass the path relative to the converted root. *fingerprints*
     is what :func:`result_fingerprints` returns. *message* is the masked message
-    with the finding's own path replaced by *file_path*.
+    with the finding's own path replaced by *file_path*. *image* is the subject
+    image's resolved digest, or failing that the locator as submitted, for a
+    finding inside a container image; it keys the result under ``"tree": "image"``.
+    The two trees cannot co-occur (an image scan runs no converter), and a result
+    carrying both properties is keyed as an image finding.
     """
     base: Dict[str, Any] = {
         "scanner": scanner,
@@ -313,7 +340,10 @@ def finding_identity(
         "package": [package_name, package_path],
         "project": workspace_project,
     }
-    if converted:
+    if image is not None:
+        base["tree"] = IMAGE_TREE
+        base["image"] = image
+    elif converted:
         base["tree"] = CONVERTED_TREE
     return FindingIdentity(
         base=base,
@@ -342,8 +372,12 @@ def relative_to_scan_root(
     recorded under the symbolic-link-resolved form of *source_dir*, False only
     the spelling given, which changes the identity (the file in its key) of a
     path that only the resolved form matched.
+
+    An image finding's file is an in-image path, which no host scan root may
+    rebase: ``/usr/lib/libssl.so`` names a file inside the image whatever
+    directory anchored the scan, so the identity is returned as it is.
     """
-    if source_dir is None:
+    if source_dir is None or identity.base.get("tree") == IMAGE_TREE:
         return identity
     file = relative_path(
         identity.base.get("file"), source_dir, resolve_root=resolve_root
