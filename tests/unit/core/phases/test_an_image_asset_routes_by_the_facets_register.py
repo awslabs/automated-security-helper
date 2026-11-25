@@ -293,9 +293,17 @@ class TestAConstructorFailureIsRoutedLikeAnyOtherRow:
         scanner_cls.side_effect = RuntimeError("constructor broke")
         return scanner_cls
 
-    def test_a_filesystem_only_scanner_that_cannot_be_built_is_skipped(
+    def test_a_filesystem_only_scanner_that_cannot_be_built_is_an_error_with_the_reason(
         self, scan_phase
     ):
+        # The same row, and the same gate visibility, as on a filesystem scan
+        # and as a module that fails to import (below): a scanner ASH could not
+        # bring up is a loss on any scan kind. The text says it would not have
+        # read the image, so nobody goes looking for lost image coverage.
+        from automated_security_helper.utils.scan_completeness import (
+            incomplete_scanners,
+        )
+
         scan_phase.plugins = [self._failing()]
         scan_phase.plugin_context.asset = Asset.for_image(ImageLocator(ref=IMAGE_REF))
 
@@ -304,8 +312,76 @@ class TestAConstructorFailureIsRoutedLikeAnyOtherRow:
         )
 
         row = result.scanner_results["bandit"]
-        assert row.status == ScannerStatus.SKIPPED
-        assert "container_image" in (row.skipped_reason or "")
+        assert row.status == ScannerStatus.ERROR
+        assert ("bandit", "ERROR") in incomplete_scanners(result)
+
+    def test_the_reason_names_the_constructor_error_and_that_no_image_coverage_was_lost(
+        self, scan_phase
+    ):
+        import logging
+
+        from automated_security_helper.utils.log import ASH_LOGGER
+
+        class _Lines(logging.Handler):
+            def __init__(self):
+                super().__init__(level=1)
+                self.lines = []
+
+            def emit(self, record):
+                self.lines.append(record.getMessage())
+
+        handler = _Lines()
+        ASH_LOGGER.addHandler(handler)
+        try:
+            scan_phase.plugins = [self._failing()]
+            scan_phase.plugin_context.asset = Asset.for_image(
+                ImageLocator(ref=IMAGE_REF)
+            )
+            scan_phase._execute_phase(
+                aggregated_results=AshAggregatedResults(), parallel=False
+            )
+        finally:
+            ASH_LOGGER.removeHandler(handler)
+        text = "\n".join(handler.lines)
+        assert "could not be constructed" in text
+        assert "constructor broke" in text
+        assert "does not scan container images" in text
+
+    def test_a_scanner_the_operator_excluded_is_still_skipped_when_it_cannot_be_built(
+        self, scan_phase
+    ):
+        # Selection comes before diagnosis, on an image scan as on any other.
+        scan_phase.plugins = [self._failing()]
+        scan_phase.plugin_context.asset = Asset.for_image(ImageLocator(ref=IMAGE_REF))
+
+        result = scan_phase._execute_phase(
+            aggregated_results=AshAggregatedResults(),
+            parallel=False,
+            excluded_scanners=["bandit"],
+        )
+
+        assert result.scanner_results["bandit"].status == ScannerStatus.SKIPPED
+
+    def test_a_module_that_fails_to_import_is_an_error_row_on_an_image_scan_too(
+        self, scan_phase
+    ):
+        from automated_security_helper.plugins.loader import PluginLoadFailure
+        from automated_security_helper.utils.scan_completeness import (
+            incomplete_scanners,
+        )
+
+        failed = "automated_security_helper.plugin_modules.ash_x_plugins.scanners"
+        scan_phase.plugin_context.plugin_load_record = {
+            failed: PluginLoadFailure(recorded="ImportError: no module named 'x'")
+        }
+        scan_phase.plugin_context.asset = Asset.for_image(ImageLocator(ref=IMAGE_REF))
+
+        result = scan_phase._execute_phase(
+            aggregated_results=AshAggregatedResults(), parallel=False
+        )
+
+        assert result.scanner_results[failed].status == ScannerStatus.ERROR
+        assert (failed, "ERROR") in incomplete_scanners(result)
 
     def test_an_image_capable_scanner_that_cannot_be_built_is_an_error(
         self, scan_phase, monkeypatch
