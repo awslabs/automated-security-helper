@@ -552,7 +552,10 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
             ),
             severity=opsf.SeverityFacet(
                 severity_class=opsf.SeverityClass.DEGRADED,
-                note="rules carry no security-severity, so the bare level maps (error to CRITICAL)",
+                note="rules carry no security-severity, so the bare level maps (error to CRITICAL); "
+                "priorityScore is not graded as a severity (the result's priorityScoreFactors "
+                "show it blends context such as hotFileSource, so it ranks findings rather than "
+                "rating them) and is kept, unchanged, in the result properties the flat row passes through",
                 dropped_native="priorityScore",
             ),
             silencing=opsf.SilencingFacet(

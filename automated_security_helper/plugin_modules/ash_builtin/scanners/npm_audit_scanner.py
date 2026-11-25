@@ -514,10 +514,10 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             "and the flat CVE column reads CVE-shaped rule ids only",
         ),
         taxonomy_cwe=FacetDecl(
-            state=FacetState.DROPPED,
-            native_field='vulnerabilities.<name>.via[]."cwe"',
-            reason='written to the result property "cwe" only; the flat '
-            "cwe_id reader reads tags, so the flat column stays empty",
+            state=FacetState.MAPPED,
+            native_field='vulnerabilities.<name>.via[]."cwe" (and the v1 '
+            'advisory "cwe"), written as CWE-<n> rule tags by _cwe_tags and '
+            'kept in the result property "cwe"',
         ),
         fingerprints=FacetDecl(
             state=FacetState.NA,
@@ -1847,6 +1847,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                         "security",
                         "npm-audit",
                         severity,
+                        *_cwe_tags(record["cwe"]),
                         f"tool_name::{self.config.name}",
                         f"tool_type::{self.tool_type or 'UNKNOWN'}",
                     ],
@@ -2672,6 +2673,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                                 "security",
                                 "npm-audit",
                                 via_severity,
+                                *_cwe_tags(via.get("cwe")),
                                 f"tool_name::{self.config.name}",
                                 f"tool_type::{self.tool_type or 'UNKNOWN'}",
                             ],
@@ -3786,6 +3788,23 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         except Exception as e:
             # Check if there are useful error details
             raise ScannerError(f"NpmAudit scan failed: {str(e)}")
+
+
+def _cwe_tags(cwe: Any) -> List[str]:
+    """An advisory's CWE ids as the ``CWE-<n>`` tags the flat reader reads.
+
+    npm's ``via[].cwe`` and the v1 advisory's ``cwe`` list ``CWE-79``-style ids
+    (and the odd ``NVD-CWE-Other``, which names no CWE and is left out). The flat
+    ``cwe_id`` column reads tags (``utils/taxonomy_ids.cwes_of_tags``), not the
+    ``cwe`` result property, so the ids go on the rule's tag list too. Defined
+    last in the module, and importing where it runs, so that the line-pinned
+    suppressions above it keep their lines.
+    """
+    from automated_security_helper.utils.taxonomy_ids import cwes_of_tags
+
+    if isinstance(cwe, str):
+        cwe = [cwe]
+    return cwes_of_tags(cwe) if isinstance(cwe, (list, tuple)) else []
 
 
 if __name__ == "__main__":

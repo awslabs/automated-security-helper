@@ -2,6 +2,7 @@
 
 from bisect import bisect_left
 import contextlib
+import copy
 from contextvars import ContextVar
 from datetime import datetime
 import logging
@@ -2116,6 +2117,50 @@ class PluginBase(UVToolMixin, BaseModel):
             ),
             level=logging.ERROR,
         )
+
+    #: What a run leaves on the plugin: the output and error lines, the exit code
+    #: and the per-run flags the recorders set (``_record_response``).
+    _RUN_RECORD_ATTRIBUTES: ClassVar[Tuple[str, ...]] = (
+        "output",
+        "errors",
+        "exit_code",
+        "_scan_timed_out_after",
+        "_scan_spawn_failure",
+        "_scan_post_run_error",
+        "_scan_kept_flag",
+        "_scan_could_not_stop",
+        "_scan_could_not_stop_runs",
+        "_scan_could_not_stop_history",
+        "_unevaluated_targets",
+    )
+
+    def _run_unrecorded(
+        self,
+        run: Callable[..., Dict[str, Any]],
+        command: List[str],
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        """Run ``command`` through ``run`` and leave the scan's record as it was.
+
+        For a second invocation of the tool whose result only adds to a report
+        already read (a side report that names what the main one does not).
+        ``_run_subprocess`` records each response on the plugin: its stdout and
+        stderr lines, the worst exit code, and the timeout, spawn-failure and
+        could-not-stop flags the executor grades the scan by. A side run that
+        failed, or only wrote to stderr, must not fail or annotate a scan whose
+        main run was fine, so those attributes are put back to what they were.
+        Its response is returned for the caller to read; nothing of it is kept.
+        """
+        saved: Dict[str, Any] = {}
+        for name in self._RUN_RECORD_ATTRIBUTES:
+            if hasattr(self, name):
+                value = getattr(self, name)
+                saved[name] = copy.copy(value)
+        try:
+            return run(command, **kwargs)
+        finally:
+            for name, value in saved.items():
+                setattr(self, name, value)
 
     def _run_subprocess(
         self,
