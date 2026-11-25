@@ -154,9 +154,7 @@ def generate_metrics_table_from_unified_data(
                 threshold_display = metrics.threshold[:4].upper()
             # First char of the source: (g)lobal, (c)onfig or (u)navailable; a
             # source with no text gets no letter rather than an IndexError.
-            threshold_location = (
-                metrics.threshold_source.value[0] if metrics.threshold_source else "?"
-            )
+            threshold_location = (metrics.threshold_source or "?")[0].lower()
             # Shown, not obeyed, like every other results-file value in the
             # table: a Text entry is not markup, but a terminal control in the
             # recorded threshold still reached the terminal as written.
@@ -167,10 +165,7 @@ def generate_metrics_table_from_unified_data(
         else:
             # Full format for larger terminals
             threshold_text = Text(
-                shown_not_obeyed(
-                    f"{metrics.threshold} "
-                    f"({metrics.threshold_source.value if metrics.threshold_source else ''})"
-                ),
+                shown_not_obeyed(f"{metrics.threshold} ({metrics.threshold_source})"),
                 style="cyan",
             )
 

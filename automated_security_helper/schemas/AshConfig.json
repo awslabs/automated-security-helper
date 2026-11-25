@@ -406,9 +406,23 @@
           "description": "Build-time configuration settings"
         },
         "content_db_staleness": {
-          "$ref": "#/$defs/StalenessPolicy",
+          "anyOf": [
+            {
+              "enum": [
+                "fail",
+                "warn"
+              ],
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": "fail",
-          "description": "What a scan does when a scanner's content database (grype's or trivy's vulnerability database, the offline semgrep/opengrep rulesets) was built longer ago than the bound declared for it in automated_security_helper/utils/content_databases.py. 'fail' (the default) keeps the scanner's findings and exits 1, naming the database, its build time, its age and the bound. 'warn' lets the scan pass and records the same warning in the log and in the reports (summary, SARIF invocation notifications, flat JSON). The CLI flag --allow-stale-content-db sets 'warn' for one scan and takes precedence over this value; --no-allow-stale-content-db sets 'fail'."
+          "description": "What a scan does when a scanner's content database (grype's or trivy's vulnerability database, the offline semgrep/opengrep rulesets) was built longer ago than the bound declared for it in automated_security_helper/utils/content_databases.py. 'fail' (the default) keeps the scanner's findings and exits 1, naming the database, its build time, its age and the bound. 'warn' lets the scan pass and records the same warning in the log and in the reports (summary, SARIF invocation notifications, flat JSON). The CLI flag --allow-stale-content-db sets 'warn' for one scan and takes precedence over this value; --no-allow-stale-content-db sets 'fail'.",
+          "title": "Content Db Staleness"
         },
         "content_db_staleness_offline_image_default": {
           "anyOf": [
@@ -3024,8 +3038,22 @@
           "type": "string"
         },
         "policy": {
-          "$ref": "#/$defs/StalenessPolicy",
-          "description": "The policy this database is held to while the entry is in effect."
+          "anyOf": [
+            {
+              "enum": [
+                "fail",
+                "warn"
+              ],
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
+          "description": "The policy this database is held to while the entry is in effect.",
+          "title": "Policy"
         },
         "reason": {
           "anyOf": [
@@ -7204,26 +7232,6 @@
       },
       "title": "SemgrepScannerConfigOptions",
       "type": "object"
-    },
-    "StalenessPolicy": {
-      "anyOf": [
-        {
-          "description": "What a scan does about a stale content database: ``FAIL`` or ``WARN``.",
-          "enum": [
-            "fail",
-            "warn"
-          ],
-          "title": "StalenessPolicy",
-          "type": "string"
-        },
-        {
-          "description": "An environment reference, resolved to the variable's value when the file is loaded.",
-          "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
-          "type": "string"
-        }
-      ],
-      "description": "What a scan does about a stale content database: ``FAIL`` or ``WARN``.",
-      "title": "StalenessPolicy"
     },
     "SuppressionScope": {
       "additionalProperties": false,

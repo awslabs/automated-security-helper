@@ -37,6 +37,8 @@ from automated_security_helper.utils.pre_installed_tool import ToolInstallStatus
 
 PACKAGE = Path(__file__).resolve().parents[3] / "automated_security_helper"
 
+pytestmark = pytest.mark.unit
+
 
 def _docstring_nodes(tree: ast.AST) -> Set[int]:
     skipped: Set[int] = set()
@@ -180,7 +182,6 @@ POSITIVE: Sequence[Tuple[str, str, str]] = [
         "source assigned as text",
     ),
     ("core/scanner_statistics_calculator.py", '"unavailable",', "source as text"),
-    ("core/unified_metrics.py", 'threshold_source: str = ""', "field type"),
     # A13 StalenessPolicy
     ("utils/content_databases.py", "STALENESS_FAIL", "retired constant"),
     ("utils/content_databases.py", "STALENESS_WARN", "retired constant"),
@@ -190,7 +191,6 @@ POSITIVE: Sequence[Tuple[str, str, str]] = [
     ("utils/content_db_staleness.py", "STALENESS_POLICIES", "retired constant"),
     ("config/staleness_trust.py", "STALENESS_FAIL", "retired constant"),
     ("utils/offline_cache_check.py", "STALENESS_FAIL", "retired constant"),
-    ("config/ash_config.py", 'Literal["fail", "warn"]', "the two config Literals"),
     # A14 ExpressOp
     ("express/client.py", '"op": "', "writer literal"),
     ("express/daemon.py", 'op == "', "reader compare"),
@@ -294,6 +294,41 @@ def test_the_ash_exit_code_table_is_derived_not_respelled():
         "INTERRUPTED": 130,
         "TERMINATED": 143,
     }
+
+
+def test_the_config_staleness_literals_accept_exactly_the_policy_members():
+    # The config models validate strictly and the loader writes YAML with
+    # safe_dump, which cannot represent an enum member, so these two fields stay
+    # Literals. The accepted set is pinned to the enum here instead.
+    import typing
+
+    from automated_security_helper.config.ash_config import (
+        AshConfig,
+        ContentDbStalenessOverride,
+    )
+
+    for model, field in (
+        (AshConfig, "content_db_staleness"),
+        (ContentDbStalenessOverride, "policy"),
+    ):
+        annotation = model.model_fields[field].annotation
+        assert set(typing.get_args(annotation)) == _values(StalenessPolicy), field
+    assert AshConfig(project_name="x").content_db_staleness == (
+        StalenessPolicy.FAIL.value
+    )
+
+
+def test_the_threshold_source_the_calculator_resolves_is_a_member():
+    from automated_security_helper.core.scanner_statistics_calculator import (
+        ScannerStatisticsCalculator,
+    )
+    from automated_security_helper.models.asharp_model import AshAggregatedResults
+
+    results = AshAggregatedResults()
+    _threshold, source = ScannerStatisticsCalculator.get_scanner_threshold_info(
+        results, "bandit"
+    )
+    assert isinstance(source, ThresholdSource)
 
 
 def test_the_wire_spellings_are_exactly_the_old_ones():
