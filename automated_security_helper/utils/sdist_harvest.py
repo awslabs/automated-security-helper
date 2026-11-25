@@ -413,13 +413,13 @@ def stamp_harvested_components(report: "CycloneDXReport", target: Path) -> int:
     stamped = 0
     for component in components:
         properties = getattr(component, "properties", None) or []
+        if any(
+            getattr(prop, "name", "") == PROPERTY_SDIST_SHA256 for prop in properties
+        ):
+            continue
         owner: Optional[Tuple[str, str]] = None
-        already = False
         for prop in properties:
             name = getattr(prop, "name", "")
-            if name == PROPERTY_SDIST_SHA256:
-                already = True
-                break
             value = getattr(prop, "value", None)
             if (
                 isinstance(name, str)
@@ -431,7 +431,7 @@ def stamp_harvested_components(report: "CycloneDXReport", target: Path) -> int:
                 if owner is not None and owner in manifests:
                     break
                 owner = None
-        if already or owner is None:
+        if owner is None:
             continue
         manifest = manifests[owner]
         new_properties = list(properties) + [
