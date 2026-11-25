@@ -1,0 +1,37 @@
+{
+  "agents": [
+    {
+      "configPath": "/run/user/23503848/skillcheck-lane/homeleak/.claude",
+      "platform": "Claude Code",
+      "skills": [
+        {
+          "hash": "7cede73d78b46b45677503b5380867e7427f2d71990942cac0565db1cba61b85",
+          "name": "benign-skill",
+          "source": "/run/user/23503848/skillcheck-lane/homeleak/.claude/skills/leaky/SKILL.md",
+          "spec": [
+            {
+              "severity": "medium",
+              "title": "Every skill name equals its directory name",
+              "uid": "skill-name-matches-directory"
+            }
+          ],
+          "status": "unknown",
+          "url": "https://mondoo.com/ai-agent-security/skills?q=benign-skill"
+        }
+      ]
+    },
+    {
+      "configPath": "/run/user/23503848/skillcheck-lane/fixture_repo/benign",
+      "platform": "Project",
+      "skills": [
+        {
+          "hash": "7cede73d78b46b45677503b5380867e7427f2d71990942cac0565db1cba61b85",
+          "name": "benign-skill",
+          "source": "/run/user/23503848/skillcheck-lane/fixture_repo/benign/skills/benign-skill/SKILL.md",
+          "status": "unknown",
+          "url": "https://mondoo.com/ai-agent-security/skills?q=benign-skill"
+        }
+      ]
+    }
+  ]
+}

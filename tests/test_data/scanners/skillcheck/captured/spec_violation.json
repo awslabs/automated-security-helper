@@ -1,0 +1,24 @@
+{
+  "agents": [
+    {
+      "configPath": "/run/user/23503848/skillcheck-lane/fixture_repo/spec_violation",
+      "platform": "Project",
+      "skills": [
+        {
+          "hash": "9e23cbd38f41f19ecfd3875eed00bee94687b6202556e1f7a4b5a9b9d9841a32",
+          "name": "MySkill",
+          "source": "/run/user/23503848/skillcheck-lane/fixture_repo/spec_violation/skills/MySkill/SKILL.md",
+          "spec": [
+            {
+              "severity": "high",
+              "title": "Every skill name is a lowercase slug (a-z0-9, single hyphens)",
+              "uid": "skill-name-valid-slug"
+            }
+          ],
+          "status": "unknown",
+          "url": "https://mondoo.com/ai-agent-security/skills?q=MySkill"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,39 @@
+{
+  "agents": [
+    {
+      "configPath": "/lane/fixture_repo/affected",
+      "platform": "Project",
+      "skills": [
+        {
+          "hash": "0000000000000000000000000000000000000000000000000000000000000001",
+          "name": "synthetic-affected-skill",
+          "purl": "pkg:skill/synthetic/example/synthetic-affected-skill@1.0.0",
+          "riskScore": 91.5,
+          "source": "/lane/fixture_repo/affected/skills/synthetic-affected-skill/SKILL.md",
+          "status": "affected",
+          "summary": "Synthetic record: the skill is reported as affected by the hash database.",
+          "topSeverity": "critical",
+          "url": "https://mondoo.com/ai-agent-security/skills/synthetic/example/synthetic-affected-skill/1.0.0"
+        },
+        {
+          "hash": "0000000000000000000000000000000000000000000000000000000000000002",
+          "name": "synthetic-medium-skill",
+          "riskScore": 40,
+          "source": "/lane/fixture_repo/affected/skills/synthetic-medium-skill/SKILL.md",
+          "status": "affected",
+          "summary": "Synthetic record: a medium-severity database verdict.",
+          "topSeverity": "medium",
+          "url": "https://mondoo.com/ai-agent-security/skills?q=synthetic-medium-skill"
+        },
+        {
+          "hash": "0000000000000000000000000000000000000000000000000000000000000003",
+          "name": "synthetic-clean-skill",
+          "riskScore": 2,
+          "source": "/lane/fixture_repo/affected/skills/synthetic-clean-skill/SKILL.md",
+          "status": "clean",
+          "url": "https://mondoo.com/ai-agent-security/skills?q=synthetic-clean-skill"
+        }
+      ]
+    }
+  ]
+}
