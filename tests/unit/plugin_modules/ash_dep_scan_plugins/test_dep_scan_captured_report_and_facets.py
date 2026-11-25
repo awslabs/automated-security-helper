@@ -202,7 +202,11 @@ class TestFacets:
         count = sum(1 for row in rows if populated(*[getattr(row, c) for c in columns]))
         state = getattr(DepScanScanner.facets, facet).state
         if state is FacetState.MAPPED:
-            assert count == len(rows), f"{facet} is MAPPED but empty in the capture"
+            # Not every row: the capture's first id is a Bitnami BIT- id, so only
+            # the second row names a CVE.
+            assert count > 0, f"{facet} is MAPPED but empty in the capture"
+            if facet != "taxonomy_cve":
+                assert count == len(rows), f"{facet} is MAPPED but sparse"
         else:
             assert count == 0, f"{facet} is {state.value} but populated"
 
