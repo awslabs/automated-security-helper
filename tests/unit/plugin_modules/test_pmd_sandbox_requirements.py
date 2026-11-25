@@ -6,10 +6,10 @@
 It declares the strict default: no network, the baseline read-only paths, the
 results directory as the only writable place, and the baseline environment
 allowlist. PMD's rules are inside its jars and ``pmd check`` makes no network
-call, so nothing beyond the default is needed. The JVM settings variables
-(``JAVA_HOME``, ``JAVA_TOOL_OPTIONS``, ``JAVA_OPTS``, ``PMD_JAVA_OPTS``) are not
-in the baseline allowlist, so a sandboxed run does not pass them in; the JVM
-runs on its own defaults.
+call, so nothing beyond the default is needed. ``JAVA_HOME`` is in the baseline
+allowlist; the variables that change JVM or launcher behavior
+(``JAVA_TOOL_OPTIONS``, ``JAVA_OPTS``, ``PMD_JAVA_OPTS``) are not, so a sandboxed
+run does not pass them in.
 
 The policy is built with ``build_scanner_policy``, the function every sandboxed
 spawn goes through, so a declaration the policy ignores fails here.
@@ -85,4 +85,6 @@ def test_the_jvm_settings_variables_are_not_passed_into_the_sandbox(layout):
             "PMD_JAVA_OPTS": "-Xmx1g",
         }
     )
-    assert passed.keys() == {"HOME"} | set(policy.extra_env)
+    # JAVA_HOME is in the baseline allowlist (the JVM finds itself with it); the
+    # variables that change how the JVM or PMD's launcher behave are not.
+    assert passed.keys() == {"HOME", "JAVA_HOME"} | set(policy.extra_env)

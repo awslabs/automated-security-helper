@@ -410,9 +410,11 @@ class PmdScanner(ScannerPluginBase[PmdScannerConfig]):
             reason="the captured PMD SARIF rules carry no reference URLs",
         ),
         tags=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field='rule "properties.tags" (the rule category, Security); '
-            "the adapter appends pmd and sast to the result's tags",
+            state=FacetState.DROPPED,
+            native_field='rule "properties.tags" (the rule category, Security)',
+            reason="PMD writes tags on the rule, not on the result, and the shared "
+            "pipeline reads result-level tags; the adapter adds pmd and sast to "
+            "each result but the native tag is not carried",
         ),
         extras=FacetDecl(
             state=FacetState.MAPPED,
