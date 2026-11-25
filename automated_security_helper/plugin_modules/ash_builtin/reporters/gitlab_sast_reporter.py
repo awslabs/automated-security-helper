@@ -6,24 +6,9 @@
 What is relational here is what a finding's id and severity depend on: two
 findings that fell back to one legacy id are told apart by how many came before
 them with it, and a suppressed finding is graded Info whatever its own grade.
-Those are a projection of the run's drafts as a frame (:func:`_projection`), whose
-columns are:
-
-========================  =========  =============================================
-``i``                     Int64      the draft's position among the kept results
-``id``                    String     the id the result was given, before the
-                                     collision count
-``legacy``                Boolean    whether the id is the legacy rule-file-line
-                                     one, the only kind that is counted
-``suppressed``            Boolean    whether a suppression is in effect
-``severity``              String     the gate's grade, in GitLab's spelling; null
-                                     when there is none
-``occurrence``            Int64      how many drafts before this one, in the frame's
-                                     order, have the same legacy id; 0 for a
-                                     non-legacy draft
-``severity_out``          String     ``Info`` for a suppressed draft, else
-                                     ``severity``
-========================  =========  =============================================
+Those are a projection of the run's drafts as a frame (:func:`_projection`),
+whose columns, and what each carries, are declared in one place:
+:func:`_projection_schema`.
 
 Every String column holds text through
 :func:`~automated_security_helper.utils.frame_text.wire`: an id can carry a rule
@@ -129,32 +114,75 @@ class _Draft:
     finding_id: str
     #: Whether *finding_id* is the legacy one, which collisions are counted on.
     legacy: bool
-    suppressed: bool
+    #: The value of ``FlatVulnerability.is_suppressed``, under its field's name.
+    is_suppressed: bool
     #: The gate's grade in GitLab's spelling; empty when there is none.
     severity: str
     #: The text for a suppressed finding's ``solution``.
     solution: Optional[str]
 
 
-def _projection(drafts: List[_Draft]) -> "pl.DataFrame":
-    """*drafts* as a frame, with each one's collision count and final severity
-    (the columns are in the module docstring)."""
+#: The two columns :func:`_projection` derives from the drafts' own columns.
+_PROJECTION_DERIVED = ("occurrence", "severity_out")
+
+
+def _projection_schema() -> Dict[str, Any]:
+    """The projection frame's declared shape, the one record of its columns.
+
+    ========================  =========  =========================================
+    ``i``                     Int64      the draft's position among the kept
+                                         results
+    ``id``                    String     the id the result was given, before the
+                                         collision count
+    ``legacy``                Boolean    whether the id is the legacy
+                                         rule-file-line one, the only kind that
+                                         is counted
+    ``is_suppressed``         Boolean    whether a suppression is in effect (the
+                                         name of the model field the value fills,
+                                         ``FlatVulnerability.is_suppressed``)
+    ``severity``              String     the gate's grade, in GitLab's spelling;
+                                         null when there is none
+    ``occurrence``            Int64      how many drafts before this one, in the
+                                         frame's order, have the same legacy id;
+                                         0 for a non-legacy draft
+    ``severity_out``          String     ``Info`` for a suppressed draft, else
+                                         ``severity``
+    ========================  =========  =========================================
+
+    The last two are derived from the first five (:data:`_PROJECTION_DERIVED`);
+    the drift gate pins the built frame against this dict.
+    """
     import polars as pl
 
+    return {
+        "i": pl.Int64,
+        "id": pl.String,
+        "legacy": pl.Boolean,
+        "is_suppressed": pl.Boolean,
+        "severity": pl.String,
+        "occurrence": pl.Int64,
+        "severity_out": pl.String,
+    }
+
+
+def _projection(drafts: List[_Draft]) -> "pl.DataFrame":
+    """*drafts* as a frame, with each one's collision count and final severity
+    (the columns are :func:`_projection_schema`)."""
+    import polars as pl
+
+    schema = _projection_schema()
     frame = pl.DataFrame(
         {
             "i": list(range(len(drafts))),
             "id": [wire(draft.finding_id) for draft in drafts],
             "legacy": [draft.legacy for draft in drafts],
-            "suppressed": [draft.suppressed for draft in drafts],
+            "is_suppressed": [draft.is_suppressed for draft in drafts],
             "severity": [wire(draft.severity) or None for draft in drafts],
         },
         schema={
-            "i": pl.Int64,
-            "id": pl.String,
-            "legacy": pl.Boolean,
-            "suppressed": pl.Boolean,
-            "severity": pl.String,
+            name: dtype
+            for name, dtype in schema.items()
+            if name not in _PROJECTION_DERIVED
         },
     )
     return frame.with_columns(
@@ -163,7 +191,7 @@ def _projection(drafts: List[_Draft]) -> "pl.DataFrame":
         .otherwise(0)
         .cast(pl.Int64)
         .alias("occurrence"),
-        pl.when(pl.col("suppressed"))
+        pl.when(pl.col("is_suppressed"))
         .then(pl.lit("Info"))
         .otherwise(pl.col("severity"))
         .alias("severity_out"),
@@ -664,7 +692,7 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
             vulnerability=vuln,
             finding_id=finding_id,
             legacy=shared_id is None,
-            suppressed=is_suppressed,
+            is_suppressed=is_suppressed,
             severity=severity,
             solution=suppression_solution,
         )

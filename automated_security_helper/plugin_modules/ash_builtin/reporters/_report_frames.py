@@ -28,27 +28,39 @@ import polars as pl
 from automated_security_helper.utils.frame_text import ranks, unwire, wire
 
 
+#: The graded frame's declared shape. The rows are per-finding gradings computed
+#: on the host (no model to derive a spec from), so the one schema dict here is
+#: the record; ``actionable`` is present only when the caller asked for it, and
+#: the drift gate pins both shapes against this dict.
+GRADED_SCHEMA: dict[str, Any] = {
+    "level": pl.String,
+    "is_suppressed": pl.Boolean,
+    "left_out": pl.Boolean,
+    "actionable": pl.Boolean,
+}
+
+
 def graded_frame(
     levels: Sequence[str],
-    suppressed: Sequence[bool],
+    is_suppressed: Sequence[bool],
     left_out: Sequence[bool],
     actionable: Sequence[bool] | None = None,
 ) -> pl.DataFrame:
     """One row per finding: its severity bucket and its three yes/no gradings.
 
-    ``actionable`` is optional because deciding it costs a threshold lookup per
-    finding, and some summaries never need it.
+    ``is_suppressed`` bears the model field's name it carries
+    (``FlatVulnerability.is_suppressed``). ``actionable`` is optional because
+    deciding it costs a threshold lookup per finding, and some summaries never
+    need it.
     """
     columns: dict[str, Any] = {
-        "level": pl.Series("level", list(levels), dtype=pl.String),
-        "suppressed": pl.Series("suppressed", list(suppressed), dtype=pl.Boolean),
-        "left_out": pl.Series("left_out", list(left_out), dtype=pl.Boolean),
+        "level": list(levels),
+        "is_suppressed": list(is_suppressed),
+        "left_out": list(left_out),
     }
     if actionable is not None:
-        columns["actionable"] = pl.Series(
-            "actionable", list(actionable), dtype=pl.Boolean
-        )
-    return pl.DataFrame(columns)
+        columns["actionable"] = list(actionable)
+    return pl.DataFrame(columns, schema={name: GRADED_SCHEMA[name] for name in columns})
 
 
 def flag_total(frame: pl.DataFrame, flag: str) -> int:
@@ -59,7 +71,9 @@ def flag_total(frame: pl.DataFrame, flag: str) -> int:
 def active_level_counts(frame: pl.DataFrame) -> List[tuple[str, int]]:
     """``(level, count)`` for the unsuppressed rows, levels in first-seen order."""
     counted = (
-        frame.filter(~pl.col("suppressed")).group_by("level", maintain_order=True).len()
+        frame.filter(~pl.col("is_suppressed"))
+        .group_by("level", maintain_order=True)
+        .len()
     )
     return [(level, int(count)) for level, count in counted.iter_rows()]
 

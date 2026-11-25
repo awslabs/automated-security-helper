@@ -62,6 +62,8 @@ from automated_security_helper.utils.frame_text import wire
 from automated_security_helper.utils.sarif_utils import _resolve_result_severity
 
 if TYPE_CHECKING:
+    import polars as pl
+
     from automated_security_helper.models.asharp_model import AshAggregatedResults
     from automated_security_helper.schemas.sarif_schema_model import Result
 
@@ -344,6 +346,34 @@ class AsffFormatter:
         }
 
 
+def _derived_schema() -> dict[str, Any]:
+    """The declared shape of the frame :func:`_derived` reads: the prepared
+    severity, the finding's ``is_suppressed`` (the model field's name) and
+    whether its rule names a CVE. The drift gate pins the built frame against
+    this dict."""
+    import polars as pl
+
+    return {
+        "severity": pl.String,
+        "is_suppressed": pl.Boolean,
+        "is_cve": pl.Boolean,
+    }
+
+
+def _derived_frame(prepared: list[dict[str, Any]]) -> "pl.DataFrame":
+    """One row per entry of *prepared*, in order, as :func:`_derived_schema`."""
+    import polars as pl
+
+    return pl.DataFrame(
+        {
+            "severity": [wire(entry["severity"]) for entry in prepared],
+            "is_suppressed": [bool(entry["flat"].is_suppressed) for entry in prepared],
+            "is_cve": [entry["is_cve"] for entry in prepared],
+        },
+        schema=_derived_schema(),
+    )
+
+
 def _derived(prepared: list[dict[str, Any]]) -> list[dict[str, str]]:
     """What a result's severity and two flags give, for every result at once.
 
@@ -356,19 +386,8 @@ def _derived(prepared: list[dict[str, Any]]) -> list[dict[str, str]]:
         return []
     import polars as pl
 
-    frame = pl.DataFrame(
-        {
-            "severity": [wire(entry["severity"]) for entry in prepared],
-            "suppressed": [bool(entry["flat"].is_suppressed) for entry in prepared],
-            "is_cve": [entry["is_cve"] for entry in prepared],
-        },
-        schema={
-            "severity": pl.String,
-            "suppressed": pl.Boolean,
-            "is_cve": pl.Boolean,
-        },
-    )
-    suppressed = pl.col("suppressed")
+    frame = _derived_frame(prepared)
+    suppressed = pl.col("is_suppressed")
     return frame.select(
         # A severity the table does not name is informational.
         pl.col("severity")
