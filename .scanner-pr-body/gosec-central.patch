@@ -1,0 +1,160 @@
+diff --git a/automated_security_helper/core/scanner_inventory.py b/automated_security_helper/core/scanner_inventory.py
+index beeb4d005ca..75676dd2485 100644
+--- a/automated_security_helper/core/scanner_inventory.py
++++ b/automated_security_helper/core/scanner_inventory.py
+@@ -72,6 +72,7 @@ from automated_security_helper.utils.redacted_model import (
+ _VENDORED_SCANNER_PLUGIN_PACKAGES = (
+     "automated_security_helper.plugin_modules.ash_betterleaks_plugins",
+     "automated_security_helper.plugin_modules.ash_ferret_plugins",
++    "automated_security_helper.plugin_modules.ash_gosec_plugins",
+     "automated_security_helper.plugin_modules.ash_guarddog_plugins",
+     "automated_security_helper.plugin_modules.ash_hadolint_plugins",
+     "automated_security_helper.plugin_modules.ash_snyk_plugins",
+diff --git a/automated_security_helper/utils/scanner_names.py b/automated_security_helper/utils/scanner_names.py
+index 96d39acd057..bab360694df 100644
+--- a/automated_security_helper/utils/scanner_names.py
++++ b/automated_security_helper/utils/scanner_names.py
+@@ -135,6 +135,7 @@ SCANNER_TOOL_TYPES: Mapping[str, str] = {
+     "betterleaks": "SECRETS",
+     "ferret-scan": "SECRETS",
+     "gitleaks": "SECRETS",
++    "gosec": "SAST",
+     "grype": "SCA",
+     "guarddog": "SCA",
+     "hadolint": "IAC",
+diff --git a/automated_security_helper/utils/tool_downloads.py b/automated_security_helper/utils/tool_downloads.py
+index 827e575d78c..0059a7f9446 100644
+--- a/automated_security_helper/utils/tool_downloads.py
++++ b/automated_security_helper/utils/tool_downloads.py
+@@ -167,6 +167,7 @@ TOOL_VERSIONS: dict[str, str] = {
+     "betterleaks": "v1.10.1",
+     "cfn-guard": "3.3.0",
+     "gitleaks": "v8.30.1",
++    "gosec": "v2.30.0",
+     "grype": "v0.122.1",
+     "hadolint": "v2.15.1",
+     "opengrep": "v2.0.0",
+@@ -237,6 +238,15 @@ _GITLEAKS_ASSETS: dict[PlatformArch, str] = {
+     ("windows", "arm64"): "gitleaks_8.30.1_windows_arm64.zip",
+ }
+ 
++_GOSEC_ASSETS: dict[PlatformArch, str] = {
++    ("linux", "amd64"): "gosec_2.30.0_linux_amd64.tar.gz",
++    ("linux", "arm64"): "gosec_2.30.0_linux_arm64.tar.gz",
++    ("darwin", "amd64"): "gosec_2.30.0_darwin_amd64.tar.gz",
++    ("darwin", "arm64"): "gosec_2.30.0_darwin_arm64.tar.gz",
++    ("windows", "amd64"): "gosec_2.30.0_windows_amd64.tar.gz",
++    ("windows", "arm64"): "gosec_2.30.0_windows_arm64.tar.gz",
++}
++
+ _GRYPE_ASSETS: dict[PlatformArch, str] = {
+     ("linux", "amd64"): "grype_0.122.1_linux_amd64.tar.gz",
+     ("linux", "arm64"): "grype_0.122.1_linux_arm64.tar.gz",
+@@ -410,6 +420,13 @@ _DIGESTS: dict[str, str] = {
+     "betterleaks_1.10.1_darwin_arm64.tar.gz": "ca91eb3b006f15478411f235b5e2712fb15cea74f6701ebadc2364efe0af1403",  # pragma: allowlist secret
+     "betterleaks_1.10.1_windows_x64.zip": "53d4b37635a999992fb8e1d79f8215279315cbb3b4139314289b69407e79143d",  # pragma: allowlist secret
+     "betterleaks_1.10.1_windows_arm64.zip": "f93d26dfc7b939f967c74e3f908b44faec1b1cb6ffb29c75c0a1d7e713ab8f70",  # pragma: allowlist secret
++    # gosec v2.30.0
++    "gosec_2.30.0_linux_amd64.tar.gz": "3fcce2c4e802ff4169217874602a7df355e9a37bcb6ffaa34b08f3d5f336cdfb",  # pragma: allowlist secret
++    "gosec_2.30.0_linux_arm64.tar.gz": "0867994920453070a5d6a713e35921a3058473e5c3bf777fdd5a2d6f95313fda",  # pragma: allowlist secret
++    "gosec_2.30.0_darwin_amd64.tar.gz": "1b10b496954791f4b57448722f0cb93c0fa4aba24e9d286c0459dfde593e0898",  # pragma: allowlist secret
++    "gosec_2.30.0_darwin_arm64.tar.gz": "cac8c480673fc179798402b6d86efc12b6bcf11c18bcf377fda02cc55846dd97",  # pragma: allowlist secret
++    "gosec_2.30.0_windows_amd64.tar.gz": "503bdfe6155584f2497ef855846b66406bce5b574ce1a9c7a7bb171aff2caa02",  # pragma: allowlist secret
++    "gosec_2.30.0_windows_arm64.tar.gz": "836d13d37d53356d6214cdee7dae3fb2a3f9d5baf2b2ee38f6d2329c7c62e5aa",  # pragma: allowlist secret
+     # cfn-guard 3.3.0
+     "cfn-guard-v3-x86_64-linux-latest.tar.gz": "ecf25d586c98057836fac28a8e498569f6daded8f386fd13327c82a4daa45d6e",  # pragma: allowlist secret
+     "cfn-guard-v3-aarch64-linux-latest.tar.gz": "7b8a7b4befdf47e7f53c0023a8c79799b7d8dde69ab8a77ce3078211920c8ff4",  # pragma: allowlist secret
+@@ -478,6 +495,13 @@ _EXECUTABLE_DIGESTS: dict[str, str] = {
+     "betterleaks_1.10.1_darwin_arm64.tar.gz": "13ac5109fa85a590c7ba6e7f130311e0c60a2bf582c3aac073176c93b46621a8",  # pragma: allowlist secret
+     "betterleaks_1.10.1_windows_x64.zip": "d9946b77870a30838f9a6a3591ea45c9c6530abfb0cf3890d2046b3d42816049",  # pragma: allowlist secret
+     "betterleaks_1.10.1_windows_arm64.zip": "ed9ee26a6f1a8d7f042712e524802911e23fd1b1cb0561ecb606b4faab5882d4",  # pragma: allowlist secret
++    # gosec v2.30.0 (the executable inside each archive: gosec, gosec.exe on windows)
++    "gosec_2.30.0_linux_amd64.tar.gz": "09008194e5c3a192a4b77d3872b591c638ccb698c6996f1ccbe2cd37d346eb6c",  # pragma: allowlist secret
++    "gosec_2.30.0_linux_arm64.tar.gz": "d9672cfbdeffe6ca40195a06cd8719a43eb0a08decf84a413d703840c90364d9",  # pragma: allowlist secret
++    "gosec_2.30.0_darwin_amd64.tar.gz": "91fd117ee448a29fd824da9da107cf595c6d2ef8c247030822320e122a949f16",  # pragma: allowlist secret
++    "gosec_2.30.0_darwin_arm64.tar.gz": "e2658e81b2eeb8239c409e72bc036a5ac51a896e7b67e1cb07789c94f35baa66",  # pragma: allowlist secret
++    "gosec_2.30.0_windows_amd64.tar.gz": "77bf70434f4779f80d9ed9410c0cfaa81f0f0ce7575653ad3ce4531eff3ed322",  # pragma: allowlist secret
++    "gosec_2.30.0_windows_arm64.tar.gz": "b70e0dd15744450ec45350cf6e75ff27da677e556bc315a0bd219773e0bd6889",  # pragma: allowlist secret
+     # cfn-guard 3.3.0
+     "cfn-guard-v3-x86_64-linux-latest.tar.gz": "308d1d109c0952036ed917fb09e45f3b9fb780f1dd65e15d8519816d70e0d9ab",  # pragma: allowlist secret
+     "cfn-guard-v3-aarch64-linux-latest.tar.gz": "3b189145bdd679d7537a1385de94f9c95e338b40e57ffa3bd81fe9a01c5831fa",  # pragma: allowlist secret
+@@ -564,6 +588,7 @@ _RELEASE_BASE_URLS: dict[str, str] = {
+     "betterleaks": "https://github.com/betterleaks/betterleaks/releases/download",
+     "cfn-guard": "https://github.com/aws-cloudformation/cloudformation-guard/releases/download",
+     "gitleaks": "https://github.com/gitleaks/gitleaks/releases/download",
++    "gosec": "https://github.com/securego/gosec/releases/download",
+     "grype": "https://github.com/anchore/grype/releases/download",
+     "hadolint": "https://github.com/hadolint/hadolint/releases/download",
+     "opengrep": "https://github.com/opengrep/opengrep/releases/download",
+@@ -577,6 +602,7 @@ _ASSET_TABLES: dict[str, dict[PlatformArch, str]] = {
+     "betterleaks": _BETTERLEAKS_ASSETS,
+     "cfn-guard": _CFN_GUARD_ASSETS,
+     "gitleaks": _GITLEAKS_ASSETS,
++    "gosec": _GOSEC_ASSETS,
+     "grype": _GRYPE_ASSETS,
+     "hadolint": _HADOLINT_ASSETS,
+     "opengrep": _OPENGREP_ASSETS,
+diff --git a/tests/unit/plugin_modules/test_scanner_facets_corpus_consistency.py b/tests/unit/plugin_modules/test_scanner_facets_corpus_consistency.py
+index 3de3c6ef912..d52c99ec620 100644
+--- a/tests/unit/plugin_modules/test_scanner_facets_corpus_consistency.py
++++ b/tests/unit/plugin_modules/test_scanner_facets_corpus_consistency.py
+@@ -343,6 +343,7 @@ CORPORA: Mapping[str, Optional[CorpusSpec]] = {
+     ),
+     "bandit": CorpusSpec("bandit", sarif=("captured/*.sarif",)),
+     "betterleaks": CorpusSpec("betterleaks", sarif=("captured/*.sarif",)),
++    "gosec": CorpusSpec("gosec", sarif=("captured/*.sarif",)),
+     "cdk-nag": CorpusSpec(
+         "cdk",
+         missing="cdk-nag's committed output is the NagReport CSV and no prep "
+@@ -559,7 +560,7 @@ def test_the_gate_carries_no_waiver_but_the_register() -> None:
+ def test_the_registry_and_the_corpus_table_agree() -> None:
+     assert not _REMAINING_LOAD_ERRORS, _REMAINING_LOAD_ERRORS
+     names = {_name(cls) for cls in SCANNER_CLASSES}
+-    assert len(SCANNER_CLASSES) == 22, sorted(c.__name__ for c in SCANNER_CLASSES)
++    assert len(SCANNER_CLASSES) == 23, sorted(c.__name__ for c in SCANNER_CLASSES)
+     assert names == set(CORPORA) == set(SCANNER_TOOL_TYPES), (
+         f"registry {sorted(names)} / corpus table {sorted(CORPORA)}: a scanner "
+         "needs a CORPORA row (a corpus, or None with the fixture to author)"
+diff --git a/tests/unit/plugin_modules/test_scanner_facets_registry_totality.py b/tests/unit/plugin_modules/test_scanner_facets_registry_totality.py
+index f82a04e8991..9f24679c439 100644
+--- a/tests/unit/plugin_modules/test_scanner_facets_registry_totality.py
++++ b/tests/unit/plugin_modules/test_scanner_facets_registry_totality.py
+@@ -162,4 +162,4 @@ def test_no_registered_scanner_rests_on_the_unknown_offline_strategy(
+ 
+ def test_the_enumeration_holds_all_twenty_two_shipped_scanners() -> None:
+     """The planted-control count: a shrunken universe fails here, not silently."""
+-    assert len(SCANNER_CLASSES) == 22, sorted(c.__name__ for c in SCANNER_CLASSES)
++    assert len(SCANNER_CLASSES) == 23, sorted(c.__name__ for c in SCANNER_CLASSES)
+diff --git a/tests/unit/plugin_modules/test_scanner_operational_facets_consistency.py b/tests/unit/plugin_modules/test_scanner_operational_facets_consistency.py
+index 75f410462e5..604aaa2c9af 100644
+--- a/tests/unit/plugin_modules/test_scanner_operational_facets_consistency.py
++++ b/tests/unit/plugin_modules/test_scanner_operational_facets_consistency.py
+@@ -110,7 +110,7 @@ def _instances(_context) -> dict[type, ScannerPluginBase]:
+ 
+ def test_the_universe_is_the_twenty_two_shipped_scanners() -> None:
+     assert not _REMAINING_LOAD_ERRORS, _REMAINING_LOAD_ERRORS
+-    assert len(SCANNER_CLASSES) == 22, sorted(c.__name__ for c in SCANNER_CLASSES)
++    assert len(SCANNER_CLASSES) == 23, sorted(c.__name__ for c in SCANNER_CLASSES)
+     names = [_ops(cls).scanner_name for cls in SCANNER_CLASSES]
+     assert len(set(names)) == len(names), f"duplicate scanner_name in {names}"
+     assert set(names) == set(SCANNER_TOOL_TYPES), (
+@@ -237,6 +237,7 @@ _NATIVE_FIXTURES: dict[str, tuple[str, opsf.OutputFormat]] = {
+     "bandit": ("bandit/captured/bandit-1.9.4-m0.sarif", opsf.OutputFormat.SARIF),
+     "betterleaks": ("betterleaks/captured/positive.sarif", opsf.OutputFormat.SARIF),
+     "gitleaks": ("gitleaks/gitleaks-8.30.1.sarif", opsf.OutputFormat.SARIF),
++    "gosec": ("gosec/captured/positive.sarif", opsf.OutputFormat.SARIF),
+     "cfn-lint": (
+         "cfn_lint_guard/captured/cfn-lint-1.57.1-insecure.sarif",
+         opsf.OutputFormat.SARIF,
+diff --git a/tests/unit/walked_package.py b/tests/unit/walked_package.py
+index 34b6d79d3a8..abffdebc444 100644
+--- a/tests/unit/walked_package.py
++++ b/tests/unit/walked_package.py
+@@ -51,6 +51,7 @@ PACKAGE_DIRS = frozenset(
+         "plugin_modules/ash_builtin/reporters",
+         "plugin_modules/ash_builtin/scanners",
+         "plugin_modules/ash_ferret_plugins",
++        "plugin_modules/ash_gosec_plugins",
+         "plugin_modules/ash_guarddog_plugins",
+         "plugin_modules/ash_hadolint_plugins",
+         "plugin_modules/ash_snyk_plugins",
