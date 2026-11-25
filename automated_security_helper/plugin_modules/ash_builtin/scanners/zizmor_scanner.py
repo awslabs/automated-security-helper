@@ -832,16 +832,14 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
             native_field="results[].locations[].physicalLocation.region.snippet.text",
         ),
         references=FacetDecl(
-            state=FacetState.DROPPED,
-            native_field="tool.driver.rules[].helpUri",
-            reason="rule-level only: the flat reader takes references from "
-            "result relatedLocations, so the help link is discarded today",
+            state=FacetState.MAPPED,
+            native_field="tool.driver.rules[].helpUri, read into the flat "
+            "references when the result carries no relatedLocations",
         ),
         tags=FacetDecl(
-            state=FacetState.DROPPED,
-            native_field="tool.driver.rules[].properties.tags",
-            reason="rule-level only: the flat reader takes tags from result "
-            "properties, so the rule tags are discarded today",
+            state=FacetState.MAPPED,
+            native_field="tool.driver.rules[].properties.tags, read into the "
+            "flat tags when the result carries none",
         ),
         extras=FacetDecl(
             state=FacetState.MAPPED,

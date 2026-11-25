@@ -379,17 +379,20 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
             native_field="results[].locations[].physicalLocation.region.snippet.text",
         ),
         references=FacetDecl(
-            state=FacetState.DROPPED,
-            native_field="tool.driver.rules[].help.markdown",
-            reason="rule-level only: the flat reader takes references from "
-            "result relatedLocations, so the rule help is discarded today",
+            state=FacetState.NA,
+            reason="UNCONFIRMED: the committed captures' SARIF rules carry no "
+            "helpUri (the rule help is help.markdown text, not a link). A "
+            "rule helpUri would be read into the flat references by the "
+            "shared rule read (FlatVulnerability.from_sarif_result); "
+            "redeclare MAPPED when a capture carrying one is committed (the "
+            "corpus gate fails this cell as soon as the observed column is "
+            "populated)",
         ),
         tags=FacetDecl(
-            state=FacetState.DROPPED,
-            native_field="tool.driver.rules[].properties.tags",
-            reason="rule-level only: the flat reader takes tags from result "
-            "properties, so the rule tags are discarded today (they still "
-            "feed the CWE read)",
+            state=FacetState.MAPPED,
+            native_field="tool.driver.rules[].properties.tags, read into the "
+            "flat tags when the result carries none (they also feed the CWE "
+            "read)",
         ),
         extras=FacetDecl(
             state=FacetState.MAPPED,
