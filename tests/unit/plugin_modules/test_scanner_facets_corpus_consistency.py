@@ -353,23 +353,20 @@ CORPORA: Mapping[str, Optional[CorpusSpec]] = {
     "checkov": CorpusSpec("checkov", sarif=("captured/*.sarif",), prep="checkov"),
     "detect-secrets": CorpusSpec("detect_secrets", prep="detect-secrets"),
     "ferret-scan": CorpusSpec(
-        "ferret-scan",
-        missing="ferret-scan commits only its input samples (sample.txt, a "
-        ".docx), no captured output",
+        "ferret-scan", sarif=("captured/*.sarif",), prep="ferret-scan"
     ),
     "gitleaks": CorpusSpec("gitleaks", sarif=("gitleaks-*.sarif",), prep="gitleaks"),
-    "grype": CorpusSpec(
-        "grype",
-        missing="grype commits native JSON only (grype/grype.src.json); the "
-        "SARIF is rendered inside test_grype_fix_available_conformance.py, "
-        "not committed. Commit a `grype -o sarif` capture or register a prep",
-    ),
+    "grype": CorpusSpec("grype", sarif=("captured/*.sarif",), prep="grype"),
     "guarddog": CorpusSpec("guarddog", prep="guarddog"),
     "hadolint": CorpusSpec("hadolint", sarif=("captured/*.sarif",)),
     "npm-audit": CorpusSpec("npmaudit", prep="npm-audit"),
     "opengrep": CorpusSpec("opengrep", sarif=("captured/*.sarif",)),
     "semgrep": CorpusSpec("semgrep", sarif=("captured/*.sarif",)),
-    "snyk-code": None,
+    # Authored in the shape `snyk code test --sarif` writes (see the README in
+    # the directory); a licensed capture committed under captured/ joins it.
+    "snyk-code": CorpusSpec(
+        "snyk", sarif=("authored/*.sarif", "captured/*.sarif"), prep="snyk-code"
+    ),
     "syft": CorpusSpec(
         "syft",
         missing="syft commits its native SBOM JSON only (syft/syft.src.json); "
@@ -383,10 +380,7 @@ CORPORA: Mapping[str, Optional[CorpusSpec]] = {
 }
 
 #: Why a scanner with no CorpusSpec has none (named, not authored).
-_NO_FIXTURE_DIRECTORY = {
-    "snyk-code": "no tests/test_data/scanners/snyk directory; commit a "
-    "captured `snyk code test --sarif` result (needs a licensed run)",
-}
+_NO_FIXTURE_DIRECTORY: dict[str, str] = {}
 
 
 def _load_sarif(path: Path) -> SarifReport:
@@ -571,6 +565,63 @@ def _materialized(template: Path, scratch: Path) -> Path:
     return destination
 
 
+def _prep_ferret_scan(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]]]:
+    """The committed `ferret-scan --format sarif` capture through the adapter's
+    own base-relative URI resolution, the step it applies before the report is
+    built."""
+    from automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner import (
+        _resolve_sarif_uri_base_ids,
+    )
+
+    for pattern in spec.sarif:
+        for path in sorted((_FIXTURES / spec.directory).glob(pattern)):
+            document = json.loads(path.read_text(encoding="utf-8"))
+            _resolve_sarif_uri_base_ids(document)
+            report = SarifReport.model_validate(document)
+            yield report, [r for run in report.runs or [] for r in run.results or []]
+
+
+def _prep_grype(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]]]:
+    """The committed `grype -o sarif` capture through the adapter's own
+    post-processing (URIs, package identity, fix state). The scan target is an
+    empty directory: the capture was taken over an SBOM, so no lockfile sits
+    beside it for the package-path lookup."""
+    import tempfile
+
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.grype_scanner import (
+        GrypeScanner,
+    )
+
+    with tempfile.TemporaryDirectory(prefix="facets-grype-corpus-") as scratch:
+        for pattern in spec.sarif:
+            for path in sorted((_FIXTURES / spec.directory).glob(pattern)):
+                # The step reads no instance state; building the scanner would
+                # need a run context this pure read has no use for.
+                report = GrypeScanner.__new__(GrypeScanner)._post_process_sarif(
+                    _load_sarif(path), [], Path(scratch)
+                )
+                yield (
+                    report,
+                    [r for run in report.runs or [] for r in run.results or []],
+                )
+
+
+def _prep_snyk_code(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]]]:
+    """The committed SARIF through the adapter's own rule-CWE normalization,
+    the one step the scanner applies before it builds the report."""
+    from automated_security_helper.plugin_modules.ash_snyk_plugins.snyk_code_scanner import (
+        normalize_rule_cwe_into_tags,
+    )
+
+    for pattern in spec.sarif:
+        for path in sorted((_FIXTURES / spec.directory).glob(pattern)):
+            document = normalize_rule_cwe_into_tags(
+                json.loads(path.read_text(encoding="utf-8"))
+            )
+            report = SarifReport.model_validate(document)
+            yield report, [r for run in report.runs or [] for r in run.results or []]
+
+
 def _prep_trivy(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]]]:
     """The committed SARIF through the adapter's own pure steps.
 
@@ -698,9 +749,12 @@ _PREPS: Mapping[
     "cfn-nag": _prep_cfn_nag,
     "checkov": _prep_checkov,
     "detect-secrets": _prep_detect_secrets,
+    "ferret-scan": _prep_ferret_scan,
     "gitleaks": _prep_gitleaks,
+    "grype": _prep_grype,
     "guarddog": _prep_guarddog,
     "npm-audit": _prep_npm_audit,
+    "snyk-code": _prep_snyk_code,
     "trivy": _prep_trivy,
 }
 
@@ -808,6 +862,48 @@ def test_the_registry_and_the_corpus_table_agree() -> None:
         assert (_FIXTURES / spec.directory).is_dir(), f"{name}: {spec.directory}"
         if not spec.sarif and spec.prep is None:
             assert spec.missing, f"{name}: a corpus-less spec names what to author"
+
+
+def test_discovery_does_not_depend_on_which_tier_declares_a_scanner() -> None:
+    """The gate reads every plugin package's ``ASH_SCANNERS`` the same way.
+
+    Core (ash_builtin), the alpha ash_*_plugins packages and any package an SDK
+    plugin ships are one population here: the gate names no tier, and a scanner
+    is in or out by declaring itself, not by where it lives. The registered set
+    must equal the union of every package's list, and must span more than one
+    package so the check is not satisfied by a single tier.
+    """
+    declared: set[type] = set()
+    packages_with_scanners: set[str] = set()
+    for info in pkgutil.iter_modules(plugin_modules.__path__):
+        if not info.ispkg:
+            continue
+        package = importlib.import_module(f"{plugin_modules.__name__}.{info.name}")
+        found = list(getattr(package, "ASH_SCANNERS", []))
+        if found:
+            packages_with_scanners.add(info.name)
+        declared.update(found)
+    assert set(SCANNER_CLASSES) == declared
+    assert len(packages_with_scanners) >= 2, packages_with_scanners
+    # No scanner is looked up by the name of a tier or a package.
+    body = (
+        Path(__file__)
+        .read_text(encoding="utf-8")
+        .split("def test_discovery_does_not_depend")[0]
+    )
+    for needle in ("startswith(" + '"ash_', "== " + '"ash_builtin"'):
+        assert needle not in body, needle
+
+
+def test_the_scanners_read_from_captures_and_authored_shapes_are_observed() -> None:
+    """The scanners whose cells were redeclared unread are observed now."""
+    for name in ("snyk-code", "grype", "ferret-scan"):
+        frame = observed_frame(name, CORPORA[name])
+        assert frame is not None, name
+        assert frame["rule_id"][1] > 0 and frame["rule_id"][0] == frame["rule_id"][1]
+        assert frame["file_path"][0] > 0 and frame["message"][0] > 0, name
+    assert observed_frame("grype", CORPORA["grype"])["fingerprints"][0] > 0
+    assert observed_frame("ferret-scan", CORPORA["ferret-scan"])["fingerprints"][0] == 0
 
 
 def test_the_corpus_is_not_vacuous() -> None:

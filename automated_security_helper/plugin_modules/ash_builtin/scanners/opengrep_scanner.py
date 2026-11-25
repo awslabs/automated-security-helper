@@ -495,14 +495,14 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
                 ),
             ),
             prerequisites=opsf.PrerequisitesFacet(
-                kinds=(opsf.Prerequisite.GIT_CHECKOUT,),
+                kinds=(opsf.Prerequisite.NONE,),
                 note=(
-                    "opengrep runs git ls-files itself and exits 2 when git refuses the "
-                    "directory; ASH supplies safe.directory"
-                ),
-                unconfirmed=(
-                    "behavior on a tree that is not a git checkout was not read; the "
-                    "declared prerequisite is the conservative reading"
+                    "no prerequisite: opengrep 2.0.0 (the pinned release, sha256 checked) "
+                    "scanned a copy of tests/test_data/scanners/opengrep/fixture_repo with "
+                    "no .git directory and exited 0 with the one finding it reports on a "
+                    "git copy of the same files. In a git checkout it runs git ls-files "
+                    "itself and exits 2 when git refuses the directory; ASH supplies "
+                    "safe.directory"
                 ),
             ),
         )
