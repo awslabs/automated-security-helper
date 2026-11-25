@@ -3380,7 +3380,6 @@
       'error': "Invalid severity threshold: 'SEVERE'. Must be one of: ALL, LOW, MEDIUM, HIGH, CRITICAL",
       'error_category': 'invalid_parameter',
       'error_type': 'MCPResourceError',
-      'execution_used': 'in_process',
       'exit_code': 5,
       'exit_code_meaning': 'usage error',
       'operation': 'scan_directory',

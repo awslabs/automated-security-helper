@@ -352,10 +352,16 @@ class TestRunAshScan:
         ):
             result = await run_ash_scan(ctx=mock_ctx, source_dir=str(tmp_path))
 
-        # As given, plus the one key every run_ash_scan answer now carries: which
-        # execution path ran.
-        assert result == {**mock_result, "execution_used": "in_process"}
+        assert result == mock_result
         mock_ctx.error.assert_called()
+
+    def test_run_ash_scan_has_no_execution_selector(self):
+        """One execution path exists, so the tool takes no argument that names one."""
+        import inspect
+
+        from automated_security_helper.cli.mcp_server import run_ash_scan
+
+        assert "execution" not in inspect.signature(run_ash_scan).parameters
 
     @pytest.mark.asyncio
     async def test_scan_exception_handling(self, mock_ctx, tmp_path):

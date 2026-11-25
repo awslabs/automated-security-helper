@@ -675,7 +675,6 @@ async def run_ash_scan(
     severity_threshold: Optional[str] = None,
     config_path: Optional[str] = None,
     clean_output: bool = True,
-    execution: str = "auto",
 ) -> Dict[str, Any]:
     """
     Start a security scan and return immediately.
@@ -738,19 +737,6 @@ async def run_ash_scan(
             replaced once it finishes; with false they stay visible until the scan's
             own set-up moves them a moment later. A call refused because the
             directory already has a scan touches nothing in it.
-        execution: How the scan executes: "auto" (the default), "in_process" or
-            "express". auto and in_process run the scan in this server's own
-            process, today's path, which is what keeps the in-process progress
-            hooks. express asks for the warm express daemon and, like the CLI's
-            own thin client, falls back to the in-process run whenever
-            delegation cannot preserve the scan exactly -- which on this server
-            is always, for two measured reasons the response names: the daemon
-            protocol takes over the client's stdio file descriptors, and this
-            server's are the JSON-RPC transport; and the sandbox restrictions
-            the server passes (the config base gate, the client config policy)
-            have no command-line form, so a delegated run would drop them. A
-            fallback costs warmth, never correctness; the response's
-            execution_used says which path ran.
 
     Refused (error_type source_delivery_busy) while clear_source, set_source_git,
     set_source_zip_finalize, set_source_image or
@@ -800,42 +786,6 @@ async def run_ash_scan(
             # A call that carries no session is the request's own fault, as an
             # unusable session header is, so it reports the same usage code.
             return with_exit_code(refusal, REFUSED_USAGE_EXIT_CODE)
-
-        # The execution selection, validated before anything acts: an unknown
-        # word is the request's own fault, the usage code, as an unusable
-        # severity_threshold is.
-        execution_asked = (execution or "auto").strip().lower()
-        if execution_asked not in ("auto", "in_process", "express"):
-            message = (
-                f"execution must be one of auto, in_process or express, not "
-                f"{execution!r}"
-            )
-            await _tell_client_error(ctx, raw_controls_on_one_line(message))
-            return with_exit_code(
-                {
-                    "success": False,
-                    "error": raw_controls_on_one_line(message),
-                    "error_type": "invalid_execution",
-                },
-                REFUSED_USAGE_EXIT_CODE,
-            )
-        execution_used = "in_process"
-        if execution_asked == "express":
-            # The thin-client contract (express/client.py): anything that
-            # cannot be delegated exactly errs toward the in-process run,
-            # which costs warmth and never correctness. Delegation from this
-            # server cannot be exact on this tip: the daemon takes over the
-            # client's stdio (this server's is the JSON-RPC transport), and
-            # the sandbox restrictions below have no command-line form, so a
-            # delegated run would drop them.
-            await _tell_client(
-                ctx,
-                "info",
-                "execution=express fell back to the in-process run: the "
-                "express daemon's handover takes the client's stdio, which "
-                "on this server is the JSON-RPC transport, and the session's "
-                "sandbox restrictions have no command-line form.",
-            )
 
         # An empty or blank source_dir names no directory: it is the omitted
         # form, which resolves to the delivered image or tree or refuses,
@@ -1127,9 +1077,6 @@ async def run_ash_scan(
             clean_output=clean_output,
             asset=scan_asset,
         )
-        # Which path ran, for the execution argument's contract: in_process is
-        # the only one this server runs today, express having erred toward it.
-        result.setdefault("execution_used", execution_used)
 
         for warning in result.get("warnings") or []:
             await _tell_client(ctx, "warning", raw_controls_on_one_line(str(warning)))

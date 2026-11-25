@@ -97,13 +97,6 @@ One session has one subject and the latest delivery wins. `run_ash_scan` with no
 workspace, since an image has no target directory. See
 [Run the MCP server](mcp-server.md).
 
-`run_ash_scan` takes an `execution` argument: `auto` and `in_process` run the scan in
-the server's own process, and `express` asks for the express daemon. The server answers
-`express` with the in-process run today, because the daemon takes over the client's
-standard streams, which on the server are the JSON-RPC transport, and the session's
-sandbox restrictions have no command-line form. The response's `execution_used` says
-which path ran.
-
 ## Findings, identity and suppressions
 
 A finding inside an image keeps its in-image path as `file_path`, exactly as the tool
