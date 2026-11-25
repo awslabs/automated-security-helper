@@ -1,0 +1,15 @@
+# Benign test fixture for the facets corpus gate (never executed).
+# One local semgrep rule (no registry, no network at scan time), mirroring
+# tests/test_data/scanners/opengrep/fixture_repo/m0_rule.yaml with CWE
+# metadata, so a captured `semgrep scan --sarif` run shows where the CWE, the
+# rule tags and the fingerprints land in semgrep's own SARIF.
+rules:
+  - id: m0-subprocess-shell-true
+    languages: [python]
+    severity: ERROR
+    message: "ASH M0 fixture rule: subprocess.call with shell=True"
+    metadata:
+      cwe:
+        - "CWE-78: Improper Neutralization of Special Elements used in an OS Command"
+    patterns:
+      - pattern: subprocess.call(..., shell=True)

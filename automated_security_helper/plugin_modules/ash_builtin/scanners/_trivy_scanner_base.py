@@ -2175,8 +2175,9 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
             version = lines[1][len("Installed Version: ") :].strip() or None
         return name, version
 
+    @classmethod
     def _attach_package_identity(
-        self, sarif_report: SarifReport, target: Path
+        cls, sarif_report: SarifReport, target: Path
     ) -> SarifReport:
         """Give each dependency result one package copy and say which it is.
 
@@ -2198,7 +2199,7 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
             new_results = []
             for result in run.results or []:
                 message = result.message.root.text if result.message else None
-                name, version = self._package_from_message(message)
+                name, version = cls._package_from_message(message)
                 if name is None:
                     new_results.append(result)
                     continue
@@ -2233,11 +2234,11 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
                     for location, path in zip(result.locations or [], resolved):
                         copy = result.model_copy(deep=True)
                         copy.locations = [location.model_copy(deep=True)]
-                        self._set_identity(copy, name, version, path)
+                        cls._set_identity(copy, name, version, path)
                         new_results.append(copy)
                 else:
                     path = resolved[0] if len(resolved) == 1 else None
-                    self._set_identity(result, name, version, path)
+                    cls._set_identity(result, name, version, path)
                     new_results.append(result)
             run.results = new_results
         return sarif_report

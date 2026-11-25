@@ -1875,10 +1875,23 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
         final_args: List[str],
         target: Path,
     ) -> SarifReport:
-        """Drop ASH's own files, rate every result, drop empty fingerprints, keep
-        snippets redacted, and report the files the re-scan did not reach."""
+        """Drop ASH's own files, report the files the re-scan did not reach, and
+        normalize every result (:meth:`normalize_results`)."""
         self._drop_results_under_output_dir(sarif_report, target)
         self._report_rescan_skipped(sarif_report)
+        return self.normalize_results(sarif_report)
+
+    @staticmethod
+    def normalize_results(sarif_report: SarifReport) -> SarifReport:
+        """Rate every result, tag it, drop empty fingerprints, keep snippets redacted.
+
+        The result-level half of the adapter's post-processing, separated from
+        the instance-bound half (output-directory dropping, re-scan reporting)
+        so that conformance tests can drive gitleaks' own normalization over a
+        committed capture without a scanner instance, the way
+        ``CfnGuardScanner.normalize_results`` is driven. Pure over the report:
+        no tool is run and nothing outside the report is read.
+        """
         for result in sarif_report.get_all_results():
             # See "Severity" in the module docstring.
             result.level = Level.error

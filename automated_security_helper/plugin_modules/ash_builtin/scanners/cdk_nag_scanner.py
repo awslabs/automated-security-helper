@@ -1218,9 +1218,11 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
             "YAML-rendered into Region.snippet",
         ),
         references=FacetDecl(
-            state=FacetState.MAPPED,
+            state=FacetState.DROPPED,
             native_field="per-pack rule help URI (_rule_help_uri, "
             "ReportingDescriptor.helpUri)",
+            reason="rule-level only: the flat reader takes references from "
+            "result relatedLocations, so the help link is discarded today",
         ),
         tags=FacetDecl(
             state=FacetState.MAPPED,

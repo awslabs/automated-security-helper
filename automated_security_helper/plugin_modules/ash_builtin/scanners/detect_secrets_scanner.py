@@ -2566,6 +2566,66 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                     )
         return collection
 
+    @staticmethod
+    def build_secret_result(
+        *,
+        finding_type: str,
+        uri: str,
+        line_number: int,
+        start_column: Optional[int] = None,
+        suppressions: Optional[List[Any]] = None,
+        config_name: str = "detect-secrets",
+        tool_type: str = "SECRETS",
+    ) -> Result:
+        """One SARIF result for one detect-secrets finding, value-free.
+
+        The result-shaped half of :meth:`scan`'s reporting loop, separated so
+        conformance tests can drive it over a committed worker-output capture
+        (``PotentialSecret.json()`` dicts, hashed only) without a scanner
+        instance, the way ``CfnGuardScanner.normalize_results`` is driven.
+        Pure: no library scan runs and nothing outside the arguments is read.
+        The message and snippet are synthesized from the finding's type and
+        place; the secret value never enters the report.
+        """
+        rule_id = re.sub(pattern=r"\W+", repl="-", string=finding_type).upper()
+        return Result(
+            ruleId=f"SECRET-{rule_id}",
+            suppressions=suppressions,
+            properties=PropertyBag(
+                tags=[
+                    "detect-secrets",
+                    "secret",
+                    "security",
+                    f"tool_name::{config_name}",
+                    f"tool_type::{tool_type}",
+                ],
+            ),
+            level=Level.error,
+            kind=Kind.fail,
+            message=Message(
+                text=f"Secret of type '{finding_type}' detected in file "
+                f"'{uri}' at line {line_number}"
+            ),
+            locations=[
+                Location(
+                    id=1,
+                    physicalLocation=PhysicalLocation(
+                        artifactLocation=ArtifactLocation(
+                            uri=uri,
+                        ),
+                        region=Region(
+                            startLine=line_number,
+                            endLine=line_number,
+                            startColumn=start_column,
+                            snippet=ArtifactContent(
+                                text=f"Secret of type {finding_type} detected"
+                            ),
+                        ),
+                    ),
+                )
+            ],
+        )
+
     def _finding_uri(self, key: str, scan_root: Path) -> str:
         """The URI of the file detect-secrets keyed as *key*, relative to the source.
 
@@ -3436,61 +3496,23 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                     suppressed = is_known and not is_real
                     if suppressed:
                         kept_known += 1
-                    rule_id = re.sub(
-                        pattern=r"\W+", repl="-", string=finding.type
-                    ).upper()
                     results.append(
-                        Result(
-                            # Adjust as needed to capture findings from scanner as
-                            # SARIF Result objects. Reference the current CDK Nag
-                            # Scanner/Wrapper for examples on custom SARIF structure.
-                            ruleId=f"SECRET-{rule_id}",
+                        self.build_secret_result(
+                            finding_type=finding.type,
+                            uri=uri,
+                            line_number=finding.line_number,
+                            # Where the secret starts, so two of one type on one
+                            # line are two findings; see _scan_in_worker.
+                            start_column=self._secret_columns.get(
+                                (filename, finding.secret_hash, finding.type)
+                            ),
                             suppressions=(
                                 [baseline_suppression]
                                 if suppressed and baseline_suppression is not None
                                 else None
                             ),
-                            properties=PropertyBag(
-                                tags=[
-                                    "detect-secrets",
-                                    "secret",
-                                    "security",
-                                    f"tool_name::{self.config.name}",
-                                    f"tool_type::{self.tool_type or 'UNKNOWN'}",
-                                ],
-                            ),
-                            level=Level.error,
-                            kind=Kind.fail,
-                            message=Message(
-                                text=f"Secret of type '{finding.type}' detected in file '{uri}' at line {finding.line_number}"
-                            ),
-                            locations=[
-                                Location(
-                                    id=1,
-                                    physicalLocation=PhysicalLocation(
-                                        artifactLocation=ArtifactLocation(
-                                            uri=uri,
-                                        ),
-                                        region=Region(
-                                            startLine=finding.line_number,
-                                            endLine=finding.line_number,
-                                            # Where the secret starts, so two of
-                                            # one type on one line are two
-                                            # findings; see _scan_in_worker.
-                                            startColumn=self._secret_columns.get(
-                                                (
-                                                    filename,
-                                                    finding.secret_hash,
-                                                    finding.type,
-                                                )
-                                            ),
-                                            snippet=ArtifactContent(
-                                                text=f"Secret of type {finding.type} detected"
-                                            ),
-                                        ),
-                                    ),
-                                )
-                            ],
+                            config_name=self.config.name,
+                            tool_type=str(self.tool_type or "UNKNOWN"),
                         )
                     )
             if kept_known:
