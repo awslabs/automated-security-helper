@@ -1478,8 +1478,9 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
             # the scanned tree. Skip them unless explicitly requested via
             # frameworks (or an external checkov config file's framework key).
             for vcs_framework in _VCS_CONFIGURATION_FRAMEWORKS:
-                if vcs_framework not in skip_frameworks:
-                    skip_frameworks.append(vcs_framework)
+                if vcs_framework in frameworks or vcs_framework in skip_frameworks:
+                    continue
+                skip_frameworks.append(vcs_framework)
         for item in skip_frameworks:
             self.args.extra_args.append(
                 ToolExtraArg(key="--skip-framework", value=item)
