@@ -390,9 +390,9 @@ class DotnetVulnerableScanner(ScannerPluginBase[DotnetVulnerableScannerConfig]):
             "referenced from)",
         ),
         line_range=FacetDecl(
-            state=FacetState.NA,
-            reason="the report has no line; the result sits on line 1 of the "
-            "project file",
+            state=FacetState.MAPPED,
+            native_field="SARIF region.startLine (the report has no line; the "
+            "adapter always writes line 1 of the project file)",
         ),
         column=FacetDecl(
             state=FacetState.NA,
@@ -452,9 +452,11 @@ class DotnetVulnerableScanner(ScannerPluginBase[DotnetVulnerableScannerConfig]):
             reason="the report quotes no source text",
         ),
         references=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field='vulnerability "advisoryurl", written as the result '
-            'property "advisory_url" and in the message',
+            state=FacetState.DROPPED,
+            native_field='vulnerability "advisoryurl"',
+            reason="kept only in the message text and the advisory_url result "
+            "property; the shared pipeline reads relatedLocations for references, "
+            "which this adapter does not write",
         ),
         tags=FacetDecl(
             state=FacetState.MAPPED,
@@ -800,7 +802,8 @@ class DotnetVulnerableScanner(ScannerPluginBase[DotnetVulnerableScannerConfig]):
                 found, failure = self._read_project(uri, code, response)
                 if failure is not None:
                     self.targets_failed += 1
-                    self.errors.append(f"{uri}: {failure}")
+                    # An ERROR-level _plugin_log is itself recorded in ``errors``
+                    # (base/plugin_base.py), so the failure is appended there once.
                     self._plugin_log(
                         f"dotnet did not evaluate {uri}: {failure}",
                         target_type=target_type,

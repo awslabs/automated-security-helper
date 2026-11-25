@@ -59,8 +59,8 @@ def test_the_positive_fixture_maps_every_severity_row():
         result = by_package[package]
         assert result.ruleId == rule, package
         assert result.properties.issue_severity == severity, package
-        assert result.level.value == level, package
-        assert result.kind.value == "fail", package
+        assert getattr(result.level, "value", result.level) == level, package
+        assert getattr(result.kind, "value", result.kind) == "fail", package
 
 
 def test_a_package_under_two_frameworks_is_one_result_naming_both():

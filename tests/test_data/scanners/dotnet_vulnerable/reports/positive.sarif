@@ -1,0 +1,391 @@
+{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": ".NET SDK: dotnet list package --vulnerable",
+          "notifications": [],
+          "rules": [],
+          "taxa": [],
+          "locations": [],
+          "language": "en-US",
+          "contents": [
+            "localizedData",
+            "nonLocalizedData"
+          ],
+          "isComprehensive": false,
+          "supportedTaxonomies": []
+        },
+        "extensions": []
+      },
+      "invocations": [],
+      "language": "en-US",
+      "versionControlProvenance": [],
+      "logicalLocations": [],
+      "graphs": [],
+      "results": [
+        {
+          "ruleId": "GHSA-aaaa-bbbb-cccc",
+          "ruleIndex": -1,
+          "kind": "fail",
+          "level": "error",
+          "message": {
+            "text": "Example.Critical 1.0.0 (top-level package) has a known Critical severity vulnerability: https://github.com/advisories/GHSA-aaaa-bbbb-cccc",
+            "arguments": []
+          },
+          "locations": [
+            {
+              "id": -1,
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "App/App.csproj",
+                  "index": -1
+                },
+                "region": {
+                  "startLine": 1,
+                  "charOffset": -1,
+                  "byteOffset": -1
+                }
+              },
+              "logicalLocations": [],
+              "annotations": [],
+              "relationships": []
+            }
+          ],
+          "partialFingerprints": {
+            "dotnetVulnerable/v1": "fe276eea5fc6305a92a3ae8bbe568241b08d57eeb8b2420fdae17659a0b3ff66"
+          },
+          "stacks": [],
+          "codeFlows": [],
+          "graphs": [],
+          "graphTraversals": [],
+          "relatedLocations": [],
+          "rank": -1.0,
+          "attachments": [],
+          "fixes": [],
+          "taxa": [],
+          "properties": {
+            "tags": [
+              "sca",
+              "vulnerability",
+              "nuget"
+            ],
+            "issue_severity": "CRITICAL",
+            "package_name": "Example.Critical",
+            "package_version": "1.0.0",
+            "dependency_kind": "top-level",
+            "target_frameworks": [
+              "net6.0"
+            ],
+            "advisory_url": "https://github.com/advisories/GHSA-aaaa-bbbb-cccc",
+            "nuget_severity": "Critical"
+          }
+        },
+        {
+          "ruleId": "GHSA-jjjj-kkkk-llll",
+          "ruleIndex": -1,
+          "kind": "fail",
+          "level": "error",
+          "message": {
+            "text": "Example.Future 5.0.0 (top-level package) has a known Catastrophic severity vulnerability: https://github.com/advisories/GHSA-jjjj-kkkk-llll",
+            "arguments": []
+          },
+          "locations": [
+            {
+              "id": -1,
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "App/App.csproj",
+                  "index": -1
+                },
+                "region": {
+                  "startLine": 1,
+                  "charOffset": -1,
+                  "byteOffset": -1
+                }
+              },
+              "logicalLocations": [],
+              "annotations": [],
+              "relationships": []
+            }
+          ],
+          "partialFingerprints": {
+            "dotnetVulnerable/v1": "030fe82ca53ed5cb576f6d1616b0569e91d9a7924c9c8fefc7a8ecf47548d4e6"
+          },
+          "stacks": [],
+          "codeFlows": [],
+          "graphs": [],
+          "graphTraversals": [],
+          "relatedLocations": [],
+          "rank": -1.0,
+          "attachments": [],
+          "fixes": [],
+          "taxa": [],
+          "properties": {
+            "tags": [
+              "sca",
+              "vulnerability",
+              "nuget"
+            ],
+            "issue_severity": "HIGH",
+            "package_name": "Example.Future",
+            "package_version": "5.0.0",
+            "dependency_kind": "top-level",
+            "target_frameworks": [
+              "net8.0"
+            ],
+            "advisory_url": "https://github.com/advisories/GHSA-jjjj-kkkk-llll",
+            "nuget_severity": "Catastrophic"
+          }
+        },
+        {
+          "ruleId": "GHSA-gggg-hhhh-iiii",
+          "ruleIndex": -1,
+          "kind": "fail",
+          "level": "note",
+          "message": {
+            "text": "Example.Low 3.0.0 (top-level package) has a known Low severity vulnerability: https://github.com/advisories/GHSA-gggg-hhhh-iiii",
+            "arguments": []
+          },
+          "locations": [
+            {
+              "id": -1,
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "App/App.csproj",
+                  "index": -1
+                },
+                "region": {
+                  "startLine": 1,
+                  "charOffset": -1,
+                  "byteOffset": -1
+                }
+              },
+              "logicalLocations": [],
+              "annotations": [],
+              "relationships": []
+            }
+          ],
+          "partialFingerprints": {
+            "dotnetVulnerable/v1": "2422872b96bbcaaf3f5034863008cc3b4b596e77cfcd0dcafbf263a0337f9876"
+          },
+          "stacks": [],
+          "codeFlows": [],
+          "graphs": [],
+          "graphTraversals": [],
+          "relatedLocations": [],
+          "rank": -1.0,
+          "attachments": [],
+          "fixes": [],
+          "taxa": [],
+          "properties": {
+            "tags": [
+              "sca",
+              "vulnerability",
+              "nuget"
+            ],
+            "issue_severity": "LOW",
+            "package_name": "Example.Low",
+            "package_version": "3.0.0",
+            "dependency_kind": "top-level",
+            "target_frameworks": [
+              "net8.0"
+            ],
+            "advisory_url": "https://github.com/advisories/GHSA-gggg-hhhh-iiii",
+            "nuget_severity": "Low"
+          }
+        },
+        {
+          "ruleId": "GHSA-dddd-eeee-ffff",
+          "ruleIndex": -1,
+          "kind": "fail",
+          "level": "warning",
+          "message": {
+            "text": "Example.Transitive 2.1.0 (transitive package) has a known Moderate severity vulnerability: https://github.com/advisories/GHSA-dddd-eeee-ffff",
+            "arguments": []
+          },
+          "locations": [
+            {
+              "id": -1,
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "App/App.csproj",
+                  "index": -1
+                },
+                "region": {
+                  "startLine": 1,
+                  "charOffset": -1,
+                  "byteOffset": -1
+                }
+              },
+              "logicalLocations": [],
+              "annotations": [],
+              "relationships": []
+            }
+          ],
+          "partialFingerprints": {
+            "dotnetVulnerable/v1": "41db371f8a43c2007fb8f26ab547aa3047ffb06177cdebf38dd1928fc3bfa8bd"
+          },
+          "stacks": [],
+          "codeFlows": [],
+          "graphs": [],
+          "graphTraversals": [],
+          "relatedLocations": [],
+          "rank": -1.0,
+          "attachments": [],
+          "fixes": [],
+          "taxa": [],
+          "properties": {
+            "tags": [
+              "sca",
+              "vulnerability",
+              "nuget"
+            ],
+            "issue_severity": "MEDIUM",
+            "package_name": "Example.Transitive",
+            "package_version": "2.1.0",
+            "dependency_kind": "transitive",
+            "target_frameworks": [
+              "net6.0"
+            ],
+            "advisory_url": "https://github.com/advisories/GHSA-dddd-eeee-ffff",
+            "nuget_severity": "Moderate"
+          }
+        },
+        {
+          "ruleId": "NUGET-VULNERABLE-PACKAGE",
+          "ruleIndex": -1,
+          "kind": "fail",
+          "level": "warning",
+          "message": {
+            "text": "Example.Unrated 4.0.0 (top-level package) has a known unrated severity vulnerability: https://example.org/advisory/4",
+            "arguments": []
+          },
+          "locations": [
+            {
+              "id": -1,
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "App/App.csproj",
+                  "index": -1
+                },
+                "region": {
+                  "startLine": 1,
+                  "charOffset": -1,
+                  "byteOffset": -1
+                }
+              },
+              "logicalLocations": [],
+              "annotations": [],
+              "relationships": []
+            }
+          ],
+          "partialFingerprints": {
+            "dotnetVulnerable/v1": "a4e7243cfdcc220e6bd511c978715944900f541fd780f195adfaf49cc5078adc"
+          },
+          "stacks": [],
+          "codeFlows": [],
+          "graphs": [],
+          "graphTraversals": [],
+          "relatedLocations": [],
+          "rank": -1.0,
+          "attachments": [],
+          "fixes": [],
+          "taxa": [],
+          "properties": {
+            "tags": [
+              "sca",
+              "vulnerability",
+              "nuget"
+            ],
+            "issue_severity": "MEDIUM",
+            "package_name": "Example.Unrated",
+            "package_version": "4.0.0",
+            "dependency_kind": "top-level",
+            "target_frameworks": [
+              "net8.0"
+            ],
+            "advisory_url": "https://example.org/advisory/4"
+          }
+        },
+        {
+          "ruleId": "GHSA-5crp-9r3c-p9vr",
+          "ruleIndex": -1,
+          "kind": "fail",
+          "level": "error",
+          "message": {
+            "text": "Newtonsoft.Json 9.0.1 (top-level package) has a known High severity vulnerability: https://github.com/advisories/GHSA-5crp-9r3c-p9vr",
+            "arguments": []
+          },
+          "locations": [
+            {
+              "id": -1,
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "App/App.csproj",
+                  "index": -1
+                },
+                "region": {
+                  "startLine": 1,
+                  "charOffset": -1,
+                  "byteOffset": -1
+                }
+              },
+              "logicalLocations": [],
+              "annotations": [],
+              "relationships": []
+            }
+          ],
+          "partialFingerprints": {
+            "dotnetVulnerable/v1": "d73ce021267dc8100d487e3bc6765d8d396b3f7eb3b72e4818943aa0e969e848"
+          },
+          "stacks": [],
+          "codeFlows": [],
+          "graphs": [],
+          "graphTraversals": [],
+          "relatedLocations": [],
+          "rank": -1.0,
+          "attachments": [],
+          "fixes": [],
+          "taxa": [],
+          "properties": {
+            "tags": [
+              "sca",
+              "vulnerability",
+              "nuget"
+            ],
+            "issue_severity": "HIGH",
+            "package_name": "Newtonsoft.Json",
+            "package_version": "9.0.1",
+            "dependency_kind": "top-level",
+            "target_frameworks": [
+              "net6.0",
+              "net8.0"
+            ],
+            "advisory_url": "https://github.com/advisories/GHSA-5crp-9r3c-p9vr",
+            "nuget_severity": "High"
+          }
+        }
+      ],
+      "runAggregates": [],
+      "redactionTokens": [],
+      "newlineSequences": [
+        "\r\n",
+        "\n"
+      ],
+      "threadFlowLocations": [],
+      "taxonomies": [],
+      "addresses": [],
+      "translations": [],
+      "policies": [],
+      "webRequests": [],
+      "webResponses": []
+    }
+  ],
+  "inlineExternalProperties": [],
+  "properties": {
+    "tags": []
+  }
+}

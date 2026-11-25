@@ -14,6 +14,11 @@ host, so this directory is named `reports`, not `captured`. A real capture
 the first time someone runs the scanner against a restored project. Until then the
 checklist row for captured fixtures stays unmet.
 
+`positive.sarif` is the SARIF the adapter's own `convert_report` writes for
+`positive.json` (project uri `App/App.csproj`), serialized with
+`SarifReport.model_dump_json(by_alias=True, exclude_none=True, indent=2)`. The facets
+corpus test reads it; regenerate it whenever the adapter's result shape changes.
+
 `positive.json` covers every NuGet severity name the scanner maps (Critical, High,
 Moderate, Low), an unrated advisory (empty severity, a non-GHSA URL), a name the
 scanner does not know (Catastrophic), a package seen under two target frameworks, and
