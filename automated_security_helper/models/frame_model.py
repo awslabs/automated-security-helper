@@ -448,13 +448,13 @@ def unaccounted(spec: FrameSpec) -> List[str]:
     projected = {c for c in spec.columns if isinstance(c, str)}
     read = {r for c in spec.columns if isinstance(c, Computed) for r in c.reads}
     missing: List[str] = []
-    for name, info in model.model_fields.items():  # type: ignore[attr-defined]
+    for name, info in model.model_fields.items():
         if name in projected or name in spec.waived:
             continue
         if _marker(info.metadata, NotInFrame) is not None:
             continue
         missing.append(name)
-    for name in list(model.__private_attributes__) + _public_properties(model):  # type: ignore[attr-defined]
+    for name in list(model.__private_attributes__) + _public_properties(model):
         if name not in read and name not in spec.waived and name not in missing:
             missing.append(name)
     return missing
