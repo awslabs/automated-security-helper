@@ -492,6 +492,14 @@ SHIPPED_DEFAULT_DENIED_PATHS = (
     *SHIPPED_DEFAULT_DENIED_PATHS,
     SHIPPED_DEFAULT_DENIED_PATHS[-1] | {"/scanners/syft/options/sdist_harvest/**"},
 )
+#: The default after the run history's section joined it: ``enabled`` turns on
+#: writes beside the output on every scan, and ``keep_runs`` bounds what pruning
+#: may delete, so neither is a client's to change through a runtime override.
+SHIPPED_DEFAULT_DENIED_PATHS = (
+    *SHIPPED_DEFAULT_DENIED_PATHS,
+    SHIPPED_DEFAULT_DENIED_PATHS[-1]
+    | {"/global_settings/history", "/global_settings/history/**"},
+)
 
 
 class _OptionDefaults(Mapping[Tuple[str, str], Any]):
