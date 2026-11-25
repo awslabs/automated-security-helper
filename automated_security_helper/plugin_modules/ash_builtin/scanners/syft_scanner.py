@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated, Any, ClassVar, List, Literal, Set
 
-from pydantic import BaseModel, Field, PrivateAttr, ValidationError, model_validator
+from pydantic import Field, PrivateAttr, ValidationError, model_validator
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base import scanner_operational_facets as opsf
@@ -48,6 +48,7 @@ from automated_security_helper.utils.error_text import (
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.process_env import snapshot_environ
+from automated_security_helper.utils.redacted_model import RedactedSection
 from automated_security_helper.utils.suppression_matcher import active_ignore_paths
 
 #: The CycloneDX version syft is asked to write. Without ``@<version>`` syft writes
@@ -58,7 +59,7 @@ from automated_security_helper.utils.suppression_matcher import active_ignore_pa
 CYCLONEDX_SPEC_VERSION = "1.6"
 
 
-class SdistHarvestOptions(BaseModel):
+class SdistHarvestOptions(RedactedSection):
     """Options for the cross-toolchain sdist lockfile harvest.
 
     The harvest itself runs in the convert phase (the ``sdist-lock-harvester``
