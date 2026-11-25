@@ -35,6 +35,8 @@ def layout(tmp_path, monkeypatch):
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("USERPROFILE", str(home))
+    # A declared cache path is mounted only when it exists.
+    (home / ".local/share/ruby-advisory-db").mkdir(parents=True)
     source = tmp_path / "src"
     source.mkdir()
     output = source / ".ash" / "ash_output"

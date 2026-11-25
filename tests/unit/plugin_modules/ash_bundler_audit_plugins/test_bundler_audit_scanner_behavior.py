@@ -560,7 +560,9 @@ class TestReport:
         scanner = _scanner(tree, tmp_path)
         report = _run(scanner, FakeBundlerAudit(), monkeypatch)
         driver = report.runs[0].tool.driver
-        assert driver.name == "bundler-audit"
+        # The base class's attach_scanner_details sets the driver name to the
+        # scanner's config name.
+        assert driver.name == "bundler_audit"
         assert driver.version == "0.9.3"
         assert [r.id for r in driver.rules] == [e[0] for e in POSITIVE_EXPECTED]
 

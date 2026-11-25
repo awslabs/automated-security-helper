@@ -489,10 +489,10 @@ class BundlerAuditScanner(ScannerPluginBase[BundlerAuditScannerConfig]):
             reason="ruby-advisory-db advisories carry no CWE field in the report",
         ),
         fingerprints=FacetDecl(
-            state=FacetState.NA,
-            reason="the tool emits no fingerprint; the adapter's own "
-            "partialFingerprints (bundlerAudit/v1) is not read by the flat "
-            "finding identity (observed over the committed corpus)",
+            state=FacetState.MAPPED,
+            native_field="(no native fingerprint) the adapter computes result "
+            'partialFingerprints "bundlerAudit/v1", a sha256 over rule id, gem '
+            "name, version and lockfile path",
         ),
         fix_available=FacetDecl(
             state=FacetState.DROPPED,
@@ -558,6 +558,7 @@ class BundlerAuditScanner(ScannerPluginBase[BundlerAuditScannerConfig]):
                 selection="the Gemfile.lock at the root of the scan target "
                 "(nothing_to_scan_reason; a subdirectory lockfile or a symlink "
                 "is not read)",
+                covers_note="the scanner declares no covers display string",
             ),
             runtime=opsf.RuntimeFacet(
                 kind=opsf.RuntimeKind.USER_INSTALLED_CLI,
@@ -590,9 +591,10 @@ class BundlerAuditScanner(ScannerPluginBase[BundlerAuditScannerConfig]):
                 ),
             ),
             identity=opsf.IdentityFacet(
-                fingerprint_class=opsf.FingerprintClass.POSITIONAL_ONLY,
-                note="identity is the rule id, file and lockfile line; the "
-                "adapter's partialFingerprints is not read by the flat identity",
+                fingerprint_class=opsf.FingerprintClass.STABLE_COMPUTED,
+                note="the adapter's partialFingerprints (bundlerAudit/v1) hashes "
+                "rule id, gem, version and lockfile path, so the identity does "
+                "not move when the lockfile line does",
             ),
             extensibility=opsf.ExtensibilityFacet(
                 custom_rules=opsf.CustomRules.NONE,
