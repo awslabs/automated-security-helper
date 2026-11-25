@@ -11906,9 +11906,9 @@ def test_an_unquoted_off_sandbox_mode_is_read_as_the_mode_off(
     and so names no mode, and a mode that is not lowercase must exit 3.
     """
     assert_on_page(_SANDBOX_HOW_TO, _SANDBOX_MODES_SENTENCE)
-    from automated_security_helper.config.ash_config import SandboxConfig
+    from automated_security_helper.core.enums import SandboxMode
 
-    allowed = typing.get_args(SandboxConfig.model_fields["mode"].annotation)
+    allowed = [mode.value for mode in SandboxMode]
     listed = re.findall(r"`([^`]+)`", _SANDBOX_MODES_SENTENCE.split(", lowercase")[0])
     assert list(allowed) == listed, (allowed, listed)
 

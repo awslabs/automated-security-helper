@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from fnmatch import fnmatchcase
 from pathlib import Path
-from typing import Any, Dict, List, Tuple, get_args
+from typing import Any, Dict, List, Tuple
 
 import pytest
 import yaml
@@ -191,11 +191,7 @@ def test_the_mode_gate_runs_once_per_mode_but_the_profiles_own() -> None:
 
 @pytest.mark.parametrize(
     "mode",
-    sorted(
-        m
-        for m in get_args(SandboxConfig.model_fields["mode"].annotation)
-        if m != "bwrap"
-    ),
+    sorted(m.value for m in SandboxMode if m.value != _PROFILE_MODE),
 )
 def test_override_yaml_cannot_move_the_sandbox_to_any_other_mode(
     tmp_path: Path, mode: str
