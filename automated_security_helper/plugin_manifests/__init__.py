@@ -180,13 +180,17 @@ def exclusion_options() -> tuple[tuple[str, ExclusionOption], ...]:
 
 @functools.lru_cache(maxsize=1)
 def alpha_scanner_modules() -> Dict[str, str]:
-    """``{scanner name or alias: dotted plugin module}`` for every alpha scanner.
+    """``{scanner name or alias: dotted plugin module}`` for every scanner that
+    ships but is not loaded unless its module is named.
 
-    The manifest tier scan. Keys are lower-case.
+    Keyed on ``default_enabled``, not on ``tier``: the callers (the "add this
+    module" hint, ``dependencies install``, the MCP inventory's shipped-module
+    list) all ask about loading, and a maintained scanner that stays opt-in is
+    ``supported`` and still needs naming. Keys are lower-case.
     """
     mapping: Dict[str, str] = {}
     for manifest in scanner_manifests():
-        if manifest.tier is not PluginTier.ALPHA:
+        if manifest.default_enabled:
             continue
         for name in (manifest.name, *manifest.aliases):
             mapping.setdefault(name, manifest.plugin_module)
@@ -194,5 +198,5 @@ def alpha_scanner_modules() -> Dict[str, str]:
 
 
 def alpha_module_for(scanner_name: str) -> Optional[str]:
-    """The module that provides *scanner_name*, or None if no alpha one does."""
+    """The module that provides *scanner_name*, or None if no opt-in one does."""
     return alpha_scanner_modules().get(str(scanner_name).lower().strip())
