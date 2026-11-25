@@ -11,17 +11,17 @@ after installing, run `ash dependencies install`, described in
 
 ## Requirements
 
-- Python 3.10 to 3.14. uv and pipx can fetch a matching Python for you.
+- Python 3.11 to 3.14. uv and pipx can fetch a matching Python for you.
 - git, which the installer uses to fetch the repository.
 - Linux (x86-64 or arm64), macOS, or Windows (x86-64). CI installs ASH with pip and
-  pipx on Python 3.10 to 3.14 and with uvx on 3.12, on Ubuntu (x86-64 and arm64),
+  pipx on Python 3.11 to 3.14 and with uvx on 3.12, on Ubuntu (x86-64 and arm64),
   macOS on Apple silicon, and Windows. Intel Macs and Windows on arm64 are not tested.
 
 Some scanner tools are not available on every platform: see
 [Platform limits](../docs/advanced-usage.md#platform-limits).
 
 Always pass a Python version to uv and pipx, as the commands below do. The v3.7.x
-releases accept any Python 3 version from 3.10 up, so on a machine with no suitable
+releases accept any Python 3 version from 3.11 up, so on a machine with no suitable
 Python, uv picks the newest release, 3.15, and the install fails while building a
 dependency that does not support 3.15.
 
@@ -117,7 +117,7 @@ that pipx installs into ASH's environment, so a pipx install needs no separate u
 ## Install with pip
 
 Create a virtual environment outside the projects you will scan, activate it, and
-install into it. Use any Python 3.10 to 3.14 in place of 3.12. On systems whose Python
+install into it. Use any Python 3.11 to 3.14 in place of 3.12. On systems whose Python
 is marked as externally managed, such as Ubuntu 24.04, pip installs only into a
 virtual environment.
 

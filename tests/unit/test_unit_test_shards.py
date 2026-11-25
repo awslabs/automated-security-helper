@@ -2488,7 +2488,7 @@ class TestTheCoverageJobReadsWhatTheUnitRunsUpload:
         [
             (os_name, arch, python)
             for os_name, arch in [*COVERAGE_RUNNERS, ("macos-15", "ARM64")]
-            for python in ("3.10", "3.11", "3.12", "3.13", "3.14")
+            for python in ("3.11", "3.12", "3.13", "3.14")
         ],
     )
     def test_the_download_pattern_matches_what_the_unit_jobs_upload(
@@ -2517,7 +2517,7 @@ class TestTheCoverageJobReadsWhatTheUnitRunsUpload:
         assert "strategy" not in job
         for job_id in UNIT_TEST_JOB_IDS:
             tested = _workflow_job(job_id)["strategy"]["matrix"]
-            for python in ("3.10", "3.11", "3.12", "3.13", "3.14"):
+            for python in ("3.11", "3.12", "3.13", "3.14"):
                 assert python in tested["python-version"], (job_id, python)
 
     def test_it_runs_where_the_combine_needs_no_source_of_its_own(self):

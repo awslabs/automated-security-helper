@@ -385,7 +385,7 @@ redirect only to the same scheme, host and port.
 
 If you encounter any issues:
 
-1. Verify your Python version matches the required version (3.10+):
+1. Verify your Python version matches the required version (3.11+):
 
 ```bash
 python --version

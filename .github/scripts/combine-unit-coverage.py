@@ -44,7 +44,7 @@ Usage::
 
     combine-unit-coverage.py --results-dir shard-results \\
         --os "ubuntu-latest ubuntu-24.04-arm macos-latest windows-latest" \\
-        --python-version "3.10 3.11 3.12 3.13 3.14" --marker unit --fail-under 80 \\
+        --python-version "3.11 3.12 3.13 3.14" --marker unit --fail-under 80 \\
         --summary "$GITHUB_STEP_SUMMARY"
     combine-unit-coverage.py --self-test
 

@@ -206,20 +206,20 @@ class TestTheExpansion:
         assert LEGS["lint"] == 1
 
     def test_an_axis_product_less_its_excludes(self):
-        # 25 OS and Python combinations, cut into three jobs by OS: 2 Linux and 2 macOS
-        # images and 1 Windows image, each on 5 Python versions. The unit pools and the
+        # 20 OS and Python combinations, cut into three jobs by OS: 2 Linux and 2 macOS
+        # images and 1 Windows image, each on 4 Python versions. The unit pools and the
         # integration tier split each combination into the pool's shard count -- 6 on
         # Linux, 8 on macOS and Windows (the note above unit-test-linux in the workflow;
         # tests/unit/test_unit_test_shards.py pins those axes per pool); the e2e tier
         # runs once per image, on one Python version.
-        assert LEGS["unit-test-linux"] == 2 * 5 * 6
-        assert LEGS["unit-test-macos"] == 2 * 5 * 8
-        assert LEGS["unit-test-windows"] == 1 * 5 * 8
-        assert UNIT_TEST_LEGS == 60 + 80 + 40
-        assert LEGS["integration-test-linux"] == 2 * 5 * 6
-        assert LEGS["integration-test-macos"] == 2 * 5 * 8
-        assert LEGS["integration-test-windows"] == 1 * 5 * 8
-        assert sum(LEGS[name] for name in INTEGRATION_TEST_JOB_IDS) == 180
+        assert LEGS["unit-test-linux"] == 2 * 4 * 6
+        assert LEGS["unit-test-macos"] == 2 * 4 * 8
+        assert LEGS["unit-test-windows"] == 1 * 4 * 8
+        assert UNIT_TEST_LEGS == 48 + 64 + 32
+        assert LEGS["integration-test-linux"] == 2 * 4 * 6
+        assert LEGS["integration-test-macos"] == 2 * 4 * 8
+        assert LEGS["integration-test-windows"] == 1 * 4 * 8
+        assert sum(LEGS[name] for name in INTEGRATION_TEST_JOB_IDS) == 144
         assert [LEGS[name] for name in E2E_TEST_JOB_IDS] == [2, 2, 1]
         # The standalone integration suite runs in four shards of its own.
         assert LEGS["integration-test"] == 4
@@ -229,13 +229,13 @@ class TestTheExpansion:
         assert sorted(PYTEST_JOB_IDS) == sorted(
             [*UNIT_TEST_JOB_IDS, *INTEGRATION_TEST_JOB_IDS, *E2E_TEST_JOB_IDS]
         ), PYTEST_JOB_IDS
-        assert PYTEST_CHECK_RUNS == 180 + 180 + 5
+        assert PYTEST_CHECK_RUNS == 144 + 144 + 5
 
     def test_no_matrix_is_past_githubs_limit_of_256_jobs(self):
         """GitHub rejects the workflow, not just the leg, past 256 jobs from one matrix.
 
         The limit applies to each matrix. The unit-test matrix was the closest, at 200
-        legs as one job; the tiers are nine matrices now and the largest is 80.
+        legs as one job; the tiers are nine matrices now and the largest is 64.
         """
         too_big = {name: legs for name, legs in LEGS.items() if legs > 256}
         assert not too_big, too_big
@@ -269,7 +269,7 @@ PR_COVER_IMAGES = {"ubuntu-24.04-arm", "macos-15", "windows-latest"}
 EVENT_LIST = re.compile(
     r"^\$\{\{ github\.event_name == 'pull_request' && '([^']*)' \|\| '([^']*)' \}\}$"
 )
-PR_COVER_PYTHONS = {"3.10", "3.12", "3.14"}
+PR_COVER_PYTHONS = {"3.12", "3.14"}
 TIER_JOB_IDS = [*UNIT_TEST_JOB_IDS, *INTEGRATION_TEST_JOB_IDS, *E2E_TEST_JOB_IDS]
 
 
@@ -335,15 +335,15 @@ class TestThePullRequestCover:
         }
 
     def test_the_pull_request_tiers_add_up(self):
-        # One image per pool and the 3 cover Pythons; every unit job runs each
+        # One image per pool and the 2 cover Pythons; every unit job runs each
         # combination in its pool's shard count (6 on Linux, 8 on macOS and Windows).
-        unit_linux = 1 * 3 * 6
-        unit_macos_and_windows = 1 * 3 * 8 + 1 * 3 * 8
+        unit_linux = 1 * 2 * 6
+        unit_macos_and_windows = 1 * 2 * 8 + 1 * 2 * 8
         unit = unit_linux + unit_macos_and_windows
-        assert sum(PR_LEGS[n] for n in UNIT_TEST_JOB_IDS) == unit == 66
-        assert sum(PR_LEGS[n] for n in INTEGRATION_TEST_JOB_IDS) == unit == 66
+        assert sum(PR_LEGS[n] for n in UNIT_TEST_JOB_IDS) == unit == 44
+        assert sum(PR_LEGS[n] for n in INTEGRATION_TEST_JOB_IDS) == unit == 44
         assert [PR_LEGS[n] for n in E2E_TEST_JOB_IDS] == [1, 1, 1]
-        assert PR_PYTEST_CHECK_RUNS == unit + 66 + 3
+        assert PR_PYTEST_CHECK_RUNS == unit + 44 + 3
 
     def test_ensure_cache_runs_on_the_two_labels_with_headroom_on_a_pull_request(self):
         """Nothing waits for this job any more, but its save should still land while the
@@ -436,10 +436,10 @@ class TestThePullRequestCover:
         bundle = [c for c in cells if c["method"] == "bundle"]
         assert {c["os"] for c in bundle} == PR_COVER_IMAGES
         assert {str(c["python-version"]) for c in bundle} == PR_COVER_PYTHONS
-        assert len(bundle) == 9
+        assert len(bundle) == 6
         # Homebrew on macOS still runs here on macos-15 (and in homebrew-macos).
         assert [c["os"] for c in cells if c["method"] == "homebrew"] == ["macos-15"]
-        assert PR_LEGS["install-validation"] == 14
+        assert PR_LEGS["install-validation"] == 11
 
     def test_the_pull_request_total_is_smaller_than_the_merge_queue_total(self):
         assert ON_PULL_REQUEST < ON_MERGE_QUEUE < ON_PUSH
@@ -859,16 +859,16 @@ class TestInstallMethodsPullRequestCover:
     def test_a_dispatch_runs_the_full_matrix(self):
         """The overlay is void off a pull request; the static axes are the dispatch."""
         assert (
-            _legs(IM_VALIDATE, "workflow_dispatch") == _legs(IM_VALIDATE, "push") == 116
+            _legs(IM_VALIDATE, "workflow_dispatch") == _legs(IM_VALIDATE, "push") == 96
         )
 
     def test_what_a_pull_request_runs_method_by_method(self):
         by_method = Counter(c["method"] for c in _cells(IM_VALIDATE, "pull_request"))
         assert by_method == {
-            "pip": 9,
-            "pipx": 9,
-            "pre-commit": 9,
-            "mcp": 9,
+            "pip": 6,
+            "pipx": 6,
+            "pre-commit": 6,
+            "mcp": 6,
             "uvx": 3,
             "homebrew": 1,
             "podman": 2,
@@ -876,7 +876,7 @@ class TestInstallMethodsPullRequestCover:
             "nerdctl": 1,
             "nix": 3,
         }, by_method
-        assert sum(by_method.values()) == 47
+        assert sum(by_method.values()) == 35
 
     def test_a_pull_request_leaves_the_saturated_labels_except_sole_coverage(self):
         cells = _cells(IM_VALIDATE, "pull_request")

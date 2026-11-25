@@ -21,7 +21,7 @@ ASH is Automated Security Helper, the agentic security harness: it runs open-sou
 
 ## Quickstart
 
-Install ASH with Python 3.10+ and pipx:
+Install ASH with Python 3.11+ and pipx:
 
 <!-- doctest: illustrative reason="installs ASH from GitHub over the network" -->
 ```bash
@@ -129,7 +129,7 @@ repos:
 pre-commit run ash --all-files
 ```
 
-The `ash` hook runs bandit, detect-secrets, checkov, cdk-nag and npm-audit. It needs pre-commit running on Python 3.10 to 3.14, and Node.js and npm on `PATH` for cdk-nag and npm-audit. `ash-simple-scan` is the same hook under its earlier id. See [Using ASH with pre-commit](how-to/pre-commit.md) for running without Node.js and for the container hook, `ash-full-scan`.
+The `ash` hook runs bandit, detect-secrets, checkov, cdk-nag and npm-audit. It needs pre-commit running on Python 3.11 to 3.14, and Node.js and npm on `PATH` for cdk-nag and npm-audit. `ash-simple-scan` is the same hook under its earlier id. See [Using ASH with pre-commit](how-to/pre-commit.md) for running without Node.js and for the container hook, `ash-full-scan`.
 
 ## Output Files
 
@@ -146,7 +146,7 @@ ASH v3 produces several output files in the `.ash/ash_output/` directory:
 <details>
 <summary>How do I run ASH on Windows?</summary>
 
-ASH v3 can run directly on Windows in local mode with Python 3.10+. Simply install ASH using pip, pipx, or uvx and run with `--mode local`. For container mode, you'll need WSL2 and a container runtime like Docker Desktop, Rancher Desktop, or Podman Desktop.
+ASH v3 can run directly on Windows in local mode with Python 3.11+. Simply install ASH using pip, pipx, or uvx and run with `--mode local`. For container mode, you'll need WSL2 and a container runtime like Docker Desktop, Rancher Desktop, or Podman Desktop.
 </details>
 
 <details>
