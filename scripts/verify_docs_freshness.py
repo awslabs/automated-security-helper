@@ -1944,6 +1944,7 @@ def run_gate(checks, serial: bool = False) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     import argparse
+    import gc
 
     parser = argparse.ArgumentParser(description=__doc__.strip().splitlines()[0])
     parser.add_argument(
@@ -2026,7 +2027,29 @@ def main(argv: list[str] | None = None) -> int:
         ("Journey pages match their journey files", check_doc_journeys),
     ]
 
-    return run_gate(checks, serial=args.serial)
+    # The gate deliberately holds big caches for its whole run (the env-var read
+    # sweep, the config models, the MCP contract, the package syntax trees), and
+    # the cyclic collector re-walks all of it on every generation-2 pass that the
+    # later allocation-heavy checks trigger. Measured on a quiet 192-CPU host:
+    # the same 26 checks took 94.6s with the collector on and 66.9s with it off,
+    # before any other change here. Nothing in a process this short-lived needs
+    # cycles reclaimed; the workers inherit the setting through fork.
+    #
+    # The restore for in-process callers (the tests) freezes first. Everything
+    # allocated while the collector was off sits uncollected in the young
+    # generation, and a plain enable() pays that whole debt at the next pass --
+    # measured as ~27s at interpreter shutdown, which un-did the win. freeze()
+    # moves what the gate left behind (its caches, which live for the process
+    # anyway) into the permanent generation, so collection resumes for new
+    # allocations only.
+    was_enabled = gc.isenabled()
+    gc.disable()
+    try:
+        return run_gate(checks, serial=args.serial)
+    finally:
+        if was_enabled:
+            gc.freeze()
+            gc.enable()
 
 
 if __name__ == "__main__":
