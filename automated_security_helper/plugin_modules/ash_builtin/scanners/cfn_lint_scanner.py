@@ -709,8 +709,10 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
             reason="the SARIF regions carry line and column only, no snippet",
         ),
         references=FacetDecl(
-            state=FacetState.MAPPED,
+            state=FacetState.DROPPED,
             native_field="driver rules[].helpUri",
+            reason="rule-level only: the flat reader takes references from "
+            "result relatedLocations, so the help link is discarded today",
         ),
         tags=FacetDecl(
             state=FacetState.NA,

@@ -889,12 +889,17 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
             "snippet.text (settled by the M0 capture)",
         ),
         references=FacetDecl(
-            state=FacetState.MAPPED,
+            state=FacetState.DROPPED,
             native_field="tool.driver.rules[].helpUri",
+            reason="rule-level only: the flat reader takes references from "
+            "result relatedLocations, so the help link is discarded today",
         ),
         tags=FacetDecl(
-            state=FacetState.MAPPED,
+            state=FacetState.DROPPED,
             native_field="tool.driver.rules[].properties.tags",
+            reason="rule-level only: the flat reader takes tags from result "
+            "properties, so the rule tags are discarded today (they still "
+            "feed the CWE read)",
         ),
         extras=FacetDecl(
             state=FacetState.MAPPED,

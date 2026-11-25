@@ -454,12 +454,17 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
             reason="trivy's SARIF results carry no code snippet",
         ),
         references=FacetDecl(
-            state=FacetState.MAPPED,
+            state=FacetState.DROPPED,
             native_field="SARIF rule helpUri",
+            reason="rule-level only: the flat reader takes references from "
+            "result relatedLocations, so the help link is discarded today",
         ),
         tags=FacetDecl(
-            state=FacetState.MAPPED,
+            state=FacetState.DROPPED,
             native_field="SARIF rule properties.tags",
+            reason="rule-level only: the flat reader takes tags from result "
+            "properties, so the rule tags are discarded today (the severity "
+            "word among them still feeds issue_severity)",
         ),
         extras=FacetDecl(
             state=FacetState.MAPPED,

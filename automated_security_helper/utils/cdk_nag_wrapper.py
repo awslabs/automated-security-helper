@@ -1399,6 +1399,192 @@ def _violations_from_validation_report(
     return per_pack, None
 
 
+def build_nag_results(
+    cdk_nag_report_lines: Dict[str, List[_NagFinding]],
+    model,
+    template_path,
+    template_lines: List[str],
+    *,
+    include_compliant_checks: bool = False,
+    honor_template_suppressions: bool = True,
+) -> Dict[str, List[Result]]:
+    """The SARIF results of a template's cdk-nag findings, per pack.
+
+    The pure half of :func:`run_cdk_nag_against_cfn_template`: everything after
+    the CDK synth has produced findings. Separated so conformance tests can
+    drive the mapping over committed findings and templates without a CDK app,
+    a node process or an installed cdk-nag (the way
+    ``CfnGuardScanner.normalize_results`` is driven). ``model`` is the parsed
+    template (:func:`~automated_security_helper.utils.cfn_template_model.get_model_from_template_text`)
+    and ``template_lines`` its text, both of which the synth path already holds.
+    No tool is run and nothing outside the arguments is read.
+    """
+    results: Dict[str, List[Result]] = {}
+
+    # Once per template, guarded as the two sites above are: the per-finding loop
+    # was the one call of get_shortest_name with no handler, so a template whose
+    # path merely starts with the working directory's name (a sibling directory)
+    # raised ValueError there and lost every finding it had.
+    cfn_file_rel_path = Path(template_path).as_posix()
+    try:
+        cfn_file_rel_path = str(get_shortest_name(input=template_path))
+    except Exception as e:
+        ASH_LOGGER.debug(f"Could not get relative path to template: {e}")
+
+    # One read of the template for every finding of it; the per-finding
+    # search re-read the whole file per rule, under the environment lock
+    # and inside the worker's scan timeout.
+    locations = _TemplateLocations(template_lines)
+
+    for pack_name, report_lines in cdk_nag_report_lines.items():
+        if pack_name not in results:
+            results[pack_name] = []
+        line: _NagFinding
+        for line in report_lines:
+            if line.compliance == "Compliant" and not include_compliant_checks:
+                ASH_LOGGER.debug(f"Skipping compliant check: {line.rule_id}")
+                continue
+
+            # Under CfnInclude the construct path is
+            # "<stack>/<template>/<LogicalId>", so the last segment is the template's
+            # own logical ID -- the same property 2.x's resourceId had, which is why
+            # the lookup and line-number search below are unchanged.
+            resource_log_id = line.resource_id.split("/")[-1]
+
+            # The URIs name the template absolutely, as the template path the
+            # scanner passes does. get_shortest_name is relative to the working
+            # directory, so with ASH run from an ancestor of the source
+            # directory a URI read "proj/t.yaml", which the path sanitizer then
+            # took as relative to the source directory. An absolute URI is made
+            # relative to the source directory there, wherever ASH runs.
+            cfn_file_uri = Path(os.path.abspath(template_path)).as_posix()
+            cfn_resource_matches = [
+                item
+                for resource_id, item in model.Resources.items()
+                if resource_id == resource_log_id
+            ]
+            if not cfn_resource_matches:
+                # Said out loud, as the construct-less case is: a finding that
+                # cannot be placed on a resource of this template is not reported,
+                # and silence here let a template read clean.
+                ASH_LOGGER.warning(
+                    f"cdk-nag rule '{line.rule_id}' cites construct "
+                    f"'{line.resource_id}', whose logical id is not a resource of "
+                    f"{cfn_file_rel_path}, so that finding is not reported"
+                )
+                continue
+            cfn_resource = cfn_resource_matches[0]
+            resource_line, resource_column = locations.of(resource_log_id)
+            start_column, end_column = _sarif_columns(resource_column, resource_log_id)
+
+            cfn_resource_dict = {
+                "Resources": {resource_log_id: cfn_resource.model_dump(by_alias=True)}
+            }
+            level, kind = _level_and_kind(
+                compliance=line.compliance,
+                rule_level=line.rule_level,
+                exception_reason=line.exception_reason,
+            )
+            # The template may already say why this finding is accepted. See
+            # _template_suppression_reason: cdk-nag 3.x cannot read its own in-band
+            # suppressions back off a template it is re-scanning, so if this is not
+            # done here the author's reason is never applied to anything. A row
+            # whose rule never ran gets none (_suppression_for_finding).
+            template_suppression = _suppression_for_finding(
+                line, cfn_resource, honor_template_suppressions
+            )
+            if template_suppression is not None:
+                # Styles its reason, so it asks for markup and escapes
+                # every value: all four come from the template.
+                ASH_LOGGER.verbose(
+                    f"Suppressing rule '{escape_markup(line.rule_id)}' on "
+                    f"resource '{escape_markup(resource_log_id)}' in "
+                    f"'{escape_markup(cfn_file_rel_path)}' based on the "
+                    f"template's own cdk_nag metadata: "
+                    f"[yellow]{escape_markup(template_suppression)}[/yellow]",
+                    extra=MARKUP,
+                )
+            finding = Result(
+                suppressions=(
+                    [
+                        Suppression(
+                            kind=Kind1.inSource,
+                            justification=(
+                                "(ASH cdk-nag in-template suppression) "
+                                f"{template_suppression}"
+                            ),
+                        )
+                    ]
+                    if template_suppression is not None
+                    else None
+                ),
+                properties=PropertyBag(
+                    cdk_nag_finding=line.as_dict(),
+                    cfn_resource=cfn_resource_dict,
+                    # The universal resource-identity contract for
+                    # resource-scoped suppressions (utils/
+                    # package_identity.py): the construct path and the
+                    # CloudFormation type, as flat keys any reader can
+                    # take without knowing cdk-nag's own bag.
+                    ash_resource_id=line.resource_id,
+                    ash_resource_type=cfn_resource.Type,
+                    tags=[
+                        "aws",
+                        "cdk",
+                        "cdk-nag",
+                        pack_name or "unknown",
+                        line.rule_id,
+                        resource_log_id,
+                        cfn_resource.Type,
+                        "tool_name::cdk-nag",
+                        "tool_type::IAC",
+                    ],
+                ),
+                ruleId=line.rule_id,
+                level=level,
+                kind=kind,
+                message=Message(
+                    root=Message1(text=_result_message_text(line, cfn_file_rel_path))
+                ),
+                analysisTarget=ArtifactLocation(
+                    uri=cfn_file_uri,
+                ),
+                locations=[
+                    Location(
+                        id=1,
+                        physicalLocation=PhysicalLocation(
+                            root=PhysicalLocation2(
+                                artifactLocation=ArtifactLocation(
+                                    uri=cfn_file_uri,
+                                ),
+                                region=Region(
+                                    startLine=(resource_line or 1),
+                                    endLine=(resource_line or 1),
+                                    startColumn=start_column,
+                                    endColumn=end_column,
+                                    snippet=ArtifactContent(
+                                        text=dump_yaml(
+                                            {
+                                                "Resources": {
+                                                    resource_log_id: cfn_resource.model_dump(
+                                                        by_alias=True
+                                                    )
+                                                }
+                                            }
+                                        )
+                                    ),
+                                ),
+                            ),
+                        ),
+                    )
+                ],
+            )
+
+            results[pack_name].append(finding)
+
+    return results
+
+
 def run_cdk_nag_against_cfn_template(
     template_path: Path,
     nag_packs: List[
@@ -1846,8 +2032,6 @@ def run_cdk_nag_against_cfn_template(
             ]
             ASH_LOGGER.debug(json.dumps(included, default=str, indent=2))
 
-            results: Dict[str, List[Result]] = {}
-
             # cdk-nag 3.x reports through CDK's policy validation framework, which writes a
             # single validation-report.json rather than the per-pack *-NagReport.json files
             # 2.x produced. Globbing for those files against a v3 install finds nothing and
@@ -1863,172 +2047,14 @@ def run_cdk_nag_against_cfn_template(
             if not cdk_nag_report_lines:
                 ASH_LOGGER.debug(f"cdk-nag reported no violations for {template_path}")
 
-            # Once per template, guarded as the two sites above are: the per-finding loop
-            # was the one call of get_shortest_name with no handler, so a template whose
-            # path merely starts with the working directory's name (a sibling directory)
-            # raised ValueError there and lost every finding it had.
-            cfn_file_rel_path = Path(template_path).as_posix()
-            try:
-                cfn_file_rel_path = str(get_shortest_name(input=template_path))
-            except Exception as e:
-                ASH_LOGGER.debug(f"Could not get relative path to template: {e}")
-
-            # One read of the template for every finding of it; the per-finding
-            # search re-read the whole file per rule, under the environment lock
-            # and inside the worker's scan timeout.
-            locations = _TemplateLocations(template_lines)
-
-            for pack_name, report_lines in cdk_nag_report_lines.items():
-                if pack_name not in results:
-                    results[pack_name] = []
-                line: _NagFinding
-                for line in report_lines:
-                    if line.compliance == "Compliant" and not include_compliant_checks:
-                        ASH_LOGGER.debug(f"Skipping compliant check: {line.rule_id}")
-                        continue
-
-                    # Under CfnInclude the construct path is
-                    # "<stack>/<template>/<LogicalId>", so the last segment is the template's
-                    # own logical ID -- the same property 2.x's resourceId had, which is why
-                    # the lookup and line-number search below are unchanged.
-                    resource_log_id = line.resource_id.split("/")[-1]
-
-                    # The URIs name the template absolutely, as the template path the
-                    # scanner passes does. get_shortest_name is relative to the working
-                    # directory, so with ASH run from an ancestor of the source
-                    # directory a URI read "proj/t.yaml", which the path sanitizer then
-                    # took as relative to the source directory. An absolute URI is made
-                    # relative to the source directory there, wherever ASH runs.
-                    cfn_file_uri = Path(os.path.abspath(template_path)).as_posix()
-                    cfn_resource_matches = [
-                        item
-                        for resource_id, item in model.Resources.items()
-                        if resource_id == resource_log_id
-                    ]
-                    if not cfn_resource_matches:
-                        # Said out loud, as the construct-less case is: a finding that
-                        # cannot be placed on a resource of this template is not reported,
-                        # and silence here let a template read clean.
-                        ASH_LOGGER.warning(
-                            f"cdk-nag rule '{line.rule_id}' cites construct "
-                            f"'{line.resource_id}', whose logical id is not a resource of "
-                            f"{cfn_file_rel_path}, so that finding is not reported"
-                        )
-                        continue
-                    cfn_resource = cfn_resource_matches[0]
-                    resource_line, resource_column = locations.of(resource_log_id)
-                    start_column, end_column = _sarif_columns(
-                        resource_column, resource_log_id
-                    )
-
-                    cfn_resource_dict = {
-                        "Resources": {
-                            resource_log_id: cfn_resource.model_dump(by_alias=True)
-                        }
-                    }
-                    level, kind = _level_and_kind(
-                        compliance=line.compliance,
-                        rule_level=line.rule_level,
-                        exception_reason=line.exception_reason,
-                    )
-                    # The template may already say why this finding is accepted. See
-                    # _template_suppression_reason: cdk-nag 3.x cannot read its own in-band
-                    # suppressions back off a template it is re-scanning, so if this is not
-                    # done here the author's reason is never applied to anything. A row
-                    # whose rule never ran gets none (_suppression_for_finding).
-                    template_suppression = _suppression_for_finding(
-                        line, cfn_resource, honor_template_suppressions
-                    )
-                    if template_suppression is not None:
-                        # Styles its reason, so it asks for markup and escapes
-                        # every value: all four come from the template.
-                        ASH_LOGGER.verbose(
-                            f"Suppressing rule '{escape_markup(line.rule_id)}' on "
-                            f"resource '{escape_markup(resource_log_id)}' in "
-                            f"'{escape_markup(cfn_file_rel_path)}' based on the "
-                            f"template's own cdk_nag metadata: "
-                            f"[yellow]{escape_markup(template_suppression)}[/yellow]",
-                            extra=MARKUP,
-                        )
-                    finding = Result(
-                        suppressions=(
-                            [
-                                Suppression(
-                                    kind=Kind1.inSource,
-                                    justification=(
-                                        "(ASH cdk-nag in-template suppression) "
-                                        f"{template_suppression}"
-                                    ),
-                                )
-                            ]
-                            if template_suppression is not None
-                            else None
-                        ),
-                        properties=PropertyBag(
-                            cdk_nag_finding=line.as_dict(),
-                            cfn_resource=cfn_resource_dict,
-                            # The universal resource-identity contract for
-                            # resource-scoped suppressions (utils/
-                            # package_identity.py): the construct path and the
-                            # CloudFormation type, as flat keys any reader can
-                            # take without knowing cdk-nag's own bag.
-                            ash_resource_id=line.resource_id,
-                            ash_resource_type=cfn_resource.Type,
-                            tags=[
-                                "aws",
-                                "cdk",
-                                "cdk-nag",
-                                pack_name or "unknown",
-                                line.rule_id,
-                                resource_log_id,
-                                cfn_resource.Type,
-                                "tool_name::cdk-nag",
-                                "tool_type::IAC",
-                            ],
-                        ),
-                        ruleId=line.rule_id,
-                        level=level,
-                        kind=kind,
-                        message=Message(
-                            root=Message1(
-                                text=_result_message_text(line, cfn_file_rel_path)
-                            )
-                        ),
-                        analysisTarget=ArtifactLocation(
-                            uri=cfn_file_uri,
-                        ),
-                        locations=[
-                            Location(
-                                id=1,
-                                physicalLocation=PhysicalLocation(
-                                    root=PhysicalLocation2(
-                                        artifactLocation=ArtifactLocation(
-                                            uri=cfn_file_uri,
-                                        ),
-                                        region=Region(
-                                            startLine=(resource_line or 1),
-                                            endLine=(resource_line or 1),
-                                            startColumn=start_column,
-                                            endColumn=end_column,
-                                            snippet=ArtifactContent(
-                                                text=dump_yaml(
-                                                    {
-                                                        "Resources": {
-                                                            resource_log_id: cfn_resource.model_dump(
-                                                                by_alias=True
-                                                            )
-                                                        }
-                                                    }
-                                                )
-                                            ),
-                                        ),
-                                    ),
-                                ),
-                            )
-                        ],
-                    )
-
-                    results[pack_name].append(finding)
+            results = build_nag_results(
+                cdk_nag_report_lines,
+                model,
+                template_path,
+                template_lines,
+                include_compliant_checks=include_compliant_checks,
+                honor_template_suppressions=honor_template_suppressions,
+            )
 
             return CdkNagWrapperResponse(
                 results=results,

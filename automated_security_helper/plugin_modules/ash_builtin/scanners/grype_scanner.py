@@ -412,23 +412,33 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
     #: reading of grype's SARIF in this module (``_GRYPE_PACKAGE_MESSAGE``).
     facets: ClassVar[ScannerFacets] = ScannerFacets(
         rule_id=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="SARIF result ruleId (the vulnerability id)",
+            state=FacetState.NA,
+            reason="UNCONFIRMED: the survey reads the SARIF result ruleId (the "
+            "vulnerability id) off the conformance tests' presenter shape; no "
+            "grype SARIF fixture from a real run is committed, so a "
+            "`grype -o sarif` capture settles it",
         ),
         severity=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field='SARIF rule properties "security-severity" (CVSS), '
-            'else the result "level"',
+            state=FacetState.NA,
+            reason="UNCONFIRMED: the survey reads the SARIF rule properties "
+            '"security-severity" (CVSS), else the result "level", off the '
+            "conformance tests' presenter shape; no grype SARIF fixture from "
+            "a real run is committed, so a `grype -o sarif` capture settles it",
         ),
         file_path=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="SARIF locations[].physicalLocation.artifactLocation.uri "
-            "(the manifest or lockfile)",
+            state=FacetState.NA,
+            reason="UNCONFIRMED: the survey reads SARIF locations[]."
+            "physicalLocation.artifactLocation.uri (the manifest or lockfile) "
+            "off the conformance tests' presenter shape; no grype SARIF "
+            "fixture from a real run is committed, so a `grype -o sarif` "
+            "capture settles it",
         ),
         line_range=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="SARIF region.startLine (grype always writes line 1 of "
-            "the manifest)",
+            state=FacetState.NA,
+            reason="UNCONFIRMED: the survey reads SARIF region.startLine "
+            "(grype always writes line 1 of the manifest) off the conformance "
+            "tests' presenter shape; no grype SARIF fixture from a real run "
+            "is committed, so a `grype -o sarif` capture settles it",
         ),
         column=FacetDecl(
             state=FacetState.NA,
@@ -437,8 +447,11 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
             "startColumn",
         ),
         message=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="SARIF result message.text",
+            state=FacetState.NA,
+            reason="UNCONFIRMED: the survey reads SARIF result message.text "
+            "off the conformance tests' presenter shape; no grype SARIF "
+            "fixture from a real run is committed, so a `grype -o sarif` "
+            "capture settles it",
         ),
         resource_id=FacetDecl(
             state=FacetState.NA,
@@ -452,25 +465,38 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
             "package ecosystem (gem, npm), not a resource type",
         ),
         package_name=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field='SARIF message "package: <name>, version <version> '
-            'was found at:" (_GRYPE_PACKAGE_MESSAGE)',
+            state=FacetState.NA,
+            reason="UNCONFIRMED: the adapter parses the SARIF message "
+            '"package: <name>, version <version> was found at:" '
+            "(_GRYPE_PACKAGE_MESSAGE), pinned over the conformance tests' "
+            "presenter shape only; no grype SARIF fixture from a real run is "
+            "committed, so a `grype -o sarif` capture settles it",
         ),
         package_version=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field='SARIF message "package: <name>, version <version> '
-            'was found at:" (_GRYPE_PACKAGE_MESSAGE)',
+            state=FacetState.NA,
+            reason="UNCONFIRMED: the adapter parses the SARIF message "
+            '"package: <name>, version <version> was found at:" '
+            "(_GRYPE_PACKAGE_MESSAGE), pinned over the conformance tests' "
+            "presenter shape only; no grype SARIF fixture from a real run is "
+            "committed, so a `grype -o sarif` capture settles it",
         ),
         package_path=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="npm lockfile entry found by name and version beside "
-            "the manifest; grype's own output carries no per-copy path "
-            "(set only when exactly one copy matches)",
+            state=FacetState.NA,
+            reason="UNCONFIRMED: the adapter resolves an npm lockfile entry "
+            "by name and version beside the manifest (set only when exactly "
+            "one copy matches), pinned over the conformance tests' presenter "
+            "shape only; no grype SARIF fixture from a real run (over a "
+            "committed npm tree) is committed, so a `grype -o sarif` capture "
+            "settles it",
         ),
         taxonomy_cve=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="SARIF result ruleId (CVE or GHSA id; "
-            "matches[].vulnerability.id)",
+            state=FacetState.NA,
+            reason="UNCONFIRMED: the SARIF result ruleId is the vulnerability "
+            "id (matches[].vulnerability.id, a CVE or GHSA id; the committed "
+            "native JSON's eight matches are all GHSA ids, which the flat CVE "
+            "column never reads); no grype SARIF fixture from a real run with "
+            "a CVE-named match is committed, so a `grype -o sarif` capture "
+            "settles it",
         ),
         taxonomy_cwe=FacetDecl(
             state=FacetState.NA,
@@ -486,14 +512,15 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
             "fingerprints or partialFingerprints",
         ),
         fix_available=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field='SARIF rule help.text line "Fix Version: <versions>" '
-            "(grype's rendering of matches[].vulnerability.fix.versions), "
-            "written as fix_available=True only for a non-empty list on a "
-            "uniquely named rule whose Package and Version lines match the "
-            "result's own message; an empty list (not-fixed, wont-fix, "
-            "unknown) is never written as False",
-            example="GHSA-3h5v-q93c-6h6q-ws: Fix Version: 8.17.1",
+            state=FacetState.NA,
+            reason="UNCONFIRMED: the adapter reads the SARIF rule help.text "
+            'line "Fix Version: <versions>" (grype\'s rendering of '
+            "matches[].vulnerability.fix.versions) and writes "
+            "fix_available=True only for a non-empty list on a uniquely named "
+            "rule whose Package and Version lines match the result's own "
+            "message, pinned over the conformance tests' presenter shape "
+            "only; no grype SARIF fixture from a real run is committed, so a "
+            "`grype -o sarif` capture settles it",
         ),
         remediation_text=FacetDecl(
             state=FacetState.NA,
@@ -512,8 +539,12 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
             "dataSource) are never read into references",
         ),
         tags=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="SARIF rule properties.tags",
+            state=FacetState.NA,
+            reason="UNCONFIRMED: the survey reads SARIF rule properties.tags "
+            "off the conformance tests' presenter shape (rule-level, which "
+            "the flat reader never takes as the tags column anyway); no grype "
+            "SARIF fixture from a real run is committed, so a `grype -o "
+            "sarif` capture settles whether results carry tags",
         ),
         extras=FacetDecl(
             state=FacetState.MAPPED,

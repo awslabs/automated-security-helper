@@ -385,30 +385,42 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
     #: `snyk code test --sarif` run over a sample with a finding settles them.
     facets: ClassVar[ScannerFacets] = ScannerFacets(
         rule_id=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field='result "ruleId"',
+            state=FacetState.NA,
+            reason='output not read: the survey reads result "ruleId" off the '
+            "in-test double's shape, and no snyk SARIF from a real run is "
+            "committed (M0 item e); a licensed `snyk code test --sarif` run "
+            "would settle it",
         ),
         severity=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field='result "level"; rules carry no security-severity, so '
-            "a bare error reads as CRITICAL (degraded)",
+            state=FacetState.NA,
+            reason='output not read: the survey reads result "level" (no '
+            "security-severity on rules, so a bare error reads as CRITICAL) "
+            "off the in-test double's shape, and no snyk SARIF from a real "
+            "run is committed (M0 item e); a licensed run would settle it",
         ),
         file_path=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="locations[].physicalLocation.artifactLocation.uri "
-            "(%SRCROOT% base)",
+            state=FacetState.NA,
+            reason="output not read: the survey reads locations[]."
+            "physicalLocation.artifactLocation.uri (%SRCROOT% base) off the "
+            "in-test double's shape, and no snyk SARIF from a real run is "
+            "committed (M0 item e); a licensed run would settle it",
         ),
         line_range=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="region.startLine / region.endLine",
+            state=FacetState.NA,
+            reason="output not read: the survey reads region.startLine / "
+            "region.endLine off the in-test double's shape, and no snyk "
+            "SARIF from a real run is committed (M0 item e); a licensed run "
+            "would settle it",
         ),
         column=FacetDecl(
             state=FacetState.MAPPED,
             native_field="region.startColumn / region.endColumn",
         ),
         message=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field='result "message.text"',
+            state=FacetState.NA,
+            reason='output not read: the survey reads result "message.text" '
+            "off the in-test double's shape, and no snyk SARIF from a real "
+            "run is committed (M0 item e); a licensed run would settle it",
         ),
         resource_id=FacetDecl(
             state=FacetState.NA,
@@ -436,15 +448,20 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
             reason="snyk code rules are source-defect classes, not CVEs",
         ),
         taxonomy_cwe=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field='tool.driver.rules[].properties "cwe" (e.g. '
-            '["CWE-798"]), normalized by normalize_rule_cwe_into_tags into '
+            state=FacetState.NA,
+            reason='output not read: rules\' properties "cwe" (e.g. '
+            '["CWE-798"]) is normalized by normalize_rule_cwe_into_tags into '
             "the rule's tags as external/cwe/cwe-<n>, which the shared flat "
-            "reader reads",
+            "reader reads -- pinned over the in-test double's shape only, "
+            "since no snyk SARIF from a real run is committed (M0 item e); a "
+            "licensed run would settle it",
         ),
         fingerprints=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field='result "fingerprints" {"0", "1"}',
+            state=FacetState.NA,
+            reason="output not read: the survey reads result "
+            '"fingerprints" {"0", "1"} off the in-test double\'s shape, and '
+            "no snyk SARIF from a real run is committed (M0 item e); a "
+            "licensed run would settle it",
         ),
         fix_available=FacetDecl(
             state=FacetState.DROPPED,

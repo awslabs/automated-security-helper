@@ -1,0 +1,15 @@
+# Benign test fixture for the facets corpus gate (never executed).
+# The same local rule as m0_rule.yaml with CWE metadata, so a captured
+# `opengrep scan --sarif` run shows the fork writing the metadata into the
+# rule's SARIF properties.tags -- the place the shared flat reader takes the
+# CWE from (utils/taxonomy_ids.py cwes_of_tags over result and rule tags).
+rules:
+  - id: m0-subprocess-shell-true-cwe
+    languages: [python]
+    severity: ERROR
+    message: "ASH M0 fixture rule: subprocess.call with shell=True (CWE-tagged)"
+    metadata:
+      cwe:
+        - "CWE-78: Improper Neutralization of Special Elements used in an OS Command"
+    patterns:
+      - pattern: subprocess.call(..., shell=True)

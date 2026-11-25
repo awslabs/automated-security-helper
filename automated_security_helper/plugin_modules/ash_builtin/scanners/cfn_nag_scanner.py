@@ -420,22 +420,34 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
     #: reason, never a guess.
     facets: ClassVar[ScannerFacets] = ScannerFacets(
         rule_id=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field='violation "id" (e.g. W51), the SARIF ruleId',
+            state=FacetState.NA,
+            reason='UNCONFIRMED: the JSON violation "id" (e.g. W51, the '
+            "committed fixture) should render as the SARIF ruleId, but the "
+            "SARIF the pipeline reads was never read to a real result (M0 "
+            "item b FATALed); one cfn_nag_scan --output-format sarif run "
+            "settles it",
         ),
         severity=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field='violation "type" (WARN or FAIL), rendered by the '
-            "tool as the SARIF result level",
+            state=FacetState.NA,
+            reason='UNCONFIRMED: the JSON violation "type" (WARN or FAIL) '
+            "should render as the SARIF result level, but the SARIF the "
+            "pipeline reads was never read to a real result (M0 item b); one "
+            "cfn_nag_scan --output-format sarif run settles it",
         ),
         file_path=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field='file result "filename", the SARIF artifact uri '
-            "(restored from the staged copy by _restore_cfn_nag_uris)",
+            state=FacetState.NA,
+            reason='UNCONFIRMED: the JSON file result "filename" should '
+            "render as the SARIF artifact uri (restored from the staged copy "
+            "by _restore_cfn_nag_uris), but the SARIF the pipeline reads was "
+            "never read to a real result (M0 item b); one cfn_nag_scan "
+            "--output-format sarif run settles it",
         ),
         line_range=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field='violation "line_numbers", the SARIF region startLine',
+            state=FacetState.NA,
+            reason='UNCONFIRMED: the JSON violation "line_numbers" should '
+            "render as the SARIF region startLine, but the SARIF the "
+            "pipeline reads was never read to a real result (M0 item b); one "
+            "cfn_nag_scan --output-format sarif run settles it",
         ),
         column=FacetDecl(
             state=FacetState.NA,
@@ -444,8 +456,11 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
             "--output-format sarif run settles whether a column is emitted",
         ),
         message=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field='violation "message"',
+            state=FacetState.NA,
+            reason='UNCONFIRMED: the JSON violation "message" should render '
+            "as the SARIF message text, but the SARIF the pipeline reads was "
+            "never read to a real result (M0 item b); one cfn_nag_scan "
+            "--output-format sarif run settles it",
         ),
         resource_id=FacetDecl(
             state=FacetState.DROPPED,

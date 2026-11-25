@@ -224,8 +224,12 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
             native_field="tool.driver.rules[].properties.tags (CWE entries)",
         ),
         fingerprints=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field='results[].fingerprints."matchBasedId/v1"',
+            state=FacetState.NA,
+            reason="semgrep OSS writes the placeholder 'requires login' as "
+            'results[].fingerprints."matchBasedId/v1" (the committed capture '
+            "shows it), which the finding-identity reader discards; a real "
+            "match-based id needs semgrep's logged-in engine, and the "
+            "opengrep fork is the build that emits one",
         ),
         fix_available=FacetDecl(
             state=FacetState.DROPPED,
@@ -243,12 +247,18 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
             native_field="results[].locations[].physicalLocation.region.snippet.text",
         ),
         references=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="tool.driver.rules[].helpUri",
+            state=FacetState.DROPPED,
+            native_field="tool.driver.rules[].helpUri (registry rules; a "
+            "local rule carries none)",
+            reason="rule-level only: the flat reader takes references from "
+            "result relatedLocations, so the help link is discarded today",
         ),
         tags=FacetDecl(
-            state=FacetState.MAPPED,
+            state=FacetState.DROPPED,
             native_field="tool.driver.rules[].properties.tags",
+            reason="rule-level only: the flat reader takes tags from result "
+            "properties, so the rule tags are discarded today (they still "
+            "feed the CWE read)",
         ),
         extras=FacetDecl(
             state=FacetState.MAPPED,

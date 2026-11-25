@@ -797,11 +797,10 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
             native_field='check "check_id" (e.g. CKV_AWS_55), the SARIF result ruleId',
         ),
         severity=FacetDecl(
-            state=FacetState.NA,
-            reason="UNCONFIRMED: the committed side report carries "
-            '"severity": null on every check and no checkov SARIF golden is '
-            "committed; one checkov --output sarif run settles whether a "
-            "level is emitted",
+            state=FacetState.MAPPED,
+            native_field='SARIF result "level" (settled by the committed '
+            'checkov-3.4.6 capture; the side report\'s "severity" stays '
+            "null without a platform key)",
         ),
         file_path=FacetDecl(
             state=FacetState.MAPPED,
@@ -878,10 +877,10 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
             "remediation text field exists in the side report",
         ),
         snippet=FacetDecl(
-            state=FacetState.DROPPED,
-            native_field='check "code_block" ([line number, text] pairs)',
-            reason="the side report carries the resource's source lines; the "
-            "adapter never reads them",
+            state=FacetState.MAPPED,
+            native_field="SARIF region.snippet.text (settled by the committed "
+            'checkov-3.4.6 capture; the side report\'s "code_block" carries '
+            "the same lines)",
         ),
         references=FacetDecl(
             state=FacetState.DROPPED,

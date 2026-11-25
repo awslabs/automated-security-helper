@@ -894,14 +894,18 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
             native_field='match "code" / risk "threat_code"',
         ),
         references=FacetDecl(
-            state=FacetState.MAPPED,
+            state=FacetState.DROPPED,
             native_field="rule helpUri https://github.com/DataDog/guarddog"
             "#heuristics (adapter-written, not per-heuristic)",
+            reason="rule-level only: the flat reader takes references from "
+            "result relatedLocations, so the help link is discarded today",
         ),
         tags=FacetDecl(
-            state=FacetState.MAPPED,
+            state=FacetState.DROPPED,
             native_field="rule-level PropertyBag tags guarddog and "
             "malicious-package, written by the adapter",
+            reason="rule-level only: the flat reader takes tags from result "
+            "properties, so the rule tags are discarded today",
         ),
         extras=FacetDecl(
             state=FacetState.MAPPED,

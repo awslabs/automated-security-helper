@@ -1092,36 +1092,52 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
 
     #: The facets register row (base/scanner_facets.py). Declaration only: no
-    #: behavior changes. Native fields name ferret-scan's own SARIF. No tool
-    #: SARIF fixture is committed (tests/test_data/scanners/ferret-scan holds
-    #: only the inputs), so the cell the survey could not read is declared
-    #: n/a with the run that would settle it.
+    #: behavior changes. No tool SARIF fixture is committed
+    #: (tests/test_data/scanners/ferret-scan holds only the inputs) and the
+    #: tests synthesize the SARIF shape by hand, so every cell the survey
+    #: could only read off ferret-scan's own output is declared n/a with the
+    #: run that would settle it, per the register's unread-source rule.
     facets: ClassVar[ScannerFacets] = ScannerFacets(
         rule_id=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field='result "ruleId"',
+            state=FacetState.NA,
+            reason='output not read: the survey reads result "ruleId" off '
+            "the tests' hand-written SARIF shape, and no ferret-scan SARIF "
+            "from a real run is committed; one `ferret-scan --format sarif` "
+            "run over the committed samples would settle it",
         ),
         severity=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field='result "level" (the tool\'s own rating)',
+            state=FacetState.NA,
+            reason='output not read: the survey reads result "level" (the '
+            "tool's own rating) off the tests' hand-written SARIF shape, and "
+            "no ferret-scan SARIF from a real run is committed; one "
+            "`ferret-scan --format sarif` run would settle it",
         ),
         file_path=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="locations[].physicalLocation.artifactLocation.uri "
-            "(uriBaseId resolved by the adapter)",
+            state=FacetState.NA,
+            reason="output not read: the survey reads locations[]."
+            "physicalLocation.artifactLocation.uri (uriBaseId resolved by "
+            "the adapter) off the tests' hand-written SARIF shape, and no "
+            "ferret-scan SARIF from a real run is committed; one "
+            "`ferret-scan --format sarif` run would settle it",
         ),
         line_range=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="region.startLine / region.endLine",
+            state=FacetState.NA,
+            reason="output not read: the survey reads region.startLine / "
+            "region.endLine off the tests' hand-written SARIF shape, and no "
+            "ferret-scan SARIF from a real run is committed; one "
+            "`ferret-scan --format sarif` run would settle it",
         ),
         column=FacetDecl(
             state=FacetState.MAPPED,
             native_field="region.startColumn / region.endColumn",
         ),
         message=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field='result "message.text" (matched values masked by the '
-            "shared secret-masking pass downstream)",
+            state=FacetState.NA,
+            reason='output not read: the survey reads result "message.text" '
+            "(matched values masked by the shared secret-masking pass "
+            "downstream) off the tests' hand-written SARIF shape, and no "
+            "ferret-scan SARIF from a real run is committed; one "
+            "`ferret-scan --format sarif` run would settle it",
         ),
         resource_id=FacetDecl(
             state=FacetState.NA,
@@ -1169,9 +1185,12 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
             reason="ferret-scan results carry no remediation text",
         ),
         snippet=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="region.snippet.text (matched values masked by the "
-            "shared secret-masking pass downstream)",
+            state=FacetState.NA,
+            reason="output not read: the survey reads region.snippet.text "
+            "(matched values masked by the shared secret-masking pass "
+            "downstream) off the tests' hand-written SARIF shape, and no "
+            "ferret-scan SARIF from a real run is committed; one "
+            "`ferret-scan --format sarif` run would settle it",
         ),
         references=FacetDecl(
             state=FacetState.NA,

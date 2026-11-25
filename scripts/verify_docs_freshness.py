@@ -36,6 +36,7 @@ DOCS_DIR = REPO_ROOT / "docs"
 # (the config models, the plugin registry, the @mcp.tool decorators).
 REFERENCE_DIR = DOCS_DIR / "content" / "reference"
 SCANNERS_REFERENCE_MD = REFERENCE_DIR / "scanners.md"
+SCANNER_FACETS_REFERENCE_MD = REFERENCE_DIR / "scanner-facets.md"
 REPORTERS_REFERENCE_MD = REFERENCE_DIR / "reporters.md"
 MCP_TOOLS_REFERENCE_MD = REFERENCE_DIR / "mcp-tools.md"
 
@@ -627,6 +628,23 @@ def check_scanners() -> list[str]:
         read_text(SCANNERS_REFERENCE_MD),
         "Scanner",
         "docs/content/reference/scanners.md",
+    )
+
+
+def check_scanner_facets_page() -> list[str]:
+    """The facets reference's summary table and the scanners ASH ships are the same set.
+
+    The page itself is generated from the register and held current by
+    ``tests/unit/test_generated_docs_freshness.py``; this is the second source:
+    the generator could drop or invent a scanner, and here the page is held
+    against the config models the way the scanners reference is.
+    """
+    return compare_inventories(
+        "Scanner facets",
+        scanner_names(),
+        read_text(SCANNER_FACETS_REFERENCE_MD),
+        "Scanner",
+        "docs/content/reference/scanner-facets.md",
     )
 
 
@@ -1737,6 +1755,10 @@ def main(argv: list[str] | None = None) -> int:
     checks = [
         ("Reporter list in docs matches code", check_reporters),
         ("Scanner list in docs matches code", check_scanners),
+        (
+            "Scanner facets reference lists the scanners ASH ships",
+            check_scanner_facets_page,
+        ),
         (
             "Plugin data behind the home page graphics matches code",
             check_plugin_data,

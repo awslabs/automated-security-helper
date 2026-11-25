@@ -469,9 +469,9 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             "location, synthesized as node_modules/<location>/package.json)",
         ),
         line_range=FacetDecl(
-            state=FacetState.NA,
-            reason="npm audit output carries no line; the adapter synthesizes "
-            "1:1, so there is no native line to map",
+            state=FacetState.MAPPED,
+            native_field="(no native line) the adapter writes line 1 of the "
+            "synthesized manifest location on every result",
         ),
         column=FacetDecl(
             state=FacetState.NA,
@@ -508,9 +508,10 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             "lockfile entry for the install path",
         ),
         taxonomy_cve=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field='vulnerabilities.<name>.via[]."url" (the GHSA '
-            "advisory id carried as the ruleId; npm audit names no CVE field)",
+            state=FacetState.NA,
+            reason="npm audit names no CVE field: the advisory id carried as "
+            'the ruleId is vulnerabilities.<name>.via[]."url" (a GHSA id), '
+            "and the flat CVE column reads CVE-shaped rule ids only",
         ),
         taxonomy_cwe=FacetDecl(
             state=FacetState.DROPPED,
@@ -539,13 +540,18 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             reason="a package advisory has no source code snippet",
         ),
         references=FacetDecl(
-            state=FacetState.MAPPED,
+            state=FacetState.DROPPED,
             native_field='vulnerabilities.<name>.via[]."url" (rule helpUri)',
+            reason="written at rule level only: the flat reader takes "
+            "references from result relatedLocations, so the advisory link "
+            "is discarded today",
         ),
         tags=FacetDecl(
-            state=FacetState.MAPPED,
+            state=FacetState.DROPPED,
             native_field="rule properties.tags (ASH-composed: security, "
             "npm-audit, the severity word)",
+            reason="written at rule level only: the flat reader takes tags "
+            "from result properties, so the rule tags are discarded today",
         ),
         extras=FacetDecl(
             state=FacetState.MAPPED,
@@ -2481,6 +2487,43 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         if isinstance(kept, bool) or not isinstance(kept, (int, float)):
             return True
         return score > kept
+
+    @classmethod
+    def convert_results(
+        cls,
+        npm_audit_results: Dict[str, Any],
+        target_path: Path,
+        lock_file: Path | None = None,
+    ) -> SarifReport:
+        """A default-configured scanner's SARIF view of an npm audit report.
+
+        Tool-free: the plugin context is a default-configured one over
+        ``target_path`` and nothing runs, so conformance tests can drive the
+        conversion over a committed audit capture the way
+        ``CfnGuardScanner.normalize_results`` is driven (the conversion itself
+        is an instance method because it reads the scanner's name, tool type
+        and exit state). ``exit_code`` 0 is the successful-run shape, so the
+        invocation record reads as a completed scan.
+        """
+        from automated_security_helper.base.plugin_context import PluginContext
+        from automated_security_helper.config.default_config import (
+            get_default_config,
+        )
+
+        target = Path(target_path)
+        scanner = cls(
+            context=PluginContext(
+                source_dir=target,
+                output_dir=target / "ash-output",
+                work_dir=target / "ash-work",
+                config=get_default_config(),
+            ),
+            config=NpmAuditScannerConfig(),
+        )
+        scanner.exit_code = 0
+        return scanner._convert_npm_audit_to_sarif(
+            npm_audit_results, target_path, lock_file
+        )
 
     def _convert_npm_audit_to_sarif(
         self,
