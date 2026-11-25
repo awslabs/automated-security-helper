@@ -42,6 +42,26 @@ from automated_security_helper.utils.suppression_matcher import (
 )
 
 
+def confined_path(root: Path, *parts: str) -> Optional[Path]:
+    """``root`` joined with ``parts``, resolved, if it stays strictly under ``root``.
+
+    The harvest builds paths from values a scanned repository wrote (package
+    name, version, a cache key). Those are validated at parse time; this is the
+    second layer at every join site: the joined path is resolved (symlinks and
+    ``..`` included) and must be inside the resolved root, and not the root
+    itself. None means refuse: the caller skips the package and never deletes
+    or writes the path.
+    """
+    try:
+        resolved_root = Path(root).resolve()
+        joined = resolved_root.joinpath(*parts).resolve()
+    except (OSError, RuntimeError, ValueError):
+        return None
+    if joined == resolved_root or not joined.is_relative_to(resolved_root):
+        return None
+    return joined
+
+
 class SdistLockHarvesterConfig(ConverterPluginConfigBase):
     """Configuration for the sdist lockfile harvester.
 
@@ -265,9 +285,11 @@ class SdistLockHarvester(ConverterPluginBase[SdistLockHarvesterConfig]):
         ``harvest-manifest.json``. The manifest carries the provenance the syft
         scanner stamps onto each harvested component.
         """
-        destination = self.results_dir.joinpath(
-            HARVEST_DIR_NAME, package.name, package.version
+        destination = confined_path(
+            self.results_dir.joinpath(HARVEST_DIR_NAME), package.name, package.version
         )
+        if destination is None:
+            raise RuntimeError("the harvest destination is outside its root")
         destination.mkdir(parents=True, exist_ok=True)
         written: List[Path] = []
         for basename in sorted(lockfiles):
@@ -307,7 +329,9 @@ class SdistLockHarvester(ConverterPluginBase[SdistLockHarvesterConfig]):
         """
         if package.sdist_sha256 is None:
             return None
-        entry = cache_root.joinpath(package.sdist_sha256)
+        entry = confined_path(cache_root, package.sdist_sha256)
+        if entry is None:
+            return None
         index = entry.joinpath("cached-lockfiles.json")
         if not index.is_file():
             return None
@@ -317,11 +341,13 @@ class SdistLockHarvester(ConverterPluginBase[SdistLockHarvesterConfig]):
             digests = cached.get("digests")
         except Exception as error:
             return self._evict_cache_entry(
-                entry, f"its index could not be read ({type(error).__name__})"
+                cache_root,
+                entry,
+                f"its index could not be read ({type(error).__name__})",
             )
         if not isinstance(digests, dict):
             return self._evict_cache_entry(
-                entry, "its index records no content digests"
+                cache_root, entry, "its index records no content digests"
             )
         from automated_security_helper.utils.download_utils import sha256_file
 
@@ -331,10 +357,11 @@ class SdistLockHarvester(ConverterPluginBase[SdistLockHarvesterConfig]):
         served = [name for name in names if name in wanted]
         for name in served:
             recorded = digests.get(name)
-            candidate = entry.joinpath(name)
+            candidate = confined_path(entry, name)
             try:
                 matches = (
                     isinstance(recorded, str)
+                    and candidate is not None
                     and candidate.is_file()
                     and sha256_file(candidate).lower() == recorded.lower()
                 )
@@ -342,13 +369,14 @@ class SdistLockHarvester(ConverterPluginBase[SdistLockHarvesterConfig]):
                 matches = False
             if not matches:
                 return self._evict_cache_entry(
+                    cache_root,
                     entry,
                     f"'{name}' does not match the digest recorded when the "
                     "entry was written",
                 )
         return served
 
-    def _evict_cache_entry(self, entry: Path, why: str) -> None:
+    def _evict_cache_entry(self, cache_root: Path, entry: Path, why: str) -> None:
         """Remove a cache entry that cannot be served, so the miss is honest.
 
         Serving is refused on ANY doubt; eviction then makes the next online
@@ -356,11 +384,18 @@ class SdistLockHarvester(ConverterPluginBase[SdistLockHarvesterConfig]):
         the same unverifiable bytes again. Returns None, the caller's cold-miss
         answer.
         """
+        confined = confined_path(cache_root, entry.name)
+        if confined is None or confined != Path(entry).resolve():
+            ASH_LOGGER.warning(
+                "Not evicting a sdist-harvest cache entry that is outside the "
+                "cache root; the package reads as a cold cache miss."
+            )
+            return None
         ASH_LOGGER.warning(
             f"Evicting the sdist-harvest cache entry {entry.name[:12]}...: {why}. "
             "The package reads as a cold cache miss."
         )
-        shutil.rmtree(entry, ignore_errors=True)
+        shutil.rmtree(confined, ignore_errors=True)
         return None
 
     def _fetch_and_harvest(
@@ -394,7 +429,10 @@ class SdistLockHarvester(ConverterPluginBase[SdistLockHarvesterConfig]):
         wanted = [
             ECOSYSTEM_LOCKFILES[eco] for eco in ecosystems if eco in ECOSYSTEM_LOCKFILES
         ]
-        entry = cache_root.joinpath(package.sdist_sha256)
+        confined_entry = confined_path(cache_root, package.sdist_sha256)
+        if confined_entry is None:
+            raise RuntimeError("the cache entry is outside the cache root")
+        entry = confined_entry
         entry.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(
             prefix="ash-sdist-harvest-", dir=cache_root
@@ -595,7 +633,10 @@ class SdistLockHarvester(ConverterPluginBase[SdistLockHarvesterConfig]):
                 return
             results.extend(
                 self._materialize(
-                    package, cache_root.joinpath(package.sdist_sha256), cached, sources
+                    package,
+                    self._confined_entry(cache_root, package),
+                    cached,
+                    sources,
                 )
             )
             return
@@ -658,6 +699,17 @@ class SdistLockHarvester(ConverterPluginBase[SdistLockHarvesterConfig]):
             return
         results.extend(
             self._materialize(
-                package, cache_root.joinpath(package.sdist_sha256), harvested, sources
+                package,
+                self._confined_entry(cache_root, package),
+                harvested,
+                sources,
             )
         )
+
+    @staticmethod
+    def _confined_entry(cache_root: Path, package: FlaggedPackage) -> Path:
+        """The package's cache entry directory, confined to the cache root."""
+        entry = confined_path(cache_root, package.sdist_sha256 or "")
+        if entry is None:
+            raise RuntimeError("the cache entry is outside the cache root")
+        return entry
