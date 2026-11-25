@@ -125,6 +125,12 @@ global_settings:
       - /converters/archive/options/max_compression_ratio
       denied_value_patterns: {}
       replace_default_denied_paths: false
+  deduplication:
+    annotate: false
+    fold: false
+  history:
+    enabled: false
+    keep_runs: 50
 fail_on_findings: true
 fail_on_incomplete_scanners: true
 fail_on_unknown_keys: false
