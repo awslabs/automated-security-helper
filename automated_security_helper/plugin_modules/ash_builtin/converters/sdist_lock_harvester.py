@@ -20,7 +20,10 @@ from automated_security_helper.models.core import (
     ignore_paths_that_skip_scanning,
 )
 from automated_security_helper.plugins.decorators import ash_converter_plugin
-from automated_security_helper.utils.atomic_write import write_text_atomically
+from automated_security_helper.utils.atomic_write import (
+    write_bytes_atomically,
+    write_text_atomically,
+)
 from automated_security_helper.utils.download_utils import download_file
 from automated_security_helper.utils.get_scan_set import honors_ignore_files, scan_set
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
@@ -299,7 +302,9 @@ class SdistLockHarvester(ConverterPluginBase[SdistLockHarvesterConfig]):
         written: List[Path] = []
         for basename in sorted(lockfiles):
             target = destination.joinpath(basename)
-            shutil.copyfile(cached_dir.joinpath(basename), target)
+            write_bytes_atomically(
+                target, cached_dir.joinpath(basename).read_bytes(), root=destination
+            )
             written.append(target)
             sources[target] = package.lock_display
         manifest = HarvestManifest(
@@ -311,7 +316,9 @@ class SdistLockHarvester(ConverterPluginBase[SdistLockHarvesterConfig]):
             lockfiles=sorted(lockfiles),
         )
         manifest_path = destination.joinpath(HARVEST_MANIFEST_NAME)
-        manifest_path.write_text(manifest.to_json() + "\n", encoding="utf-8")
+        write_text_atomically(
+            manifest_path, manifest.to_json() + "\n", "utf-8", root=destination
+        )
         written.append(manifest_path)
         sources[manifest_path] = package.lock_display
         return written

@@ -68,6 +68,7 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Dict, List, Mapping, Optional, Sequence, Tuple
 
+from automated_security_helper.utils.atomic_write import write_bytes_atomically
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -400,7 +401,9 @@ def harvest_lockfiles_from_sdist(
                 # the size check above already filtered honest headers.
                 continue
             destination.mkdir(parents=True, exist_ok=True)
-            destination.joinpath(basename).write_bytes(content)
+            write_bytes_atomically(
+                destination.joinpath(basename), content, root=destination
+            )
             written.append(basename)
     return written
 
