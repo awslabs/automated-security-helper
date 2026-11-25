@@ -453,7 +453,7 @@
       }
     },
     "list_scanners": {
-      "description": "List all registered ASH scanners with their metadata.\n\nReturns one entry per scanner with:\n  name: scanner config name (e.g. \"bandit\", \"checkov\")\n  version: detected version string, or null when the scanner reports none.\n    The format is whatever each scanner reports and is not consistent between\n    them -- bandit reports \"bandit 1.9.4\" where checkov reports \"3.3.11\".\n  dependencies_satisfied: true, false, or null when it could not be\n    determined, which happens when a scanner cannot be constructed or its own\n    dependency check raises. Treat null as \"unknown\", not as \"not met\": a\n    scanner reporting null may well run.\n  offline_strategy: one of \"bundled\", \"cache_flags\", \"skip_offline\", \"unknown\"\n  enabled: whether the scanner is enabled in the default ASH config\n  installs_on_first_scan: true when the scanner's tool is not installed and a\n    scan installs it with uv when it starts the scanner; its\n    dependencies_satisfied is then false\n\nNothing is installed or downloaded to answer: a tool that is not already\npresent is reported as such.\n\ndependencies_satisfied describes this deployment's environment at the moment of\nthe call. It is not a prediction about a scan: a scanner reporting true can\nstill fail on a given target, and a scan may skip a scanner for reasons of\nconfiguration rather than dependencies.\n\nThe list covers the built-in scanners and the alpha scanners ASH ships\n(ferret-scan, snyk-code, trivy-repo). Listing an alpha scanner does not add\nit to any scan: a scan runs the built-in scanners plus those of the plugin\nmodules its own ash_plugin_modules names, so an alpha scanner runs only in a\nscan whose config or --ash-plugin-modules names its module.",
+      "description": "List all registered ASH scanners with their metadata.\n\nReturns one entry per scanner with:\n  name: scanner config name (e.g. \"bandit\", \"checkov\")\n  version: detected version string, or null when the scanner reports none.\n    The format is whatever each scanner reports and is not consistent between\n    them -- bandit reports \"bandit 1.9.4\" where checkov reports \"3.3.11\".\n  dependencies_satisfied: true, false, or null when it could not be\n    determined, which happens when a scanner cannot be constructed or its own\n    dependency check raises. Treat null as \"unknown\", not as \"not met\": a\n    scanner reporting null may well run.\n  offline_strategy: one of \"bundled\", \"cache_flags\", \"skip_offline\", \"unknown\"\n  enabled: whether the scanner is enabled in the default ASH config\n  installs_on_first_scan: true when the scanner's tool is not installed and a\n    scan installs it with uv when it starts the scanner; its\n    dependencies_satisfied is then false\n\nNothing is installed or downloaded to answer: a tool that is not already\npresent is reported as such.\n\ndependencies_satisfied describes this deployment's environment at the moment of\nthe call. It is not a prediction about a scan: a scanner reporting true can\nstill fail on a given target, and a scan may skip a scanner for reasons of\nconfiguration rather than dependencies.\n\nThe list covers the built-in scanners and the opt-in scanners ASH ships\n(ferret-scan, snyk-code, trivy-repo). Listing an opt-in scanner does not add\nit to any scan: a scan runs the built-in scanners plus those of the plugin\nmodules its own ash_plugin_modules names, so an opt-in scanner runs only in\na scan whose config or --ash-plugin-modules names its module.",
       "inputSchema": {
         "properties": {},
         "title": "list_scannersArguments",
@@ -533,7 +533,7 @@
       }
     },
     "run_ash_scan": {
-      "description": "Start a security scan and return immediately.\n\nThis tool starts a scan and returns immediately with a scan ID.\nProgress updates will be reported through the MCP context.\n\nPoll get_scan_progress(scan_id) every 5 seconds for progress updates.\nThe scan continues server-side independently of the client connection.\nStop polling when progress['is_complete'] is true, then read\nprogress['status'].\n\nis_complete becomes true when the scan ends, in any of 'completed',\n'incomplete', 'failed' or 'cancelled'. results_available is true for\n'completed' and 'incomplete', the two whose results get_scan_results can\nread. 'incomplete' means the run finished and its results are readable, but\none or more selected scanners did not complete: treat it as terminal with\npartial coverage and read incomplete_scanners for which and why.\n\nExample usage:\n    result = run_ash_scan(source_dir=\"/path/to/project\")\n    scan_id = result['scan_id']\n\n    # Poll until is_complete is true, then read the status\n    while True:\n        progress = get_scan_progress(scan_id=scan_id)\n        if progress.get('is_complete'):\n            break\n        time.sleep(5)  # Poll every 5 seconds\n\n    # Completed and incomplete scans have readable results; for failed or\n    # cancelled scans, read the status and error before retrying.\n    if progress.get('results_available'):\n        results = get_scan_results(\n            output_dir=progress['output_directory'],\n            filter_level=\"summary\",\n            actionable_only=True\n        )\n\nArgs:\n    source_dir: Path to the directory to scan. This should be the absolute path!\n        Omit it to scan a source tree this session delivered with\n        set_source_git or set_source_zip_finalize.\n    severity_threshold: The least severe finding that still counts as actionable:\n        ALL, LOW, MEDIUM, HIGH or CRITICAL, in any case. It can make the\n        config's global_settings.severity_threshold stricter for this scan,\n        never looser: the scan runs at the stricter of the two, which decides\n        which findings are actionable and whether a scanner reports FAILED.\n        Omit it to use the config's own threshold (MEDIUM unless the config\n        sets one).\n    config_path: Optional path to ASH configuration file\n    clean_output: Hide the previous scan's results when this call starts the scan.\n        Either way they are put back if this scan fails or is cancelled, and\n        replaced once it finishes; with false they stay visible until the scan's\n        own set-up moves them a moment later. A call refused because the\n        directory already has a scan touches nothing in it.\n\nRefused (error_type source_delivery_busy) while clear_source, set_source_git\nor set_source_zip_finalize is changing this session's delivered source;\ncall it again once that call has returned.\n\nNeeds a session, because get_scan_progress and cancel_scan do: refused\n(error_type session_identity_required) on a stateless server run without\n--trust-upstream-session-id. run_ash_workspace_scan returns its results in\nits response and needs none.\n\nOn a network transport a session runs at most the operator's\nmax_concurrent_scans_per_session scans at once (default 2); one more is\nrefused (error_type session_scan_limit) until one has finished.\n\nReturns:\n    Dict with scan_id, status, and connection management guidance. A refused\n    scan returns `success` false, `error_type`, and the `exit_code` the CLI\n    exits with for the same refusal, with its `exit_code_meaning`: 3 for a\n    config that is refused or unusable, a link at `.ash` or\n    `.ash/ash_output` in source_dir (as run_ash_workspace_scan reports one\n    in its output tree), or a file git tracks in `.ash/ash_output` where the\n    scan writes, or cannot say whether it does (`error_type`\n    committed_output_files); 5 for the request itself (an unusable session\n    header, no session at all (`session_identity_required`), an unusable\n    severity_threshold, a source_dir that is missing or not a directory, or\n    no source_dir with nothing delivered); 4 for a target the\n    server will not scan (outside the permitted roots, or a delivered tree\n    no longer on disk); 1 for anything else, another scan of the same\n    directory included.",
+      "description": "Start a security scan and return immediately.\n\nThis tool starts a scan and returns immediately with a scan ID.\nProgress updates will be reported through the MCP context.\n\nPoll get_scan_progress(scan_id) every 5 seconds for progress updates.\nThe scan continues server-side independently of the client connection.\nStop polling when progress['is_complete'] is true, then read\nprogress['status'].\n\nis_complete becomes true when the scan ends, in any of 'completed',\n'incomplete', 'failed' or 'cancelled'. results_available is true for\n'completed' and 'incomplete', the two whose results get_scan_results can\nread. 'incomplete' means the run finished and its results are readable, but\none or more selected scanners did not complete: treat it as terminal with\npartial coverage and read incomplete_scanners for which and why.\n\nExample usage:\n    result = run_ash_scan(source_dir=\"/path/to/project\")\n    scan_id = result['scan_id']\n\n    # Poll until is_complete is true, then read the status\n    while True:\n        progress = get_scan_progress(scan_id=scan_id)\n        if progress.get('is_complete'):\n            break\n        time.sleep(5)  # Poll every 5 seconds\n\n    # Completed and incomplete scans have readable results; for failed or\n    # cancelled scans, read the status and error before retrying.\n    if progress.get('results_available'):\n        results = get_scan_results(\n            output_dir=progress['output_directory'],\n            filter_level=\"summary\",\n            actionable_only=True\n        )\n\nArgs:\n    source_dir: Path to the directory to scan. This should be the absolute path!\n        Omit it to scan what this session delivered: the container image a\n        set_source_image or set_source_image_archive_finalize recorded (the\n        latest delivery wins), else a source tree set_source_git or\n        set_source_zip_finalize delivered. An image scan runs in the\n        session's own workspace and writes its output tree there; scanners\n        that do not declare container_image targets are reported SKIPPED.\n        Naming source_dir explicitly always scans that directory, whatever\n        the session delivered.\n    severity_threshold: The least severe finding that still counts as actionable:\n        ALL, LOW, MEDIUM, HIGH or CRITICAL, in any case. It can make the\n        config's global_settings.severity_threshold stricter for this scan,\n        never looser: the scan runs at the stricter of the two, which decides\n        which findings are actionable and whether a scanner reports FAILED.\n        Omit it to use the config's own threshold (MEDIUM unless the config\n        sets one).\n    config_path: Optional path to ASH configuration file\n    clean_output: Hide the previous scan's results when this call starts the scan.\n        Either way they are put back if this scan fails or is cancelled, and\n        replaced once it finishes; with false they stay visible until the scan's\n        own set-up moves them a moment later. A call refused because the\n        directory already has a scan touches nothing in it.\n\nRefused (error_type source_delivery_busy) while clear_source, set_source_git,\nset_source_zip_finalize, set_source_image or\nset_source_image_archive_finalize is changing this session's delivered\nsubject; call it again once that call has returned. A delivered image\narchive that is no longer a readable tar is refused (error_type\ndelivered_image_missing, exit code 4) before anything starts.\n\nNeeds a session, because get_scan_progress and cancel_scan do: refused\n(error_type session_identity_required) on a stateless server run without\n--trust-upstream-session-id. run_ash_workspace_scan returns its results in\nits response and needs none.\n\nOn a network transport a session runs at most the operator's\nmax_concurrent_scans_per_session scans at once (default 2); one more is\nrefused (error_type session_scan_limit) until one has finished.\n\nReturns:\n    Dict with scan_id, status, and connection management guidance. A refused\n    scan returns `success` false, `error_type`, and the `exit_code` the CLI\n    exits with for the same refusal, with its `exit_code_meaning`: 3 for a\n    config that is refused or unusable, a link at `.ash` or\n    `.ash/ash_output` in source_dir (as run_ash_workspace_scan reports one\n    in its output tree), or a file git tracks in `.ash/ash_output` where the\n    scan writes, or cannot say whether it does (`error_type`\n    committed_output_files); 5 for the request itself (an unusable session\n    header, no session at all (`session_identity_required`), an unusable\n    severity_threshold, a source_dir that is missing or not a directory, or\n    no source_dir with nothing delivered); 4 for a target the\n    server will not scan (outside the permitted roots, or a delivered tree\n    no longer on disk); 1 for anything else, another scan of the same\n    directory included.",
       "inputSchema": {
         "properties": {
           "clean_output": {
@@ -829,6 +829,116 @@
           "result"
         ],
         "title": "set_source_gitOutput",
+        "type": "object"
+      }
+    },
+    "set_source_image": {
+      "description": "Record a container image reference as this session's scan subject.\n\nThe indirect-reference half of the image submission contract: the ref\n(registry/repo[:tag][@sha256:digest]) is stored on the session and NOTHING\nis fetched at delivery time -- image fetching, caching and preparing are\ndelegated to a container engine or the scanner tools' own registry clients\nat scan start. Digest-pinned refs are preferred; a tag-only ref is resolved\nwhere an engine is present. run_ash_scan with no source_dir then scans this\nimage; scanners that do not declare container_image targets are reported\nSKIPPED, and when nothing scanned the image the report carries one\ninformational note saying so.\n\nA later set_source_git or set_source_zip_finalize replaces the subject with\nthe delivered tree (the latest delivery wins), and a later set_source_image\nreplaces it back; clear_source forgets it.\n\nArgs:\n    image_ref: The image reference. For an archive you hold the bytes of,\n        use set_source_image_archive_chunk/-finalize instead, which needs\n        no engine and no network.\n\nReturns:\n    Dict with success and image_ref; success=False with error for a value\n    that can never be a reference, and error_type source_delivery_busy\n    while a scan of this session runs.",
+      "inputSchema": {
+        "properties": {
+          "image_ref": {
+            "title": "Image Ref",
+            "type": "string"
+          }
+        },
+        "required": [
+          "image_ref"
+        ],
+        "title": "set_source_imageArguments",
+        "type": "object"
+      },
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "additionalProperties": true,
+            "title": "Result",
+            "type": "object"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "set_source_imageOutput",
+        "type": "object"
+      }
+    },
+    "set_source_image_archive_chunk": {
+      "description": "Upload one base64 chunk of a saved container image (docker save tar).\n\nThe direct-payload half of the image submission contract, the zip channel's\nshape byte for byte: chunks arrive in order, each at most 1 MiB decoded,\nthe final one with last=True, then set_source_image_archive_finalize\nverifies and records the archive as this session's scan subject. Needs no\ncontainer engine and no network on the server: the scanner tools read the\narchive directly. An archive may be at most 100 MiB; a larger image is\nnamed by reference with set_source_image instead.\n\nArgs:\n    upload_id: Identifier you choose, scoping this one upload.\n    sequence: Zero-based ordinal of this chunk.\n    data_b64: Base64-encoded chunk payload.\n    last: True on the final chunk.\n\nReturns:\n    Dict with success, received, next_sequence and last; the same errors\n    and error_types as set_source_zip_chunk.",
+      "inputSchema": {
+        "properties": {
+          "data_b64": {
+            "title": "Data B64",
+            "type": "string"
+          },
+          "last": {
+            "title": "Last",
+            "type": "boolean"
+          },
+          "sequence": {
+            "title": "Sequence",
+            "type": "integer"
+          },
+          "upload_id": {
+            "title": "Upload Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "data_b64",
+          "last",
+          "sequence",
+          "upload_id"
+        ],
+        "title": "set_source_image_archive_chunkArguments",
+        "type": "object"
+      },
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "additionalProperties": true,
+            "title": "Result",
+            "type": "object"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "set_source_image_archive_chunkOutput",
+        "type": "object"
+      }
+    },
+    "set_source_image_archive_finalize": {
+      "description": "Verify an uploaded image archive and record it as this session's subject.\n\nThe assembled upload must hash to expected_sha256 and be a plain tar (what\ndocker save writes; a gzip-compressed archive is refused with the remedy)\nof at most 100 MiB. Nothing is extracted: the archive is moved whole into\nthe session workspace and the session's image locator points at it. A\nrefused archive leaves the previously delivered subject as it was.\nrun_ash_scan with no source_dir then scans it, exactly as a\nset_source_image reference is scanned.\n\nArgs:\n    upload_id: Identifier matching the prior chunk calls.\n    expected_sha256: Hex sha256 the assembled archive must hash to.\n\nReturns:\n    Dict with success and image_archive (the archive's server-side path);\n    success=False with error on checksum mismatch, oversize upload, bytes\n    that are not a plain tar, or an upload that never received its last\n    chunk, with error_type source_delivery_busy while a scan of this\n    session runs and session_workspace_unavailable when the workspace\n    cannot take the file.",
+      "inputSchema": {
+        "properties": {
+          "expected_sha256": {
+            "title": "Expected Sha256",
+            "type": "string"
+          },
+          "upload_id": {
+            "title": "Upload Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "expected_sha256",
+          "upload_id"
+        ],
+        "title": "set_source_image_archive_finalizeArguments",
+        "type": "object"
+      },
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "additionalProperties": true,
+            "title": "Result",
+            "type": "object"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "set_source_image_archive_finalizeOutput",
         "type": "object"
       }
     },

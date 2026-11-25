@@ -375,9 +375,10 @@ _CONFINED_KINDS = (
 
 def _client_delivered(path: Path) -> bool:
     """Whether *path* is a file an MCP client delivered, as named and as resolved
-    (``cli/mcp/sandbox.config_is_client_supplied``). Imported when called: that
-    module imports the config package."""
-    from automated_security_helper.cli.mcp.sandbox import config_is_client_supplied
+    (``config.mcp_sandbox.config_is_client_supplied``). Imported when called, as
+    ``config_sources.config_is_client_delivered`` does, so the two modules do not
+    import each other while they load."""
+    from automated_security_helper.config.mcp_sandbox import config_is_client_supplied
 
     return config_is_client_supplied(path)
 

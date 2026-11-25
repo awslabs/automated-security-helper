@@ -11822,9 +11822,11 @@ def test_while_a_scan_of_the_session_runs_delivery_is_refused_and_chunks_accepte
     """
     assert_on_page(
         MCP_SERVER,
-        "While a scan of a session runs, `clear_source`, `set_source_git`, and "
-        "`set_source_zip_finalize` are refused with `error_type` `source_delivery_busy`, "
-        "because each would remove or replace the tree the scan is reading.",
+        "While a scan of a session runs, `clear_source`, `set_source_git`, "
+        "`set_source_zip_finalize`, `set_source_image`, and "
+        "`set_source_image_archive_finalize` are refused with `error_type` "
+        "`source_delivery_busy`, because each would remove or replace the subject "
+        "the scan is reading.",
     )
     assert_on_page(
         MCP_SERVER, "Chunks are still accepted, because they land beside the tree."
@@ -11841,6 +11843,9 @@ def test_while_a_scan_of_the_session_runs_delivery_is_refused_and_chunks_accepte
         refused = {
             "set_source_zip_finalize": _delivery_finalize(data, "during"),
             "set_source_git": _delivery_tool("set_source_git", url=url),
+            "set_source_image": _delivery_tool(
+                "set_source_image", image_ref="registry.example.com/team/app:1"
+            ),
             "clear_source": _delivery_tool("clear_source"),
         }
 
@@ -22682,7 +22687,7 @@ _HOMEPAGE_ALPHA_SENTENCE = (
     "A scan runs one only when its module is named in `ash_plugin_modules` or "
     "`--ash-plugin-modules`. See the "
     "[alpha plugins](docs/plugins/alpha/index.md) and the "
-    "[scanners reference](reference/scanners.md) for all 22 scanners."
+    "[scanners reference](reference/scanners.md) for all 23 scanners."
 )
 
 
@@ -22705,21 +22710,19 @@ def test_the_homepage_says_asha_ships_six_alpha_scanners_and_links_each(
 
     The sentence is on the page. Its count of six is the number of scanners the
     vendored alpha plugin packages declare, which is every in-tree alpha
-    module; its 22 is built in plus alpha; and each link it carries resolves to
+    module; its 23 is built in plus alpha; and each link it carries resolves to
     a page under docs/content, the alpha index and the scanners reference
     included.
     """
-    from automated_security_helper.core.scanner_inventory import (
-        _VENDORED_SCANNER_PLUGIN_PACKAGES,
-    )
+    from automated_security_helper.plugins.enablement import modules_needing_naming
 
     assert_on_page(_HOMEPAGE, _HOMEPAGE_ALPHA_SENTENCE)
     builtin, alpha = _shipped_scanner_split(tmp_path, monkeypatch)
-    assert len(_VENDORED_SCANNER_PLUGIN_PACKAGES) == len(alpha) == 6, (
-        len(_VENDORED_SCANNER_PLUGIN_PACKAGES),
+    assert len(modules_needing_naming()) == len(alpha) == 6, (
+        len(modules_needing_naming()),
         sorted(alpha),
     )
-    assert len(builtin) + len(alpha) == 22, (len(builtin), len(alpha))
+    assert len(builtin) + len(alpha) == 23, (len(builtin), len(alpha))
     links = re.findall(r"\]\(([^)#]+\.md)", _HOMEPAGE_ALPHA_SENTENCE)
     assert len(links) == 8, links
     for link in links:

@@ -359,7 +359,9 @@ it, and keep to one trusted client per server with `ASH_MCP_TRANSPORT` set.
 A stateless server identifies no session by itself, so the tools that keep state for a
 session refuse every call with `error_type` `session_identity_required`: `run_ash_scan`,
 `get_scan_progress`, `list_active_scans`, `cancel_scan`, `set_source_git`,
-`set_source_zip_chunk`, `set_source_zip_finalize`, `clear_source`, and `select_profile`.
+`set_source_zip_chunk`, `set_source_zip_finalize`, `set_source_image`,
+`set_source_image_archive_chunk`, `set_source_image_archive_finalize`, `clear_source`, and
+`select_profile`.
 `run_ash_workspace_scan` returns its results in its response and needs no session. The session
 is never what a client claims: on a stateful server an `Mcp-Session-Id` the server did not
 issue names no session, and on SSE the session is the one the server issued for the event
@@ -504,9 +506,25 @@ gives `git_clone_failed` or `git_checkout_failed`, with git's own message in `er
   refused as a whole, before anything is extracted.
 - A new zip is extracted beside the old tree and replaces it only when extraction succeeds.
 
-While a scan of a session runs, `clear_source`, `set_source_git`, and
-`set_source_zip_finalize` are refused with `error_type` `source_delivery_busy`, because each
-would remove or replace the tree the scan is reading. Call them again once the scan has
+A session can deliver a container image as its scan subject instead of a tree.
+`set_source_image` records an image reference and fetches nothing: resolution belongs to a
+container engine or the scanner tools' own registry clients at scan start.
+`set_source_image_archive_chunk` and `set_source_image_archive_finalize` take a saved image
+(an uncompressed `docker save` tar) in the zip channel's exact shape -- the same chunk rules
+and caps, a SHA-256 verified at finalize -- but nothing is extracted: the archive is one file
+the scanner tools read whole, checked only for tar shape and moved into the session
+workspace. One session has one subject, and the latest delivery wins: an image delivered
+after a tree replaces it as what `run_ash_scan` scans when `source_dir` is omitted, and a
+tree delivered after an image replaces the image. An image scan writes its output tree under
+the session's own workspace, since an image has no target directory; scanners that do not
+declare `container_image` targets in their operational facets are reported SKIPPED, and when
+nothing scanned the image the report carries one informational SARIF note saying so. See
+[Scan container images](scan-container-images.md) for the asset contract itself.
+
+While a scan of a session runs, `clear_source`, `set_source_git`,
+`set_source_zip_finalize`, `set_source_image`, and `set_source_image_archive_finalize` are
+refused with `error_type` `source_delivery_busy`, because each
+would remove or replace the subject the scan is reading. Call them again once the scan has
 finished. A `run_ash_workspace_scan` over a workspace in the session's delivered tree holds the
 tree the same way for the whole workspace scan. The other way round, `run_ash_scan` and
 `run_ash_workspace_scan` are refused with the same `error_type` while one of those calls is

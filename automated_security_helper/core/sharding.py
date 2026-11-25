@@ -754,11 +754,13 @@ def _verify_candidate_agreement(
             f"gap. Re-run the whole matrix on one version."
         )
 
-    candidate_sets = {tuple(_normalized(a.candidate_scanners)) for a in with_candidates}
+    candidate_sets = {
+        tuple(_normalized(a.candidate_scanners or [])) for a in with_candidates
+    }
     if len(candidate_sets) > 1:
         detail = "; ".join(
             f"shard {a.shard_index}: "
-            f"{', '.join(map(shown_shard_text, _normalized(a.candidate_scanners)))}"
+            f"{', '.join(map(shown_shard_text, _normalized(a.candidate_scanners or [])))}"
             for a in sorted(with_candidates, key=lambda a: a.shard_index)
         )
         raise ShardCoverageError(

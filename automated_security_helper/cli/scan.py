@@ -1167,7 +1167,7 @@ def run_ash_scan_cli_command(
             rich_help_panel="Execution",
             help="Whether to run scanners in parallel or sequential",
         ),
-    ] = ExecutionStrategy.PARALLEL.value,
+    ] = ExecutionStrategy.PARALLEL,
     progress: Annotated[
         bool,
         typer.Option(
@@ -1670,6 +1670,50 @@ def run_ash_scan_cli_command(
             help="Leave out findings already present in this saved ash_aggregated_results.json from a full scan (for example the default branch's), so the reports, the summary and the exit code count only new findings. Matching tolerates findings that only moved lines. The file must be outside the scanned checkout and the output directory. Supported with --mode local and precommit only (exit 5 otherwise).",
         ),
     ] = None,
+    # The image options come last, so no existing option's position shifts for a
+    # caller that passes them positionally.
+    image: Annotated[
+        str | None,
+        typer.Option(
+            "--image",
+            rich_help_panel="Scan",
+            help=(
+                "Scan a container image named by reference "
+                "(registry/repo[:tag][@sha256:digest]) instead of a source "
+                "directory. ASH fetches nothing itself: the image is prepared "
+                "by a container engine or the scanner tools' own registry "
+                "clients. Exclusive with --source-dir, --image-archive and "
+                "--image-layout; scanners that do not declare container_image "
+                "targets are reported SKIPPED."
+            ),
+        ),
+    ] = None,
+    image_archive: Annotated[
+        str | None,
+        typer.Option(
+            "--image-archive",
+            rich_help_panel="Scan",
+            help=(
+                "Scan a saved container image (an uncompressed docker save / "
+                "OCI archive tarball) instead of a source directory. Needs no "
+                "container engine. Exclusive with --source-dir, --image and "
+                "--image-layout."
+            ),
+        ),
+    ] = None,
+    image_layout: Annotated[
+        str | None,
+        typer.Option(
+            "--image-layout",
+            rich_help_panel="Scan",
+            help=(
+                "Scan a container image from an OCI image-layout directory "
+                "(the directory holding the oci-layout marker file) instead "
+                "of a source directory. Needs no container engine. Exclusive "
+                "with --source-dir, --image and --image-archive."
+            ),
+        ),
+    ] = None,
 ):
     """Scan code, infrastructure, secrets, and dependencies.
 
@@ -1728,6 +1772,30 @@ def run_ash_scan_cli_command(
             simple=simple,
         ).value
     )
+
+    # Options that read or filter by the directory the scan starts in are not
+    # an image scan's subject: --staged could exit 0 as "nothing staged"
+    # without the image ever being scanned. Refused first, before the options'
+    # own mode checks, so the operator is told the real conflict.
+    for image_flag, image_value in (
+        ("--image", image),
+        ("--image-archive", image_archive),
+        ("--image-layout", image_layout),
+    ):
+        if image_value is None:
+            continue
+        for other_flag, other_given in (
+            ("--staged", staged),
+            ("--baseline", baseline is not None),
+            ("--use-existing", use_existing),
+            ("--changed-files-only", changed_files_only),
+        ):
+            if other_given:
+                _fail_usage(
+                    f"{image_flag} cannot be combined with {other_flag}: "
+                    f"{other_flag} reads the working directory, which an image "
+                    "scan does not scan. Scan the image on its own."
+                )
 
     if baseline is not None:
         from automated_security_helper.express.runtime import CHILD_ENV
@@ -1997,6 +2065,57 @@ def run_ash_scan_cli_command(
                         f"'{fmt}' is not a valid format. Valid formats are: {', '.join(valid_formats)}"
                     )
 
+    # The image options, refused before the workspace block and before any
+    # path default resolves, so a conflicting invocation does no work first.
+    # One wording per case, shared with run_ash_scan's own refusals so a
+    # library caller and the CLI name the same first problem; the payload
+    # gates are the stat-level checks of utils/image_payload_refusals.py.
+    image_flags_given = [
+        name
+        for name, value in (
+            ("--image", image),
+            ("--image-archive", image_archive),
+            ("--image-layout", image_layout),
+        )
+        if value is not None
+    ]
+    if image_flags_given:
+        if len(image_flags_given) > 1:
+            _fail_usage(
+                f"{', '.join(image_flags_given)} each name the one image to "
+                "scan, so only one may be given. Keep the one that says where "
+                "the image is."
+            )
+        if source_dir is not None:
+            source_flag = (
+                "ASH_SOURCE_DIR (set in the environment)"
+                if _from_environment(ctx, "source_dir")
+                else "--source-dir"
+            )
+            _fail_usage(
+                f"{image_flags_given[0]} cannot be combined with "
+                f"{source_flag}: one scan has one subject. Scan the directory "
+                "and the image as two runs."
+            )
+        if workspace is not None:
+            _fail_usage(
+                f"{image_flags_given[0]} cannot be combined with --workspace: "
+                "a workspace names directories, and one scan has one subject."
+            )
+        from automated_security_helper.utils.image_payload_refusals import (
+            image_archive_refusal,
+            image_layout_refusal,
+        )
+
+        if image_archive is not None:
+            payload_refusal = image_archive_refusal(image_archive)
+            if payload_refusal is not None:
+                _fail_usage(shown_on_one_line(payload_refusal))
+        if image_layout is not None:
+            payload_refusal = image_layout_refusal(image_layout)
+            if payload_refusal is not None:
+                _fail_usage(shown_on_one_line(payload_refusal))
+
     workspace_plan: WorkspacePlan | None = None
     if workspace is not None:
         workspace_plan = _handle_workspace_mode(
@@ -2093,7 +2212,7 @@ def run_ash_scan_cli_command(
         _fail_usage(shown_on_one_line(source_refusal))
     # The output directory's default, the collision adjustment, its refusals and
     # --use-existing, in one place for the real run and the workspace dry run.
-    output_dir, existing_results = _settle_output_dir(
+    settled_output_dir, existing_results = _settle_output_dir(
         source_dir,
         output_dir,
         use_existing,
@@ -2101,6 +2220,7 @@ def run_ash_scan_cli_command(
         mode=mode,
         workspace=workspace_plan is not None,
     )
+    output_dir = os.fspath(settled_output_dir)
     baseline_data = None
     if baseline is not None:
         from automated_security_helper.utils.scan_baseline import (
@@ -2214,7 +2334,13 @@ def run_ash_scan_cli_command(
     try:
         with shutdown_cancels(cancel_event), cancel_scope(cancel_event):
             _deferred("run_ash_scan")(
-                source_dir=source_dir,
+                # With an image option, the subject is the image: source_dir
+                # stays unnamed, as run_ash_scan's exclusivity rule reads it
+                # (the cwd default above served only the output-dir settling).
+                source_dir=None if image_flags_given else source_dir,
+                image=image,
+                image_archive=image_archive,
+                image_layout=image_layout,
                 output_dir=output_dir,
                 config=config,
                 config_overrides=config_overrides,

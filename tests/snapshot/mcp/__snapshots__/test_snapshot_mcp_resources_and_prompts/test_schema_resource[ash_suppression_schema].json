@@ -162,6 +162,19 @@
       "description": "(Optional) Only suppress findings about the package copy installed at this path, relative to the scan root (glob, supports **), e.g. 'deploy/cdk/node_modules/aws-cdk-lib/node_modules/brace-expansion'. Separates two copies with the same name and version. Findings that do not report an install path never match.",
       "title": "Package Path"
     },
+    "image": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "(Optional) Only suppress findings inside a container image whose submitted reference or resolved digest matches this pattern (glob, case-insensitive), e.g. 'alpine:*' or 'sha256:abc*'. Omit it to match any asset; filesystem findings and image findings alike. Findings that carry no image never match an image-scoped suppression.",
+      "title": "Image"
+    },
     "symbol": {
       "anyOf": [
         {

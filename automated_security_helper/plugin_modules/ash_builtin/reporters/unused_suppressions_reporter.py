@@ -388,7 +388,7 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
                         f"{project.output_path}/reports/ash.{self.config.extension}"
                     ),
                 }
-                for project in workspace_results.projects
+                for project in (workspace_results.projects if workspace_results else ())
                 if project.status == ProjectRunStatus.COMPLETED
             ]
 
@@ -525,7 +525,7 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
         # (SHOWN_SUPPRESSION_FIELDS), so a date read from the environment is
         # still quoted by its reference here.
         data["expiration"] = shown("expires")
-        for field in (*PACKAGE_SUPPRESSION_FIELDS, "symbol"):
+        for field in (*PACKAGE_SUPPRESSION_FIELDS, "symbol", "image"):
             if getattr(suppression, field) is not None:
                 data[field] = shown(field)
         return data

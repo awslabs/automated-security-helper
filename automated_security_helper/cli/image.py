@@ -157,7 +157,7 @@ def build_ash_image_cli_command(
         ),
     ] = AshLogLevel.INFO,
     config: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--config",
             "-c",

@@ -657,7 +657,7 @@ def _write_report(
     _write_report_checked(content, stream)
 
 
-def get_report_formats(incomplete: str = None) -> List[str]:
+def get_report_formats(incomplete: str | None = None) -> List[str]:
     """The formats a reporter ASH ships writes, containing ``incomplete``:
     ExportFormat's values but those no reporter writes, which --format refuses.
     The AWS plugin module's are among them, accepted once ``ash_plugin_modules``
@@ -711,7 +711,7 @@ def report_command(
         ),
     ] = AshLogLevel.INFO,
     config: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--config",
             "-c",

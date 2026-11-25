@@ -1822,7 +1822,9 @@ def _mappings_holding_a_key_read_from_the_environment(
     """
     from automated_security_helper.config.config_validator import dumped_place
 
-    written = list(getattr(base, "_written_key_mappings", None) or ())
+    written: List[Tuple[Any, FrozenSet[Any]]] = list(
+        getattr(base, "_written_key_mappings", None) or ()
+    )
     written += [
         (rewrite.path, frozenset())
         for rewrite in getattr(base, "_written_references", None) or []

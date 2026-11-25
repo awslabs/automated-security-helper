@@ -46,6 +46,7 @@ SCHEMA = {
     "has_identity": pl.Boolean,
     "fingerprinted": pl.Boolean,
     "base": pl.String,
+    "correlation_id": pl.String,
 }
 
 

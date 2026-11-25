@@ -6,7 +6,16 @@ import os
 import random
 import re
 from contextlib import suppress
-from typing import TYPE_CHECKING, Any, Callable, Dict, Iterable, List, Optional
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    overload,
+)
 import uuid
 from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
 from automated_security_helper.base.plugin_context import PluginContext
@@ -53,7 +62,14 @@ if TYPE_CHECKING:
     from automated_security_helper.config.client_scanner_exclusions import (
         EvaluationBudget,
     )
-from automated_security_helper.models.flat_vulnerability import FlatVulnerability
+from automated_security_helper.models.flat_vulnerability import (
+    FlatVulnerability,
+    _string_property,
+)
+from automated_security_helper.utils.finding_identity import (
+    IMAGE_DIGEST_PROPERTY,
+    IMAGE_REF_PROPERTY,
+)
 from automated_security_helper.utils.package_identity import (
     extract_package_identity,
     extract_resource_identity,
@@ -61,8 +77,11 @@ from automated_security_helper.utils.package_identity import (
 )
 from automated_security_helper.models.asharp_model import ScannerSeverityCount
 from automated_security_helper.utils.secret_masking import mask_secret_in_text
-from automated_security_helper.utils.shared_finding_ids import shared_ids_by_position
 from automated_security_helper.utils.ash_lock import AshLock, AshLockError
+from automated_security_helper.utils.shared_finding_ids import (
+    shared_correlation_ids_by_position,
+    shared_ids_by_position,
+)
 from automated_security_helper.utils.symbol_spans import SymbolResolver
 from automated_security_helper.utils.suppression_frame import (
     first_ignore_path,
@@ -434,7 +453,7 @@ def attach_scanner_details(
     for run in sarif_report.runs:
         # Create or update tool.driver information
         if not run.tool:
-            run.tool = Tool()
+            run.tool = Tool(driver=ToolComponent(name=scanner_name))
 
         if not run.tool.driver:
             run.tool.driver = ToolComponent(name=scanner_name)
@@ -465,7 +484,8 @@ def attach_scanner_details(
             scanner_details["tool_invocation"] = invocation_details
 
         # Add scanner details to properties
-        run.tool.driver.properties.scanner_details = scanner_details
+        # PropertyBag allows extra fields (extra="allow"), which ty cannot see.
+        run.tool.driver.properties.scanner_details = scanner_details  # ty: ignore[unresolved-attribute]
 
         # Also attach scanner information to each result
         if run.results:
@@ -789,6 +809,20 @@ def _fill_message_arguments(
     return _MESSAGE_PLACEHOLDER.sub(fill, text)
 
 
+@overload
+def result_message_text(result: Any, rule: Any = None, *, default: str) -> str: ...
+
+
+@overload
+def result_message_text(result: Any, rule: Any, default: str) -> str: ...
+
+
+@overload
+def result_message_text(
+    result: Any, rule: Any = None, default: None = None
+) -> str | None: ...
+
+
 def result_message_text(
     result: Any, rule: Any = None, default: str | None = None
 ) -> str | None:
@@ -904,6 +938,25 @@ def shared_finding_ids(model: Any, all_results: List[Any]) -> List[str | None]:
         return shared_ids_by_position(flat, all_results)
     except Exception as e:  # noqa: BLE001 -- a fallback, see the docstring
         ASH_LOGGER.debug(f"Could not derive shared finding ids: {str(e)}")
+        return [None] * len(all_results)
+
+
+def shared_correlation_ids(model: Any, all_results: List[Any]) -> List[str | None]:
+    """The cross-scanner correlation id of each result, by position, else None.
+
+    The same pairing as :func:`shared_finding_ids`, reading the flattened
+    finding's ``correlation_id`` (assigned once at flatten time,
+    ``models/flat_vulnerability.assign_correlation_ids``), so every reporter
+    exports the one value the model computed rather than re-deriving the key.
+    None at a position whose finding carries none (only the ``secret/`` and
+    ``dep/`` families have one, ``utils/finding_identity``), and at every
+    position when the flattening fails.
+    """
+    try:
+        flat = list(model.to_flat_vulnerabilities())
+        return shared_correlation_ids_by_position(flat, all_results)
+    except Exception as e:  # noqa: BLE001 -- a fallback, see the docstring
+        ASH_LOGGER.debug(f"Could not derive shared correlation ids: {str(e)}")
         return [None] * len(all_results)
 
 
@@ -1491,7 +1544,7 @@ def _apply_inline_suppression(
         )
     for isup in inline_cache[file_key]:
         if (
-            isup.rule_id.lower() == result.ruleId.lower()
+            isup.rule_id.lower() == (result.ruleId or "").lower()
             and isup.line_number == result_line
         ):
             if not result.suppressions:
@@ -2391,7 +2444,12 @@ def _apply_suppressions_within_budget(
                     None,
                 )
                 uri_as_written = None
-                if result.ruleId and location is not None:
+                if (
+                    result.ruleId
+                    and location is not None
+                    and location.physicalLocation is not None
+                    and location.physicalLocation.root.artifactLocation is not None
+                ):
                     raw_uri = location.physicalLocation.root.artifactLocation.uri
                     uri = (
                         _normalize_sarif_uri(
@@ -2479,6 +2537,10 @@ def _apply_suppressions_within_budget(
                         file_path=uri,
                         line_start=line_start,
                         line_end=line_end,
+                        # An image finding's subject, for an ``image:``-scoped
+                        # suppression (stamped by the scanner executor).
+                        image_ref=_string_property(result, IMAGE_REF_PROPERTY),
+                        image_digest=_string_property(result, IMAGE_DIGEST_PROPERTY),
                     )
 
                 if flat_finding:

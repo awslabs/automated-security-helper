@@ -1659,6 +1659,141 @@ def mark_converted_results(sarif_report: Any, context: Any) -> int:
     return marked
 
 
+#: Suffix of the sidecar a converter writes beside a generated file to say which
+#: span of the original each line of it came from (the MCP config converter does).
+SPAN_MAP_SUFFIX = ".spanmap.json"
+
+#: The result property recording the generated file a mapped result was found in.
+CONVERTED_FROM_PROPERTY = "ash/convertedFrom"
+
+_SPAN_ROW_INTS = ("script_line", "line", "col", "end_line", "end_col")
+
+
+def _read_span_rows(sidecar: Path) -> Dict[int, Dict[str, Any]]:
+    """The sidecar's rows by generated line, or an empty mapping for anything unusable.
+
+    The sidecar is data a converter wrote from scanned content, so it is read as
+    untrusted: a file that is not a JSON array of objects, a row whose numbers are
+    not positive integers, or a source path that is absolute or leaves the tree
+    names nothing, and that row is left out.
+    """
+    try:
+        loaded = json.loads(sidecar.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(loaded, list):
+        return {}
+    rows: Dict[int, Dict[str, Any]] = {}
+    for row in loaded:
+        if not isinstance(row, dict):
+            continue
+        numbers = [row.get(key) for key in _SPAN_ROW_INTS]
+        if not all(
+            isinstance(number, int) and not isinstance(number, bool) and number >= 1
+            for number in numbers
+        ):
+            continue
+        source = row.get("source_file")
+        if (
+            not isinstance(source, str)
+            or not source
+            or source.startswith("/")
+            or "\\" in source
+            or ".." in source.split("/")
+        ):
+            continue
+        rows.setdefault(row["script_line"], row)
+    return rows
+
+
+def map_back_converted_results(sarif_report: Any, context: Any) -> int:
+    """Re-point a result in a generated file to the original file's span.
+
+    A converter that writes ``<file>.spanmap.json`` beside a generated ``<file>``
+    says, per generated line, where in the original the text came from. A result
+    located on such a line is moved to that original file and its span: the
+    artifact uri becomes the original's path, and the region its recorded start and
+    end line and column. The result then carries no ``converted_path``, so the
+    finding is keyed by the original path and line (a suppression written against
+    the original file matches it), and ``ash/convertedFrom`` names the generated
+    file it was found in.
+
+    A result with no sidecar beside its file, a file the sidecar has no row for,
+    or no start line is left exactly as it is: every converter without a sidecar
+    (the notebook and archive converters) is untouched by this.
+
+    Run after :func:`mark_converted_results`, which writes the ``converted_path``
+    this removes from a mapped result.
+
+    Returns:
+        The number of results mapped.
+    """
+    from types import SimpleNamespace
+
+    from automated_security_helper.schemas.sarif_schema_model import (
+        PropertyBag,
+        Region,
+    )
+    from automated_security_helper.utils.finding_identity import (
+        CONVERTED_PATH_PROPERTY,
+    )
+
+    runs = getattr(sarif_report, "runs", None) or []
+    if not runs or getattr(context, "output_dir", None) is None:
+        return 0
+    source = Path(context.source_dir).resolve()
+    work = path_in_record_form(_work_dir_of(context))
+    sidecars: Dict[Path, Dict[int, Dict[str, Any]]] = {}
+    mapped = 0
+    for run in runs:
+        for result in getattr(run, "results", None) or []:
+            converted_from: Optional[str] = None
+            for location in getattr(result, "locations", None) or []:
+                physical = getattr(location, "physicalLocation", None)
+                root = getattr(physical, "root", physical)
+                region = getattr(root, "region", None)
+                artifact = getattr(root, "artifactLocation", None)
+                start_line = getattr(region, "startLine", None)
+                if root is None or artifact is None or not isinstance(start_line, int):
+                    continue
+                candidates = _result_paths(
+                    SimpleNamespace(locations=[location]), source
+                )
+                candidate = next(iter(candidates), None)
+                if (
+                    candidate is None
+                    or candidate == work
+                    or not candidate.is_relative_to(work)
+                ):
+                    continue
+                if candidate not in sidecars:
+                    sidecars[candidate] = _read_span_rows(
+                        candidate.with_name(candidate.name + SPAN_MAP_SUFFIX)
+                    )
+                row = sidecars[candidate].get(start_line)
+                if row is None:
+                    continue
+                artifact.uri = row["source_file"]
+                root.region = Region(
+                    startLine=row["line"],
+                    startColumn=row["col"],
+                    endLine=row["end_line"],
+                    endColumn=row["end_col"],
+                )
+                if converted_from is None:
+                    converted_from = candidate.relative_to(work).as_posix()
+            if converted_from is None:
+                continue
+            if result.properties is None:
+                result.properties = PropertyBag()
+            extras = result.properties.__pydantic_extra__
+            if extras is not None:
+                extras.pop(CONVERTED_PATH_PROPERTY, None)
+            setattr(result.properties, CONVERTED_FROM_PROPERTY, converted_from)
+            mapped += 1
+    return mapped
+
+
 #: Written by a converter beside its output, at the top of its results directory:
 #: a JSON object mapping each path it wrote, relative to the work directory with
 #: ``/`` (the form ``mark_converted_results`` records as ``converted_path``), to the

@@ -63,6 +63,7 @@ from automated_security_helper.base.scanner_facets import (
     FacetState,
     ScannerFacets,
 )
+from automated_security_helper.models.vocab import TargetType
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.models.core import (
     EMPTY_SCOPE_RULE,
@@ -1259,7 +1260,6 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
                 semantics="exit 3 is an accepted coverage-accounting outcome",
             ),
             provenance=opsf.ProvenanceFacet(
-                tier=opsf.Tier.ALPHA_OPTIN,
                 source=opsf.ProvenanceSource.PYPI_PINNED_DEPENDENCY,
                 selection_surfaces=("ash_ferret_plugins in ash_plugin_modules",),
                 upstream_license=(
@@ -1642,7 +1642,7 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
         options = self.config.options
 
         # Confidence levels
-        if options.confidence_levels and options.confidence_levels != "all":
+        if options.confidence_levels != "all":
             self.args.extra_args.append(
                 ToolExtraArg(key="--confidence", value=options.confidence_levels)
             )
@@ -1954,7 +1954,7 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
         return None
 
     def _resolve_arguments(
-        self, target: Path, results_file: Path | None = None
+        self, target: str | Path, results_file: str | Path | None = None
     ) -> List[str]:
         """Resolve arguments for Ferret scan command.
 
@@ -1973,7 +1973,7 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
             )
 
         # Build command
-        args = [self.command]
+        args: List[str] = [self._tool_command()]
 
         # Add format argument (always SARIF for ASH compatibility)
         if self.args.format_arg and self.args.format_arg_value:
@@ -2013,7 +2013,7 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
     def scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[Any] | None = None,
         config: FerretScannerConfig | None = None,
         *args,

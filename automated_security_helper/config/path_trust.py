@@ -335,7 +335,7 @@ def operator_reason(
     operator's, or None: inside the scanned tree itself, or a name whose directory
     walk did not finish (``sandbox_grants.in_tree_reason``), delivered by an MCP
     client, or a session profile a client's patch changed."""
-    from automated_security_helper.cli.mcp.profile_registry import (
+    from automated_security_helper.config.session_profiles import (
         session_config_was_patched,
     )
     from automated_security_helper.config.sandbox_grants import (
@@ -363,7 +363,7 @@ def operator_reason(
 
 
 def _client_delivered_reason(path: Union[str, Path]) -> Optional[str]:
-    from automated_security_helper.cli.mcp.sandbox import config_is_client_supplied
+    from automated_security_helper.config.mcp_sandbox import config_is_client_supplied
 
     if config_is_client_supplied(path) or config_is_client_supplied(
         os.path.realpath(path)
@@ -395,7 +395,7 @@ def scanned_tree_judgment(
     resolves, and the marks the host set for the scan inside a container
     (``marked_repository_written``, ``marked_files_repository_written``), whose
     mounted copies sit in no checkout there. Also true, under the MCP server,
-    for any file an MCP client delivered (``cli.mcp.sandbox
+    for any file an MCP client delivered (``config.mcp_sandbox
     .config_is_client_supplied``: a delivered tree, an upload or its staging, in
     this session or another), which a client-written config could otherwise name
     from outside the tree it scans. The one membership test this module and
@@ -407,7 +407,7 @@ def scanned_tree_judgment(
     """
     # Imported here: sandbox_grants imports ash_config, which imports the scanners
     # that import this module.
-    from automated_security_helper.cli.mcp.sandbox import config_is_client_supplied
+    from automated_security_helper.config.mcp_sandbox import config_is_client_supplied
     from automated_security_helper.config.sandbox_grants import (
         WalkJudgment,
         confined_files,

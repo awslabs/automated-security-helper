@@ -136,10 +136,10 @@ _RANGED_PIN_MARKERS: dict[tuple[str, str], list[_Marker]] = {
     ("API_KEY_OR_SECRET", FINDING_TREND_TEST): [
         _Marker((r"^def report_id\(second, token=",)),
     ],
-    # The two lines of .ash/.ash.yaml whose reasons quote a placeholder fixture; they
+    # The two lines of .ash.yaml whose reasons quote a placeholder fixture; they
     # are the findings the self-scan reports on that file, and each is the one line of
     # the file that has this shape.
-    ("API_KEY_OR_SECRET", ".ash/.ash.yaml"): [
+    ("API_KEY_OR_SECRET", ".ash.yaml"): [
         _Marker((r'HEAD = "[0-9a-f]{40}" and TOKEN =',)),
         _Marker((r'`\w+ = "abcdefghijklmnop"` is a fixture',)),
     ],
@@ -633,12 +633,12 @@ def test_an_every_line_pattern_that_matches_nothing_is_reported():
             "def other_id(second, count=3):",
         ),
         (
-            ("API_KEY_OR_SECRET", ".ash/.ash.yaml"),
+            ("API_KEY_OR_SECRET", ".ash.yaml"),
             'HEAD = "' + "0123456789abcdef0123456789abcdef01234567" + '" and TOKEN =',
             'HEAD = "unset" and nothing else',
         ),
         (
-            ("API_KEY_OR_SECRET", ".ash/.ash.yaml"),
+            ("API_KEY_OR_SECRET", ".ash.yaml"),
             "`" + 'secret = "abcdefghijklmnop"` is a fixture fed into',
             "`value` is a fixture fed into",
         ),

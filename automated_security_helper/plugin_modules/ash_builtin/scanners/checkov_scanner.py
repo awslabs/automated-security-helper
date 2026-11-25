@@ -39,6 +39,7 @@ from automated_security_helper.base.options import (
     ScannerOptionsBase,
     tool_version_constraint,
 )
+from automated_security_helper.models.vocab import TargetType
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.core.constants import KNOWN_IGNORE_PATHS
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
@@ -1087,7 +1088,6 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
                 semantics="0 clean, 1 findings: the native-tool convention",
             ),
             provenance=opsf.ProvenanceFacet(
-                tier=opsf.Tier.BUILTIN_DEFAULT,
                 source=opsf.ProvenanceSource.PYPI_VIA_UV,
                 selection_surfaces=("options.frameworks", "options.skip_frameworks"),
                 upstream_license=(
@@ -1290,7 +1290,7 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
             # call of the mixin does: without it a scanner offline by its
             # options probed PyPI online while its run and install were offline.
             resolved = get_uv_tool_command(
-                self.command,
+                self._tool_command(),
                 from_spec=self._uv_probe_from_spec(),
                 offline=self._is_offline_mode(),
             )
@@ -1330,7 +1330,7 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         # scan went through uv, whose install had just failed. And a dependency
         # declared satisfied is recorded as such, as the branches above record it.
         resolved = get_uv_tool_command(
-            self.command,
+            self._tool_command(),
             from_spec=self._uv_probe_from_spec(),
             offline=self._is_offline_mode(),
         )
@@ -1360,7 +1360,7 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         executable = resolved[0]
         checked = verify_pre_installed_tool(
             executable,
-            self.command,
+            self._tool_command(),
             None,
             self._get_tool_version_constraint(),
             uv_executable=None,
@@ -1546,7 +1546,7 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
             frameworks = list(file_frameworks)
         for item in frameworks:
             self.args.extra_args.append(ToolExtraArg(key="--framework", value=item))
-        skip_frameworks = list(self.config.options.skip_frameworks)
+        skip_frameworks: list[str] = list(self.config.options.skip_frameworks)
         file_skip_frameworks = file_values.get("skip-framework")
         if isinstance(file_skip_frameworks, str):
             file_skip_frameworks = [file_skip_frameworks]
@@ -1627,7 +1627,7 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
     def _execute_scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason],
     ):
         """Resolve final argv and results path for Checkov.

@@ -17,8 +17,8 @@ This gate reads the source (no polars import, no ASH import) and asserts:
 * the only modules in the package with a module-scope ``import polars`` are the
   ones on :data:`MODULE_SCOPE_ALLOWLIST`, each with its reason;
 * no module in the import closure of ``models/core.py`` has one;
-* the closure of ``config/ash_config.py`` loads polars only through the reporter
-  plugins named on :data:`CONFIG_CLOSURE_EAGER`.
+* the closure of ``config/ash_config.py`` loads polars only through the modules
+  named on :data:`CONFIG_CLOSURE_EAGER` (none today).
 
 The walker is itself checked against planted positives: a source with a
 module-scope import must be flagged, so a walker that stopped looking would
@@ -67,18 +67,13 @@ MODULE_SCOPE_ALLOWLIST: Dict[str, str] = {
     f"{PACKAGE}.utils.sbom_merge": "loaded on the SBOM merge path",
 }
 
-#: Reporter modules whose module-scope polars import is reachable from
-#: ``config/ash_config.py`` (it imports the reporters' config classes, and the
-#: reporters import each other). They are the remaining reason polars loads
-#: with the config layer; moving their imports into functions retires an entry
-#: here. Measured: the five reporter-package modules on the allowlist.
-CONFIG_CLOSURE_EAGER: Set[str] = {
-    f"{PACKAGE}.plugin_modules.ash_builtin.reporters._junitxml_frame",
-    f"{PACKAGE}.plugin_modules.ash_builtin.reporters._report_frames",
-    f"{PACKAGE}.plugin_modules.ash_builtin.reporters.gitlab_cyclonedx_reporter",
-    f"{PACKAGE}.plugin_modules.ash_builtin.reporters.ocsf_reporter",
-    f"{PACKAGE}.plugin_modules.ash_builtin.reporters.report_content_emitter",
-}
+#: Modules whose module-scope polars import is reachable from
+#: ``config/ash_config.py``. The reporters' config classes no longer pull a
+#: reporter that imports polars into the config layer, so the set is empty: a
+#: module-scope polars import that becomes reachable from the config layer
+#: again fails this gate and is either moved into a function or listed here
+#: with the reason it must load with the config.
+CONFIG_CLOSURE_EAGER: Set[str] = set()
 
 
 def _is_polars(name: str) -> bool:

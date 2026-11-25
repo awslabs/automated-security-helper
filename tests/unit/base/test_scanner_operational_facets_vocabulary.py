@@ -280,7 +280,6 @@ def test_exit_codes_are_sorted_unique_and_non_empty() -> None:
 
 def test_an_upstream_license_is_not_read_or_cited_never_recalled() -> None:
     base = {
-        "tier": opsf.Tier.BUILTIN_DEFAULT,
         "source": opsf.ProvenanceSource.PYPI_VIA_UV,
         "selection_surfaces": (),
     }

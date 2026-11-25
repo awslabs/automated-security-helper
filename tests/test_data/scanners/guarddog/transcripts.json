@@ -1,0 +1,330 @@
+{
+  "schema_version": 1,
+  "transcripts": [
+    {
+      "adapter_prep": "guarddog",
+      "also_for": [],
+      "argv": null,
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": {
+        "paths": [
+          "fixture_repo/crate_suspicious"
+        ],
+        "sha256": "df5a7737e730cddf4cbeb5cae6ff811c187e6ed0b090de38a1ae38a07f5330d7"
+      },
+      "id": "scan-crates-crate-suspicious",
+      "live_input": false,
+      "note": "ecosystem crates; a loose capture from before transcripts, the tool version is not recorded",
+      "observable": true,
+      "pin_stamp": null,
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "json",
+          "path": "captured/scan_crates_crate_suspicious.json",
+          "sha256": "65273beaf9a0abd5524c1d2540042c64800c4a44102b901fbfe334222859f375"
+        }
+      ],
+      "retention": "current",
+      "scanner": "guarddog",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "guarddog",
+        "version": "unknown"
+      }
+    },
+    {
+      "adapter_prep": "guarddog",
+      "also_for": [],
+      "argv": null,
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": {
+        "paths": [
+          "fixture_repo/action_suspicious"
+        ],
+        "sha256": "65ab41fdc0d354f2a919d5719bb5fdbcebba587e3174ebeedff3e4bbf006faa1"
+      },
+      "id": "scan-github-action-action-suspicious",
+      "live_input": false,
+      "note": "ecosystem github_action; a loose capture from before transcripts, the tool version is not recorded",
+      "observable": true,
+      "pin_stamp": null,
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "json",
+          "path": "captured/scan_github_action_action_suspicious.json",
+          "sha256": "9c36bfd135588ca1970a92b88516766ce378b8222c57260ed692a94485827270"
+        }
+      ],
+      "retention": "current",
+      "scanner": "guarddog",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "guarddog",
+        "version": "unknown"
+      }
+    },
+    {
+      "adapter_prep": "guarddog",
+      "also_for": [],
+      "argv": null,
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": {
+        "paths": [
+          "fixture_repo/go_suspicious"
+        ],
+        "sha256": "355785d666c05e844e6a57bd59154a0f2ccaea6691fce14baa4044ec92d5f5bf"
+      },
+      "id": "scan-go-go-suspicious",
+      "live_input": false,
+      "note": "ecosystem go; a loose capture from before transcripts, the tool version is not recorded",
+      "observable": true,
+      "pin_stamp": null,
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "json",
+          "path": "captured/scan_go_go_suspicious.json",
+          "sha256": "43598c130ffec02c58e52c5f8b8dacc712f41caf462a51fb32618b65feff895f"
+        }
+      ],
+      "retention": "current",
+      "scanner": "guarddog",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "guarddog",
+        "version": "unknown"
+      }
+    },
+    {
+      "adapter_prep": "guarddog",
+      "also_for": [],
+      "argv": null,
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": {
+        "paths": [
+          "fixture_repo/npm_clean"
+        ],
+        "sha256": "259d324caea88f794145d19b79aec298a38280f0c7efa1841562fb812e8fffb7"
+      },
+      "id": "scan-npm-npm-clean",
+      "live_input": false,
+      "note": "ecosystem npm; a loose capture from before transcripts, the tool version is not recorded",
+      "observable": true,
+      "pin_stamp": null,
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "json",
+          "path": "captured/scan_npm_npm_clean.json",
+          "sha256": "8665d68c1125d9b089d71b9c2c6416ddc836cc2a4c40c880fbfd0843e431ed3c"
+        }
+      ],
+      "retention": "current",
+      "scanner": "guarddog",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "guarddog",
+        "version": "unknown"
+      }
+    },
+    {
+      "adapter_prep": "guarddog",
+      "also_for": [],
+      "argv": null,
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": {
+        "paths": [
+          "fixture_repo/npm_suspicious"
+        ],
+        "sha256": "f26c8b0f38c5f2c4fa922d0f8964ffeaa4fc6078dea4d25353d668a223d0acbe"
+      },
+      "id": "scan-npm-npm-suspicious",
+      "live_input": false,
+      "note": "ecosystem npm; a loose capture from before transcripts, the tool version is not recorded",
+      "observable": true,
+      "pin_stamp": null,
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "json",
+          "path": "captured/scan_npm_npm_suspicious.json",
+          "sha256": "36c8420ace1e49664d8e547eb1f4d7ca82ebdbb198364f7247b641153ae13c5b"
+        }
+      ],
+      "retention": "current",
+      "scanner": "guarddog",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "guarddog",
+        "version": "unknown"
+      }
+    },
+    {
+      "adapter_prep": "guarddog",
+      "also_for": [],
+      "argv": null,
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": {
+        "paths": [
+          "fixture_repo/pypi_clean"
+        ],
+        "sha256": "89abc8283ec16c027a3d33e64337e027a2352c24a50437556aa2cef82a6ba0ca"
+      },
+      "id": "scan-pypi-pypi-clean",
+      "live_input": false,
+      "note": "ecosystem pypi; a loose capture from before transcripts, the tool version is not recorded",
+      "observable": true,
+      "pin_stamp": null,
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "json",
+          "path": "captured/scan_pypi_pypi_clean.json",
+          "sha256": "2d2514169980810c2f86cef33d4fbf5bb9e25c0d3d2730e9ff0d6f159eca7ca0"
+        }
+      ],
+      "retention": "current",
+      "scanner": "guarddog",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "guarddog",
+        "version": "unknown"
+      }
+    },
+    {
+      "adapter_prep": "guarddog",
+      "also_for": [],
+      "argv": null,
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": {
+        "paths": [
+          "fixture_repo/pypi_suspicious"
+        ],
+        "sha256": "e8e2efbbf88bc9e15c95b983f4b4de5f8b163671deab71b852dfbefc68746e86"
+      },
+      "id": "scan-pypi-pypi-suspicious",
+      "live_input": false,
+      "note": "ecosystem pypi; a loose capture from before transcripts, the tool version is not recorded",
+      "observable": true,
+      "pin_stamp": null,
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "json",
+          "path": "captured/scan_pypi_pypi_suspicious.json",
+          "sha256": "c08c5bfd01c04587ef6913d8cb329813495eb67d1302b620c7272996bcb3dcb9"
+        }
+      ],
+      "retention": "current",
+      "scanner": "guarddog",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "guarddog",
+        "version": "unknown"
+      }
+    },
+    {
+      "adapter_prep": "guarddog",
+      "also_for": [],
+      "argv": null,
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": {
+        "paths": [
+          "fixture_repo/gem_suspicious"
+        ],
+        "sha256": "236a827ca031c268597e590be3c7f1eac677850ce8f30ae033c4cd12d7ac2734"
+      },
+      "id": "scan-rubygems-gem-suspicious",
+      "live_input": false,
+      "note": "ecosystem rubygems; a loose capture from before transcripts, the tool version is not recorded",
+      "observable": true,
+      "pin_stamp": null,
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "json",
+          "path": "captured/scan_rubygems_gem_suspicious.json",
+          "sha256": "14766bb709b9c62a9d1e4cf861aab0a48f84aa2d1efea29dd0a497e2f695d8b6"
+        }
+      ],
+      "retention": "current",
+      "scanner": "guarddog",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "guarddog",
+        "version": "unknown"
+      }
+    },
+    {
+      "adapter_prep": "guarddog",
+      "also_for": [],
+      "argv": null,
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": {
+        "paths": [
+          "captured/verify_pypi_requirements.txt"
+        ],
+        "sha256": "d05c88654d3349342524fc007c0829ee8a54864745ded2e893b08bc284a88fd0"
+      },
+      "id": "verify-pypi-requirements",
+      "live_input": false,
+      "note": "the verify mode over a requirements file, read through the guarddog prep's verify branch",
+      "observable": true,
+      "pin_stamp": null,
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "json",
+          "path": "captured/verify_pypi_requirements.json",
+          "sha256": "2efb4c7cdbda05a81971402050b9fb96bdfb7d0f86a37faaf1f52fc34816ae89"
+        }
+      ],
+      "retention": "current",
+      "scanner": "guarddog",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "guarddog",
+        "version": "unknown"
+      }
+    }
+  ],
+  "unrecorded": []
+}

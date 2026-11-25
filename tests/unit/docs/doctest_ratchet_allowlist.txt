@@ -22,6 +22,4 @@ docs/plugins/builtin/actionlint.md
 docs/plugins/builtin/cfn-lint-and-cfn-guard.md
 docs/plugins/builtin/trivy.md
 how-to/agent-plugins.md
-personas/index.md
-reference/index.md
 support.md

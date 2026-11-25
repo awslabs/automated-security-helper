@@ -1,0 +1,179 @@
+{
+  "schema_version": 1,
+  "transcripts": [
+    {
+      "adapter_prep": null,
+      "also_for": [],
+      "argv": null,
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": null,
+      "id": "cfn-nag-src-test-yaml",
+      "live_input": false,
+      "note": "a loose native capture from before transcripts; no SARIF capture exists (the M0 run could not produce a real cfn-nag result, see M0-FINDINGS.md)",
+      "observable": true,
+      "pin_stamp": null,
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "json",
+          "path": "src.test.yaml.json",
+          "sha256": "2e060b0c5a5d3403066a68ae75993431a35b5df75f3d3763fb1bdddbee631a11"
+        }
+      ],
+      "retention": "current",
+      "scanner": "cfn-nag",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "cfn-nag",
+        "version": "unknown"
+      }
+    },
+    {
+      "adapter_prep": null,
+      "also_for": [],
+      "argv": null,
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": null,
+      "id": "cfn-nag-src-cfn-and-python-test-yaml",
+      "live_input": false,
+      "note": "a loose native capture from before transcripts",
+      "observable": true,
+      "pin_stamp": null,
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "json",
+          "path": "src.cfn_and_python.test.yaml.json",
+          "sha256": "a1ffd4dee1b9ece62a91268f17dfcf7c3b5a95c083bc68f77b2870f3a7fc619b"
+        }
+      ],
+      "retention": "current",
+      "scanner": "cfn-nag",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "cfn-nag",
+        "version": "unknown"
+      }
+    },
+    {
+      "adapter_prep": "cfn-nag",
+      "also_for": [],
+      "argv": null,
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": null,
+      "id": "cfn-nag-0.8.10-m0",
+      "live_input": false,
+      "note": "the SARIF cfn-nag 0.8.10 wrote, read through the adapter that attaches each result's resource",
+      "observable": true,
+      "pin_stamp": null,
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "sarif",
+          "path": "captured/cfn_nag-0.8.10-m0.sarif",
+          "sha256": "f805db7e6a83cb52602a731632edab35a27df1e56fefbe3d625e5707ffd0596b"
+        }
+      ],
+      "retention": "current",
+      "scanner": "cfn-nag",
+      "side_reports": [
+        {
+          "format": "json",
+          "path": "captured/cfn_nag-0.8.10-m0.json",
+          "sha256": "d56697c4f5cad370a9a8ba330ae5c644daed03784d60c97f39a1c6ae6393e60f"
+        }
+      ],
+      "stderr_tail": null,
+      "tool": {
+        "name": "cfn-nag",
+        "version": "0.8.10"
+      }
+    },
+    {
+      "adapter_prep": "cfn-nag",
+      "also_for": [],
+      "argv": null,
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": null,
+      "id": "cfn-nag-0.8.10-two-buckets",
+      "live_input": false,
+      "note": "the SARIF cfn-nag 0.8.10 wrote over a template with two buckets, read through the adapter that attaches each result's resource",
+      "observable": true,
+      "pin_stamp": null,
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "sarif",
+          "path": "captured/cfn_nag-0.8.10-two-buckets.sarif",
+          "sha256": "483767570cb0f7367cf2483ed5da30e93906e208e3b0e0d8c6bd22acc36961e0"
+        }
+      ],
+      "retention": "current",
+      "scanner": "cfn-nag",
+      "side_reports": [
+        {
+          "format": "json",
+          "path": "captured/cfn_nag-0.8.10-two-buckets.json",
+          "sha256": "33c5458e9e4bf24ec88a62021911d0df227a51641a045f8f1b5133320ec72dfa"
+        }
+      ],
+      "stderr_tail": null,
+      "tool": {
+        "name": "cfn-nag",
+        "version": "0.8.10"
+      }
+    },
+    {
+      "adapter_prep": "cfn-nag",
+      "also_for": [],
+      "argv": null,
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": null,
+      "id": "cfn-nag-0.8.10-fatal-psych-ruby-3.3.8",
+      "live_input": false,
+      "note": "the SARIF cfn-nag 0.8.10 wrote on a portable Ruby 3.3.8, a run that holds no result; the JSON beside it is the same run",
+      "observable": true,
+      "pin_stamp": null,
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "sarif",
+          "path": "captured/cfn_nag-0.8.10-fatal-psych-portable-ruby-3.3.8.sarif",
+          "sha256": "dff24bfde5f10d973024c499151a7b4788fc394078e7605a3f2d84033a4e26c4"
+        }
+      ],
+      "retention": "current",
+      "scanner": "cfn-nag",
+      "side_reports": [
+        {
+          "format": "json",
+          "path": "captured/cfn_nag-0.8.10-fatal-psych-portable-ruby-3.3.8.json",
+          "sha256": "e96a50fe84420cb5b13563021341ce94c556c4e1041d68bed5699ba30b0f4c46"
+        }
+      ],
+      "stderr_tail": null,
+      "tool": {
+        "name": "cfn-nag",
+        "version": "0.8.10"
+      }
+    }
+  ],
+  "unrecorded": []
+}

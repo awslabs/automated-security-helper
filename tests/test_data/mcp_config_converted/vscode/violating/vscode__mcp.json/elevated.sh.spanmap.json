@@ -1,0 +1,29 @@
+[
+  {
+    "col": 17,
+    "end_col": 6,
+    "end_line": 9,
+    "line": 5,
+    "pointer": "/servers/elevated",
+    "script_line": 1,
+    "source_file": ".vscode/mcp.json"
+  },
+  {
+    "col": 17,
+    "end_col": 6,
+    "end_line": 9,
+    "line": 5,
+    "pointer": "/servers/elevated",
+    "script_line": 2,
+    "source_file": ".vscode/mcp.json"
+  },
+  {
+    "col": 17,
+    "end_col": 6,
+    "end_line": 9,
+    "line": 5,
+    "pointer": "/servers/elevated",
+    "script_line": 3,
+    "source_file": ".vscode/mcp.json"
+  }
+]

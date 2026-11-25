@@ -1,0 +1,29 @@
+[
+  {
+    "col": 1,
+    "end_col": 21,
+    "end_line": 8,
+    "line": 8,
+    "pointer": "/mcp_servers/runner",
+    "script_line": 1,
+    "source_file": ".codex/config.toml"
+  },
+  {
+    "col": 1,
+    "end_col": 21,
+    "end_line": 8,
+    "line": 8,
+    "pointer": "/mcp_servers/runner",
+    "script_line": 2,
+    "source_file": ".codex/config.toml"
+  },
+  {
+    "col": 1,
+    "end_col": 21,
+    "end_line": 8,
+    "line": 8,
+    "pointer": "/mcp_servers/runner",
+    "script_line": 3,
+    "source_file": ".codex/config.toml"
+  }
+]

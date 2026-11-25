@@ -1149,6 +1149,8 @@ def stale_content_databases(
     nothing in ASH writes -- cannot fail a scan. One per database and scanner, as in
     ``content_db_records``, an enforced one kept over one that only warns.
     """
+    from automated_security_helper.schemas.sarif_schema_model import Level
+
     sarif = getattr(results, "sarif", None)
     found: Dict[Tuple[str, str], ContentDbAgeRecord] = {}
     for run in getattr(sarif, "runs", None) or []:
@@ -1183,7 +1185,9 @@ def stale_content_databases(
                     )
                 # The level is authoritative for whether it fails the scan.
                 record.policy = (
-                    StalenessPolicy.FAIL if level == "error" else StalenessPolicy.WARN
+                    StalenessPolicy.FAIL
+                    if level == Level.error.value
+                    else StalenessPolicy.WARN
                 )
                 if enforced_only and not record.enforced:
                     continue

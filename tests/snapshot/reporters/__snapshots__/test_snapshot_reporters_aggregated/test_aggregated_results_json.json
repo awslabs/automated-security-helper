@@ -53,6 +53,7 @@
           "package_name": null,
           "package_version": null,
           "package_path": null,
+          "image": null,
           "symbol": null,
           "scope": null,
           "resource_id": null
@@ -68,6 +69,7 @@
           "package_name": null,
           "package_version": null,
           "package_path": null,
+          "image": null,
           "symbol": null,
           "scope": null,
           "resource_id": null

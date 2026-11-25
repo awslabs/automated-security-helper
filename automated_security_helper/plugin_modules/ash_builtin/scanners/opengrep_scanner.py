@@ -40,7 +40,9 @@ from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import ToolArgs
 from automated_security_helper.plugin_modules.ash_builtin.scanners._grep_scanner_base import (
     DEFAULT_EXCLUDES,
+    GrepMetricsMode,
     GrepScannerBase,
+    GrepSeverityWord,
 )
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.utils.download_utils import (
@@ -97,14 +99,14 @@ class OpengrepScannerConfigOptions(ScannerOptionsBase):
     ] = []
 
     severity: Annotated[
-        List[Literal["INFO", "WARNING", "ERROR"]],
+        List[GrepSeverityWord],
         Field(
             description="Report findings only from rules matching the supplied severity level.",
         ),
     ] = []
 
     metrics: Annotated[
-        Literal["auto", "on", "off"],
+        GrepMetricsMode,
         Field(
             description="Configures how usage metrics are sent to the OpenGrep server. Deprecated in Opengrep v1.7.0+. This configuration is ignored if the installed version is >= 1.7.0.",
         ),
@@ -520,7 +522,6 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
                 ),
             ),
             provenance=opsf.ProvenanceFacet(
-                tier=opsf.Tier.BUILTIN_DEFAULT,
                 source=opsf.ProvenanceSource.PINNED_RELEASE_BINARY,
                 selection_surfaces=("options.config",),
                 upstream_license=(
@@ -741,10 +742,10 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
         it, so the row says where the copy is and how to allow it rather than
         "not installed".
         """
-        found = find_executable(self.command)
+        found = find_executable(self._tool_command())
         ASH_LOGGER.verbose(f"Found opengrep executable at: {found}")
         if found is None:
-            refusal = in_tree_refusal(self.command)
+            refusal = in_tree_refusal(self._tool_command())
             if refusal is not None:
                 self.dependency_unavailable_reason = refusal
                 self._plugin_log(refusal, level=logging.WARNING)
@@ -765,7 +766,7 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
     def _get_opengrep_version(self) -> tuple[int, int, int] | None:
         try:
             result = spawn_run(  # nosec B603 — list args, executable from find_executable()
-                [self.command, "--version"],
+                [self._tool_command(), "--version"],
                 capture_output=True,
                 text=True,
                 timeout=5,
