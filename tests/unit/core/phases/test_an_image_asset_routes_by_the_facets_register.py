@@ -363,3 +363,68 @@ class TestTheNotScannedNoteStaysTrue:
         row = result.scanner_results.get("trivy")
         assert row is None or row.status != ScannerStatus.SKIPPED
         assert _informational_results(result) == []
+
+
+class TestATagIsResolvedOnceBeforeAnyScannerRuns:
+    """The scan phase asks the resolver once, and the scan carries its answer."""
+
+    DIGEST = "sha256:" + "ab" * 32
+
+    def _patched(self, monkeypatch, answer):
+        calls = []
+
+        def resolver(image, *, offline, **_):
+            calls.append((image, offline))
+            return answer(image)
+
+        monkeypatch.setattr(
+            "automated_security_helper.utils.image_digest_resolver.resolve_image_locator",
+            resolver,
+        )
+        return calls
+
+    def test_the_resolved_digest_is_on_the_asset_the_scanners_are_given(
+        self, scan_phase, monkeypatch
+    ):
+        calls = self._patched(
+            monkeypatch,
+            lambda image: image.model_copy(update={"resolved_digest": self.DIGEST}),
+        )
+        scan_phase.plugin_context.asset = Asset.for_image(ImageLocator(ref=IMAGE_REF))
+
+        scan_phase._execute_phase(
+            aggregated_results=AshAggregatedResults(), parallel=False
+        )
+
+        assert len(calls) == 1
+        assert calls[0][0].ref == IMAGE_REF
+        image = scan_phase.plugin_context.asset.image
+        assert (image.ref, image.resolved_digest) == (IMAGE_REF, self.DIGEST)
+
+    def test_an_unresolved_locator_leaves_the_asset_as_submitted(
+        self, scan_phase, monkeypatch
+    ):
+        self._patched(monkeypatch, lambda image: image)
+        asset = Asset.for_image(ImageLocator(ref=IMAGE_REF))
+        scan_phase.plugin_context.asset = asset
+
+        scan_phase._execute_phase(
+            aggregated_results=AshAggregatedResults(), parallel=False
+        )
+
+        assert scan_phase.plugin_context.asset is asset
+
+    @pytest.mark.parametrize("subject", ["none", "filesystem"])
+    def test_a_filesystem_scan_never_asks(self, scan_phase, monkeypatch, subject):
+        calls = self._patched(monkeypatch, lambda image: image)
+        scan_phase.plugin_context.asset = (
+            None
+            if subject == "none"
+            else Asset.for_filesystem(scan_phase.plugin_context.source_dir)
+        )
+
+        scan_phase._execute_phase(
+            aggregated_results=AshAggregatedResults(), parallel=False
+        )
+
+        assert calls == []

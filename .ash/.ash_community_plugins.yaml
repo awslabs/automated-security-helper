@@ -72,8 +72,8 @@ global_settings:
         hold words, not a credential.
     - rule_id: API_KEY_OR_SECRET
       path: Dockerfile
-      line_start: 812
-      line_end: 814
+      line_start: 818
+      line_end: 820
       reason: >-
         False positive. The adduser command in the non-root-user block passes the
         --disabled-password flag, which the netrc_password detector in ferret-scan 2.6.1
@@ -82,8 +82,8 @@ global_settings:
         moves out of this range.
     - rule_id: API_KEY_OR_SECRET
       path: automated_security_helper/assets/Dockerfile
-      line_start: 812
-      line_end: 814
+      line_start: 818
+      line_end: 820
       reason: >-
         False positive. This is the build-context copy of the Dockerfile entry above, with
         the same adduser --disabled-password flag that ferret-scan 2.6.1 reads as a
@@ -614,8 +614,8 @@ global_settings:
     # look like high-entropy secrets because a SHA256 is high-entropy.
     - path: automated_security_helper/utils/tool_downloads.py
       rule_id: API_KEY_OR_SECRET
-      line_start: 398
-      line_end: 538
+      line_start: 412
+      line_end: 564
       reason: >-
         False positive — every string in this range is a published SHA256 release
         checksum or the SHA256 of what one of those verified archives extracts to.
@@ -640,8 +640,8 @@ global_settings:
         would silently swallow a real secret added here later.
     - path: automated_security_helper/utils/tool_downloads.py
       rule_id: API_KEY_OR_SECRET
-      line_start: 1012
-      line_end: 1057
+      line_start: 1043
+      line_end: 1089
       reason: >-
         False positive, the same shape as the entry above, over _THIRD_PARTY_HASHES:
         the commit SHA each bundled tool's release tag points to, and the SHA256 of

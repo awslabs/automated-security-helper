@@ -489,6 +489,7 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
                     opsf.Fetched.VULN_DB,
                     opsf.Fetched.CHECKS_BUNDLE,
                     opsf.Fetched.MODULE_SOURCES,
+                    opsf.Fetched.IMAGE_DIGEST,
                 ),
                 prefetch=(opsf.Prefetch.CONTENT_DB_REFRESH,),
                 offline_outcome=opsf.OfflineOutcome.DEGRADED,

@@ -1145,6 +1145,19 @@ class ScanPhase(EnginePhase):
         image_subject = (
             isinstance(subject, Asset) and subject.kind == AssetKind.CONTAINER_IMAGE
         )
+        if image_subject and subject.image is not None:
+            # A tag-only reference gets the digest the registry says it points
+            # at, so its finding ids key on that digest (utils/image_digest_resolver).
+            # Once per scan, before any scanner is built; a failure or offline
+            # mode leaves the locator as submitted and logs one notice.
+            from automated_security_helper.core.constants import is_offline_mode
+            from automated_security_helper.utils.image_digest_resolver import (
+                resolve_image_locator,
+            )
+
+            resolved = resolve_image_locator(subject.image, offline=is_offline_mode())
+            if resolved is not subject.image:
+                self.plugin_context.asset = Asset.for_image(resolved)
         source_files = (
             []
             if image_subject
