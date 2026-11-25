@@ -26,6 +26,8 @@ from automated_security_helper.models.scan_results_container import (
 )
 from automated_security_helper.models.vocab import TargetType
 
+pytestmark = pytest.mark.unit
+
 REPO = Path(__file__).resolve().parents[3]
 PKG = REPO / "automated_security_helper"
 
