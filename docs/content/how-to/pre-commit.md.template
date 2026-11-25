@@ -237,11 +237,12 @@ spread between the three runs of a row was at most about 3 seconds. Rerun the sc
 machine for figures that mean something there.
 
 The table is refreshed from a benchmark job rather than by hand. The workflow
-`ash-scan-benchmark.yml` installs a pull request's base and head into two environments on
-one runner and alternates timed runs of `ash --version`, a staged scan of one `.py` file, a
-staged scan of one CI config file and a scan of the whole fixture. It prints the minimum,
-median, mean and maximum of five runs per build in the job summary, and a nightly run on
-`main` appends to a trend artifact. The job is informational: it is not a required check,
+`ash-scan-benchmark.yml` installs the commit under test, its parent commit and the latest
+release into three environments on one runner and alternates timed runs of `ash --version`,
+a staged scan of one `.py` file, a staged scan of one CI config file and a scan of the whole
+fixture. It prints the minimum, median, mean and maximum of five runs per build in the job
+summary, with the commit under test's difference from each of the other two, and a nightly
+run on `main` appends all three to a trend artifact. The job is informational: it is not a required check,
 and a warning in its summary never fails a build. The rows above were timed by hand, with
 a staged file that held no finding; the script now stages a file with a planted finding,
 so refresh the table from the job's figures, or from the script on a quiet host, and do
