@@ -760,6 +760,8 @@ SOFTWARE.
       
         
       
+        
+      
     
     
     
@@ -1115,6 +1117,34 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
+      <a href="../../how-to/scan-container-images/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scan container images
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../how-to/run-offline/" class="md-nav__link">
         
   
@@ -1243,10 +1273,10 @@ SOFTWARE.
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_16" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_17" >
         
           
-          <label class="md-nav__link" for="__nav_4_16" id="__nav_4_16_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_4_17" id="__nav_4_17_label" tabindex="0">
             
   
   
@@ -1264,8 +1294,8 @@ SOFTWARE.
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_16_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_4_16">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_17_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_17">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -2254,6 +2284,17 @@ SOFTWARE.
 </li>
       
         <li class="md-nav__item">
+  <a href="#mcp-config" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        mcp-config
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#npm-audit" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2720,6 +2761,10 @@ SOFTWARE.
       
         
       
+        
+      
+        
+      
     
     
     
@@ -2831,6 +2876,62 @@ SOFTWARE.
     
   
     Gitleaks scanner
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/mcp-config/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP server config scanning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/syft/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Syft SBOM scanner (syft) and the sdist lockfile harvest
   
 
     
@@ -3786,6 +3887,17 @@ SOFTWARE.
 </li>
       
         <li class="md-nav__item">
+  <a href="#mcp-config" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        mcp-config
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#npm-audit" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3998,7 +4110,7 @@ SOFTWARE.
 
 <h1 id="scanner-facets-reference">Scanner facets reference<a class="headerlink" href="#scanner-facets-reference" title="Permanent link">&para;</a></h1>
 <p>This page is generated from the scanner facets register in the ASH source code by <code>scripts/generate_facets_reference.py</code>. Edits made to this file by hand are overwritten the next time it is generated.</p>
-<p>ASH ships 22 scanners, and every one declares, per facet of the shared vocabulary, whether its native output maps into the shared pipeline. The register is production code (<code>automated_security_helper/base/scanner_facets.py</code>): the declaration has runtime consumers, and a scanner without one is refused by the registry totality test. The four states:</p>
+<p>ASH ships 23 scanners, and every one declares, per facet of the shared vocabulary, whether its native output maps into the shared pipeline. The register is production code (<code>automated_security_helper/base/scanner_facets.py</code>): the declaration has runtime consumers, and a scanner without one is refused by the registry totality test. The four states:</p>
 <ul>
 <li><code>mapped</code>: the facet lands where the shared pipeline reads it, and the cell names the native field it comes from. The corpus-consistency gate (<code>tests/unit/plugin_modules/test_scanner_facets_corpus_consistency.py</code>) holds these cells against the committed fixtures.</li>
 <li><code>mappable-dropped</code>: the native output carries the value and ASH discards it today: a roadmap record, not a promise. The cell names the native field and why it is dropped.</li>
@@ -4087,6 +4199,13 @@ SOFTWARE.
 <td>0</td>
 <td>4</td>
 <td>4</td>
+</tr>
+<tr>
+<td><a href="#mcp-config"><code>mcp-config</code></a></td>
+<td>8</td>
+<td>0</td>
+<td>12</td>
+<td>0</td>
 </tr>
 <tr>
 <td><a href="#npm-audit"><code>npm-audit</code></a></td>
@@ -4197,7 +4316,7 @@ SOFTWARE.
 <tr>
 <td><code>severity</code></td>
 <td><code>mapped</code></td>
-<td>errors[].kind (ASH severity table; a message matching the untrusted-input pattern raises it to HIGH)</td>
+<td>errors[].kind and errors[].message (ASH severity table, severity_for; an expression finding whose message matches the untrusted-input pattern is raised to HIGH, and a deprecated-commands finding whose message names set-env or add-path is raised to MEDIUM)</td>
 <td></td>
 </tr>
 <tr>
@@ -4424,7 +4543,7 @@ SOFTWARE.
 <td><code>snippet</code></td>
 <td><code>mapped</code></td>
 <td>results[].locations[].physicalLocation.region.snippet.text (settled by the M0 capture)</td>
-<td></td>
+<td>mask_secrets_in_sarif runs over the whole report, so a snippet holding a secret-shaped value is masked in place; the snippet still maps, with the masked text</td>
 </tr>
 <tr>
 <td><code>references</code></td>
@@ -5358,7 +5477,7 @@ SOFTWARE.
 <td><code>fingerprints</code></td>
 <td><code>mappable-dropped</code></td>
 <td>result "partialFingerprints" (commitSha, author, email, date, commitMessage)</td>
-<td>dir mode emits empty-string git metadata, which _post_process_sarif drops because an empty fingerprint is identical across every result; git-mode values pass through</td>
+<td>dir mode emits empty-string git metadata, which _post_process_sarif drops because an empty fingerprint is identical across every result; ASH runs only the dir subcommand, so no git metadata is ever kept</td>
 </tr>
 <tr>
 <td><code>fix_available</code></td>
@@ -5534,6 +5653,142 @@ SOFTWARE.
 </tr>
 </tbody>
 </table>
+<h2 id="mcp-config"><code>mcp-config</code><a class="headerlink" href="#mcp-config" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Class: <code>automated_security_helper.plugin_modules.ash_builtin.scanners.mcp_config_scanner.McpConfigScanner</code></li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Facet</th>
+<th>State</th>
+<th>Native field</th>
+<th>Reason</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>rule_id</code></td>
+<td><code>mapped</code></td>
+<td>PolicyFinding.rule_id (MCP-PRIVILEGE-ESCALATION, MCP-AUTO-APPROVAL, MCP-UNPINNED-RUNNER, MCP-REMOTE-NOT-LOCAL, MCP-REMOTE-URL-PREFIX, MCP-REMOTE-URL-INSECURE, MCP-COMMAND-PREFIX, MCP-ENV-SECRET)</td>
+<td></td>
+</tr>
+<tr>
+<td><code>severity</code></td>
+<td><code>mapped</code></td>
+<td>RULE_SEVERITY[rule_id] (HIGH, MEDIUM, LOW), written as result level and properties issue_severity</td>
+<td></td>
+</tr>
+<tr>
+<td><code>file_path</code></td>
+<td><code>mapped</code></td>
+<td>McpServerEntry.source_file</td>
+<td></td>
+</tr>
+<tr>
+<td><code>line_range</code></td>
+<td><code>mapped</code></td>
+<td>McpServerEntry.spans[pointer] line / end_line</td>
+<td></td>
+</tr>
+<tr>
+<td><code>column</code></td>
+<td><code>mapped</code></td>
+<td>McpServerEntry.spans[pointer] col / end_col (JSON); a TOML key is located by its line only</td>
+<td></td>
+</tr>
+<tr>
+<td><code>message</code></td>
+<td><code>mapped</code></td>
+<td>PolicyFinding.message, built from McpServerEntry.server_name</td>
+<td></td>
+</tr>
+<tr>
+<td><code>resource_id</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>the finding names a field of a config file; the server entry's JSON pointer rides in the result property mcp_server_pointer, and ash_resource_id is not written, so a suppression binds on file and line</td>
+</tr>
+<tr>
+<td><code>resource_type</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>an MCP server entry is not a deployable resource type</td>
+</tr>
+<tr>
+<td><code>package_name</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>the finding names a launcher argument, not a package inventory row</td>
+</tr>
+<tr>
+<td><code>package_version</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>the finding carries no package version</td>
+</tr>
+<tr>
+<td><code>package_path</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>the finding carries no package path</td>
+</tr>
+<tr>
+<td><code>taxonomy_cve</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>policy findings carry no CVE taxonomy</td>
+</tr>
+<tr>
+<td><code>taxonomy_cwe</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>the rules carry no CWE taxonomy</td>
+</tr>
+<tr>
+<td><code>fingerprints</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>the scanner writes no partialFingerprints; identity is file and line</td>
+</tr>
+<tr>
+<td><code>fix_available</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>policy findings carry no fix state</td>
+</tr>
+<tr>
+<td><code>remediation_text</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>the remedy is the last sentence of the message; there is no separate remediation field</td>
+</tr>
+<tr>
+<td><code>snippet</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>the config text is never quoted into a finding, because an env value can be a credential</td>
+</tr>
+<tr>
+<td><code>references</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>the rules carry no reference URLs</td>
+</tr>
+<tr>
+<td><code>tags</code></td>
+<td><code>mapped</code></td>
+<td>adapter-written PropertyBag tags (mcp-config, security, tool_name, tool_type)</td>
+<td></td>
+</tr>
+<tr>
+<td><code>extras</code></td>
+<td><code>mapped</code></td>
+<td>result properties issue_severity, mcp_server_pointer and mcp_config_format written by the adapter</td>
+<td></td>
+</tr>
+</tbody>
+</table>
 <h2 id="npm-audit"><code>npm-audit</code><a class="headerlink" href="#npm-audit" title="Permanent link">&para;</a></h2>
 <ul>
 <li>Class: <code>automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_scanner.NpmAuditScanner</code></li>
@@ -5552,7 +5807,7 @@ SOFTWARE.
 <td><code>rule_id</code></td>
 <td><code>mapped</code></td>
 <td>vulnerabilities.&lt;name&gt;.via[]."url" (the GHSA id, synthesized as the ruleId); "npm-audit-transitive-&lt;name&gt;" for a transitive-only entry</td>
-<td></td>
+<td>an advisory with no usable URL segment falls back to npm-&lt;package&gt;-&lt;source id&gt; (npm-&lt;package&gt; when it has no source id), and a v1 advisory (yarn, pnpm) takes the last segment of its own url the same way (_advisory_id)</td>
 </tr>
 <tr>
 <td><code>severity</code></td>
@@ -5563,20 +5818,20 @@ SOFTWARE.
 <tr>
 <td><code>file_path</code></td>
 <td><code>mapped</code></td>
-<td>vulnerabilities.&lt;name&gt;."nodes" (the install location, synthesized as node_modules/&lt;location&gt;/package.json)</td>
-<td></td>
+<td>(no native file) the lockfile the audit ran against (package-lock.json, npm-shrinkwrap.json, pnpm-lock.yaml or yarn.lock), relative to the scan root</td>
+<td>npm audit, yarn audit and pnpm audit name no file, and the node_modules/&lt;package&gt;/package.json install location they imply usually is not in the checkout and matches a node_modules ignore path, so the adapter reports the lockfile; the install location is kept in the package_path property. A report converted with no lockfile known keeps the install-location URI</td>
 </tr>
 <tr>
 <td><code>line_range</code></td>
 <td><code>mapped</code></td>
-<td>(no native line) the adapter writes line 1 of the synthesized manifest location on every result</td>
-<td></td>
+<td>(no native line) the 1-based line of the package's entry in an npm lockfile's packages map, read by the adapter</td>
+<td>a result with no readable entry (yarn.lock, pnpm-lock.yaml, a lockfile v1, a node npm names no entry for) carries no region; a line is never invented</td>
 </tr>
 <tr>
 <td><code>column</code></td>
-<td><code>mapped</code></td>
-<td>(no native column) the adapter writes column 1 of the synthesized manifest location on every result, beside the line_range cell's line 1</td>
+<td><code>n/a</code></td>
 <td></td>
+<td>npm audit output carries no column and the lockfile location is a line, so the adapter writes none</td>
 </tr>
 <tr>
 <td><code>message</code></td>
@@ -5588,7 +5843,7 @@ SOFTWARE.
 <td><code>resource_id</code></td>
 <td><code>n/a</code></td>
 <td></td>
-<td>LOCATOR-ONLY (synthesized): the URI node_modules/&lt;loc&gt;/package.json is built from the native "nodes", an install locator; the findings are packages, not resources</td>
+<td>LOCATOR-ONLY (set by the adapter): the URI is the lockfile the audit ran against, a locator; the findings are packages, not resources</td>
 </tr>
 <tr>
 <td><code>resource_type</code></td>
@@ -5606,13 +5861,13 @@ SOFTWARE.
 <td><code>package_version</code></td>
 <td><code>mapped</code></td>
 <td>installed version read from the lockfile beside the manifest (npm audit's own report gives only a vulnerable range)</td>
-<td></td>
+<td>npm 7+ path; a yarn or pnpm advisory lists the installed versions in its findings, and one with none gets no version</td>
 </tr>
 <tr>
 <td><code>package_path</code></td>
 <td><code>mapped</code></td>
 <td>vulnerabilities.&lt;name&gt;."nodes" resolved against the lockfile entry for the install path</td>
-<td></td>
+<td>npm 7+ path only: yarn and pnpm do not say where a copy is installed, so their results carry package_path as None</td>
 </tr>
 <tr>
 <td><code>taxonomy_cve</code></td>
@@ -5628,15 +5883,15 @@ SOFTWARE.
 </tr>
 <tr>
 <td><code>fingerprints</code></td>
-<td><code>n/a</code></td>
-<td></td>
-<td>npm audit output carries no fingerprint; finding identity keys on scanner, rule and package</td>
+<td><code>mapped</code></td>
+<td>(no native fingerprint) result partialFingerprints.ashNpmAuditFinding/v1, ASH-composed: a hash of the rule id, package name, installed version, install path and dependency paths</td>
+<td>written when the result is located at its lockfile, where findings of one lockfile share a file and often a line</td>
 </tr>
 <tr>
 <td><code>fix_available</code></td>
 <td><code>mapped</code></td>
 <td>vulnerabilities.&lt;name&gt;."fixAvailable"</td>
-<td></td>
+<td>npm 7+ path; a v1 advisory (yarn 1-3, pnpm) takes it from its "patched_versions" (a non-empty range other than &lt;0.0.0), and a yarn 4 line carries none</td>
 </tr>
 <tr>
 <td><code>remediation_text</code></td>
@@ -5654,7 +5909,7 @@ SOFTWARE.
 <td><code>references</code></td>
 <td><code>mapped</code></td>
 <td>vulnerabilities.&lt;name&gt;.via[]."url" (rule helpUri), read into the flat references when the result carries no relatedLocations</td>
-<td></td>
+<td>a v1 advisory's native references and cves keys are not read (the record takes only its url, title, severity, cvss, cwe, ranges and findings), so the advisory url is its only reference</td>
 </tr>
 <tr>
 <td><code>tags</code></td>
@@ -5693,8 +5948,8 @@ SOFTWARE.
 <tr>
 <td><code>severity</code></td>
 <td><code>mapped</code></td>
-<td>results[].level</td>
-<td></td>
+<td>tool.driver.rules[].defaultConfiguration.level</td>
+<td>the tool writes no level on a result (the committed captures' result keys are fingerprints, locations, message, properties, ruleId); the level lives on the rule, and SARIF's default-level semantics resolve a result without one through it</td>
 </tr>
 <tr>
 <td><code>file_path</code></td>
@@ -5802,7 +6057,7 @@ SOFTWARE.
 <td><code>extras</code></td>
 <td><code>mapped</code></td>
 <td>results[].properties (SARIF property bag, passed through unmodified)</td>
-<td></td>
+<td>the committed capture's bag is empty ({}), so this cell rests on the pass-through, not on a populated key</td>
 </tr>
 </tbody>
 </table>
@@ -5829,8 +6084,8 @@ SOFTWARE.
 <tr>
 <td><code>severity</code></td>
 <td><code>mapped</code></td>
-<td>results[].level</td>
-<td></td>
+<td>tool.driver.rules[].defaultConfiguration.level</td>
+<td>the tool writes no level on a result (the committed captures' result keys are fingerprints, locations, message, properties, ruleId); the level lives on the rule, and SARIF's default-level semantics resolve a result without one through it</td>
 </tr>
 <tr>
 <td><code>file_path</code></td>
@@ -5938,7 +6193,7 @@ SOFTWARE.
 <td><code>extras</code></td>
 <td><code>mapped</code></td>
 <td>results[].properties (SARIF property bag, passed through unmodified)</td>
-<td></td>
+<td>the committed capture's bag is empty ({}), so this cell rests on the pass-through, not on a populated key</td>
 </tr>
 </tbody>
 </table>
@@ -6237,7 +6492,7 @@ SOFTWARE.
 <tr>
 <td><code>severity</code></td>
 <td><code>mapped</code></td>
-<td>results[].properties."zizmor/severity" and "zizmor/confidence" (ASH rewrites them to a severity band)</td>
+<td>results[].properties."zizmor/severity" and "zizmor/confidence" (ASH rewrites them to a severity band, written to properties.issue_severity, and rewrites results[].level to agree with it; map_zizmor_severity)</td>
 <td></td>
 </tr>
 <tr>
@@ -6345,7 +6600,7 @@ SOFTWARE.
 <tr>
 <td><code>extras</code></td>
 <td><code>mapped</code></td>
-<td>results[].properties ("zizmor/severity", "zizmor/confidence", "zizmor/persona"), plus the symbolic route in logicalLocations</td>
+<td>results[].properties ("zizmor/severity", "zizmor/confidence", "zizmor/persona"), plus the symbolic route in logicalLocations, and the ASH-written issue_severity (no native property of that name)</td>
 <td></td>
 </tr>
 </tbody>
@@ -6446,7 +6701,7 @@ SOFTWARE.
 <td><code>fingerprints</code></td>
 <td><code>mappable-dropped</code></td>
 <td>result "partialFingerprints" (commitSha, author, email, date, commitMessage)</td>
-<td>dir mode emits empty-string git metadata, which _post_process_sarif drops because an empty fingerprint is identical across every result; git-mode values pass through</td>
+<td>dir mode emits empty-string git metadata, which _post_process_sarif drops because an empty fingerprint is identical across every result; ASH runs only the dir subcommand, so no git metadata is ever kept</td>
 </tr>
 <tr>
 <td><code>fix_available</code></td>
@@ -6463,7 +6718,7 @@ SOFTWARE.
 <tr>
 <td><code>snippet</code></td>
 <td><code>mapped</code></td>
-<td>region.snippet.text, forced to REDACTED by _post_process_sarif</td>
+<td>region.snippet.text, forced to REDACTED by --redact=100 and again by _post_process_sarif</td>
 <td></td>
 </tr>
 <tr>
@@ -6639,25 +6894,25 @@ SOFTWARE.
 <tr>
 <td><code>rule_id</code></td>
 <td><code>mapped</code></td>
-<td>"results" key (the heuristic name, e.g. capability-network-lolbas)</td>
+<td>risks[] "threat_rule" for a correlated risk, else the "results" key (the heuristic name, e.g. threat-process-download-exec)</td>
 <td></td>
 </tr>
 <tr>
 <td><code>severity</code></td>
 <td><code>mapped</code></td>
-<td>(no native severity) the adapter's risk ladder over the heuristic's category</td>
-<td></td>
+<td>risks[] "severity" (high/medium/low), mapped one to one by _risk_severity</td>
+<td>the results that GuardDog's risk engine did not correlate carry no native severity, so the adapter fixes them by class: LOW for an uncorrelated threat match, MEDIUM for a metadata rule, INFO for a capability match</td>
 </tr>
 <tr>
 <td><code>file_path</code></td>
 <td><code>mapped</code></td>
-<td>match "location" file part (e.g. setup.py:16)</td>
+<td>risks[] "threat_location" or match "location" file part (e.g. setup.py:16)</td>
 <td></td>
 </tr>
 <tr>
 <td><code>line_range</code></td>
 <td><code>mapped</code></td>
-<td>match "location" line part</td>
+<td>risks[] "threat_location" or match "location" line part</td>
 <td></td>
 </tr>
 <tr>
@@ -6669,7 +6924,7 @@ SOFTWARE.
 <tr>
 <td><code>message</code></td>
 <td><code>mapped</code></td>
-<td>match "message", assembled with the rule and match into the result text by the adapter</td>
+<td>risks[] "threat_description" or match "message", assembled with the rule, the location and the correlated capability into the result text by the adapter</td>
 <td></td>
 </tr>
 <tr>
@@ -6735,7 +6990,7 @@ SOFTWARE.
 <tr>
 <td><code>snippet</code></td>
 <td><code>mapped</code></td>
-<td>match "code" / risk "threat_code"</td>
+<td>match "code" / risks[] "threat_code"</td>
 <td></td>
 </tr>
 <tr>
@@ -6753,7 +7008,7 @@ SOFTWARE.
 <tr>
 <td><code>extras</code></td>
 <td><code>mapped</code></td>
-<td>extra_properties merged into the result PropertyBag (package_name and package_version in verify mode)</td>
+<td>extra_properties merged into the result PropertyBag: issue_severity and guarddog_ecosystem on every result, guarddog_match on matches, guarddog_risk, guarddog_risk_severity, guarddog_capability_rule and mitre_tactics on correlated risks, and package_name and package_version in verify mode</td>
 <td></td>
 </tr>
 </tbody>
@@ -7025,8 +7280,8 @@ SOFTWARE.
 <tr>
 <td><code>extras</code></td>
 <td><code>mapped</code></td>
-<td>result and rule properties bags, passed through the SARIF model untouched</td>
-<td></td>
+<td>result properties bag, passed through the SARIF model untouched and read whole into the flat properties</td>
+<td>the rule properties bag survives the SARIF model but the flat reader takes only the rule's tags and helpUri from the rule, so rule-bag keys (cwe, isAutofixable, exampleCommitFixes) reach the flat row only through the cells above that name them</td>
 </tr>
 </tbody>
 </table>

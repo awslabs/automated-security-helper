@@ -760,6 +760,8 @@ SOFTWARE.
       
         
       
+        
+      
     
     
     
@@ -1115,6 +1117,34 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
+      <a href="../../how-to/scan-container-images/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scan container images
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../how-to/run-offline/" class="md-nav__link">
         
   
@@ -1243,10 +1273,10 @@ SOFTWARE.
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_16" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_17" >
         
           
-          <label class="md-nav__link" for="__nav_4_16" id="__nav_4_16_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_4_17" id="__nav_4_17_label" tabindex="0">
             
   
   
@@ -1264,8 +1294,8 @@ SOFTWARE.
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_16_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_4_16">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_17_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_17">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -2605,6 +2635,10 @@ SOFTWARE.
       
         
       
+        
+      
+        
+      
     
     
     
@@ -2716,6 +2750,62 @@ SOFTWARE.
     
   
     Gitleaks scanner
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/mcp-config/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP server config scanning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/syft/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Syft SBOM scanner (syft) and the sdist lockfile harvest
   
 
     
@@ -3759,7 +3849,7 @@ SOFTWARE.
 
 <h1 id="exit-codes">Exit codes<a class="headerlink" href="#exit-codes" title="Permanent link">&para;</a></h1>
 <p>The exit code of every <code>ash</code> command, with the conditions that produce it. For how to change the scan verdict, see <a href="../../how-to/set-the-gate/">Set the gate</a>.</p>
-<p>On every command, a command-line usage error exits 5: an unknown option, subcommand, or argument; a value outside the choices an option takes (such as <code>--mode</code> or <code>--min-severity</code>) or a number that is not one; a missing required option; or a <code>--cli-json-input</code> document that ASH cannot read or use. <code>ash scan</code>, <code>ash build-image</code>, and <code>ash</code> with no subcommand reject an option or argument they do not define. An option given to <code>ash</code> before a subcommand is passed to the command named right after <code>ash</code>, and is a usage error when that command does not take it: <code>ash --source-dir . config get</code> exits 5, because <code>ash config</code> has no <code>--source-dir</code>, while <code>ash config get --source-dir .</code> works. Some names and paths that ASH cannot use are usage errors too, such as a <code>--scanners</code> list that names no scanner, a <code>--source-dir</code> that does not exist, or an <code>--output-dir</code> that ASH cannot create, while <code>ash report</code>, and a scan with <code>--use-existing</code>, exit 1 when they find no results to use. The tables below list both. Two <code>ash dependencies install</code> selections exit 2 instead: a <code>--tool</code> name that it has no plugin for, or whose plugin type <code>--plugin-type</code> leaves out, and a <code>--plugin-type</code> other than <code>converter</code>, <code>scanner</code>, or <code>reporter</code>. Usage errors have a code of their own so that a CI gate does not read a mistyped flag as a scan with findings.</p>
+<p>On every command, a command-line usage error exits 5: an unknown option, subcommand, or argument; a value outside the choices an option takes (such as <code>--mode</code> or <code>--min-severity</code>) or a number that is not one; a missing required option; or a <code>--cli-json-input</code> document that ASH cannot read or use. <code>ash scan</code>, <code>ash container build</code>, and <code>ash</code> with no subcommand reject an option or argument they do not define. An option given to <code>ash</code> before a subcommand is passed to the command named right after <code>ash</code>, and is a usage error when that command does not take it: <code>ash --source-dir . config get</code> exits 5, because <code>ash config</code> has no <code>--source-dir</code>, while <code>ash config get --source-dir .</code> works. Some names and paths that ASH cannot use are usage errors too, such as a <code>--scanners</code> list that names no scanner, a <code>--source-dir</code> that does not exist, or an <code>--output-dir</code> that ASH cannot create, while <code>ash report</code>, and a scan with <code>--use-existing</code>, exit 1 when they find no results to use. The tables below list both. Two <code>ash dependencies install</code> selections exit 2 instead: a <code>--tool</code> name that it has no plugin for, or whose plugin type <code>--plugin-type</code> leaves out, and a <code>--plugin-type</code> other than <code>converter</code>, <code>scanner</code>, or <code>reporter</code>. Usage errors have a code of their own so that a CI gate does not read a mistyped flag as a scan with findings.</p>
 <h2 id="scan"><code>ash scan</code><a class="headerlink" href="#scan" title="Permanent link">&para;</a></h2>
 <p><code>ash</code> with no subcommand runs a scan and exits the same way.</p>
 <table>
@@ -3893,7 +3983,7 @@ SOFTWARE.
 </ol>
 <p><code>fail_on_findings</code> and <code>fail_on_incomplete_scanners</code> each come from the command-line flag, then the config, then their default (on). <code>--allow-stale-content-db</code> and <code>--no-allow-stale-content-db</code> replace the config's <code>content_db_staleness</code>.</p>
 <h3 id="container">Container and Nix mode<a class="headerlink" href="#container" title="Permanent link">&para;</a></h3>
-<p>In <code>--mode container</code> (and <code>ash build-image</code>) and <code>--mode nix</code>, ASH reads the results back on the host and computes the code by the rules above, applying <code>--min-severity</code> there. <code>--ignore-suppressions</code> reaches the scan inside the container and works there as in a local scan.</p>
+<p>In <code>--mode container</code> (and <code>ash container build</code>) and <code>--mode nix</code>, ASH reads the results back on the host and computes the code by the rules above, applying <code>--min-severity</code> there. <code>--ignore-suppressions</code> reaches the scan inside the container and works there as in a local scan.</p>
 <table>
 <thead>
 <tr>
@@ -3924,7 +4014,7 @@ SOFTWARE.
 </tr>
 <tr>
 <td>130</td>
-<td>Interrupted with Ctrl-C. Outside Windows, ASH passes the interrupt to the container runtime or the Nix shell, unless the terminal already delivered it there, waits up to 5 seconds for it to stop, and then kills it; a second Ctrl-C during the wait kills it at once. On Windows, a Ctrl-C typed in the console reaches the container runtime as well, and ASH waits up to 5 seconds for it to stop, as above; without a console, ASH ends the runtime at once. A scan prints the interrupted-scan message above. <code>ash build-image</code> prints <code>ASH build-image interrupted before it finished.</code>, and, without <code>--no-run</code>, adds <code>: there is no verdict, and the output directory may hold partial results</code> before the period.</td>
+<td>Interrupted with Ctrl-C. Outside Windows, ASH passes the interrupt to the container runtime or the Nix shell, unless the terminal already delivered it there, waits up to 5 seconds for it to stop, and then kills it; a second Ctrl-C during the wait kills it at once. On Windows, a Ctrl-C typed in the console reaches the container runtime as well, and ASH waits up to 5 seconds for it to stop, as above; without a console, ASH ends the runtime at once. A scan prints the interrupted-scan message above. <code>ash container build</code> prints <code>ASH container build interrupted before it finished.</code>, and, without <code>--no-run</code>, adds <code>: there is no verdict, and the output directory may hold partial results</code> before the period.</td>
 </tr>
 <tr>
 <td>any other</td>
@@ -4234,7 +4324,7 @@ SOFTWARE.
 <p>The named config path is the one <code>--config</code>, <code>ASH_CONFIG</code>, or the path argument of <code>get</code>, <code>update</code>, and <code>validate-plugin-dependencies</code> gives. An <code>ASH_CONFIG</code> that names a file that does not exist exits 3 from <code>get</code>, <code>validate</code>, <code>lint</code>, and <code>validate-plugin-dependencies</code> even when <code>--config</code> or the path argument names a file that loads, since a scan refuses that pair too. <a href="../../how-to/configure/#check">Configure ASH</a> explains what <code>validate</code>, <code>lint</code>, and <code>get</code> check.</p>
 <p><code>ash config init</code> refuses to add a second config source:</p>
 <!-- doctest: run expect-exit=1 -->
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>mkdir<span class="w"> </span>-p<span class="w"> </span>.ash<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;project_name: payments-api\n&#39;</span><span class="w"> </span>&gt;<span class="w"> </span>.ash/.ash.yaml
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;project_name: payments-api\n&#39;</span><span class="w"> </span>&gt;<span class="w"> </span>.ashrc.yaml
 </span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>ash<span class="w"> </span>config<span class="w"> </span>init
 </span></code></pre></div>
 <p>A named config path that does not exist or is a directory exits 3 from every <code>ash config</code> command that reads a config:</p>

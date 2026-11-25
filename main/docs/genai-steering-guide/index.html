@@ -762,6 +762,8 @@ SOFTWARE.
       
         
       
+        
+      
     
     
     
@@ -1117,6 +1119,34 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
+      <a href="../../how-to/scan-container-images/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scan container images
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../how-to/run-offline/" class="md-nav__link">
         
   
@@ -1245,10 +1275,10 @@ SOFTWARE.
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_16" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_17" >
         
           
-          <label class="md-nav__link" for="__nav_4_16" id="__nav_4_16_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_4_17" id="__nav_4_17_label" tabindex="0">
             
   
   
@@ -1266,8 +1296,8 @@ SOFTWARE.
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_16_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_4_16">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_17_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_17">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -3360,6 +3390,10 @@ SOFTWARE.
       
         
       
+        
+      
+        
+      
     
     
     
@@ -3471,6 +3505,62 @@ SOFTWARE.
     
   
     Gitleaks scanner
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plugins/builtin/mcp-config/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP server config scanning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plugins/builtin/syft/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Syft SBOM scanner (syft) and the sdist lockfile harvest
   
 
     
@@ -5381,7 +5471,7 @@ message instead of the keys below. Adapt the calls to your MCP client.</p>
 - <strong>Simplified Results</strong>: <code>reports/ash.flat.json</code> (recommended for most use cases)
 - <strong>Human Reports</strong>: HTML, Markdown, Text (NOT for machine parsing)
 - <strong>Dependencies</strong>: <code>reports/ash.cdx.json</code> (CycloneDX SBOM)
-- <strong>Configuration</strong>: the ASH config file (<code>.ashrc.yaml</code> in a new project; a project's existing <code>.ash/.ash.yaml</code> is read first), YAML with a JSON schema
+- <strong>Configuration</strong>: the ASH config file (<code>.ash.yaml</code> at the project root; configs at older locations still load, with a deprecation warning), YAML with a JSON schema
 - <strong>Suppressions</strong>: Defined in configuration file under <code>global_settings.suppressions</code></p>
 <p><strong>Tool Requirements</strong>:
 - <strong>Preferred</strong>: <code>jq</code> (fastest, most efficient for JSON queries - ALWAYS TRY FIRST)
@@ -5992,7 +6082,7 @@ message instead of the keys below. Adapt the calls to your MCP client.</p>
 <h2 id="configuration-file-schema">Configuration File Schema<a class="headerlink" href="#configuration-file-schema" title="Permanent link">&para;</a></h2>
 <h3 id="location">Location<a class="headerlink" href="#location" title="Permanent link">&para;</a></h3>
 <ul>
-<li>Default: the first config file discovery finds; <code>ash config init</code> creates <code>.ashrc.yaml</code> in the project root</li>
+<li>Default: the first config file discovery finds; <code>ash config init</code> creates <code>.ash.yaml</code> in the project root</li>
 <li>Custom: Specify with <code>--config</code> flag or <code>ASH_CONFIG</code> environment variable</li>
 </ul>
 <h3 id="schema-structure">Schema Structure<a class="headerlink" href="#schema-structure" title="Permanent link">&para;</a></h3>
@@ -6796,7 +6886,7 @@ its file and lines, or the fingerprints its scanner reports. For example,
 <code>justification</code>. It writes nothing and returns one entry as <code>yaml</code> and <code>json</code>. Its
 <code>expires</code> defaults to 90 days from today. Leave out the <code>client_supplied</code> key it includes,
 and put the entry under <code>global_settings.suppressions</code> in the project's config:</p>
-<!-- doctest: save-as=.ashrc.yaml -->
+<!-- doctest: save-as=.ash.yaml -->
 <div class="language-yaml highlight"><pre><span></span><code><span id="__span-74-1"><a id="__codelineno-74-1" name="__codelineno-74-1" href="#__codelineno-74-1"></a><span class="nt">global_settings</span><span class="p">:</span>
 </span><span id="__span-74-2"><a id="__codelineno-74-2" name="__codelineno-74-2" href="#__codelineno-74-2"></a><span class="w">  </span><span class="nt">suppressions</span><span class="p">:</span>
 </span><span id="__span-74-3"><a id="__codelineno-74-3" name="__codelineno-74-3" href="#__codelineno-74-3"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">rule_id</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;SECRET-SECRET-KEYWORD&quot;</span>
@@ -6818,12 +6908,15 @@ and put the entry under <code>global_settings.suppressions</code> in the project
 <li><code>ignore_paths</code> entries also need <code>path</code> and <code>reason</code>, and drop every finding in the matching
   files. Prefer a suppression for one rule.</li>
 </ul>
-<p>Edit the config file the scan used, or create <code>.ashrc.yaml</code> in the scanned directory if it
+<p>Edit the config file the scan used, or create <code>.ash.yaml</code> in the scanned directory if it
 has none. ASH uses the first of these it finds in the scanned
-directory: <code>.ash.yml</code>, <code>.ash.yaml</code>, <code>.ash.json</code>, <code>ash.yml</code>, <code>ash.yaml</code>, <code>ash.json</code> (each in the
-directory, then in <code>.ash/</code>), then <code>.ashrc.toml</code>, <code>.ashrc.yaml</code>, <code>.ashrc.yml</code>, <code>.ashrc.json</code>,
-<code>ashrc.toml</code>, <code>ashrc.yaml</code>, <code>ashrc.yml</code>, and <code>ashrc.json</code> in the directory, then the
-<code>[tool.ash]</code> table of <code>pyproject.toml</code>. If the config has an <code>extends</code> key, its own
+directory: <code>.ash.yaml</code> at the root, then the deprecated locations <code>.ash.yml</code>, <code>.ash.json</code>,
+<code>ash.yml</code>, <code>ash.yaml</code>, <code>ash.json</code> (each in the directory, then in <code>.ash/</code>, which also covers
+<code>.ash/.ash.yaml</code>), then the deprecated <code>.ashrc.toml</code>, <code>.ashrc.yaml</code>, <code>.ashrc.yml</code>,
+<code>.ashrc.json</code>, <code>ashrc.toml</code>, <code>ashrc.yaml</code>, <code>ashrc.yml</code>, and <code>ashrc.json</code> in the directory,
+then the <code>[tool.ash]</code> table of <code>pyproject.toml</code>. A config at a deprecated location still
+loads, with one warning that names <code>.ash.yaml</code> as the path to move it to; support is removed
+in ASH 4.0. If the config has an <code>extends</code> key, its own
 <code>suppressions</code> list replaces the base config's list instead of adding to it; keep the base's
 entries by adding yours with a <code>patch</code> operation <code>add</code> at <code>/global_settings/suppressions/-</code>.</p>
 <p>Check the edited config before you scan. <code>ash config validate</code>, run in the scanned directory,

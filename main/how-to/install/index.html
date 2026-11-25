@@ -762,6 +762,8 @@ SOFTWARE.
       
         
       
+        
+      
     
     
     
@@ -1313,6 +1315,34 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
+      <a href="../scan-container-images/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scan container images
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../run-offline/" class="md-nav__link">
         
   
@@ -1441,10 +1471,10 @@ SOFTWARE.
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_16" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_17" >
         
           
-          <label class="md-nav__link" for="__nav_4_16" id="__nav_4_16_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_4_17" id="__nav_4_17_label" tabindex="0">
             
   
   
@@ -1462,8 +1492,8 @@ SOFTWARE.
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_16_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_4_16">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_17_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_17">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -2616,6 +2646,10 @@ SOFTWARE.
       
         
       
+        
+      
+        
+      
     
     
     
@@ -2727,6 +2761,62 @@ SOFTWARE.
     
   
     Gitleaks scanner
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/mcp-config/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP server config scanning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/syft/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Syft SBOM scanner (syft) and the sdist lockfile harvest
   
 
     
@@ -4024,7 +4114,7 @@ pinned, so the scanner toolchain matches the code.</p>
 <h2 id="container-image">Container image<a class="headerlink" href="#container-image" title="Permanent link">&para;</a></h2>
 <p>No ASH image is published. <code>ash --mode container</code> builds an image with every scanner
 on your machine and scans inside it; it rebuilds the image on every run unless you
-pass <code>--no-build</code>. <code>ash build-image</code> builds one to push to your own registry. See
+pass <code>--no-build</code>. <code>ash container build</code> builds one to push to your own registry. See
 <a href="../run-in-a-container/">Run ASH in a container</a>.</p>
 <h2 id="nix-mode">Nix mode<a class="headerlink" href="#nix-mode" title="Permanent link">&para;</a></h2>
 <p><code>ash --mode nix</code> runs the scan inside a Nix shell whose scanner tools come from

@@ -762,6 +762,8 @@ SOFTWARE.
       
         
       
+        
+      
     
     
     
@@ -1142,6 +1144,17 @@ SOFTWARE.
 </li>
       
         <li class="md-nav__item">
+  <a href="#correlation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Correlate one observation across scanners
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#share" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1232,6 +1245,34 @@ SOFTWARE.
     
   
     Run in a container
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../scan-container-images/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scan container images
   
 
     
@@ -1380,10 +1421,10 @@ SOFTWARE.
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_16" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_17" >
         
           
-          <label class="md-nav__link" for="__nav_4_16" id="__nav_4_16_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_4_17" id="__nav_4_17_label" tabindex="0">
             
   
   
@@ -1401,8 +1442,8 @@ SOFTWARE.
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_16_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_4_16">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_17_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_17">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -2555,6 +2596,10 @@ SOFTWARE.
       
         
       
+        
+      
+        
+      
     
     
     
@@ -2666,6 +2711,62 @@ SOFTWARE.
     
   
     Gitleaks scanner
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/mcp-config/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP server config scanning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/syft/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Syft SBOM scanner (syft) and the sdist lockfile harvest
   
 
     
@@ -3577,6 +3678,17 @@ SOFTWARE.
 </li>
       
         <li class="md-nav__item">
+  <a href="#correlation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Correlate one observation across scanners
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#share" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3746,7 +3858,7 @@ every enabled reporter writes its report. In a workspace scan, a project's
 <code>output_formats</code> applies to that project's reports, and the combined reports follow
 <code>--output-formats</code> only:</p>
 <!-- doctest: run expect-exit=2 -->
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>cat<span class="w"> </span>&gt;<span class="w"> </span>.ashrc.yaml<span class="w"> </span><span class="s">&lt;&lt;&#39;EOF&#39;</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>cat<span class="w"> </span>&gt;<span class="w"> </span>.ash.yaml<span class="w"> </span><span class="s">&lt;&lt;&#39;EOF&#39;</span>
 </span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="s">output_formats:</span>
 </span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="s">  - sarif</span>
 </span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="s">EOF</span>
@@ -3880,6 +3992,33 @@ when you enable the <code>spdx</code> reporter.</p>
   shortens it.</li>
 <li><code>ash.summary.txt</code> is plain text for logs.</li>
 </ul>
+<h2 id="correlation">Correlate one observation across scanners<a class="headerlink" href="#correlation" title="Permanent link">&para;</a></h2>
+<p>Two scanners that find the same secret, or the same advisory against the same package,
+report two findings with two ids: finding ids deliberately include the scanner and the
+rule, and ASH never deduplicates. For grouping those findings, carrying reports also
+export a cross-scanner <strong>correlation id</strong>, the same value on every finding of a run that
+reports one observation:</p>
+<ul>
+<li><code>secret/&lt;sha256&gt;</code> on secret detections, keyed by file, start line, and workspace
+  project (plus the converted-tree marker for a converted file) — no scanner, no rule.
+  Two secrets on one line share the id; the per-scanner finding id still tells them apart.</li>
+<li><code>dep/&lt;sha256&gt;</code> on dependency findings, keyed by the advisory id (upper-cased), the
+  package name, and the installed version — no file or line, because SCA scanners put
+  every package of a lockfile at its line 1.</li>
+<li>SAST and IaC findings carry none, by design. A location does not say <em>which</em> problem
+  two SAST tools flagged, and IaC engines spell one resource differently (template
+  logical ids vs. construct paths), so an id there would promise a correlation it cannot
+  deliver.</li>
+</ul>
+<p>Where it appears, always under the same absence rule (a finding with no id carries
+nothing, never an empty value): the ASFF reports' <code>ProductFields["ash/correlationId"]</code>,
+the SARIF report's <code>result.properties["ash/correlationId"]</code> (kept by the GitHub GHAS
+report too), the OCSF report's <code>metadata.correlation_uid</code> and
+<code>unmapped["ash/correlationId"]</code>, the GitLab SAST report's <code>details.ash_correlation_id</code>,
+the <code>correlation_id</code> column of the CSV, and the <code>correlation_id</code> key of carrying
+flat-JSON findings.</p>
+<p>The id groups findings and identifies none: baselines, suppressions, diffs, and trend
+matching stay keyed by the per-scanner finding id.</p>
 <h2 id="share">Before you share a report<a class="headerlink" href="#share" title="Permanent link">&para;</a></h2>
 <ul>
 <li>Reports can contain source text. ASH masks secrets in finding messages, but a scanner

@@ -760,6 +760,8 @@ SOFTWARE.
       
         
       
+        
+      
     
     
     
@@ -1115,6 +1117,34 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
+      <a href="../../how-to/scan-container-images/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scan container images
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../how-to/run-offline/" class="md-nav__link">
         
   
@@ -1243,10 +1273,10 @@ SOFTWARE.
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_16" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_17" >
         
           
-          <label class="md-nav__link" for="__nav_4_16" id="__nav_4_16_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_4_17" id="__nav_4_17_label" tabindex="0">
             
   
   
@@ -1264,8 +1294,8 @@ SOFTWARE.
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_16_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_4_16">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_17_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_17">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -2420,6 +2450,10 @@ SOFTWARE.
       
         
       
+        
+      
+        
+      
     
     
     
@@ -2531,6 +2565,62 @@ SOFTWARE.
     
   
     Gitleaks scanner
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/mcp-config/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP server config scanning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/syft/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Syft SBOM scanner (syft) and the sdist lockfile harvest
   
 
     
@@ -3830,7 +3920,7 @@ SOFTWARE.
 <p><code>model</code> is an <code>AshAggregatedResults</code>, the same data as <code>.ash/ash_output/ash_aggregated_results.json</code> (<a href="../../reference/output-files/">Output files</a>). The parts a reporter usually needs:</p>
 <ul>
 <li><code>model.metadata.summary_stats</code>: <code>actionable</code>, <code>total</code> (findings not suppressed), and <code>severity_counts</code> with <code>critical</code>, <code>high</code>, <code>medium</code>, <code>low</code>, <code>info</code>, and <code>suppressed</code>;</li>
-<li><code>model.to_flat_vulnerabilities()</code>: one flat record per finding, with <code>scanner</code>, <code>rule_id</code>, <code>severity</code>, <code>file_path</code>, <code>line_start</code>, <code>line_end</code>, <code>description</code>, and <code>is_suppressed</code>. The flat <code>severity</code> is the severity the summary and the gate use (<a href="../write-a-scanner/#set-the-severity">Set the severity</a>);</li>
+<li><code>model.to_flat_vulnerabilities()</code>: one flat record per finding, with <code>scanner</code>, <code>rule_id</code>, <code>severity</code>, <code>file_path</code>, <code>line_start</code>, <code>line_end</code>, <code>description</code>, and <code>is_suppressed</code>. The flat <code>severity</code> is the severity the summary and the gate use (<a href="../write-a-scanner/#set-the-severity">Set the severity</a>). Each record also carries <code>correlation_id</code>, the cross-scanner correlation id (<a href="../../how-to/export-reports/#correlation">Correlate one observation across scanners</a>) — often <code>None</code>, since only secret and dependency findings have one, so read it as optional;</li>
 <li><code>model.sarif</code>: the aggregated SARIF, one run with every scanner's results;</li>
 <li><code>model.scanner_results</code>: the outcome of each scanner, with <code>status</code> (PASSED, FAILED, MISSING, SKIPPED, or ERROR) and <code>finding_count</code>.</li>
 </ul>
@@ -3951,7 +4041,7 @@ SOFTWARE.
 <p><code>validate_plugin_dependencies()</code> returns <code>False</code> when the region or bucket is missing, or when an AWS call fails, and ASH skips the reporter. <code>report()</code> returns <code>None</code> when the upload fails, so ASH logs an error and writes no file (<a href="#what-ash-does-with-the-return-value">What ASH does with the return value</a>). Each failure is also logged with <code>_plugin_log</code>, which takes a number from <code>logging</code> as its level, such as <code>logging.ERROR</code>. A string such as <code>"ERROR"</code> raises <code>TypeError</code>.</p>
 <h2 id="declare-the-destination-options">Declare the destination options<a class="headerlink" href="#declare-the-destination-options" title="Permanent link">&para;</a></h2>
 <p>A reporter that sends findings somewhere, or writes them to a path its options name, declares those options in <code>destination_options</code>, as <code>FindingsBucketReporter</code> does. List every option that chooses where findings are sent or written, or which credentials send them: an endpoint, a region, an account, a bucket, a profile, a token, an output path. Name each as its field in the options model. An alias of the field is covered as well. The default is <code>()</code>.</p>
-<p>When the config was built from a file inside the scanned tree (a discovered <code>.ash/.ash.yaml</code>, a <code>--config</code> inside the tree, an <code>extends</code> base, or <code>ASH_CONFIG</code>), or from a file an MCP client delivered, ASH takes these options from the trusted base instead: the defaults, an operator config outside the tree, and <code>--config-overrides</code>. A value such a file set is replaced, under any spelling of the reporter's section that ASH reads as this reporter's, and one warning names each option it ignored. The reporter's other options still apply from the file. ASH does this once it has imported your plugin module and before it builds any reporter, in a scan and in <code>ash report</code>. The built-in AWS reporters declare theirs the same way (<a href="../../concepts/trust-model/#what-each-tier-may-set">Configuration trust model</a>).</p>
+<p>When the config was built from a file inside the scanned tree (a discovered <code>.ash.yaml</code>, a <code>--config</code> inside the tree, an <code>extends</code> base, or <code>ASH_CONFIG</code>), or from a file an MCP client delivered, ASH takes these options from the trusted base instead: the defaults, an operator config outside the tree, and <code>--config-overrides</code>. A value such a file set is replaced, under any spelling of the reporter's section that ASH reads as this reporter's, and one warning names each option it ignored. The reporter's other options still apply from the file. ASH does this once it has imported your plugin module and before it builds any reporter, in a scan and in <code>ash report</code>. The built-in AWS reporters declare theirs the same way (<a href="../../concepts/trust-model/#what-each-tier-may-set">Configuration trust model</a>).</p>
 <p>A reporter that declares any destination option sends findings somewhere, so whether it runs is the operator's choice too, in both directions. Its <code>enabled</code> comes from the trusted base, or from the default of your config model's <code>enabled</code> when the trusted base sets none: such a file's <code>enabled: true</code> or <code>enabled: false</code> is replaced with a warning where it differs, and leaving the section out leaves the reporter as the trusted base has it. That is why <code>FindingsBucketConfig</code> sets <code>enabled</code> to <code>False</code>. A reporter that declares no destination options writes only local files, and its <code>enabled</code> applies from the file.</p>
 <p>Under the MCP server, a delivered file that sets a declared option is scanned with the server's value rather than refused, because the server checks the file against <code>denied_paths</code> before it imports your plugin module. To have such a file refused, add the option to the profile's <a href="../../reference/configuration/#global_settings.mcp.runtime_overrides.denied_paths"><code>global_settings.mcp.runtime_overrides.denied_paths</code></a>, for example <code>/reporters/findings-bucket/options/bucket_name</code>.</p>
 <h2 id="a-destination-that-is-not-an-option">A destination that is not an option<a class="headerlink" href="#a-destination-that-is-not-an-option" title="Permanent link">&para;</a></h2>
@@ -3963,7 +4053,7 @@ SOFTWARE.
 </span><span id="__span-11-5"><a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;The endpoint the operator set for this run, or None when there is none.&quot;&quot;&quot;</span>
 </span><span id="__span-11-6"><a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>    <span class="k">return</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;ACME_FINDINGS_ENDPOINT&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="kc">None</span>
 </span></code></pre></div>
-<p>A repository that names an endpoint in its <code>.ash/.ash.yaml</code> then changes nothing. A reporter that makes network calls also runs in the ASH process, outside the scanner sandbox, so it can reach any host ASH can.</p>
+<p>A repository that names an endpoint in its <code>.ash.yaml</code> then changes nothing. A reporter that makes network calls also runs in the ASH process, outside the scanner sandbox, so it can reach any host ASH can.</p>
 <h2 id="workspace-scans">Workspace scans<a class="headerlink" href="#workspace-scans" title="Permanent link">&para;</a></h2>
 <p>In a workspace scan (<code>ash scan --workspace</code>), ASH asks each reporter what to do with several projects through its <code>workspace_behaviour</code> class variable. The default, <code>ReporterWorkspaceBehaviour.PER_PROJECT</code>, writes the report once per project, under each project's own output directory, and no workspace-level file. Set <code>MERGED</code> only if your reporter handles results with one SARIF run per project. <a href="../../how-to/scale-large-repos/">Scale to large repositories</a> covers workspace scans.</p>
 

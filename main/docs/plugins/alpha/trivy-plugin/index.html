@@ -760,6 +760,8 @@ SOFTWARE.
       
         
       
+        
+      
     
     
     
@@ -1115,6 +1117,34 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
+      <a href="../../../../how-to/scan-container-images/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scan container images
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../../../how-to/run-offline/" class="md-nav__link">
         
   
@@ -1243,10 +1273,10 @@ SOFTWARE.
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_16" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_17" >
         
           
-          <label class="md-nav__link" for="__nav_4_16" id="__nav_4_16_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_4_17" id="__nav_4_17_label" tabindex="0">
             
   
   
@@ -1264,8 +1294,8 @@ SOFTWARE.
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_16_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_4_16">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_17_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_17">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -2420,6 +2450,10 @@ SOFTWARE.
       
         
       
+        
+      
+        
+      
     
     
     
@@ -2531,6 +2565,62 @@ SOFTWARE.
     
   
     Gitleaks scanner
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../builtin/mcp-config/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP server config scanning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../builtin/syft/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Syft SBOM scanner (syft) and the sdist lockfile harvest
   
 
     
@@ -6614,7 +6704,7 @@ therefore runs trivy twice, and each finding is reported once per scanner; set
 </span></code></pre></div>
 <h2 id="configuration">Configuration<a class="headerlink" href="#configuration" title="Permanent link">&para;</a></h2>
 <h3 id="basic-configuration">Basic Configuration<a class="headerlink" href="#basic-configuration" title="Permanent link">&para;</a></h3>
-<p>Add the Trivy plugin to your ASH config file (<code>.ashrc.yaml</code> in a new project):</p>
+<p>Add the Trivy plugin to your ASH config file (<code>.ash.yaml</code> at the project root):</p>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>ash_plugin_modules:
 </span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>  - automated_security_helper.plugin_modules.ash_trivy_plugins
 </span></code></pre></div>
@@ -6662,7 +6752,7 @@ therefore runs trivy twice, and each finding is reported once per scanner; set
 </span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>ash<span class="w"> </span>--source-dir<span class="w"> </span>/path/to/project<span class="w"> </span>--scanners<span class="w"> </span>trivy-repo
 </span></code></pre></div>
 <h3 id="vulnerability-only-scan">Vulnerability-Only Scan<a class="headerlink" href="#vulnerability-only-scan" title="Permanent link">&para;</a></h3>
-<div class="language-yaml highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># ASH config file (.ashrc.yaml in a new project)</span>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># ASH config file (.ash.yaml at the project root)</span>
 </span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="nt">scanners</span><span class="p">:</span>
 </span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">  </span><span class="nt">trivy-repo</span><span class="p">:</span>
 </span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
@@ -6675,7 +6765,7 @@ therefore runs trivy twice, and each finding is reported once per scanner; set
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>ash<span class="w"> </span>--scanners<span class="w"> </span>trivy-repo
 </span></code></pre></div>
 <h3 id="comprehensive-security-scan">Comprehensive Security Scan<a class="headerlink" href="#comprehensive-security-scan" title="Permanent link">&para;</a></h3>
-<div class="language-yaml highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="c1"># ASH config file (.ashrc.yaml in a new project)</span>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="c1"># ASH config file (.ash.yaml at the project root)</span>
 </span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="nt">scanners</span><span class="p">:</span>
 </span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="w">  </span><span class="nt">trivy-repo</span><span class="p">:</span>
 </span><span id="__span-10-4"><a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
@@ -6685,7 +6775,7 @@ therefore runs trivy twice, and each finding is reported once per scanner; set
 </span><span id="__span-10-8"><a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a><span class="w">      </span><span class="nt">license_full</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
 </span></code></pre></div>
 <h3 id="integration-with-other-scanners">Integration with Other Scanners<a class="headerlink" href="#integration-with-other-scanners" title="Permanent link">&para;</a></h3>
-<div class="language-yaml highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="c1"># ASH config file (.ashrc.yaml in a new project)</span>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="c1"># ASH config file (.ash.yaml at the project root)</span>
 </span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="nt">scanners</span><span class="p">:</span>
 </span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="w">  </span><span class="c1"># Combine Trivy with other ASH scanners</span>
 </span><span id="__span-11-4"><a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="w">  </span><span class="nt">trivy-repo</span><span class="p">:</span>
@@ -6722,7 +6812,7 @@ ASH decides the scan's exit code from the findings. See
 <li><strong>JSON</strong>: Structured data for custom processing</li>
 </ul>
 <h3 id="example-output-configuration">Example Output Configuration<a class="headerlink" href="#example-output-configuration" title="Permanent link">&para;</a></h3>
-<div class="language-yaml highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="c1"># ASH config file (.ashrc.yaml in a new project)</span>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="c1"># ASH config file (.ash.yaml at the project root)</span>
 </span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="nt">reporters</span><span class="p">:</span>
 </span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="w">  </span><span class="nt">sarif</span><span class="p">:</span>
 </span><span id="__span-12-4"><a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
@@ -7458,7 +7548,7 @@ ASH decides the scan's exit code from the findings. See
 </span><span id="__span-38-41"><a id="__codelineno-38-41" name="__codelineno-38-41" href="#__codelineno-38-41"></a><span class="s">    yaml.dump({&#39;global_settings&#39;: {&#39;suppressions&#39;: suppressions}}, f, default_flow_style=False)</span>
 </span><span id="__span-38-42"><a id="__codelineno-38-42" name="__codelineno-38-42" href="#__codelineno-38-42"></a>
 </span><span id="__span-38-43"><a id="__codelineno-38-43" name="__codelineno-38-43" href="#__codelineno-38-43"></a><span class="s">print(f&quot;Generated {len(suppressions)} baseline suppressions&quot;)</span>
-</span><span id="__span-38-44"><a id="__codelineno-38-44" name="__codelineno-38-44" href="#__codelineno-38-44"></a><span class="s">print(&quot;Review .security-baseline/baseline-suppressions.yaml and merge approved suppressions into your ASH config file (.ashrc.yaml in a new project)&quot;)</span>
+</span><span id="__span-38-44"><a id="__codelineno-38-44" name="__codelineno-38-44" href="#__codelineno-38-44"></a><span class="s">print(&quot;Review .security-baseline/baseline-suppressions.yaml and merge approved suppressions into your ASH config file (.ash.yaml at the project root)&quot;)</span>
 </span><span id="__span-38-45"><a id="__codelineno-38-45" name="__codelineno-38-45" href="#__codelineno-38-45"></a><span class="s">EOF</span>
 </span></code></pre></div>
 <h4 id="regression-detection">Regression Detection<a class="headerlink" href="#regression-detection" title="Permanent link">&para;</a></h4>
@@ -7803,7 +7893,7 @@ ASH decides the scan's exit code from the findings. See
 <p><strong>Solution</strong>:</p>
 <!-- doctest: illustrative reason="needs a container runtime" -->
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-68-1"><a id="__codelineno-68-1" name="__codelineno-68-1" href="#__codelineno-68-1"></a><span class="c1"># Use the host network</span>
-</span><span id="__span-68-2"><a id="__codelineno-68-2" name="__codelineno-68-2" href="#__codelineno-68-2"></a>ash<span class="w"> </span>build-image<span class="w"> </span>--container-network<span class="w"> </span>host
+</span><span id="__span-68-2"><a id="__codelineno-68-2" name="__codelineno-68-2" href="#__codelineno-68-2"></a>ash<span class="w"> </span>container<span class="w"> </span>build<span class="w"> </span>--container-network<span class="w"> </span>host
 </span><span id="__span-68-3"><a id="__codelineno-68-3" name="__codelineno-68-3" href="#__codelineno-68-3"></a>
 </span><span id="__span-68-4"><a id="__codelineno-68-4" name="__codelineno-68-4" href="#__codelineno-68-4"></a><span class="c1"># Pre-download database</span>
 </span><span id="__span-68-5"><a id="__codelineno-68-5" name="__codelineno-68-5" href="#__codelineno-68-5"></a>trivy<span class="w"> </span>image<span class="w"> </span>--download-db-only
@@ -7865,7 +7955,7 @@ ASH decides the scan's exit code from the findings. See
 </span><span id="__span-71-5"><a id="__codelineno-71-5" name="__codelineno-71-5" href="#__codelineno-71-5"></a>ash<span class="w"> </span>--version
 </span><span id="__span-71-6"><a id="__codelineno-71-6" name="__codelineno-71-6" href="#__codelineno-71-6"></a>
 </span><span id="__span-71-7"><a id="__codelineno-71-7" name="__codelineno-71-7" href="#__codelineno-71-7"></a><span class="c1"># Configuration</span>
-</span><span id="__span-71-8"><a id="__codelineno-71-8" name="__codelineno-71-8" href="#__codelineno-71-8"></a>cat<span class="w"> </span>.ashrc.yaml<span class="w">  </span><span class="c1"># your ASH config file; `ash config validate` prints which one a scan uses</span>
+</span><span id="__span-71-8"><a id="__codelineno-71-8" name="__codelineno-71-8" href="#__codelineno-71-8"></a>cat<span class="w"> </span>.ash.yaml<span class="w">  </span><span class="c1"># your ASH config file; `ash config validate` prints which one a scan uses</span>
 </span><span id="__span-71-9"><a id="__codelineno-71-9" name="__codelineno-71-9" href="#__codelineno-71-9"></a>
 </span><span id="__span-71-10"><a id="__codelineno-71-10" name="__codelineno-71-10" href="#__codelineno-71-10"></a><span class="c1"># Recent logs</span>
 </span><span id="__span-71-11"><a id="__codelineno-71-11" name="__codelineno-71-11" href="#__codelineno-71-11"></a>tail<span class="w"> </span>-50<span class="w"> </span>.ash/ash_output/scanners/trivy-repo/*/ash.log
@@ -8031,7 +8121,7 @@ database, or pass <code>--allow-stale-content-db</code> (config: <code>content_d
 to scan with an older one and have the reports say so.</p>
 <h3 id="advanced-suppression-strategies">Advanced Suppression Strategies<a class="headerlink" href="#advanced-suppression-strategies" title="Permanent link">&para;</a></h3>
 <h4 id="rule-based-suppressions">Rule-Based Suppressions<a class="headerlink" href="#rule-based-suppressions" title="Permanent link">&para;</a></h4>
-<div class="language-yaml highlight"><pre><span></span><code><span id="__span-78-1"><a id="__codelineno-78-1" name="__codelineno-78-1" href="#__codelineno-78-1"></a><span class="c1"># ASH config file (.ashrc.yaml in a new project)</span>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-78-1"><a id="__codelineno-78-1" name="__codelineno-78-1" href="#__codelineno-78-1"></a><span class="c1"># ASH config file (.ash.yaml at the project root)</span>
 </span><span id="__span-78-2"><a id="__codelineno-78-2" name="__codelineno-78-2" href="#__codelineno-78-2"></a><span class="nt">global_settings</span><span class="p">:</span>
 </span><span id="__span-78-3"><a id="__codelineno-78-3" name="__codelineno-78-3" href="#__codelineno-78-3"></a><span class="w">  </span><span class="nt">suppressions</span><span class="p">:</span>
 </span><span id="__span-78-4"><a id="__codelineno-78-4" name="__codelineno-78-4" href="#__codelineno-78-4"></a><span class="w">    </span><span class="c1"># Suppress specific CVEs</span>
@@ -8076,7 +8166,7 @@ to scan with an older one and have the reports say so.</p>
 </span><span id="__span-79-17"><a id="__codelineno-79-17" name="__codelineno-79-17" href="#__codelineno-79-17"></a><span class="w">    </span>ash<span class="w"> </span>config<span class="w"> </span>update<span class="w"> </span>--set<span class="w"> </span><span class="s2">&quot;global_settings.suppressions+=</span><span class="nv">$part</span><span class="s2">&quot;</span>
 </span><span id="__span-79-18"><a id="__codelineno-79-18" name="__codelineno-79-18" href="#__codelineno-79-18"></a><span class="w">  </span><span class="k">done</span>
 </span></code></pre></div>
-<p>Appending YAML to the config file (<code>cat suppressions.yaml &gt;&gt; .ashrc.yaml</code>) does
+<p>Appending YAML to the config file (<code>cat suppressions.yaml &gt;&gt; .ash.yaml</code>) does
 not work: it adds a second top-level <code>global_settings</code>, YAML keeps only the last
 one, and every other global setting in the file is dropped. <code>ash config update</code>
 keeps them, and writes each entry with only the fields it sets. It rewrites the
@@ -8152,7 +8242,7 @@ variables (<code>!ENV</code> or <code>${VAR:default}</code>); add the entries to
 </span><span id="__span-84-12"><a id="__codelineno-84-12" name="__codelineno-84-12" href="#__codelineno-84-12"></a>touch<span class="w"> </span>.last_scan
 </span></code></pre></div>
 <h4 id="resource-management">Resource Management<a class="headerlink" href="#resource-management" title="Permanent link">&para;</a></h4>
-<div class="language-yaml highlight"><pre><span></span><code><span id="__span-85-1"><a id="__codelineno-85-1" name="__codelineno-85-1" href="#__codelineno-85-1"></a><span class="c1"># ASH config file (.ashrc.yaml in a new project) - Optimized for large repositories</span>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-85-1"><a id="__codelineno-85-1" name="__codelineno-85-1" href="#__codelineno-85-1"></a><span class="c1"># ASH config file (.ash.yaml at the project root) - Optimized for large repositories</span>
 </span><span id="__span-85-2"><a id="__codelineno-85-2" name="__codelineno-85-2" href="#__codelineno-85-2"></a><span class="nt">scanners</span><span class="p">:</span>
 </span><span id="__span-85-3"><a id="__codelineno-85-3" name="__codelineno-85-3" href="#__codelineno-85-3"></a><span class="w">  </span><span class="nt">trivy-repo</span><span class="p">:</span>
 </span><span id="__span-85-4"><a id="__codelineno-85-4" name="__codelineno-85-4" href="#__codelineno-85-4"></a><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>

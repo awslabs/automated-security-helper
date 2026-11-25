@@ -760,6 +760,8 @@ SOFTWARE.
       
         
       
+        
+      
     
     
     
@@ -1115,6 +1117,34 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
+      <a href="../../../../how-to/scan-container-images/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scan container images
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../../../how-to/run-offline/" class="md-nav__link">
         
   
@@ -1243,10 +1273,10 @@ SOFTWARE.
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_16" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_17" >
         
           
-          <label class="md-nav__link" for="__nav_4_16" id="__nav_4_16_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_4_17" id="__nav_4_17_label" tabindex="0">
             
   
   
@@ -1264,8 +1294,8 @@ SOFTWARE.
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_16_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_4_16">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_17_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_17">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -2420,6 +2450,10 @@ SOFTWARE.
       
         
       
+        
+      
+        
+      
     
     
     
@@ -2531,6 +2565,62 @@ SOFTWARE.
     
   
     Gitleaks scanner
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../builtin/mcp-config/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP server config scanning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../builtin/syft/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Syft SBOM scanner (syft) and the sdist lockfile harvest
   
 
     
@@ -4327,7 +4417,7 @@ The plugin will automatically check for credentials at <code>~/.config/configsto
 <h3 id="basic-configuration">Basic Configuration<a class="headerlink" href="#basic-configuration" title="Permanent link">&para;</a></h3>
 <p>The Snyk Code plugin is not loaded by default. Its scanner sends the scanned source
 to Snyk with your Snyk token, so only the operator running ASH can load it. A config
-file inside the scanned tree, such as the repository's own <code>.ash/.ash.yaml</code>, cannot:
+file inside the scanned tree, such as the repository's own <code>.ash.yaml</code>, cannot:
 an <code>ash_plugin_modules</code> entry there that names the package, or a module inside it,
 is ignored with a warning naming the entry.</p>
 <p>Load it with <code>--ash-plugin-modules</code>:</p>
@@ -4349,7 +4439,7 @@ file outside the scanned tree loads this package or the package that lists it.</
 </span></code></pre></div>
 <p>The scanner's settings, except <code>honor_tree_exclusions</code> (see
 <a href="#exclusion-files-in-the-scanned-tree">Exclusion files in the scanned tree</a>),
-can stay in the repository's <code>.ash/.ash.yaml</code>:</p>
+can stay in the repository's <code>.ash.yaml</code>:</p>
 <div class="language-yaml highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="nt">scanners</span><span class="p">:</span>
 </span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="w">  </span><span class="nt">snyk-code</span><span class="p">:</span>
 </span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
@@ -4411,7 +4501,7 @@ neither does <code>.gitignore</code>, which ASH's own scan set honors too.</p>
 </span><span id="__span-14-5"><a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="w">      </span><span class="nt">honor_tree_exclusions</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
 </span></code></pre></div>
 <p>A config file inside the scanned tree, such as the repository's own
-<code>.ash/.ash.yaml</code>, or one an MCP client delivered, does not set it.</p>
+<code>.ash.yaml</code>, or one an MCP client delivered, does not set it.</p>
 <h3 id="advanced-options">Advanced Options<a class="headerlink" href="#advanced-options" title="Permanent link">&para;</a></h3>
 <div class="language-yaml highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="nt">scanners</span><span class="p">:</span>
 </span><span id="__span-15-2"><a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="w">  </span><span class="nt">snyk-code</span><span class="p">:</span>

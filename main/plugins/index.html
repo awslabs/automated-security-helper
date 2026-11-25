@@ -760,6 +760,8 @@ SOFTWARE.
       
         
       
+        
+      
     
     
     
@@ -1115,6 +1117,34 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
+      <a href="../how-to/scan-container-images/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scan container images
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../how-to/run-offline/" class="md-nav__link">
         
   
@@ -1243,10 +1273,10 @@ SOFTWARE.
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_16" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_17" >
         
           
-          <label class="md-nav__link" for="__nav_4_16" id="__nav_4_16_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_4_17" id="__nav_4_17_label" tabindex="0">
             
   
   
@@ -1264,8 +1294,8 @@ SOFTWARE.
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_16_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_4_16">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_17_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_17">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -2420,6 +2450,10 @@ SOFTWARE.
       
         
       
+        
+      
+        
+      
     
     
     
@@ -2531,6 +2565,62 @@ SOFTWARE.
     
   
     Gitleaks scanner
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../docs/plugins/builtin/mcp-config/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP server config scanning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../docs/plugins/builtin/syft/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Syft SBOM scanner (syft) and the sdist lockfile harvest
   
 
     
@@ -3560,7 +3650,7 @@ SOFTWARE.
 <p>ASH sorts configuration by who controls it, as the <a href="../concepts/trust-model/#tiers">Configuration trust model</a> describes, and module loading follows the same tiers:</p>
 <ul>
 <li>You, the operator, may name any plugin module, wherever it is installed: with <code>--ash-plugin-modules</code>, <code>ASH_PLUGIN_MODULES</code>, <code>--config-overrides</code>, a config file outside every git checkout and the scanned directory, or the Python API.</li>
-<li>A config file inside a git checkout or the scanned directory (a repository's own <code>.ash/.ash.yaml</code>, for example, or a config kept in an ops repository), or a file an MCP client delivered, may add only ASH's own plugin modules and modules installed outside every git checkout and the scanned directory. A third-party package in a virtual environment inside a checkout counts as inside it. Such a file may never add <code>ash_aws_plugins</code> or <code>ash_snyk_plugins</code>, or any module inside either, such as <code>automated_security_helper.plugin_modules.ash_aws_plugins.s3_reporter</code>, because their plugins send findings or the scanned source to a remote service with your credentials.</li>
+<li>A config file inside a git checkout or the scanned directory (a repository's own <code>.ash.yaml</code>, for example, or a config kept in an ops repository), or a file an MCP client delivered, may add only ASH's own plugin modules and modules installed outside every git checkout and the scanned directory. A third-party package in a virtual environment inside a checkout counts as inside it. Such a file may never add <code>ash_aws_plugins</code> or <code>ash_snyk_plugins</code>, or any module inside either, such as <code>automated_security_helper.plugin_modules.ash_aws_plugins.s3_reporter</code>, because their plugins send findings or the scanned source to a remote service with your credentials.</li>
 </ul>
 <p>Every source, yours included, is held to ASH's plugin namespace: a module path that starts with <code>automated_security_helper.</code> or <code>ash_plugins</code>, or whose top-level package ends in <code>_ash_plugins</code>. A name outside it, ASH's plugin root itself, a namespace package, or a name that is not a dotted path of Python identifiers stops the scan with exit code 3 before anything is scanned, whatever its source, and so does a module you name that fails to import. A scan uses only the modules it names.</p>
 <p>From a repository's file, ASH drops every entry it cannot find or will not import, names them in one warning, and runs the scan without them. For a module installed inside a checkout, the warning says where Python found it and which checkout it is in. ASH checks where each module is without importing it, so a dropped entry runs no code. To load a dropped module anyway, name it from an operator source, or install it outside every git checkout and the scanned directory. Under its default policy, the MCP server refuses a delivered config whose <code>ash_plugin_modules</code> list has such an entry instead of dropping it (<a href="../how-to/mcp-server/#what-a-delivered-config-cannot-set">What a delivered config cannot set</a>).</p>

@@ -760,6 +760,8 @@ SOFTWARE.
       
         
       
+        
+      
     
     
     
@@ -1115,6 +1117,34 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
+      <a href="../../how-to/scan-container-images/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scan container images
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../how-to/run-offline/" class="md-nav__link">
         
   
@@ -1243,10 +1273,10 @@ SOFTWARE.
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_16" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_17" >
         
           
-          <label class="md-nav__link" for="__nav_4_16" id="__nav_4_16_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_4_17" id="__nav_4_17_label" tabindex="0">
             
   
   
@@ -1264,8 +1294,8 @@ SOFTWARE.
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_16_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_4_16">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_17_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_17">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -2226,6 +2256,17 @@ SOFTWARE.
 </li>
       
         <li class="md-nav__item">
+  <a href="#mcp-config" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        mcp-config
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#npm-audit" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2720,6 +2761,10 @@ SOFTWARE.
       
         
       
+        
+      
+        
+      
     
     
     
@@ -2831,6 +2876,62 @@ SOFTWARE.
     
   
     Gitleaks scanner
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/mcp-config/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP server config scanning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/syft/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Syft SBOM scanner (syft) and the sdist lockfile harvest
   
 
     
@@ -3786,6 +3887,17 @@ SOFTWARE.
 </li>
       
         <li class="md-nav__item">
+  <a href="#mcp-config" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        mcp-config
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#npm-audit" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3999,7 +4111,7 @@ SOFTWARE.
 
 <h1 id="scanners-reference">Scanners reference<a class="headerlink" href="#scanners-reference" title="Permanent link">&para;</a></h1>
 <p>This page is generated from the scanner plugins in the ASH source code by <code>scripts/generate_scanner_reference.py</code>. Edits made to this file by hand are overwritten the next time it is generated.</p>
-<p>ASH ships 22 scanners. The built-in ones are loaded on every scan. The others are alpha scanners, each in a plugin module that <code>ash scan</code> loads only when the configuration's <code>ash_plugin_modules</code> (or <code>--ash-plugin-modules</code>) names the module; for the MCP server, see <a href="../../plugins/#what-a-plugin-can-do">What a plugin can do</a>.</p>
+<p>ASH ships 23 scanners. The built-in ones are loaded on every scan. The others are alpha scanners, each in a plugin module that <code>ash scan</code> loads only when the configuration's <code>ash_plugin_modules</code> (or <code>--ash-plugin-modules</code>) names the module; for the MCP server, see <a href="../../plugins/#what-a-plugin-can-do">What a plugin can do</a>.</p>
 <!-- doctest: options of=scanners -->
 <table>
 <thead>
@@ -4092,6 +4204,14 @@ SOFTWARE.
 <td>built in</td>
 <td><code>grype</code></td>
 <td>no</td>
+</tr>
+<tr>
+<td><a href="#mcp-config"><code>mcp-config</code></a></td>
+<td>SAST</td>
+<td>yes</td>
+<td>built in</td>
+<td><code>ash-mcp-config-scanner</code></td>
+<td>yes</td>
 </tr>
 <tr>
 <td><a href="#npm-audit"><code>npm-audit</code></a></td>
@@ -4879,6 +4999,94 @@ SOFTWARE.
 </tr>
 </tbody>
 </table>
+<h2 id="mcp-config"><code>mcp-config</code><a class="headerlink" href="#mcp-config" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Scanner page: <a href="../../docs/plugins/builtin/mcp-config/"><code>mcp-config</code> scanner page</a></li>
+<li>Class: <code>automated_security_helper.plugin_modules.ash_builtin.scanners.mcp_config_scanner.McpConfigScanner</code></li>
+<li>Provided by: built in, loaded on every scan</li>
+<li>Enabled by default: yes</li>
+<li>Tool type: SAST</li>
+<li>Command: <code>ash-mcp-config-scanner</code></li>
+<li>Install: none declared</li>
+<li>Offline strategy: <code>bundled</code></li>
+<li>Network in the sandbox, by default: no</li>
+<li>Environment passed into the sandbox: none beyond the baseline</li>
+<li>Environment set under sandbox-exec: none</li>
+</ul>
+<p>Options, under <code>scanners.mcp-config.options</code>. An option not listed here refuses the configuration.</p>
+<!-- doctest: options of=scanners.mcp-config -->
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a id="scanners.mcp-config.options.severity_threshold"></a><code>severity_threshold</code></td>
+<td>one of <code>ALL</code>, <code>LOW</code>, <code>MEDIUM</code>, <code>HIGH</code>, <code>CRITICAL</code>, or null</td>
+<td><code>null</code></td>
+<td>Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM.</td>
+</tr>
+<tr>
+<td><a id="scanners.mcp-config.options.scan_timeout"></a><code>scan_timeout</code></td>
+<td>integer or null, at least 1</td>
+<td><code>1800</code></td>
+<td>Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes.</td>
+</tr>
+<tr>
+<td><a id="scanners.mcp-config.options.offline"></a><code>offline</code></td>
+<td>boolean</td>
+<td><code>false</code></td>
+<td>Run this scanner offline even when ASH runs online. False follows ASH's own mode; it never puts a scanner online under --offline.</td>
+</tr>
+<tr>
+<td><a id="scanners.mcp-config.options.forbid_privilege_escalation"></a><code>forbid_privilege_escalation</code></td>
+<td>boolean</td>
+<td><code>true</code></td>
+<td>Flag sudo, doas, su and pkexec used as the command, or as a whole argument, of a stdio MCP server entry (HIGH). The match is on the whole word, so a name that merely contains one is not flagged.</td>
+</tr>
+<tr>
+<td><a id="scanners.mcp-config.options.forbid_unpinned_runners"></a><code>forbid_unpinned_runners</code></td>
+<td>boolean</td>
+<td><code>true</code></td>
+<td>Flag npx, bunx, pnpm dlx, pnpx and uvx entries whose package has no exact version, such as <code>npx -y pkg</code> or <code>uvx pkg</code> (MEDIUM). <code>pkg@1.2.3</code> and <code>pkg==1.2.3</code> are pinned; <code>pkg@latest</code> and ranges are not.</td>
+</tr>
+<tr>
+<td><a id="scanners.mcp-config.options.forbid_auto_approval"></a><code>forbid_auto_approval</code></td>
+<td>boolean</td>
+<td><code>true</code></td>
+<td>Flag settings that approve MCP tool calls without asking (HIGH): gemini <code>trust: true</code>, a non-empty kiro <code>autoApprove</code> or roo <code>alwaysAllow</code>, and codex <code>approval_mode</code> of <code>auto</code> or <code>full-auto</code>.</td>
+</tr>
+<tr>
+<td><a id="scanners.mcp-config.options.require_local"></a><code>require_local</code></td>
+<td>boolean</td>
+<td><code>false</code></td>
+<td>Flag every remote (url, httpUrl, serverUrl) entry whose host is not loopback (MEDIUM). <code>localhost</code>, <code>127.0.0.0/8</code> and <code>::1</code> count as local, whichever way the IPv6 address is spelled.</td>
+</tr>
+<tr>
+<td><a id="scanners.mcp-config.options.remote_url_prefixes"></a><code>remote_url_prefixes</code></td>
+<td>list of string</td>
+<td><code>[]</code></td>
+<td>When not empty, every remote URL must start with one of these prefixes (MEDIUM), compared on URL boundaries with the scheme and host in lower case, and a remote URL that is not loopback must be https (MEDIUM). Empty turns the check off.</td>
+</tr>
+<tr>
+<td><a id="scanners.mcp-config.options.allowed_command_prefixes"></a><code>allowed_command_prefixes</code></td>
+<td>list of string</td>
+<td><code>[]</code></td>
+<td>When not empty, every stdio command must be a path that starts with one of these prefixes (MEDIUM), compared on path boundaries after the command is normalized. A bare command name such as <code>npx</code> does not start with a path prefix and is flagged. Empty turns the check off.</td>
+</tr>
+<tr>
+<td><a id="scanners.mcp-config.options.flag_env_secrets"></a><code>flag_env_secrets</code></td>
+<td>boolean</td>
+<td><code>true</code></td>
+<td>Flag an <code>env</code> entry whose name says key, token, secret or password and whose value is a literal rather than a reference such as <code>${NAME}</code> (LOW). The value is never written into the finding.</td>
+</tr>
+</tbody>
+</table>
 <h2 id="npm-audit"><code>npm-audit</code><a class="headerlink" href="#npm-audit" title="Permanent link">&para;</a></h2>
 <ul>
 <li>Class: <code>automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_scanner.NpmAuditScanner</code></li>
@@ -5106,6 +5314,7 @@ SOFTWARE.
 </table>
 <h2 id="syft"><code>syft</code><a class="headerlink" href="#syft" title="Permanent link">&para;</a></h2>
 <ul>
+<li>Scanner page: <a href="../../docs/plugins/builtin/syft/"><code>syft</code> scanner page</a></li>
 <li>Class: <code>automated_security_helper.plugin_modules.ash_builtin.scanners.syft_scanner.SyftScanner</code></li>
 <li>Provided by: built in, loaded on every scan</li>
 <li>Enabled by default: yes</li>
@@ -5164,6 +5373,12 @@ SOFTWARE.
 <td>list of one of <code>cyclonedx-json</code>, <code>cyclonedx-xml</code>, <code>github-json</code>, <code>spdx-json</code>, <code>spdx-tag-value</code>, <code>syft-json</code>, <code>syft-table</code>, <code>syft-text</code></td>
 <td><code>["syft-table"]</code></td>
 <td>List of additional formats to output. Defaults to syft-table.</td>
+</tr>
+<tr>
+<td><a id="scanners.syft.options.sdist_harvest"></a><code>sdist_harvest</code></td>
+<td>mapping</td>
+<td>see the section</td>
+<td>Configure the cross-toolchain sdist lockfile harvest, which completes the SBOM for compiled dependencies whose artifacts carry no audit data. The harvest runs in the convert phase; offline mode disables its fetches whatever these options say.</td>
 </tr>
 </tbody>
 </table>

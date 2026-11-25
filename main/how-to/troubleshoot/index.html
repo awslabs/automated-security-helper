@@ -762,6 +762,8 @@ SOFTWARE.
       
         
       
+        
+      
     
     
     
@@ -1117,6 +1119,34 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
+      <a href="../scan-container-images/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scan container images
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../run-offline/" class="md-nav__link">
         
   
@@ -1245,10 +1275,10 @@ SOFTWARE.
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_16" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_17" >
         
           
-          <label class="md-nav__link" for="__nav_4_16" id="__nav_4_16_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_4_17" id="__nav_4_17_label" tabindex="0">
             
   
   
@@ -1266,8 +1296,8 @@ SOFTWARE.
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_16_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_4_16">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_17_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_17">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -2861,6 +2891,10 @@ SOFTWARE.
       
         
       
+        
+      
+        
+      
     
     
     
@@ -2972,6 +3006,62 @@ SOFTWARE.
     
   
     Gitleaks scanner
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/mcp-config/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP server config scanning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/syft/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Syft SBOM scanner (syft) and the sdist lockfile harvest
   
 
     
@@ -4602,7 +4692,7 @@ misspelled name among valid ones in <code>--scanners</code> is not a usage error
 <code>No registered scanner matches ...</code> and runs the others.</p>
 <h3 id="the-scan-exits-3">The scan exits 3<a class="headerlink" href="#the-scan-exits-3" title="Permanent link">&para;</a></h3>
 <p>Symptom:</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>ERROR (3) Invalid configuration: Configuration validation failed for &#39;/home/me/repo/.ashrc.yaml&#39;: Invalid value at &#39;global_settings.fail_on_findings&#39;: Extra inputs are not permitted. Run: ash config lint --config /home/me/repo/.ashrc.yaml
+<div class="language-text highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>ERROR (3) Invalid configuration: Configuration validation failed for &#39;/home/me/repo/.ash.yaml&#39;: Invalid value at &#39;global_settings.fail_on_findings&#39;: Extra inputs are not permitted. Run: ash config lint --config /home/me/repo/.ash.yaml
 </span></code></pre></div>
 <p>Cause: the configuration file has a key ASH does not know below the top level, or a
 value of the wrong type anywhere, top level included. A plugin's options with a key ASH
@@ -4611,7 +4701,7 @@ by default and the entry suppresses nothing until it is fixed; with
 <code>fail_on_unknown_keys: true</code> (the default from ASH v4) it is refused the same way, and
 the message lists the keys the entry accepts:</p>
 <!-- doctest: run expect-exit=3 -->
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>cat<span class="w"> </span>&gt;<span class="w"> </span>.ashrc.yaml<span class="w"> </span><span class="s">&lt;&lt;&#39;EOF&#39;</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>cat<span class="w"> </span>&gt;<span class="w"> </span>.ash.yaml<span class="w"> </span><span class="s">&lt;&lt;&#39;EOF&#39;</span>
 </span><span id="__span-14-2"><a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="s">fail_on_unknown_keys: true</span>
 </span><span id="__span-14-3"><a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="s">global_settings:</span>
 </span><span id="__span-14-4"><a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="s">  suppressions:</span>
@@ -4647,7 +4737,7 @@ the scan refuses it with exit 3.</p>
 <p>An ignore path that expired lets its files back into the scan, so the finding in <code>app.py</code>
 counts again here:</p>
 <!-- doctest: run expect-exit=2 -->
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-16-1"><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a>cat<span class="w"> </span>&gt;<span class="w"> </span>.ashrc.yaml<span class="w"> </span><span class="s">&lt;&lt;&#39;EOF&#39;</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-16-1"><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a>cat<span class="w"> </span>&gt;<span class="w"> </span>.ash.yaml<span class="w"> </span><span class="s">&lt;&lt;&#39;EOF&#39;</span>
 </span><span id="__span-16-2"><a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="s">global_settings:</span>
 </span><span id="__span-16-3"><a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="s">  ignore_paths:</span>
 </span><span id="__span-16-4"><a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="s">    - path: app.py</span>
@@ -4666,7 +4756,7 @@ prints the configuration a scan would use. <code>ash config lint</code> also lis
 suppressions and ignore paths.</p>
 <h3 id="a-setting-in-the-repositorys-config-file-is-ignored">A setting in the repository's config file is ignored<a class="headerlink" href="#a-setting-in-the-repositorys-config-file-is-ignored" title="Permanent link">&para;</a></h3>
 <p>Symptom: a warning such as:</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-18-1"><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a>Ignoring sandbox.network_scanners from /home/me/repo/.ash/.ash.yaml: the file is inside the scanned tree, so the repository being scanned wrote it. ...
+<div class="language-text highlight"><pre><span></span><code><span id="__span-18-1"><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a>Ignoring sandbox.network_scanners from /home/me/repo/.ash.yaml: the file is inside the scanned tree, so the repository being scanned wrote it. ...
 </span></code></pre></div>
 <p>Cause: some settings decide what ASH may run, read, or send, or whether a stale database
 fails the scan: sandbox grants, plugin modules, reporter destinations and credentials,
@@ -4747,7 +4837,7 @@ read; <a href="../../concepts/content-databases/">Content databases</a> lists th
 scans keep grype's and trivy's databases current, so this usually happens offline or
 with an old image.</p>
 <p>Fix: refresh the database. For an offline image, rebuild it with
-<code>ash build-image --offline</code>. For offline rules on your machine, download them again
+<code>ash container build --offline</code>. For offline rules on your machine, download them again
 (<a href="../../docs/advanced-usage/#seeding-the-semgrep-and-opengrep-rule-cache">Seeding the semgrep and opengrep rule cache</a>).
 To scan with the old database anyway, pass <code>--allow-stale-content-db</code> or set
 <code>content_db_staleness: warn</code>: the stale database then no longer fails the scan, and

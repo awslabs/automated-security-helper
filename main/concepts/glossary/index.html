@@ -760,6 +760,8 @@ SOFTWARE.
       
         
       
+        
+      
     
     
     
@@ -1115,6 +1117,34 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
+      <a href="../../how-to/scan-container-images/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scan container images
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../how-to/run-offline/" class="md-nav__link">
         
   
@@ -1243,10 +1273,10 @@ SOFTWARE.
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_16" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_17" >
         
           
-          <label class="md-nav__link" for="__nav_4_16" id="__nav_4_16_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_4_17" id="__nav_4_17_label" tabindex="0">
             
   
   
@@ -1264,8 +1294,8 @@ SOFTWARE.
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_16_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_4_16">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_17_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_17">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -2929,6 +2959,10 @@ SOFTWARE.
       
         
       
+        
+      
+        
+      
     
     
     
@@ -3040,6 +3074,62 @@ SOFTWARE.
     
   
     Gitleaks scanner
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/mcp-config/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP server config scanning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/syft/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Syft SBOM scanner (syft) and the sdist lockfile harvest
   
 
     
@@ -4416,7 +4506,7 @@ SOFTWARE.
 <h2 id="aggregated-sarif">Aggregated SARIF<a class="headerlink" href="#aggregated-sarif" title="Permanent link">&para;</a></h2>
 <p>The single SARIF run that every scanner's results are merged into, written as <code>reports/ash.sarif</code>. Findings are appended, not deduplicated. See <a href="../how-ash-works/#findings-are-merged-not-deduplicated">How ASH works</a>.</p>
 <h2 id="alpha-plugin">Alpha plugin<a class="headerlink" href="#alpha-plugin" title="Permanent link">&para;</a></h2>
-<p>One of the opt-in scanner packages (<code>ash_*_plugins</code>) that ships with ASH but is not built in, such as the trivy-repo, snyk-code, and ferret-scan scanners. Alpha is a maturity label: ASH ships these scanners but does not yet promote them as supported. The <code>ash_aws_plugins</code> reporters load the same opt-in way but are not alpha plugins. <code>ash scan</code> loads one only when a plugin module list names it; for the MCP server, see <a href="../../plugins/#what-a-plugin-can-do">What a plugin can do</a>. See <a href="../../docs/plugins/alpha/">Alpha plugins</a>.</p>
+<p>A plugin package that ships with ASH but is not built in, such as the trivy-repo, snyk-code, and ferret-scan scanners. Alpha is a maturity label: ASH ships these scanners but does not yet promote them as supported. <code>ash scan</code> loads one only when a plugin module list names it; for the MCP server, see <a href="../../plugins/#what-a-plugin-can-do">What a plugin can do</a>. See <a href="../../docs/plugins/alpha/">Alpha plugins</a>.</p>
 <h2 id="aws-plugins">AWS plugins<a class="headerlink" href="#aws-plugins" title="Permanent link">&para;</a></h2>
 <p>The <code>ash_aws_plugins</code> package, which ships with ASH and holds reporters that send results to AWS services. It loads only when the operator names it in a plugin module list; a repository config cannot. See <a href="../../plugins/aws/">AWS reporters</a>.</p>
 <h2 id="client-supplied">Client-supplied<a class="headerlink" href="#client-supplied" title="Permanent link">&para;</a></h2>
@@ -4462,7 +4552,7 @@ SOFTWARE.
 <h2 id="reporter">Reporter<a class="headerlink" href="#reporter" title="Permanent link">&para;</a></h2>
 <p>A plugin that renders the aggregated results in one format and writes it to the <code>reports/</code> directory. See the <a href="../../reference/reporters/">reporter reference</a>.</p>
 <h2 id="repository-config">Repository config<a class="headerlink" href="#repository-config" title="Permanent link">&para;</a></h2>
-<p>An ASH config file inside a git checkout or inside the scanned directory, such as the <code>.ash/.ash.yaml</code> ASH discovers in the repository, or a config kept in an ops repository of its own. It cannot grant sandbox access, load ASH's off-host plugin packages, or choose where ASH's AWS reporters send results. See <a href="../trust-model/">Configuration trust model</a>.</p>
+<p>An ASH config file inside a git checkout or inside the scanned directory, such as the <code>.ash.yaml</code> ASH discovers in the repository, or a config kept in an ops repository of its own. It cannot grant sandbox access, load ASH's off-host plugin packages, or choose where ASH's AWS reporters send results. See <a href="../trust-model/">Configuration trust model</a>.</p>
 <h2 id="run-mode">Run mode<a class="headerlink" href="#run-mode" title="Permanent link">&para;</a></h2>
 <p>Where a scan runs: <code>local</code> (the default), <code>container</code>, <code>nix</code>, or <code>precommit</code>, chosen with <code>--mode</code>. See <a href="../how-ash-works/#phases">How ASH works</a>.</p>
 <h2 id="sandbox-grant">Sandbox grant<a class="headerlink" href="#sandbox-grant" title="Permanent link">&para;</a></h2>

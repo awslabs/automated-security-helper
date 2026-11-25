@@ -762,6 +762,8 @@ SOFTWARE.
       
         
       
+        
+      
     
     
     
@@ -1117,6 +1119,34 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
+      <a href="../scan-container-images/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scan container images
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../run-offline/" class="md-nav__link">
         
   
@@ -1369,10 +1399,10 @@ SOFTWARE.
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_16" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_17" >
         
           
-          <label class="md-nav__link" for="__nav_4_16" id="__nav_4_16_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_4_17" id="__nav_4_17_label" tabindex="0">
             
   
   
@@ -1390,8 +1420,8 @@ SOFTWARE.
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_16_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_4_16">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_17_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_17">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -2544,6 +2574,10 @@ SOFTWARE.
       
         
       
+        
+      
+        
+      
     
     
     
@@ -2655,6 +2689,62 @@ SOFTWARE.
     
   
     Gitleaks scanner
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/mcp-config/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP server config scanning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/syft/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Syft SBOM scanner (syft) and the sdist lockfile harvest
   
 
     
@@ -3646,7 +3736,11 @@ The name means what it means for
 the same operation, minus the waiting that is not the work.</p>
 <p>The scan itself is unchanged. The forked child executes the same console entry a cold run
 executes, with your command line, your working directory and your terminal, so its output,
-reports and exit code are the cold run's. Express is an accelerator, never a different scan.</p>
+reports and exit code are the cold run's. Express is an accelerator, never a different scan.
+That covers every asset kind by construction: a scan of a
+<a href="../scan-container-images/">container image</a> under express is the same image scan, because
+the child is the cold run and inherits the environment -- the engine socket included --
+that the cold run would have used. Nothing about images is configured here.</p>
 <p>Unix only (Linux and macOS). On Windows, and anywhere else without unix-domain sockets,
 there is no express mode: <code>ash express start</code> refuses with a clear message,
 <code>ash scan --express</code> prints one line on stderr saying the platform has no express mode

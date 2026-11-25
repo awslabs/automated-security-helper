@@ -762,6 +762,8 @@ SOFTWARE.
       
         
       
+        
+      
     
     
     
@@ -1647,6 +1649,34 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
+      <a href="../../how-to/scan-container-images/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scan container images
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../how-to/run-offline/" class="md-nav__link">
         
   
@@ -1775,10 +1805,10 @@ SOFTWARE.
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_16" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_17" >
         
           
-          <label class="md-nav__link" for="__nav_4_16" id="__nav_4_16_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_4_17" id="__nav_4_17_label" tabindex="0">
             
   
   
@@ -1796,8 +1826,8 @@ SOFTWARE.
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_16_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_4_16">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_17_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_17">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -2950,6 +2980,10 @@ SOFTWARE.
       
         
       
+        
+      
+        
+      
     
     
     
@@ -3061,6 +3095,62 @@ SOFTWARE.
     
   
     Gitleaks scanner
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plugins/builtin/mcp-config/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP server config scanning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plugins/builtin/syft/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Syft SBOM scanner (syft) and the sdist lockfile harvest
   
 
     
@@ -4788,7 +4878,7 @@ fail for lacking semgrep and opengrep, as long as another selected scanner runs.
 <p>For air-gapped environments:</p>
 <!-- doctest: illustrative reason="needs a container runtime" -->
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="c1"># Build an offline image</span>
-</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>ash<span class="w"> </span>build-image<span class="w"> </span>--offline<span class="w"> </span>--offline-semgrep-rulesets<span class="w"> </span>p/ci
+</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>ash<span class="w"> </span>container<span class="w"> </span>build<span class="w"> </span>--offline<span class="w"> </span>--offline-semgrep-rulesets<span class="w"> </span>p/ci
 </span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>
 </span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="c1"># Run in offline mode</span>
 </span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>ash<span class="w"> </span>--mode<span class="w"> </span>container<span class="w"> </span>--offline
@@ -4804,7 +4894,7 @@ rest of that day, so the first build on a new day needs network access. With
 <p>An offline image's databases are frozen at build time, and ASH fails a scan whose
 database is past its bound: grype's 5 days (120h) after it was built, the offline
 semgrep and opengrep rulesets 30 days after they were downloaded. Rebuild the image
-(<code>ash build-image --offline</code>) at least that often. To scan with an older image
+(<code>ash container build --offline</code>) at least that often. To scan with an older image
 anyway, pass <code>--allow-stale-content-db</code> or set <code>content_db_staleness: warn</code>; the scan
 then passes and every report names the stale database. See
 <a href="../../concepts/content-databases/#what-happens-when-a-database-is-stale">What happens when a database is stale</a>.</p>
@@ -4812,7 +4902,7 @@ then passes and every report names the stale database. See
 <p>Offline mode is decided when each scanner runs, from these sources in order:</p>
 <ol>
 <li>ASH's offline mode: <code>--offline</code> on <code>ash scan</code>, <code>ASH_OFFLINE=true</code> in the
-   environment, or an image built with <code>ash build-image --offline</code>. It applies to
+   environment, or an image built with <code>ash container build --offline</code>. It applies to
    every scanner, and no scanner option turns it off.</li>
 <li>A scanner's own <code>options.offline: true</code> (checkov, grype, opengrep, semgrep, syft,
    trivy, trivy-repo). It runs that one scanner offline while the rest of the scan
@@ -4887,7 +4977,7 @@ fall back to downloading the rules.</p>
 in <code>--offline-semgrep-rulesets</code> (space-separated, default <code>p/ci</code>) into
 <code>/deps/.semgrep</code> and <code>/deps/.opengrep</code> and sets both variables:</p>
 <!-- doctest: illustrative reason="needs a container runtime" -->
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>ash<span class="w"> </span>build-image<span class="w"> </span>--offline<span class="w"> </span>--offline-semgrep-rulesets<span class="w"> </span><span class="s2">&quot;p/ci p/python&quot;</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>ash<span class="w"> </span>container<span class="w"> </span>build<span class="w"> </span>--offline<span class="w"> </span>--offline-semgrep-rulesets<span class="w"> </span><span class="s2">&quot;p/ci p/python&quot;</span>
 </span></code></pre></div>
 <p>For a local scan, download the rulesets yourself while online, using the same URL the
 image build uses, and record the download time in <code>.ash-rules-fetched-at</code> next to
@@ -4973,7 +5063,7 @@ rebuild cadence it commits you to, and offline builds.</p>
 <h3 id="building-custom-images">Building Custom Images<a class="headerlink" href="#building-custom-images" title="Permanent link">&para;</a></h3>
 <!-- doctest: illustrative reason="needs a container runtime" -->
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-17-1"><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="c1"># Build a custom image</span>
-</span><span id="__span-17-2"><a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a>ash<span class="w"> </span>build-image<span class="w"> </span>--build-target<span class="w"> </span>ci<span class="w"> </span>--custom-containerfile<span class="w"> </span>./my-dockerfile
+</span><span id="__span-17-2"><a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a>ash<span class="w"> </span>container<span class="w"> </span>build<span class="w"> </span>--build-target<span class="w"> </span>ci<span class="w"> </span>--custom-containerfile<span class="w"> </span>./my-dockerfile
 </span></code></pre></div>
 <h2 id="advanced-configuration-overrides">Advanced Configuration Overrides<a class="headerlink" href="#advanced-configuration-overrides" title="Permanent link">&para;</a></h2>
 <!-- doctest: illustrative reason="runs a full scan that needs the tool of every enabled scanner" -->

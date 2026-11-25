@@ -760,6 +760,8 @@ SOFTWARE.
       
         
       
+        
+      
     
     
     
@@ -1115,6 +1117,34 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
+      <a href="../../how-to/scan-container-images/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scan container images
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../how-to/run-offline/" class="md-nav__link">
         
   
@@ -1243,10 +1273,10 @@ SOFTWARE.
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_16" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_17" >
         
           
-          <label class="md-nav__link" for="__nav_4_16" id="__nav_4_16_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_4_17" id="__nav_4_17_label" tabindex="0">
             
   
   
@@ -1264,8 +1294,8 @@ SOFTWARE.
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_16_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_4_16">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_17_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_17">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -2583,6 +2613,10 @@ SOFTWARE.
       
         
       
+        
+      
+        
+      
     
     
     
@@ -2694,6 +2728,62 @@ SOFTWARE.
     
   
     Gitleaks scanner
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/mcp-config/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP server config scanning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/syft/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Syft SBOM scanner (syft) and the sdist lockfile harvest
   
 
     
@@ -3817,6 +3907,11 @@ shows how to turn them on and off.</p>
 <td></td>
 </tr>
 <tr>
+<td>MCP server config files (<code>.mcp.json</code>, <code>.cursor/mcp.json</code>, <code>.codex/config.toml</code> and the others the <a href="../../docs/plugins/builtin/mcp-config/">MCP config page</a> lists)</td>
+<td>mcp-config, semgrep, opengrep (semgrep and opengrep on the shell scripts the converter writes for them)</td>
+<td></td>
+</tr>
+<tr>
 <td>Jupyter notebooks</td>
 <td>bandit, detect-secrets, gitleaks (on the converted script, bandit only for a Python notebook; see <a href="#converted-files">Converted files</a>)</td>
 <td></td>
@@ -3925,6 +4020,13 @@ them to the tool.</p>
 <td>SCA</td>
 <td>Whole directory: the packages it catalogs from manifests and lockfiles</td>
 <td>no</td>
+<td>no</td>
+</tr>
+<tr>
+<td>mcp-config</td>
+<td>SAST</td>
+<td>Selected files: the repo-local MCP server config files (<code>.mcp.json</code>, <code>.cursor/mcp.json</code>, <code>.vscode/mcp.json</code>, <code>.codex/config.toml</code> and the others the <a href="../../docs/plugins/builtin/mcp-config/">MCP config page</a> lists), read in process</td>
+<td>yes</td>
 <td>no</td>
 </tr>
 <tr>

@@ -760,6 +760,8 @@ SOFTWARE.
       
         
       
+        
+      
     
     
     
@@ -1115,6 +1117,34 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
+      <a href="../how-to/scan-container-images/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scan container images
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../how-to/run-offline/" class="md-nav__link">
         
   
@@ -1243,10 +1273,10 @@ SOFTWARE.
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_16" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_17" >
         
           
-          <label class="md-nav__link" for="__nav_4_16" id="__nav_4_16_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_4_17" id="__nav_4_17_label" tabindex="0">
             
   
   
@@ -1264,8 +1294,8 @@ SOFTWARE.
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_16_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_4_16">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_17_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_17">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -2418,6 +2448,10 @@ SOFTWARE.
       
         
       
+        
+      
+        
+      
     
     
     
@@ -2529,6 +2563,62 @@ SOFTWARE.
     
   
     Gitleaks scanner
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../docs/plugins/builtin/mcp-config/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP server config scanning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../docs/plugins/builtin/syft/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Syft SBOM scanner (syft) and the sdist lockfile harvest
   
 
     
@@ -3827,7 +3917,7 @@ SOFTWARE.
 
 <h1 id="frequently-asked-questions">Frequently asked questions<a class="headerlink" href="#frequently-asked-questions" title="Permanent link">&para;</a></h1>
 <p>Short answers, each with a link to the page that has the details. The config examples are
-keys to add to your ASH config file. <code>ash config init</code> writes one, <code>.ashrc.yaml</code>, in the
+keys to add to your ASH config file. <code>ash config init</code> writes one, <code>.ash.yaml</code>, in the
 current directory.</p>
 <h2 id="why-does-my-first-scan-exit-1">Why does my first scan exit 1?<a class="headerlink" href="#why-does-my-first-scan-exit-1" title="Permanent link">&para;</a></h2>
 <p>At least one scanner is MISSING: its tool is not installed, or ASH found the tool only
@@ -3858,7 +3948,7 @@ code, not every dependency: uv, pipx, and pip resolve ASH's dependencies again w
 install it. Homebrew installs the release its formula names, the latest one, with the
 dependency versions locked in that release's <code>uv.lock</code>.</p>
 <h2 id="is-there-a-container-image">Is there a container image?<a class="headerlink" href="#is-there-a-container-image" title="Permanent link">&para;</a></h2>
-<p>ASH publishes no image. <code>ash build-image</code> builds one from a release tag, and
+<p>ASH publishes no image. <code>ash container build</code> builds one from a release tag, and
 <code>ash --mode container</code> builds one and runs the scan in it. ASH uses the first of finch,
 docker, nerdctl, and podman that it finds on your <code>PATH</code>, or the one you name with
 <code>--oci-runner</code>. The default image runs as a non-root user whose UID and GID you can set;
@@ -3957,7 +4047,7 @@ See <a href="../how-to/ci/github-actions/">Run ASH in GitHub Actions</a>.</p>
 <p>Yes. With <code>--offline</code>, ASH runs every scanner in its offline mode and installs nothing,
 except npm-audit, which does not run offline. Some scanners still make requests; only the
 scanner sandbox, or container mode with <code>--offline</code>, removes the network itself. The rules and vulnerability databases must be in
-place first; an image built with <code>ash build-image --offline</code> contains them. Each database
+place first; an image built with <code>ash container build --offline</code> contains them. Each database
 has an age bound, from a day to a month, and by default a scan fails when one is past it
 (an image built with <code>OFFLINE=YES</code> only warns for trivy's database), so plan to rebuild
 offline images often. See <a href="../how-to/run-offline/">Run ASH offline</a> and

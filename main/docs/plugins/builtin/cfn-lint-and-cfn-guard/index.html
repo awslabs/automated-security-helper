@@ -760,6 +760,8 @@ SOFTWARE.
       
         
       
+        
+      
     
     
     
@@ -1115,6 +1117,34 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
+      <a href="../../../../how-to/scan-container-images/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scan container images
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../../../how-to/run-offline/" class="md-nav__link">
         
   
@@ -1243,10 +1273,10 @@ SOFTWARE.
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_16" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_17" >
         
           
-          <label class="md-nav__link" for="__nav_4_16" id="__nav_4_16_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_4_17" id="__nav_4_17_label" tabindex="0">
             
   
   
@@ -1264,8 +1294,8 @@ SOFTWARE.
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_16_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_4_16">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_17_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_17">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -2422,6 +2452,10 @@ SOFTWARE.
       
         
       
+        
+      
+        
+      
     
     
     
@@ -2846,6 +2880,62 @@ SOFTWARE.
     
   
     Gitleaks scanner
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mcp-config/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP server config scanning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../syft/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Syft SBOM scanner (syft) and the sdist lockfile harvest
   
 
     
@@ -4079,7 +4169,7 @@ SOFTWARE.
 <p>Some of cfn-lint's checks depend on the region, for example whether a resource type exists there (rule <code>E3006</code>). <code>regions</code> names the regions to check against. When it is unset, cfn-lint uses the regions a template names in its own <code>Metadata: cfn-lint: config: regions</code>, then those in the <code>config_file</code> you named, and otherwise us-east-1. On its own, cfn-lint would read <code>AWS_REGION</code> and <code>AWS_DEFAULT_REGION</code> before falling back to us-east-1. ASH does not let it, so a template gives the same findings on every host: an empty <code>AWS_REGION</code>, which a CI job gets from an unset variable, would otherwise make cfn-lint fail on every template.</p>
 <h4 id="configuration-files">Configuration files<a class="headerlink" href="#configuration-files" title="Permanent link">&para;</a></h4>
 <p>Left to itself, cfn-lint reads a <code>.cfnlintrc</code> from the directory it runs in (the scanned repository) and from your home directory. ASH does not let it: unless <code>config_file</code> names a file, ASH passes cfn-lint an empty configuration of its own, which it writes outside the scanned tree and removes when the scan ends, and which stops both lookups. A <code>.cfnlintrc</code> is not passive settings. Its <code>append_rules</code> key names Python files that cfn-lint loads as rules, so a <code>.cfnlintrc</code> in the scanned repository would make cfn-lint import and run a rule module from the scanned tree. Its other keys, such as <code>ignore_checks</code>, would change what cfn-lint reports without appearing in the ASH config, which is where ASH takes <code>ignore_checks</code>, <code>include_checks</code> and <code>regions</code> from instead.</p>
-<p>For the same reason <code>config_file</code> is honored only when the operator sets it, through <code>--config-overrides</code> or a config file outside every git checkout and the scanned directory (one that is not <a href="../../../../concepts/trust-model/#how-the-tier-is-decided">repository-written</a>), and only for a file outside the scanned tree. A relative <code>config_file</code> is taken from the directory of the ASH config file that sets it, or from the working directory for <code>--config-overrides</code>, not from the source directory (see <a href="../../../../how-to/configure/#relative-paths">Relative paths in the operator's settings</a>). A <code>config_file</code> from the repository's own <code>.ash/.ash.yaml</code> or from an ASH config in any other git checkout, or one naming a file inside the tree, is ignored with a warning and cfn-lint gets ASH's empty configuration, and so is a path inside the tree that leads out of it through a symbolic link there. A config an MCP client delivered that sets <code>config_file</code> is refused, since it is a default <code>denied_paths</code> entry. A file you name this way is used with <code>append_rules</code> included, and one that does not exist fails the scan. cfn-lint resolves the relative paths in it, such as <code>append_rules</code> and <code>custom_rules</code> entries, against its working directory rather than the file's directory. ASH runs cfn-lint in a new, empty directory outside the scanned tree that only your user can enter and that is removed after the scan, so a relative path names nothing: neither a file in the scanned repository nor one in a shared directory such as <code>/tmp</code>. Write those paths as absolute paths: a relative one makes cfn-lint fail on every template. Under <code>--sandbox</code>, a file outside the tree is not mounted unless it is listed in <code>sandbox.extra_read_paths</code>.</p>
+<p>For the same reason <code>config_file</code> is honored only when the operator sets it, through <code>--config-overrides</code> or a config file outside every git checkout and the scanned directory (one that is not <a href="../../../../concepts/trust-model/#how-the-tier-is-decided">repository-written</a>), and only for a file outside the scanned tree. A relative <code>config_file</code> is taken from the directory of the ASH config file that sets it, or from the working directory for <code>--config-overrides</code>, not from the source directory (see <a href="../../../../how-to/configure/#relative-paths">Relative paths in the operator's settings</a>). A <code>config_file</code> from the repository's own <code>.ash.yaml</code> or from an ASH config in any other git checkout, or one naming a file inside the tree, is ignored with a warning and cfn-lint gets ASH's empty configuration, and so is a path inside the tree that leads out of it through a symbolic link there. A config an MCP client delivered that sets <code>config_file</code> is refused, since it is a default <code>denied_paths</code> entry. A file you name this way is used with <code>append_rules</code> included, and one that does not exist fails the scan. cfn-lint resolves the relative paths in it, such as <code>append_rules</code> and <code>custom_rules</code> entries, against its working directory rather than the file's directory. ASH runs cfn-lint in a new, empty directory outside the scanned tree that only your user can enter and that is removed after the scan, so a relative path names nothing: neither a file in the scanned repository nor one in a shared directory such as <code>/tmp</code>. Write those paths as absolute paths: a relative one makes cfn-lint fail on every template. Under <code>--sandbox</code>, a file outside the tree is not mounted unless it is listed in <code>sandbox.extra_read_paths</code>.</p>
 <p><code>tool_version</code> is appended to the package name when ASH installs cfn-lint, so it must be a version constraint such as <code>&gt;=1.43.3,&lt;2.0.0</code>. Anything else, including a direct reference such as <code>@ file:///...</code>, is ignored with a warning and the default constraint is used.</p>
 <p><code>ignore_checks</code> and <code>tool_version</code> are honored only when you set them as the operator, with <code>--config-overrides</code> or an ASH config file outside every git checkout and the scanned directory. <code>ignore_checks</code> drops findings before ASH sees them, so they are neither reported nor counted as suppressed, and <code>tool_version</code> chooses the cfn-lint release that is installed. Set by an ASH config inside a git checkout or the scanned directory, each is ignored with a warning and its default is used; a config an MCP client delivered that sets either is refused, since both are default <code>denied_paths</code> entries. To silence a finding in a repository, use an ASH suppression.</p>
 <h3 id="severity-mapping">Severity mapping<a class="headerlink" href="#severity-mapping" title="Permanent link">&para;</a></h3>

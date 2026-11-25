@@ -760,6 +760,8 @@ SOFTWARE.
       
         
       
+        
+      
     
     
     
@@ -1115,6 +1117,34 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
+      <a href="../../how-to/scan-container-images/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scan container images
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../how-to/run-offline/" class="md-nav__link">
         
   
@@ -1243,10 +1273,10 @@ SOFTWARE.
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_16" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_17" >
         
           
-          <label class="md-nav__link" for="__nav_4_16" id="__nav_4_16_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_4_17" id="__nav_4_17_label" tabindex="0">
             
   
   
@@ -1264,8 +1294,8 @@ SOFTWARE.
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_16_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_4_16">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_17_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_17">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -2550,6 +2580,10 @@ SOFTWARE.
       
         
       
+        
+      
+        
+      
     
     
     
@@ -2661,6 +2695,62 @@ SOFTWARE.
     
   
     Gitleaks scanner
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/mcp-config/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP server config scanning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/syft/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Syft SBOM scanner (syft) and the sdist lockfile harvest
   
 
     
@@ -3648,7 +3738,7 @@ SOFTWARE.
 
 
 <h1 id="configuration-trust-model">Configuration trust model<a class="headerlink" href="#configuration-trust-model" title="Permanent link">&para;</a></h1>
-<p>ASH reads its configuration from places with different owners. You, the person or pipeline running ASH, control the command line, the environment, and the files outside the repository. The repository being scanned controls every file inside it, including the <code>.ash/.ash.yaml</code> that ASH discovers without being asked. A client of the ASH MCP server controls the files it delivers to the server. ASH sorts configuration into three tiers by owner, and limits what the repository and MCP clients can set for a short list of settings: the ones that grant access, send data off the host, or choose code for a tool to run.</p>
+<p>ASH reads its configuration from places with different owners. You, the person or pipeline running ASH, control the command line, the environment, and the files outside the repository. The repository being scanned controls every file inside it, including the <code>.ash.yaml</code> that ASH discovers without being asked. A client of the ASH MCP server controls the files it delivers to the server. ASH sorts configuration into three tiers by owner, and limits what the repository and MCP clients can set for a short list of settings: the ones that grant access, send data off the host, or choose code for a tool to run.</p>
 <h2 id="tiers">The three tiers<a class="headerlink" href="#tiers" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
@@ -3664,7 +3754,7 @@ SOFTWARE.
 </tr>
 <tr>
 <td>Repository</td>
-<td>Any config file inside a git checkout or inside the scanned directory: the discovered <code>.ash/.ash.yaml</code> and its siblings, a <code>--config</code> or <code>ASH_CONFIG</code> that points into the repository being scanned, and a config file kept in a checkout of its own, such as an ops or dotfiles repository.</td>
+<td>Any config file inside a git checkout or inside the scanned directory: the discovered <code>.ash.yaml</code> and its siblings, a <code>--config</code> or <code>ASH_CONFIG</code> that points into the repository being scanned, and a config file kept in a checkout of its own, such as an ops or dotfiles repository.</td>
 </tr>
 <tr>
 <td>MCP client</td>
@@ -3779,12 +3869,12 @@ SOFTWARE.
 <p><a href="../../how-to/choose-scanners/#operator-only">Options only the operator can set</a> lists the scanners that limit the options in the last row. The reporter limits apply to a reporter's section under any spelling ASH reads as that reporter, so a repository's reporter section spelled <code>BedrockSummary</code> is limited like <code>bedrock-summary-reporter</code>. The table is how a scan reads the reporter settings. <code>ash report</code> and <code>ash merge</code> read stored results, which do not record which tree was scanned, so any config file they read, even one outside every git checkout, is held to the repository column for whether each AWS reporter runs and where it sends: those come only from <code>--config-overrides</code> (<a href="../../plugins/aws/#ash-report">Rendering a reporter from saved results</a>). Two rules apply from every tier: <code>reporters.&lt;name&gt;.extension</code> must be a plain filename suffix, and report files are written only inside the reports directory.</p>
 <h2 id="denied-settings">When a lower tier sets something it may not<a class="headerlink" href="#denied-settings" title="Permanent link">&para;</a></h2>
 <p>From a repository file, ASH ignores the value, uses the trusted one, logs a warning that names the settings and the file and says how to keep them, and runs the scan. For example:</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>Ignoring sandbox.network_scanners, sandbox.extra_read_paths from /work/repo/.ash/.ash.yaml: the file is inside the scanned tree, so the repository being scanned wrote it. A network_scanners list there still removes network from scanners it does not name, and a sandbox mode there still applies when nothing else turns the sandbox on. To keep a setting, move the file outside every git checkout, or pass the setting with --config-overrides. A file inside the scanned directory has to move out of it as well.
+<div class="language-text highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>Ignoring sandbox.network_scanners, sandbox.extra_read_paths from /work/repo/.ash.yaml: the file is inside the scanned tree, so the repository being scanned wrote it. A network_scanners list there still removes network from scanners it does not name, and a sandbox mode there still applies when nothing else turns the sandbox on. To keep a setting, move the file outside every git checkout, or pass the setting with --config-overrides. A file inside the scanned directory has to move out of it as well.
 </span></code></pre></div>
 <p>Here the repository's config gave grype a network and a read path. To give grype a network yourself, pass <code>--config-overrides 'sandbox.network_scanners=[grype]'</code>.</p>
 <p>An MCP-client file is also checked against the server's runtime-override policy, the <code>denied_paths</code> and <code>denied_value_patterns</code> of <code>global_settings.mcp.runtime_overrides</code>, whether or not <code>runtime_overrides.enabled</code> is set. The policy comes from the server's own configuration: the file <code>ASH_CONFIG</code> names when the server starts, or the built-in defaults when <code>ASH_CONFIG</code> is unset or empty. An <code>ASH_CONFIG</code> that names a path that is not a file, or a file that does not load, stops <code>ash mcp</code> from starting, with exit code 3. By default the list covers the gate settings (<code>fail_on_findings</code>, <code>fail_on_incomplete_scanners</code>, <code>content_db_staleness</code> and its overrides, and <code>content_db_staleness_offline_image_default</code>), the scanner options that drop findings by rule ID, by a baseline, or by a whole category, options that limit how much a scanner reads or that turn on its own network calls, each scanner's <code>offline</code> option, each scanner's own config file, which version of a tool runs, every setting of the reporters that send findings off the host (<code>aws-security-hub</code>, <code>bedrock-summary-reporter</code>, <code>cloudwatch-logs</code>, and <code>s3</code>), their <code>enabled</code> included, and the <code>gitlab-sast</code> reporter's <code>exclude_suppressed</code>; <a href="../../how-to/mcp-server/#what-a-delivered-config-cannot-set">What a delivered config cannot set</a> lists them. If a delivered file sets any of them to a value other than the trusted one, ASH refuses the whole file rather than trimming it. The error names each field, the MCP tools report it with <code>error_type: config_field_denied</code>, and on the CLI it is a configuration error (exit 3). If the policy itself cannot be read, because the file <code>ASH_CONFIG</code> names exists but does not load, or has two sections that ASH reads as the same plugin, a config with an MCP-client file is refused with <code>config_policy_unreadable</code>. The server meets that case only when the file changed after it started.</p>
 <p>The check follows where the file is, not whether a server is running. In this example the parent directory is the workspace root, so the scanned directory is a delivered tree, and its config turns off <code>fail_on_findings</code>:</p>
-<!-- doctest: save-as=.ash/.ash.yaml -->
+<!-- doctest: save-as=.ash.yaml -->
 <div class="language-yaml highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nt">project_name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">delivered</span>
 </span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="nt">fail_on_findings</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
 </span></code></pre></div>
@@ -3814,7 +3904,7 @@ SOFTWARE.
 <li>
 <p>A repository-tier config on the CLI can still turn off <code>fail_on_findings</code> and <code>fail_on_incomplete_scanners</code>, raise severity thresholds, disable scanners and reporters, and add suppressions, ignore paths, and per-scanner exclusions. None of this is marked. To keep these choices yours in a scan of one directory, pass your own config with <code>--config</code>, so that the repository's config is not read. You can also override the repository's values on the command line: <code>--config-overrides</code> replaces any setting (for example <code>scanners.bandit.enabled=true</code> or <code>global_settings.suppressions=[]</code>), flags such as <code>--fail-on-findings</code>, <code>--fail-on-incomplete-scanners</code>, and <code>--no-allow-stale-content-db</code> take precedence over a config file, and <code>--ignore-suppressions</code> stops the repository's suppressions and ignore paths from applying. In workspace mode every setting your <code>--config</code> makes is final for every project, and a project's own config fills only the settings yours leaves out.</p>
 <p>With <code>--ignore-suppressions</code>, every scanner reads the files under the repository's ignore paths, and their findings come back. It does not lift a scanner's own exclusion options, such as bandit's <code>excluded_paths</code>, or the repository's <code>.gitignore</code> and <code>.ignore</code> files (<a href="../../how-to/suppress-findings/#ignore-suppressions">See every finding</a>). In a repository where detect-secrets reports a password in <code>app.py</code>, a repository config that ignores <code>app.py</code> keeps the scan passing:</p>
-<p><!-- doctest: save-as=.ash/.ash.yaml -->
+<p><!-- doctest: save-as=.ash.yaml -->
 <div class="language-yaml highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="nt">global_settings</span><span class="p">:</span>
 </span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="w">  </span><span class="nt">ignore_paths</span><span class="p">:</span>
 </span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">app.py</span>
@@ -3833,7 +3923,7 @@ SOFTWARE.
 </span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="w">  </span>--config-overrides<span class="w"> </span><span class="s1">&#39;global_settings.ignore_paths=[]&#39;</span>
 </span></code></pre></div></p>
 <p>A suppression of the same finding is lifted the same way, and the scan fails:</p>
-<p><!-- doctest: save-as=.ash/.ash.yaml -->
+<p><!-- doctest: save-as=.ash.yaml -->
 <div class="language-yaml highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="nt">global_settings</span><span class="p">:</span>
 </span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="w">  </span><span class="nt">suppressions</span><span class="p">:</span>
 </span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">app.py</span>

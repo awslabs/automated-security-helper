@@ -760,6 +760,8 @@ SOFTWARE.
       
         
       
+        
+      
     
     
     
@@ -1115,6 +1117,34 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
+      <a href="../../../../how-to/scan-container-images/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scan container images
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../../../how-to/run-offline/" class="md-nav__link">
         
   
@@ -1243,10 +1273,10 @@ SOFTWARE.
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_16" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_17" >
         
           
-          <label class="md-nav__link" for="__nav_4_16" id="__nav_4_16_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_4_17" id="__nav_4_17_label" tabindex="0">
             
   
   
@@ -1264,8 +1294,8 @@ SOFTWARE.
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_16_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_4_16">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_17_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_17">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -2422,6 +2452,10 @@ SOFTWARE.
       
         
       
+        
+      
+        
+      
     
     
     
@@ -2707,6 +2741,62 @@ SOFTWARE.
     
   
     Gitleaks scanner
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mcp-config/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP server config scanning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../syft/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Syft SBOM scanner (syft) and the sdist lockfile harvest
   
 
     
@@ -3809,7 +3899,7 @@ SOFTWARE.
 <h3 id="shellcheck-and-pyflakes"><code>shellcheck</code> and <code>pyflakes</code><a class="headerlink" href="#shellcheck-and-pyflakes" title="Permanent link">&para;</a></h3>
 <p>actionlint runs <code>shellcheck</code> on <code>run:</code> scripts and <code>pyflakes</code> on <code>shell: python</code> steps when they are on <code>PATH</code>, and skips them silently when they are not. Results would then depend on what a host happens to have installed, so ASH disables both by default (<code>actionlint -shellcheck= -pyflakes=</code>).</p>
 <p>To use them, set the option to <code>shellcheck</code> or <code>pyflakes</code>, which is looked up in the absolute directories on <code>PATH</code> and in ASH's bin directory, and handed to actionlint as an absolute path. If the configured tool cannot be found or is not executable, the scanner reports <code>MISSING</code> rather than running without it. shellcheck and pyflakes findings are LOW severity. Neither is installed in the ASH container image.</p>
-<p>Each option names the program actionlint pipes every <code>run:</code> script to, started from the root of the scanned tree. Set to a shell or an interpreter, that program would run each <code>run:</code> script instead of checking it. ASH's config usually comes from the repository being scanned (<code>.ash/.ash.yaml</code>), so from a config file inside any git checkout or the scanned directory each option accepts only its own name. Another program, or any path, is honored only from <code>--config-overrides</code> or a config file outside every git checkout and the scanned directory:</p>
+<p>Each option names the program actionlint pipes every <code>run:</code> script to, started from the root of the scanned tree. Set to a shell or an interpreter, that program would run each <code>run:</code> script instead of checking it. ASH's config usually comes from the repository being scanned (<code>.ash.yaml</code>), so from a config file inside any git checkout or the scanned directory each option accepts only its own name. Another program, or any path, is honored only from <code>--config-overrides</code> or a config file outside every git checkout and the scanned directory:</p>
 <!-- doctest: illustrative reason="runs a full scan, which needs every scanner installed" -->
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>ash<span class="w"> </span>scan<span class="w"> </span>--config-overrides<span class="w"> </span><span class="s1">&#39;scanners.actionlint.options.shellcheck=/opt/shellcheck/bin/shellcheck&#39;</span>
 </span></code></pre></div>

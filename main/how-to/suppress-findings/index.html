@@ -762,6 +762,8 @@ SOFTWARE.
       
         
       
+        
+      
     
     
     
@@ -1019,6 +1021,17 @@ SOFTWARE.
   
     <nav class="md-nav" aria-label="Suppress a finding in the config">
       <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#harvested" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Suppress a finding in a harvested lockfile
+      
+    </span>
+  </a>
+  
+</li>
         
           <li class="md-nav__item">
   <a href="#expiration" class="md-nav__link">
@@ -1308,6 +1321,34 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
+      <a href="../scan-container-images/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scan container images
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../run-offline/" class="md-nav__link">
         
   
@@ -1436,10 +1477,10 @@ SOFTWARE.
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_16" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_17" >
         
           
-          <label class="md-nav__link" for="__nav_4_16" id="__nav_4_16_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_4_17" id="__nav_4_17_label" tabindex="0">
             
   
   
@@ -1457,8 +1498,8 @@ SOFTWARE.
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_16_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_4_16">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_17_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_17">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -2611,6 +2652,10 @@ SOFTWARE.
       
         
       
+        
+      
+        
+      
     
     
     
@@ -2722,6 +2767,62 @@ SOFTWARE.
     
   
     Gitleaks scanner
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/mcp-config/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP server config scanning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/syft/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Syft SBOM scanner (syft) and the sdist lockfile harvest
   
 
     
@@ -3568,6 +3669,17 @@ SOFTWARE.
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#harvested" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Suppress a finding in a harvested lockfile
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#expiration" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3832,6 +3944,11 @@ SOFTWARE.
 <td>Only findings about this dependency, for dependency scanners such as grype and npm-audit</td>
 </tr>
 <tr>
+<td><code>image</code></td>
+<td>no</td>
+<td>Only findings inside a container image whose submitted reference or resolved digest matches this case-insensitive glob; see <a href="../scan-container-images/#findings-identity-and-suppressions">Scan container images</a>. A finding that is not inside an image never matches</td>
+</tr>
+<tr>
 <td><code>resource_id</code></td>
 <td>no</td>
 <td>Only findings about this resource, for the scanners that name one: cdk-nag (the construct path) and checkov (for Terraform, a Terraform plan, CloudFormation and Kubernetes; the name checkov gives it, such as <code>aws_db_instance.this</code>, <code>module.db.aws_db_instance.this</code> or <code>AWS::S3::Bucket.Bucket</code>). A finding with no resource never matches</td>
@@ -3850,29 +3967,53 @@ SOFTWARE.
 </span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span>--config-overrides<span class="w"> </span><span class="s1">&#39;global_settings.suppressions+=[{&quot;path&quot;: &quot;app.py&quot;, &quot;rule_id&quot;: &quot;SECRET-SECRET-KEYWORD&quot;, &quot;reason&quot;: &quot;Fixture value, not a real password&quot;}]&#39;</span>
 </span></code></pre></div>
 <p>With <code>rule_id</code> misspelled, the entry suppresses nothing instead of suppressing every rule in <code>app.py</code>: the run warns, naming the key, and fails on the finding the entry was meant to suppress (exit 2). Set <code>fail_on_unknown_keys: true</code> to refuse the config outright (exit 3); ASH v4 makes that the default.</p>
+<h3 id="harvested">Suppress a finding in a harvested lockfile<a class="headerlink" href="#harvested" title="Permanent link">&para;</a></h3>
+<p>A finding can sit in a file the scan materialized rather than one in your tree:
+the <a href="../../docs/plugins/builtin/syft/#the-sdist-lockfile-harvest">sdist lockfile harvest</a>
+writes a compiled dependency's embedded lockfiles into the converted target at
+<code>sdist-locks/&lt;package&gt;/&lt;version&gt;/&lt;lockfile&gt;</code>, and grype and trivy report
+advisories against them. Such a finding is fixed by upgrading the parent
+package, never by an edit, so while no fixed release exists the honest
+disposition is a time-boxed suppression whose <code>path</code> globs over the harvest
+layout -- the version segment is a <code>*</code> so the entry survives a version bump,
+and <code>expires</code> plus the pinned package version force the revisit:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nt">global_settings</span><span class="p">:</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span><span class="nt">suppressions</span><span class="p">:</span>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">rule_id</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;GHSA-2mjx-qc3c-rqvc&quot;</span>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">      </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;**/sdist-locks/polars-runtime-32/*/Cargo.lock&quot;</span>
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">      </span><span class="nt">package_name</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;rustls&quot;</span>
+</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">      </span><span class="nt">package_version</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;0.23.43&quot;</span>
+</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">      </span><span class="nt">expires</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;2026-12-27&quot;</span>
+</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="w">      </span><span class="nt">reason</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">&gt;-</span>
+</span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="w">        </span><span class="no">rustls 0.23.43 is statically linked into the polars-runtime-32 wheel;</span>
+</span><span id="__span-2-10"><a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="w">        </span><span class="no">only a polars release built against rustls 0.23.45 or later removes it.</span>
+</span></code></pre></div>
+<p>ASH's own <code>.ash.yaml</code> carries the worked set of these entries (the rustls
+advisories in polars' harvested <code>Cargo.lock</code>), one per scanner spelling of the
+same GHSA id, each with the evidence in its reason.</p>
 <!-- doctest: run expect-exit=2 -->
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>ash<span class="w"> </span>--source-dir<span class="w"> </span>.<span class="w"> </span>--scanners<span class="w"> </span>detect-secrets<span class="w"> </span>--offline<span class="w"> </span>--no-progress<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span>--config-overrides<span class="w"> </span><span class="s1">&#39;global_settings.suppressions+=[{&quot;path&quot;: &quot;app.py&quot;, &quot;ruleId&quot;: &quot;SECRET-SECRET-KEYWORD&quot;, &quot;reason&quot;: &quot;Fixture value, not a real password&quot;}]&#39;</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>ash<span class="w"> </span>--source-dir<span class="w"> </span>.<span class="w"> </span>--scanners<span class="w"> </span>detect-secrets<span class="w"> </span>--offline<span class="w"> </span>--no-progress<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span>--config-overrides<span class="w"> </span><span class="s1">&#39;global_settings.suppressions+=[{&quot;path&quot;: &quot;app.py&quot;, &quot;ruleId&quot;: &quot;SECRET-SECRET-KEYWORD&quot;, &quot;reason&quot;: &quot;Fixture value, not a real password&quot;}]&#39;</span>
 </span></code></pre></div>
 <h3 id="expiration">Expiration<a class="headerlink" href="#expiration" title="Permanent link">&para;</a></h3>
 <p>On its <code>expires</code> date, by the local clock of the machine that runs the scan (UTC in the container image, which sets <code>TZ=UTC</code>), a suppression stops matching, and the finding fails the next scan again. <code>expires</code> is the canonical spelling of the field; <code>expiration</code> is accepted as a deprecated alias when a config is read, and the alias is removed in ASH v4. At the start of a scan, ASH logs one warning that lists every suppression and ignore path that has expired, including those whose date is today, and then a warning for the ignore paths and one for the suppressions that expire within the next 30 days. With <code>--ignore-suppressions</code>, these warnings leave suppressions out. <code>ash config lint</code> reports suppressions that have expired, and <code>ash config lint --fix</code> removes them.</p>
 <p>An expired suppression no longer applies, so this run fails on the finding and names the entry:</p>
 <!-- doctest: run expect-exit=2 -->
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>ash<span class="w"> </span>--source-dir<span class="w"> </span>.<span class="w"> </span>--scanners<span class="w"> </span>detect-secrets<span class="w"> </span>--offline<span class="w"> </span>--no-progress<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span>--config-overrides<span class="w"> </span><span class="s1">&#39;global_settings.suppressions+=[{&quot;path&quot;: &quot;app.py&quot;, &quot;rule_id&quot;: &quot;SECRET-SECRET-KEYWORD&quot;, &quot;reason&quot;: &quot;Fixture value, not a real password&quot;, &quot;expires&quot;: &quot;2020-01-01&quot;}]&#39;</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>ash<span class="w"> </span>--source-dir<span class="w"> </span>.<span class="w"> </span>--scanners<span class="w"> </span>detect-secrets<span class="w"> </span>--offline<span class="w"> </span>--no-progress<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span>--config-overrides<span class="w"> </span><span class="s1">&#39;global_settings.suppressions+=[{&quot;path&quot;: &quot;app.py&quot;, &quot;rule_id&quot;: &quot;SECRET-SECRET-KEYWORD&quot;, &quot;reason&quot;: &quot;Fixture value, not a real password&quot;, &quot;expires&quot;: &quot;2020-01-01&quot;}]&#39;</span>
 </span></code></pre></div>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>The following ignore paths and suppressions have expired and no longer apply:
-</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>  - Suppression of rule &#39;SECRET-SECRET-KEYWORD&#39; for &#39;app.py&#39; expired on 2020-01-01. Reason: Fixture value, not a real password
-</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>Remove them, or move their expiration dates, in your ASH configuration file.
+<div class="language-text highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>The following ignore paths and suppressions have expired and no longer apply:
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>  - Suppression of rule &#39;SECRET-SECRET-KEYWORD&#39; for &#39;app.py&#39; expired on 2020-01-01. Reason: Fixture value, not a real password
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>Remove them, or move their expiration dates, in your ASH configuration file.
 </span></code></pre></div>
 <h3 id="symbol">Scope a suppression to a symbol<a class="headerlink" href="#symbol" title="Permanent link">&para;</a></h3>
 <p><code>symbol</code> limits a suppression to findings inside one definition in the file, named with dots from the top of the file, such as <code>Deployer.run_hook</code>. The name is exact and case-sensitive. A suppression with <code>symbol</code> keeps matching when the code around the definition moves, where a line range would not.</p>
-<div class="language-yaml highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nt">global_settings</span><span class="p">:</span>
-</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span><span class="nt">suppressions</span><span class="p">:</span>
-</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">src/deploy.py</span>
-</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">      </span><span class="nt">rule_id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">B602</span>
-</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="w">      </span><span class="nt">symbol</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Deployer.run_hook</span>
-</span><span id="__span-5-6"><a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="w">      </span><span class="nt">reason</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">run_hook only runs commands from the deploy manifest</span>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="nt">global_settings</span><span class="p">:</span>
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="w">  </span><span class="nt">suppressions</span><span class="p">:</span>
+</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">src/deploy.py</span>
+</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="w">      </span><span class="nt">rule_id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">B602</span>
+</span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="w">      </span><span class="nt">symbol</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Deployer.run_hook</span>
+</span><span id="__span-6-6"><a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="w">      </span><span class="nt">reason</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">run_hook only runs commands from the deploy manifest</span>
 </span></code></pre></div>
 <p>A symbol suppression also needs an entry for its file in <code>.ash.lock</code>; <a href="#lock">create both with <code>ash suppress add</code></a>.</p>
 <p>ASH finds the definition by parsing the file with tree-sitter, for Python, JavaScript, TypeScript, and Java files. The parsers are in the <code>symbols</code> extra, which is not installed by default; without it, a suppression with <code>symbol</code> matches nothing and the scan logs a warning that names the extra. The container image includes it. For the qualified-name grammar, the fail-closed rules, and the resolver's API and limits, see <a href="../../reference/symbol-resolution/">Symbol resolution</a>.</p>
@@ -3885,12 +4026,12 @@ SOFTWARE.
 </ul>
 <p>The whole file is hashed, not the definition, so reformatting a definition and editing it are treated alike. The file is read as bytes, so a checkout that rewrites line endings changes the hash; refresh the lock on that checkout.</p>
 <p>Create the suppression and its lock entry together with <code>ash suppress add</code>:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>ash<span class="w"> </span>suppress<span class="w"> </span>add<span class="w"> </span>B602<span class="w"> </span>--symbol<span class="w"> </span>Deployer.run_hook<span class="w"> </span>--file<span class="w"> </span>src/deploy.py<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="w">  </span>--reason<span class="w"> </span><span class="s2">&quot;run_hook only runs commands from the deploy manifest&quot;</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>ash<span class="w"> </span>suppress<span class="w"> </span>add<span class="w"> </span>B602<span class="w"> </span>--symbol<span class="w"> </span>Deployer.run_hook<span class="w"> </span>--file<span class="w"> </span>src/deploy.py<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="w">  </span>--reason<span class="w"> </span><span class="s2">&quot;run_hook only runs commands from the deploy manifest&quot;</span>
 </span></code></pre></div>
 <p>This writes the suppression to the config a scan of the current directory uses (<code>--config</code> names another YAML file) and the hash to <code>.ash.lock</code>. A suppression already in the config for the same rule, file, and symbol is not written twice, which is how you bring an existing symbol suppression under the lock. Pass <code>--source-dir</code> to run it from another directory.</p>
 <p>After you change a locked file, read the change, confirm the suppressions still hold, and record the review:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>ash<span class="w"> </span>suppress<span class="w"> </span>refresh<span class="w"> </span>src/deploy.py<span class="w">   </span><span class="c1"># or no path, for every locked file</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>ash<span class="w"> </span>suppress<span class="w"> </span>refresh<span class="w"> </span>src/deploy.py<span class="w">   </span><span class="c1"># or no path, for every locked file</span>
 </span></code></pre></div>
 <p><code>ash suppress verify</code> exits 1 and lists every locked file that changed or is gone, and every symbol suppression in the config that has no lock entry. Run it in CI. <code>--config</code> is repeatable for a repository with more than one config.</p>
 <p>Commit <code>.ash.lock</code> with the change it belongs to, so a reviewer sees the new hash beside the edit it covers. The commands are the supported way to write the file; its keys are sorted, so the same tree always produces the same bytes.</p>
@@ -3898,25 +4039,25 @@ SOFTWARE.
 <h3 id="installing-the-extra">Installing the extra<a class="headerlink" href="#installing-the-extra" title="Permanent link">&para;</a></h3>
 <p>When the extra is missing, the scan warning and <code>ash config lint</code> print a command that installs the extra's packages. The command is read from the metadata of the ASH you run, so it fits that ASH whatever its version or source. It runs the <code>uv</code> that ASH depends on through the Python interpreter that runs ASH and installs into that interpreter's environment, so it reaches a virtualenv, a <code>uv tool install</code> or <code>pipx install</code> environment, and a checkout's <code>uv sync</code> environment alike. The hint prints the interpreter's full path where this shows <code>&lt;python&gt;</code>:</p>
 <!-- doctest: illustrative reason="shows the command the warning prints, with a placeholder for the interpreter path" -->
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>&lt;python&gt;<span class="w"> </span>-m<span class="w"> </span>uv<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>--no-config<span class="w"> </span>--python<span class="w"> </span>&lt;python&gt;<span class="w"> </span><span class="s1">&#39;tree-sitter&gt;=0.26,&lt;0.27&#39;</span><span class="w"> </span><span class="s1">&#39;tree-sitter-java&gt;=0.23.5,&lt;0.24&#39;</span><span class="w"> </span><span class="s1">&#39;tree-sitter-javascript&gt;=0.25,&lt;0.26&#39;</span><span class="w"> </span><span class="s1">&#39;tree-sitter-python&gt;=0.25,&lt;0.26&#39;</span><span class="w"> </span><span class="s1">&#39;tree-sitter-typescript&gt;=0.23.2,&lt;0.24&#39;</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>&lt;python&gt;<span class="w"> </span>-m<span class="w"> </span>uv<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>--no-config<span class="w"> </span>--python<span class="w"> </span>&lt;python&gt;<span class="w"> </span><span class="s1">&#39;tree-sitter&gt;=0.26,&lt;0.27&#39;</span><span class="w"> </span><span class="s1">&#39;tree-sitter-java&gt;=0.23.5,&lt;0.24&#39;</span><span class="w"> </span><span class="s1">&#39;tree-sitter-javascript&gt;=0.25,&lt;0.26&#39;</span><span class="w"> </span><span class="s1">&#39;tree-sitter-python&gt;=0.25,&lt;0.26&#39;</span><span class="w"> </span><span class="s1">&#39;tree-sitter-typescript&gt;=0.23.2,&lt;0.24&#39;</span>
 </span></code></pre></div>
 <p>A plain <code>pip install</code> of those packages does not do the same: environments made by uv have no pip, so <code>pip</code> runs whichever pip comes next on <code>PATH</code>, usually another Python's.</p>
 <p>You can also reinstall ASH with <code>[symbols]</code> added to the source you installed it from. For uvx that is the only way that lasts: uvx rebuilds its cached environment from its own arguments, so an extra installed into it is dropped.</p>
 <p>The <code>symbols</code> extra is available from the next release, the first after v3.7.1. v3.7.1 and earlier define only <code>cdk</code>, and asking one of them for <code>[symbols]</code> installs it without the extra, with only a warning. Until that release, install from the <code>main</code> branch, as <a href="../install/#install-from-main">Install from main</a> shows, with <code>[symbols]</code> after the package name:</p>
 <!-- doctest: illustrative reason="installs ASH from GitHub over the network" -->
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>uv<span class="w"> </span>tool<span class="w"> </span>install<span class="w"> </span>--force<span class="w"> </span><span class="s2">&quot;automated-security-helper[symbols] @ git+https://github.com/awslabs/automated-security-helper.git@main&quot;</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>uv<span class="w"> </span>tool<span class="w"> </span>install<span class="w"> </span>--force<span class="w"> </span><span class="s2">&quot;automated-security-helper[symbols] @ git+https://github.com/awslabs/automated-security-helper.git@main&quot;</span>
 </span></code></pre></div>
 <p><code>main</code> moves, so this command also replaces the ASH you run with the newest code. To stay on one version, or to use a checkout, put that source after the first <code>@</code> instead: a commit SHA from <code>main</code>, or <code>file:///path/to/checkout</code>. Keep the <code>@</code> and the source. ASH is not published on PyPI, and the PyPI project with ASH's name is unrelated and has no <code>symbols</code> extra, so asking for the extra by the bare name installs that project instead.</p>
 <h2 id="inline">Suppress a finding in the source<a class="headerlink" href="#inline" title="Permanent link">&para;</a></h2>
 <p>An <code>ash-ignore</code> comment on the finding's line suppresses it, and <code>ash-ignore-next-line</code> suppresses a finding on the line below:</p>
 <!-- doctest: illustrative reason="shows where the comments go; running it would call make deploy" -->
-<div class="language-python highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">subprocess</span>
-</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>
-</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="n">DEPLOY_COMMAND</span> <span class="o">=</span> <span class="s2">&quot;make deploy&quot;</span>
-</span><span id="__span-10-4"><a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="n">subprocess</span><span class="o">.</span><span class="n">call</span><span class="p">(</span><span class="n">DEPLOY_COMMAND</span><span class="p">,</span> <span class="n">shell</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>  <span class="c1"># ash-ignore: B602 fixed command</span>
-</span><span id="__span-10-5"><a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>
-</span><span id="__span-10-6"><a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="c1"># ash-ignore-next-line: B108 the build container&#39;s own scratch directory</span>
-</span><span id="__span-10-7"><a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="n">SCRATCH_DIR</span> <span class="o">=</span> <span class="s2">&quot;/tmp/ash-build&quot;</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">subprocess</span>
+</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>
+</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="n">DEPLOY_COMMAND</span> <span class="o">=</span> <span class="s2">&quot;make deploy&quot;</span>
+</span><span id="__span-11-4"><a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="n">subprocess</span><span class="o">.</span><span class="n">call</span><span class="p">(</span><span class="n">DEPLOY_COMMAND</span><span class="p">,</span> <span class="n">shell</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>  <span class="c1"># ash-ignore: B602 fixed command</span>
+</span><span id="__span-11-5"><a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>
+</span><span id="__span-11-6"><a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="c1"># ash-ignore-next-line: B108 the build container&#39;s own scratch directory</span>
+</span><span id="__span-11-7"><a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a><span class="n">SCRATCH_DIR</span> <span class="o">=</span> <span class="s2">&quot;/tmp/ash-build&quot;</span>
 </span></code></pre></div>
 <ul>
 <li>Write the comment with <code>#</code> or <code>//</code>. Other comment styles, such as <code>/* */</code> and <code>&lt;!-- --&gt;</code>, are not recognized.</li>
@@ -3990,47 +4131,59 @@ SOFTWARE.
 <p>A finding that is not reported never reaches ASH, so it leaves no trace in any report and <code>--ignore-suppressions</code> cannot bring it back.</p>
 <h2 id="ignore-paths">Ignore a path<a class="headerlink" href="#ignore-paths" title="Permanent link">&para;</a></h2>
 <p>An ignore path drops every finding located in a path:</p>
-<div class="language-yaml highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="nt">global_settings</span><span class="p">:</span>
-</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="w">  </span><span class="nt">ignore_paths</span><span class="p">:</span>
-</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">vendor/**</span>
-</span><span id="__span-11-4"><a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="w">      </span><span class="nt">reason</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Third-party code, scanned upstream</span>
-</span><span id="__span-11-5"><a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">tests/fixtures/**</span>
-</span><span id="__span-11-6"><a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="w">      </span><span class="nt">reason</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Deliberately vulnerable test inputs</span>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="nt">global_settings</span><span class="p">:</span>
+</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="w">  </span><span class="nt">ignore_paths</span><span class="p">:</span>
+</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">vendor/**</span>
+</span><span id="__span-12-4"><a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="w">      </span><span class="nt">reason</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Third-party code, scanned upstream</span>
+</span><span id="__span-12-5"><a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">tests/fixtures/**</span>
+</span><span id="__span-12-6"><a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a><span class="w">      </span><span class="nt">reason</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Deliberately vulnerable test inputs</span>
 </span></code></pre></div>
 <p><code>path</code> and <code>reason</code> are required, and paths match the way suppression paths do. The findings an ignore path drops include a dependency scanner's findings about a package installed under it: a <code>node_modules/</code> ignore path also drops grype's findings located in <code>node_modules/&lt;package&gt;/package.json</code>.</p>
+<p>npm-audit does not work that way. npm, pnpm and yarn name no file in their audit output, so npm-audit locates each advisory at the lockfile it audited (<code>package-lock.json</code>, <code>npm-shrinkwrap.json</code>, <code>pnpm-lock.yaml</code> or <code>yarn.lock</code>), as a path relative to the scanned directory. That file is in your checkout, a <code>node_modules/</code> ignore path does not match it, and it is where a fix is made. For an npm lockfile the result also carries the line of the package's entry; for <code>pnpm-lock.yaml</code> and <code>yarn.lock</code> it has no line. Findings of one lockfile share its location, so the package, its installed version and where it is installed are what tell them apart: they are in the result's <code>package_name</code>, <code>package_version</code> and <code>package_path</code> properties, and in its <code>partialFingerprints</code>.</p>
+<p>Two ignore paths still silence npm-audit, and neither is a mistake in the scanner. An ignore path that matches a lockfile, such as <code>**/pnpm-lock.yaml</code>, drops that lockfile's findings. And a lockfile under an ignore path is skipped rather than audited, so a generic ignore list that names lockfiles leaves those projects out of the audit and the scan has no npm-audit finding for them. Check the ignore list for lockfile names before relying on a clean npm-audit result.</p>
+<p>Earlier releases located every npm-audit finding at <code>node_modules/&lt;package&gt;/package.json</code>. A suppression whose <code>path</code> is that location does not match the finding now, and neither does a baseline keyed on it. Re-key the suppression by setting <code>path</code> to the lockfile and keeping <code>package_name</code>, <code>package_version</code> and <code>package_path</code> to name the dependency:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="nt">global_settings</span><span class="p">:</span>
+</span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="w">  </span><span class="nt">suppressions</span><span class="p">:</span>
+</span><span id="__span-13-3"><a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">rule_id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GHSA-vfj7-8cjw-p6xm</span>
+</span><span id="__span-13-4"><a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="w">      </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">deploy/cdk/package-lock.json</span>
+</span><span id="__span-13-5"><a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="w">      </span><span class="nt">package_name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">braces</span>
+</span><span id="__span-13-6"><a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a><span class="w">      </span><span class="nt">package_path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">deploy/cdk/node_modules/braces</span>
+</span><span id="__span-13-7"><a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a><span class="w">      </span><span class="nt">reason</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Not reachable from the deployed code</span>
+</span></code></pre></div>
+<p>Grype's findings in a lockfile are suppressed the same way.</p>
 <p>An ignore path can also have an <code>expires</code> date, which works the way a suppression's does: on that date the ignore path stops applying, so the files it covered are scanned again and their findings count on the next scan. The same holds for the entries of bandit <code>excluded_paths</code>, checkov <code>skip_path</code>, and syft <code>exclude</code>. This expired ignore path no longer drops the finding in <code>app.py</code>:</p>
 <!-- doctest: run expect-exit=2 -->
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>ash<span class="w"> </span>--source-dir<span class="w"> </span>.<span class="w"> </span>--scanners<span class="w"> </span>detect-secrets<span class="w"> </span>--offline<span class="w"> </span>--no-progress<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="w">  </span>--config-overrides<span class="w"> </span><span class="s1">&#39;global_settings.ignore_paths+=[{&quot;path&quot;: &quot;app.py&quot;, &quot;reason&quot;: &quot;Fixture value, not a real password&quot;, &quot;expires&quot;: &quot;2020-01-01&quot;}]&#39;</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>ash<span class="w"> </span>--source-dir<span class="w"> </span>.<span class="w"> </span>--scanners<span class="w"> </span>detect-secrets<span class="w"> </span>--offline<span class="w"> </span>--no-progress<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-14-2"><a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="w">  </span>--config-overrides<span class="w"> </span><span class="s1">&#39;global_settings.ignore_paths+=[{&quot;path&quot;: &quot;app.py&quot;, &quot;reason&quot;: &quot;Fixture value, not a real password&quot;, &quot;expires&quot;: &quot;2020-01-01&quot;}]&#39;</span>
 </span></code></pre></div>
 <p>A trailing slash names the files under a directory. With a copy of <code>app.py</code> in <code>vendor/</code>, the ignore path <code>vendor/</code> drops the copy's finding, and the suppression from the earlier example covers the original, so the run passes:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>mkdir<span class="w"> </span>-p<span class="w"> </span>vendor<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>cp<span class="w"> </span>app.py<span class="w"> </span>vendor/app.py
-</span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>ash<span class="w"> </span>--source-dir<span class="w"> </span>.<span class="w"> </span>--scanners<span class="w"> </span>detect-secrets<span class="w"> </span>--offline<span class="w"> </span>--no-progress<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-13-3"><a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="w">  </span>--config-overrides<span class="w"> </span><span class="s1">&#39;global_settings.ignore_paths+=[{&quot;path&quot;: &quot;vendor/&quot;, &quot;reason&quot;: &quot;Third-party code&quot;}]&#39;</span><span class="w"> </span><span class="se">\</span>
-</span><span id="__span-13-4"><a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="w">  </span>--config-overrides<span class="w"> </span><span class="s1">&#39;global_settings.suppressions+=[{&quot;path&quot;: &quot;app.py&quot;, &quot;rule_id&quot;: &quot;SECRET-SECRET-KEYWORD&quot;, &quot;reason&quot;: &quot;Fixture value, not a real password&quot;}]&#39;</span>
-</span><span id="__span-13-5"><a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a>rm<span class="w"> </span>-r<span class="w"> </span>vendor
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>mkdir<span class="w"> </span>-p<span class="w"> </span>vendor<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>cp<span class="w"> </span>app.py<span class="w"> </span>vendor/app.py
+</span><span id="__span-15-2"><a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a>ash<span class="w"> </span>--source-dir<span class="w"> </span>.<span class="w"> </span>--scanners<span class="w"> </span>detect-secrets<span class="w"> </span>--offline<span class="w"> </span>--no-progress<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-15-3"><a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="w">  </span>--config-overrides<span class="w"> </span><span class="s1">&#39;global_settings.ignore_paths+=[{&quot;path&quot;: &quot;vendor/&quot;, &quot;reason&quot;: &quot;Third-party code&quot;}]&#39;</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-15-4"><a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="w">  </span>--config-overrides<span class="w"> </span><span class="s1">&#39;global_settings.suppressions+=[{&quot;path&quot;: &quot;app.py&quot;, &quot;rule_id&quot;: &quot;SECRET-SECRET-KEYWORD&quot;, &quot;reason&quot;: &quot;Fixture value, not a real password&quot;}]&#39;</span>
+</span><span id="__span-15-5"><a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a>rm<span class="w"> </span>-r<span class="w"> </span>vendor
 </span></code></pre></div>
 <p>ASH does not read a <code>.ashignore</code> file. It does apply the repository's <code>.gitignore</code> and <code>.ignore</code> files to the files it hands several scanners; see <a href="../../reference/coverage/#what-decides-the-files">Coverage</a>. Several scanners also have their own exclusion options, such as bandit's <code>excluded_paths</code>, checkov's <code>skip_path</code>, and semgrep's <code>exclude</code>; the <a href="../../reference/scanners/">scanner reference</a> lists them.</p>
 <h2 id="exclusions">Drop one rule under a path (exclusions)<a class="headerlink" href="#exclusions" title="Permanent link">&para;</a></h2>
 <p>A suppression keeps the result in SARIF marked suppressed, and an ignore path drops every rule under the path. When one rule is always benign in one place -- bandit B101 (<code>assert</code>) under <code>tests/</code>, say -- a rule+path exclusion drops just that rule's results there, so they do not pile up as suppressed noise in SARIF consumers while B105 or B108 under <code>tests/</code> are still reported:</p>
-<div class="language-yaml highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="nt">global_settings</span><span class="p">:</span>
-</span><span id="__span-14-2"><a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="w">  </span><span class="nt">exclusions</span><span class="p">:</span>
-</span><span id="__span-14-3"><a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">rule_id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">B101</span>
-</span><span id="__span-14-4"><a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="w">      </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;**/tests/**&quot;</span>
-</span><span id="__span-14-5"><a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="w">      </span><span class="nt">scanner</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">bandit</span>
-</span><span id="__span-14-6"><a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a><span class="w">      </span><span class="nt">reason</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;pytest</span><span class="nv"> </span><span class="s">assert</span><span class="nv"> </span><span class="s">idiom;</span><span class="nv"> </span><span class="s">tests</span><span class="nv"> </span><span class="s">are</span><span class="nv"> </span><span class="s">not</span><span class="nv"> </span><span class="s">shipped&quot;</span>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-16-1"><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="nt">global_settings</span><span class="p">:</span>
+</span><span id="__span-16-2"><a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="w">  </span><span class="nt">exclusions</span><span class="p">:</span>
+</span><span id="__span-16-3"><a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">rule_id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">B101</span>
+</span><span id="__span-16-4"><a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="w">      </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;**/tests/**&quot;</span>
+</span><span id="__span-16-5"><a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a><span class="w">      </span><span class="nt">scanner</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">bandit</span>
+</span><span id="__span-16-6"><a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a><span class="w">      </span><span class="nt">reason</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;pytest</span><span class="nv"> </span><span class="s">assert</span><span class="nv"> </span><span class="s">idiom;</span><span class="nv"> </span><span class="s">tests</span><span class="nv"> </span><span class="s">are</span><span class="nv"> </span><span class="s">not</span><span class="nv"> </span><span class="s">shipped&quot;</span>
 </span></code></pre></div>
 <p><code>rule_id</code>, <code>path</code>, and <code>reason</code> are required. The rule ID matches the finding's exact ID case-insensitively, or as a glob (<code>B1*</code>); the path matches the way a suppression's does, every file-naming location of the result included; <code>scanner</code> (optional) bounds the exclusion to one scanner's results by its registered name; <code>expires</code> works the way a suppression's does. Each dropped result is logged when the scan runs with <code>--verbose</code>. <a href="../../concepts/suppressions/">Suppressions, ignore paths, and scanner exclusions</a> places exclusions among the other mechanisms.</p>
 <h2 id="unused">Find suppressions that no longer match<a class="headerlink" href="#unused" title="Permanent link">&para;</a></h2>
 <p>The <code>unused-suppressions</code> reporter, on by default, writes <code>.ash/ash_output/reports/ash.unused-suppressions.json</code> and <code>ash.unused-suppressions.md</code>. They list each entry in <code>global_settings.suppressions</code> that matched no finding in the scan, including expired ones. They do not cover ignore paths or inline suppressions.</p>
 <p>After a scan, <code>ash config lint --fix-unused</code> comments out the entries that the report lists, with the date. When it comments out every entry, it leaves <code>suppressions: []</code> above them, so the file still loads; remove the <code>[]</code> when you turn an entry back on. A suppression can look unused in one environment and still be needed in another, for example when a scanner whose finding it covers is not installed locally but runs in CI. Check the report before you remove entries.</p>
 <h2 id="inspect">Add a suppression while you review findings<a class="headerlink" href="#inspect" title="Permanent link">&para;</a></h2>
-<p><code>ash inspect findings</code> opens the last scan's findings in your terminal. Select a finding and press <code>x</code> to suppress it: ASH asks for a reason and an optional expiration, and adds an entry with the finding's path and rule ID, and its line as <code>line_start</code> and <code>line_end</code>, to the config file (the <code>--config</code> file, else the config ASH discovers, else a new <code>.ashrc.yaml</code> in the current directory). It keeps the comments of a YAML file, except one whose <code>global_settings</code> is written inline (<code>global_settings: {...}</code>), which it rewrites in full, and it writes a JSON config back as JSON. If the file already has an identical entry, nothing is added, and the status bar says so; an entry for another line, reason, or expiration with the same rule ID and path is added. It does not edit TOML files, or a file that uses <code>extends</code> but has no suppressions list of its own.</p>
+<p><code>ash inspect findings</code> opens the last scan's findings in your terminal. Select a finding and press <code>x</code> to suppress it: ASH asks for a reason and an optional expiration, and adds an entry with the finding's path and rule ID, and its line as <code>line_start</code> and <code>line_end</code>, to the config file (the <code>--config</code> file, else the config ASH discovers, else a new <code>.ash.yaml</code> in the current directory). It keeps the comments of a YAML file, except one whose <code>global_settings</code> is written inline (<code>global_settings: {...}</code>), which it rewrites in full, and it writes a JSON config back as JSON. If the file already has an identical entry, nothing is added, and the status bar says so; an entry for another line, reason, or expiration with the same rule ID and path is added. It does not edit TOML files, or a file that uses <code>extends</code> but has no suppressions list of its own.</p>
 <h2 id="ignore-suppressions">See every finding<a class="headerlink" href="#ignore-suppressions" title="Permanent link">&para;</a></h2>
 <p><code>--ignore-suppressions</code> reports findings as if no suppression existed, so you can review what the suppressions hide. With the suppression from the earlier example, the finding fails the scan again:</p>
 <!-- doctest: run expect-exit=2 -->
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>ash<span class="w"> </span>--source-dir<span class="w"> </span>.<span class="w"> </span>--scanners<span class="w"> </span>detect-secrets<span class="w"> </span>--offline<span class="w"> </span>--no-progress<span class="w"> </span>--ignore-suppressions<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-15-2"><a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="w">  </span>--config-overrides<span class="w"> </span><span class="s1">&#39;global_settings.suppressions+=[{&quot;path&quot;: &quot;app.py&quot;, &quot;rule_id&quot;: &quot;SECRET-SECRET-KEYWORD&quot;, &quot;reason&quot;: &quot;Fixture value, not a real password&quot;}]&#39;</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-17-1"><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a>ash<span class="w"> </span>--source-dir<span class="w"> </span>.<span class="w"> </span>--scanners<span class="w"> </span>detect-secrets<span class="w"> </span>--offline<span class="w"> </span>--no-progress<span class="w"> </span>--ignore-suppressions<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-17-2"><a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="w">  </span>--config-overrides<span class="w"> </span><span class="s1">&#39;global_settings.suppressions+=[{&quot;path&quot;: &quot;app.py&quot;, &quot;rule_id&quot;: &quot;SECRET-SECRET-KEYWORD&quot;, &quot;reason&quot;: &quot;Fixture value, not a real password&quot;}]&#39;</span>
 </span></code></pre></div>
 <p>It lifts config suppressions, ignore paths, <code>ash-ignore</code> comments, and cdk-nag's <code>Metadata</code> suppressions. Every scanner reads the files under an ignore path, and their findings are reported; to drop only the ignore paths for one run, pass <code>--config-overrides 'global_settings.ignore_paths=[]'</code> instead. It does not bring back what a scanner never reported (findings hidden by the scanner's own comments or its exclusion options), and findings that semgrep and checkov report as suppressed stay suppressed. The repository's <code>.gitignore</code> and <code>.ignore</code> files still apply, and findings in ASH's own output directory stay out of the results. In container mode the flag reaches the scan inside the container and works there as in a local scan.</p>
 <p>When an MCP client delivers the config, its suppressions, ignore paths, and scanner exclusions are marked client-supplied in the results; see <a href="../../concepts/trust-model/#client-supplied">Configuration trust model</a>. ASH applies all of them itself, so in a local scan with <code>--ignore-suppressions</code> none of them applies, and the findings they would have marked are ordinary findings.</p>

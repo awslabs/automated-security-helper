@@ -762,6 +762,8 @@ SOFTWARE.
       
         
       
+        
+      
     
     
     
@@ -946,6 +948,17 @@ SOFTWARE.
   
     <nav class="md-nav" aria-label="Where ASH looks for its config">
       <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#move-config" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Move an existing config to .ash.yaml
+      
+    </span>
+  </a>
+  
+</li>
         
           <li class="md-nav__item">
   <a href="#use-a-specific-file" class="md-nav__link">
@@ -1297,6 +1310,34 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
+      <a href="../scan-container-images/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scan container images
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../run-offline/" class="md-nav__link">
         
   
@@ -1425,10 +1466,10 @@ SOFTWARE.
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_16" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_17" >
         
           
-          <label class="md-nav__link" for="__nav_4_16" id="__nav_4_16_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_4_17" id="__nav_4_17_label" tabindex="0">
             
   
   
@@ -1446,8 +1487,8 @@ SOFTWARE.
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_16_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_4_16">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_17_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_17">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -2600,6 +2641,10 @@ SOFTWARE.
       
         
       
+        
+      
+        
+      
     
     
     
@@ -2711,6 +2756,62 @@ SOFTWARE.
     
   
     Gitleaks scanner
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/mcp-config/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP server config scanning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/syft/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Syft SBOM scanner (syft) and the sdist lockfile harvest
   
 
     
@@ -3568,6 +3669,17 @@ SOFTWARE.
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#move-config" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Move an existing config to .ash.yaml
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#use-a-specific-file" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3753,7 +3865,7 @@ SOFTWARE.
 <p>Run this in the root of the repository you scan:</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>ash<span class="w"> </span>config<span class="w"> </span>init
 </span></code></pre></div>
-<p><code>ash config init</code> writes <code>.ashrc.yaml</code> in the current directory, with <code>project_name</code> set to the directory's name and every other setting at its default value, and <code>.ash/.gitignore</code>, which keeps ASH's output directory <code>.ash/ash_output</code> out of git. It exits 1 if the file already exists; pass <code>--force</code> to overwrite it. It also exits 1 when the directory already has another config source, such as <code>.ash/.ash.yaml</code> or a <code>[tool.ash]</code> table, because ASH never merges sources, and <code>--force</code> does not change that. With <code>--config</code>, or <code>ASH_CONFIG</code> set, it writes to that path instead, and a path that ends in <code>.json</code> gets a JSON file. It then does not look for another config source, so a file it writes next to an existing <code>.ash/.ash.yaml</code> is one a scan does not read. <code>project_name</code> is then the name of the directory that holds the file, and <code>.ash/.gitignore</code> is written only when the file is in <code>.ash/</code> or has one of the names ASH looks for.</p>
+<p><code>ash config init</code> writes <code>.ash.yaml</code> in the current directory, with <code>project_name</code> set to the directory's name and every other setting at its default value, and <code>.ash/.gitignore</code>, which keeps ASH's output directory <code>.ash/ash_output</code> out of git. It exits 1 if the file already exists; pass <code>--force</code> to overwrite it. It also exits 1 when the directory already has another config source, such as a legacy <code>.ash/.ash.yaml</code> or a <code>[tool.ash]</code> table, because ASH never merges sources, and <code>--force</code> does not change that. With <code>--config</code>, or <code>ASH_CONFIG</code> set, it writes to that path instead, and a path that ends in <code>.json</code> gets a JSON file. It then does not look for another config source, so a file it writes next to an existing <code>.ash.yaml</code> is one a scan does not read. <code>project_name</code> is then the name of the directory that holds the file, and <code>.ash/.gitignore</code> is written only when the file is in <code>.ash/</code> or has one of the names ASH looks for.</p>
 <p>You can delete every key you don't change. A key you keep holds its value when a later ASH release changes the default, and a key you delete follows the new default. A short file also has less to review:</p>
 <div class="language-yaml highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># yaml-language-server: $schema=https://raw.githubusercontent.com/awslabs/automated-security-helper/refs/heads/main/automated_security_helper/schemas/AshConfig.json</span>
 </span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="nt">project_name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">payments-api</span>
@@ -3764,47 +3876,58 @@ SOFTWARE.
 </span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
 </span></code></pre></div>
 <p><code>project_name</code> names the project in the reports. Without it, ASH uses the <code>ASH_PROJECT_NAME</code> environment variable, else <code>ash-scan</code>.</p>
-<p>A config file inside the repository you scan, including the <code>.ashrc.yaml</code> that ASH finds on its own, is a repository config: whoever can commit to the repository controls it, so ASH ignores the few settings in it that grant sandbox access, load ASH's plugins that send data off the host, turn on the reporters that send findings off the host, choose where findings are sent, relax the stale content database check, choose which release of a scanner's tool runs, let trivy send usage data to its vendor, or point the scanners listed in <a href="../choose-scanners/#operator-only">Options only the operator can set</a> at their tool files. Command-line flags, and a config file outside every git checkout and the scanned directory that you name with <code>--config</code>, are operator sources and may set everything. A config in a separate ops or dotfiles checkout is held to the same limits as a repository config; <a href="../../concepts/trust-model/">Configuration trust model</a> has the details.</p>
+<p>A config file inside the repository you scan, including the <code>.ash.yaml</code> that ASH finds on its own, is a repository config: whoever can commit to the repository controls it, so ASH ignores the few settings in it that grant sandbox access, load ASH's plugins that send data off the host, turn on the reporters that send findings off the host, choose where findings are sent, relax the stale content database check, choose which release of a scanner's tool runs, let trivy send usage data to its vendor, or point the scanners listed in <a href="../choose-scanners/#operator-only">Options only the operator can set</a> at their tool files. Command-line flags, and a config file outside every git checkout and the scanned directory that you name with <code>--config</code>, are operator sources and may set everything. A config in a separate ops or dotfiles checkout is held to the same limits as a repository config; <a href="../../concepts/trust-model/">Configuration trust model</a> has the details.</p>
 <h2 id="discovery">Where ASH looks for its config<a class="headerlink" href="#discovery" title="Permanent link">&para;</a></h2>
 <p><code>ash scan</code> looks in its source directory (<code>--source-dir</code>, by default the current directory), and so do <code>ash config get</code>, <code>ash config validate</code>, <code>ash config lint</code>, <code>ash config validate-plugin-dependencies</code>, <code>ash config update</code>, and <code>ash config wizard</code>, which take <code>--source-dir</code> too. <code>ash config init</code> writes in the current directory. ASH uses the first source it finds, in this order:</p>
 <ol>
-<li><code>.ash.yml</code>, <code>.ash.yaml</code>, <code>.ash.json</code>, <code>ash.yml</code>, <code>ash.yaml</code>, <code>ash.json</code>. ASH tries each name in the directory and then in its <code>.ash/</code> subdirectory before it moves to the next name, so <code>.ash/.ash.yml</code> wins over <code>.ash.yaml</code>.</li>
-<li><code>.ashrc.toml</code>, <code>.ashrc.yaml</code>, <code>.ashrc.yml</code>, <code>.ashrc.json</code>, <code>ashrc.toml</code>, <code>ashrc.yaml</code>, <code>ashrc.yml</code>, and <code>ashrc.json</code>, in the directory only.</li>
-<li>The <code>[tool.ash]</code> table of <code>pyproject.toml</code>.</li>
+<li><code>.ash.yaml</code> at the root of the directory. This is the canonical location, and the one <code>ash config init</code> and <code>ash config wizard</code> write.</li>
+<li>The other names in the first group, which are deprecated locations: <code>.ash.yml</code>, <code>.ash.json</code>, <code>ash.yml</code>, <code>ash.yaml</code>, and <code>ash.json</code>, each tried in the directory and then in its <code>.ash/</code> subdirectory (<code>.ash/.ash.yaml</code> and <code>.ash/ash.yaml</code> included), before ASH moves to the next name.</li>
+<li>The <code>ashrc</code> names, which are deprecated: <code>.ashrc.toml</code>, <code>.ashrc.yaml</code>, <code>.ashrc.yml</code>, <code>.ashrc.json</code>, <code>ashrc.toml</code>, <code>ashrc.yaml</code>, <code>ashrc.yml</code>, and <code>ashrc.json</code>, in the directory only.</li>
+<li>The <code>[tool.ash]</code> table of <code>pyproject.toml</code>. It is a supported source and not deprecated, but it ranks after the file names.</li>
 </ol>
-<p>ASH never merges sources and does not look in parent directories. Every other source it finds is ignored, with a warning that names it. The <a href="../../reference/configuration/#where-ash-finds-its-configuration">configuration reference</a> lists all 21 locations in order.</p>
-<p>When a file from the first group is used while an <code>ashrc</code> file or a <code>[tool.ash]</code> table also exists, the warning adds that the first group's names are deprecated in favor of the other two. The file from the first group is still the one ASH uses. <code>ash config init</code> writes <code>.ashrc.yaml</code>, and these pages use that name.</p>
-<p>The commands that edit a config file (<code>ash config update</code>, <code>ash config wizard</code>, and <code>ash inspect findings</code>) write YAML, and JSON into a file whose name ends in <code>.json</code>. They refuse TOML files, and <code>update</code> and <code>wizard</code> also refuse a file that uses <code>extends</code> or <code>patch</code> or reads values from the environment, because a rewrite would store what the references resolve to. With no config file, <code>wizard</code> and <code>inspect findings</code> create <code>.ashrc.yaml</code>. <code>ash config update --set</code> takes the same <code>key.path=value</code> form as <a href="#overrides"><code>--config-overrides</code></a>, including JSON values and <code>+=</code>. <code>update</code> and <code>wizard</code> exit 3 and leave the file unchanged when a scan refuses it, and <code>update</code> also when a <code>--set</code> leaves a config a scan would refuse. Neither checks the options of plugins loaded from <code>ash_plugin_modules</code>, so a scan can still refuse a file they wrote. They write every setting, defaults included, keep top-level keys ASH does not know (a JSON <code>$schema</code>, for example), and keep no comment other than the schema line.</p>
+<p>ASH never merges sources and does not look in parent directories. Every other source it finds is ignored, with a warning that names it. The <a href="../../reference/configuration/#where-ash-finds-its-configuration">configuration reference</a> lists all the locations in order.</p>
+<p>A config file at any location other than <code>.ash.yaml</code> at the root still loads, and ASH prints one warning that names the file, says the location is deprecated, and names <code>.ash.yaml</code> as the path to move it to. Support for those locations is removed in ASH 4.0; the warning starts in 3.9. When both <code>.ash.yaml</code> and a legacy file exist, <code>.ash.yaml</code> is used and one warning names the legacy file it shadows. <code>--config</code>, <code>-c</code>, and the <code>ASH_CONFIG</code> variable name a file directly and produce no warning.</p>
+<h3 id="move-config">Move an existing config to <code>.ash.yaml</code><a class="headerlink" href="#move-config" title="Permanent link">&para;</a></h3>
+<p>Move the file with <code>git mv</code> so its history follows it. For a config in the <code>.ash/</code> directory:</p>
+<!-- doctest: illustrative reason="runs in a repository that already has a config at the old location" -->
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>git<span class="w"> </span>mv<span class="w"> </span>.ash/.ash.yaml<span class="w"> </span>.ash.yaml
+</span></code></pre></div>
+<p>For a config under another legacy name, such as <code>.ashrc.yaml</code>, use that name as the source:</p>
+<!-- doctest: illustrative reason="runs in a repository that already has a config at the old location" -->
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>git<span class="w"> </span>mv<span class="w"> </span>.ashrc.yaml<span class="w"> </span>.ash.yaml
+</span></code></pre></div>
+<p>The deprecation warning names the file ASH loaded and the <code>.ash.yaml</code> path to move it to. Run <code>ash config validate</code> afterward to confirm that ASH reads the new location.</p>
+<p>The commands that edit a config file (<code>ash config update</code>, <code>ash config wizard</code>, and <code>ash inspect findings</code>) write YAML, and JSON into a file whose name ends in <code>.json</code>. They refuse TOML files, and <code>update</code> and <code>wizard</code> also refuse a file that uses <code>extends</code> or <code>patch</code> or reads values from the environment, because a rewrite would store what the references resolve to. With no config file, <code>wizard</code> and <code>inspect findings</code> create <code>.ash.yaml</code>. <code>ash config update --set</code> takes the same <code>key.path=value</code> form as <a href="#overrides"><code>--config-overrides</code></a>, including JSON values and <code>+=</code>. <code>update</code> and <code>wizard</code> exit 3 and leave the file unchanged when a scan refuses it, and <code>update</code> also when a <code>--set</code> leaves a config a scan would refuse. Neither checks the options of plugins loaded from <code>ash_plugin_modules</code>, so a scan can still refuse a file they wrote. They write every setting, defaults included, keep top-level keys ASH does not know (a JSON <code>$schema</code>, for example), and keep no comment other than the schema line.</p>
 <p>In <code>pyproject.toml</code>, the same settings go under <code>[tool.ash]</code>:</p>
 <!-- doctest: config kind=pyproject -->
-<div class="language-toml highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="k">[tool.ash]</span>
-</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="n">project_name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;payments-api&quot;</span>
-</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
-</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="k">[tool.ash.global_settings]</span>
-</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="n">severity_threshold</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;HIGH&quot;</span>
+<div class="language-toml highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="k">[tool.ash]</span>
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="n">project_name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;payments-api&quot;</span>
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>
+</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="k">[tool.ash.global_settings]</span>
+</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="n">severity_threshold</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;HIGH&quot;</span>
 </span></code></pre></div>
 <h3 id="use-a-specific-file">Use a specific file<a class="headerlink" href="#use-a-specific-file" title="Permanent link">&para;</a></h3>
 <p><code>--config</code> (<code>-c</code>) or the <code>ASH_CONFIG</code> environment variable names the file to use. In a scan of one directory, ASH then skips discovery, so it does not read the repository's own config at all. In workspace mode, the file is layered over each project's own config instead: every setting it makes is final for every project, a project's own config fills only the settings it leaves out, and a project with no config uses the file alone. ASH refuses such a file inside the workspace's tree (exit 3), and one inside another git checkout cannot make the operator-only settings final (<a href="../scale-large-repos/#workspaces">Scan a multi-project workspace</a>). <code>--config-overrides</code> applies to every project as well. A relative path is resolved against the current directory, not the source directory.</p>
 <!-- doctest: illustrative reason="names a config file outside the sample project" -->
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>ash<span class="w"> </span>--source-dir<span class="w"> </span>.<span class="w"> </span>--config<span class="w"> </span>~/ash/ci.yaml
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>ash<span class="w"> </span>--source-dir<span class="w"> </span>.<span class="w"> </span>--config<span class="w"> </span>~/ash/ci.yaml
 </span></code></pre></div>
 <p>A scan uses the default configuration only when there is no config file at all. A config file that <code>--config</code> or <code>ASH_CONFIG</code> names, or that discovery finds, stops the scan with exit 3 before anything is scanned when it does not exist, is not a regular file, cannot be read, is not UTF-8, does not parse, or fails validation, and so does an <code>extends</code> base that is missing or does not parse. <a href="#check">Check a config</a> shows how to catch these before a scan.</p>
 <p>A scan that names a file that does not exist is refused:</p>
 <!-- doctest: run expect-exit=3 -->
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>ash<span class="w"> </span>--source-dir<span class="w"> </span>.<span class="w"> </span>--scanners<span class="w"> </span>detect-secrets<span class="w"> </span>--offline<span class="w"> </span>--no-progress<span class="w"> </span>--config<span class="w"> </span>no-such-config.yaml
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>ash<span class="w"> </span>--source-dir<span class="w"> </span>.<span class="w"> </span>--scanners<span class="w"> </span>detect-secrets<span class="w"> </span>--offline<span class="w"> </span>--no-progress<span class="w"> </span>--config<span class="w"> </span>no-such-config.yaml
 </span></code></pre></div>
 <p>So is one whose <code>ASH_CONFIG</code> names such a file, also when <code>--config</code> names a file that loads:</p>
 <!-- doctest: run expect-exit=3 -->
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nv">ASH_CONFIG</span><span class="o">=</span>no-such-config.yaml<span class="w"> </span>ash<span class="w"> </span>--source-dir<span class="w"> </span>.<span class="w"> </span>--scanners<span class="w"> </span>detect-secrets<span class="w"> </span>--offline<span class="w"> </span>--no-progress
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="nv">ASH_CONFIG</span><span class="o">=</span>no-such-config.yaml<span class="w"> </span>ash<span class="w"> </span>--source-dir<span class="w"> </span>.<span class="w"> </span>--scanners<span class="w"> </span>detect-secrets<span class="w"> </span>--offline<span class="w"> </span>--no-progress
 </span></code></pre></div>
 <h2 id="default-scanners">Choose which scanners run by default<a class="headerlink" href="#default-scanners" title="Permanent link">&para;</a></h2>
 <p>Set the default scanners once, in a trusted config: a file outside every git checkout and the scanned directory that you name with <code>--config</code> or <code>ASH_CONFIG</code>, or <code>--config-overrides</code>.</p>
 <!-- doctest: config kind=ash -->
-<div class="language-yaml highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="nt">project_name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">platform</span>
-</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="nt">default_scanners</span><span class="p">:</span>
-</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="w">  </span><span class="nt">only</span><span class="p">:</span>
-</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">bandit</span>
-</span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">trivy</span>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="nt">project_name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">platform</span>
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="nt">default_scanners</span><span class="p">:</span>
+</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">  </span><span class="nt">only</span><span class="p">:</span>
+</span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">bandit</span>
+</span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">trivy</span>
 </span></code></pre></div>
 <p><code>only</code> replaces the mode's default selection, and it does so in every mode: a mode that runs every scanner then runs exactly the names listed. <code>add</code> adds names to a mode whose default is a fixed set, which today is the five scanners of <a href="../pre-commit/#scanner-selection">precommit mode</a>; in a mode that runs every scanner unrestricted, <code>add</code> has no effect. Empty or missing lists change nothing. Naming both is refused with exit 3. The <code>precommit</code> section is a different, narrower setting: only <code>--mode precommit</code> reads it.</p>
 <p>A <code>default_scanners</code> in a config inside the scanned tree, or from an MCP client, is ignored with a warning, and an MCP client's patch to it is refused. The operator's value stays in force. A trusted config that <code>extends</code> a file inside a checkout keeps the selection its own files write, and ignores the one that file writes. <code>ash config lint</code> warns about a <code>default_scanners</code> in a config inside the scanned tree, a key that is not <code>only</code> or <code>add</code> included, and still exits 0. Selecting a scanner does not enable it or install its tool: a scanner with <code>enabled: false</code> stays off, and a selected scanner whose tool is missing is reported as missing.</p>
@@ -3813,18 +3936,18 @@ SOFTWARE.
 <p>Container mode needs an image built from this ASH release when the selection comes from the config: the command passes the image the lists it read on the host, an older image rejects that option, and the run ends with exit 3 and a request to rebuild before any scanner starts. A selection the host cannot resolve also ends the run with exit 3, before the container starts, unless the image may hold another ASH release and neither <code>ASH_CONFIG</code>, the selected config nor <code>--config-overrides</code> names a selection. Nix mode runs this installation and forwards <code>--only-scanners</code> and <code>--add-scanners</code> as they are.</p>
 <h2 id="extends">Share settings with <code>extends</code><a class="headerlink" href="#extends" title="Permanent link">&para;</a></h2>
 <p>A config file can build on other files. <code>extends</code> names one base file or a list of them, relative to the file that names it:</p>
-<div class="language-yaml highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="nt">extends</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">config/ash-base.yaml</span>
-</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="nt">project_name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">payments-api</span>
-</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="nt">scanners</span><span class="p">:</span>
-</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="w">  </span><span class="nt">trivy</span><span class="p">:</span>
-</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
-</span><span id="__span-7-6"><a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="nt">patch</span><span class="p">:</span>
-</span><span id="__span-7-7"><a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">op</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">add</span>
-</span><span id="__span-7-8"><a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="w">    </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/global_settings/suppressions/-</span>
-</span><span id="__span-7-9"><a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a><span class="w">    </span><span class="nt">value</span><span class="p">:</span>
-</span><span id="__span-7-10"><a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a><span class="w">      </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">app.py</span>
-</span><span id="__span-7-11"><a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a><span class="w">      </span><span class="nt">rule_id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">SECRET-SECRET-KEYWORD</span>
-</span><span id="__span-7-12"><a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a><span class="w">      </span><span class="nt">reason</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Fixture value, not a real password</span>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="nt">extends</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">config/ash-base.yaml</span>
+</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="nt">project_name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">payments-api</span>
+</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="nt">scanners</span><span class="p">:</span>
+</span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="w">  </span><span class="nt">trivy</span><span class="p">:</span>
+</span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
+</span><span id="__span-9-6"><a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="nt">patch</span><span class="p">:</span>
+</span><span id="__span-9-7"><a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">op</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">add</span>
+</span><span id="__span-9-8"><a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a><span class="w">    </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/global_settings/suppressions/-</span>
+</span><span id="__span-9-9"><a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a><span class="w">    </span><span class="nt">value</span><span class="p">:</span>
+</span><span id="__span-9-10"><a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a><span class="w">      </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">app.py</span>
+</span><span id="__span-9-11"><a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a><span class="w">      </span><span class="nt">rule_id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">SECRET-SECRET-KEYWORD</span>
+</span><span id="__span-9-12"><a id="__codelineno-9-12" name="__codelineno-9-12" href="#__codelineno-9-12"></a><span class="w">      </span><span class="nt">reason</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Fixture value, not a real password</span>
 </span></code></pre></div>
 <p>ASH merges the bases in order and then the file itself. Mappings merge key by key; a list or a single value from the later file replaces the base's. To add to a base's list instead of replacing it, use <code>patch</code>, a list of JSON Patch operations (<code>add</code>, <code>remove</code>, <code>replace</code>, and <code>test</code>) applied after the merge. A config file that an MCP client chose (a file inside delivered source, or one named as <code>config_path</code>) may not use <code>test</code>: every <code>test</code> operation in such a file is refused before any operation applies, because a <code>test</code> against a base the operator owns would reveal, through whether the file loads, a value the client may not read (<a href="../mcp-server/#what-a-delivered-config-cannot-set">What a delivered config cannot set</a>); the operator's own files keep theirs.</p>
 <p>A plugin's section is found by the plugin's name with case, punctuation, and the words Scanner, Reporter, and Converter ignored, so <code>CSV</code>, <code>CsvReporter</code>, and <code>csv</code> name one reporter, and <code>DetectSecretsScanner</code> names <code>detect-secrets</code>. A child's spelling of a section the base writes another way is that section: the merged config holds it under a built-in plugin's own name (<code>csv</code>), and otherwise under the child's spelling. A file that writes two such spellings, neither of them the plugin's own name, such as <code>DetectSecrets</code> and <code>DETECT_SECRETS</code>, is refused with exit 3 by a scan and by <code>ash config validate</code>, which name both spellings and none of their values. When one of the two is the plugin's own name (<code>detect-secrets</code>), the file is not refused: the plugin's own name wins key by key where both set a value. A config that a results file recorded is read, not refused, by <code>ash report</code> and <code>ash merge</code>: of two such spellings in it, they read the one that the scan which recorded it read, and when the spelling not read sets a value the read one does not, a warning names the spellings and the one read, never a value.</p>
@@ -3832,9 +3955,9 @@ SOFTWARE.
 <p>A base must be inside the scanned directory. For a config file outside the scanned directory, its bases must be in that file's own directory or below it (for a file in <code>.ash/</code>, the directory that holds <code>.ash/</code>). URLs are refused, and so are cycles, chains more than 10 levels deep, and chains of more than 50 files.</p>
 <h2 id="overrides">Override settings for one run<a class="headerlink" href="#overrides" title="Permanent link">&para;</a></h2>
 <p><code>--config-overrides</code> sets one key for one run, on top of the config file. Repeat it to set several; when two set the same key, the later one wins.</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>ash<span class="w"> </span>--source-dir<span class="w"> </span>.<span class="w"> </span>--scanners<span class="w"> </span>detect-secrets<span class="w"> </span>--offline<span class="w"> </span>--no-progress<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="w">  </span>--config-overrides<span class="w"> </span><span class="nv">fail_on_findings</span><span class="o">=</span><span class="nb">false</span><span class="w"> </span><span class="se">\</span>
-</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">  </span>--config-overrides<span class="w"> </span>global_settings.severity_threshold<span class="o">=</span>HIGH
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>ash<span class="w"> </span>--source-dir<span class="w"> </span>.<span class="w"> </span>--scanners<span class="w"> </span>detect-secrets<span class="w"> </span>--offline<span class="w"> </span>--no-progress<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="w">  </span>--config-overrides<span class="w"> </span><span class="nv">fail_on_findings</span><span class="o">=</span><span class="nb">false</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="w">  </span>--config-overrides<span class="w"> </span>global_settings.severity_threshold<span class="o">=</span>HIGH
 </span></code></pre></div>
 <p>The form is <code>key.path=value</code>:</p>
 <ul>
@@ -3845,9 +3968,9 @@ SOFTWARE.
 <p>ASH applies the overrides after loading the config file and validates the result again. An override that does not parse or does not validate stops the scan with exit 3, and so does an unknown key in a plugin's <code>options</code> or a plugin option set beside <code>enabled</code> instead of under <code>options</code>. An override of a key the model ignores, such as an unknown top-level key or an unknown plugin name under <code>scanners</code>, <code>reporters</code>, or <code>converters</code>, is accepted and has no effect. Overrides are an operator source, so they can set the settings a repository config cannot.</p>
 <h2 id="environment">Read values from the environment<a class="headerlink" href="#environment" title="Permanent link">&para;</a></h2>
 <p>A config value written as <code>${NAME}</code> or <code>${NAME:default}</code> is replaced by the environment variable <code>NAME</code>. With a default, <code>default</code> applies when the variable is not set:</p>
-<div class="language-yaml highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="nt">project_name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${ASH_SERVICE_NAME:payments-api}</span>
-</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="nt">global_settings</span><span class="p">:</span>
-</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="w">  </span><span class="nt">severity_threshold</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${ASH_GATE_THRESHOLD:HIGH}</span>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="nt">project_name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${ASH_SERVICE_NAME:payments-api}</span>
+</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="nt">global_settings</span><span class="p">:</span>
+</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="w">  </span><span class="nt">severity_threshold</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${ASH_GATE_THRESHOLD:HIGH}</span>
 </span></code></pre></div>
 <ul>
 <li>Write the reference at the start of the value. In YAML, an unquoted value that starts with <code>${</code> is replaced, and a quoted one only when it is tagged <code>!ENV</code> (<code>!ENV '${NAME}'</code>). In TOML, every string value that starts with <code>${</code> is replaced. A JSON config file is never read this way.</li>
@@ -3863,17 +3986,17 @@ SOFTWARE.
 <li>An editor that checks the file against ASH's schema marks a reference in a field with fixed values, such as <code>severity_threshold</code>, as an error. ASH accepts it.</li>
 </ul>
 <p><code>ash config get</code> loads the file with the variable read, and prints the reference, not the value:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>cat<span class="w"> </span>&gt;<span class="w"> </span>env-example.yaml<span class="w"> </span><span class="s">&lt;&lt;&#39;EOF&#39;</span>
-</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="s">project_name: ${ASH_SERVICE_NAME}</span>
-</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="s">EOF</span>
-</span><span id="__span-10-4"><a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="nv">ASH_SERVICE_NAME</span><span class="o">=</span>payments-api<span class="w"> </span>ash<span class="w"> </span>config<span class="w"> </span>get<span class="w"> </span>--config<span class="w"> </span>env-example.yaml
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>cat<span class="w"> </span>&gt;<span class="w"> </span>env-example.yaml<span class="w"> </span><span class="s">&lt;&lt;&#39;EOF&#39;</span>
+</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="s">project_name: ${ASH_SERVICE_NAME}</span>
+</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="s">EOF</span>
+</span><span id="__span-12-4"><a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="nv">ASH_SERVICE_NAME</span><span class="o">=</span>payments-api<span class="w"> </span>ash<span class="w"> </span>config<span class="w"> </span>get<span class="w"> </span>--config<span class="w"> </span>env-example.yaml
 </span></code></pre></div>
 <!-- doctest: output -->
-<div class="language-text highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>project_name: ${ASH_SERVICE_NAME}
+<div class="language-text highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>project_name: ${ASH_SERVICE_NAME}
 </span></code></pre></div>
 <p>Without the variable, the same file is refused:</p>
 <!-- doctest: run expect-exit=3 -->
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>ash<span class="w"> </span>config<span class="w"> </span>validate<span class="w"> </span>--config<span class="w"> </span>env-example.yaml
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>ash<span class="w"> </span>config<span class="w"> </span>validate<span class="w"> </span>--config<span class="w"> </span>env-example.yaml
 </span></code></pre></div>
 <h2 id="relative-paths">Relative paths in the operator's settings<a class="headerlink" href="#relative-paths" title="Permanent link">&para;</a></h2>
 <p>A relative path in one of the operator's settings is taken from where it was set, not from the source directory being scanned:</p>
@@ -3886,7 +4009,7 @@ A path that starts with <code>~</code>, or is absolute, is used as written. In <
 <p>A config file inside the scanned tree does not set these options (<a href="../../concepts/trust-model/#how-the-tier-is-decided">How a file's tier is decided</a>). To name a file in the scanned repository, give its absolute path, or a path relative to where you run ASH with <code>--config-overrides</code>.</p>
 <h2 id="schema">Get completion in your editor<a class="headerlink" href="#schema" title="Permanent link">&para;</a></h2>
 <p>The first line <code>ash config init</code> writes points editors that use the YAML language server (VS Code with the Red Hat YAML extension, for example) at ASH's JSON schema:</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a># yaml-language-server: $schema=https://raw.githubusercontent.com/awslabs/automated-security-helper/refs/heads/main/automated_security_helper/schemas/AshConfig.json
+<div class="language-text highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a># yaml-language-server: $schema=https://raw.githubusercontent.com/awslabs/automated-security-helper/refs/heads/main/automated_security_helper/schemas/AshConfig.json
 </span></code></pre></div>
 <p>The editor then completes keys and checks values as you type. ASH itself treats the line as a comment. The URL follows the <code>main</code> branch, not the ASH version you have installed, so the schema can list keys your version does not have. The schema flags an unknown key only where ASH itself refuses one (the unknown-key rows of the table in <a href="#typos">Which mistakes ASH catches</a> that end in exit 3, plus <code>build</code> and <code>mcp-resource-management</code>), and it does not include the alpha plugins' sections.</p>
 <h2 id="check">Check a config<a class="headerlink" href="#check" title="Permanent link">&para;</a></h2>
@@ -3918,9 +4041,9 @@ A path that starts with <code>~</code>, or is absolute, is used as written. In <
 </tbody>
 </table>
 <p>Run <code>ash config validate</code> and <code>ash config lint</code> from the repository root before you commit a change. <code>ash config get</code> prints the resolved config, so you can see what ASH read from the file:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>ash<span class="w"> </span>config<span class="w"> </span>validate
-</span><span id="__span-14-2"><a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>ash<span class="w"> </span>config<span class="w"> </span>lint
-</span><span id="__span-14-3"><a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>ash<span class="w"> </span>config<span class="w"> </span>get
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-16-1"><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a>ash<span class="w"> </span>config<span class="w"> </span>validate
+</span><span id="__span-16-2"><a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a>ash<span class="w"> </span>config<span class="w"> </span>lint
+</span><span id="__span-16-3"><a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a>ash<span class="w"> </span>config<span class="w"> </span>get
 </span></code></pre></div>
 <p>A missing <code>project_name</code> and an unknown top-level key are warnings, which leave the exit code at 0: a scan takes the project's name from the <code>ASH_PROJECT_NAME</code> environment variable, else <code>ash-scan</code>, and it ignores the unknown key, so a config written for another ASH version still loads. A file that does not parse is invalid for <code>validate</code> and <code>lint</code> (exit 3), and a scan refuses it the same way.</p>
 <p>In the messages of the <code>ash config</code> commands, and of a scan that refuses a config, a value that a reference read from the environment is shown as <code>&lt;value&gt;</code> where the message quotes it, however short the value is, so the commands do not print what the variable holds. A value that a field taking a fixed choice, a boolean, or a number refuses is not quoted at all: the message names the field and what it takes. <code>ash config get</code> prints a valid config with each reference as the file wrote it.</p>
@@ -3979,13 +4102,13 @@ A path that starts with <code>~</code>, or is absolute, is used as written. In <
 </table>
 <p>When a known key is close to the unknown one, the error names it. This suppression is refused:</p>
 <!-- doctest: config kind=ash-invalid reason="ruleId is not a key of a suppression" -->
-<div class="language-yaml highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="nt">global_settings</span><span class="p">:</span>
-</span><span id="__span-15-2"><a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="w">  </span><span class="nt">suppressions</span><span class="p">:</span>
-</span><span id="__span-15-3"><a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">src/deploy.py</span>
-</span><span id="__span-15-4"><a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="w">      </span><span class="nt">ruleId</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">B602</span>
-</span><span id="__span-15-5"><a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a><span class="w">      </span><span class="nt">reason</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">The command is a constant; no user input reaches it</span>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-17-1"><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="nt">global_settings</span><span class="p">:</span>
+</span><span id="__span-17-2"><a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="w">  </span><span class="nt">suppressions</span><span class="p">:</span>
+</span><span id="__span-17-3"><a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">src/deploy.py</span>
+</span><span id="__span-17-4"><a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a><span class="w">      </span><span class="nt">ruleId</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">B602</span>
+</span><span id="__span-17-5"><a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a><span class="w">      </span><span class="nt">reason</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">The command is a constant; no user input reaches it</span>
 </span></code></pre></div>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-16-1"><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a>Invalid value at &#39;global_settings.suppressions[0]&#39;: Value error, Unknown key &#39;ruleId&#39; (did you mean &#39;rule_id&#39;?) in a suppression. Accepted keys: expiration, line_end, line_start, package_name, package_path, package_version, path, reason, rule_id, symbol.
+<div class="language-text highlight"><pre><span></span><code><span id="__span-18-1"><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a>Invalid value at &#39;global_settings.suppressions[0]&#39;: Value error, Unknown key &#39;ruleId&#39; (did you mean &#39;rule_id&#39;?) in a suppression. Accepted keys: expiration, line_end, line_start, package_name, package_path, package_version, path, reason, rule_id, symbol.
 </span></code></pre></div>
 <p><code>ash config validate</code>, <code>ash config lint</code>, and <code>ash config get</code> catch every mistake that ends in exit 3, with one exception: they do not load the plugins named in <code>ash_plugin_modules</code>, so only a scan checks those plugins' options, once it has loaded them. <code>validate</code> and <code>lint</code> also warn about the unknown top-level key. No command catches the last mistake. For that one, compare your keys with the <a href="../../reference/configuration/">configuration reference</a> and the <a href="../../reference/scanners/">scanner reference</a>, and look for the value you meant to set in the output of <code>ash config get</code>.</p>
 

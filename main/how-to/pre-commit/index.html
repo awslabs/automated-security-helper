@@ -762,6 +762,8 @@ SOFTWARE.
       
         
       
+        
+      
     
     
     
@@ -1117,6 +1119,34 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
+      <a href="../scan-container-images/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scan container images
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../run-offline/" class="md-nav__link">
         
   
@@ -1441,10 +1471,10 @@ SOFTWARE.
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_16" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_17" >
         
           
-          <label class="md-nav__link" for="__nav_4_16" id="__nav_4_16_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_4_17" id="__nav_4_17_label" tabindex="0">
             
   
   
@@ -1462,8 +1492,8 @@ SOFTWARE.
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_16_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_4_16">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_17_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_17">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -2616,6 +2646,10 @@ SOFTWARE.
       
         
       
+        
+      
+        
+      
     
     
     
@@ -2727,6 +2761,62 @@ SOFTWARE.
     
   
     Gitleaks scanner
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/mcp-config/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP server config scanning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/syft/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Syft SBOM scanner (syft) and the sdist lockfile harvest
   
 
     
@@ -3813,7 +3903,7 @@ committed there like any other. <code>ash config init</code>
 writes a <code>.ash/.gitignore</code> that ignores it, or add the line yourself:</p>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>.ash/ash_output/
 </span></code></pre></div>
-<p>Do not ignore all of <code>.ash/</code>: an ASH config file can live there, as <code>.ash/.ash.yaml</code>.</p>
+<p>Do not ignore all of <code>.ash/</code>: an ASH config file at a legacy location, such as <code>.ash/.ash.yaml</code>, can still live there.</p>
 <h2 id="behavior">What the hook runs<a class="headerlink" href="#behavior" title="Permanent link">&para;</a></h2>
 <p>The <code>ash</code> hook runs <code>ashv3 --mode=precommit --staged</code> with your <code>args</code>. Precommit mode:</p>
 <ul>
@@ -4003,11 +4093,12 @@ while the host was busiest, so do not read that as size making a run cheaper. Th
 spread between the three runs of a row was at most about 3 seconds. Rerun the script on your own
 machine for figures that mean something there.</p>
 <p>The table is refreshed from a benchmark job rather than by hand. The workflow
-<code>ash-scan-benchmark.yml</code> installs a pull request's base and head into two environments on
-one runner and alternates timed runs of <code>ash --version</code>, a staged scan of one <code>.py</code> file, a
-staged scan of one CI config file and a scan of the whole fixture. It prints the minimum,
-median, mean and maximum of five runs per build in the job summary, and a nightly run on
-<code>main</code> appends to a trend artifact. The job is informational: it is not a required check,
+<code>ash-scan-benchmark.yml</code> installs the commit under test, its parent commit and the latest
+release into three environments on one runner and alternates timed runs of <code>ash --version</code>,
+a staged scan of one <code>.py</code> file, a staged scan of one CI config file and a scan of the whole
+fixture. It prints the minimum, median, mean and maximum of five runs per build in the job
+summary, with the commit under test's difference from each of the other two, and a nightly
+run on <code>main</code> appends all three to a trend artifact. The job is informational: it is not a required check,
 and a warning in its summary never fails a build. The rows above were timed by hand, with
 a staged file that held no finding; the script now stages a file with a planted finding,
 so refresh the table from the job's figures, or from the script on a quiet host, and do
@@ -4137,7 +4228,7 @@ reason:</p>
 </span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="w">      </span><span class="nt">rule_id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">SECRET-HEX-HIGH-ENTROPY-STRING</span>
 </span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="w">      </span><span class="nt">reason</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">pre-commit autoupdate --freeze pins hooks to commit SHAs</span>
 </span></code></pre></div>
-<p>Put it in your ASH config file, or, if the repository has none, in a new <code>.ashrc.yaml</code> at
+<p>Put it in your ASH config file, or, if the repository has none, in a new <code>.ash.yaml</code> at
 its root. <a href="../suppress-findings/">Suppress findings</a> covers expiration dates and narrower
 matches.</p>
 <h2 id="full-scan">The ash-full-scan hook<a class="headerlink" href="#full-scan" title="Permanent link">&para;</a></h2>

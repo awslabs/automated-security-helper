@@ -760,6 +760,8 @@ SOFTWARE.
       
         
       
+        
+      
     
     
     
@@ -1115,6 +1117,34 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
+      <a href="../../how-to/scan-container-images/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scan container images
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../how-to/run-offline/" class="md-nav__link">
         
   
@@ -1243,10 +1273,10 @@ SOFTWARE.
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_16" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_17" >
         
           
-          <label class="md-nav__link" for="__nav_4_16" id="__nav_4_16_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_4_17" id="__nav_4_17_label" tabindex="0">
             
   
   
@@ -1264,8 +1294,8 @@ SOFTWARE.
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_16_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_4_16">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_17_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_17">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -2522,6 +2552,10 @@ SOFTWARE.
       
         
       
+        
+      
+        
+      
     
     
     
@@ -2633,6 +2667,62 @@ SOFTWARE.
     
   
     Gitleaks scanner
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/mcp-config/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP server config scanning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/syft/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Syft SBOM scanner (syft) and the sdist lockfile harvest
   
 
     
@@ -3648,7 +3738,7 @@ SOFTWARE.
 <li>a <code>content_db_staleness_overrides</code> entry for one database, which needs an expiration date and a reason and stops applying at 00:00 UTC on that date;</li>
 <li><code>--allow-stale-content-db</code> or <code>--no-allow-stale-content-db</code> on the command line. Either one wins over the config file and clears every per-database override: the first sets <code>warn</code>, the second <code>fail</code>.</li>
 </ul>
-<p>An image built with <code>ash build-image --offline</code> holds <code>trivy-db</code> to <code>warn</code> instead of <code>fail</code> by default, because trivy's 24-hour bound would otherwise fail every trivy scan in the image from a day after the build. A stale <code>trivy-db</code> then does not fail the scan, and the reports say the database was stale and that the offline image's default let the scan go on. <code>grype-db</code> and the offline rulesets still fail the scan. To hold <code>trivy-db</code> to <code>content_db_staleness</code> in the image too, set <code>content_db_staleness_offline_image_default: false</code> or pass <code>--no-allow-stale-content-db</code>; a <code>content_db_staleness_overrides</code> entry for <code>trivy-db</code> also takes precedence over this default. The default applies wherever <code>ASH_OFFLINE_AT_BUILD_TIME</code> is <code>YES</code>, which the image sets when it is built with <code>OFFLINE=YES</code>; a config can turn it off but not on.</p>
+<p>An image built with <code>ash container build --offline</code> holds <code>trivy-db</code> to <code>warn</code> instead of <code>fail</code> by default, because trivy's 24-hour bound would otherwise fail every trivy scan in the image from a day after the build. A stale <code>trivy-db</code> then does not fail the scan, and the reports say the database was stale and that the offline image's default let the scan go on. <code>grype-db</code> and the offline rulesets still fail the scan. To hold <code>trivy-db</code> to <code>content_db_staleness</code> in the image too, set <code>content_db_staleness_offline_image_default: false</code> or pass <code>--no-allow-stale-content-db</code>; a <code>content_db_staleness_overrides</code> entry for <code>trivy-db</code> also takes precedence over this default. The default applies wherever <code>ASH_OFFLINE_AT_BUILD_TIME</code> is <code>YES</code>, which the image sets when it is built with <code>OFFLINE=YES</code>; a config can turn it off but not on.</p>
 <p>Every reading, fresh or stale, is recorded in the results. A config file inside a git checkout or the scanned directory, such as a repository's own, cannot relax the check: a <code>warn</code> from it that differs from the operator's policy is replaced, and a <code>policy: warn</code> entry the operator did not set is dropped, with a warning. A <code>fail</code> from it is kept. A config an MCP client delivers may not change either setting under the default policy. See <a href="../trust-model/">Configuration trust model</a>.</p>
 <h2 id="where-the-databases-are-cached">Where the databases are cached<a class="headerlink" href="#where-the-databases-are-cached" title="Permanent link">&para;</a></h2>
 <p>ASH resolves one cache directory per tool and passes the same directory to the scan, the refresh, and the age check. It always names that directory to the tool (<code>GRYPE_DB_CACHE_DIR</code> for grype, <code>trivy --cache-dir</code> for trivy), so a <code>db.cache-dir</code> in a grype config is ignored with a warning, and a <code>cache.dir</code> in a trivy config is overridden.</p>
@@ -3686,7 +3776,7 @@ SOFTWARE.
 </ul>
 <p>When ASH runs a refresh itself (trivy's before every online scan, grype's under the sandbox), it runs outside the scanner sandbox, with network, from a working directory outside the scanned tree, and with ASH's empty tool configuration. For trivy, a <code>trivy.yaml</code> that the operator names in the trivy or trivy-repo scanner's <code>config_file</code> option, outside the scanned tree, is used instead, so a database mirror set there applies. A refresh holds a lock in the cache directory, so two scanners, or on Linux and macOS two scans, do not run ASH's refresh at once, and it times out after 900 seconds. A failed refresh fails that scanner. For a repository you do not trust, scan in local mode with the sandbox on, as in <a href="../../docs/scanner-sandbox/#untrusted">Scan a repository you do not trust</a>.</p>
 <p>The age checks are protected the same way: each probe runs with ASH's empty tool configuration from outside the scanned tree, so a configuration file in the repository cannot point the probe at a different database from the one the scan read.</p>
-<p>Offline, nothing is refreshed. The databases must already be in the cache: <code>ash build-image --offline</code> builds an image with current grype and trivy databases and the semgrep and opengrep rulesets (<code>p/ci</code> by default), in which every scan runs offline. On a host you can run <code>grype db update</code> and <code>trivy image --download-db-only</code> while online. Because each bound counts from when the database itself was built, an offline image reports trivy's database stale within a day of the image build, as a warning by default, and starts failing grype scans within five days, unless you rebuild it or relax the policy. <a href="../../how-to/run-offline/">Run ASH offline</a> covers seeding the caches and choosing a rebuild cadence. To read the age of the cached grype and trivy databases against these bounds without running a scan, use <a href="../../reference/cli/#dependencies-check"><code>ash dependencies check --offline</code></a> (<a href="../../how-to/run-offline/#check-caches">Check cached database ages</a>).</p>
+<p>Offline, nothing is refreshed. The databases must already be in the cache: <code>ash container build --offline</code> builds an image with current grype and trivy databases and the semgrep and opengrep rulesets (<code>p/ci</code> by default), in which every scan runs offline. On a host you can run <code>grype db update</code> and <code>trivy image --download-db-only</code> while online. Because each bound counts from when the database itself was built, an offline image reports trivy's database stale within a day of the image build, as a warning by default, and starts failing grype scans within five days, unless you rebuild it or relax the policy. <a href="../../how-to/run-offline/">Run ASH offline</a> covers seeding the caches and choosing a rebuild cadence. To read the age of the cached grype and trivy databases against these bounds without running a scan, use <a href="../../reference/cli/#dependencies-check"><code>ash dependencies check --offline</code></a> (<a href="../../how-to/run-offline/#check-caches">Check cached database ages</a>).</p>
 
 
 

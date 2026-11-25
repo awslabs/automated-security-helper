@@ -13,7 +13,7 @@
         <link rel="canonical" href="https://awslabs.github.io/automated-security-helper/latest/how-to/run-offline/">
       
       
-        <link rel="prev" href="../run-in-a-container/">
+        <link rel="prev" href="../scan-container-images/">
       
       
         <link rel="next" href="../../integrations/">
@@ -762,6 +762,8 @@ SOFTWARE.
       
         
       
+        
+      
     
     
     
@@ -1114,6 +1116,34 @@ SOFTWARE.
                 
   
   
+  
+  
+    <li class="md-nav__item">
+      <a href="../scan-container-images/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scan container images
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
     
   
   
@@ -1375,10 +1405,10 @@ SOFTWARE.
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_16" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_17" >
         
           
-          <label class="md-nav__link" for="__nav_4_16" id="__nav_4_16_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_4_17" id="__nav_4_17_label" tabindex="0">
             
   
   
@@ -1396,8 +1426,8 @@ SOFTWARE.
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_16_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_4_16">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_17_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_17">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -2550,6 +2580,10 @@ SOFTWARE.
       
         
       
+        
+      
+        
+      
     
     
     
@@ -2661,6 +2695,62 @@ SOFTWARE.
     
   
     Gitleaks scanner
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/mcp-config/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP server config scanning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/syft/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Syft SBOM scanner (syft) and the sdist lockfile harvest
   
 
     
@@ -3728,7 +3818,7 @@ grype would read (<code>GRYPE_DB_CACHE_DIR</code>, else grype's default cache di
 </tr>
 <tr>
 <td>syft</td>
-<td>Skips its update check.</td>
+<td>Skips its update check. Offline also skips the <a href="../../docs/plugins/builtin/syft/#the-sdist-lockfile-harvest">sdist lockfile harvest</a>: the SBOM then omits the embedded lockfiles of compiled dependencies, and the harvester's results record one informational <code>ash-sbom-harvest-skipped</code> entry naming each package the SBOM is missing. A cache warmed by one online scan (<code>ash/sdist-harvest/</code> under the user-level cache directory, or <code>scanners.syft.options.sdist_harvest.cache_dir</code>) restores full coverage offline: entries are keyed by each sdist's sha256 pin and every cached file is re-verified against the digest recorded when it was written, so the cache can only serve the bytes the lockfile resolves.</td>
 </tr>
 <tr>
 <td>zizmor</td>
@@ -3802,7 +3892,7 @@ or policy blocks its age. The check neither downloads data nor starts a scanner.
 It does not verify the installed tools, database integrity, the Trivy Java index,
 or that the scan will cover every input.</p>
 <h2 id="offline-image">The offline image<a class="headerlink" href="#offline-image" title="Permanent link">&para;</a></h2>
-<p><code>ash build-image --offline</code> and <code>ash scan --mode container --offline</code> build the image with
+<p><code>ash container build --offline</code> and <code>ash scan --mode container --offline</code> build the image with
 <code>OFFLINE=YES</code>. The build needs network access: it downloads the grype database, the trivy
 database, and the semgrep rulesets named by <code>--offline-semgrep-rulesets</code> (default <code>p/ci</code>),
 copies the rulesets for opengrep, and fails if any of them is empty. The image has
@@ -3940,8 +4030,8 @@ scan and turns the offline image's <code>trivy-db</code> default off.</p>
 <nav class="ash-pagination" aria-label="Previous and next documentation pages">
   <div class="ash-wrap ash-pagination__inner">
     
-    <a href="../run-in-a-container/" rel="prev">
-      <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M222,128a6,6,0,0,1-6,6H54.49l61.75,61.76a6,6,0,1,1-8.48,8.48l-72-72a6,6,0,0,1,0-8.48l72-72a6,6,0,0,1,8.48,8.48L54.49,122H216A6,6,0,0,1,222,128Z"/></svg></span><span><span class="ash-pagination__direction">PREVIOUS</span>Run in a container</span>
+    <a href="../scan-container-images/" rel="prev">
+      <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M222,128a6,6,0,0,1-6,6H54.49l61.75,61.76a6,6,0,1,1-8.48,8.48l-72-72a6,6,0,0,1,0-8.48l72-72a6,6,0,0,1,8.48,8.48L54.49,122H216A6,6,0,0,1,222,128Z"/></svg></span><span><span class="ash-pagination__direction">PREVIOUS</span>Scan container images</span>
     </a>
     
     

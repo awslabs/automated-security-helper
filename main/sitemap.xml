@@ -129,6 +129,14 @@
          <lastmod>2026-11-25</lastmod>
     </url>
     <url>
+         <loc>https://awslabs.github.io/automated-security-helper/latest/docs/plugins/builtin/mcp-config/</loc>
+         <lastmod>2026-11-25</lastmod>
+    </url>
+    <url>
+         <loc>https://awslabs.github.io/automated-security-helper/latest/docs/plugins/builtin/syft/</loc>
+         <lastmod>2026-11-25</lastmod>
+    </url>
+    <url>
          <loc>https://awslabs.github.io/automated-security-helper/latest/docs/plugins/builtin/trivy/</loc>
          <lastmod>2026-11-25</lastmod>
     </url>
@@ -218,6 +226,10 @@
     </url>
     <url>
          <loc>https://awslabs.github.io/automated-security-helper/latest/how-to/scale-large-repos/</loc>
+         <lastmod>2026-11-25</lastmod>
+    </url>
+    <url>
+         <loc>https://awslabs.github.io/automated-security-helper/latest/how-to/scan-container-images/</loc>
          <lastmod>2026-11-25</lastmod>
     </url>
     <url>

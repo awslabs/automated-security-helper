@@ -16,7 +16,7 @@
         <link rel="prev" href="../../docs/scanner-sandbox/">
       
       
-        <link rel="next" href="../run-offline/">
+        <link rel="next" href="../scan-container-images/">
       
       
         
@@ -762,6 +762,8 @@ SOFTWARE.
       
         
       
+        
+      
     
     
     
@@ -1286,6 +1288,34 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
+      <a href="../scan-container-images/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scan container images
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../run-offline/" class="md-nav__link">
         
   
@@ -1414,10 +1444,10 @@ SOFTWARE.
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_16" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_17" >
         
           
-          <label class="md-nav__link" for="__nav_4_16" id="__nav_4_16_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_4_17" id="__nav_4_17_label" tabindex="0">
             
   
   
@@ -1435,8 +1465,8 @@ SOFTWARE.
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_16_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_4_16">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_17_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_17">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -2589,6 +2619,10 @@ SOFTWARE.
       
         
       
+        
+      
+        
+      
     
     
     
@@ -2700,6 +2734,62 @@ SOFTWARE.
     
   
     Gitleaks scanner
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/mcp-config/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP server config scanning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/syft/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Syft SBOM scanner (syft) and the sdist lockfile harvest
   
 
     
@@ -3778,14 +3868,14 @@ that fails to start, and a build that fails, exit with the runtime's own status 
 </tr>
 </tbody>
 </table>
-<p><code>ash build-image</code> builds the image and then scans the current directory with it, writing
+<p><code>ash container build</code> builds the image and then scans the current directory with it, writing
 to <code>.ash/ash_output</code> there. Add <code>--no-run</code> to build only. It takes no <code>--source-dir</code>,
 <code>--output-dir</code>, or other scan option: an argument its help does not list stops it with
 exit code 5 before anything is built, so use <code>ash scan --mode container</code> to choose the
 directories. Every option of both commands is in the
-<a href="../../reference/cli/#build-image">CLI reference</a>.</p>
+<a href="../../reference/cli/#container-build">CLI reference</a>.</p>
 <p>Spell options out in full: the short flags differ between the two commands. On <code>ash scan</code>,
-<code>-o</code> is <code>--oci-runner</code> and <code>-r</code> is <code>--run</code>; on <code>ash build-image</code>, <code>-r</code> is <code>--oci-runner</code>.</p>
+<code>-o</code> is <code>--oci-runner</code> and <code>-r</code> is <code>--run</code>; on <code>ash container build</code>, <code>-r</code> is <code>--oci-runner</code>.</p>
 <h2 id="runtime">Choose the container runtime<a class="headerlink" href="#runtime" title="Permanent link">&para;</a></h2>
 <p>ASH uses the first of finch, docker, nerdctl, and podman that it finds on <code>PATH</code>. To pick
 one, pass <code>--oci-runner podman</code> or set <code>OCI_RUNNER=podman</code>. To prefix every runtime call
@@ -3810,7 +3900,7 @@ or you can spell the path out. A scan in local mode reads neither variable.</p>
 <h2 id="build-target">Root and non-root images<a class="headerlink" href="#build-target" title="Permanent link">&para;</a></h2>
 <p>The Dockerfile has two final stages:</p>
 <ul>
-<li><code>non-root</code>, the default, runs as <code>ash-user</code>. <code>ash build-image</code> and container-mode scans
+<li><code>non-root</code>, the default, runs as <code>ash-user</code>. <code>ash container build</code> and container-mode scans
   give that user the UID and GID of the user running ASH, so the scan can write to the
   mounted output directory. Pass <code>--container-uid</code> and <code>--container-gid</code> to choose other
   values.</li>
@@ -3863,7 +3953,7 @@ Set <code>ASH_IMAGE_NAME</code> to build and run an image under another name.</p
 </table>
 <p><code>--ash-revision-to-install</code> overrides the table with a tag, a branch, or a full
 40-character commit ID. It accepts letters, digits, dots, hyphens, underscores, and
-slashes. Run from the top directory of a checkout of ASH, <code>ash build-image</code> and
+slashes. Run from the top directory of a checkout of ASH, <code>ash container build</code> and
 container-mode scans build that checkout whatever the revision says; to build another
 revision, run them from another directory.</p>
 <p>A branch, or a tag that is not a release tag (such as the retired floating <code>v3</code>), is
@@ -3890,7 +3980,7 @@ local scan prints (<a href="../../reference/exit-codes/#scan">Exit codes</a>). <
 as well: it prints the line after <code>ERROR:</code> and exits 5.</p>
 <p>An output directory that is a symlink, or that a symlink below the source directory leads
 to, such as a committed <code>.ash</code> link for the default <code>.ash/ash_output</code>, stops
-<code>ash scan --mode container</code> and <code>ash build-image</code> with exit code 3
+<code>ash scan --mode container</code> and <code>ash container build</code> with exit code 3
 (<a href="../../reference/exit-codes/#container">Exit codes</a>), because the scan inside the
 container would write wherever the link points. The refusal comes before a container
 runtime is looked up, with <code>--no-run</code> too, so nothing is built, created, or mounted.
@@ -3914,7 +4004,7 @@ lifts suppressions and ignore paths for every scanner, and ASH's own output dire
 stays out of the results (<a href="../suppress-findings/#ignore-suppressions">See every finding</a>).</p>
 <p>The container uses the runtime's default bridge network. <code>--offline</code> runs it with no
 network and builds an offline image (<a href="../run-offline/">Run ASH offline</a>).
-<code>ash build-image --container-network</code> takes another network mode, such as <code>none</code> or a
+<code>ash container build --container-network</code> takes another network mode, such as <code>none</code> or a
 named network.</p>
 <h3 id="config">The config file<a class="headerlink" href="#config" title="Permanent link">&para;</a></h3>
 <p><code>--config</code> names the config file, or <code>ASH_CONFIG</code> when no <code>--config</code> is given. With
@@ -4043,11 +4133,11 @@ with <code>--no-run</code>, it logs no warning. <code>./ash</code> and <code>Inv
 <code>sandbox.mode=off</code> as its last override, and log no warning about it.</p>
 <h2 id="own-image">Build and host your own image<a class="headerlink" href="#own-image" title="Permanent link">&para;</a></h2>
 <p>Build the image once, push it to a registry your organization controls, and run that
-image in CI instead of building per run. With <code>ASH_IMAGE_NAME</code> set, <code>ash build-image</code> tags
+image in CI instead of building per run. With <code>ASH_IMAGE_NAME</code> set, <code>ash container build</code> tags
 the image with your registry's name:</p>
 <!-- doctest: illustrative reason="needs a container runtime, network access, and a registry" -->
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">ASH_IMAGE_NAME</span><span class="o">=</span>registry.example.com/security/ash:3.8.0
-</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>ash<span class="w"> </span>build-image<span class="w"> </span>--no-run<span class="w"> </span>--oci-runner<span class="w"> </span>docker<span class="w"> </span>--ash-revision-to-install<span class="w"> </span>v3.8.0<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>ash<span class="w"> </span>container<span class="w"> </span>build<span class="w"> </span>--no-run<span class="w"> </span>--oci-runner<span class="w"> </span>docker<span class="w"> </span>--ash-revision-to-install<span class="w"> </span>v3.8.0<span class="w"> </span><span class="se">\</span>
 </span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">  </span>--container-uid<span class="w"> </span><span class="m">1001</span><span class="w"> </span>--container-gid<span class="w"> </span><span class="m">1001</span>
 </span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>docker<span class="w"> </span>push<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$ASH_IMAGE_NAME</span><span class="s2">&quot;</span>
 </span></code></pre></div>
@@ -4144,7 +4234,7 @@ Go and Rust programs, are not reproduced.</p>
 <h2 id="platforms">Windows and macOS<a class="headerlink" href="#platforms" title="Permanent link">&para;</a></h2>
 <p>ASH's own CI tests container mode on Linux only, with docker, podman, finch, and nerdctl.</p>
 <ul>
-<li>On Windows, <code>ash build-image</code> always builds the root <code>ci</code> image, because the non-root
+<li>On Windows, <code>ash container build</code> always builds the root <code>ci</code> image, because the non-root
   user cannot write to the bind-mounted output directory there. <code>ash scan --mode container</code>
   does not force it. If <code>ash</code> runs a different program, such as the <code>ash</code> shell that ships
   with Git for Windows, run <code>ashv3</code>, which is the same command.</li>
@@ -4193,8 +4283,8 @@ Go and Rust programs, are not reproduced.</p>
     </a>
     
     
-    <a class="ash-pagination__next" href="../run-offline/" rel="next">
-      <span><span class="ash-pagination__direction">NEXT</span>Run offline</span><span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M220.24,132.24l-72,72a6,6,0,0,1-8.48-8.48L201.51,134H40a6,6,0,0,1,0-12H201.51L139.76,60.24a6,6,0,0,1,8.48-8.48l72,72A6,6,0,0,1,220.24,132.24Z"/></svg></span>
+    <a class="ash-pagination__next" href="../scan-container-images/" rel="next">
+      <span><span class="ash-pagination__direction">NEXT</span>Scan container images</span><span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M220.24,132.24l-72,72a6,6,0,0,1-8.48-8.48L201.51,134H40a6,6,0,0,1,0-12H201.51L139.76,60.24a6,6,0,0,1,8.48-8.48l72,72A6,6,0,0,1,220.24,132.24Z"/></svg></span>
     </a>
     
   </div>

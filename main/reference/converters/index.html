@@ -760,6 +760,8 @@ SOFTWARE.
       
         
       
+        
+      
     
     
     
@@ -1115,6 +1117,34 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
+      <a href="../../how-to/scan-container-images/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scan container images
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../how-to/run-offline/" class="md-nav__link">
         
   
@@ -1243,10 +1273,10 @@ SOFTWARE.
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_16" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_17" >
         
           
-          <label class="md-nav__link" for="__nav_4_16" id="__nav_4_16_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_4_17" id="__nav_4_17_label" tabindex="0">
             
   
   
@@ -1264,8 +1294,8 @@ SOFTWARE.
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_16_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_4_16">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_17_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_17">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -2210,6 +2240,28 @@ SOFTWARE.
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#mcp_config" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        mcp_config
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sdist-lock-harvester" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        sdist-lock-harvester
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2489,6 +2541,10 @@ SOFTWARE.
       
         
       
+        
+      
+        
+      
     
     
     
@@ -2600,6 +2656,62 @@ SOFTWARE.
     
   
     Gitleaks scanner
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/mcp-config/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP server config scanning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/syft/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Syft SBOM scanner (syft) and the sdist lockfile harvest
   
 
     
@@ -3455,6 +3567,28 @@ SOFTWARE.
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#mcp_config" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        mcp_config
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sdist-lock-harvester" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        sdist-lock-harvester
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -3537,7 +3671,7 @@ SOFTWARE.
 
 <h1 id="converters-reference">Converters reference<a class="headerlink" href="#converters-reference" title="Permanent link">&para;</a></h1>
 <p>This page is generated from the converter plugins in the ASH source code by <code>scripts/generate_converter_reference.py</code>. Edits made to this file by hand are overwritten the next time it is generated.</p>
-<p>ASH ships 2 converters. Converters run in the <code>convert</code> phase, before the <code>scan</code> phase, and write what they produce under <code>&lt;output directory&gt;/converted/&lt;converter name&gt;/</code>.</p>
+<p>ASH ships 4 converters. Converters run in the <code>convert</code> phase, before the <code>scan</code> phase, and write what they produce under <code>&lt;output directory&gt;/converted/&lt;converter name&gt;/</code>.</p>
 <!-- doctest: options of=converters -->
 <table>
 <thead>
@@ -3562,6 +3696,20 @@ SOFTWARE.
 <td>yes</td>
 <td>built in</td>
 <td><code>jupyter-nbconvert</code></td>
+<td>yes</td>
+</tr>
+<tr>
+<td><a href="#mcp_config"><code>mcp_config</code></a></td>
+<td>yes</td>
+<td>built in</td>
+<td>none (runs in the ASH process)</td>
+<td>yes</td>
+</tr>
+<tr>
+<td><a href="#sdist-lock-harvester"><code>sdist-lock-harvester</code></a></td>
+<td>yes</td>
+<td>built in</td>
+<td>none (runs in the ASH process)</td>
 <td>yes</td>
 </tr>
 </tbody>
@@ -3648,6 +3796,26 @@ SOFTWARE.
 </tr>
 </tbody>
 </table>
+<h2 id="mcp_config"><code>mcp_config</code><a class="headerlink" href="#mcp_config" title="Permanent link">&para;</a></h2>
+<p>Converter implementation for repo-local MCP server config files.</p>
+<ul>
+<li>Class: <code>automated_security_helper.plugin_modules.ash_builtin.converters.mcp_config_converter.McpConfigConverter</code></li>
+<li>Provided by: built in, loaded on every scan</li>
+<li>Enabled by default: yes</li>
+<li>Command: none (runs in the ASH process)</li>
+<li>Install: none declared</li>
+</ul>
+<p>This plugin has no options.</p>
+<h2 id="sdist-lock-harvester"><code>sdist-lock-harvester</code><a class="headerlink" href="#sdist-lock-harvester" title="Permanent link">&para;</a></h2>
+<p>Harvests cross-toolchain lockfiles from the sdists the tree's lockfiles pin.</p>
+<ul>
+<li>Class: <code>automated_security_helper.plugin_modules.ash_builtin.converters.sdist_lock_harvester.SdistLockHarvester</code></li>
+<li>Provided by: built in, loaded on every scan</li>
+<li>Enabled by default: yes</li>
+<li>Command: none (runs in the ASH process)</li>
+<li>Install: none declared</li>
+</ul>
+<p>This plugin has no options.</p>
 
 
 

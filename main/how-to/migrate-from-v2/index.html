@@ -762,6 +762,8 @@ SOFTWARE.
       
         
       
+        
+      
     
     
     
@@ -1117,6 +1119,34 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
+      <a href="../scan-container-images/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scan container images
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../run-offline/" class="md-nav__link">
         
   
@@ -1245,10 +1275,10 @@ SOFTWARE.
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_16" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_17" >
         
           
-          <label class="md-nav__link" for="__nav_4_16" id="__nav_4_16_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_4_17" id="__nav_4_17_label" tabindex="0">
             
   
   
@@ -1266,8 +1296,8 @@ SOFTWARE.
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_16_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_4_16">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_17_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_17">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -2555,6 +2585,10 @@ SOFTWARE.
       
         
       
+        
+      
+        
+      
     
     
     
@@ -2666,6 +2700,62 @@ SOFTWARE.
     
   
     Gitleaks scanner
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/mcp-config/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP server config scanning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/syft/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Syft SBOM scanner (syft) and the sdist lockfile harvest
   
 
     
@@ -3684,7 +3774,7 @@ lists what changes for a v2 user and what to do about each.</p>
 <tr>
 <td>Configuration</td>
 <td>none</td>
-<td>a config file, <code>.ashrc.yaml</code> in a new project, with ignore paths, suppressions, thresholds, and scanner settings</td>
+<td>a config file, <code>.ash.yaml</code> at the project root, with ignore paths, suppressions, thresholds, and scanner settings</td>
 </tr>
 <tr>
 <td>Output</td>
@@ -3813,10 +3903,10 @@ scanned.</p>
 uncommitted and untracked files that are not ignored are scanned too. Expect findings in
 files v2 never saw. Neither version reads a <code>.ashignore</code> file.</p>
 <p>Everything else is set in a configuration file. <code>ash config init</code> writes a starting
-file, <code>.ashrc.yaml</code>, in the current directory:</p>
+file, <code>.ash.yaml</code>, in the current directory:</p>
 <!-- doctest: run -->
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>ash<span class="w"> </span>config<span class="w"> </span>init
-</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>head<span class="w"> </span>-n<span class="w"> </span><span class="m">3</span><span class="w"> </span>.ashrc.yaml
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>head<span class="w"> </span>-n<span class="w"> </span><span class="m">3</span><span class="w"> </span>.ash.yaml
 </span></code></pre></div>
 <p>In it you can:</p>
 <ul>

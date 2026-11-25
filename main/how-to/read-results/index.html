@@ -762,6 +762,8 @@ SOFTWARE.
       
         
       
+        
+      
     
     
     
@@ -1081,6 +1083,17 @@ SOFTWARE.
 </li>
       
         <li class="md-nav__item">
+  <a href="#results-group" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The ash results command group
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#print-a-report-in-the-terminal-with-ash-report" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1241,6 +1254,34 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
+      <a href="../scan-container-images/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scan container images
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../run-offline/" class="md-nav__link">
         
   
@@ -1369,10 +1410,10 @@ SOFTWARE.
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_16" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_17" >
         
           
-          <label class="md-nav__link" for="__nav_4_16" id="__nav_4_16_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_4_17" id="__nav_4_17_label" tabindex="0">
             
   
   
@@ -1390,8 +1431,8 @@ SOFTWARE.
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_16_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_4_16">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_17_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_17">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -2544,6 +2585,10 @@ SOFTWARE.
       
         
       
+        
+      
+        
+      
     
     
     
@@ -2655,6 +2700,62 @@ SOFTWARE.
     
   
     Gitleaks scanner
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/mcp-config/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP server config scanning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/syft/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Syft SBOM scanner (syft) and the sdist lockfile harvest
   
 
     
@@ -3533,6 +3634,17 @@ SOFTWARE.
 </li>
       
         <li class="md-nav__item">
+  <a href="#results-group" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The ash results command group
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#print-a-report-in-the-terminal-with-ash-report" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3955,6 +4067,17 @@ scanners only, since it leaves <code>SKIPPED</code> rows out of the table.</p>
 <!-- doctest: output -->
 <div class="language-text highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>detect-secrets FAILED 1
 </span></code></pre></div>
+<h2 id="results-group">The <code>ash results</code> command group<a class="headerlink" href="#results-group" title="Permanent link">&para;</a></h2>
+<p>The commands that work on results a scan already wrote, and run no scan themselves, live
+under one noun: <code>ash results report</code>, <code>ash results diff</code>, <code>ash results trend</code>,
+<code>ash results merge</code> and <code>ash results inspect</code>. Each takes the same options and behaves the
+same as the top-level command it replaces.</p>
+<p>The old top-level spellings (<code>ash report</code>, <code>ash diff</code>, <code>ash trend</code>, <code>ash merge</code> and
+<code>ash inspect</code>) still work in 3.9. Each prints one <code>DeprecationWarning</code> line on standard
+error that names its replacement, and all five are removed in 4.0. They no longer appear in
+<code>ash --help</code>. Standard output, exit codes and options are unchanged, so a script that reads
+them keeps working while you move it to the new spelling. The sections below use the
+top-level spelling; add <code>results</code> after <code>ash</code> to use the new one.</p>
 <h2 id="print-a-report-in-the-terminal-with-ash-report">Print a report in the terminal with <code>ash report</code><a class="headerlink" href="#print-a-report-in-the-terminal-with-ash-report" title="Permanent link">&para;</a></h2>
 <p><code>ash report</code> renders a report of the last scan and prints it to standard output. It reads
 <code>ash_aggregated_results.json</code> only from <code>.ash/ash_output</code> under the current directory, and
@@ -4059,7 +4182,7 @@ reads <code>ash_aggregated_results.json</code> from <code>.ash/ash_output</code>
 <a href="#counting">How ASH counts findings</a>).</p>
 <p><code>x</code> asks for a reason and an optional expiration date, then adds a suppression for that
 rule, file, and line to a config file: the one <code>--config</code> or <code>ASH_CONFIG</code> names, else the
-config file a scan of the current directory would use, else <code>.ashrc.yaml</code> in the current
+config file a scan of the current directory would use, else <code>.ash.yaml</code> in the current
 directory. It writes YAML, or JSON to a <code>.json</code> file. It refuses a TOML file, and a file
 that <code>extends</code> another and has no suppressions list of its own, because writing one there
 would replace the base file's list. If the file already has the same suppression, <code>x</code>

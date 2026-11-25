@@ -760,6 +760,8 @@ SOFTWARE.
       
         
       
+        
+      
     
     
     
@@ -1115,6 +1117,34 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
+      <a href="../../how-to/scan-container-images/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scan container images
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../how-to/run-offline/" class="md-nav__link">
         
   
@@ -1243,10 +1273,10 @@ SOFTWARE.
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_16" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_17" >
         
           
-          <label class="md-nav__link" for="__nav_4_16" id="__nav_4_16_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_4_17" id="__nav_4_17_label" tabindex="0">
             
   
   
@@ -1264,8 +1294,8 @@ SOFTWARE.
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_16_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_4_16">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_17_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_17">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -2544,6 +2574,10 @@ SOFTWARE.
       
         
       
+        
+      
+        
+      
     
     
     
@@ -2655,6 +2689,62 @@ SOFTWARE.
     
   
     Gitleaks scanner
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/mcp-config/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP server config scanning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/syft/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Syft SBOM scanner (syft) and the sdist lockfile harvest
   
 
     
@@ -3640,7 +3730,7 @@ SOFTWARE.
 <h2 id="phases">Phases<a class="headerlink" href="#phases" title="Permanent link">&para;</a></h2>
 <p>A scan runs up to three phases, always in this order: convert, scan, and report. <code>--phases</code> runs a subset of them, and <code>ash report</code> renders reports again from an existing results file without scanning.</p>
 <pre class="mermaid"><code>flowchart LR
-    src[Source directory] --&gt; convert[Convert phase&lt;br/&gt;archive, jupyter]
+    src[Source directory] --&gt; convert[Convert phase&lt;br/&gt;archive, jupyter, mcp_config, sdist-lock-harvester]
     convert --&gt; conv[converted/ target]
     src --&gt; scan
     conv --&gt; scan[Scan phase&lt;br/&gt;scanners in parallel]
@@ -3661,7 +3751,7 @@ SOFTWARE.
 <p>In the report phase, ASH applies suppressions once more to the merged SARIF, recomputes the counts, and runs every enabled reporter. Each reporter writes its file under <code>reports/</code>, named <code>ash.&lt;extension&gt;</code>. A reporter that fails logs an error and writes nothing; it does not change the exit code.</p>
 <p>Where the scan runs is a separate choice, the run mode. <code>local</code> (the default) runs the scanners installed on the host. <code>container</code> builds an image and runs the same scan inside it. <code>nix</code> runs it inside <code>nix develop</code>, which supplies pinned scanner binaries, and always scans offline. <code>precommit</code> is a local scan of a fixed set of fast scanners (bandit, detect-secrets, checkov, cdk-nag, and npm-audit, plus any you name with <code>--scanners</code>) with simplified output. It scans the whole source directory, not only the staged files, and in workspace mode it changes only the output. See <a href="../../how-to/run-in-a-container/">Run ASH in a container</a> and <a href="../../how-to/pre-commit/">Run ASH with pre-commit</a>.</p>
 <h2 id="how-scanners-are-selected">How scanners are selected<a class="headerlink" href="#how-scanners-are-selected" title="Permanent link">&para;</a></h2>
-<p>ASH ships 16 built-in scanners, all enabled by default except semgrep and opengrep on Windows. For each scanner it knows about, ASH asks these questions in order and records the first answer that stops the scanner:</p>
+<p>ASH ships 17 built-in scanners, all enabled by default except semgrep and opengrep on Windows. For each scanner it knows about, ASH asks these questions in order and records the first answer that stops the scanner:</p>
 <ol>
 <li>Is it enabled? <code>scanners.&lt;name&gt;.enabled: false</code> in the config turns a scanner off. <code>--scanners</code> cannot turn it back on; <code>ash scan --config-overrides scanners.&lt;name&gt;.enabled=true</code> can.</li>
 <li>Was it selected? <code>--scanners</code> is an allowlist and <code>--exclude-scanners</code> removes names from it. A scanner that is not selected is recorded SKIPPED.</li>

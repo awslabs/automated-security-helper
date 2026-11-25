@@ -762,6 +762,8 @@ SOFTWARE.
       
         
       
+        
+      
     
     
     
@@ -1413,6 +1415,34 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
+      <a href="../../how-to/scan-container-images/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scan container images
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../how-to/run-offline/" class="md-nav__link">
         
   
@@ -1541,10 +1571,10 @@ SOFTWARE.
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_16" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_17" >
         
           
-          <label class="md-nav__link" for="__nav_4_16" id="__nav_4_16_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_4_17" id="__nav_4_17_label" tabindex="0">
             
   
   
@@ -1562,8 +1592,8 @@ SOFTWARE.
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_16_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_4_16">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_17_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_17">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -2716,6 +2746,10 @@ SOFTWARE.
       
         
       
+        
+      
+        
+      
     
     
     
@@ -2827,6 +2861,62 @@ SOFTWARE.
     
   
     Gitleaks scanner
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plugins/builtin/mcp-config/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP server config scanning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plugins/builtin/syft/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Syft SBOM scanner (syft) and the sdist lockfile harvest
   
 
     
@@ -3988,7 +4078,7 @@ scanner subprocess inside an OS-level sandbox instead. It is off by default.</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>ash<span class="w"> </span>scan<span class="w"> </span>--sandbox<span class="w"> </span>auto<span class="w">            </span><span class="c1"># best sandbox this machine has</span>
 </span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>ash<span class="w"> </span>scan<span class="w"> </span>--sandbox<span class="w"> </span>bwrap<span class="w"> </span>--offline<span class="w"> </span><span class="c1"># bubblewrap, no scanner gets a network</span>
 </span></code></pre></div>
-<p>or in your ASH config file (<code>.ashrc.yaml</code> in a new project):</p>
+<p>or in your ASH config file (<code>.ash.yaml</code> at the project root):</p>
 <div class="language-yaml highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nt">sandbox</span><span class="p">:</span>
 </span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span><span class="nt">mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">auto</span>
 </span></code></pre></div>
@@ -4466,26 +4556,31 @@ skipped for lacking a declaration, and never run unsandboxed.</p>
 </span><span id="__span-3-21"><a id="__codelineno-3-21" name="__codelineno-3-21" href="#__codelineno-3-21"></a>        <span class="n">env_names</span><span class="o">=</span><span class="p">(</span><span class="s2">&quot;MYTOOL_TOKEN&quot;</span><span class="p">,),</span>
 </span><span id="__span-3-22"><a id="__codelineno-3-22" name="__codelineno-3-22" href="#__codelineno-3-22"></a>        <span class="c1"># Set under sandbox-exec only, after the allowlist.</span>
 </span><span id="__span-3-23"><a id="__codelineno-3-23" name="__codelineno-3-23" href="#__codelineno-3-23"></a>        <span class="n">sandbox_exec_env</span><span class="o">=</span><span class="p">((</span><span class="s2">&quot;MYTOOL_PACKAGE_CACHE&quot;</span><span class="p">,</span> <span class="s2">&quot;disabled&quot;</span><span class="p">),),</span>
-</span><span id="__span-3-24"><a id="__codelineno-3-24" name="__codelineno-3-24" href="#__codelineno-3-24"></a>        <span class="c1"># The tool unpacks itself where this variable says and runs what it</span>
-</span><span id="__span-3-25"><a id="__codelineno-3-25" name="__codelineno-3-25" href="#__codelineno-3-25"></a>        <span class="c1"># unpacked; sandbox-exec points it at a private directory per spawn.</span>
-</span><span id="__span-3-26"><a id="__codelineno-3-26" name="__codelineno-3-26" href="#__codelineno-3-26"></a>        <span class="n">unpack_dir_env</span><span class="o">=</span><span class="s2">&quot;XDG_CACHE_HOME&quot;</span><span class="p">,</span>
-</span><span id="__span-3-27"><a id="__codelineno-3-27" name="__codelineno-3-27" href="#__codelineno-3-27"></a>        <span class="c1"># True when read_paths come from the scanner&#39;s options, which the</span>
-</span><span id="__span-3-28"><a id="__codelineno-3-28" name="__codelineno-3-28" href="#__codelineno-3-28"></a>        <span class="c1"># scanned repository can write: they are then mounted only for scanners</span>
-</span><span id="__span-3-29"><a id="__codelineno-3-29" name="__codelineno-3-29" href="#__codelineno-3-29"></a>        <span class="c1"># named in sandbox.read_path_scanners, and cache_paths are not mounted.</span>
-</span><span id="__span-3-30"><a id="__codelineno-3-30" name="__codelineno-3-30" href="#__codelineno-3-30"></a>        <span class="n">read_paths_require_grant</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
-</span><span id="__span-3-31"><a id="__codelineno-3-31" name="__codelineno-3-31" href="#__codelineno-3-31"></a>        <span class="c1"># The same for env_prefixes and env_names, with sandbox.env_scanners.</span>
-</span><span id="__span-3-32"><a id="__codelineno-3-32" name="__codelineno-3-32" href="#__codelineno-3-32"></a>        <span class="n">env_requires_grant</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
-</span><span id="__span-3-33"><a id="__codelineno-3-33" name="__codelineno-3-33" href="#__codelineno-3-33"></a>        <span class="c1"># Variables in ASH&#39;s own environment naming a directory the tool reads</span>
-</span><span id="__span-3-34"><a id="__codelineno-3-34" name="__codelineno-3-34" href="#__codelineno-3-34"></a>        <span class="c1"># (semgrep&#39;s SEMGREP_RULES_CACHE_DIR): mounted read-only, and not</span>
-</span><span id="__span-3-35"><a id="__codelineno-3-35" name="__codelineno-3-35" href="#__codelineno-3-35"></a>        <span class="c1"># executable under sandbox-exec.</span>
-</span><span id="__span-3-36"><a id="__codelineno-3-36" name="__codelineno-3-36" href="#__codelineno-3-36"></a>        <span class="c1"># An unset or empty variable, or one naming /, $HOME or a directory above</span>
-</span><span id="__span-3-37"><a id="__codelineno-3-37" name="__codelineno-3-37" href="#__codelineno-3-37"></a>        <span class="c1"># it, grants nothing.</span>
-</span><span id="__span-3-38"><a id="__codelineno-3-38" name="__codelineno-3-38" href="#__codelineno-3-38"></a>        <span class="n">read_path_env</span><span class="o">=</span><span class="p">(</span><span class="s2">&quot;MYTOOL_RULES_DIR&quot;</span><span class="p">,),</span>
-</span><span id="__span-3-39"><a id="__codelineno-3-39" name="__codelineno-3-39" href="#__codelineno-3-39"></a>        <span class="c1"># True for a tool handed a staged copy of its input outside the tree</span>
-</span><span id="__span-3-40"><a id="__codelineno-3-40" name="__codelineno-3-40" href="#__codelineno-3-40"></a>        <span class="c1"># (the jupyter converter&#39;s nbconvert): it may not read the source or</span>
-</span><span id="__span-3-41"><a id="__codelineno-3-41" name="__codelineno-3-41" href="#__codelineno-3-41"></a>        <span class="c1"># output directory. See &quot;Converters&quot; below.</span>
-</span><span id="__span-3-42"><a id="__codelineno-3-42" name="__codelineno-3-42" href="#__codelineno-3-42"></a>        <span class="n">staged_input_only</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
-</span><span id="__span-3-43"><a id="__codelineno-3-43" name="__codelineno-3-43" href="#__codelineno-3-43"></a>    <span class="p">)</span>
+</span><span id="__span-3-24"><a id="__codelineno-3-24" name="__codelineno-3-24" href="#__codelineno-3-24"></a>        <span class="c1"># Under sandbox-exec, these variables point at a private, empty</span>
+</span><span id="__span-3-25"><a id="__codelineno-3-25" name="__codelineno-3-25" href="#__codelineno-3-25"></a>        <span class="c1"># directory per spawn. For a tool whose cache location follows a</span>
+</span><span id="__span-3-26"><a id="__codelineno-3-26" name="__codelineno-3-26" href="#__codelineno-3-26"></a>        <span class="c1"># variable it offers no other way to move (Go&#39;s os.UserCacheDir reads</span>
+</span><span id="__span-3-27"><a id="__codelineno-3-27" name="__codelineno-3-27" href="#__codelineno-3-27"></a>        <span class="c1"># HOME alone on macOS).</span>
+</span><span id="__span-3-28"><a id="__codelineno-3-28" name="__codelineno-3-28" href="#__codelineno-3-28"></a>        <span class="n">sandbox_exec_cache_env</span><span class="o">=</span><span class="p">(</span><span class="s2">&quot;HOME&quot;</span><span class="p">,),</span>
+</span><span id="__span-3-29"><a id="__codelineno-3-29" name="__codelineno-3-29" href="#__codelineno-3-29"></a>        <span class="c1"># The tool unpacks itself where this variable says and runs what it</span>
+</span><span id="__span-3-30"><a id="__codelineno-3-30" name="__codelineno-3-30" href="#__codelineno-3-30"></a>        <span class="c1"># unpacked; sandbox-exec points it at a private directory per spawn.</span>
+</span><span id="__span-3-31"><a id="__codelineno-3-31" name="__codelineno-3-31" href="#__codelineno-3-31"></a>        <span class="n">unpack_dir_env</span><span class="o">=</span><span class="s2">&quot;XDG_CACHE_HOME&quot;</span><span class="p">,</span>
+</span><span id="__span-3-32"><a id="__codelineno-3-32" name="__codelineno-3-32" href="#__codelineno-3-32"></a>        <span class="c1"># True when read_paths come from the scanner&#39;s options, which the</span>
+</span><span id="__span-3-33"><a id="__codelineno-3-33" name="__codelineno-3-33" href="#__codelineno-3-33"></a>        <span class="c1"># scanned repository can write: they are then mounted only for scanners</span>
+</span><span id="__span-3-34"><a id="__codelineno-3-34" name="__codelineno-3-34" href="#__codelineno-3-34"></a>        <span class="c1"># named in sandbox.read_path_scanners, and cache_paths are not mounted.</span>
+</span><span id="__span-3-35"><a id="__codelineno-3-35" name="__codelineno-3-35" href="#__codelineno-3-35"></a>        <span class="n">read_paths_require_grant</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+</span><span id="__span-3-36"><a id="__codelineno-3-36" name="__codelineno-3-36" href="#__codelineno-3-36"></a>        <span class="c1"># The same for env_prefixes and env_names, with sandbox.env_scanners.</span>
+</span><span id="__span-3-37"><a id="__codelineno-3-37" name="__codelineno-3-37" href="#__codelineno-3-37"></a>        <span class="n">env_requires_grant</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+</span><span id="__span-3-38"><a id="__codelineno-3-38" name="__codelineno-3-38" href="#__codelineno-3-38"></a>        <span class="c1"># Variables in ASH&#39;s own environment naming a directory the tool reads</span>
+</span><span id="__span-3-39"><a id="__codelineno-3-39" name="__codelineno-3-39" href="#__codelineno-3-39"></a>        <span class="c1"># (semgrep&#39;s SEMGREP_RULES_CACHE_DIR): mounted read-only, and not</span>
+</span><span id="__span-3-40"><a id="__codelineno-3-40" name="__codelineno-3-40" href="#__codelineno-3-40"></a>        <span class="c1"># executable under sandbox-exec.</span>
+</span><span id="__span-3-41"><a id="__codelineno-3-41" name="__codelineno-3-41" href="#__codelineno-3-41"></a>        <span class="c1"># An unset or empty variable, or one naming /, $HOME or a directory above</span>
+</span><span id="__span-3-42"><a id="__codelineno-3-42" name="__codelineno-3-42" href="#__codelineno-3-42"></a>        <span class="c1"># it, grants nothing.</span>
+</span><span id="__span-3-43"><a id="__codelineno-3-43" name="__codelineno-3-43" href="#__codelineno-3-43"></a>        <span class="n">read_path_env</span><span class="o">=</span><span class="p">(</span><span class="s2">&quot;MYTOOL_RULES_DIR&quot;</span><span class="p">,),</span>
+</span><span id="__span-3-44"><a id="__codelineno-3-44" name="__codelineno-3-44" href="#__codelineno-3-44"></a>        <span class="c1"># True for a tool handed a staged copy of its input outside the tree</span>
+</span><span id="__span-3-45"><a id="__codelineno-3-45" name="__codelineno-3-45" href="#__codelineno-3-45"></a>        <span class="c1"># (the jupyter converter&#39;s nbconvert): it may not read the source or</span>
+</span><span id="__span-3-46"><a id="__codelineno-3-46" name="__codelineno-3-46" href="#__codelineno-3-46"></a>        <span class="c1"># output directory. See &quot;Converters&quot; below.</span>
+</span><span id="__span-3-47"><a id="__codelineno-3-47" name="__codelineno-3-47" href="#__codelineno-3-47"></a>        <span class="n">staged_input_only</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+</span><span id="__span-3-48"><a id="__codelineno-3-48" name="__codelineno-3-48" href="#__codelineno-3-48"></a>    <span class="p">)</span>
 </span></code></pre></div>
 <p>The alpha scanners declare theirs:</p>
 <ul>
@@ -4580,7 +4675,7 @@ resolved path, or the shell's working directory (<code>$PWD</code>).</p>
 <p>An in-tree <code>network_scanners</code> list still takes network away: a scanner it doesn't
 name gets none, so a repository can keep its own scan offline with
 <code>network_scanners: []</code>.</p>
-<p>When any file the config was built from can't grant (the discovered <code>.ash/.ash.yaml</code>,
+<p>When any file the config was built from can't grant (the discovered <code>.ash.yaml</code>,
 a <code>--config</code> path, an <code>extends</code> base, or the file <code>ASH_CONFIG</code> names), the five
 settings are taken from the files that can: in workspace mode the operator's
 default config (under the MCP server, the session's bound profile), else
@@ -4593,9 +4688,9 @@ adds with <code>patch</code>; a <code>mode</code> its own <code>patch</code> set
 warning that names the files that can't grant and the settings it dropped. A <code>network_scanners</code> list in such a file still takes network away: a scanner
 it doesn't name gets none, so a repository can keep its own scan offline with
 <code>network_scanners: []</code>.</p>
-<p>For a config in <code>/home/me/src/app/.ash/.ash.yaml</code> that grants grype a network and a
+<p>For a config in <code>/home/me/src/app/.ash.yaml</code> that grants grype a network and a
 read path, the warning reads:</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>WARNING  Ignoring sandbox.network_scanners, sandbox.extra_read_paths from /home/me/src/app/.ash/.ash.yaml: the file is inside the scanned tree, so the repository being scanned wrote it. A network_scanners list there still removes network from scanners it does not name, and a sandbox mode there still applies when nothing else turns the sandbox on. To keep a setting, move the file outside every git checkout, or pass the setting with --config-overrides. A file inside the scanned directory has to move out of it as well.
+<div class="language-text highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>WARNING  Ignoring sandbox.network_scanners, sandbox.extra_read_paths from /home/me/src/app/.ash.yaml: the file is inside the scanned tree, so the repository being scanned wrote it. A network_scanners list there still removes network from scanners it does not name, and a sandbox mode there still applies when nothing else turns the sandbox on. To keep a setting, move the file outside every git checkout, or pass the setting with --config-overrides. A file inside the scanned directory has to move out of it as well.
 </span></code></pre></div>
 <p>This applies to a trusted config kept in a checkout of its own as well, such as an
 ops or dotfiles repository: its grants are dropped with the same warning. Pass them

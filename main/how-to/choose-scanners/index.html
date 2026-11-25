@@ -762,6 +762,8 @@ SOFTWARE.
       
         
       
+        
+      
     
     
     
@@ -1247,6 +1249,34 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
+      <a href="../scan-container-images/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scan container images
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../run-offline/" class="md-nav__link">
         
   
@@ -1375,10 +1405,10 @@ SOFTWARE.
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_16" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_17" >
         
           
-          <label class="md-nav__link" for="__nav_4_16" id="__nav_4_16_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_4_17" id="__nav_4_17_label" tabindex="0">
             
   
   
@@ -1396,8 +1426,8 @@ SOFTWARE.
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_16_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_4_16">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_17_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_17">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -2550,6 +2580,10 @@ SOFTWARE.
       
         
       
+        
+      
+        
+      
     
     
     
@@ -2661,6 +2695,62 @@ SOFTWARE.
     
   
     Gitleaks scanner
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/mcp-config/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP server config scanning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/syft/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Syft SBOM scanner (syft) and the sdist lockfile harvest
   
 
     
@@ -3648,7 +3738,7 @@ SOFTWARE.
 
 
 <h1 id="choose-scanners">Choose scanners<a class="headerlink" href="#choose-scanners" title="Permanent link">&para;</a></h1>
-<p>ASH runs every enabled scanner it has, and all 16 built-in scanners are enabled by default (on Windows, semgrep and opengrep are off by default). This page shows how to see which scanners a scan will run, turn some off, add alpha scanners, and set a scanner's options. The <a href="../../reference/scanners/">scanner reference</a> lists each scanner with its tool and options.</p>
+<p>ASH runs every enabled scanner it has, and all 17 built-in scanners are enabled by default (on Windows, semgrep and opengrep are off by default). This page shows how to see which scanners a scan will run, turn some off, add alpha scanners, and set a scanner's options. The <a href="../../reference/scanners/">scanner reference</a> lists each scanner with its tool and options.</p>
 <h2 id="see-which-scanners-will-run">See which scanners will run<a class="headerlink" href="#see-which-scanners-will-run" title="Permanent link">&para;</a></h2>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>ash<span class="w"> </span>plugin<span class="w"> </span>list
 </span></code></pre></div>
@@ -3685,7 +3775,7 @@ SOFTWARE.
 <p>A scanner that is turned off, not selected, or excluded is recorded SKIPPED and does not affect the exit code. If every selected scanner is SKIPPED, including when none of them has a file to scan, the scan exits 1 (with <code>fail_on_incomplete_scanners</code> on, the default).</p>
 <h3 id="run-only-python-based-scanners">Run only Python-based scanners<a class="headerlink" href="#run-only-python-based-scanners" title="Permanent link">&para;</a></h3>
 <p><code>--python-only</code> keeps the scanners that need nothing but Python: bandit, cfn-lint, checkov, detect-secrets, semgrep, and zizmor. ASH applies it before it checks the scanners' tools, so every other scanner is recorded SKIPPED whether or not its tool is installed, and does not affect the exit code. When the run selects no Python-only scanner, as with <code>--python-only --scanners grype</code>, no scanner runs and the scan exits 1.</p>
-<p><a id="community"></a></p>
+<p><a id="alpha"></a></p>
 <h2 id="alpha">Add alpha scanners<a class="headerlink" href="#alpha" title="Permanent link">&para;</a></h2>
 <p>Alpha scanners are opt-in scanners that ship with ASH in plugin modules that load only when you name them. ASH does not yet promote them as supported. Add the module to <code>ash_plugin_modules</code>:</p>
 <div class="language-yaml highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nt">ash_plugin_modules</span><span class="p">:</span>

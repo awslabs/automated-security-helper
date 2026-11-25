@@ -762,6 +762,8 @@ SOFTWARE.
       
         
       
+        
+      
     
     
     
@@ -1117,6 +1119,34 @@ SOFTWARE.
   
   
     <li class="md-nav__item">
+      <a href="../scan-container-images/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scan container images
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../run-offline/" class="md-nav__link">
         
   
@@ -1245,10 +1275,10 @@ SOFTWARE.
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_16" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_17" >
         
           
-          <label class="md-nav__link" for="__nav_4_16" id="__nav_4_16_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_4_17" id="__nav_4_17_label" tabindex="0">
             
   
   
@@ -1266,8 +1296,8 @@ SOFTWARE.
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_16_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_4_16">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_17_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_17">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -2683,6 +2713,10 @@ SOFTWARE.
       
         
       
+        
+      
+        
+      
     
     
     
@@ -2794,6 +2828,62 @@ SOFTWARE.
     
   
     Gitleaks scanner
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/mcp-config/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP server config scanning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/syft/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Syft SBOM scanner (syft) and the sdist lockfile harvest
   
 
     
@@ -4240,7 +4330,9 @@ it, and keep to one trusted client per server with <code>ASH_MCP_TRANSPORT</code
 <p>A stateless server identifies no session by itself, so the tools that keep state for a
 session refuse every call with <code>error_type</code> <code>session_identity_required</code>: <code>run_ash_scan</code>,
 <code>get_scan_progress</code>, <code>list_active_scans</code>, <code>cancel_scan</code>, <code>set_source_git</code>,
-<code>set_source_zip_chunk</code>, <code>set_source_zip_finalize</code>, <code>clear_source</code>, and <code>select_profile</code>.
+<code>set_source_zip_chunk</code>, <code>set_source_zip_finalize</code>, <code>set_source_image</code>,
+<code>set_source_image_archive_chunk</code>, <code>set_source_image_archive_finalize</code>, <code>clear_source</code>, and
+<code>select_profile</code>.
 <code>run_ash_workspace_scan</code> returns its results in its response and needs no session. The session
 is never what a client claims: on a stateful server an <code>Mcp-Session-Id</code> the server did not
 issue names no session, and on SSE the session is the one the server issued for the event
@@ -4398,9 +4490,24 @@ gives <code>git_clone_failed</code> or <code>git_checkout_failed</code>, with gi
   refused as a whole, before anything is extracted.</li>
 <li>A new zip is extracted beside the old tree and replaces it only when extraction succeeds.</li>
 </ul>
-<p>While a scan of a session runs, <code>clear_source</code>, <code>set_source_git</code>, and
-<code>set_source_zip_finalize</code> are refused with <code>error_type</code> <code>source_delivery_busy</code>, because each
-would remove or replace the tree the scan is reading. Call them again once the scan has
+<p>A session can deliver a container image as its scan subject instead of a tree.
+<code>set_source_image</code> records an image reference and fetches nothing: resolution belongs to a
+container engine or the scanner tools' own registry clients at scan start.
+<code>set_source_image_archive_chunk</code> and <code>set_source_image_archive_finalize</code> take a saved image
+(an uncompressed <code>docker save</code> tar) in the zip channel's exact shape -- the same chunk rules
+and caps, a SHA-256 verified at finalize -- but nothing is extracted: the archive is one file
+the scanner tools read whole, checked only for tar shape and moved into the session
+workspace. One session has one subject, and the latest delivery wins: an image delivered
+after a tree replaces it as what <code>run_ash_scan</code> scans when <code>source_dir</code> is omitted, and a
+tree delivered after an image replaces the image. An image scan writes its output tree under
+the session's own workspace, since an image has no target directory; scanners that do not
+declare <code>container_image</code> targets in their operational facets are reported SKIPPED, and when
+nothing scanned the image the report carries one informational SARIF note saying so. See
+<a href="../scan-container-images/">Scan container images</a> for the asset contract itself.</p>
+<p>While a scan of a session runs, <code>clear_source</code>, <code>set_source_git</code>,
+<code>set_source_zip_finalize</code>, <code>set_source_image</code>, and <code>set_source_image_archive_finalize</code> are
+refused with <code>error_type</code> <code>source_delivery_busy</code>, because each
+would remove or replace the subject the scan is reading. Call them again once the scan has
 finished. A <code>run_ash_workspace_scan</code> over a workspace in the session's delivered tree holds the
 tree the same way for the whole workspace scan. The other way round, <code>run_ash_scan</code> and
 <code>run_ash_workspace_scan</code> are refused with the same <code>error_type</code> while one of those calls is
