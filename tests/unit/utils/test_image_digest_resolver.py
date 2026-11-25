@@ -83,6 +83,25 @@ def notices():
         ASH_LOGGER.setLevel(level)
 
 
+@pytest.fixture(autouse=True)
+def no_engine_on_this_host(monkeypatch, tmp_path):
+    """The engine rung of the ladder sees no daemon: these rows are the registry's.
+
+    The suite must never ask the host's real engine (tests/unit/utils/
+    test_image_digest_ladder.py covers the engine rung with its own socket).
+    """
+    import automated_security_helper.core.container_engine as engine_module
+
+    monkeypatch.delenv("DOCKER_HOST", raising=False)
+    monkeypatch.delenv("XDG_RUNTIME_DIR", raising=False)
+    monkeypatch.setattr(
+        engine_module, "DOCKER_DEFAULT_SOCKET", str(tmp_path / "absent-docker.sock")
+    )
+    monkeypatch.setattr(
+        engine_module, "PODMAN_SYSTEM_SOCKET", str(tmp_path / "absent-podman.sock")
+    )
+
+
 def _notice_count(handler) -> int:
     return sum(1 for r in handler.records if "Could not resolve" in r.getMessage())
 
