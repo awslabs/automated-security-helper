@@ -752,9 +752,9 @@ assertions failed against a buildspec that had already been changed.
 
 The templates synthesize with no AWS credentials and no `cdk.context.json`: nothing
 uses `fromLookup`, so `npx cdk synth --all --no-lookups` works offline. The pinned
-`aws-cdk` CLI (2.1144.0) is the `minimumCliVersion` that `manifest.json` records for
-the locked `aws-cdk-lib` 2.273.0 and `@aws-cdk/cloud-assembly-schema` 54.26.0
-(manifest schema 54.0.0). The CLI only rejects a newer schema major, so a CLI below
+`aws-cdk` CLI (2.1149.0) is the `minimumCliVersion` that `manifest.json` records for
+the locked `aws-cdk-lib` 2.278.0 and `@aws-cdk/cloud-assembly-schema` 55.7.0
+(manifest schema 55.0.0). The CLI only rejects a newer schema major, so a CLI below
 that minimum still synthesizes, but one built against an older major fails synth
 with a schema mismatch that does not look like a template problem.
 
