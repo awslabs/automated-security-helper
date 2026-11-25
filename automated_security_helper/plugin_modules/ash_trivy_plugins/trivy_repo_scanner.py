@@ -282,6 +282,7 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
                 python_only=False,
                 use_uv_tool=False,
             ),
+            runtime_compat=opsf.RuntimeCompatFacet(rows=()),
             platforms=opsf.PlatformsFacet(
                 provisionable=opsf.PLATFORMS_NO_WINDOWS_ARM64,
                 note="no windows/arm64 and no 32-bit macOS asset (tool_downloads.py docstring)",

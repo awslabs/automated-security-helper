@@ -87,3 +87,62 @@ def test_the_unconfirmed_state_has_its_own_column_and_legend_entry(page: str) ->
     assert "| [`planted`](#planted) | 2 | 0 | 17 | 1 |" in page
     assert "- `unconfirmed`:" in page
     assert "| `severity` | `unconfirmed` |" in page
+
+
+def _compat_planted():
+    """A planted class whose operational row carries one open-ended PIN row."""
+    from automated_security_helper.base import scanner_operational_facets as opsf
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.zizmor_scanner import (
+        ZizmorScanner,
+    )
+
+    row = opsf.RuntimeCompatRow(
+        runtime=opsf.RuntimeName.PYTHON,
+        tool_versions="",
+        runtime_request=">=3.10,<3.15",
+        resolution=opsf.CompatResolution.PIN,
+        reason="PLANTED-COMPAT-REASON | with a pipe",
+        upstream_issue="https://example.com/planted/issues/1",
+        open_ended=True,
+    )
+
+    class Planted:
+        facets: ClassVar[ScannerFacets] = _row()
+        operational_facets = ZizmorScanner.operational_facets.model_copy(
+            update={"runtime_compat": opsf.RuntimeCompatFacet(rows=(row,))}
+        )
+
+    return Planted
+
+
+@pytest.fixture
+def compat_page(monkeypatch) -> str:
+    monkeypatch.syspath_prepend(str(SCRIPTS))
+    import _plugin_reference
+    import generate_facets_reference
+
+    plugins = [
+        SimpleNamespace(name="planted-compat", cls=_compat_planted()),
+        SimpleNamespace(name="planted", cls=_Planted),
+    ]
+    monkeypatch.setattr(_plugin_reference, "discover", lambda kind: plugins)
+    content, _ = generate_facets_reference.generate()
+    sys.modules.pop("generate_facets_reference", None)
+    return content
+
+
+def test_the_facets_page_renders_runtime_compat_rows(compat_page: str) -> None:
+    assert "## Runtime compatibility" in compat_page
+    assert (
+        "| [`planted-compat`](#planted-compat) | `python` | all | `>=3.10,<3.15` | "
+        "`pin` | yes, [https://example.com/planted/issues/1]"
+        "(https://example.com/planted/issues/1) |"
+    ) in compat_page
+    # the pipe in the reason must not end the table cell
+    assert "PLANTED-COMPAT-REASON \\| with a pipe" in compat_page
+    assert "1 of 2 scanners declare a row. The other 1 declare none" in compat_page
+
+
+def test_a_scanner_with_no_operational_row_is_counted_not_listed(page: str) -> None:
+    assert "0 of 1 scanners declare a row. The other 1 declare none" in page
+    assert "| Scanner | Runtime | Tool versions |" not in page
