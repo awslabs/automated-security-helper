@@ -22,10 +22,12 @@ stopped reading ``.env``. Like any ignore path it is anchored at the source
 directory: ``vendor/`` is the top-level ``vendor`` directory, and ``**/vendor/`` is
 one at any depth.
 
-Suppressions keep their meaning. A suppression path ending in ``/`` still matches
-only that literal path, so it suppresses nothing; ASH warns once, after the scan,
-for each such suppression that matched no finding, and names ``<dir>/**/*``, which as
-a suppression path covers every file below the directory and not a file of its name.
+Since the bare-directory rule (issue #894) suppressions read a glob-free path the
+same way: ``vendor`` and ``vendor/`` both name the directory and match the findings
+below it, anchored, and the bare spelling also matches a file named ``vendor``. The
+post-scan warning that a trailing-slash suppression matched nothing went with the
+behavior it described. ``<dir>/**/*`` stays another spelling of the files below the
+directory.
 """
 
 from __future__ import annotations
@@ -125,7 +127,9 @@ class TestMatching:
             ("src/vendor/a.py", "vendor/", False),
             ("src/vendor/a.py", "**/vendor/", True),
             ("vendor/a.py", "**/vendor/", True),
-            ("vendor/a.py", "vendor", False),
+            # The bare-directory rule (issue #894): a glob-free name is the
+            # directory too.
+            ("vendor/a.py", "vendor", True),
             ("vendor/a.py", "vendor/*", True),
             ("vendor/lib/b.js", "vendor/", True),
             # Inside the directory only, never a file of that name.
@@ -144,11 +148,17 @@ class TestMatching:
         entry = IgnorePathWithReason(path=pattern, reason="r")
         assert entry.matches_path(path) is expected
 
-    def test_a_suppression_path_ending_in_a_slash_is_unchanged(self):
+    def test_a_suppression_path_ending_in_a_slash_names_its_directory(self):
+        """The bare-directory rule (issue #894): ``vendor/`` in a suppression
+        names the directory and matches the findings below it, as it does in an
+        ignore path; a file named ``vendor`` matches the slashless spelling only.
+        """
         suppression = AshSuppression(path="vendor/", rule_id="R1", reason="r")
 
-        assert suppression.matches_path("vendor/a.py") is False
-        assert suppression_matcher.file_path_matches("vendor/a.py", "vendor/") is False
+        assert suppression.matches_path("vendor/a.py") is True
+        assert suppression_matcher.file_path_matches("vendor/a.py", "vendor/") is True
+        assert suppression_matcher.file_path_matches("vendor", "vendor/") is False
+        assert suppression_matcher.file_path_matches("vendor", "vendor") is True
 
 
 class TestDroppedFindings:
@@ -187,44 +197,9 @@ class TestDroppedFindings:
 
         assert _kept(report) == uris
 
-    def test_a_suppression_path_ending_in_a_slash_still_suppresses_nothing(self):
-        suppression = AshSuppression(path="build/", rule_id="R1", reason="r")
-
-        report = apply_suppressions_to_sarif(
-            _sarif("build/out.py"), _context([], suppressions=[suppression])
-        )
-
-        assert _kept(report) == ["build/out.py"]
-
-
-class TestUnmatchedDirectorySuppressions:
-    def test_one_warning_names_the_directory_glob(self, ash_warnings):
-        unmatched = AshSuppression(path="build/", rule_id="R1", reason="r")
-        used = AshSuppression(path="lib/", rule_id="R2", reason="r")
-        plain = AshSuppression(path="docs/*", rule_id="R3", reason="r")
-
-        suppression_matcher.warn_unmatched_directory_suppressions(
-            [unmatched, used, plain], used_ids={used.id}
-        )
-
-        messages = [record.getMessage() for record in ash_warnings]
-        assert len(messages) == 1, messages
-        assert "'build/'" in messages[0]
-        assert "'build/**/*'" in messages[0]
-
-    def test_the_suggested_spelling_is_what_is_inside_the_directory(self):
-        """As a suppression path, ``build/**/*`` covers every file below build
-        and not a file named build; ``build/**`` would cover that file too."""
-        suggested = AshSuppression(path="build/**/*", rule_id="R1", reason="r")
-
-        assert suggested.matches_path("build/a.js") is True
-        assert suggested.matches_path("build/x/y.js") is True
-        assert suggested.matches_path("build") is False
-        assert suggested.matches_path("src/build/a.js") is False
-
-    def test_a_suppression_build_slash_keeps_its_literal_meaning(self, ash_warnings):
-        """After the ignore-path change, ``build/`` as a suppression still matches
-        nothing below build, and the warning about it is given once."""
+    def test_a_suppression_path_ending_in_a_slash_suppresses_the_directory(self):
+        """The bare-directory rule (issue #894): ``build/`` as a suppression
+        marks the findings below build suppressed, and leaves the rest alone."""
         suppression = AshSuppression(path="build/", rule_id="R1", reason="r")
         finding = FlatVulnerability(
             id="x",
@@ -237,27 +212,32 @@ class TestUnmatchedDirectorySuppressions:
             file_path="build/a.js",
         )
 
-        assert suppression.matches(finding) is False
-        assert should_suppress_finding(finding, [suppression])[0] is False
+        assert suppression.matches(finding) is True
+        assert should_suppress_finding(finding, [suppression])[0] is True
         report = apply_suppressions_to_sarif(
-            _sarif("build/a.js"), _context([], suppressions=[suppression])
+            _sarif("build/out.py", "src/app.py"),
+            _context([], suppressions=[suppression]),
         )
-        assert _kept(report) == ["build/a.js"]
+        assert _kept(report) == ["src/app.py"]
+        marked = [
+            result
+            for run in report.runs
+            for result in run.results or []
+            if result.suppressions
+        ]
+        assert len(marked) == 1
 
-        suppression_matcher.warn_unmatched_directory_suppressions(
-            [suppression], used_ids=set()
-        )
 
-        assert len(ash_warnings) == 1
+class TestDirectorySpellings:
+    def test_the_glob_spelling_is_what_is_inside_the_directory(self):
+        """As a suppression path, ``build/**/*`` covers every file below build
+        and not a file named build; ``build/**`` would cover that file too."""
+        suggested = AshSuppression(path="build/**/*", rule_id="R1", reason="r")
 
-    def test_nothing_is_said_when_every_such_suppression_matched(self, ash_warnings):
-        used = AshSuppression(path="lib/", rule_id="R2", reason="r")
-
-        suppression_matcher.warn_unmatched_directory_suppressions(
-            [used], used_ids={used.id}
-        )
-
-        assert ash_warnings == []
+        assert suggested.matches_path("build/a.js") is True
+        assert suggested.matches_path("build/x/y.js") is True
+        assert suggested.matches_path("build") is False
+        assert suggested.matches_path("src/build/a.js") is False
 
 
 class TestTheScannersExclusions:

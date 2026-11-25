@@ -8,6 +8,7 @@ global_settings:
     expires: null
     client_supplied: false
   suppressions: []
+  exclusions: []
   mcp:
     runtime_overrides:
       enabled: false
@@ -32,6 +33,7 @@ global_settings:
       - /scanners/detect-secrets/options/baseline_file
       - /global_settings/ignore_paths
       - /global_settings/suppressions
+      - /global_settings/exclusions
       - /global_settings/mcp
       - /global_settings/mcp/**
       - /scanners/opengrep/options/exclude_rule

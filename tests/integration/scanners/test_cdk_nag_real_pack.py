@@ -137,6 +137,29 @@ def non_compliant_template(tmp_path: Path) -> Path:
     return path
 
 
+# A template no AwsSolutions rule fires on (issue #887's own repro fixture): a bare
+# WaitConditionHandle has no property any pack judges. Being compliant is as
+# load-bearing here as being non-compliant is above -- since aws-cdk-lib 2.258.0
+# (aws/aws-cdk#38009) a pack that evaluated a template and found NOTHING writes no
+# ``pluginReports[]`` entry at all, so this template's validation report is
+# ``{"pluginReports": []}`` and only the wrapper's own record of the pack's completed
+# validate() can tell "evaluated, clean" from "never ran".
+COMPLIANT_TEMPLATE = {
+    "AWSTemplateFormatVersion": "2010-09-09",
+    "Description": "Deliberately compliant fixture for cdk-nag integration coverage",
+    "Resources": {
+        "Handle": {"Type": "AWS::CloudFormation::WaitConditionHandle"},
+    },
+}
+
+
+@pytest.fixture()
+def compliant_template(tmp_path: Path) -> Path:
+    path = tmp_path / "compliant.template.json"
+    path.write_text(json.dumps(COMPLIANT_TEMPLATE, indent=2))
+    return path
+
+
 # A template that trips the CDK's OWN validation plugin as well as a nag pack. From
 # aws-cdk-lib 2.262.0 the CDK registers CloudFormationValidatePlugin unconditionally, so its
 # findings arrive in the same validation-report.json as cdk-nag's -- and a placeholder KMS key
@@ -289,6 +312,51 @@ class TestRealNagPack:
         assert rule_ids, "findings carried no ruleId"
         assert any(rid.startswith("AwsSolutions-") for rid in rule_ids), (
             f"expected at least one AwsSolutions rule, got {sorted(rule_ids)}"
+        )
+
+    def test_a_compliant_template_is_evaluated_with_zero_findings(
+        self, compliant_template: Path, tmp_path: Path
+    ):
+        """Issue #887: a template without violations must read evaluated, not failed.
+
+        Since aws-cdk-lib 2.258.0 (aws/aws-cdk#38009) ``buildPluginReports`` omits
+        every plugin that succeeded with zero violations, so this template's
+        validation report is ``{"pluginReports": []}`` -- byte-identical to the
+        report of a synth where no pack ran. Before the wrapper recorded each
+        requested pack's own completed ``validate()``, this response carried
+        ``failure`` ("contains no plugin reports. No pack evaluated this
+        template."), the scanner counted the template as a failed target, and a
+        repository of compliant templates read as a cdk-nag ERROR.
+
+        This also proves, against the installed aws-cdk-lib and cdk-nag, that the
+        recording subclass is transparent to jsii: the pack still registers, CDK
+        still drives its validate(), and the non-compliant test above still sees
+        every finding.
+        """
+        _require_cdk_nag()
+        from automated_security_helper.utils.cdk_nag_wrapper import (
+            run_cdk_nag_against_cfn_template,
+        )
+
+        response = run_cdk_nag_against_cfn_template(
+            template_path=compliant_template,
+            nag_packs=["AwsSolutionsChecks"],
+            outdir=tmp_path / "cdk-out",
+        )
+
+        assert response is not None, (
+            "wrapper returned None for a valid CloudFormation template"
+        )
+        assert response.failure is None, (
+            "the requested pack evaluated this compliant template (its validate() "
+            "completed with zero violations), so the response must not say no pack "
+            f"evaluated it; got failure={response.failure!r}"
+        )
+        assert response.results == {"AwsSolutions": []}, (
+            "a compliant evaluation is the {pack: []} shape. A non-empty result "
+            "means the fixture is no longer compliant under the installed cdk-nag "
+            "and needs a new rule-free resource; got "
+            f"{ {k: len(v) for k, v in response.results.items()} }"
         )
 
     def test_failure_is_not_reported_as_success(self, tmp_path: Path):

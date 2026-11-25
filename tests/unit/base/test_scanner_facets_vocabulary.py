@@ -103,9 +103,25 @@ def test_na_requires_a_reason() -> None:
         FacetDecl(state=FacetState.NA, reason="")
     decl = FacetDecl(
         state=FacetState.NA,
-        reason="output not read; a sample run would settle it",
+        reason="the tool's output carries no such field",
     )
     assert decl.state is FacetState.NA
+
+
+def test_unconfirmed_is_its_own_state_and_requires_a_reason() -> None:
+    assert FacetState.UNCONFIRMED is not FacetState.NA
+    assert FacetState.UNCONFIRMED.value == "unconfirmed"
+    with pytest.raises(ValidationError):
+        FacetDecl(state=FacetState.UNCONFIRMED)
+    with pytest.raises(ValidationError):
+        FacetDecl(state=FacetState.UNCONFIRMED, reason="  ")
+    decl = FacetDecl(
+        state=FacetState.UNCONFIRMED,
+        reason="output not read; a sample run would settle it",
+    )
+    assert decl.state is FacetState.UNCONFIRMED
+    # Unlike MAPPED and DROPPED it names no native field: nothing was read.
+    assert decl.native_field is None
 
 
 def test_mapped_resource_id_requires_an_example() -> None:

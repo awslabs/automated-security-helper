@@ -38,6 +38,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_lint_scan
     CfnLintScannerConfigOptions,
 )
 from automated_security_helper.utils.config_trust import record_provenance
+from tests.unit.base.scanner_support import is_resource_run
 
 pytestmark = pytest.mark.unit
 
@@ -114,7 +115,7 @@ class RegionFaultCfnLint:
         self.calls: list = []
 
     def __call__(self, command, **kwargs):
-        if command[1:3] == ["--format", "json"]:
+        if is_resource_run(command):
             # the scanner's own second run that names each result's resource
             # (_attach_resources): an empty report names none, and it is no
             # invocation of the scan

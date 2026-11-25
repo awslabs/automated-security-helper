@@ -538,8 +538,9 @@ def bandit_exclude_globs(anchor: str, pattern: str) -> List[str]:
 
     Emitted:
 
-    * a literal (``app.py``, ``src/app.py``), which ASH reads as that path
-      only: ``<anchor>/app.p[y]``.
+    * a literal (``app.py``, ``src/app.py``), which ASH reads as that path and
+      the directory of that name (the bare-directory rule, issue #894):
+      ``<anchor>/app.p[y]`` and ``<anchor>/app.py/*``.
     * ``dir/**`` and ``dir/`` (``dir`` literal, any depth of components):
       ``<anchor>/dir/*``.
     * ``**/dir/**`` and ``**/dir/``: ``<anchor>/dir/*`` and ``<anchor>/*/dir/*``.
@@ -550,9 +551,10 @@ def bandit_exclude_globs(anchor: str, pattern: str) -> List[str]:
     included. ASH's matcher compares a path as it is given and drops no ``./``, so
     ``./app.py`` covers no file of the tree and bandit is told to skip none. Nor a
     pattern or anchor holding a line break or a NUL (``_cannot_be_passed``): the
-    argument could not carry it, and the SARIF step applies the ignore path. Nor
-    a literal made only of ``/`` and ``!`` (``_not_a_plain_substring`` has no
-    form for it that is not a plain substring of other paths).
+    argument could not carry it, and the SARIF step applies the ignore path. A
+    literal made only of ``/`` and ``!`` gets its subtree glob only
+    (``_not_a_plain_substring`` has no form for the path itself that is not a
+    plain substring of other paths).
     """
     pattern = pattern.replace("\\", "/")
     if pattern.endswith("/") and pattern.strip("/"):
@@ -582,10 +584,14 @@ def bandit_exclude_globs(anchor: str, pattern: str) -> List[str]:
             return []
         if _GLOB_CHARACTERS & set(pattern):
             return [f"{anchor_glob}/{pattern}"]
+        # A glob-free pattern names the path and the directory of that name
+        # (the bare-directory rule, issue #894), so bandit skips the path
+        # itself and, as for "<dir>/**", everything below it.
+        globs = [f"{anchor_glob}/{pattern}/*"]
         literal = _not_a_plain_substring(pattern)
-        if literal is None:
-            return []
-        return [f"{anchor_glob}/{literal}"]
+        if literal is not None:
+            globs.insert(0, f"{anchor_glob}/{literal}")
+        return globs
     parts = pattern.split("/")
     leading = parts[0] == "**"
     middle = parts[1:-1] if leading else parts[:-1]
@@ -889,17 +895,15 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
             "snippet.text (settled by the M0 capture)",
         ),
         references=FacetDecl(
-            state=FacetState.DROPPED,
-            native_field="tool.driver.rules[].helpUri",
-            reason="rule-level only: the flat reader takes references from "
-            "result relatedLocations, so the help link is discarded today",
+            state=FacetState.MAPPED,
+            native_field="tool.driver.rules[].helpUri, read into the flat "
+            "references when the result carries no relatedLocations",
         ),
         tags=FacetDecl(
-            state=FacetState.DROPPED,
-            native_field="tool.driver.rules[].properties.tags",
-            reason="rule-level only: the flat reader takes tags from result "
-            "properties, so the rule tags are discarded today (they still "
-            "feed the CWE read)",
+            state=FacetState.MAPPED,
+            native_field="tool.driver.rules[].properties.tags, read into the "
+            "flat tags when the result carries none (they also feed the CWE "
+            "read)",
         ),
         extras=FacetDecl(
             state=FacetState.MAPPED,

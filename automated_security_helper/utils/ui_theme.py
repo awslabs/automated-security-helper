@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING
 
 from rich.theme import Theme as RichTheme
 
+from automated_security_helper.utils.severity_ladder import SEVERITY_COUNT_KEYS
+
 if TYPE_CHECKING:
     from textual.theme import Theme as TextualTheme
 
@@ -35,7 +37,7 @@ FOOTER_CREDIT = "Built with <3 at Amazon Web Services"
 FOOTER_CREDIT_SMALL_BLOCKQUOTE = f"> <sub>{FOOTER_CREDIT}</sub>"
 
 #: The severities a finding carries, the only palette keys severity_color reads.
-SEVERITY_LEVELS = ("critical", "high", "medium", "low", "info")
+SEVERITY_LEVELS = SEVERITY_COUNT_KEYS
 
 
 def severity_color(severity: str) -> str:
@@ -60,10 +62,7 @@ def rich_theme() -> RichTheme:
             "ash.success": COLORS["success"],
             "ash.warning": COLORS["warning"],
             "ash.error": f"bold {COLORS['error']}",
-            **{
-                f"ash.{level}": severity_color(level)
-                for level in ("critical", "high", "medium", "low", "info")
-            },
+            **{f"ash.{level}": severity_color(level) for level in SEVERITY_LEVELS},
         }
     )
 

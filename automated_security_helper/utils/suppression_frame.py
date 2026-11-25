@@ -125,7 +125,12 @@ def _package_holds(entry: "AshSuppression", finding: "FlatVulnerability") -> boo
     if entry.package_path is not None:
         if finding.package_path is None:
             return False
-        return _path_pattern_matches(finding.package_path, entry.package_path)
+        # package_path separates two installed copies, so it is an identity,
+        # not a scope: the bare-directory rule (issue #894) must not make a
+        # glob-free entry cover packages nested below the copy it names.
+        return _path_pattern_matches(
+            finding.package_path, entry.package_path, bare_directory=False
+        )
     return True
 
 
