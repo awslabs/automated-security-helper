@@ -22682,7 +22682,7 @@ _HOMEPAGE_COMMUNITY_SENTENCE = (
     "A scan runs one only when its module is named in `ash_plugin_modules` or "
     "`--ash-plugin-modules`. See the "
     "[community plugins](docs/plugins/community/index.md) and the "
-    "[scanners reference](reference/scanners.md) for all 22 scanners."
+    "[scanners reference](reference/scanners.md) for all 23 scanners."
 )
 
 
@@ -22705,7 +22705,7 @@ def test_the_homepage_says_asha_ships_six_community_scanners_and_links_each(
 
     The sentence is on the page. Its count of six is the number of scanners the
     vendored community plugin packages declare, which is every in-tree community
-    module; its 22 is built in plus community; and each link it carries resolves to
+    module; its 23 is built in plus community; and each link it carries resolves to
     a page under docs/content, the community index and the scanners reference
     included.
     """
@@ -22719,7 +22719,7 @@ def test_the_homepage_says_asha_ships_six_community_scanners_and_links_each(
         len(_VENDORED_SCANNER_PLUGIN_PACKAGES),
         sorted(community),
     )
-    assert len(builtin) + len(community) == 22, (len(builtin), len(community))
+    assert len(builtin) + len(community) == 23, (len(builtin), len(community))
     links = re.findall(r"\]\(([^)#]+\.md)", _HOMEPAGE_COMMUNITY_SENTENCE)
     assert len(links) == 8, links
     for link in links:

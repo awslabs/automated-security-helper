@@ -44,6 +44,7 @@ from automated_security_helper.utils.mcp_config.emit import (
     source_slug,
 )
 from automated_security_helper.utils.mcp_config.readers import MAX_CONFIG_BYTES
+from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.scan_output_dirs import record_converted_sources
 from automated_security_helper.utils.scanned_tree import (
     TreeInputRefused,
@@ -208,9 +209,11 @@ class McpConfigConverter(ConverterPluginBase[McpConfigConverterConfig]):
                 script_path = directory / f"{slug(entry.server_name, taken_names)}.sh"
                 sidecar_path = script_path.with_name(script_path.name + SPANMAP_SUFFIX)
                 # newline="": the text already ends each line with a bare LF.
-                with open(script_path, "w", encoding="utf-8", newline="") as handle:
+                # open_for_write refuses a link at any component below the output
+                # directory, so a planted link cannot redirect the write.
+                with open_for_write(script_path, newline="") as handle:
                     handle.write(script_text)
-                with open(sidecar_path, "w", encoding="utf-8", newline="") as handle:
+                with open_for_write(sidecar_path, newline="") as handle:
                     handle.write(sidecar_text(rows))
                 results.append(script_path)
                 sources[script_path] = display
