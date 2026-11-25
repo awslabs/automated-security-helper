@@ -754,6 +754,21 @@ def link_walk_cannot_examine(monkeypatch, component: Path) -> ExaminationRefused
     return refused
 
 
+def declared_params(name: str, command) -> list:
+    """The click parameters a root subcommand takes, as the wrappers read them.
+
+    ``scan`` is a group whose scan options are declared on its subjects (``scan
+    fs``), and the wrappers' tables list ``scan`` for every option a subject takes,
+    so its parameters are the group's own plus each subject's. Every other
+    command's are its own, as before.
+    """
+    params = list(command.params)
+    if name == "scan":
+        for subject in getattr(command, "commands", {}).values():
+            params.extend(subject.params)
+    return params
+
+
 def stand_in_host_ids(monkeypatch, uid: int = 1000, gid: int = 1000) -> None:
     """Answer the host's uid and gid without running ``id -u`` and ``id -g``.
 

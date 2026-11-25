@@ -40,7 +40,10 @@
 │ --help                                                Show this message and exit.               │
 └─────────────────────────────────────────────────────────────────────────────────────────────────┘
 ┌─ Scan ──────────────────────────────────────────────────────────────────────────────────────────┐
-│ --source-dir                <str>                            The source directory to scan       │
+│ --source-dir                <str>                            The source directory to scan.      │
+│                                                              Deprecated as an option, removed   │
+│                                                              in ASH v4.0: give it as the PATH   │
+│                                                              argument of `ash scan fs`.         │
 │                                                              [env var: ASH_SOURCE_DIR]          │
 │ --scanners                  <str>                            Deprecated: use --only-scanners to │
 │                                                              state the whole selection, or      │

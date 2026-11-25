@@ -21,6 +21,7 @@ import pytest
 import typer.main
 
 from automated_security_helper.cli.main import app
+from tests.utils.helpers import declared_params
 
 pytestmark = pytest.mark.unit
 
@@ -63,9 +64,9 @@ def _calls(text: str, opening: str) -> list[str]:
     return found
 
 
-def _options(command) -> set[str]:
+def _options(command, name: str = "") -> set[str]:
     found = set()
-    for param in command.params:
+    for param in declared_params(name, command):
         found.update(getattr(param, "opts", None) or [])
         found.update(getattr(param, "secondary_opts", None) or [])
     return found
@@ -82,7 +83,7 @@ def test_the_subcommand_table_matches_the_real_commands():
         assert takers == {
             name
             for name, command in root.commands.items()
-            if option in _options(command)
+            if option in _options(command, name)
         }, option
 
 

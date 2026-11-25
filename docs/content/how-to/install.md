@@ -297,6 +297,37 @@ CI installs the formula, built from the commit under test, with Homebrew on Ubun
 (x86-64) and on macOS on Apple silicon, then runs `brew test` and scans with the
 installed `ash`. Homebrew is not available on Windows, and Linux on arm64 is not tested.
 
+## Enable tab completion
+
+Completion offers the subcommands, the subject after `scan` (`ash scan <TAB>` offers
+`fs`), and each subject's options. There are two routes, one for each way of running
+ASH.
+
+**The installed `ash` command** completes through Typer. Install the script for your
+shell once, then open a new shell:
+
+<!-- doctest: illustrative reason="writes a completion script into the reader's shell configuration" -->
+```bash
+ash --install-completion
+```
+
+`ash --show-completion` prints the script instead, to copy it or to put it where you
+keep your shell configuration. Both work for bash, zsh, fish, and PowerShell, and take
+the shell's name (`ash --show-completion bash`) when it cannot be detected.
+
+**`./ash`**, the wrapper that runs ASH in a container on a host with no Python, prints a
+bash completion function of its own. It is generated from the same tables the wrapper
+reads its arguments with, so it offers the same subcommands and options:
+
+<!-- doctest: illustrative reason="loads a completion function into the reader's shell" -->
+```bash
+source <(./ash --show-completion)
+```
+
+Add that line to `~/.bashrc` to keep it. In PowerShell, `Invoke-ASH` completes the
+words you give `-AshArgs`, and the arguments after it, once `utils/ash_helpers.ps1` is
+loaded; there is nothing to install.
+
 ## Uninstall
 
 Remove ASH with the tool that installed it:

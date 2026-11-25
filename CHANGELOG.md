@@ -46,6 +46,36 @@
 
 ## Unreleased
 
+### Features
+
+- **`ash scan` takes a subject: `ash scan fs [PATH]` scans a directory.** `scan` is now
+  a group, and `fs` is its first subject. The directory is its argument (it defaults to
+  the working directory), and `--source-dir` and `ASH_SOURCE_DIR` still name it. `fs`
+  takes every option `ash scan` took, and `ash scan --help` lists the subjects.
+- **Tab completion is covered for both ways of running ASH.** `ash scan <TAB>` offers
+  `fs`, and `fs`'s options complete; `ash --install-completion` and `ash
+  --show-completion` are documented. `./ash --show-completion` prints a bash completion
+  function and `Invoke-ASH` completes `-AshArgs`, both generated from the tables the
+  wrappers parse with (`scripts/generate_wrapper_tables.py`), so they cannot name a
+  subcommand or option the CLI does not have. See
+  [Enable tab completion](docs/content/how-to/install.md#enable-tab-completion).
+
+### Breaking changes
+
+- **Bare `ash`, `ash scan` with no subject, and `--source-dir` are deprecated and will
+  be removed in ASH v4.0.** They still run the same scan. Each prints one line to stderr
+  (stdout and the exit code are unchanged) that names the replacement:
+  `ash scan --source-dir X` becomes `ash scan fs X`, and `ash --mode container ...`
+  becomes `ash scan fs . --mode container ...`. `ASH_SOURCE_DIR` is not deprecated, and
+  `ash scan --workspace` has no subject to move to yet, so it prints nothing. Check
+  `ash-args`, `ASH_SCAN_EXTRA_ARGS` and similar pass-through settings, which are not
+  rewritten for you. `./ash` accepts `scan fs <path>` and reads the path as the
+  directory to mount.
+- **A 3.8 `ash` cannot drive a 3.9 image, or the reverse.** The command ASH runs inside
+  its container (container mode) and inside a Nix shell (nix mode) is now `ash scan fs`,
+  which a 3.8 `ash` does not parse, so `--ash-revision-to-install` and a published image
+  must come from the same release line as the `ash` that starts them.
+
 ### Maintenance
 
 - Removed the ASH v2 in-container scanner scripts `utils/common.sh`,
@@ -63,6 +93,9 @@
 
 ### Fixes
 
+- `trend` is now in the subcommand tables of `./ash` and `utils/ash_helpers.ps1`, which
+  stopped before it, and in the express client's list of commands that are not scans, so
+  `ash trend` is no longer sent to an express daemon as a scan.
 - **`Invoke-ASH` now matches `./ash` and the `ash` CLI on two container-run details.**
   It passes `GITHUB_ACTIONS`, `TF_BUILD` and `TEAMCITY_VERSION` into the container when
   set (by name, or with their values when `OCI_RUNNER_WRAPPER` is set; a value that holds

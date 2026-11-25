@@ -44,6 +44,14 @@ def test_subcommands():
     )
 
 
+def test_scan_subjects():
+    assert contract().scan_subjects == ("fs",)
+
+
+def test_scan_subject_value_options_are_the_ones_the_root_does_not_take():
+    assert contract().scan_subject_value_options == ("--cli-json-input",)
+
+
 def test_only_scan_takes_sandbox():
     assert contract().sandbox_subcommands == ("scan",)
 

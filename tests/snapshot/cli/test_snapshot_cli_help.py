@@ -140,12 +140,13 @@ def test_the_walk_reaches_the_documented_tree():
     assert {
         "ash",
         "ash scan",
+        "ash scan fs",
         "ash config validate-plugin-dependencies",
         "ash dependencies install",
         "ash inspect sarif-fields",
         "ash plugin list",
     } <= walked
     assert {_command_id(path) for path, _ in SKELETON_COMMANDS} >= {
-        "ash scan",
+        "ash scan fs",
         "ash report",
     }

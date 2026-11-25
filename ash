@@ -363,9 +363,13 @@ ASH_SUBCOMMANDS="scan build-image report diff trend merge mcp get-genai-guide co
 # END generated: sh-subcommands
 # The subjects `scan` takes (`./ash scan fs [PATH]`). The first word after scan that
 # is not an option or an option's value names one, and the word after that is the
-# directory to scan (forward_word, below).
+# directory to scan (forward_word, below). ASH_SCAN_VALUE_OPTIONS are options a
+# subject takes a value for that the root does not, so the word after one is not
+# the directory; ASH_ROOT_OPTIONS is every long option, for the completion function.
 # BEGIN generated: sh-scan-subjects (scripts/generate_wrapper_tables.py)
 ASH_SCAN_SUBJECTS="fs"
+ASH_SCAN_VALUE_OPTIONS="--cli-json-input"
+ASH_ROOT_OPTIONS="--add-scanners --all-enabled-plugins --all-enabled-scanners --allow-in-tree-tools --allow-missing-projects --allow-stale-content-db --annotate-duplicates --ash-config-from-host --ash-plugin-modules --ash-revision-to-install --base-ref --baseline --build --build-target --changed-files-only --cleanup --cli-json-input --color --compact-report --config --config-file-from-another-checkout --config-file-from-scanned-repository --config-from-scanned-repository --config-overrides --container-gid --container-uid --custom-build-arg --custom-containerfile --debug --dry-run --exclude-scanners --express --fail-on-findings --fail-on-incomplete-scanners --fold-duplicates --force --format --formats --full --generate-cli-skeleton --honor-ignore-files --ignore-suppressions --inspect --install-completion --log-level --min-severity --mode --no-allow-stale-content-db --no-build --no-cleanup --no-color --no-express --no-fail-on-findings --no-fail-on-incomplete-scanners --no-honor-ignore-files --no-ignore-suppressions --no-inspect --no-offline --no-progress --no-quiet --no-run --no-show-summary --no-simple --no-use-existing --oci --oci-runner --offline --offline-semgrep-rulesets --only-scanners --output-dir --output-format --output-formats --phases --progress --python-based-plugins-only --python-based-scanners-only --python-only --quiet --require-scanner-selection --run --runner --sandbox --scanners --shard-count --shard-index --show-completion --show-summary --simple --source-dir --staged --strategy --use-existing --verbose --version --workspace --workspace-config"
 # END generated: sh-scan-subjects
 # The bash completion function `./ash --show-completion` prints, for hosts with no
 # Python to run the CLI's own completion.
@@ -374,10 +378,12 @@ print_bash_completion() {
   cat <<'ASH_BASH_COMPLETION'
 _ash_completion() {
   local cur="${COMP_WORDS[COMP_CWORD]}" prev="" subcommand="" subject="" word i skip="NO"
-  local subcommands="scan build-image report diff trend merge mcp get-genai-guide config dependencies inspect plugin express"
-  local subjects="fs"
-  local options="--add-scanners --all-enabled-plugins --all-enabled-scanners --allow-in-tree-tools --allow-missing-projects --allow-stale-content-db --annotate-duplicates --ash-config-from-host --ash-plugin-modules --ash-revision-to-install --base-ref --baseline --build --build-target --changed-files-only --cleanup --cli-json-input --color --compact-report --config --config-file-from-another-checkout --config-file-from-scanned-repository --config-from-scanned-repository --config-overrides --container-gid --container-uid --custom-build-arg --custom-containerfile --debug --dry-run --exclude-scanners --express --fail-on-findings --fail-on-incomplete-scanners --fold-duplicates --force --format --formats --full --generate-cli-skeleton --honor-ignore-files --ignore-suppressions --inspect --install-completion --log-level --min-severity --mode --no-allow-stale-content-db --no-build --no-cleanup --no-color --no-express --no-fail-on-findings --no-fail-on-incomplete-scanners --no-honor-ignore-files --no-ignore-suppressions --no-inspect --no-offline --no-progress --no-quiet --no-run --no-show-summary --no-simple --no-use-existing --oci --oci-runner --offline --offline-semgrep-rulesets --only-scanners --output-dir --output-format --output-formats --phases --progress --python-based-plugins-only --python-based-scanners-only --python-only --quiet --require-scanner-selection --run --runner --sandbox --scanners --shard-count --shard-index --show-completion --show-summary --simple --source-dir --staged --strategy --use-existing --verbose --version --workspace --workspace-config"
-  local value_options="--add-scanners --ash-config-from-host --ash-plugin-modules --ash-revision-to-install --base-ref --baseline --build-target --cli-json-input --config --config-file-from-another-checkout --config-file-from-scanned-repository --config-overrides --container-gid --container-uid --custom-build-arg --custom-containerfile --exclude-scanners --format --formats --log-level --min-severity --mode --oci --oci-runner --offline-semgrep-rulesets --only-scanners --output-dir --output-format --output-formats --phases --require-scanner-selection --runner --sandbox --scanners --shard-count --shard-index --source-dir --strategy --workspace --workspace-config -c -f -g -o -u"
+ASH_BASH_COMPLETION
+  printf '  local subcommands="%s"\n' "${ASH_SUBCOMMANDS}"
+  printf '  local subjects="%s"\n' "${ASH_SCAN_SUBJECTS}"
+  printf '  local options="%s"\n' "${ASH_ROOT_OPTIONS}"
+  printf '  local value_options="%s %s"\n' "${ASH_ROOT_VALUE_OPTIONS}" "${ASH_SCAN_VALUE_OPTIONS}"
+  cat <<'ASH_BASH_COMPLETION'
   if ((COMP_CWORD > 1)); then
     prev="${COMP_WORDS[COMP_CWORD - 1]}"
   fi
@@ -429,7 +435,7 @@ ASH_DASH_O_IS_THE_SUBCOMMANDS="get-genai-guide config"
 # (`--phases report`, `--phases inspect`), so the token after one of these is
 # the option's value, not the subcommand.
 # BEGIN generated: sh-root-value-options (scripts/generate_wrapper_tables.py)
-ASH_ROOT_VALUE_OPTIONS="--add-scanners --ash-config-from-host --ash-plugin-modules --ash-revision-to-install --base-ref --baseline --build-target --cli-json-input --config --config-file-from-another-checkout --config-file-from-scanned-repository --config-overrides --container-gid --container-uid --custom-build-arg --custom-containerfile --exclude-scanners --format --formats --log-level --min-severity --mode --oci --oci-runner --offline-semgrep-rulesets --only-scanners --output-dir --output-format --output-formats --phases --require-scanner-selection --runner --sandbox --scanners --shard-count --shard-index --source-dir --strategy --workspace --workspace-config -c -f -g -o -u"
+ASH_ROOT_VALUE_OPTIONS="--add-scanners --ash-config-from-host --ash-plugin-modules --ash-revision-to-install --base-ref --baseline --build-target --config --config-file-from-another-checkout --config-file-from-scanned-repository --config-overrides --container-gid --container-uid --custom-build-arg --custom-containerfile --exclude-scanners --format --formats --log-level --min-severity --mode --oci --oci-runner --offline-semgrep-rulesets --only-scanners --output-dir --output-format --output-formats --phases --require-scanner-selection --runner --sandbox --scanners --shard-count --shard-index --source-dir --strategy --workspace --workspace-config -c -f -g -o -u"
 # END generated: sh-root-value-options
 
 # The first word of ASH_ARG_WORDS that names an ash subcommand, in SUBCOMMAND,
@@ -1051,6 +1057,8 @@ forward_word() {
   if [[ "${INNER_VALUE_PENDING}" = "YES" ]]; then
     INNER_VALUE_PENDING="NO"
   elif [[ " ${ASH_ROOT_VALUE_OPTIONS} " == *" $1 "* ]]; then
+    INNER_VALUE_PENDING="YES"
+  elif [[ "${SUBCOMMAND_WORD}" = "scan" && " ${ASH_SCAN_VALUE_OPTIONS} " == *" $1 "* ]]; then
     INNER_VALUE_PENDING="YES"
   elif [[ "${SUBCOMMAND_WORD}" = "scan" && "$1" != -* && "${SCAN_PATH_SEEN}" = "NO" ]]; then
     # `scan <subject> [PATH]`: the first word after scan that is not an option or an

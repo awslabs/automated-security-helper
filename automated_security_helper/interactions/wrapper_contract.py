@@ -116,6 +116,8 @@ class WrapperContract:
     sandbox_subcommands: tuple[str, ...]
     #: The subjects of ``scan`` (``ash scan <subject>``), in the CLI's own order.
     scan_subjects: tuple[str, ...]
+    #: The options a subject of ``scan`` takes a value for that the root does not.
+    scan_subject_value_options: tuple[str, ...]
     #: Every long option of the root and of the scan's subjects, sorted: what a
     #: shell completion offers after a dash.
     root_options: tuple[str, ...]
@@ -183,15 +185,21 @@ def contract() -> WrapperContract:
         )
         forwarded.append((option, takers))
 
-    value_options = sorted(
-        {
+    def value_options_of(params: list[Any]) -> set[str]:
+        return {
             spelling
-            for param in [*root.params, *subject_params]
+            for param in params
             if param.param_type_name == "option"
             and not param.is_flag
             and not param.count
             for spelling in param.opts
         }
+
+    value_options = sorted(value_options_of(list(root.params)))
+    # Options a subject takes with a value that the root does not (the structured
+    # input file), so the word after one is not read as the directory or a subject.
+    subject_value_options = sorted(
+        value_options_of(subject_params) - set(value_options)
     )
     all_options = sorted(
         {
@@ -206,6 +214,7 @@ def contract() -> WrapperContract:
     return WrapperContract(
         subcommands=subcommands,
         scan_subjects=scan_subjects,
+        scan_subject_value_options=tuple(subject_value_options),
         root_options=tuple(all_options),
         sandbox_subcommands=tuple(
             name

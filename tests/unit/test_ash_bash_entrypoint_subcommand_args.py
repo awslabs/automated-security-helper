@@ -317,8 +317,10 @@ def test_every_re_emitted_flag_is_one_the_subcommand_takes():
     quiet = set(re.search(r"ASH_TAKES_QUIET=\"([^\"]*)\"", script).group(1).split())
     color = set(re.search(r"ASH_TAKES_COLOR=\"([^\"]*)\"", script).group(1).split())
     root = typer.main.get_command(app)
+    from tests.utils.helpers import declared_params
+
     declared = {
-        name: {param.name for param in command.params}
+        name: {param.name for param in declared_params(name, command)}
         for name, command in root.commands.items()
     }
     assert subcommands == set(declared)

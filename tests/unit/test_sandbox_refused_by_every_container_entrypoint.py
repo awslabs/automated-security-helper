@@ -63,7 +63,7 @@ from tests.unit.test_build_date_reaches_every_build_entrypoint import (
     _write_python_command,
     _write_runner_guards,
 )
-from tests.utils.helpers import mark_git_checkout
+from tests.utils.helpers import declared_params, mark_git_checkout
 
 REPO_ROOT = Path(__file__).resolve().parents[1].parent
 ASH_SCRIPT = REPO_ROOT / "ash"
@@ -2362,7 +2362,7 @@ class TestTheWrappersListsAreTheClis:
         takes_it = {
             name
             for name, command in root.commands.items()
-            if "sandbox" in {param.name for param in command.params}
+            if "sandbox" in {param.name for param in declared_params(name, command)}
         }
 
         assert self._bash_list("ASH_TAKES_SANDBOX") == takes_it

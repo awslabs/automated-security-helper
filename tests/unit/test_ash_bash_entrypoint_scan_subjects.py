@@ -240,6 +240,7 @@ def _completions(tmp_path, words, cword):
     return [line for line in result.stdout.splitlines() if line]
 
 
+@pytest.mark.integration
 def test_show_completion_prints_a_function_and_exits_without_a_runner(tmp_path):
     result = subprocess.run(  # nosec B603 B607 - fixed script path, list args
         ["bash", str(ASH_SCRIPT), "--show-completion"],
@@ -256,26 +257,31 @@ def test_show_completion_prints_a_function_and_exits_without_a_runner(tmp_path):
     assert "complete -o default -F _ash_completion ash ./ash" in result.stdout
 
 
+@pytest.mark.integration
 def test_completion_offers_the_subjects_after_scan(tmp_path):
     assert _completions(tmp_path, ["ash", "scan", ""], 2) == ["fs"]
 
 
+@pytest.mark.integration
 def test_completion_offers_the_subcommands_with_none_named(tmp_path):
     offered = _completions(tmp_path, ["ash", "sc"], 1)
 
     assert offered == ["scan"]
 
 
+@pytest.mark.integration
 def test_completion_offers_the_options_after_a_dash(tmp_path):
     offered = _completions(tmp_path, ["ash", "scan", "fs", "--shard-"], 3)
 
     assert offered == ["--shard-count", "--shard-index"]
 
 
+@pytest.mark.integration
 def test_completion_leaves_a_value_alone(tmp_path):
     assert _completions(tmp_path, ["ash", "scan", "fs", "--mode", ""], 4) == []
 
 
+@pytest.mark.integration
 def test_completion_skips_an_option_value_when_finding_the_subject(tmp_path):
     # `--mode scan` names no subject: scan is the value, and fs is still offered.
     offered = _completions(tmp_path, ["ash", "scan", "--mode", "local", ""], 4)

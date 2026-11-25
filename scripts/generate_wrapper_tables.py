@@ -107,7 +107,10 @@ def ps_runner_discovery(contract) -> list[str]:
 
 
 def ps_scan_subjects(contract) -> list[str]:
-    return [f"$ashScanSubjects = {_ps_list(contract.scan_subjects)}"]
+    return [
+        f"$ashScanSubjects = {_ps_list(contract.scan_subjects)}",
+        f"$ashScanValueOptions = {_ps_list(contract.scan_subject_value_options)}",
+    ]
 
 
 def ps_completion(contract) -> list[str]:
@@ -123,7 +126,10 @@ def ps_completion(contract) -> list[str]:
         f"    $subcommands = {_ps_list(contract.subcommands)}",
         f"    $subjects = {_ps_list(contract.scan_subjects)}",
         f"    $options = {_ps_list(contract.root_options)}",
-        f"    $valueOptions = {_ps_list(contract.root_value_options)}",
+        "    $valueOptions = "
+        + _ps_list(
+            (*contract.root_value_options, *contract.scan_subject_value_options)
+        ),
         "    if ($parameterName -eq 'AshArgs') {",
         "        # -AshArgs is one string: complete its last word and keep the rest.",
         '        $line = "$wordToComplete".Trim([char]39, [char]34)',
@@ -205,7 +211,11 @@ def sh_subcommands(contract) -> list[str]:
 
 
 def sh_scan_subjects(contract) -> list[str]:
-    return [f'ASH_SCAN_SUBJECTS="{_sh_words(contract.scan_subjects)}"']
+    return [
+        f'ASH_SCAN_SUBJECTS="{_sh_words(contract.scan_subjects)}"',
+        f'ASH_SCAN_VALUE_OPTIONS="{_sh_words(contract.scan_subject_value_options)}"',
+        f'ASH_ROOT_OPTIONS="{_sh_words(contract.root_options)}"',
+    ]
 
 
 def sh_completion(contract) -> list[str]:
@@ -220,10 +230,14 @@ def sh_completion(contract) -> list[str]:
         "  cat <<'ASH_BASH_COMPLETION'",
         "_ash_completion() {",
         '  local cur="${COMP_WORDS[COMP_CWORD]}" prev="" subcommand="" subject="" word i skip="NO"',
-        f'  local subcommands="{_sh_words(contract.subcommands)}"',
-        f'  local subjects="{_sh_words(contract.scan_subjects)}"',
-        f'  local options="{_sh_words(contract.root_options)}"',
-        f'  local value_options="{_sh_words(contract.root_value_options)}"',
+        "ASH_BASH_COMPLETION",
+        # The word lists are the wrapper's own tables, read when the function is
+        # printed, so the text here holds no second copy of them.
+        '  printf \'  local subcommands="%s"\\n\' "${ASH_SUBCOMMANDS}"',
+        '  printf \'  local subjects="%s"\\n\' "${ASH_SCAN_SUBJECTS}"',
+        '  printf \'  local options="%s"\\n\' "${ASH_ROOT_OPTIONS}"',
+        '  printf \'  local value_options="%s %s"\\n\' "${ASH_ROOT_VALUE_OPTIONS}" "${ASH_SCAN_VALUE_OPTIONS}"',
+        "  cat <<'ASH_BASH_COMPLETION'",
         "  if ((COMP_CWORD > 1)); then",
         '    prev="${COMP_WORDS[COMP_CWORD - 1]}"',
         "  fi",
