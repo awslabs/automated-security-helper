@@ -826,7 +826,7 @@ async def run_ash_scan(
                             {
                                 "success": False,
                                 "error": raw_controls_on_one_line(message),
-                                "error_type": "delivered_image_missing",
+                                "error_type": McpErrorType.DELIVERED_IMAGE_MISSING.value,
                                 "session_id": session_id,
                             },
                             REFUSED_TARGET_EXIT_CODE,
@@ -852,7 +852,7 @@ async def run_ash_scan(
                         {
                             "success": False,
                             "error": raw_controls_on_one_line(message),
-                            "error_type": "session_workspace_unavailable",
+                            "error_type": McpErrorType.SESSION_WORKSPACE_UNAVAILABLE.value,
                         },
                         REFUSED_INTERNAL_EXIT_CODE,
                     )

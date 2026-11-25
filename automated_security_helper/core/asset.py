@@ -35,12 +35,14 @@ from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
+from automated_security_helper.base.scanner_operational_facets import TargetKind
+
 
 class AssetKind(str, Enum):
     """What kind of subject a scan is about."""
 
     FILESYSTEM = "filesystem"
-    CONTAINER_IMAGE = "container_image"
+    CONTAINER_IMAGE = TargetKind.CONTAINER_IMAGE.value
 
 
 class _Frozen(BaseModel):

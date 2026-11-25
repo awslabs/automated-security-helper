@@ -1940,7 +1940,7 @@ def validated_remote_clone_request(
         raise CloneRequestRefused(
             "a clone source must be a remote https or ssh url; a local path or "
             "file:// url would read this machine's own filesystem",
-            "local_clone_source_refused",
+            McpErrorType.LOCAL_CLONE_SOURCE_REFUSED.value,
         )
     try:
         endpoint = remote_clone_endpoint(url)
@@ -1951,7 +1951,9 @@ def validated_remote_clone_request(
     try:
         _refuse_ssh_key_id(ssh_key_id)
     except ValueError as error:
-        raise CloneRequestRefused(str(error), "ssh_key_not_registered") from error
+        raise CloneRequestRefused(
+            str(error), McpErrorType.SSH_KEY_NOT_REGISTERED.value
+        ) from error
     return url, ref or None, depth, endpoint
 
 
