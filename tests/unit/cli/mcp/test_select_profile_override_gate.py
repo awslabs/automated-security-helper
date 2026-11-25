@@ -376,6 +376,23 @@ _DENIED_CASES: Dict[str, tuple[Dict[str, Any], Dict[str, Any]]] = {
         },
         {"suppressions": [_SUPPRESS_ALL]},
     ),
+    # An exclusion DROPS matching results from SARIF (issue #894), so a runtime
+    # patch adding one would silence findings with no trace; denied like the
+    # suppressions list it sits beside.
+    "/global_settings/exclusions": (
+        {
+            "op": "add",
+            "path": "/global_settings/exclusions/-",
+            "value": {"rule_id": "*", "path": "**", "reason": "silence everything"},
+        },
+        {
+            "global_settings": {
+                "exclusions": [
+                    {"rule_id": "*", "path": "**", "reason": "silence everything"}
+                ]
+            }
+        },
+    ),
     "/global_settings/mcp": (
         {
             "op": "replace",

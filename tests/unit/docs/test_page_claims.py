@@ -6282,8 +6282,8 @@ _CONFIG_VALIDATE_ROWS = (
     "| `ash config validate` | 0 | A scan accepts the config, apart from the options of "
     "plugins loaded from `ash_plugin_modules`, which only a scan checks. Warnings may be "
     "printed, for example for a missing `project_name`, which a scan does not need, or "
-    "for an ignore or suppression path that names an existing directory and matches no "
-    "file in it ([Check a config](../how-to/configure.md#check)). | "
+    "for a path that starts with `./` and so matches nothing "
+    "([Check a config](../how-to/configure.md#check)). | "
     "| | 1 | No config file is found in the source directory and none is named: "
     "`validate` says so, and that a scan of that directory uses the default "
     "configuration. Also when an error occurred. | "
@@ -13810,25 +13810,21 @@ def test_trivy_repo_counts_only_an_executable_trivy(
 SUPPRESSIONS_CONCEPT = "concepts/suppressions.md"
 SUPPRESS_FINDINGS = "how-to/suppress-findings.md"
 
-_A_SUPPRESSION_SLASH_IS_LITERAL = (
-    "A trailing slash is literal, unlike in an ignore path, so `tests/` matches no "
-    "finding, and neither does a bare directory name such as `tests`; `tests/**/*` "
-    "matches the files below the directory."
+_A_BARE_DIRECTORY_NAMES_ITS_SUBTREE = (
+    "A pattern with no glob character names a path and the directory of that name: "
+    "`tests` matches a file named `tests` and every finding below `tests/`, and "
+    "`tests/` matches the findings below the directory only, as it does in an "
+    "ignore path."
 )
-_THE_SCAN_WARNS_ABOUT_A_SLASH = (
-    "A trailing slash is literal, unlike in an ignore path: `tests/` matches no "
-    "finding, and the scan warns that it matched nothing and gives `tests/**/*`, the "
-    "pattern for the files under the directory."
+_THE_HOWTO_BARE_DIRECTORY_SENTENCE = (
+    "A path with no glob character names a file and the directory of that name: "
+    "`tests` and `tests/` both match every finding below `tests/`, and the bare "
+    "`tests` also matches a file named `tests`."
 )
-_CHECKS_REPORT_A_DIRECTORY = (
-    "When the directory exists in the scanned directory, `ash config validate` and "
-    "`ash config lint` warn about either one with that pattern and exit 0."
-)
-_VALIDATE_ROW_ON_A_DIRECTORY = (
-    "An ignore path that names an existing directory with neither a trailing `/` nor "
-    "`**`, and a suppression path that names one without `**`, are warnings too, since "
-    "a scan accepts them; the warning gives the pattern for every file inside, "
-    "`<dir>/` for an ignore path and `<dir>/**/*` for a suppression path"
+_VALIDATE_ROW_ON_DOT_PREFIX = (
+    "A path that matches nothing because it starts with `./` (`./src` is `src/`) or "
+    "is empty or `.` is a warning too, since a scan accepts it, and the warning says "
+    "what to write instead."
 )
 #: configure.md (Check a config): the directory the checks judge a config against.
 _CHECKS_USE_THE_SOURCE_DIR = (
@@ -13855,23 +13851,27 @@ def _suppressed_by_file(output: Path) -> Dict[str, bool]:
 
 
 @pytest.mark.integration
-def test_a_suppression_path_ending_in_a_slash_suppresses_nothing_and_the_scan_says_so(
+def test_a_bare_directory_suppression_path_covers_the_findings_below_it(
     tmp_path: Path,
 ) -> None:
     """suppressions.md (How a suppression matches), and suppress-findings.md.
 
-    A tree with a hardcoded password in ``build/app.py``, ``lib/app.py`` and
-    ``tests/app.py`` is scanned with three suppressions: ``build/``, ``lib/**`` and
-    ``tests/**/*``. The finding in ``build/`` must be reported unsuppressed, and the
-    scan must warn that the suppression with path ``build/`` matched no finding and
-    give ``build/**/*``. The control is the other two, which suppress their findings,
-    and no such warning for them.
+    The bare-directory rule (issue #894). A tree with a hardcoded password in
+    ``build/app.py``, ``lib/app.py``, ``tests/app.py`` and ``pkg/tests/app.py`` is
+    scanned with three suppressions: ``build/``, ``lib`` and ``tests``. The first
+    three findings must be suppressed -- a trailing-slash directory and a bare
+    directory name alike -- and no warning about a suppression matching nothing may
+    be printed. The control is ``pkg/tests/app.py``: the bare ``tests`` is anchored,
+    so a ``tests`` directory elsewhere stays reported.
     """
-    assert_on_page(SUPPRESSIONS_CONCEPT, _A_SUPPRESSION_SLASH_IS_LITERAL)
-    assert_on_page(SUPPRESS_FINDINGS, _THE_SCAN_WARNS_ABOUT_A_SLASH)
+    assert_on_page(SUPPRESSIONS_CONCEPT, _A_BARE_DIRECTORY_NAMES_ITS_SUBTREE)
+    assert_on_page(SUPPRESS_FINDINGS, _THE_HOWTO_BARE_DIRECTORY_SENTENCE)
     tree = _config_scan_tree(
         tmp_path,
-        {f"{name}/app.py": _CONFIG_SECRET for name in ("build", "lib", "tests")},
+        {
+            f"{name}/app.py": _CONFIG_SECRET
+            for name in ("build", "lib", "tests", "pkg/tests")
+        },
     )
     (tree / ".ash").mkdir()
     (tree / ".ash" / ".ash.yaml").write_text(
@@ -13881,7 +13881,7 @@ def test_a_suppression_path_ending_in_a_slash_suppresses_nothing_and_the_scan_sa
                 "global_settings": {
                     "suppressions": [
                         {"path": path, "reason": "page claims"}
-                        for path in ("build/", "lib/**", "tests/**/*")
+                        for path in ("build/", "lib", "tests")
                     ]
                 },
             }
@@ -13909,17 +13909,11 @@ def test_a_suppression_path_ending_in_a_slash_suppresses_nothing_and_the_scan_sa
     )
 
     suppressed = _suppressed_by_file(output)
-    assert suppressed.get("build/app.py") is False, (suppressed, _output_tail(result))
+    assert suppressed.get("build/app.py") is True, (suppressed, _output_tail(result))
     assert suppressed.get("lib/app.py") is True, suppressed
     assert suppressed.get("tests/app.py") is True, suppressed
-    warning = (
-        "The suppression with path 'build/' matched no finding: a suppression path "
-        "ending in '/' matches only that literal path"
-    )
-    assert _squeezed(warning) in text, _output_tail(result)
-    assert _squeezed("write 'build/**/*'") in text, _output_tail(result)
-    for path in ("lib/**", "tests/**/*"):
-        assert _squeezed(f"The suppression with path '{path}'") not in text
+    assert suppressed.get("pkg/tests/app.py") is False, suppressed
+    assert _squeezed("matched no finding") not in text, _output_tail(result)
 
 
 @pytest.mark.parametrize("command", ["validate", "lint"])
@@ -13928,7 +13922,7 @@ def test_a_suppression_path_ending_in_a_slash_suppresses_nothing_and_the_scan_sa
     [
         pytest.param(
             ("vendor", "tests", "build/"),
-            ["Use 'vendor/'", "Use 'tests/**/*'", "Use 'build/**/*'"],
+            [],
             id="each-names-an-existing-directory",
         ),
         pytest.param(
@@ -13939,25 +13933,23 @@ def test_a_suppression_path_ending_in_a_slash_suppresses_nothing_and_the_scan_sa
     ],
 )
 @pytest.mark.integration
-def test_config_checks_warn_and_exit_0_on_a_path_that_names_an_existing_directory(
+def test_config_checks_accept_a_path_that_names_an_existing_directory(
     tmp_path: Path, command: str, paths: Tuple[str, str, str], errors: List[str]
 ) -> None:
     """configure.md (Check a config), suppress-findings.md, and exit-codes.md.
 
-    A repository has the directories ``vendor``, ``tests`` and ``build``, and its config
-    ignores the first and suppresses the other two. Written ``vendor``, ``tests`` and
-    ``build/``, ``ash config validate`` and ``ash config lint`` must exit 0 and give
-    each path's pattern as a warning: ``vendor/`` for the ignore path, ``tests/**/*``
-    and ``build/**/*`` for the suppression paths. The control is the same config
-    written with those patterns, which both commands accept with exit 0 and no such
-    warning.
+    The bare-directory rule (issue #894). A repository has the directories
+    ``vendor``, ``tests`` and ``build``, and its config ignores the first and
+    suppresses the other two. Written ``vendor``, ``tests`` and ``build/``, the
+    patterns name the directories and match the files below them, so ``ash config
+    validate`` and ``ash config lint`` must exit 0 with no directory warning, the
+    same answer the glob spellings get.
     """
-    assert_on_page(CONFIGURE, _VALIDATE_ROW_ON_A_DIRECTORY)
-    assert_on_page(SUPPRESS_FINDINGS, _CHECKS_REPORT_A_DIRECTORY)
+    assert_on_page(CONFIGURE, _VALIDATE_ROW_ON_DOT_PREFIX)
     assert_on_page(
         EXIT_CODES,
-        "or for an ignore or suppression path that names an existing directory and "
-        "matches no file in it ([Check a config](../how-to/configure.md#check)). |",
+        "or for a path that starts with `./` and so matches nothing "
+        "([Check a config](../how-to/configure.md#check)). |",
     )
     ignored, *suppressed = paths
     tree = _config_scan_tree(
@@ -14078,21 +14070,22 @@ _CHECKS_WARN_ABOUT_A_PATH_THAT_MATCHES_NOTHING = [
     (
         SUPPRESS_FINDINGS,
         (
-            "They warn in the same way, saying what to write instead, about a path that "
-            "starts with `./` (`./src/app.py` is `src/app.py`) and about an empty path or "
-            "`.`. A path whose leading names match the tree only in another case "
-            "(`tests/**` against `Tests/`) gets a warning that names the tree's spelling "
-            "and says that patterns match case-sensitively."
+            "`ash config validate` and `ash config lint` warn, saying what to write "
+            "instead, about a path that starts with `./` (`./src/app.py` is "
+            "`src/app.py`) and about an empty path or `.`, and exit 0. A path whose "
+            "leading names match the tree only in another case (`tests/**` against "
+            "`Tests/`) gets a warning that names the tree's spelling and says that "
+            "patterns match case-sensitively."
         ),
     ),
     (
         CONFIGURE,
         (
-            "So is a path that matches nothing because it starts with `./` (`./src` is "
-            "`src/`) or is empty or `.`, and the warning says what to write instead. A "
-            "path that matches the tree only in another case (`tests/**` against "
-            "`Tests/`) gets a warning that names the tree's spelling and says that "
-            "patterns match case-sensitively"
+            "A path that matches nothing because it starts with `./` (`./src` is "
+            "`src/`) or is empty or `.` is a warning too, since a scan accepts it, and "
+            "the warning says what to write instead. A path that matches the tree only "
+            "in another case (`tests/**` against `Tests/`) gets a warning that names "
+            "the tree's spelling and says that patterns match case-sensitively"
         ),
     ),
 ]
@@ -14165,8 +14158,8 @@ def _source_dir_tree(parent: Path) -> Dict[str, Path]:
     ``repo`` holds a discovered config and a ``vendor`` directory; ``bounded`` holds a
     config in ``config/`` whose base is in ``shared/``, beside it; ``plain`` has no
     config and no ``vendor``; ``operator`` holds a config outside every repository
-    that ignores ``vendor`` and has a ``vendor`` directory of its own; ``elsewhere``
-    is an empty working directory.
+    that ignores ``**/vendor`` and has a ``vendor`` directory of its own;
+    ``elsewhere`` is an empty working directory.
     """
     paths = {
         name: parent / name
@@ -14179,7 +14172,7 @@ def _source_dir_tree(parent: Path) -> Dict[str, Path]:
         "bounded/shared/base.yaml": "fail_on_findings: false\n",
         "plain/app.py": "x = 1\n",
         "operator/op.yaml": "project_name: demo\nglobal_settings:\n  ignore_paths:\n"
-        "    - path: vendor\n      reason: page claims\n",
+        "    - path: '**/vendor'\n      reason: page claims\n",
         "operator/vendor/a.txt": "x\n",
         "elsewhere/.keep": "",
     }
@@ -14202,8 +14195,8 @@ def test_config_checks_judge_a_config_against_the_source_dir(
     ``bounded/config/`` whose base is in ``bounded/shared/`` is inside the scanned
     directory with ``--source-dir bounded`` and loads, while from ``elsewhere`` it is
     outside it and its base is refused (exit 3), as a scan bounds it. validate and lint
-    must warn about the operator config's ``vendor`` when the source directory has a
-    ``vendor`` directory and not when only the config's own directory has one.
+    must warn about the operator config's ``**/vendor`` when the source directory has
+    a ``vendor`` directory and not when only the config's own directory has one.
     """
     assert_on_page(CONFIGURE, _CHECKS_USE_THE_SOURCE_DIR)
     paths = _source_dir_tree(tmp_path)
@@ -14244,7 +14237,9 @@ def test_config_checks_judge_a_config_against_the_source_dir(
     without_vendor = check("--config", operator, "--source-dir", str(paths["plain"]))
     assert with_vendor.returncode == 0, _output_tail(with_vendor)
     assert without_vendor.returncode == 0, _output_tail(without_vendor)
-    advice = _squeezed("Path 'vendor' points to a directory but matches no file in it")
+    advice = _squeezed(
+        "Path '**/vendor' points to a directory but matches no file in it"
+    )
     assert advice in _squeezed(with_vendor.stdout + with_vendor.stderr), _output_tail(
         with_vendor
     )

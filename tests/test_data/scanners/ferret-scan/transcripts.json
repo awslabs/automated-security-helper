@@ -1,10 +1,37 @@
 {
   "schema_version": 1,
-  "transcripts": [],
-  "unrecorded": [
+  "transcripts": [
     {
-      "reason": "the directory commits only the input samples (sample.txt and a .docx); record ferret-scan's output over them",
-      "scanner": "ferret-scan"
+      "adapter_prep": "ferret-scan",
+      "also_for": [],
+      "argv": null,
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": null,
+      "id": "ferret-scan-2.5.3-sample-txt",
+      "live_input": false,
+      "note": "the output of ferret-scan 2.5.3 over the committed sample.txt, read through the adapter's base-relative URI resolution; the committed file and its name are all the recording says about the run",
+      "observable": true,
+      "pin_stamp": null,
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "sarif",
+          "path": "captured/ferret-scan-2.5.3-sample-txt.sarif",
+          "sha256": "528624a6e09f3b3860b28e1f2220666114b0fadeb7ea10f3e8342f606e8de4d6"
+        }
+      ],
+      "retention": "current",
+      "scanner": "ferret-scan",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "ferret-scan",
+        "version": "2.5.3"
+      }
     }
-  ]
+  ],
+  "unrecorded": []
 }

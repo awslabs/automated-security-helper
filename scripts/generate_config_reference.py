@@ -569,12 +569,25 @@ def _env_chain(expr: ast.AST) -> list[str]:
     return chain
 
 
+def _unwrap_cast(expr: ast.AST) -> ast.AST:
+    """``X`` for ``cast(T, X)``: a cast changes what a type checker believes about a
+    default, never where the default comes from."""
+    while (
+        isinstance(expr, ast.Call)
+        and ast.unparse(expr.func).split(".")[-1] == "cast"
+        and len(expr.args) == 2
+    ):
+        expr = expr.args[1]
+    return expr
+
+
 def _default_expressions(stmt: ast.AnnAssign) -> list[ast.AST]:
     """The expressions a field's default comes from, in the class body's syntax.
 
     The assigned value, or the ``default``/``default_factory`` of a ``Field(...)``
     that is assigned or sits in an ``Annotated[...]`` annotation. Nothing else in
-    a ``Field`` call (a description that mentions a variable) counts.
+    a ``Field`` call (a description that mentions a variable) counts. A ``cast``
+    around the default is looked through.
     """
     found: list[ast.AST] = []
     for part in (stmt.value, stmt.annotation):
@@ -596,7 +609,7 @@ def _default_expressions(stmt: ast.AnnAssign) -> list[ast.AST]:
         isinstance(value, ast.Call) and ast.unparse(value.func).endswith("Field")
     ):
         found.append(value)
-    return found
+    return [_unwrap_cast(expr) for expr in found]
 
 
 def _module_env_constants(module) -> dict[str, list[str]]:

@@ -22,6 +22,7 @@ from automated_security_helper.core.resource_management.error_handling import (
     _NotARegularFile,
     _read_regular_file_text,
 )
+from automated_security_helper.core.enums import ScannerStatus
 from automated_security_helper.core.resource_management.exceptions import (
     MCPResourceError,
 )
@@ -37,7 +38,11 @@ from automated_security_helper.utils.error_text import (
 )
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
 from automated_security_helper.utils.scanner_tool_types import result_scanner_name
-from automated_security_helper.utils.severity_ladder import result_severity
+from automated_security_helper.utils.severity_ladder import (
+    SEVERITY_COUNT_KEYS,
+    SUPPRESSED_COUNT_KEY,
+    result_severity,
+)
 from automated_security_helper.utils.terminal_text import raw_controls_on_one_line
 
 # Configure module logger
@@ -63,7 +68,7 @@ _logger = ASH_LOGGER
 # canonical per-scanner counts in the aggregated results file are typed by
 # ScannerTargetStatusInfo and have a fixed field set; this constant governs only
 # the MCP progress and summary views assembled in this module.
-SEVERITY_BUCKETS = ("critical", "high", "medium", "low", "info", "suppressed")
+SEVERITY_BUCKETS = (*SEVERITY_COUNT_KEYS, SUPPRESSED_COUNT_KEY)
 UNKNOWN_SEVERITY = "unknown"
 
 
@@ -90,11 +95,11 @@ class MCScannerStatus(Enum):
 #: document and also compares strings -- the value arrives from JSON, so it is a
 #: string by the time either function sees it.
 _SCANNER_STATUS_MAP = {
-    "PASSED": MCScannerStatus.COMPLETED,
-    "FAILED": MCScannerStatus.FAILED,
-    "ERROR": MCScannerStatus.FAILED,
-    "MISSING": MCScannerStatus.SKIPPED,
-    "SKIPPED": MCScannerStatus.SKIPPED,
+    ScannerStatus.PASSED.value: MCScannerStatus.COMPLETED,
+    ScannerStatus.FAILED.value: MCScannerStatus.FAILED,
+    ScannerStatus.ERROR.value: MCScannerStatus.FAILED,
+    ScannerStatus.MISSING.value: MCScannerStatus.SKIPPED,
+    ScannerStatus.SKIPPED.value: MCScannerStatus.SKIPPED,
 }
 
 
@@ -1161,7 +1166,10 @@ def summarize_scanner_statuses(
 
         # FAILED and ERROR are deliberately not included. Those scanners ran;
         # reporting them as skipped would send a user looking for a missing tool.
-        if recorded_status not in ("MISSING", "SKIPPED"):
+        if recorded_status not in (
+            ScannerStatus.MISSING.value,
+            ScannerStatus.SKIPPED.value,
+        ):
             continue
 
         if not dependencies_satisfied:
@@ -1440,7 +1448,7 @@ def _add_aggregated_scanner_progress(
         # document recorded rather than assuming success. The results model reads a
         # status that is absent as PASSED, and so does this.
         mapped_status = scanner_status_from_results(
-            scanner_info.get("status", "PASSED")
+            scanner_info.get("status", ScannerStatus.PASSED.value)
         )
         source_progress = ScannerProgress(
             scanner_name=scanner_name,
@@ -1836,8 +1844,10 @@ def get_scan_progress_info(
                     scanner_results if isinstance(scanner_results, dict) else {}
                 ).items()
                 if isinstance(info, dict)
-                and _recorded_status_word(info.get("status", "PASSED"))
-                in ("PASSED", "FAILED")
+                and _recorded_status_word(
+                    info.get("status", ScannerStatus.PASSED.value)
+                )
+                in (ScannerStatus.PASSED.value, ScannerStatus.FAILED.value)
             ]
 
             metadata = results.get("metadata")
@@ -2238,7 +2248,10 @@ def get_scan_results(
         for scanner_name, scanner_results in results_dict.get(
             "scanner_results", {}
         ).items():
-            if scanner_results.get("status", "UNKNOWN") in ["PASSED", "FAILED"]:
+            if scanner_results.get("status", "UNKNOWN") in [
+                ScannerStatus.PASSED.value,
+                ScannerStatus.FAILED.value,
+            ]:
                 scanners_completed.append(scanner_name)
 
         # Minted unconditionally. This used to read

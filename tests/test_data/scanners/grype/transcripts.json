@@ -40,6 +40,40 @@
         "name": "grype",
         "version": "0.91.0"
       }
+    },
+    {
+      "adapter_prep": "grype",
+      "also_for": [],
+      "argv": null,
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": null,
+      "id": "grype-0.122.1-from-syft-sbom",
+      "live_input": true,
+      "note": "grype 0.122.1 over a syft SBOM, read through the adapter's post-processing (URIs, package identity, fix state) with an empty scan target; grype reads a vulnerability database, so the recording is a dated snapshot",
+      "observable": true,
+      "pin_stamp": {
+        "tool": "grype",
+        "version": "v0.122.1"
+      },
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "sarif",
+          "path": "captured/grype-0.122.1-from-syft-sbom.sarif",
+          "sha256": "c1768fecc1e9d13faea2f20e909d1ffe9219214b32d521b6657a5f5fc208c38b"
+        }
+      ],
+      "retention": "current",
+      "scanner": "grype",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "grype",
+        "version": "0.122.1"
+      }
     }
   ],
   "unrecorded": []

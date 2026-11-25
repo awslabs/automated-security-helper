@@ -24,6 +24,10 @@ from automated_security_helper.base.forward_refs import OnceOnlyResolver
 from automated_security_helper.core.constants import ASH_DOCS_URL, ASH_REPO_URL
 from automated_security_helper.core.enums import ExportFormat, ScannerStatus
 from automated_security_helper.core.sharding import ShardAssignment
+from automated_security_helper.utils.severity_ladder import (
+    SEVERITY_COUNT_KEYS,
+    SUPPRESSED_COUNT_KEY,
+)
 from automated_security_helper.models.core import IgnoreFileExclusions
 from automated_security_helper.models.flat_vulnerability import (
     FlatVulnerability,
@@ -75,11 +79,9 @@ if TYPE_CHECKING:
 __all__ = ["AshAggregatedResults"]
 
 
-_SEVERITY_ORDER = ("critical", "high", "medium", "low", "info")
-_VALID_INCREMENT_FIELDS = _SEVERITY_ORDER + ("suppressed",)
-_SUMMARY_SEVERITY_FIELDS = frozenset(
-    ("critical", "high", "medium", "low", "info", "suppressed")
-)
+_SEVERITY_ORDER = SEVERITY_COUNT_KEYS
+_VALID_INCREMENT_FIELDS = _SEVERITY_ORDER + (SUPPRESSED_COUNT_KEY,)
+_SUMMARY_SEVERITY_FIELDS = frozenset((*SEVERITY_COUNT_KEYS, SUPPRESSED_COUNT_KEY))
 
 
 class ScannerSeverityCount(StrippedRecordModel):

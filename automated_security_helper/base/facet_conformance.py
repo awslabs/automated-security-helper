@@ -102,7 +102,7 @@ class Verdict:
     state: str
     non_null: Optional[int]
     total: Optional[int]
-    outcome: str  # "ok" | "FAIL" | "excluded"
+    outcome: str  # "ok" | "FAIL" | "excluded" | "owed"
     detail: str
 
     def row(self) -> str:
@@ -133,6 +133,20 @@ def judge(
     non_null, total = observed if observed is not None else (None, None)
     populated = bool(non_null)
     cell = f"{scanner}.{facet} declared {state.value}"
+    if state is FacetState.UNCONFIRMED:
+        # Neither contamination nor proof: nobody has read a real run for this
+        # cell, so whatever the corpus holds proves nothing yet. It is a fixture
+        # owed, listed in the table and never failed.
+        return Verdict(
+            scanner,
+            facet,
+            state.value,
+            non_null,
+            total,
+            "owed",
+            "fixture owed: author or capture the real run that settles the cell, "
+            "then redeclare it MAPPED or N/A with the evidence",
+        )
     if state is FacetState.MAPPED:
         if observed is None or not total:
             why = (

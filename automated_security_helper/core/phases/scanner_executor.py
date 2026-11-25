@@ -97,7 +97,9 @@ from automated_security_helper.utils.sarif_utils import (
 )
 from automated_security_helper.utils.tool_config_dir import tool_config_scope
 from automated_security_helper.utils.severity_ladder import (
+    SEVERITY_COUNT_KEYS,
     SEVERITY_THRESHOLDS,
+    SUPPRESSED_COUNT_KEY,
     resolve_missing_levels,
     resolve_scanner_threshold,
 )
@@ -239,7 +241,7 @@ def _exit_is_the_shutdowns(error: BaseException) -> bool:
 
 
 #: The fields of ScannerSeverityCount a returned dict's ``severity_counts`` can set.
-_SEVERITY_COUNT_FIELDS = ("suppressed", "critical", "high", "medium", "low", "info")
+_SEVERITY_COUNT_FIELDS = (SUPPRESSED_COUNT_KEY, *SEVERITY_COUNT_KEYS)
 
 #: The levels a target report can record it was graded against
 #: (``ScanResultsContainer.scanner_severity_threshold``). An unrecognised

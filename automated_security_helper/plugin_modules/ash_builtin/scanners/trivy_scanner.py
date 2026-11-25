@@ -214,7 +214,6 @@ from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.utils.config_trust import (
     NOT_THE_OPERATORS,
     refusal_warning,
-    set_by_operator,
 )
 from automated_security_helper.utils.process_env import snapshot_environ
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
@@ -428,7 +427,7 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
             native_field="SARIF result ruleId (the CVE id)",
         ),
         taxonomy_cwe=FacetDecl(
-            state=FacetState.NA,
+            state=FacetState.UNCONFIRMED,
             reason="UNCONFIRMED: trivy's SARIF rules carry no CWE (tags are "
             "vulnerability, security, <severity>); the JSON format's CweIDs "
             "has no committed vulnerability fixture, and a `trivy fs --format "
@@ -447,7 +446,7 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
             "writes nothing)",
         ),
         remediation_text=FacetDecl(
-            state=FacetState.NA,
+            state=FacetState.UNCONFIRMED,
             reason="UNCONFIRMED: not classified by the survey; the flat "
             "model has no remediation column, and the rule help text carries "
             "the fixed version already declared under fix_available",
@@ -457,17 +456,16 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
             reason="trivy's SARIF results carry no code snippet",
         ),
         references=FacetDecl(
-            state=FacetState.DROPPED,
-            native_field="SARIF rule helpUri",
-            reason="rule-level only: the flat reader takes references from "
-            "result relatedLocations, so the help link is discarded today",
+            state=FacetState.MAPPED,
+            native_field="SARIF rule helpUri, read into the flat references "
+            "by FlatVulnerability.from_sarif_result when the result carries "
+            "no relatedLocations",
         ),
         tags=FacetDecl(
-            state=FacetState.DROPPED,
-            native_field="SARIF rule properties.tags",
-            reason="rule-level only: the flat reader takes tags from result "
-            "properties, so the rule tags are discarded today (the severity "
-            "word among them still feeds issue_severity)",
+            state=FacetState.MAPPED,
+            native_field="SARIF rule properties.tags, read into the flat tags "
+            "by FlatVulnerability.from_sarif_result when the result carries "
+            "none (the severity word among them still feeds issue_severity)",
         ),
         extras=FacetDecl(
             state=FacetState.MAPPED,
@@ -655,17 +653,18 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         chosen = list(options.scanners)
         if chosen == default:
             return
-        config = self.context.config if self.context is not None else None
-        if set_by_operator(config, "scanners.trivy.options.scanners", chosen):
-            return
-        self._plugin_log(
+        granted = self._operator_gated(
+            "scanners.trivy.options.scanners",
+            chosen,
+            default,
             refusal_warning(
                 f"Ignoring scanners.trivy.options.scanners ({chosen}): "
                 f"{NOT_THE_OPERATORS}. trivy runs the default set, {default}.",
                 NOT_THE_OPERATORS,
             ),
-            level=logging.WARNING,
         )
+        if granted is chosen:
+            return
         if self.config is not None:
             self.config.options = options.model_copy(update={"scanners": default})
 

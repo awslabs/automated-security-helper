@@ -6849,6 +6849,7 @@ def _gating_actionable_count(
     non_sarif_qualifying = False
     if getattr(getattr(results, "metadata", None), "baseline", None) is not None:
         from automated_security_helper.utils.severity_ladder import (
+            SEVERITIES,
             severity_fails_threshold,
         )
 
@@ -6856,7 +6857,7 @@ def _gating_actionable_count(
             counts = ScannerStatisticsCalculator.dict_result_counts(
                 results, metric.scanner_name
             )
-            for severity in ("CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"):
+            for severity in SEVERITIES:
                 count = getattr(counts, severity.lower())
                 if count and severity_fails_threshold(
                     severity, threshold_for(metric.scanner_name)

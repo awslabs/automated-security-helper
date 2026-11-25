@@ -741,6 +741,36 @@ def scrubbed_daemon_environment(environ: Mapping[str, str]) -> dict[str, str]:
     return kept
 
 
+#: The ``op`` of each request frame the protocol carries. The daemon dispatches
+#: on these and the client and the ``ash express`` commands build their frames
+#: from them (the ``*_frame`` builders below), so a frame's spelling lives once.
+OP_STATUS = "status"
+OP_STOP = "stop"
+OP_SCAN = "scan"
+OP_GO = "go"
+OP_SIGNAL = "signal"
+
+
+def status_frame() -> dict[str, Any]:
+    """The control request asking a daemon for its status."""
+    return {"op": OP_STATUS}
+
+
+def stop_frame() -> dict[str, Any]:
+    """The control request asking a daemon to stop."""
+    return {"op": OP_STOP}
+
+
+def go_frame() -> dict[str, Any]:
+    """The client's answer to the daemon's scan ok: fork the scan now."""
+    return {"op": OP_GO}
+
+
+def signal_frame(signum: int) -> dict[str, Any]:
+    """The client forwarding *signum* to the scan the daemon forked for it."""
+    return {"op": OP_SIGNAL, "signum": int(signum)}
+
+
 def send_frame(sock: socket.socket, frame: dict[str, Any]) -> None:
     """Write one frame: a compact JSON object and its newline."""
     data = json.dumps(frame, separators=(",", ":")).encode("utf-8") + b"\n"

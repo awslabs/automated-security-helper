@@ -208,24 +208,21 @@ CORPORA: Mapping[str, Optional[CorpusSpec]] = {
     "checkov": CorpusSpec("checkov", sarif=("captured/*.sarif",), prep="checkov"),
     "detect-secrets": CorpusSpec("detect_secrets", prep="detect-secrets"),
     "ferret-scan": CorpusSpec(
-        "ferret-scan",
-        missing="ferret-scan commits only its input samples (sample.txt, a "
-        ".docx), no captured output",
+        "ferret-scan", sarif=("captured/*.sarif",), prep="ferret-scan"
     ),
     "gitleaks": CorpusSpec("gitleaks", sarif=("gitleaks-*.sarif",), prep="gitleaks"),
-    "grype": CorpusSpec(
-        "grype",
-        missing="grype commits native JSON only (grype/grype.src.json); the "
-        "SARIF is rendered inside test_grype_fix_available_conformance.py, "
-        "not committed. Commit a `grype -o sarif` capture or register a prep",
-    ),
+    "grype": CorpusSpec("grype", sarif=("captured/*.sarif",), prep="grype"),
     "guarddog": CorpusSpec("guarddog", prep="guarddog"),
     "hadolint": CorpusSpec("hadolint", sarif=("captured/*.sarif",)),
     "mcp-config": CorpusSpec("mcp_config", sarif=("captured/*.sarif",)),
     "npm-audit": CorpusSpec("npmaudit", prep="npm-audit"),
     "opengrep": CorpusSpec("opengrep", sarif=("captured/*.sarif",)),
     "semgrep": CorpusSpec("semgrep", sarif=("captured/*.sarif",)),
-    "snyk-code": None,
+    # Authored in the shape `snyk code test --sarif` writes (see the README in
+    # the directory); a licensed capture committed under captured/ joins it.
+    "snyk-code": CorpusSpec(
+        "snyk", sarif=("authored/*.sarif", "captured/*.sarif"), prep="snyk-code"
+    ),
     "syft": CorpusSpec(
         "syft",
         missing="syft commits its native SBOM JSON only (syft/syft.src.json); "
@@ -239,10 +236,7 @@ CORPORA: Mapping[str, Optional[CorpusSpec]] = {
 }
 
 #: Why a scanner with no CorpusSpec has none (named, not authored).
-_NO_FIXTURE_DIRECTORY = {
-    "snyk-code": "no tests/test_data/scanners/snyk directory; commit a "
-    "captured `snyk code test --sarif` result (needs a licensed run)",
-}
+_NO_FIXTURE_DIRECTORY: dict[str, str] = {}
 
 
 def _load_sarif(path: Path) -> SarifReport:
@@ -299,6 +293,31 @@ def _prep_cfn_nag(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]]
             yield report, [r for run in report.runs or [] for r in run.results or []]
 
 
+def _report_with_rules(tool_name: str, rules: list[Any]) -> SarifReport:
+    """A report whose one run declares *rules* on its driver and holds no
+    results: the results are yielded beside it, and the rule-level facets
+    (help link, tags) are read from the run."""
+    return SarifReport.model_validate(
+        {
+            "version": "2.1.0",
+            "runs": [
+                {
+                    "tool": {
+                        "driver": {
+                            "name": tool_name,
+                            "rules": [
+                                rule.model_dump(mode="json", exclude_none=True)
+                                for rule in rules
+                            ],
+                        }
+                    },
+                    "results": [],
+                }
+            ],
+        }
+    )
+
+
 def _prep_guarddog(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]]]:
     from automated_security_helper.plugin_modules.ash_guarddog_plugins.guarddog_scanner import (
         convert_guarddog_scan_result,
@@ -312,8 +331,10 @@ def _prep_guarddog(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]
         converted = convert_guarddog_scan_result(
             document, uri_prefix="", ecosystem=ecosystem, include_capabilities=True
         )
-        report = SarifReport.model_validate({"version": "2.1.0", "runs": []})
-        yield report, list(converted.results)
+        yield (
+            _report_with_rules("guarddog", list(converted.rules.values())),
+            list(converted.results),
+        )
     # Verify mode is where the adapter writes package identity: each committed
     # verify capture is a list of {dependency, version, result} entries over
     # the manifest committed beside it, converted the way the scanner's own
@@ -332,8 +353,10 @@ def _prep_guarddog(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]
                 manifest_uri=manifest.name,
                 manifest_line=manifest_line_for(manifest_text, entry["dependency"]),
             )
-            report = SarifReport.model_validate({"version": "2.1.0", "runs": []})
-            yield report, list(converted.results)
+            yield (
+                _report_with_rules("guarddog", list(converted.rules.values())),
+                list(converted.results),
+            )
 
 
 def _prep_checkov(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]]]:
@@ -427,6 +450,63 @@ def _materialized(template: Path, scratch: Path) -> Path:
     return destination
 
 
+def _prep_ferret_scan(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]]]:
+    """The committed `ferret-scan --format sarif` capture through the adapter's
+    own base-relative URI resolution, the step it applies before the report is
+    built."""
+    from automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner import (
+        _resolve_sarif_uri_base_ids,
+    )
+
+    for pattern in spec.sarif:
+        for path in sorted((_FIXTURES / spec.directory).glob(pattern)):
+            document = json.loads(path.read_text(encoding="utf-8"))
+            _resolve_sarif_uri_base_ids(document)
+            report = SarifReport.model_validate(document)
+            yield report, [r for run in report.runs or [] for r in run.results or []]
+
+
+def _prep_grype(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]]]:
+    """The committed `grype -o sarif` capture through the adapter's own
+    post-processing (URIs, package identity, fix state). The scan target is an
+    empty directory: the capture was taken over an SBOM, so no lockfile sits
+    beside it for the package-path lookup."""
+    import tempfile
+
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.grype_scanner import (
+        GrypeScanner,
+    )
+
+    with tempfile.TemporaryDirectory(prefix="facets-grype-corpus-") as scratch:
+        for pattern in spec.sarif:
+            for path in sorted((_FIXTURES / spec.directory).glob(pattern)):
+                # The step reads no instance state; building the scanner would
+                # need a run context this pure read has no use for.
+                report = GrypeScanner.__new__(GrypeScanner)._post_process_sarif(
+                    _load_sarif(path), [], Path(scratch)
+                )
+                yield (
+                    report,
+                    [r for run in report.runs or [] for r in run.results or []],
+                )
+
+
+def _prep_snyk_code(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]]]:
+    """The committed SARIF through the adapter's own rule-CWE normalization,
+    the one step the scanner applies before it builds the report."""
+    from automated_security_helper.plugin_modules.ash_snyk_plugins.snyk_code_scanner import (
+        normalize_rule_cwe_into_tags,
+    )
+
+    for pattern in spec.sarif:
+        for path in sorted((_FIXTURES / spec.directory).glob(pattern)):
+            document = normalize_rule_cwe_into_tags(
+                json.loads(path.read_text(encoding="utf-8"))
+            )
+            report = SarifReport.model_validate(document)
+            yield report, [r for run in report.runs or [] for r in run.results or []]
+
+
 def _prep_trivy(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]]]:
     """The committed SARIF through the adapter's own pure steps.
 
@@ -470,15 +550,9 @@ def _prep_trivy(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]]]:
 def _prep_npm_audit(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]]]:
     import tempfile
 
-    from automated_security_helper.config.ash_config import AshConfig
     from automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_scanner import (
         NpmAuditScanner,
     )
-
-    # The conversion constructs a default-configured scanner, whose model
-    # carries forward references to AshConfig; resolve them the way the other
-    # construction tests do.
-    AshConfig.model_rebuild()
 
     with tempfile.TemporaryDirectory(prefix="facets-npmaudit-corpus-") as scratch:
         target = _materialized(
@@ -496,6 +570,9 @@ def _prep_npm_audit(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result
 def _prep_cdk_nag(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]]]:
     import csv
 
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.cdk_nag_scanner import (
+        _reporting_descriptor_for,
+    )
     from automated_security_helper.utils.cdk_nag_wrapper import (
         _NagFinding,
         build_nag_results,
@@ -537,8 +614,17 @@ def _prep_cdk_nag(spec: CorpusSpec) -> Iterator[tuple[SarifReport, list[Result]]
             template_path,
             template_text.splitlines(),
         )
-        report = SarifReport.model_validate({"version": "2.1.0", "runs": []})
-        yield report, [r for results in per_pack.values() for r in results]
+        nag_results = [r for results in per_pack.values() for r in results]
+        # The run the scanner writes carries one descriptor per rule, which is
+        # where the rule's help link lives; build it the way scan() does.
+        representatives: dict[Any, Result] = {}
+        for result in nag_results:
+            representatives.setdefault(result.ruleId, result)
+        rules = [
+            _reporting_descriptor_for(rep, tool_name="cdk-nag", tool_type="IAC")
+            for rep in representatives.values()
+        ]
+        yield _report_with_rules("ash-cdk-nag-wrapper", rules), nag_results
 
 
 #: Registered preps: native, non-SARIF or adapter-normalized fixtures through
@@ -554,9 +640,12 @@ _PREPS: Mapping[
     "cfn-nag": _prep_cfn_nag,
     "checkov": _prep_checkov,
     "detect-secrets": _prep_detect_secrets,
+    "ferret-scan": _prep_ferret_scan,
     "gitleaks": _prep_gitleaks,
+    "grype": _prep_grype,
     "guarddog": _prep_guarddog,
     "npm-audit": _prep_npm_audit,
+    "snyk-code": _prep_snyk_code,
     "trivy": _prep_trivy,
 }
 
@@ -656,6 +745,48 @@ def test_the_registry_and_the_corpus_table_agree() -> None:
             assert spec.missing, f"{name}: a corpus-less spec names what to author"
 
 
+def test_discovery_does_not_depend_on_which_tier_declares_a_scanner() -> None:
+    """The gate reads every plugin package's ``ASH_SCANNERS`` the same way.
+
+    Core (ash_builtin), the alpha ash_*_plugins packages and any package an SDK
+    plugin ships are one population here: the gate names no tier, and a scanner
+    is in or out by declaring itself, not by where it lives. The registered set
+    must equal the union of every package's list, and must span more than one
+    package so the check is not satisfied by a single tier.
+    """
+    declared: set[type] = set()
+    packages_with_scanners: set[str] = set()
+    for info in pkgutil.iter_modules(plugin_modules.__path__):
+        if not info.ispkg:
+            continue
+        package = importlib.import_module(f"{plugin_modules.__name__}.{info.name}")
+        found = list(getattr(package, "ASH_SCANNERS", []))
+        if found:
+            packages_with_scanners.add(info.name)
+        declared.update(found)
+    assert set(SCANNER_CLASSES) == declared
+    assert len(packages_with_scanners) >= 2, packages_with_scanners
+    # No scanner is looked up by the name of a tier or a package.
+    body = (
+        Path(__file__)
+        .read_text(encoding="utf-8")
+        .split("def test_discovery_does_not_depend")[0]
+    )
+    for needle in ("startswith(" + '"ash_', "== " + '"ash_builtin"'):
+        assert needle not in body, needle
+
+
+def test_the_scanners_read_from_captures_and_authored_shapes_are_observed() -> None:
+    """The scanners whose cells were redeclared unread are observed now."""
+    for name in ("snyk-code", "grype", "ferret-scan"):
+        frame = observed_frame(name, CORPORA[name])
+        assert frame is not None, name
+        assert frame["rule_id"][1] > 0 and frame["rule_id"][0] == frame["rule_id"][1]
+        assert frame["file_path"][0] > 0 and frame["message"][0] > 0, name
+    assert observed_frame("grype", CORPORA["grype"])["fingerprints"][0] > 0
+    assert observed_frame("ferret-scan", CORPORA["ferret-scan"])["fingerprints"][0] == 0
+
+
 def test_the_corpus_is_not_vacuous() -> None:
     """A gate over an empty universe passes everything; refuse that."""
     with_corpus = {}
@@ -737,6 +868,50 @@ def test_planted_legitimate_cells_pass(
     state: FacetState, observed: Optional[tuple[int, int]]
 ) -> None:
     assert judge("planted", "tags", state, observed).outcome == "ok"
+
+
+@pytest.mark.parametrize(
+    "observed", [(3, 4), (0, 4), None], ids=["populated", "empty", "no-corpus"]
+)
+def test_planted_an_unconfirmed_facet_is_owed_never_failed(
+    observed: Optional[tuple[int, int]],
+) -> None:
+    """UNCONFIRMED is neither contamination (a populated column does not fail
+    it, as it fails N/A) nor proof (an empty one does not pass it, as it passes
+    N/A): it is listed as a fixture owed whatever the corpus holds."""
+    verdict = judge("planted", "rule_id", FacetState.UNCONFIRMED, observed)
+    assert verdict.outcome == "owed", verdict.detail
+    assert "fixture owed" in verdict.detail
+    # The same populated column fails an N/A declaration: the states differ.
+    if observed == (3, 4):
+        assert judge("planted", "rule_id", FacetState.NA, observed).outcome == "FAIL"
+
+
+def test_the_owed_fixtures_are_listed_by_the_gate_table() -> None:
+    owed = [v for v in verdict_rows() if v.outcome == "owed"]
+    assert owed, (
+        "no UNCONFIRMED cell is listed: the register has none, or the gate hides them"
+    )
+    assert {v.state for v in owed} == {FacetState.UNCONFIRMED.value}
+
+
+def test_no_na_cell_is_the_unread_state_in_disguise() -> None:
+    """N/A means the tool cannot carry the facet. A cell whose reason says no run
+    was read, or begins UNCONFIRMED, is the unconfirmed state and is declared so."""
+    stretched = []
+    for cls in SCANNER_CLASSES:
+        facets = vars(cls).get(SCANNER_FACETS_ATTR)
+        for facet in FACET_NAMES:
+            cell = getattr(facets, facet)
+            reason = (cell.reason or "").lower()
+            if cell.state is FacetState.NA and (
+                reason.startswith("unconfirmed") or "output not read" in reason
+            ):
+                stretched.append(f"{_name(cls)}.{facet}")
+    assert not stretched, (
+        "declared n/a but worded as unread: declare these UNCONFIRMED -- "
+        + ", ".join(stretched)
+    )
 
 
 def test_planted_an_excluded_facet_is_never_judged() -> None:

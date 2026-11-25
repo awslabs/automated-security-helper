@@ -884,9 +884,9 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         ),
         column=FacetDecl(
             state=FacetState.NA,
-            reason="UNCONFIRMED: the side report carries a line range only "
-            "and no checkov SARIF golden is committed; one SARIF run settles "
-            "whether a column is emitted",
+            reason="the committed checkov-3.4.6 capture's six SARIF regions "
+            "carry startLine, endLine and snippet only, and the side report "
+            "carries a line range only",
         ),
         message=FacetDecl(
             state=FacetState.MAPPED,
@@ -932,8 +932,9 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         ),
         fingerprints=FacetDecl(
             state=FacetState.NA,
-            reason="UNCONFIRMED: the side report carries no fingerprint and "
-            "no checkov SARIF golden is committed; one SARIF run settles it",
+            reason="none of the committed checkov-3.4.6 capture's six SARIF "
+            "results carries fingerprints or partialFingerprints, and the "
+            "side report carries no fingerprint",
         ),
         fix_available=FacetDecl(
             state=FacetState.NA,
@@ -970,9 +971,8 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         ),
         extras=FacetDecl(
             state=FacetState.NA,
-            reason="UNCONFIRMED: no checkov SARIF golden is committed, so "
-            "whether results carry a property bag is open; one SARIF run "
-            "settles it",
+            reason="none of the committed checkov-3.4.6 capture's six SARIF "
+            "results carries a properties bag",
         ),
     )
 
@@ -1546,11 +1546,23 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         for item in frameworks:
             self.args.extra_args.append(ToolExtraArg(key="--framework", value=item))
         skip_frameworks: list[str] = list(self.config.options.skip_frameworks)
+        file_skip_frameworks = file_values.get("skip-framework")
+        if isinstance(file_skip_frameworks, str):
+            file_skip_frameworks = [file_skip_frameworks]
+        for item in (
+            file_skip_frameworks if isinstance(file_skip_frameworks, list) else []
+        ):
+            # Passed on the command line too, since the command line's
+            # --skip-framework list replaces the file's whole, and this scanner
+            # passes one on almost every run (the VCS frameworks below).
+            if isinstance(item, str) and item.strip() and item not in skip_frameworks:
+                skip_frameworks.append(item)
         if "all" in frameworks:
             # Checkov's "all" includes VCS server-configuration frameworks that
             # audit remote server settings over the network rather than files in
             # the scanned tree. Skip them unless explicitly requested via
-            # frameworks (or an external checkov config file's framework key).
+            # frameworks (or an external checkov config file's framework key),
+            # including beside "all".
             for vcs_framework in _VCS_CONFIGURATION_FRAMEWORKS:
                 if vcs_framework in frameworks or vcs_framework in skip_frameworks:
                     continue

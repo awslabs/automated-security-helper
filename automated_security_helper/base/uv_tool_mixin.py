@@ -1788,9 +1788,12 @@ class UVToolMixin:
             # (SARIF scanner_version) is its own, not the one the uv probe read
             # from uv's environment. Read with a default: a verifier stand-in
             # that carries only status and detail is a verdict without one.
-            verified_version = getattr(verdict, "version", None)
-            if verified_version:
-                self.tool_version = verified_version
+            # A copy that answered no version leaves the record empty: the
+            # value an earlier uv probe wrote names an environment the scan
+            # does not run (#955, the probe resolved 3.4.5 while the PATH copy
+            # was 3.3.15), and the uv probe is no longer owed on this route.
+            self.tool_version = getattr(verdict, "version", None) or None
+            self._deferred_tool_version_probe = None
             return True
 
         # A tool from the Nix store is the pinned one `--mode nix` exists to run.

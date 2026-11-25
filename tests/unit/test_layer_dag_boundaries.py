@@ -97,7 +97,10 @@ KNOWN_VIOLATIONS: Dict[Tuple[str, str], int] = {
     # 70 -> 73: the sdist lock harvester reads config.path_trust,
     # config.operator_only_options and config.sandbox_grants (the same trust checks
     # the other converters take), and the grep scanner base reads config.mcp_sandbox.
-    ("plugin_modules", "config"): 73,
+    # 73 -> 74: npm_audit_scanner's normalize-results harness entry resolves the
+    # scanner model's AshConfig forward reference before it builds one (landed on
+    # main with the consolidated fixes).
+    ("plugin_modules", "config"): 74,
     # 70 -> 75: the sdist lock harvester (core.constants, core.exceptions), the MCP
     # config scanner (core.enums), cdk-nag (core.exceptions) and trivy
     # (core.container_engine) read core types the way the other plugins do.

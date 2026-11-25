@@ -95,10 +95,12 @@ def test_a_scan_writes_the_resource_of_each_result(tmp_path) -> None:
         report = scanner.scan(target=context.work_dir, target_type="converted")
     results = [r for run in report.runs for r in run.results]
     assert len(results) == 6
-    assert {_bag(r).get("ash_resource_id") for r in results} == {
-        "M0FixtureBucketA",
-        "M0FixtureBucketB",
-    }
+    by_line: dict = {}
+    for result in results:
+        line = result.locations[0].physicalLocation.root.region.startLine
+        by_line.setdefault(line, set()).add(_bag(result).get("ash_resource_id"))
+    # each id on the result of its own bucket: a swap would still pass a set check
+    assert by_line == {8: {"M0FixtureBucketA"}, 12: {"M0FixtureBucketB"}}
 
 
 def test_the_resource_reaches_the_flat_row() -> None:

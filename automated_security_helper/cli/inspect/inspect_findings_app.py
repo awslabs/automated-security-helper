@@ -71,7 +71,10 @@ from automated_security_helper.utils.scanned_tree import (
     open_in_scanned_tree,
 )
 from automated_security_helper.utils.secret_masking import source_snippet_masker
-from automated_security_helper.utils.severity_ladder import result_severity
+from automated_security_helper.utils.severity_ladder import (
+    SEVERITY_COUNT_KEYS,
+    result_severity,
+)
 from automated_security_helper.utils.terminal_text import (
     controls_shown,
     only_controls_shown,
@@ -936,7 +939,7 @@ def _summary_line(findings: list) -> Text:
     summary = Text()
     active = [finding for finding in findings if not finding.get("suppressed")]
     summary.append(f"{len(active)} active", style=f"bold {COLORS['foreground']}")
-    for level in ("critical", "high", "medium", "low", "info"):
+    for level in SEVERITY_COUNT_KEYS:
         count = sum(finding.get("severity", "").lower() == level for finding in active)
         if count:
             summary.append("  ·  ", style=COLORS["muted"])
@@ -1951,7 +1954,9 @@ class FindingsExplorerApp(App):
 
     def _apply_sorting(self) -> None:
         """Sort the filtered findings."""
-        severity_order = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
+        severity_order = {
+            level: position for position, level in enumerate(SEVERITY_COUNT_KEYS)
+        }
 
         if self.current_sort == "severity":
             self.filtered_findings.sort(

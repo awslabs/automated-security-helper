@@ -43,6 +43,7 @@ from pydantic import Field
 
 from automated_security_helper.cli.mcp_tools import (
     CONFIG_ENV_NOT_RESOLVED,
+    CONFIG_INPUT_NOT_PERMITTED,
     REFUSED_CONFIG_EXIT_CODE,
     REFUSED_INTERNAL_EXIT_CODE,
     REFUSED_TARGET_EXIT_CODE,
@@ -957,7 +958,7 @@ async def run_ash_scan(
                     {
                         "success": False,
                         "error": raw_controls_on_one_line(str(config_error)),
-                        "error_type": "config_input_not_permitted",
+                        "error_type": CONFIG_INPUT_NOT_PERMITTED,
                         "error_category": config_error.context["error_category"],
                     },
                     REFUSED_CONFIG_EXIT_CODE,
