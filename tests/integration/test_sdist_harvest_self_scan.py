@@ -23,7 +23,9 @@ not failed, when ASH runs offline.
 from __future__ import annotations
 
 import json
+import os
 import re
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -111,3 +113,46 @@ def test_ash_harvests_the_polars_crate_tree_from_its_own_lock(
     )
     assert manifest["parent_purl"] == f"pkg:pypi/polars-runtime-32@{polars.version}"
     assert manifest["sdist_sha256"] == polars.sdist_sha256
+
+    # The SBOM leg: the pinned syft reads the harvest the way the converted-tree
+    # pass does, the harvest's provenance is stamped onto what it found, and the
+    # crate this repository's suppressions are written for is in the result with
+    # its polars parent. The same assertions run against a captured report in
+    # test_sdist_harvest_sbom_fixture.py for the legs that install no syft.
+    from automated_security_helper.schemas.cyclonedx_bom_1_6_schema import (
+        CycloneDXReport,
+    )
+    from automated_security_helper.utils.download_utils import install_pinned_tool
+    from automated_security_helper.utils.sdist_harvest import (
+        stamp_harvested_components,
+    )
+    from tests.utils.sdist_harvest_oracle import (
+        assert_linked_crate_is_listed_with_its_parent,
+        assert_suppressions_match_reported_paths,
+    )
+    from tests.utils.trivy_fixture import host_arch, host_platform
+
+    syft = install_pinned_tool(
+        "syft", host_platform(), host_arch(), tmp_path / "syft-bin"
+    )
+    run = subprocess.run(  # nosec B603 - the pinned syft, fixed argv, a directory this test wrote
+        [str(syft), f"dir:{converter.results_dir}", "-o", "cyclonedx-json"],
+        capture_output=True,
+        text=True,
+        timeout=300,
+        env={"PATH": os.environ["PATH"], "HOME": str(tmp_path)},
+    )
+    assert run.returncode == 0, run.stderr[-500:]
+    report = CycloneDXReport.model_validate(json.loads(run.stdout))
+    # syft does not descend into /run, so a test directory there reads as an
+    # empty target; a count this far under the lockfile's names that case.
+    assert len(report.components or []) >= packages, (
+        f"syft read {len(report.components or [])} components from a lockfile of "
+        f"{packages} packages (is {converter.results_dir} under /run?)"
+    )
+    stamped = stamp_harvested_components(report, converter.results_dir)
+    assert stamped >= packages
+    locations = assert_linked_crate_is_listed_with_its_parent(
+        report, f"pkg:pypi/polars-runtime-32@{polars.version}"
+    )
+    assert_suppressions_match_reported_paths(locations)

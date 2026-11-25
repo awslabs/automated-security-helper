@@ -1,0 +1,164 @@
+{
+  "$schema": "http://cyclonedx.org/schema/bom-1.7.schema.json",
+  "bomFormat": "CycloneDX",
+  "components": [
+    {
+      "bom-ref": "pkg:cargo/adler2@2.0.1?package-id=8ce24f4308ca07d3",
+      "cpe": "cpe:2.3:a:adler2_project:adler2:2.0.1:*:*:*:*:rust:*:*",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "registry+https://github.com/rust-lang/crates.io-index"
+        }
+      ],
+      "name": "adler2",
+      "properties": [
+        {
+          "name": "syft:package:foundBy",
+          "value": "rust-cargo-lock-cataloger"
+        },
+        {
+          "name": "syft:package:language",
+          "value": "rust"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "rust-crate"
+        },
+        {
+          "name": "syft:package:metadataType",
+          "value": "rust-cargo-lock-entry"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:adler2:adler2:2.0.1:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:location:0:path",
+          "value": "/sdist-locks/polars-runtime-32/1.44.2/Cargo.lock"
+        },
+        {
+          "name": "ash:sbom-harvest:sdist-sha256",
+          "value": "b84842f7d621aaca7a52e165e19a24f89db45f8aa13744941430218419a14a67"
+        },
+        {
+          "name": "ash:sbom-harvest:parent-purl",
+          "value": "pkg:pypi/polars-runtime-32@1.44.2"
+        },
+        {
+          "name": "ash:sbom-harvest:source-url",
+          "value": "https://files.pythonhosted.org/packages/d4/a1/a7eace6587b56f22cf2a21ab4d5e695db372dc23fd96accb68b1ec12660b/polars_runtime_32-1.44.2.tar.gz"
+        }
+      ],
+      "purl": "pkg:cargo/adler2@2.0.1",
+      "type": "library",
+      "version": "2.0.1"
+    },
+    {
+      "bom-ref": "pkg:cargo/ring@0.17.14?package-id=4e61446338a34fcf",
+      "cpe": "cpe:2.3:a:ring_project:ring:0.17.14:*:*:*:*:rust:*:*",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "registry+https://github.com/rust-lang/crates.io-index"
+        }
+      ],
+      "name": "ring",
+      "properties": [
+        {
+          "name": "syft:package:foundBy",
+          "value": "rust-cargo-lock-cataloger"
+        },
+        {
+          "name": "syft:package:language",
+          "value": "rust"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "rust-crate"
+        },
+        {
+          "name": "syft:package:metadataType",
+          "value": "rust-cargo-lock-entry"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:ring:ring:0.17.14:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:location:0:path",
+          "value": "/sdist-locks/polars-runtime-32/1.44.2/Cargo.lock"
+        },
+        {
+          "name": "ash:sbom-harvest:sdist-sha256",
+          "value": "b84842f7d621aaca7a52e165e19a24f89db45f8aa13744941430218419a14a67"
+        },
+        {
+          "name": "ash:sbom-harvest:parent-purl",
+          "value": "pkg:pypi/polars-runtime-32@1.44.2"
+        },
+        {
+          "name": "ash:sbom-harvest:source-url",
+          "value": "https://files.pythonhosted.org/packages/d4/a1/a7eace6587b56f22cf2a21ab4d5e695db372dc23fd96accb68b1ec12660b/polars_runtime_32-1.44.2.tar.gz"
+        }
+      ],
+      "purl": "pkg:cargo/ring@0.17.14",
+      "type": "library",
+      "version": "0.17.14"
+    },
+    {
+      "bom-ref": "pkg:cargo/rustls@0.23.43?package-id=5af7b1a789b897d7",
+      "cpe": "cpe:2.3:a:rustls_project:rustls:0.23.43:*:*:*:*:rust:*:*",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "registry+https://github.com/rust-lang/crates.io-index"
+        }
+      ],
+      "name": "rustls",
+      "properties": [
+        {
+          "name": "syft:package:foundBy",
+          "value": "rust-cargo-lock-cataloger"
+        },
+        {
+          "name": "syft:package:language",
+          "value": "rust"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "rust-crate"
+        },
+        {
+          "name": "syft:package:metadataType",
+          "value": "rust-cargo-lock-entry"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:rustls:rustls:0.23.43:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:location:0:path",
+          "value": "/sdist-locks/polars-runtime-32/1.44.2/Cargo.lock"
+        },
+        {
+          "name": "ash:sbom-harvest:sdist-sha256",
+          "value": "b84842f7d621aaca7a52e165e19a24f89db45f8aa13744941430218419a14a67"
+        },
+        {
+          "name": "ash:sbom-harvest:parent-purl",
+          "value": "pkg:pypi/polars-runtime-32@1.44.2"
+        },
+        {
+          "name": "ash:sbom-harvest:source-url",
+          "value": "https://files.pythonhosted.org/packages/d4/a1/a7eace6587b56f22cf2a21ab4d5e695db372dc23fd96accb68b1ec12660b/polars_runtime_32-1.44.2.tar.gz"
+        }
+      ],
+      "purl": "pkg:cargo/rustls@0.23.43",
+      "type": "library",
+      "version": "0.23.43"
+    }
+  ],
+  "specVersion": "1.7",
+  "version": 1
+}
