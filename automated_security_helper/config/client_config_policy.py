@@ -125,11 +125,18 @@ RESTRICT_ONLY_PATHS: Tuple[str, ...] = (
 )
 
 #: Exempt from the default ``denied_paths`` when ``HONOR_DELIVERED_SUPPRESSIONS``.
+#: Exclusions ride with suppressions and ignore paths: a delivered entry is
+#: honored and marked ``client_supplied``, which for an exclusion means the
+#: result is kept marked suppressed rather than dropped
+#: (``sarif_utils._matching_exclusion``), so the results still show what the
+#: client chose to hide.
 SUPPRESSION_PATHS: Tuple[str, ...] = (
     "/global_settings/suppressions",
     "/global_settings/suppressions/**",
     "/global_settings/ignore_paths",
     "/global_settings/ignore_paths/**",
+    "/global_settings/exclusions",
+    "/global_settings/exclusions/**",
 )
 
 #: No effect in a client-delivered file: the policy never comes from one, and
@@ -467,6 +474,14 @@ SHIPPED_DEFAULT_DENIED_PATHS: Tuple[FrozenSet[str], ...] = tuple(
             "/scanners/zizmor/options/honor_inline_ignores",
         ),
     )
+)
+# The current default: the v3.8.0 list plus `/global_settings/exclusions`
+# (issue #894; an exclusion drops findings outright, so a runtime patch must
+# not install one). Derived rather than written out because it differs from
+# the shipped v3.8.0 list by that one entry; the next default change after a
+# release that ships this one appends its own list the same way.
+SHIPPED_DEFAULT_DENIED_PATHS = SHIPPED_DEFAULT_DENIED_PATHS + (
+    SHIPPED_DEFAULT_DENIED_PATHS[-1] | {"/global_settings/exclusions"},
 )
 
 
@@ -1409,13 +1424,18 @@ def _mark_client_supplied(
     from automated_security_helper.cli.mcp.sandbox import config_is_client_supplied
     from automated_security_helper.config.runtime_patch import _walk
     from automated_security_helper.models.core import (
+        AshExclusion,
         AshSuppression,
         IgnorePathWithReason,
     )
 
     delivered = is_delivered or config_is_client_supplied
 
-    models = {"suppressions": AshSuppression, "ignore_paths": IgnorePathWithReason}
+    models = {
+        "suppressions": AshSuppression,
+        "ignore_paths": IgnorePathWithReason,
+        "exclusions": AshExclusion,
+    }
     operators: Dict[str, List[Dict[str, Any]]] = {field: [] for field in models}
     sources: List[Any] = [
         _with_own_patch(document, base)
