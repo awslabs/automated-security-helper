@@ -89,6 +89,7 @@ from automated_security_helper.config.ash_config import (
     AshConfig,
     RuntimeOverridesConfig,
 )
+from automated_security_helper.plugin_manifests import scanner_manifests
 from automated_security_helper.utils.import_caches import invalidate_import_caches
 from automated_security_helper.utils.log import ASH_LOGGER
 
@@ -485,56 +486,14 @@ SHIPPED_DEFAULT_DENIED_PATHS: Tuple[FrozenSet[str], ...] = tuple(
 #: the default.
 #: ``test_the_plugin_option_defaults_are_the_plugins`` derives the list from the
 #: default ``denied_paths`` and checks each value against the plugin's model.
+#: Declared by each such scanner's manifest (``denied_option_defaults``), where the
+#: values sit beside the plugin that owns them, and read here by scanner name and
+#: option. A scanner whose plugin loads by default (``default_enabled``) declares
+#: none: the trusted config carries its section.
 PLUGIN_OPTION_DEFAULTS: Mapping[Tuple[str, str], Any] = {
-    ("betterleaks", "config_file"): None,
-    ("betterleaks", "honor_inline_ignores"): False,
-    ("betterleaks", "honor_tree_ignore_files"): False,
-    ("betterleaks", "offline"): False,
-    ("ferret-scan", "checks"): "all",
-    ("ferret-scan", "confidence_levels"): "all",
-    ("ferret-scan", "config_file"): None,
-    ("ferret-scan", "disable_ip_types"): None,
-    ("ferret-scan", "enable_preprocessors"): True,
-    ("ferret-scan", "finding_limit"): 0,
-    ("ferret-scan", "max_live_bytes"): None,
-    ("ferret-scan", "offline"): False,
-    ("ferret-scan", "profile"): None,
-    ("ferret-scan", "recursive"): True,
-    ("ferret-scan", "respect_gitignore"): False,
-    ("ferret-scan", "tool_version"): None,
-    ("ferret-scan", "use_default_config"): True,
-    ("ferret-scan", "validator_budget"): None,
-    ("guarddog", "ecosystems"): [
-        "pypi",
-        "npm",
-        "go",
-        "github_action",
-        "rubygems",
-        "crates",
-    ],
-    ("guarddog", "exclude_rules"): [],
-    ("guarddog", "offline"): False,
-    ("guarddog", "rules"): [],
-    ("guarddog", "sandbox"): "auto",
-    ("guarddog", "tool_version"): None,
-    ("guarddog", "verify"): False,
-    ("hadolint", "config_file"): None,
-    ("hadolint", "offline"): False,
-    ("snyk-code", "honor_tree_exclusions"): False,
-    ("snyk-code", "offline"): False,
-    ("snyk-code", "scan_timeout"): 1800,
-    ("snyk-code", "severity_threshold"): None,
-    ("trivy-repo", "config_file"): None,
-    ("trivy-repo", "disable_telemetry"): True,
-    ("trivy-repo", "ignore_file"): None,
-    ("trivy-repo", "ignore_unfixed"): True,
-    ("trivy-repo", "license_full"): True,
-    ("trivy-repo", "module_dir"): None,
-    ("trivy-repo", "offline"): False,
-    ("trivy-repo", "scan_timeout"): 1800,
-    ("trivy-repo", "scanners"): ["vuln", "secret", "misconfig", "license"],
-    ("trivy-repo", "secret_config_file"): None,
-    ("trivy-repo", "severity_threshold"): None,
+    (manifest.name, option): default
+    for manifest in scanner_manifests()
+    for option, default in manifest.denied_option_defaults.items()
 }
 
 

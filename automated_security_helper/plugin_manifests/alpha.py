@@ -12,6 +12,8 @@ which module to add for a scanner that was named but not loaded.
 Promotion to ``supported`` is the one-line ``tier`` edit here.
 """
 
+from typing import Any
+
 from automated_security_helper.base.plugin_manifest import (
     BUNDLED_VERSION,
     MANIFEST_SCHEMA_VERSION,
@@ -34,6 +36,70 @@ _EXCLUSIONS = {
     ),
     "guarddog": (ExclusionOption(option="excluded_paths", kind="guarddog-path"),),
     "trivy-repo": (ExclusionOption(option="ignore_file", kind="trivy-ignore-file"),),
+}
+
+
+#: The default of each option a client-delivered config may not set, per scanner;
+#: see ``ScannerManifest.denied_option_defaults``. snyk-code's and trivy-repo's
+#: whole sections are denied, so every one of their options is listed; for the
+#: others the denied options are the ones named in the default ``denied_paths`` and
+#: the ones its ``/scanners/*/options/offline`` and ``tool_version`` globs reach
+#: (hadolint has no ``tool_version`` option). A list default is compared with
+#: ``==``, so a delivered list holding the same items in another order is not the
+#: default. ``test_the_plugin_option_defaults_are_the_plugins`` derives the rows from
+#: the default ``denied_paths`` and checks each value against the plugin's model.
+_DENIED_OPTION_DEFAULTS: dict[str, dict[str, Any]] = {
+    "betterleaks": {
+        "config_file": None,
+        "honor_inline_ignores": False,
+        "honor_tree_ignore_files": False,
+        "offline": False,
+    },
+    "ferret-scan": {
+        "checks": "all",
+        "confidence_levels": "all",
+        "config_file": None,
+        "disable_ip_types": None,
+        "enable_preprocessors": True,
+        "finding_limit": 0,
+        "max_live_bytes": None,
+        "offline": False,
+        "profile": None,
+        "recursive": True,
+        "respect_gitignore": False,
+        "tool_version": None,
+        "use_default_config": True,
+        "validator_budget": None,
+    },
+    "guarddog": {
+        "ecosystems": ["pypi", "npm", "go", "github_action", "rubygems", "crates"],
+        "exclude_rules": [],
+        "offline": False,
+        "rules": [],
+        "sandbox": "auto",
+        "tool_version": None,
+        "verify": False,
+    },
+    "hadolint": {"config_file": None, "offline": False},
+    "snyk-code": {
+        "honor_tree_exclusions": False,
+        "offline": False,
+        "scan_timeout": 1800,
+        "severity_threshold": None,
+    },
+    "trivy-repo": {
+        "config_file": None,
+        "disable_telemetry": True,
+        "ignore_file": None,
+        "ignore_unfixed": True,
+        "license_full": True,
+        "module_dir": None,
+        "offline": False,
+        "scan_timeout": 1800,
+        "scanners": ["vuln", "secret", "misconfig", "license"],
+        "secret_config_file": None,
+        "severity_threshold": None,
+    },
 }
 
 
@@ -60,6 +126,7 @@ def _alpha(
         file_ownership=(f"{_SOURCES}/{package}", *owned),
         provisioning=provisioning_for(name),
         exclusion_options=_EXCLUSIONS.get(name, ()),
+        denied_option_defaults=_DENIED_OPTION_DEFAULTS.get(name, {}),
     )
 
 

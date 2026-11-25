@@ -285,6 +285,12 @@ class ScannerManifest(_Frozen):
     #: The options a client-supplied config may use to exclude files or findings
     #: from this scanner (see :class:`ExclusionOption`).
     exclusion_options: tuple[ExclusionOption, ...] = ()
+    #: For a plugin that does not load by default: the default of each option a
+    #: client-delivered config may not set, as JSON values. The trusted config has
+    #: no section for such a plugin, so a delivered value equal to the default
+    #: (which changes nothing) is told from a changed one by this row. A test
+    #: binds each row to the options model's own default.
+    denied_option_defaults: dict[str, Any] = {}
 
     @field_validator("name")
     @classmethod

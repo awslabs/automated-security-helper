@@ -213,6 +213,30 @@ def test_the_bandit_kind_needs_a_glob_builder_and_no_other_kind_takes_one():
         ExclusionOption(option="exclude", kind="glob", glob_builder="pkg.mod:build")
 
 
+def test_only_plugins_that_do_not_load_by_default_declare_denied_option_defaults():
+    from automated_security_helper.config.client_config_policy import (
+        PLUGIN_OPTION_DEFAULTS,
+    )
+
+    declaring = {m.name for m in scanner_manifests() if m.denied_option_defaults}
+    assert declaring == {m.name for m in scanner_manifests() if not m.default_enabled}
+    assert {scanner for scanner, _ in PLUGIN_OPTION_DEFAULTS} == declaring
+    assert len(PLUGIN_OPTION_DEFAULTS) == 42, "control: the table lost rows"
+    assert PLUGIN_OPTION_DEFAULTS[("trivy-repo", "scanners")] == [
+        "vuln",
+        "secret",
+        "misconfig",
+        "license",
+    ]
+
+
+def test_a_denied_option_default_is_an_option_of_its_scanners_model():
+    for manifest in scanner_manifests():
+        model = resolve_ref(manifest.options_model)
+        for option in manifest.denied_option_defaults:
+            assert option in model.model_fields, (manifest.name, option)
+
+
 def test_a_section_model_outside_the_plugin_is_refused():
     manifest = scanner_manifests()[0]
     data = manifest.model_dump()
