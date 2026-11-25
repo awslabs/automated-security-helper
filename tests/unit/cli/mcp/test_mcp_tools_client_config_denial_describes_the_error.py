@@ -21,6 +21,7 @@ import zipfile
 from pathlib import Path
 from typing import Any, Dict
 
+from automated_security_helper.cli.mcp.error_types import McpErrorType
 import pytest
 from pydantic import BaseModel, ValidationError
 
@@ -152,7 +153,9 @@ def test_rules_that_cannot_be_read_describe_the_error(monkeypatch, caplog) -> No
         )
 
     assert response is not None and response["success"] is False, response
-    assert response["error_type"] == mcp_tools.CONFIG_POLICY_UNREADABLE, response
+    assert response["error_type"] == McpErrorType.CONFIG_POLICY_UNREADABLE.value, (
+        response
+    )
     # The arm was reached: the error it describes is the stand-in's own kind.
     # The described error names the model it refused ("1 validation error for
     # <title>"), not the exception's class name: the stand-in's own title is
