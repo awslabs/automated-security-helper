@@ -13,6 +13,7 @@ from __future__ import annotations
 import pytest
 
 from tests.unit.vocab import _entries_e1  # noqa: F401  (registers its entries)
+from tests.unit.vocab import _entries_e12  # noqa: F401  (registers its entries)
 from tests.unit.vocab._drift_gate import (
     VocabEntry,
     entries,

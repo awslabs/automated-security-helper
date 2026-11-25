@@ -40,7 +40,9 @@ from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import ToolArgs
 from automated_security_helper.plugin_modules.ash_builtin.scanners._grep_scanner_base import (
     DEFAULT_EXCLUDES,
+    GrepMetricsMode,
     GrepScannerBase,
+    GrepSeverityWord,
 )
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.utils.download_utils import (
@@ -97,14 +99,14 @@ class OpengrepScannerConfigOptions(ScannerOptionsBase):
     ] = []
 
     severity: Annotated[
-        List[Literal["INFO", "WARNING", "ERROR"]],
+        List[GrepSeverityWord],
         Field(
             description="Report findings only from rules matching the supplied severity level.",
         ),
     ] = []
 
     metrics: Annotated[
-        Literal["auto", "on", "off"],
+        GrepMetricsMode,
         Field(
             description="Configures how usage metrics are sent to the OpenGrep server. Deprecated in Opengrep v1.7.0+. This configuration is ignored if the installed version is >= 1.7.0.",
         ),

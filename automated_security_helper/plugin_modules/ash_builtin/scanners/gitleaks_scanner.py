@@ -168,6 +168,7 @@ from automated_security_helper.base.scanner_facets import (
     FacetState,
     ScannerFacets,
 )
+from automated_security_helper.models.vocab import Severity, TargetType
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
@@ -1043,7 +1044,7 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
     def _execute_scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason],
     ) -> Tuple[List[str], Path, Optional[Dict[str, str]]]:
         """Resolve the argv and results path for one gitleaks run.
@@ -1905,7 +1906,9 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
                 result.properties = PropertyBag(tags=tags)
             else:
                 result.properties.tags = tags
-            setattr(result.properties, "issue_severity", "CRITICAL")  # noqa: B010
+            setattr(  # noqa: B010
+                result.properties, "issue_severity", Severity.CRITICAL.value
+            )
 
             for location in result.locations or []:
                 physical = location.physicalLocation
