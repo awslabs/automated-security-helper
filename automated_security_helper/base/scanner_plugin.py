@@ -412,7 +412,18 @@ class ScannerPluginBase(PluginBase, Generic[T]):
     Plugin implementations
     """
 
-    config: T | ScannerPluginConfigBase | None = None
+    if TYPE_CHECKING:
+        # Every concrete scanner fills its config in ``model_post_init`` when
+        # none was given, so the methods read it as the plugin's own config
+        # type; the runtime field below still accepts None until then.
+        # The ``= None`` keeps both optional in the constructor the checker
+        # sees; this branch is never evaluated.
+        config: T = None  # ty: ignore[invalid-assignment]
+        # The scanner's own results directory, set by ``_pre_scan`` before the
+        # scan runs.
+        results_dir: Path = None  # ty: ignore[invalid-assignment]
+    else:
+        config: T | ScannerPluginConfigBase | None = None
     dependencies_satisfied: bool = False
 
     #: Human-readable target coverage ("Terraform", "Python"), for the docs graphics.
@@ -783,7 +794,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         """
         if self.dependency_unavailable_reason:
             return False
-        found = find_executable(self.command)
+        found = find_executable(self._tool_command())
         if found is None and self.command:
             # A copy inside the scanned tree was refused: say so in the MISSING row,
             # with the path and how to allow it, rather than "not installed".
@@ -1298,7 +1309,8 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             options: Optional scanner-specific options
         """
         self.start_time = datetime.now(timezone.utc)
-        self.results_dir.mkdir(parents=True, exist_ok=True)
+        if self.results_dir is not None:
+            self.results_dir.mkdir(parents=True, exist_ok=True)
 
         # The config swap FIRST, before the dependency check reads anything the
         # config decides (tool_version builds the requirement). It used to sit
@@ -1692,7 +1704,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         sarif_report: SarifReport,
         final_args: List[str],
         target: "Path",
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Return additional Invocation kwargs (e.g. ``properties``).
 
         Default returns an empty dict. Override to attach scanner-specific
@@ -1805,7 +1817,10 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             exitCode=self.exit_code,
             exitCodeDescription="\n".join(self.errors) if self.errors else "",
             workingDirectory=working_dir,
-            **extras,
+            # A scanner's extras name Invocation fields by key (properties,
+            # toolExecutionNotifications, ...); a dict unpack is checked against
+            # every typed field at once, which no value type satisfies.
+            **extras,  # ty: ignore[invalid-argument-type]
         )
         ash_record._tool_said_unsuccessful = tool_said_unsuccessful
         sarif_report.runs[0].invocations = [
@@ -2805,7 +2820,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                     text,
                     read.values,
                     plugin_inputs=self._uv_run_inputs_for_records(),
-                    tool_name=self.command,
+                    tool_name=self._tool_command(),
                     limit=None,
                 )
             except Exception:  # noqa: BLE001 -- the error being reported outranks it
@@ -3073,7 +3088,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                             raw,
                             values,
                             plugin_inputs=inputs,
-                            tool_name=self.command,
+                            tool_name=self._tool_command(),
                             limit=None,
                         )
                 else:
@@ -3288,12 +3303,14 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         if global_ignore_paths is None:
             global_ignore_paths = []
         try:
+            # Passed by keyword: a scan override reads them by name, and an
+            # extra positional would collide with ``target``.
             return self.scan(
                 target=target,
                 target_type=target_type,
                 global_ignore_paths=global_ignore_paths,
                 config=config,
-                *args,
+                *args,  # ty: ignore[parameter-already-assigned]
                 **kwargs,
             )
         except Exception as e:

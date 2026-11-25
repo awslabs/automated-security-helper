@@ -41,7 +41,7 @@ for.
 from __future__ import annotations
 
 import re
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 import yaml
 from yaml.emitter import Emitter
@@ -73,7 +73,15 @@ _FIRST_AFTER_SURROGATES = chr(0xE000)
 _LAST_PRINTABLE = chr(0xFFFD)
 
 
-class NoCommandLineDumper:
+if TYPE_CHECKING:
+    # For the type checker only: the mixin calls and reads what its dumper
+    # provides. At runtime it stays a plain mixin, listed before the dumper.
+    _DumperBase = yaml.Dumper
+else:
+    _DumperBase = object
+
+
+class NoCommandLineDumper(_DumperBase):
     """A mixin for a ``yaml`` dumper class, listed before it, so that no line the
     dumper writes is a CI workflow command.
 

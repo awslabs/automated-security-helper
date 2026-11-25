@@ -23,7 +23,7 @@ import signal
 import stat
 import types
 from pathlib import Path
-from typing import Annotated, Callable, Dict, List, Optional
+from typing import Annotated, Any, Callable, Dict, List, Optional
 import typer
 
 from automated_security_helper.cli.mcp.http_sessions import (
@@ -767,7 +767,7 @@ def build_streamable_http_app(
     # `ValueError: "Settings" object has no field "streamable_http_path"`.
     # Passing it per call is also better behaved: the previous form mutated a
     # module-level singleton's settings as a side effect.
-    app_kwargs = {
+    app_kwargs: dict[str, Any] = {
         "streamable_http_path": mount_path,
         "stateless_http": stateless_http,
         "host": host,
@@ -872,7 +872,7 @@ def build_sse_app(
 
     # Same v2 change as the streamable-HTTP path above: sse_path is a keyword
     # argument on sse_app() rather than a Settings field.
-    app_kwargs = {"sse_path": mount_path, "host": host}
+    app_kwargs: dict[str, Any] = {"sse_path": mount_path, "host": host}
     app_kwargs["transport_security"] = security
     app = _mcp_instance.sse_app(**app_kwargs)
     # The session of an sse request is the one the server issued for its event

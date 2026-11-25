@@ -245,12 +245,12 @@ class ScanExecutionEngine:
         self._selection_origin: SelectionOrigin = selection_origin
 
         # Get debug and verbose flags from environment or config
-        debug_flag = debug or os.environ.get("ASH_DEBUG", "").lower() in [
+        debug_flag = bool(debug) or os.environ.get("ASH_DEBUG", "").lower() in [
             "true",
             "1",
             "yes",
         ]
-        verbose_flag = verbose or os.environ.get("ASH_VERBOSE", "").lower() in [
+        verbose_flag = bool(verbose) or os.environ.get("ASH_VERBOSE", "").lower() in [
             "true",
             "1",
             "yes",
@@ -378,12 +378,12 @@ class ScanExecutionEngine:
                 hasattr(self._context.config, "debug")
                 and self._context.config.debug is not None
             ):
-                debug_flag = self._context.config.debug
+                debug_flag = bool(self._context.config.debug)
             if (
                 hasattr(self._context.config, "verbose")
                 and self._context.config.verbose is not None
             ):
-                verbose_flag = self._context.config.verbose
+                verbose_flag = bool(self._context.config.verbose)
 
         # Initialize progress display with debug/verbose flags
         self.progress_display = LiveProgressDisplay(
@@ -407,9 +407,8 @@ class ScanExecutionEngine:
         # Initialize basic configuration
 
         # Convert and set up paths
-        self._context.source_dir = (
-            Path(self._context.source_dir) if self._context.source_dir else None
-        )
+        if self._context.source_dir:
+            self._context.source_dir = Path(self._context.source_dir)
         try:
             # Log directory setup
             ASH_LOGGER.debug(f"Source directory: {self._context.source_dir}")

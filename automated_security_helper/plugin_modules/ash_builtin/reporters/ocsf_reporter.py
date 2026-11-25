@@ -634,7 +634,7 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
             severity = result_severity(result)
 
             # Create vulnerability object with required fields
-            vuln_dict = {
+            vuln_dict: Dict[str, Any] = {
                 "desc": desc,
                 "title": rule_id,
                 "severity": severity,
@@ -1110,7 +1110,7 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
 
             # Create OCSF vulnerability finding
             ASH_LOGGER.debug(f"Creating VulnerabilityFinding object for {rule_id}")
-            vulnerability_finding_dict = {
+            vulnerability_finding_dict: Dict[str, Any] = {
                 "activity_id": ActivityId.integer_1,  # Create
                 "activity_name": ACTIVITY_NAME,
                 "severity_id": severity_id,

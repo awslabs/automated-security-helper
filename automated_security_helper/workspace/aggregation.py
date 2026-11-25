@@ -136,7 +136,17 @@ import re
 import shutil
 import stat
 from pathlib import Path, PurePosixPath
-from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Literal,
+    Mapping,
+    Optional,
+    Sequence,
+)
 from urllib.parse import quote, unquote
 
 from automated_security_helper.core.committed_output import WORKSPACE_SPOOL_DIR_NAME
@@ -1670,7 +1680,7 @@ class WorkspaceAggregator:
         exit_code: int,
         wall_clock_seconds: float,
         *,
-        status: str = "completed",
+        status: Literal["completed", "refused"] = "completed",
         max_parallel_projects: Optional[int] = None,
         project_timeout: Optional[float] = None,
     ) -> WorkspaceResults:
@@ -1700,7 +1710,7 @@ class WorkspaceAggregator:
         exit_code: int,
         wall_clock_seconds: float,
         *,
-        status: str = "completed",
+        status: Literal["completed", "refused"] = "completed",
         max_parallel_projects: Optional[int] = None,
         project_timeout: Optional[float] = None,
         project_name: Optional[str] = None,

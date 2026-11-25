@@ -668,6 +668,10 @@ async def _profile_needs_a_session(
     return with_exit_code(refusal, REFUSED_USAGE_EXIT_CODE)
 
 
+# The scans' progress-monitor tasks, held here so none is collected while it runs.
+_monitor_tasks: set[asyncio.Task] = set()
+
+
 @mcp.tool()
 async def run_ash_scan(
     ctx: Context,
@@ -862,6 +866,11 @@ async def run_ash_scan(
                         ctx, raw_controls_on_one_line(resolved.error["error"])
                     )
                     return resolved.error
+                if resolved.source_dir is None:
+                    raise RuntimeError(
+                        "_resolve_omitted_source_dir returned neither a directory "
+                        "nor an error"
+                    )
                 source_dir = resolved.source_dir
         # The working directory is the server's filesystem layout, which this
         # module withholds from a network caller (_resolve_omitted_source_dir):
@@ -1141,10 +1150,8 @@ async def run_ash_scan(
         monitor_task = asyncio.create_task(
             monitor_scan_progress(ctx, scan_id, session_id=session_id)
         )
-        if not hasattr(run_ash_scan, "_monitor_tasks"):
-            run_ash_scan._monitor_tasks = set()
-        run_ash_scan._monitor_tasks.add(monitor_task)
-        monitor_task.add_done_callback(lambda t: run_ash_scan._monitor_tasks.discard(t))
+        _monitor_tasks.add(monitor_task)
+        monitor_task.add_done_callback(_monitor_tasks.discard)
 
         return {
             "success": True,
@@ -3680,7 +3687,7 @@ async def _stop_on_signal(signals: Optional[Iterable[int]] = None) -> None:
     """
     if signals is None:
         signals = _watched_stop_signals()
-    with anyio.open_signal_receiver(*signals) as received:
+    with anyio.open_signal_receiver(*(signal.Signals(s) for s in signals)) as received:
         async for signum in received:
             name = signal.Signals(signum).name
             logger.warning(f"{name} received: stopping the scans and the server")

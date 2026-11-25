@@ -181,10 +181,10 @@ def _raised_answer(exc: BaseException) -> Dict[str, Any]:
         answer["path"] = getattr(exc, "path", None)
         answer["reason"] = getattr(exc, "reason", None)
     elif answer["kind"] == "os":
-        answer["errno"] = exc.errno if isinstance(exc.errno, int) else None  # type: ignore[attr-defined]
-        answer["strerror"] = (
-            exc.strerror if isinstance(exc.strerror, str) else None  # type: ignore[attr-defined]
-        )
+        os_errno = getattr(exc, "errno", None)
+        os_strerror = getattr(exc, "strerror", None)
+        answer["errno"] = os_errno if isinstance(os_errno, int) else None
+        answer["strerror"] = os_strerror if isinstance(os_strerror, str) else None
         # Windows carries the native error code beside errno and prints it
         # ("[WinError 5] Access is denied"); a rebuilt error without it printed
         # "[Errno 13]" instead, so the text did not survive the crossing there.

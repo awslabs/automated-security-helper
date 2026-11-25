@@ -208,7 +208,7 @@ async def stop_running_scans(
     # This loop's: a task of a loop that is gone can never finish, and waiting
     # on it would only run out the timeout.
     loop = asyncio.get_running_loop()
-    running = {
+    running: dict[asyncio.Future, str] = {
         task: scan_id
         for task, scan_id in _scan_tasks.items()
         if task.get_loop() is loop and not task.done()
@@ -2614,12 +2614,13 @@ async def _release_what_the_scan_held_off_the_loop(
     if not _holds_a_session(session_id):
         return
     import anyio
+    from anyio import to_thread
 
     from automated_security_helper.cli.mcp.sessions import finish_ended_session
 
     try:
         with anyio.CancelScope(shield=True):
-            await anyio.to_thread.run_sync(finish_ended_session, session_id)
+            await to_thread.run_sync(finish_ended_session, session_id)
     except Exception as release_error:  # noqa: BLE001 -- the tool's own reply wins
         _logger.error(
             f"Scan {scan_id or '(not started)'}: could not complete the end of "
@@ -2866,13 +2867,14 @@ async def _run_scan_async(
             # a cancelled task too, and the removal has to complete anyway
             # (http_sessions ends its own sessions the same way).
             import anyio
+            from anyio import to_thread
 
             from automated_security_helper.cli.mcp.sessions import (
                 finish_ended_session,
             )
 
             with anyio.CancelScope(shield=True):
-                await anyio.to_thread.run_sync(finish_ended_session, session_id)
+                await to_thread.run_sync(finish_ended_session, session_id)
 
 
 async def _run_scan(

@@ -2662,10 +2662,13 @@ class ScannerExecutor:
                     # ``"metadata": null`` (or a list); read as a mapping it raised
                     # here, after the row was graded, and the raise discarded the
                     # scanner's other targets' containers with this one.
-                    if isinstance(raw_results, dict) and isinstance(
-                        raw_results.get("metadata"), dict
-                    ):
-                        for key, value in raw_results["metadata"].items():
+                    raw_metadata = (
+                        raw_results.get("metadata")
+                        if isinstance(raw_results, dict)
+                        else None
+                    )
+                    if isinstance(raw_metadata, dict):
+                        for key, value in raw_metadata.items():
                             container.add_metadata(key, value)
 
                     results.append(container)
@@ -3109,17 +3112,24 @@ class ScannerExecutor:
                 # scanner's thread. A pool thread does not inherit context, and
                 # one copy per task, because a context cannot be entered by two
                 # threads at once.
-                future = executor.submit(
-                    contextvars.copy_context().run,
-                    self._start_and_run,
-                    scanner_name,
-                    scanner_plugin,
-                    scan_targets,
+                # Context.run is generic over its callable's return, which ty
+                # does not solve through submit; the future's value is what
+                # _start_and_run returns.
+                future: Future[Tuple[List[ScanResultsContainer], bool]] = (  # ty: ignore[invalid-assignment]
+                    executor.submit(
+                        contextvars.copy_context().run,
+                        self._start_and_run,
+                        scanner_name,
+                        scanner_plugin,
+                        scan_targets,
+                    )
                 )
-                future.scanner_name = scanner_name  # type: ignore[attr-defined]
-                future.scanner_task_key = task_key  # type: ignore[attr-defined]
+                # The handler below reads these three back off the future;
+                # Future has no slot for them, so they ride as plain attributes.
+                future.scanner_name = scanner_name  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
+                future.scanner_task_key = task_key  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
                 # For the handler below, which redacts with its values.
-                future.scanner_plugin = scanner_plugin  # type: ignore[attr-defined]
+                future.scanner_plugin = scanner_plugin  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
                 futures.append(future)
 
             # A cancel ends the run, but a scanner that had finished by then stays
@@ -3191,8 +3201,8 @@ class ScannerExecutor:
 
             completed_count = 0
             for future in _futures_to_record():
-                scanner_name = future.scanner_name  # type: ignore[attr-defined]
-                task_key = future.scanner_task_key  # type: ignore[attr-defined]
+                scanner_name = future.scanner_name  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
+                task_key = future.scanner_task_key  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
                 task_id = scanner_tasks_map.get(task_key)
 
                 try:

@@ -2474,7 +2474,7 @@ def pinned_tool_install_commands(
 
 def get_opengrep_url(
     target_platform: Literal["linux", "darwin", "macos", "windows"],
-    arch: Literal["amd64", "arm64", "x86_64", "aarch64"],
+    arch: str,
     version: str = "v1.1.5",
     linux_type: Literal["musllinux", "manylinux"] = "manylinux",
 ) -> str:

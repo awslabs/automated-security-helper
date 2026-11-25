@@ -13,7 +13,16 @@ import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path, PurePath, PureWindowsPath
-from typing import Annotated, Any, Iterable, List, NoReturn, Optional, Tuple
+from typing import (
+    Annotated,
+    Any,
+    Iterable,
+    List,
+    Literal,
+    NoReturn,
+    Optional,
+    Tuple,
+)
 
 import typer
 
@@ -183,19 +192,21 @@ DEPRECATED_TOOL_ALIASES: dict[str, str] = {
 
 #: The plugin types --plugin-type selects, each the plugin manager's own name for
 #: that kind of plugin.
-PLUGIN_KINDS = ("converter", "scanner", "reporter")
+PluginKind = Literal["converter", "scanner", "reporter"]
+PLUGIN_KINDS: tuple[PluginKind, ...] = ("converter", "scanner", "reporter")
 
 
-def _plugin_kind(plugin_type: str) -> str:
+def _plugin_kind(plugin_type: str) -> PluginKind:
     """The registry kind a --plugin-type value selects.
 
     install_dependencies refuses a value that is not one of PLUGIN_KINDS before
     anything is selected, so a value reaching here is one of them; any other is a
     programming error, not a kind to guess.
     """
-    if plugin_type not in PLUGIN_KINDS:
-        raise ValueError(f"not a plugin type: {plugin_type!r}")
-    return plugin_type
+    for kind in PLUGIN_KINDS:
+        if plugin_type == kind:
+            return kind
+    raise ValueError(f"not a plugin type: {plugin_type!r}")
 
 
 def _selection_key(name: str) -> str:
@@ -1136,7 +1147,7 @@ def install_dependencies(
     # The default when no bin path was given, or a blank one, from the option or
     # from a whitespace-only ASH_BIN_PATH that click passes through as given.
     target_bin_path: Optional[Path]
-    if is_blank_bin_path(bin_path):
+    if bin_path is None or is_blank_bin_path(bin_path):
         target_bin_path = ASH_BIN_PATH
     elif (
         from_environment(ctx, "bin_path")
@@ -1909,7 +1920,11 @@ def install_dependencies(
         ]
         if outcome.needs_external_tool:
             outcome.executable = _resolved_executable(outcome, source_dir)
-            if outcome.executable is None and outcome.uv_managed:
+            if (
+                outcome.executable is None
+                and outcome.uv_managed
+                and outcome.command is not None
+            ):
                 outcome.executable = _uv_tool_executable(outcome.command)
             # Last, and only for a plugin the verdict counts (see
             # _report_and_exit) that declares its check can start the tool off
@@ -2017,6 +2032,8 @@ def _resolved_executable(
     """
     if outcome.runs_in_ash_interpreter and os.path.isabs(sys.executable or ""):
         return sys.executable
+    if outcome.command is None:
+        return None
     return find_executable_for_scan(outcome.command, source_dir)
 
 

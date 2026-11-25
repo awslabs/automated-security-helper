@@ -231,8 +231,8 @@ def _marker(metadata: Iterable[Any], kind: type) -> Optional[Any]:
     return found[0] if found else None
 
 
-def _field_column(model: type, name: str) -> ColumnInfo:
-    info = model.model_fields.get(name)  # type: ignore[attr-defined]
+def _field_column(model: type[BaseModel], name: str) -> ColumnInfo:
+    info = model.model_fields.get(name)
     if info is None:
         raise FrameSpecError(f"{model.__name__}.{name} is not a model field")
     metadata = list(info.metadata)
@@ -358,10 +358,10 @@ def _resolve(spec: FrameSpec) -> Tuple[ColumnInfo, ...]:
 _RESOLVED: Dict[int, Tuple[FrameSpec, Tuple[ColumnInfo, ...]]] = {}
 
 
-def _knows(model: type, name: str) -> bool:
+def _knows(model: type[BaseModel], name: str) -> bool:
     return (
-        name in model.model_fields  # type: ignore[attr-defined]
-        or name in model.__private_attributes__  # type: ignore[attr-defined]
+        name in model.model_fields
+        or name in model.__private_attributes__
         or hasattr(model, name)
     )
 
@@ -439,7 +439,13 @@ def to_frame(models: Sequence[Any], spec: FrameSpec) -> "pl.DataFrame":
             data[info.name] = list(range(len(items)))
             continue
         if info.source == "computed":
-            fn = entries[info.name].fn  # type: ignore[union-attr]
+            entry = entries[info.name]
+            if not isinstance(entry, Computed):
+                raise FrameSpecError(
+                    f"{spec.model.__name__}.{info.name} is a computed column "
+                    "without a Computed entry"
+                )
+            fn = entry.fn
             values = [fn(item) for item in items]
         else:
             values = [getattr(item, info.name) for item in items]
@@ -487,13 +493,13 @@ def unaccounted(spec: FrameSpec) -> List[str]:
     }
     read = {r for c in spec.columns if isinstance(c, Computed) for r in c.reads}
     missing: List[str] = []
-    for name, info in model.model_fields.items():  # type: ignore[attr-defined]
+    for name, info in model.model_fields.items():
         if name in projected or name in spec.waived:
             continue
         if _marker(info.metadata, NotInFrame) is not None:
             continue
         missing.append(name)
-    for name in list(model.__private_attributes__) + _public_properties(model):  # type: ignore[attr-defined]
+    for name in list(model.__private_attributes__) + _public_properties(model):
         if name not in read and name not in spec.waived and name not in missing:
             missing.append(name)
     return missing

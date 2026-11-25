@@ -93,6 +93,7 @@ from typing import (
 from urllib.parse import unquote
 
 import yaml
+from yaml.composer import ComposerError
 from pydantic import AnyUrl, Field, PrivateAttr, field_validator
 
 from automated_security_helper.base.options import (
@@ -289,7 +290,9 @@ def cfn_lint_resources(report: Any) -> Dict[_FindingKey, Set[Optional[str]]]:
             else None
         )
         key = (rule_id, filename, *spans, message)
-        found.setdefault(key, set()).add(resource)  # type: ignore[arg-type]
+        # ``spans`` is a variable-length run of line/column numbers, which a
+        # fixed-shape key type cannot describe.
+        found.setdefault(key, set()).add(resource)  # type: ignore[arg-type]  # ty: ignore[no-matching-overload]
     return found
 
 
@@ -538,9 +541,9 @@ def _names_a_template(text: str, names: List[str]) -> bool:
     return False
 
 
-def _successful_exit(code: object) -> bool:
+def _successful_exit(code: Any) -> bool:
     try:
-        value = int(code)  # type: ignore[call-overload]
+        value = int(code)
     except (TypeError, ValueError):
         return False
     return 0 <= value <= 14 and value % 2 == 0
@@ -1317,7 +1320,7 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
 
         try:
             parsed = load_config_yaml(Path(config_file).read_text(encoding="utf-8"))
-        except yaml.composer.ComposerError as exc:
+        except ComposerError as exc:
             line = exc.problem_mark.line + 1 if exc.problem_mark else "?"
             raise ScannerError(
                 f"ASH could not read {Path(config_file).as_posix()}: {exc.problem} "

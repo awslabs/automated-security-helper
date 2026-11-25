@@ -699,10 +699,10 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
         it, so the row says where the copy is and how to allow it rather than
         "not installed".
         """
-        found = find_executable(self.command)
+        found = find_executable(self._tool_command())
         ASH_LOGGER.verbose(f"Found opengrep executable at: {found}")
         if found is None:
-            refusal = in_tree_refusal(self.command)
+            refusal = in_tree_refusal(self._tool_command())
             if refusal is not None:
                 self.dependency_unavailable_reason = refusal
                 self._plugin_log(refusal, level=logging.WARNING)
@@ -723,7 +723,7 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
     def _get_opengrep_version(self) -> tuple[int, int, int] | None:
         try:
             result = spawn_run(  # nosec B603 — list args, executable from find_executable()
-                [self.command, "--version"],
+                [self._tool_command(), "--version"],
                 capture_output=True,
                 text=True,
                 timeout=5,

@@ -5,7 +5,16 @@ import os
 import random
 import re
 from contextlib import suppress
-from typing import TYPE_CHECKING, Any, Callable, Dict, Iterable, List, Optional
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    overload,
+)
 import uuid
 from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
 from automated_security_helper.base.plugin_context import PluginContext
@@ -440,7 +449,7 @@ def attach_scanner_details(
     for run in sarif_report.runs:
         # Create or update tool.driver information
         if not run.tool:
-            run.tool = Tool()
+            run.tool = Tool(driver=ToolComponent(name=scanner_name))
 
         if not run.tool.driver:
             run.tool.driver = ToolComponent(name=scanner_name)
@@ -471,7 +480,8 @@ def attach_scanner_details(
             scanner_details["tool_invocation"] = invocation_details
 
         # Add scanner details to properties
-        run.tool.driver.properties.scanner_details = scanner_details
+        # PropertyBag allows extra fields (extra="allow"), which ty cannot see.
+        run.tool.driver.properties.scanner_details = scanner_details  # ty: ignore[unresolved-attribute]
 
         # Also attach scanner information to each result
         if run.results:
@@ -793,6 +803,20 @@ def _fill_message_arguments(
         return token
 
     return _MESSAGE_PLACEHOLDER.sub(fill, text)
+
+
+@overload
+def result_message_text(result: Any, rule: Any = None, *, default: str) -> str: ...
+
+
+@overload
+def result_message_text(result: Any, rule: Any, default: str) -> str: ...
+
+
+@overload
+def result_message_text(
+    result: Any, rule: Any = None, default: None = None
+) -> str | None: ...
 
 
 def result_message_text(
@@ -1478,7 +1502,7 @@ def _apply_inline_suppression(
         )
     for isup in inline_cache[file_key]:
         if (
-            isup.rule_id.lower() == result.ruleId.lower()
+            isup.rule_id.lower() == (result.ruleId or "").lower()
             and isup.line_number == result_line
         ):
             if not result.suppressions:
@@ -2310,7 +2334,12 @@ def _apply_suppressions_within_budget(
                     None,
                 )
                 uri_as_written = None
-                if result.ruleId and location is not None:
+                if (
+                    result.ruleId
+                    and location is not None
+                    and location.physicalLocation is not None
+                    and location.physicalLocation.root.artifactLocation is not None
+                ):
                     raw_uri = location.physicalLocation.root.artifactLocation.uri
                     uri = (
                         _normalize_sarif_uri(

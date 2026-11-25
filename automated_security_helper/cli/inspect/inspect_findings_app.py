@@ -393,8 +393,11 @@ def _source_excerpt(
     the last line's, the finding's with an arrow.
     """
     file_value = finding.get("file")
+    raw_line = finding.get("line")
+    if raw_line is None:
+        return None
     try:
-        line_number = int(finding.get("line"))
+        line_number = int(raw_line)
     except (TypeError, ValueError):
         return None
     if scan_root is None or not file_value or line_number < 1:
@@ -504,8 +507,9 @@ def _as_scanned(finding: dict) -> Optional[FlatVulnerability]:
     file_value = finding.get("file")
     if not file_value:
         return None
+    raw_line = finding.get("line")
     try:
-        line_number = int(finding.get("line"))
+        line_number = None if raw_line is None else int(raw_line)
     except (TypeError, ValueError):
         line_number = None
     rule_id = finding.get("rule_id")
@@ -1573,7 +1577,14 @@ class FindingsExplorerApp(App):
         # Each cell goes through _finding_cells, which shows every value's
         # controls and invisible characters as escapes.
         for i, finding in enumerate(self.filtered_findings):
-            table.add_row(*_finding_cells(finding, self._table_fields), key=i, height=2)
+            # The row key is the finding's index, read back as an int by the
+            # highlight and selection handlers; Textual stores any hashable key
+            # though its annotation says str.
+            table.add_row(
+                *_finding_cells(finding, self._table_fields),
+                key=i,  # ty: ignore[invalid-argument-type]
+                height=2,
+            )
 
         if self.filtered_findings:
             selected_index = next(
@@ -1628,7 +1639,7 @@ class FindingsExplorerApp(App):
 
         # Update the suppressed select widget if it exists
         try:
-            suppressed_select = self.query_one("#suppressed_select")
+            suppressed_select = self.query_one("#suppressed_select", Select)
             suppressed_select.value = (
                 "all" if self.show_suppressed else "not_suppressed"
             )

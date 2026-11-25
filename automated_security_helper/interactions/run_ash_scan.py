@@ -850,9 +850,7 @@ def print_incompleteness_message(
                 + "[/yellow]"
             )
         no_kind_rows = [
-            row
-            for row in incomplete_converter_rows
-            if not (getattr(row, "kinds", ()) or ())
+            row for row in incomplete_converter_rows if not getattr(row, "kinds", None)
         ]
         if no_kind_rows:
             # A hand-built (name, reason) pair carries no record kinds, so the
@@ -3850,6 +3848,7 @@ def _sandbox_mode_without_the_config(opts: ScanOptions) -> List[str]:
         # turn off the mode the operator's own base set, on exactly the path
         # that reports what the container run drops. With no owned write, or
         # when the membership itself cannot be read, the floor stays off.
+        from automated_security_helper.config.ash_config import SandboxModeName
         from automated_security_helper.config.resolve_config import (
             _owned_sandbox_mode,
             _repository_members,
@@ -3870,7 +3869,8 @@ def _sandbox_mode_without_the_config(opts: ScanOptions) -> List[str]:
             except Exception:
                 owned = None
             if owned is not None:
-                floor.sandbox.mode = owned
+                # _owned_sandbox_mode answers only a mode the model accepts.
+                floor.sandbox.mode = cast(SandboxModeName, owned)
     selected = _sandbox_overrides(opts.config_overrides)
     if selected:
         try:
@@ -5559,10 +5559,15 @@ def _run_local_mode(
             scan_source = _scan_source_for(
                 opts, git_repository_root, snapshot_environ()
             )
-            for warning in check_baseline_scope(
-                opts.baseline_data,
-                project_name=model.metadata.project_name,
-                scan_source=scan_source,
+            baseline = opts.baseline_data
+            for warning in (
+                check_baseline_scope(
+                    baseline,
+                    project_name=model.metadata.project_name,
+                    scan_source=scan_source,
+                )
+                if baseline is not None
+                else ()
             ):
                 logger.warning(warning)
             if staged_files == []:

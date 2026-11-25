@@ -1298,7 +1298,7 @@ class AshAggregatedResults(RecordModel):
     # marks its own two pass-through inits the same way (main.py, root_model.py).
     # Private attribute, so a Pydantic release could change what it means; the
     # guard test's positive control is what would catch that.
-    __init__.__pydantic_base_init__ = True  # type: ignore[attr-defined]
+    setattr(__init__, "__pydantic_base_init__", True)
 
     @classmethod
     def model_validate(cls, *args: Any, **kwargs: Any) -> "AshAggregatedResults":

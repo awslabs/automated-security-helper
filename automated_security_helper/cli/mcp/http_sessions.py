@@ -439,6 +439,7 @@ class SessionBoundary:
         asked for again: by the client's next ``DELETE``, or at shutdown.
         """
         import anyio
+        from anyio import to_thread
 
         from automated_security_helper.cli.mcp.sessions import end_session
 
@@ -446,7 +447,7 @@ class SessionBoundary:
             # Shielded: an sse stream ends by being cancelled, and the removal
             # has to complete anyway.
             with anyio.CancelScope(shield=True):
-                await anyio.to_thread.run_sync(end_session, session_id)
+                await to_thread.run_sync(end_session, session_id)
         except Exception as exc:
             _logger().warning(f"MCP session {session_id}: could not remove: {exc}")
             return False
@@ -512,6 +513,7 @@ class SessionBoundary:
         import time
 
         import anyio
+        from anyio import to_thread
 
         if time.monotonic() < self._next_sweep:
             return
@@ -535,7 +537,7 @@ class SessionBoundary:
             # names it refreshes its workspace instead, and the TTL covers it.
             open_streams = frozenset(self._open_streams)
             try:
-                removed = await anyio.to_thread.run_sync(
+                removed = await to_thread.run_sync(
                     functools.partial(
                         _sweep_keeping_open_streams,
                         self.session_workspace_ttl,

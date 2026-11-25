@@ -616,10 +616,11 @@ def _windows_process_is_running(pid: int, *, if_unasked: bool = False) -> bool:
     still_active = 259
     error_access_denied = 5
     try:
-        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore[attr-defined]
+        # WinDLL and get_last_error exist on Windows only; this probe runs there.
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
         handle = kernel32.OpenProcess(process_query_limited_information, False, pid)
         if not handle:
-            return ctypes.get_last_error() == error_access_denied  # type: ignore[attr-defined]
+            return ctypes.get_last_error() == error_access_denied  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
         try:
             code = ctypes.c_ulong()
             if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):

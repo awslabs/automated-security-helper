@@ -542,8 +542,8 @@ def package_identities_from_frame(
 ) -> List[Tuple[Optional[str], Optional[str], Optional[str]]]:
     """The ``(name, version, path)`` tuples a :func:`package_identity_frame` holds."""
     return [
-        tuple(unwire_cell(cell) for cell in row)  # type: ignore[misc]
-        for row in frame.select(*_PACKAGE_COLUMNS).iter_rows()
+        (unwire_cell(name), unwire_cell(version), unwire_cell(path))
+        for name, version, path in frame.select(*_PACKAGE_COLUMNS).iter_rows()
     ]
 
 
@@ -552,6 +552,6 @@ def resource_identities_from_frame(
 ) -> List[Tuple[Optional[str], Optional[str]]]:
     """The ``(resource_id, resource_type)`` tuples a :func:`resource_identity_frame` holds."""
     return [
-        tuple(unwire_cell(cell) for cell in row)  # type: ignore[misc]
-        for row in frame.select(*_RESOURCE_COLUMNS).iter_rows()
+        (unwire_cell(resource_id), unwire_cell(resource_type))
+        for resource_id, resource_type in frame.select(*_RESOURCE_COLUMNS).iter_rows()
     ]

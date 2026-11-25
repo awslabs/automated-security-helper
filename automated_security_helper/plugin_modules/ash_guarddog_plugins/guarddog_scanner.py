@@ -112,7 +112,6 @@ from typing import (
     List,
     Literal,
     Tuple,
-    cast,
 )
 
 from pydantic import AnyUrl, Field, field_validator, model_validator
@@ -1023,12 +1022,12 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
     @property
     def _opts(self) -> GuardDogScannerConfigOptions:
         """The options, typed. ``config`` is set in ``model_post_init``."""
-        return cast(GuardDogScannerConfig, self.config).options
+        return self.config.options
 
     @property
     def _ctx(self) -> PluginContext:
         """The plugin context, typed. ScannerPluginBase refuses to construct without one."""
-        return cast(PluginContext, self.context)
+        return self.context
 
     def model_post_init(self, context: Any) -> None:
         if self.config is None:
@@ -1271,7 +1270,7 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
         # excluded_paths. Read as config.options.excluded_paths, the shape
         # tests/unit/utils/test_ignore_path_expiration.py looks for.
         option_entries = active_ignore_paths(
-            cast(GuardDogScannerConfig, self.config).options.excluded_paths,
+            self.config.options.excluded_paths,
             where="scanners.guarddog.options.excluded_paths",
         )
         patterns = [p.path for p in global_ignore_paths or []] + [
@@ -1808,7 +1807,7 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
         target_type: Literal["source", "converted"],
         global_ignore_paths: List[IgnorePathWithReason],
     ) -> SarifReport:
-        results_dir = Path(cast(Path, self.results_dir)).joinpath(target_type)
+        results_dir = Path(self.results_dir).joinpath(target_type)
         results_dir.mkdir(parents=True, exist_ok=True)
         files = self._candidate_files(target, target_type, global_ignore_paths)
         owned, verify_targets = self._discover_targets(target, files)
