@@ -172,6 +172,84 @@ The `symbols` extra is in `main` and not in releases up to 3.7.x. Its tree-sitte
 packages publish no wheels for Linux on arm64 with musl (Alpine), so on that platform
 the install needs a C compiler.
 
+## Choose how scanner tools are installed
+
+`ash dependencies install` installs each scanner's tool the way its plugin declares
+it: Python tools with `uv tool install`, native tools from pinned, digest-verified
+release downloads, and a few through `gem` or the system package manager. Five options
+change where tools come from. They are options of the command only; no configuration
+file or environment variable sets them, so a repository you scan cannot steer the
+installer. Each is listed in the [`ash dependencies install` reference](../reference/cli.md#dependencies-install).
+
+### Providers
+
+`--providers uv,pipx,brew` names the install providers this run may use, in order of
+preference. The list is both a permission boundary and an order: only the listed
+providers may install anything, and for each tool the first listed provider that can
+install it wins. A provider that cannot serve a tool is skipped, with its reason
+printed. When none of them can, the tool is refused with every reason, nothing runs for
+it, and the run exits 1. ASH never substitutes a provider you did not list.
+
+Without `--providers` every provider is permitted and each tool is installed the way
+its plugin declares, which is what the command did before the option existed.
+
+| Provider | What it installs |
+|---|---|
+| `uv` | Python tools in `uv tool` environments, packages into a Python environment, and `uv venv` virtualenvs |
+| `pipx` | Python tools in pipx environments. It cannot install into a named virtualenv, and `pipx install --python` takes an executable, a version, or a path, so a version-range request such as `>=3.10,<3.14` is refused |
+| `pip` | Packages into one interpreter, or into the virtualenv named by `--virtualenv-path`; `python -m venv` creates it |
+| `release-download` | ASH's pinned release downloads for the tools that have one |
+| `nix` | The toolchain the repository flake pins, by realizing the dev shell that `--mode nix` runs. One realization serves every tool in the run, and it takes no interpreter request or exact version pin |
+| `apt`, `dnf`, `yum`, `zypper`, `brew`, `npm`, `pnpm`, `conda`, `choco`, `gem` | One generic system-package shape: the install command of that manager for the package that provides the tool |
+| `go`, `cargo` | Declared and not implemented; they refuse with "not implemented" |
+| `custom` | A plugin's own shell or download command, run as declared |
+
+A package manager installs a tool from the name the install-package facet declares for
+it. A tool with no declared name for that manager is refused naming the missing row, and
+a package manager installs the version it carries, not the range the plugin declares;
+the command's output says so. `apt`, `dnf`, `yum` and `zypper` are declared as root-only,
+and ASH does not add `sudo`: run as root, or list another provider.
+
+### System tools
+
+`--inherit-system-tools` is the default, and it is the behavior the command has always
+had: a tool already on `PATH` or in a system directory counts as present, and an
+identical copy of a pinned tool skips its download.
+
+`--no-inherit-system-tools` ignores those copies. A global `checkov` on `PATH` does not
+stop the install, and the result counts only what was installed into a location ASH or
+its provider manages: uv's tool listing, the virtualenv you named, ASH's own environment,
+and the ASH bin directory. A system copy that was set aside is named in the output. Programs
+ASH never installs, such as Node.js for cdk-nag, are still found on `PATH`. The option
+affects the install and its report only; a scan finds tools exactly as before.
+
+### Virtualenvs
+
+`--virtualenv-path <dir>` installs Python tools into one virtualenv, through the provider,
+instead of into a separate environment per tool.
+
+| Path | Create flag | Result |
+|---|---|---|
+| none | none | Per-tool environments, as before |
+| none | either flag typed | Refused (exit 2): the flag does nothing without a path |
+| exists, a virtualenv | `--no-create-virtualenv` (default) | Tools install into it. Each tool's interpreter request is checked against the Python version in its `pyvenv.cfg`, and a tool whose request it fails is refused |
+| missing | `--no-create-virtualenv` (default) | Refused (exit 3) |
+| missing | `--create-virtualenv` | ASH creates it first, with one interpreter request that satisfies every tool's, then installs into it |
+| exists, not a virtualenv | either | Refused (exit 3); ASH never overwrites or deletes it |
+
+Use `--no-create-virtualenv` with a virtualenv your own setup step prepared, and
+`--create-virtualenv` to have ASH vend one. Native tools and system packages are not
+installed into a virtualenv, so the options do not change them.
+
+### Forcing a binary
+
+`--binary-path scanner=/absolute/path` forces one binary for one scanner and skips that
+scanner's install commands. Repeat it for each scanner. The path must be absolute, name a
+regular executable file rather than a symlink, and sit outside the directory being
+scanned. ASH reads and hashes the file, records the path and its SHA-256 in its install
+records under `~/.ash`, and never runs it. `--binary-path scanner=` with an empty path
+removes the record.
+
 ## Choose a version to pin
 
 | Reference | What you get |

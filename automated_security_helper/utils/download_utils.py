@@ -2140,7 +2140,12 @@ class VerifiedPresentTool:
 
 
 def find_verified_pinned_executable(
-    tool: str, target_platform: str, arch: str, destination: Path
+    tool: str,
+    target_platform: str,
+    arch: str,
+    destination: Path,
+    *,
+    inherit_system_tools: bool = True,
 ) -> Optional[VerifiedPresentTool]:
     """Find a copy of the pinned ``tool`` that is already installed, by its bytes.
 
@@ -2181,6 +2186,12 @@ def find_verified_pinned_executable(
     consulted, so a binary replaced after a previous run is caught on the next one,
     the same property ``_already_installed`` keeps for receipts.
 
+    ``inherit_system_tools=False`` (``--no-inherit-system-tools``) drops candidate 2:
+    a copy found through PATH or a system directory does not stand in for the
+    install, however well its bytes match. Candidate 1, the file at the install
+    destination, is still judged by its digest, since it is the install's own output
+    and not a system tool.
+
     Returns:
         The verified copy, or None when there is no pinned executable digest for
         this asset, no acceptable candidate, or the candidate's bytes do not match.
@@ -2198,6 +2209,12 @@ def find_verified_pinned_executable(
     at_destination = Path(destination).joinpath(asset.install_as)
     if os.path.lexists(at_destination):
         candidate = at_destination
+    elif not inherit_system_tools:
+        ASH_LOGGER.debug(
+            f"{tool} is not at {at_destination}; --no-inherit-system-tools, so no "
+            "copy found elsewhere stands in for the install"
+        )
+        return None
     else:
         found = subprocess_utils.find_executable(asset.tool)
         if not found:
@@ -2382,6 +2399,8 @@ def _destination_text(path: "Path | str") -> str:
 
 def pinned_install_already_satisfied(
     args: "list[str]",
+    *,
+    inherit_system_tools: bool = True,
 ) -> "Optional[VerifiedPresentTool]":
     """For an argv built by ``create_pinned_tool_install_command``: is it a no-op?
 
@@ -2401,7 +2420,11 @@ def pinned_install_already_satisfied(
     tool, target_platform, arch, destination = args[3:7]
     try:
         return find_verified_pinned_executable(
-            tool, target_platform, arch, Path(destination)
+            tool,
+            target_platform,
+            arch,
+            Path(destination),
+            inherit_system_tools=inherit_system_tools,
         )
     except ToolNotProvisionableError:
         # Let the install command itself report it, with its own message.
