@@ -11,6 +11,7 @@ lives in :mod:`_grep_scanner_base`. This module only customises:
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import platform
@@ -20,7 +21,11 @@ from typing import Annotated, ClassVar, Dict, List, Literal
 
 from pydantic import Field, PrivateAttr, model_validator
 
-from automated_security_helper.utils.sandbox.policy import SandboxRequirements
+from automated_security_helper.utils.sandbox.policy import (
+    SAFE_DIRECTORIES_ENV,
+    SandboxRequirements,
+    git_config_env,
+)
 from automated_security_helper.base.options import ScannerOptionsBase, release_tag
 from automated_security_helper.base.plugin_base import CustomCommand
 from automated_security_helper.base import scanner_operational_facets as opsf
@@ -51,6 +56,24 @@ from automated_security_helper.utils.subprocess_utils import (
     spawn_run,
 )
 from automated_security_helper.utils.process_env import snapshot_environ
+
+
+def _safe_directories(target: Path) -> list[str]:
+    """The real path of ``target`` and, when it sits in a checkout, the checkout's top.
+
+    The top is the first parent holding a ``.git`` (a directory, or the file a
+    linked work tree and a submodule have). No ``.git`` above it names nothing
+    more: the conservative reading, as the scanner's prerequisites facet says.
+    """
+    real = Path(os.path.realpath(target))
+    named = [str(real)]
+    start = real if real.is_dir() else real.parent
+    for parent in (start, *start.parents):
+        if os.path.lexists(parent / ".git"):
+            if str(parent) not in named:
+                named.append(str(parent))
+            break
+    return named
 
 
 class OpengrepScannerConfigOptions(ScannerOptionsBase):
@@ -295,6 +318,10 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
         system_trust_roots=True,
         # The offline rule cache ASH checked before the scan and passes as --config.
         read_path_env=("OPENGREP_RULES_CACHE_DIR",),
+        # extra_subprocess_env's safe.directory entries: the sandbox's allowlist
+        # passes no GIT_CONFIG_* variable, so it writes them from the directories
+        # the scanner names (SAFE_DIRECTORIES_ENV) instead.
+        git_safe_directory=True,
     )
 
     #: The facets register row (base/scanner_facets.py). Declaration only, zero
@@ -379,17 +406,19 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
             native_field="results[].locations[].physicalLocation.region.snippet.text",
         ),
         references=FacetDecl(
-            state=FacetState.DROPPED,
-            native_field="tool.driver.rules[].help.markdown",
-            reason="rule-level only: the flat reader takes references from "
-            "result relatedLocations, so the rule help is discarded today",
+            state=FacetState.UNCONFIRMED,
+            reason="UNCONFIRMED: the committed captures' SARIF rules carry no "
+            "helpUri (the rule help is help.markdown text, not a link). A "
+            "rule helpUri would be read into the flat references by the "
+            "shared rule read (FlatVulnerability.from_sarif_result); "
+            "redeclare MAPPED when a capture carrying one is committed (the "
+            "corpus gate lists this cell as a fixture owed until then)",
         ),
         tags=FacetDecl(
-            state=FacetState.DROPPED,
-            native_field="tool.driver.rules[].properties.tags",
-            reason="rule-level only: the flat reader takes tags from result "
-            "properties, so the rule tags are discarded today (they still "
-            "feed the CWE read)",
+            state=FacetState.MAPPED,
+            native_field="tool.driver.rules[].properties.tags, read into the "
+            "flat tags when the result carries none (they also feed the CWE "
+            "read)",
         ),
         extras=FacetDecl(
             state=FacetState.MAPPED,
@@ -411,8 +440,9 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
                 offline_outcome=opsf.OfflineOutcome.DEGRADED,
                 offline_reason=(
                     "runs against the operator's local rules or the validated offline "
-                    "ruleset cache as --config; a registry fetch that fails online exits "
-                    "2 and ASH reruns once on the local configs only"
+                    "ruleset cache as --config; opengrep runs once, and a registry "
+                    "ruleset it cannot download exits 2 and ends the scan as a fatal "
+                    "scanner error, with no second run on the local configs"
                 ),
                 offline_strategy=OfflineStrategy.CACHE_FLAGS,
                 sandbox_network=opsf.SandboxNetwork.ONLINE,
@@ -483,7 +513,11 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
             ),
             exit_codes=opsf.ExitCodesFacet(
                 success_exit_codes=(0, 1),
-                semantics="the base default {0, 1}; an exit 2 on a failed registry fetch is rerun once locally",
+                semantics=(
+                    "the base default {0, 1}; opengrep runs once, and exit 2 (a ruleset "
+                    "download failed) and exit 7 (a downloaded ruleset is invalid YAML) "
+                    "are fatal scanner errors"
+                ),
             ),
             provenance=opsf.ProvenanceFacet(
                 tier=opsf.Tier.BUILTIN_DEFAULT,
@@ -495,14 +529,14 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
                 ),
             ),
             prerequisites=opsf.PrerequisitesFacet(
-                kinds=(opsf.Prerequisite.GIT_CHECKOUT,),
+                kinds=(opsf.Prerequisite.NONE,),
                 note=(
-                    "opengrep runs git ls-files itself and exits 2 when git refuses the "
-                    "directory; ASH supplies safe.directory"
-                ),
-                unconfirmed=(
-                    "behavior on a tree that is not a git checkout was not read; the "
-                    "declared prerequisite is the conservative reading"
+                    "no prerequisite: opengrep 2.0.0 (the pinned release, sha256 checked) "
+                    "scanned a copy of tests/test_data/scanners/opengrep/fixture_repo with "
+                    "no .git directory and exited 0 with the one finding it reports on a "
+                    "git copy of the same files. In a git checkout it runs git ls-files "
+                    "itself and exits 2 when git refuses the directory; ASH supplies "
+                    "safe.directory"
                 ),
             ),
         )
@@ -670,18 +704,25 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
         that. The entry reaches only this child, through ``GIT_CONFIG_*``, and names
         the real path of the scanned directory, never ``*``; ASH's own git calls
         and every other process keep the ownership check.
+
+        Git compares ``safe.directory`` with the top of the work tree, so a scan
+        pointed at a subdirectory of a checkout names the checkout's top level as
+        well: the first parent that holds a ``.git``. Outside a checkout only the
+        scanned directory is named.
+
+        The same directories travel under ``SAFE_DIRECTORIES_ENV`` for a sandboxed
+        spawn, whose allowlist drops every ``GIT_CONFIG_*`` name and rebuilds the
+        entries from that list (``SandboxPolicy.filter_env``). The direct spawn
+        uses the ``GIT_CONFIG_*`` entries built here, numbered after the caller's
+        own block when that block is whole.
         """
         target = self._scan_target_path
         if target is None:
             return None
-        # Entries the caller already set keep their places; this one goes after them.
-        existing = snapshot_environ().get("GIT_CONFIG_COUNT", "0")
-        index = int(existing) if existing.isdigit() else 0
-        return {
-            "GIT_CONFIG_COUNT": str(index + 1),
-            f"GIT_CONFIG_KEY_{index}": "safe.directory",
-            f"GIT_CONFIG_VALUE_{index}": os.path.realpath(target),
-        }
+        directories = _safe_directories(target)
+        env = git_config_env(snapshot_environ(), directories)
+        env[SAFE_DIRECTORIES_ENV] = json.dumps(directories)
+        return env
 
     # ---------------------------------------------------------------
     # Dependency resolution

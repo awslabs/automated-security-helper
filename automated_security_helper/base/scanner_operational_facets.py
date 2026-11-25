@@ -285,8 +285,8 @@ class TargetKind(str, Enum):
     DEPENDENCY_LOCKFILES = "dependency_lockfiles"
     PACKAGE_SOURCES = "package_sources"
     PACKAGE_INVENTORY = "package_inventory"
-    SECRETS_CONTENTS = "secrets_contents"
-    SECRETS_GIT_HISTORY = "secrets_git_history"
+    SECRETS_CONTENTS = "secrets_contents"  # pragma: allowlist secret
+    SECRETS_GIT_HISTORY = "secrets_git_history"  # pragma: allowlist secret
     DOCKERFILES = "dockerfiles"
     GITHUB_ACTIONS_WORKFLOWS = "github_actions_workflows"
     COMPOSITE_ACTIONS = "composite_actions"

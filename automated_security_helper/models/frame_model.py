@@ -403,7 +403,13 @@ def to_frame(models: Sequence[Any], spec: FrameSpec) -> "pl.DataFrame":
         if info.dtype == "String":
             data[info.name] = [_text(v, info.raw) for v in values]
         elif info.dtype == "Boolean":
-            data[info.name] = [None if v is None else bool(v) for v in values]
+            if info.nullable:
+                data[info.name] = [None if v is None else bool(v) for v in values]
+            else:
+                # a nullable=False flag is never null: an instance built around
+                # validation that holds None reads as False, as bool() did in the
+                # builders this replaced
+                data[info.name] = [bool(v) for v in values]
         elif info.rank_group is not None:
             mapping = rank_maps[info.rank_group]
             data[info.name] = [None if v is None else mapping[v] for v in values]

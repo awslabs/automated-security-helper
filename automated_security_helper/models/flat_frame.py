@@ -126,7 +126,7 @@ FLAT_SPEC = FrameSpec(
         "identity_base",
         "_identity_message": "the identity message is a join input of the diff "
         "side, not a column of the flat frame",
-        "_secret_detection": "a baseline-gate policy flag, not a column of the "
+        "_secret_detection": "a baseline-gate policy flag, not a column of the "  # pragma: allowlist secret
         "flat frame",
         "_source_report": "read through the source_report property",
         "identity_message": "the identity message is a join input of the diff "

@@ -668,10 +668,11 @@ class TestSuffixCase:
     ):
         """The checks read an environment-read file again literally and in its
         own format (`ash.TOML` as TOML), and the warning names the setting
-        without its value. The path has no trailing "/", which
-        would be read as the directory and everything under it, so that the
-        directory warning is printed."""
-        monkeypatch.setenv("ASH_TEST_PROBE", "SECRETDIRZQ")
+        without its value. The value is a "**/<name>" pattern, whose last
+        component names an existing directory and matches no file in it (a
+        glob-free path matches the directory's subtree since the bare-directory
+        rule, issue #894), so that the directory warning is printed."""
+        monkeypatch.setenv("ASH_TEST_PROBE", "**/SECRETDIRZQ")
         (tmp_path / "SECRETDIRZQ").mkdir()
         target = tmp_path / "ash.TOML"
         target.write_text(

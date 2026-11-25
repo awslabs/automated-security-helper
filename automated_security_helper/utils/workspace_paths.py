@@ -79,9 +79,12 @@ pattern reached inside that project. ``None`` means the pattern cannot match
 anything in the project, so the caller applies nothing. ``matches`` is the
 matcher of the entry's kind: ``ignore_path_matches`` for an ignore path, where a
 trailing ``/`` names a directory (``vendor/`` covers what is inside ``vendor``),
-and ``file_path_matches`` for a suppression, where it is literal and matches no
-file. So an ignore path keeps its directory form (``api/vendor/`` over ``api``
-becomes ``vendor/``) and a suppression keeps its slash.
+and ``file_path_matches`` for a suppression. Under the bare-directory rule
+(issue #894) a pattern with no glob character names a directory in both
+matchers -- ``vendor`` and ``vendor/`` cover what is below ``vendor`` -- so a
+glob-free pattern of either kind converts textually (``_down_convert_bare``),
+and an entry keeps its directory form (``api/vendor/`` over ``api`` becomes
+``vendor/``).
 
 A ``.`` or empty component (``./api/x.py``, ``api/./x.py``, ``api//x.py``) is
 refused. The top-level matchers read it literally, so it matches no file there,
@@ -147,10 +150,13 @@ reasoning about glob semantics alone:
   refused when it holds a glob, which project-side would match more than the
   one file the equality covered.
 * Anchored elsewhere (``api/src/x.py`` over ``api-v2``) -- ``None``.
-* Naming only the project directory (``api`` over ``api``) -- ``None``.
-  ``file_path_matches("api/src/x.py", "api")`` is False, so this pattern covers
-  no file in the project. Returning ``**`` here would have suppressed a whole
-  project the operator never named.
+* Naming only the project directory (``api`` over ``api``) -- ``**`` when the
+  pattern is glob-free: under the bare-directory rule (issue #894)
+  ``file_path_matches("api/src/x.py", "api")`` is True, the operator named the
+  directory and its subtree, so the project-side pattern covers the whole
+  project. A pattern WITH a glob that names only the project directory by its
+  exact text (``app[v2]`` over ``app[v2]``) still converts to ``None``: its
+  exact-text reading covers no file below the directory.
 * All-stars leading (``*``, ``**``) with an all-literal or single-component
   remainder (``*/src/x.py``, ``*/*.py``) -- becomes ``**/src/x.py``,
   ``**/*.py``. The leading absorbed the prefix and can absorb further
@@ -263,6 +269,7 @@ from typing import Final, FrozenSet, Literal, Optional, Tuple, Union
 from automated_security_helper.core.exceptions import WorkspacePatternError
 from automated_security_helper.utils.path_matching import (
     _pattern_components,
+    has_glob_syntax,
     ignore_path_pattern,
 )
 from automated_security_helper.utils.undecodable_text import (
@@ -274,10 +281,12 @@ PathLike = Union[str, PurePosixPath]
 
 #: The two kinds of workspace policy entry a pattern can be. Each is read at the
 #: top level by its own matcher, and a down-converted pattern has to keep that
-#: matcher's answer: an ignore path by ``suppression_matcher.ignore_path_matches``,
-#: where a trailing ``/`` names a directory and covers what is inside it, and a
-#: suppression by ``suppression_matcher.file_path_matches``, where a trailing
-#: ``/`` is literal and so matches no file.
+#: matcher's answer: an ignore path by ``suppression_matcher.ignore_path_matches``
+#: and a suppression by ``suppression_matcher.file_path_matches``. A glob-free
+#: pattern names a directory and covers what is inside it in both (the
+#: bare-directory rule, issue #894), with or without the trailing ``/``; the
+#: kinds differ only for glob patterns, where an ignore path's trailing ``/`` is
+#: still a directory (``ignore_path_pattern``) and a suppression's is literal.
 IGNORE_PATH: Final = "ignore_path"
 SUPPRESSION: Final = "suppression"
 PatternKind = Literal["ignore_path", "suppression"]
@@ -929,7 +938,11 @@ def _down_convert(text: str, prefix_parts: tuple) -> Optional[str]:
     for index, prefix_part in enumerate(prefix_parts):
         if index >= len(pattern_parts):
             # The pattern runs out inside the prefix span, so it names an
-            # ancestor of the project rather than anything within it.
+            # ancestor of the project. Only a glob pattern reaches this
+            # function (a glob-free one is converted textually by
+            # _down_convert_bare, where an ancestor covers the whole project),
+            # and a glob pattern's exact-text reading names no file below the
+            # ancestor, so nothing in the project matches.
             return None
 
         pattern_part = pattern_parts[index]
@@ -969,11 +982,14 @@ def _down_convert(text: str, prefix_parts: tuple) -> Optional[str]:
 
     remainder = pattern_parts[len(prefix_parts) :]
     if not remainder:
-        # The pattern names the project directory and nothing below it. In
-        # ASH's matcher "api" matches the path "api", not "api/src/x.py", so no
-        # file inside the project is covered and the pattern does not apply.
-        # Returning `**` here would suppress the entire project -- the
-        # contract sweep caught exactly that.
+        # The pattern names the project directory and nothing below it. Only a
+        # glob pattern reaches this function (a glob-free "api" over "api" is
+        # _down_convert_bare's, where the bare-directory rule makes it the
+        # whole project), and a glob pattern that names the directory does so
+        # by its exact text only ("app[v2]" over "app[v2]"), which covers no
+        # file inside the project. Returning `**` here would suppress an
+        # entire project the glob never covered -- the contract sweep caught
+        # exactly that.
         return None
     if by_equality and any(_is_glob_component(part) for part in remainder):
         # Workspace-side only the path spelled exactly as the pattern matched
@@ -1004,16 +1020,46 @@ def _as_directory_form(converted: Optional[str]) -> Optional[str]:
     return converted
 
 
-def _down_convert_literal_slash(text: str, prefix_parts: tuple) -> Optional[str]:
-    """Down-convert a suppression ending in ``/``, whose slash is literal.
+def _down_convert_bare(text: str, prefix_parts: tuple) -> Optional[str]:
+    """Down-convert a pattern with no glob character, of either kind.
 
-    A file's path never ends in ``/``, so such a suppression matches no file at
-    the top level, and the one pushed down must match none either. It keeps its
-    slash (``api/vendor/`` becomes ``vendor/``), so the project's warning about a
-    suppression that names a directory still names it. When no rewrite keeps the
-    slash meaningful, which includes the project root itself (``api/`` over
-    ``api``) and a rewrite whose slash ``**`` would absorb (``*/`` would become
-    ``**/``, which is ``**``), it is dropped for the project, never widened.
+    Under the bare-directory rule (``path_matching._path_pattern_matches``,
+    issue #894) such a pattern matches its exact path and every path below the
+    directory it names, anchored, in ignore paths and suppressions alike -- so
+    the conversion is purely textual and the same for both kinds. One naming
+    the project directory or an ancestor of it covers the whole project,
+    ``**``; one anchored inside the project is the remainder after the prefix,
+    which matches the same subtree project-side by the same rule; one anchored
+    elsewhere matches nothing in the project, ``None``. A trailing slash, which
+    names the directory only and never a file of that name, is kept on a
+    remainder so the project-side pattern keeps the operator's directory form;
+    on an ancestor it is absorbed by ``**``, which the slashless project
+    directory already satisfies both sides of the contract for.
+    """
+    directory = text.rstrip("/")
+    named_directory_only = directory != text
+    parts = PurePosixPath(directory).parts
+    shorter = min(len(parts), len(prefix_parts))
+    if parts[:shorter] != prefix_parts[:shorter]:
+        return None
+    if len(parts) <= len(prefix_parts):
+        return _WHOLE_PROJECT
+    remainder = PurePosixPath(*parts[len(prefix_parts) :]).as_posix()
+    return f"{remainder}/" if named_directory_only else remainder
+
+
+def _down_convert_literal_slash(text: str, prefix_parts: tuple) -> Optional[str]:
+    """Down-convert a glob suppression ending in ``/``, whose slash is literal.
+
+    Only a suppression WITH a glob character gets here (a glob-free one is
+    ``_down_convert_bare``'s, where the slash names a directory). A file's path
+    never ends in ``/``, so such a suppression matches no file at the top
+    level, and the one pushed down must match none either. It keeps its slash
+    (``api/*/vendor/`` becomes ``*/vendor/``), so a report that names the
+    entry still shows the shape the operator wrote. When no rewrite keeps the
+    slash meaningful, such as one whose slash ``**`` would absorb (``*/`` would
+    become ``**/``, which is ``**``), it is dropped for the project, never
+    widened.
 
     ``api/**/`` is not literal: the matcher absorbs a slash after a trailing
     ``**``, so it is ``api/**`` and converts as that.
@@ -1029,6 +1075,12 @@ def _down_convert_literal_slash(text: str, prefix_parts: tuple) -> Optional[str]
     if converted is None or converted == _WHOLE_PROJECT:
         return None
     candidate = f"{converted}/"
+    # A glob-free candidate no longer keeps the slash literal: the
+    # bare-directory rule (issue #894) reads it as the directory, whose subtree
+    # this pattern -- a glob with a literal slash, which matches no file --
+    # never covered. Matching nothing is the contract, so it converts to None.
+    if not has_glob_syntax(candidate):
+        return None
     return candidate if _pattern_components(candidate)[-1] == "" else None
 
 
@@ -1056,15 +1108,20 @@ def to_project_pattern(
     module docstring for the per-shape rewrites and why widening a pattern is the
     dangerous direction.
 
-    An ignore path keeps its directory form: ``api/vendor/`` over ``api`` becomes
-    ``vendor/``, and one naming the project directory or an ancestor of it
-    (``api/`` over ``api`` or ``api/sub``) covers the whole project, ``**``. A
-    suppression keeps its literal ``/`` (:func:`_down_convert_literal_slash`).
+    A glob-free pattern of either kind converts textually under the
+    bare-directory rule (:func:`_down_convert_bare`, issue #894): it keeps its
+    directory form (``api/vendor/`` over ``api`` becomes ``vendor/``,
+    ``api/vendor`` becomes ``vendor``), and one naming the project directory or
+    an ancestor of it (``api`` or ``api/`` over ``api`` or ``api/sub``) covers
+    the whole project, ``**``. A glob ignore path ending in ``/`` still names a
+    directory (``ignore_path_pattern``); a glob suppression keeps its literal
+    ``/`` (:func:`_down_convert_literal_slash`).
 
     Returns:
         The project-relative pattern, or ``None`` when the pattern cannot match
-        anything inside this project -- including when it names only the project
-        directory, which covers no file within it.
+        anything inside this project -- including a glob pattern that names
+        only the project directory by its exact text, which covers no file
+        within it.
 
     Raises:
         WorkspacePatternError: On the same malformed inputs as
@@ -1113,7 +1170,11 @@ def to_project_pattern(
     text = form.removeprefix("/")
     _refuse_dot_components(raw, text)
 
-    if text.endswith("/"):
+    if not has_glob_syntax(text):
+        # The bare-directory rule (issue #894) reads a glob-free pattern the
+        # same way for both kinds, so one textual conversion serves both.
+        converted = _down_convert_bare(text, prefix_parts)
+    elif text.endswith("/"):
         if kind == IGNORE_PATH:
             converted = _as_directory_form(
                 _down_convert(ignore_path_pattern(text), prefix_parts)
@@ -1122,4 +1183,28 @@ def to_project_pattern(
             converted = _down_convert_literal_slash(text, prefix_parts)
     else:
         converted = _down_convert(text, prefix_parts)
+        if (
+            converted is not None
+            and converted != _WHOLE_PROJECT
+            and not has_glob_syntax(converted)
+        ):
+            # Only a glob pattern gets here (a glob-free one is
+            # _down_convert_bare's), and a glob matches by its glob or
+            # exact-text reading alone. A glob-free rewrite would gain the
+            # bare-directory rule (issue #894) project-side and cover the
+            # subtree below the path it names, which the workspace pattern
+            # never covered; no project-side pattern spells "this exact path
+            # and nothing below it" for a plain name, so the safe answer is a
+            # refusal, never a widened pattern.
+            raise WorkspacePatternError(
+                _shown(
+                    f"pattern '{text}' cannot be rewritten for project "
+                    f"'{PurePosixPath(*prefix_parts).as_posix()}': what is left "
+                    f"after the project prefix, '{converted}', has no glob "
+                    "character, and project-side a glob-free pattern also "
+                    "covers the directory of that name (the bare-directory "
+                    "rule), which this pattern never matched. Name the "
+                    "project path explicitly in a project-level entry instead."
+                )
+            )
     return text_of_undecodable(converted) if converted is not None else None

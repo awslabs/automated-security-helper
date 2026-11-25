@@ -459,7 +459,10 @@ class TestTheThresholdBelongsToTheUnitCoverageJob:
         ]
         assert aliases[0] == "automated_security_helper/", aliases
         assert "*/automated_security_helper/" in aliases, aliases
-        assert "*\\automated_security_helper\\" in aliases, aliases
+        # No backslash alias: a slash matches either separator in coverage.py's globs, so
+        # the second alias folds the Windows layout too. tests/unit/test_unit_test_shards.py
+        # (test_the_two_forward_slash_aliases_fold_every_runners_path) combines real data.
+        assert not any("\\" in alias for alias in aliases), aliases
 
 
 @pytest.mark.integration
@@ -655,7 +658,6 @@ class TestTheGateFailsAUnitRunBelowTheThreshold:
 
     def _gate(self, tmp_path: Path, results: Path, threshold: int):
         env = self._clean_env()
-        env["RUNNER_ARCH"] = "X64"
         return subprocess.run(
             [
                 sys.executable,
