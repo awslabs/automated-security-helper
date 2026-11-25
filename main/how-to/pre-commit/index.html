@@ -3754,7 +3754,7 @@ SOFTWARE.
 This page sets up the <code>ash</code> hook, says what it scans, and what it costs per commit.</p>
 <p>Prerequisites:</p>
 <ul>
-<li>pre-commit, running on Python 3.10 to 3.14, or a <code>language_version</code> as shown
+<li>pre-commit, running on Python 3.11 to 3.14, or a <code>language_version</code> as shown
   <a href="#python-version">below</a>.</li>
 <li>A git repository with a <code>.pre-commit-config.yaml</code>.</li>
 <li>Network access to GitHub and PyPI the first time the hook runs.</li>
@@ -4026,7 +4026,7 @@ gate:</p>
 <li><a href="../ci/other-ci/">Jenkins, CodeBuild, Azure Pipelines, CircleCI, and other systems</a></li>
 </ul>
 <p>If you want CI to enforce the same hook configuration, <code>pre-commit run ash --all-files</code>
-works on a runner that has pre-commit, Python 3.10 to 3.14, and network access to GitHub
+works on a runner that has pre-commit, Python 3.11 to 3.14, and network access to GitHub
 and PyPI. If the repository has CloudFormation templates or a <code>package.json</code> with a
 lockfile, the runner also needs Node.js and npm, or the hook exits 1 on every run (see
 <a href="#behavior">Behavior</a> for the <code>--exclude-scanners</code> alternative). It runs only the precommit scanner set, so keep a direct ASH scan in the
@@ -4056,7 +4056,7 @@ them is MISSING and every commit fails with exit code 1. Add
 out.</p>
 <h2 id="python-version">Pre-commit on another Python<a class="headerlink" href="#python-version" title="Permanent link">&para;</a></h2>
 <p>pre-commit builds a Python hook's environment with the interpreter it runs under, and ASH
-installs on Python 3.10 to 3.14 only. If pre-commit itself runs on another version,
+installs on Python 3.11 to 3.14 only. If pre-commit itself runs on another version,
 building the hook environment fails; on Python 3.9 the error is
 <code>No matching distribution found for hatchling&gt;=1.32.4</code>. Install pre-commit on a supported
 interpreter:</p>

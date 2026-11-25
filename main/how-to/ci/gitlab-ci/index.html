@@ -3612,7 +3612,7 @@ the full set. See <a href="../../pre-commit/#with-ci">Pre-commit and CI together
 <p>Prerequisites:</p>
 <ul>
 <li>A runner with the Docker executor, or any runner whose job image is based on Debian or
-  Ubuntu, runs as root, and has Python 3.10 or later and git. The <code>before_script</code> below
+  Ubuntu, runs as root, and has Python 3.11 or later and git. The <code>before_script</code> below
   installs packages with <code>apt-get</code>.</li>
 <li>Network access from the job to GitHub, PyPI, and the scanners' download sites.</li>
 </ul>
@@ -3869,7 +3869,7 @@ below installs that release.</p>
 </div>
 <p>Nix mode (<code>--mode nix</code>) runs the scan inside a Nix shell whose scanner tools come from
 ASH's <code>flake.nix</code>, so the job needs no <code>apt-get</code> packages for the scanners and no
-<code>ash dependencies install</code> step. The job image needs Nix on <code>PATH</code>, Python 3.10 or later,
+<code>ash dependencies install</code> step. The job image needs Nix on <code>PATH</code>, Python 3.11 or later,
 and git; set the CI/CD variable <code>NIX_IMAGE</code> to an image that has them. ASH passes
 <code>nix-command</code> and <code>flakes</code> on each invocation, so you do not have to enable them in
 <code>nix.conf</code>. Nix mode does not install ASH, and cdk-nag runs on the Python environment ASH

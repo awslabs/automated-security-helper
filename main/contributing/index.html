@@ -3593,7 +3593,7 @@ puts them. See <a href="../docs/advanced-usage/">Manage scanner tools</a>.</p>
 ASH first, because <code>uv run</code> puts the project's environment at the front of <code>PATH</code>;
 outside <code>uv run</code>, the <code>ashv3</code> alias runs the same entry point.
 - CI runs the unit suite on Linux (x86_64 and arm64), macOS on Apple silicon, and
-  Windows, each with Python 3.10 to 3.14, so any of these works for development.
+  Windows, each with Python 3.11 to 3.14, so any of these works for development.
 - Some tests need programs that are not Python packages, such as a container runtime,
   a sandbox backend, or Nix. <a href="testing/">Test your change</a> says which, and how they are
   selected.</p>
@@ -3807,7 +3807,7 @@ does not merge.</p>
 </tr>
 <tr>
 <td><code>unit-test (&lt;os&gt;, py&lt;version&gt;, shard &lt;i&gt;of&lt;n&gt;)</code></td>
-<td>the unit and snapshot suite with both extras, on five runners and Python 3.10 to 3.14, plus the cdk-nag integration tests, in six shards per Linux combination and eight per macOS and Windows one. A test that cannot find an extra fails rather than skipping, and the leg fails when total coverage of <code>automated_security_helper/</code> is under 80%</td>
+<td>the unit and snapshot suite with both extras, on five runners and Python 3.11 to 3.14, plus the cdk-nag integration tests, in six shards per Linux combination and eight per macOS and Windows one. A test that cannot find an extra fails rather than skipping, and the leg fails when total coverage of <code>automated_security_helper/</code> is under 80%</td>
 <td>through <code>required-checks</code></td>
 </tr>
 <tr>
@@ -3948,7 +3948,7 @@ hooks over the whole tree:</p>
 </span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>uv<span class="w"> </span>run<span class="w"> </span>pre-commit<span class="w"> </span>run<span class="w"> </span>--all-files
 </span></code></pre></div>
 <p>Run pre-commit through <code>uv run</code>, so it uses the project's Python; the pinned commitizen
-hook needs Python 3.10 or later. The first commit takes longer while pre-commit builds
+hook needs Python 3.11 or later. The first commit takes longer while pre-commit builds
 the hook environments, and the schema regeneration runs on every commit.</p>
 <p>On a clean checkout, <code>pre-commit run --all-files</code> passes and changes nothing. The JSON
 formatter skips the files that a tool writes or a check compares byte for byte: the
