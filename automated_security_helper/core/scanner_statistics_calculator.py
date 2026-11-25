@@ -320,6 +320,7 @@ class ScannerStatisticsCalculator:
                     zip(
                         SEVERITY_COUNT_FIELDS,
                         (suppressed, critical, high, medium, low, info),
+                        strict=True,
                     )
                 ),
                 "total": total,
@@ -1064,7 +1065,18 @@ class ScannerStatisticsCalculator:
         )
         # The ingest site: the resolver (utils/severity_ladder.py) answers the
         # source as its wire word.
-        scanner_threshold_def = ThresholdSource(resolved_source)
+        try:
+            scanner_threshold_def = ThresholdSource(resolved_source)
+        except ValueError:
+            # A word that is no source of ASH's must not abort the statistics
+            # pass after the scan ran: this one row reads as the global source,
+            # as an unrecognized status reads as ERROR in unified_metrics.
+            ASH_LOGGER.warning(
+                f"Scanner {scanner_name} has an unrecognized threshold source "
+                f"{resolved_source!r}; its row is written as "
+                f"{ThresholdSource.GLOBAL.value}"
+            )
+            scanner_threshold_def = ThresholdSource.GLOBAL
         # The kept reference form describes where the scanner's own threshold
         # came from. Keep it while the resolver still sources the graded value
         # from that config entry, and show what is graded, with its source,

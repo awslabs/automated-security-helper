@@ -42,6 +42,9 @@ class ThresholdSource(str, Enum):
     CONFIG = "config"
     UNAVAILABLE = "unavailable"
 
+    def __str__(self) -> str:
+        return self.value
+
 
 class ScannerToolType(str, Enum):
     """Type of scanner tool."""
