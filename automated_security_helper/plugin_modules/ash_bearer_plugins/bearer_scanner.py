@@ -380,8 +380,11 @@ class BearerScanner(ScannerPluginBase[BearerScannerConfig]):
             reason="deliberately not copied: the extract quotes scanned code",
         ),
         references=FacetDecl(
-            state=FacetState.MAPPED,
+            state=FacetState.DROPPED,
             native_field='finding "documentation_url", written to the rule helpUri',
+            reason="the rule helpUri survives the SARIF model and dies at the flat "
+            "reader, which reads no reference from it (observed empty over the "
+            "reference corpus)",
         ),
         tags=FacetDecl(
             state=FacetState.MAPPED,
