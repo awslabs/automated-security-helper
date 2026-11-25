@@ -449,7 +449,7 @@ def _shown_match_rate(stats: Dict[str, Any]) -> Optional[float]:
 def generate_html_report(
     validation_results: Dict,
     output_path: str,
-    field_presence: Dict[str, Dict[str, Any]] = None,
+    field_presence: Optional[Dict[str, Dict[str, Any]]] = None,
     root: Optional[str] = None,
     sarif_dir: Optional[str] = None,
     aggregate_analyzed: bool = True,
@@ -590,7 +590,7 @@ def generate_html_report(
 
     # Extract all scanners and fields from validation results
     all_scanners = set()
-    all_fields = {}
+    all_fields: Dict[str, Dict[str, Any]] = {}
 
     for scanner, importance_categories in validation_results["missing_fields"].items():
         all_scanners.add(scanner)
@@ -774,7 +774,7 @@ def generate_html_report(
     html.append("      <tbody>")
 
     # Collect all fields from all scanners
-    all_fields_by_path = {}
+    all_fields_by_path: Dict[str, Dict[str, Any]] = {}
 
     # First, add fields from validation_results
     for scanner, importance_categories in validation_results["missing_fields"].items():

@@ -19,6 +19,7 @@ from typing import (
     Sequence,
     Set,
     Tuple,
+    cast,
 )
 
 from pydantic import Field, PrivateAttr
@@ -55,7 +56,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
 )
 from automated_security_helper.utils.link_exclusions import walked_files
 from automated_security_helper.utils.error_text import text_without_values
-from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
+from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP, VERBOSE_LEVEL
 from automated_security_helper.utils.scanned_tree import REASON_LINK_LEAVES_TREE
 from automated_security_helper.utils.scan_output_dirs import (
     PatternSyntax,
@@ -1065,7 +1066,7 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         # Bandit needs sarif extra for SARIF output format and toml extra for TOML config support
         return ["sarif", "toml"]
 
-    def configure(self, config: ScannerPluginBase | None = None):
+    def configure(self, config: ScannerPluginConfigBase | None = None):
         """Configure the scanner with the provided configuration.
 
         Args:
@@ -1076,7 +1077,7 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         """
         try:
             if config is not None:
-                self.config = config
+                self.config = cast(BanditScannerConfig, config)
                 self._apply_config()
 
         except Exception as e:
@@ -1185,7 +1186,7 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
             # scanner held offline on its own, and its memo keyed that answer
             # under the mode the probe ran in, not the one this scanner is in.
             command = get_uv_tool_command(
-                self.command,
+                self._tool_command(),
                 from_spec=self._uv_probe_from_spec(),
                 offline=self._is_offline_mode(),
             )
@@ -1239,7 +1240,7 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         # the scan went back through the uv route that had just failed. The
         # scanner's own offline reading reaches the resolver here as above.
         command = get_uv_tool_command(
-            self.command,
+            self._tool_command(),
             from_spec=self._uv_probe_from_spec(),
             offline=self._is_offline_mode(),
         )
@@ -1284,7 +1285,7 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         # _select_tool_execution builds its requirement: the copy is verified
         # against the requirement the scan runs under, not one named after the
         # executable.
-        package = self.uv_tool_package_name or self.command
+        package = self._uv_package()
         requirement = build_requirement(package, extras, constraint)
         # The constraint and the check's detail can hold a configured value, and a
         # configured value can come from the environment: redacted as the mixin
@@ -1307,7 +1308,7 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
                 text,
                 values,
                 plugin_inputs=self._uv_run_inputs_for_records(),
-                tool_name=self.command,
+                tool_name=self._tool_command(),
                 limit=None,
             )
 
@@ -1439,7 +1440,11 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
                 "run with an empty ini file that ASH writes; no config file is "
                 "discovered from the scanned tree in its place."
             )
-        if configured_path is not None and Path(configured).name == ".bandit":
+        if (
+            configured_path is not None
+            and configured is not None
+            and Path(configured).name == ".bandit"
+        ):
             # The ini-or-config decision follows the name the operator's
             # configuration gave, so a link named .bandit keeps its format.
             self._ini_file = configured_path
@@ -1645,7 +1650,7 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
                 [],
                 holding=holding,
                 values=values,
-                level=logging.VERBOSE,
+                level=VERBOSE_LEVEL,
                 applied_after_scan=True,
             )
             if ignore_globs
@@ -1855,7 +1860,7 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
 
     # Python-only repos commonly have empty target dirs after conversion;
     # log at VERBOSE rather than INFO to keep the user-facing output clean.
-    empty_target_log_level: ClassVar[int] = logging.VERBOSE
+    empty_target_log_level: ClassVar[int] = VERBOSE_LEVEL
 
     def scan(
         self,

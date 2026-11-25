@@ -5,10 +5,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Any, Optional, Set, Tuple
 
-from automated_security_helper.base.converter_plugin import ConverterPluginBase
 from automated_security_helper.base.engine_phase import EnginePhase
 from automated_security_helper.base.plugin_context import PluginContext
-from automated_security_helper.base.reporter_plugin import ReporterPluginBase
 from automated_security_helper.base.plugin_config import (
     plugin_config_key,
     section_enabled,
@@ -536,8 +534,7 @@ class ScanPhase(EnginePhase):
     def __init__(
         self,
         plugin_context: PluginContext,
-        plugins: List[ConverterPluginBase | ScannerPluginBase | ReporterPluginBase]
-        | None = None,
+        plugins: List[type] | None = None,
         progress_display: Optional[Any] = None,
         asharp_model: Optional[AshAggregatedResults] = None,
         plugin_filter: Optional[Callable[[Any], bool]] = None,
@@ -1509,7 +1506,7 @@ class ScanPhase(EnginePhase):
             # nothing still ran as shard i of n, and with no record of that its
             # results read as an unsharded scan, which `ash merge` would not hold
             # to the split the other shards made.
-            if shard_count is not None:
+            if shard_count is not None and shard_index is not None:
                 all_scanner_names = [
                     _scanner_display_name(instance) for instance in scanner_instances
                 ]

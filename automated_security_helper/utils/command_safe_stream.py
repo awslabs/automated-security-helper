@@ -35,7 +35,7 @@ import io
 import os
 import re
 import threading
-from typing import Any, Callable, TextIO
+from typing import IO, Any, Callable, TextIO, cast
 
 #: A CSI terminal sequence (Rich's color codes, a cursor move), in the full
 #: ECMA-48 grammar utils/error_text.py's CSI_CODES reads: parameter bytes
@@ -183,7 +183,7 @@ class CommandSafeStream:
     and an interactive scan hung there.
     """
 
-    def __init__(self, target: Callable[[], TextIO], check_buffer: bool = False):
+    def __init__(self, target: Callable[[], IO[str]], check_buffer: bool = False):
         self._target = target
         # Whether everything written since the last line break is whitespace or
         # terminal sequences, so the next text still starts the line.
@@ -233,7 +233,7 @@ class CommandSafeStream:
             # A process with no standard stream: the writes are discarded, as
             # Rich discards them, rather than raised from None.
             return _NULL_STREAM
-        return getattr(target, "rich_proxied_file", target)
+        return cast(TextIO, getattr(target, "rich_proxied_file", target))
 
     @property
     def buffer(self) -> Any:

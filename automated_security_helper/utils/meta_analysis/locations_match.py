@@ -410,7 +410,7 @@ def _is_absolute(path: str) -> bool:
     return path.startswith("/") or (len(path) > 1 and path[1] == ":")
 
 
-def _extract_file_path(location: Dict) -> str:
+def _extract_file_path(location: Dict) -> str | None:
     """Extract file path from location object."""
     # SARIF format
     if "physicalLocation" in location:
