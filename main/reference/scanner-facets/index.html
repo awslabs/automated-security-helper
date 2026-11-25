@@ -4012,21 +4012,21 @@ SOFTWARE.
 </tr>
 <tr>
 <td><a href="#cfn-lint"><code>cfn-lint</code></a></td>
-<td>6</td>
-<td>2</td>
+<td>7</td>
+<td>1</td>
 <td>12</td>
 </tr>
 <tr>
 <td><a href="#cfn-nag"><code>cfn-nag</code></a></td>
+<td>6</td>
 <td>0</td>
-<td>1</td>
-<td>19</td>
+<td>14</td>
 </tr>
 <tr>
 <td><a href="#checkov"><code>checkov</code></a></td>
 <td>7</td>
-<td>1</td>
-<td>12</td>
+<td>0</td>
+<td>13</td>
 </tr>
 <tr>
 <td><a href="#detect-secrets"><code>detect-secrets</code></a></td>
@@ -4048,21 +4048,21 @@ SOFTWARE.
 </tr>
 <tr>
 <td><a href="#npm-audit"><code>npm-audit</code></a></td>
-<td>10</td>
-<td>3</td>
+<td>11</td>
+<td>2</td>
 <td>7</td>
 </tr>
 <tr>
 <td><a href="#opengrep"><code>opengrep</code></a></td>
 <td>10</td>
-<td>3</td>
-<td>7</td>
+<td>2</td>
+<td>8</td>
 </tr>
 <tr>
 <td><a href="#semgrep"><code>semgrep</code></a></td>
 <td>9</td>
-<td>3</td>
-<td>8</td>
+<td>2</td>
+<td>9</td>
 </tr>
 <tr>
 <td><a href="#syft"><code>syft</code></a></td>
@@ -4072,8 +4072,8 @@ SOFTWARE.
 </tr>
 <tr>
 <td><a href="#trivy"><code>trivy</code></a></td>
-<td>11</td>
-<td>4</td>
+<td>13</td>
+<td>2</td>
 <td>5</td>
 </tr>
 <tr>
@@ -4114,8 +4114,8 @@ SOFTWARE.
 </tr>
 <tr>
 <td><a href="#trivy-repo"><code>trivy-repo</code></a></td>
-<td>11</td>
-<td>4</td>
+<td>13</td>
+<td>2</td>
 <td>5</td>
 </tr>
 </tbody>
@@ -4716,9 +4716,9 @@ SOFTWARE.
 </tr>
 <tr>
 <td><code>resource_id</code></td>
-<td><code>mappable-dropped</code></td>
-<td>finding "Location.Path" (the --format json output format; Path[1] is the logical id, e.g. ["Resources", "M0FixtureBucket", ...])</td>
-<td>the SARIF format ASH requests carries the location only (artifactLocation.uri, region) and names the resource in message prose, so no id is written; the --format json output names it (M0 item c, fixture cfn-lint-1.61.0-m0-bad-property.json), the same dropped shape as cfn-nag and trivy</td>
+<td><code>mapped</code></td>
+<td>finding "Location.Path" (the --format json report; Path[1] is the logical id, e.g. ["Resources", "M0FixtureBucket", ...]), copied onto the SARIF result under ash_resource_id by attach_cfn_lint_resources from a second, unrecorded cfn-lint run</td>
+<td>Example: <code>M0FixtureBucket</code></td>
 </tr>
 <tr>
 <td><code>resource_type</code></td>
@@ -4816,45 +4816,45 @@ SOFTWARE.
 <tbody>
 <tr>
 <td><code>rule_id</code></td>
-<td><code>n/a</code></td>
+<td><code>mapped</code></td>
+<td>violation "id" (e.g. W51), the SARIF ruleId</td>
 <td></td>
-<td>UNCONFIRMED: the JSON violation "id" (e.g. W51, the committed fixture) should render as the SARIF ruleId, but the SARIF the pipeline reads was never read to a real result (M0 item b FATALed); one cfn_nag_scan --output-format sarif run settles it</td>
 </tr>
 <tr>
 <td><code>severity</code></td>
-<td><code>n/a</code></td>
+<td><code>mapped</code></td>
+<td>violation "type" (WARN or FAIL), rendered by the tool as the SARIF result level</td>
 <td></td>
-<td>UNCONFIRMED: the JSON violation "type" (WARN or FAIL) should render as the SARIF result level, but the SARIF the pipeline reads was never read to a real result (M0 item b); one cfn_nag_scan --output-format sarif run settles it</td>
 </tr>
 <tr>
 <td><code>file_path</code></td>
-<td><code>n/a</code></td>
+<td><code>mapped</code></td>
+<td>file result "filename", the SARIF artifact uri (restored from the staged copy by _restore_cfn_nag_uris)</td>
 <td></td>
-<td>UNCONFIRMED: the JSON file result "filename" should render as the SARIF artifact uri (restored from the staged copy by _restore_cfn_nag_uris), but the SARIF the pipeline reads was never read to a real result (M0 item b); one cfn_nag_scan --output-format sarif run settles it</td>
 </tr>
 <tr>
 <td><code>line_range</code></td>
-<td><code>n/a</code></td>
+<td><code>mapped</code></td>
+<td>violation "line_numbers", the SARIF region startLine</td>
 <td></td>
-<td>UNCONFIRMED: the JSON violation "line_numbers" should render as the SARIF region startLine, but the SARIF the pipeline reads was never read to a real result (M0 item b); one cfn_nag_scan --output-format sarif run settles it</td>
 </tr>
 <tr>
 <td><code>column</code></td>
 <td><code>n/a</code></td>
 <td></td>
-<td>UNCONFIRMED: the tool's JSON carries line_numbers only and no cfn-nag SARIF golden is committed; one cfn_nag_scan --output-format sarif run settles whether a column is emitted</td>
+<td>the tool's SARIF region carries startLine only and its JSON carries line_numbers only (captured fixture, M0 item b)</td>
 </tr>
 <tr>
 <td><code>message</code></td>
-<td><code>n/a</code></td>
+<td><code>mapped</code></td>
+<td>violation "message"</td>
 <td></td>
-<td>UNCONFIRMED: the JSON violation "message" should render as the SARIF message text, but the SARIF the pipeline reads was never read to a real result (M0 item b); one cfn_nag_scan --output-format sarif run settles it</td>
 </tr>
 <tr>
 <td><code>resource_id</code></td>
-<td><code>mappable-dropped</code></td>
-<td>violation "logical_resource_ids" (the JSON output format)</td>
-<td>UNCONFIRMED: no SARIF run is committed, so whether the id is a structured SARIF field or only one result per id is open (M0 item b FATALed); the unit that attaches it (M3a) picks its route after one cfn_nag_scan --output-format sarif run</td>
+<td><code>mapped</code></td>
+<td>SARIF result locations[0].logicalLocations[0].name (one result per id; the JSON "logical_resource_ids" lists them), written under ash_resource_id by attach_cfn_nag_resources</td>
+<td>Example: <code>M0FixtureBucketA</code></td>
 </tr>
 <tr>
 <td><code>resource_type</code></td>
@@ -4896,7 +4896,7 @@ SOFTWARE.
 <td><code>fingerprints</code></td>
 <td><code>n/a</code></td>
 <td></td>
-<td>UNCONFIRMED: the tool's JSON carries no fingerprint and no cfn-nag SARIF golden is committed; one SARIF run settles it</td>
+<td>the captured SARIF results carry no fingerprints and the JSON carries none (M0 item b)</td>
 </tr>
 <tr>
 <td><code>fix_available</code></td>
@@ -4914,13 +4914,13 @@ SOFTWARE.
 <td><code>snippet</code></td>
 <td><code>n/a</code></td>
 <td></td>
-<td>UNCONFIRMED: the tool's JSON carries no source excerpt and no cfn-nag SARIF golden is committed; one SARIF run settles whether a region snippet is emitted</td>
+<td>the captured SARIF region carries startLine only, with no snippet, and the JSON carries no excerpt (M0 item b)</td>
 </tr>
 <tr>
 <td><code>references</code></td>
 <td><code>n/a</code></td>
 <td></td>
-<td>UNCONFIRMED: the tool's JSON carries no URL and no cfn-nag SARIF golden is committed; one SARIF run settles whether the rule driver carries a helpUri</td>
+<td>the captured SARIF rules are {id, name, fullDescription} with no helpUri, and the JSON carries no URL (M0 item b)</td>
 </tr>
 <tr>
 <td><code>tags</code></td>
@@ -5038,7 +5038,7 @@ SOFTWARE.
 <td><code>fix_available</code></td>
 <td><code>n/a</code></td>
 <td></td>
-<td>UNCONFIRMED: the side report has a fixed_definition key but it is null on every committed check, so whether a fixable check populates it is open; one run over a fixable check settles it</td>
+<td>the side report has a fixed_definition key and it is null on every record read: 34 of 34 across terraform, cloudformation, kubernetes and dockerfile (checkov 3.4.5, an offline desk run beside the committed fixture), so no run ASH makes has shown a fix state to map; a populated record would redeclare it</td>
 </tr>
 <tr>
 <td><code>remediation_text</code></td>
@@ -5054,9 +5054,9 @@ SOFTWARE.
 </tr>
 <tr>
 <td><code>references</code></td>
-<td><code>mappable-dropped</code></td>
-<td>check "guideline" (a policy documentation URL)</td>
-<td>the side report carries a guideline URL per check; the adapter never reads it</td>
+<td><code>n/a</code></td>
+<td></td>
+<td>the side report has a "guideline" key and it is null on every record of the committed capture (9 of 9, checkov 3.4.6 insecure-s3), so no run ASH makes has shown a URL to map; attach_checkov_guidelines copies a non-null guideline onto the result as a related location, which the flat references read, so a capture whose records carry one redeclares this cell MAPPED</td>
 </tr>
 <tr>
 <td><code>tags</code></td>
@@ -5568,9 +5568,9 @@ SOFTWARE.
 </tr>
 <tr>
 <td><code>taxonomy_cwe</code></td>
-<td><code>mappable-dropped</code></td>
-<td>vulnerabilities.&lt;name&gt;.via[]."cwe"</td>
-<td>written to the result property "cwe" only; the flat cwe_id reader reads tags, so the flat column stays empty</td>
+<td><code>mapped</code></td>
+<td>vulnerabilities.&lt;name&gt;.via[]."cwe" (and the v1 advisory "cwe"), written as CWE-&lt;n&gt; rule tags by _cwe_tags and kept in the result property "cwe"</td>
+<td></td>
 </tr>
 <tr>
 <td><code>fingerprints</code></td>
@@ -5716,9 +5716,9 @@ SOFTWARE.
 </tr>
 <tr>
 <td><code>fix_available</code></td>
-<td><code>mappable-dropped</code></td>
-<td>results[].fixes</td>
-<td>SARIF fixes survive the report model and die at the flat reader, which reads only fix_available</td>
+<td><code>n/a</code></td>
+<td></td>
+<td>opengrep 2.0.0's SARIF has no fixes key even for a rule that carries <code>fix:</code> (tests/test_data/scanners/opengrep/captured/opengrep-2.0.0-fix-rule.sarif: result keys are exactly fingerprints, locations, message, properties, ruleId), so there is nothing in the SARIF ASH reads to map</td>
 </tr>
 <tr>
 <td><code>remediation_text</code></td>
@@ -5852,9 +5852,9 @@ SOFTWARE.
 </tr>
 <tr>
 <td><code>fix_available</code></td>
-<td><code>mappable-dropped</code></td>
-<td>results[].fixes</td>
-<td>SARIF fixes survive the report model and die at the flat reader, which reads only fix_available</td>
+<td><code>n/a</code></td>
+<td></td>
+<td>semgrep 1.187.0's SARIF has no fixes key even for a rule that carries <code>fix:</code> (tests/test_data/scanners/semgrep/captured/semgrep-1.187.0-fix-rule.sarif: result keys are exactly fingerprints, locations, message, properties, ruleId), so there is nothing in the SARIF ASH reads to map</td>
 </tr>
 <tr>
 <td><code>remediation_text</code></td>
@@ -6076,9 +6076,9 @@ SOFTWARE.
 </tr>
 <tr>
 <td><code>resource_id</code></td>
-<td><code>mappable-dropped</code></td>
-<td>Results[].Misconfigurations[].CauseMetadata.Resource</td>
-<td>misconfig only: the address (aws_s3_bucket.m0_fixture_bucket) exists in trivy's JSON format and is absent from the SARIF ASH reads (0 occurrences, M0 fixture); the vuln findings are packages, so no resource_id is ever written until a side-JSON attach lands</td>
+<td><code>mapped</code></td>
+<td>Results[].Misconfigurations[].CauseMetadata.Resource (trivy's JSON report, absent from its SARIF), copied onto the SARIF result under ash_resource_id by attach_trivy_resources for result type terraform only: cloudformation carries a file:line locator (t.yaml:3-4) and kubernetes and dockerfile carry none (trivy 0.76.2, M0-FINDINGS.md (a))</td>
+<td>Example: <code>aws_s3_bucket.m0_fixture_bucket</code></td>
 </tr>
 <tr>
 <td><code>resource_type</code></td>
@@ -6124,9 +6124,9 @@ SOFTWARE.
 </tr>
 <tr>
 <td><code>fix_available</code></td>
-<td><code>mappable-dropped</code></td>
-<td>message line "Fixed Version: &lt;version&gt;"</td>
-<td>the fixed version sits in the message text and is never parsed into the fix_available property the flat model reads</td>
+<td><code>mapped</code></td>
+<td>message line "Fixed Version: &lt;version&gt;", written as fix_available=True when non-empty by TrivyScannerBase._fixed_version_from_message (an empty value writes nothing)</td>
+<td></td>
 </tr>
 <tr>
 <td><code>remediation_text</code></td>
@@ -6634,13 +6634,13 @@ SOFTWARE.
 <td><code>package_name</code></td>
 <td><code>mapped</code></td>
 <td>the verified requirement's name (verify mode), written as the result property "package_name"</td>
-<td>scan mode's root package identity is not read: the native top-level "package" is a scanned directory path</td>
+<td>scan mode names no package to read: the native top-level "package" is the scanned directory path (&lt;scanned-dir&gt;/&lt;name&gt; in every captured scan_*.json), which holds neither a package name nor a version, so verify mode's requirement is the only source</td>
 </tr>
 <tr>
 <td><code>package_version</code></td>
 <td><code>mapped</code></td>
 <td>the verified requirement's version (verify mode), written as the result property "package_version"</td>
-<td>scan mode's root package version is not read</td>
+<td>scan mode names no version to read: its top-level keys are errors, issues, package (a directory path), results, risk_score and risks, none of them a version (every captured scan_*.json), so verify mode's requirement is the only source</td>
 </tr>
 <tr>
 <td><code>package_path</code></td>
@@ -7028,9 +7028,9 @@ SOFTWARE.
 </tr>
 <tr>
 <td><code>resource_id</code></td>
-<td><code>mappable-dropped</code></td>
-<td>Results[].Misconfigurations[].CauseMetadata.Resource</td>
-<td>misconfig only: the address (aws_s3_bucket.m0_fixture_bucket) exists in trivy's JSON format and is absent from the SARIF ASH reads (0 occurrences, M0 fixture); the vuln findings are packages, so no resource_id is ever written until a side-JSON attach lands</td>
+<td><code>mapped</code></td>
+<td>Results[].Misconfigurations[].CauseMetadata.Resource (trivy's JSON report, absent from its SARIF), copied onto the SARIF result under ash_resource_id by attach_trivy_resources for result type terraform only: cloudformation carries a file:line locator (t.yaml:3-4) and kubernetes and dockerfile carry none (trivy 0.76.2, M0-FINDINGS.md (a))</td>
+<td>Example: <code>aws_s3_bucket.m0_fixture_bucket</code></td>
 </tr>
 <tr>
 <td><code>resource_type</code></td>
@@ -7076,9 +7076,9 @@ SOFTWARE.
 </tr>
 <tr>
 <td><code>fix_available</code></td>
-<td><code>mappable-dropped</code></td>
-<td>message line "Fixed Version: &lt;version&gt;"</td>
-<td>the fixed version sits in the message text and is never parsed into the fix_available property the flat model reads (and ignore_unfixed defaults to true, so the tool pre-filters unfixed findings)</td>
+<td><code>mapped</code></td>
+<td>message line "Fixed Version: &lt;version&gt;", written as fix_available=True when non-empty by TrivyScannerBase._fixed_version_from_message (an empty value writes nothing; ignore_unfixed defaults to true, so the tool pre-filters unfixed findings)</td>
+<td></td>
 </tr>
 <tr>
 <td><code>remediation_text</code></td>
