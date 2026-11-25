@@ -4,7 +4,7 @@
 """The index pages of the docs site say what is under them, and what they say is true.
 
 Three pages of the site are hubs: ``reference/index.md`` (a table of the reference pages
-and the generator of each), ``docs/plugins/community/index.md`` (the six community
+and the generator of each), ``docs/plugins/alpha/index.md`` (the six alpha
 plugins that ship inside ASH) and ``personas/index.md`` (the three roles and the pages
 for them). Each lists pages and names things in the code, and none had a mechanism that
 reads the list, so a page added under a hub, or a generator renamed, left the hub
@@ -19,7 +19,7 @@ What is pinned, and what is not:
   maps to that page in ``REFERENCE_PAGES`` of the freshness test, and is the generator
   the page's own banner names; a row that says "written by hand" is a page with no
   banner. Not pinned: the one-line description of what a page lists.
-- community/index.md: the six plugins in the list are the six ``community`` pages beside
+- alpha/index.md: the six plugins in the list are the six ``alpha`` pages beside
   it, and the three that name a module (``ash_*_plugins``) name a package that exists
   under ``automated_security_helper/plugin_modules``. Not pinned: the submission
   guidelines, which are policy, and the tools each plugin runs.
@@ -43,7 +43,7 @@ pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 REFERENCE_INDEX = "reference/index.md"
-COMMUNITY_INDEX = "docs/plugins/community/index.md"
+COMMUNITY_INDEX = "docs/plugins/alpha/index.md"
 PERSONAS_INDEX = "personas/index.md"
 PLUGIN_MODULES = REPO_ROOT / "automated_security_helper" / "plugin_modules"
 BY_HAND = "written by hand"
@@ -168,7 +168,7 @@ def test_every_generated_reference_page_is_in_the_index_and_no_other_is() -> Non
 
 
 # --------------------------------------------------------------------------- #
-# docs/plugins/community/index.md
+# docs/plugins/alpha/index.md
 # --------------------------------------------------------------------------- #
 
 
@@ -177,7 +177,7 @@ def test_the_community_index_lists_the_plugins_that_ship_in_ash() -> None:
     text = page_text(COMMUNITY_INDEX)
     listed = re.findall(r"^- \*\*\[[^\]]+\]\(([^)]+)\)\*\*", text, re.MULTILINE)
     assert len(listed) == 6, listed
-    community = CONTENT / "docs" / "plugins" / "community"
+    community = CONTENT / "docs" / "plugins" / "alpha"
     pages = {p.name for p in community.glob("*-plugin.md")}
     assert set(listed) == pages, (sorted(set(listed) ^ pages), "lists vs pages")
 
