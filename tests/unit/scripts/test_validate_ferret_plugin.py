@@ -116,8 +116,8 @@ class TestParser:
         )
 
     def test_both_config_files_are_read(self, validator, tmp_path):
-        community = tmp_path / "community.yaml"
-        community.write_text(
+        alpha = tmp_path / "alpha.yaml"
+        alpha.write_text(
             "global_settings:\n  suppressions:\n    - path: a.md\n      rule_id: X\n",
             encoding="utf-8",
         )
@@ -126,9 +126,9 @@ class TestParser:
             "global_settings:\n  suppressions:\n    - path: b.md\n      rule_id: Y\n",
             encoding="utf-8",
         )
-        entries = validator.load_community_suppressions([community, ash])
+        entries = validator.load_repo_suppressions([alpha, ash])
         assert [(e["path"], e["source"]) for e in entries] == [
-            ("a.md", "community.yaml"),
+            ("a.md", "alpha.yaml"),
             ("b.md", "ash.yaml"),
         ]
 

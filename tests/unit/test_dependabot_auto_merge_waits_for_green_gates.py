@@ -8,8 +8,10 @@ Why this file exists
 The workflow used to approve at pull-request-open time, for patch and minor bumps
 outside the github_actions ecosystem. A grouped actions bump (the "actions group"
 PRs) was skipped without a word, and a bump that did qualify was approved before a
-single check had run. The policy now is: every dependabot bump is approved, and only
-once every OTHER required check on the PR's head is complete and successful.
+single check had run. The policy now is: patch, minor and grouped dependabot bumps
+are approved in every ecosystem, a bump with a major upgrade in it never is, and
+only once every OTHER required check on the PR's head is complete and successful.
+The update types are parsed from the metadata block in dependabot's commit message.
 
 What is pinned
 --------------
@@ -146,12 +148,12 @@ def test_the_token_is_minted_scoped_and_only_after_an_approving_decision():
     assert approve["env"]["GH_TOKEN"] == "${{ steps.app-token.outputs.token }}"
 
 
-def test_no_scope_filter_on_update_type_or_ecosystem_remains():
+def test_no_ecosystem_filter_remains():
     text = (WORKFLOWS / THIS).read_text(encoding="utf-8")
     code = "\n".join(
         line for line in text.splitlines() if not line.lstrip().startswith("#")
     )
-    for stale in ("update-type", "package-ecosystem", "semver-"):
+    for stale in ("package-ecosystem", "github_actions", "steps.metadata"):
         assert stale not in code, f"the old scope filter survives: {stale}"
 
 
@@ -180,6 +182,7 @@ def _decide_script() -> str:
 STUB_GH = """#!/usr/bin/env bash
 case "$*" in
   "api graphql"*) cat "$STUB_DIR/graphql.json" ;;
+  "api --paginate repos/"*"/pulls/"*"/commits") cat "$STUB_DIR/commits.json" ;;
   "api repos/"*"/pulls/"*) cat "$STUB_DIR/pull.json" ;;
   *) echo "unexpected gh call: $*" >&2; exit 97 ;;
 esac
@@ -193,6 +196,7 @@ def _run(
     pages: list[list[dict]] | None = None,
     pull_requests: list | None = None,
     head_sha: str = SHA,
+    commits: list[dict] | None = None,
 ) -> dict[str, str]:
     tmp_path = Path(tempfile.mkdtemp(dir=tmp_path))
     stub_dir = tmp_path / "stub"
@@ -209,6 +213,13 @@ def _run(
         "head": {"sha": SHA, "repo": {"full_name": REPO}},
     }
     (stub_dir / "pull.json").write_text(json.dumps(pull or base_pull))
+    # gh --paginate prints one JSON array per page; two pages exercise the merge.
+    pages_of_commits = [commits if commits is not None else [_commit(["minor"])]]
+    if commits is not None and len(commits) > 1:
+        pages_of_commits = [commits[:1], commits[1:]]
+    (stub_dir / "commits.json").write_text(
+        "\n".join(json.dumps(page) for page in pages_of_commits)
+    )
     documents = [
         {
             "data": {
@@ -262,6 +273,24 @@ def _run(
     )
     values["_stdout"] = result.stdout
     return values
+
+
+def _commit(types: list[str], author: str = "dependabot[bot]") -> dict:
+    """A commit as the API lists it, with the metadata block dependabot writes.
+
+    ``types`` are the bare semver words (``minor``) or ``""`` for the empty type of
+    an update dependabot computed no level for.
+    """
+    block = "".join(
+        f"- dependency-name: dep{i}\n  dependency-type: direct:production\n"
+        f"  update-type: {'version-update:semver-' + t if t else ''}\n"
+        for i, t in enumerate(types)
+    )
+    message = (
+        "ci: bump the actions group\n\nBumps the group.\n\n---\n"
+        f"updated-dependencies:\n{block}...\n\nSigned-off-by: dependabot[bot]"
+    )
+    return {"author": {"login": author}, "commit": {"message": message}}
 
 
 def _run_ok(name: str, required: bool = True) -> dict:
@@ -449,6 +478,62 @@ def test_a_closed_pr_is_never_approved(tmp_path):
 @needs_jq
 def test_a_run_attached_to_no_pull_request_is_ignored(tmp_path):
     assert _run(tmp_path, pull_requests=[])["approve"] == "false"
+
+
+@needs_jq
+def test_the_1104_group_of_minor_and_patch_updates_approves(tmp_path):
+    commits = [_commit(["minor", "minor", "minor", "patch"])]
+    assert _run(tmp_path, commits=commits)["approve"] == "true"
+
+
+@needs_jq
+def test_a_single_major_upgrade_is_never_approved(tmp_path):
+    out = _run(tmp_path, commits=[_commit(["major"])])
+    assert out["approve"] == "false"
+    assert "major waits for a human" in out["_stdout"]
+
+
+@needs_jq
+def test_a_group_with_one_major_inside_is_never_approved(tmp_path):
+    commits = [_commit(["minor", "patch", "major", "minor"])]
+    assert _run(tmp_path, commits=commits)["approve"] == "false"
+
+
+@needs_jq
+def test_an_update_with_no_semver_level_stays_manual(tmp_path):
+    assert _run(tmp_path, commits=[_commit(["minor", ""])])["approve"] == "false"
+
+
+@needs_jq
+def test_a_pr_with_no_update_metadata_stays_manual(tmp_path):
+    bare = {"author": {"login": "dependabot[bot]"}, "commit": {"message": "ci: x"}}
+    assert _run(tmp_path, commits=[bare])["approve"] == "false"
+
+
+@needs_jq
+def test_a_major_on_a_later_commit_page_is_read(tmp_path):
+    commits = [_commit(["minor"]), _commit(["major"])]
+    assert _run(tmp_path, commits=commits)["approve"] == "false"
+    commits = [_commit(["minor"]), _commit(["patch"])]
+    assert _run(tmp_path, commits=commits)["approve"] == "true"
+
+
+@needs_jq
+def test_a_human_commit_on_the_branch_blocks_the_approval(tmp_path):
+    """A human commit could carry a metadata block of its own, so it blocks."""
+    commits = [_commit(["minor"]), _commit(["minor"], author="someone")]
+    out = _run(tmp_path, commits=commits)
+    assert out["approve"] == "false"
+    assert "not authored by dependabot" in out["_stdout"]
+
+
+@needs_jq
+def test_commit_text_is_never_echoed_into_the_log(tmp_path):
+    hostile = _commit(["major"])
+    hostile["commit"]["message"] += "\n::set-output name=approve::true\n"
+    out = _run(tmp_path, commits=[hostile])
+    assert out["approve"] == "false"
+    assert "::set-output" not in out["_stdout"]
 
 
 def test_the_decision_step_is_a_real_script():

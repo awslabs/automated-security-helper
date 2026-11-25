@@ -20,7 +20,7 @@ version, alongside `[tool.commitizen] version_files` and
 `scripts/version_template_manager.py`'s `target_files`. A file absent from all
 three was invisible to all three, and two were: `docs/content/docs/cli-reference.md`
 and `docs/content/docs/mcp-performance-scalability.md` sat three minor releases
-behind, and `docs/content/docs/plugins/community/trivy-plugin.md` six, while a
+behind, and `docs/content/docs/plugins/alpha/trivy-plugin.md` six, while a
 test whose docstring described exactly that failure passed.
 
 A list cannot catch what is missing from it. So this walks every decodable file

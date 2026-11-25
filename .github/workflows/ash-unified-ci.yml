@@ -1546,7 +1546,7 @@ jobs:
   # Uses Python 3.12 exclusively.
   # ---------------------------------------------------------------------------
   scan-validation:
-    name: "scan (${{ matrix.method }}, ${{ matrix.os }})${{ matrix.oci-runner && matrix.oci-runner != 'docker' && format(' [{0}]', matrix.oci-runner) || '' }}${{ matrix.offline && ' [offline]' || '' }}${{ matrix.config-file == 'community' && ' - Community Plugins' || '' }}"
+    name: "scan (${{ matrix.method }}, ${{ matrix.os }})${{ matrix.oci-runner && matrix.oci-runner != 'docker' && format(' [{0}]', matrix.oci-runner) || '' }}${{ matrix.offline && ' [offline]' || '' }}${{ matrix.config-file == 'alpha' && ' - Alpha Plugins' || '' }}"
     # After the layer-cache warm-up on main; on a pull request the warm-up is skipped
     # and this starts at run creation. `!cancelled()`
     # rather than the implicit success(), so a skipped, failed or concurrency-cancelled
@@ -1654,11 +1654,11 @@ jobs:
           # Offline mode -- validates OFFLINE=YES Docker build (grype db + semgrep rulesets cached at build time)
           - { os: ubuntu-latest, method: python-container, config-file: default, oci-runner: docker, offline: true }
 
-          # Community plugins -- python-local on all platforms
-          - { os: ubuntu-latest, method: python-local, config-file: community }
-          - { os: ubuntu-24.04-arm, method: python-local, config-file: community }
-          - { os: macos-latest, method: python-local, config-file: community }
-          - { os: windows-latest, method: python-local, config-file: community }
+          # Alpha plugins -- python-local on all platforms
+          - { os: ubuntu-latest, method: python-local, config-file: alpha }
+          - { os: ubuntu-24.04-arm, method: python-local, config-file: alpha }
+          - { os: macos-latest, method: python-local, config-file: alpha }
+          - { os: windows-latest, method: python-local, config-file: alpha }
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -2023,9 +2023,9 @@ jobs:
         run: |
           pip install ".[cdk]"
           ash dependencies install
-          # hadolint and GuardDog are community scanners: their names are tools only
-          # once their module is loaded, hence the community config.
-          ash dependencies install --config .ash/.ash_community_plugins.yaml \
+          # hadolint and GuardDog are alpha scanners: their names are tools only
+          # once their module is loaded, hence the alpha config.
+          ash dependencies install --config .ash/.ash_alpha_plugins.yaml \
             --tool hadolint --tool guarddog
           # betterleaks is a community scanner too, and its module is not in that
           # file, so its install loads the module with an override as trivy-repo's
@@ -2041,7 +2041,7 @@ jobs:
       # then fetched into
       # trivy's own default cache, so that the offline pair has them: offline, ASH
       # updates nothing, and under sandbox-exec the cache is read-only, which an
-      # offline trivy-repo scan must survive. The hadolint, GuardDog and betterleaks community
+      # offline trivy-repo scan must survive. The hadolint, GuardDog and betterleaks alpha
       # modules join the config so the parity runs load their scanners too.
       - name: Install trivy-repo, enable it, and seed trivy's cache
         env:
@@ -2094,7 +2094,7 @@ jobs:
       # --require names the scanners that must actually have run, so a scanner that
       # is MISSING in both runs cannot pass parity by being absent; --require-offline
       # holds trivy-repo to that in the offline pair too. The config loads the Trivy
-      # community module, so trivy-repo, which shares the builtin trivy's code, is
+      # alpha module, so trivy-repo, which shares the builtin trivy's code, is
       # compared too, and the hadolint, GuardDog and betterleaks modules for their scanners.
       - name: Compare every scanner with and without the sandbox
         # The report path through the environment, not interpolated into the script,
@@ -2499,7 +2499,7 @@ jobs:
       # tell a scanner that could not run from one that should have.
       - name: Install the scanners the integration suite runs for real
         run: uv run ash dependencies install --tool bandit --tool actionlint --tool cfn-lint --tool cfn-guard --tool gitleaks --tool checkov --tool semgrep --tool zizmor
-      # hadolint is a community scanner, so nothing else in this job provisions it. The
+      # hadolint is an alpha scanner, so nothing else in this job provisions it. The
       # pinned, digest-verified release asset, through the same installer the image uses,
       # into ~/.ash/bin, which the suite step below puts on its own PATH.
       # ASH_REQUIRE_HADOLINT below makes a missing hadolint fail its tests.

@@ -5,7 +5,7 @@
 
 ``scripts/validate_ferret_plugin.py`` has a check named SUPPRESSION-COVERAGE. Its job is
 to make sure that a line the secret-keyword rule flags is excused by an entry in
-``.ash/.ash_community_plugins.yaml`` that names the line (``line_start``), and not by an
+``.ash/.ash_alpha_plugins.yaml`` that names the line (``line_start``), and not by an
 entry that excuses the rule for the whole file. A whole-file entry also hides every later
 hit in that file, which is why the plugin's development notes ask for line numbers.
 
@@ -69,7 +69,7 @@ def _failures_of(validator, name):
 
 
 def _coverage_failures(validator, suppressions):
-    validator.COMMUNITY_SUPPRESSIONS = suppressions
+    validator.REPO_SUPPRESSIONS = suppressions
     validator.check_suppression_coverage()
     return _failures_of(validator, COVERAGE_CHECK)
 
@@ -157,10 +157,10 @@ def test_a_hit_that_no_suppression_covers_is_left_to_the_keyword_check(
     ],
     ids=["entry without line numbers", "entry that names the line"],
 )
-def test_a_community_config_entry_is_judged_by_its_line_numbers(
+def test_an_alpha_config_entry_is_judged_by_its_line_numbers(
     validator, tmp_path, line_numbers, reported
 ):
-    config = tmp_path / ".ash" / ".ash_community_plugins.yaml"
+    config = tmp_path / ".ash" / ".ash_alpha_plugins.yaml"
     config.parent.mkdir()
     config.write_text(
         "global_settings:\n"
@@ -174,7 +174,7 @@ def test_a_community_config_entry_is_judged_by_its_line_numbers(
     # The loader reads the config files it is given. Its default is the list of this
     # repository's own configs, fixed when the module is loaded, so the file the
     # test wrote under tmp_path is named outright.
-    validator.COMMUNITY_SUPPRESSIONS = validator.load_community_suppressions([config])
+    validator.REPO_SUPPRESSIONS = validator.load_repo_suppressions([config])
 
     validator.check_suppression_coverage()
 

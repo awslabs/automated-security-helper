@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """The community-scanner CI legs are keyed off plugin metadata, not off a name list.
 
-``.github/scripts/community-scanner-legs.py`` reads the image's community module list
-(the Dockerfile's ``ASH_COMMUNITY_PLUGIN_MODULES``) and each module's own
+``.github/scripts/community-scanner-legs.py`` reads the image's alpha module list
+(the Dockerfile's ``ASH_ALPHA_PLUGIN_MODULES``) and each module's own
 ``ASH_SCANNERS``. The container action loads and checks whatever it names, so a
 community scanner reaches the leg by being listed in the image, and which registry
 serves a plugin plays no part. These tests pin that, and the betterleaks pieces that
@@ -39,7 +39,7 @@ def legs():
 def _dockerfile(tmp_path, *values):
     path = tmp_path / "Dockerfile"
     path.write_text(
-        "\n".join(f'ARG ASH_COMMUNITY_PLUGIN_MODULES="{v}"' for v in values) + "\n"
+        "\n".join(f'ARG ASH_ALPHA_PLUGIN_MODULES="{v}"' for v in values) + "\n"
     )
     return path
 

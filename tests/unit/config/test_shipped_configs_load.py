@@ -7,8 +7,8 @@ A plugin section refuses a key beside ``enabled`` that it does not declare, and 
 plugin's options refuse one they do not declare. Built-in sections are checked
 when the config loads; a plugin from ``ash_plugin_modules`` once the plugins are
 loaded (``ScanExecutionEngine.__init__``). Were the repository's own
-``.ash/.ash_community_plugins.yaml`` to keep ``snyk-code.severity_threshold`` beside
-``enabled``, every community-plugin CI leg would stop at engine init while
+``.ash/.ash_alpha_plugins.yaml`` to keep ``snyk-code.severity_threshold`` beside
+``enabled``, every alpha-plugin CI leg would stop at engine init while
 ``ash config validate`` on the same file passed; a doc or a plugin README showing
 options that way hands a user who copies them exit 3.
 

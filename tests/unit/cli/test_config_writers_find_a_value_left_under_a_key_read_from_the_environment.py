@@ -31,7 +31,7 @@ pytestmark = pytest.mark.unit
 
 SECTION_VARIABLE = "ASH_TEST_SECTION_NAME"
 OPTION_VARIABLE = "ASH_TEST_OPTION_NAME"
-SECTION = "community-demo-scanner"
+SECTION = "alpha-demo-scanner"
 SECTION_REFERENCE = "${" + SECTION_VARIABLE + "}"
 OPTION_REFERENCE = "${" + OPTION_VARIABLE + "}"
 READ = "needle"

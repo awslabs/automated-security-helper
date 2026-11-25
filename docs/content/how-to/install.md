@@ -224,7 +224,7 @@ ASH you started, so install ASH with one of the methods above first.
 
 The Nix shell supplies the tools of every built-in scanner except cdk-nag, which runs on
 the Python environment ASH is installed in, so install ASH with the `cdk` extra for it.
-It does not supply ferret-scan or the Snyk CLI, which two community plugins run.
+It does not supply ferret-scan or the Snyk CLI, which two alpha plugins run.
 
 The scan inside the shell gets your environment, so it reads the file `ASH_CONFIG` names
 first, as a local scan does, and then the file `--config` names. With no `--config`, the

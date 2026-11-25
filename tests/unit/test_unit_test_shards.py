@@ -3242,7 +3242,10 @@ class TestTheCombineGateReadsEveryOsAtOnce:
         )
         folded = self._folded_files(tmp_path, two_aliases, source)
         assert len(folded) == 1, folded
-        assert folded[0].endswith("automated_security_helper/mod.py"), folded
+        # Windows writes the folded path with backslashes, so compare the posix form.
+        assert (
+            Path(folded[0]).as_posix().endswith("automated_security_helper/mod.py")
+        ), folded
         # The fold lands on the file in the checkout the data is combined in. Comparing
         # against a runner prefix would fail whenever pytest's own temporary directory
         # sits under /home/runner, which is where a hosted runner puts it.

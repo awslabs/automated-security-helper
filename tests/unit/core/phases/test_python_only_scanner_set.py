@@ -7,7 +7,7 @@ ferret-scan (a Go binary) and cdk-nag (which needs Node.js through jsii). Scanne
 answer ``is_python_only`` for themselves; one that does not counts only when it runs
 its tool through uv.
 
-The set is pinned over every built-in and community scanner ASH ships, constructed
+The set is pinned over every built-in and alpha scanner ASH ships, constructed
 for real, and then through ScanPhase, which is what ``--python-only`` reaches.
 """
 
