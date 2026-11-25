@@ -1,0 +1,7204 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Automated Security Helper, the agentic security harness: security scanning for code, infrastructure, secrets, and dependencies.">
+      
+      
+      
+        <link rel="canonical" href="https://awslabs.github.io/automated-security-helper/latest/reference/scanner-facets/">
+      
+      
+        <link rel="prev" href="../scanners/">
+      
+      
+        <link rel="next" href="../reporters/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="data:,">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Scanner facets - ASH - Automated Security Helper</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/ash.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  
+  <!-- Phosphor SVG icon license:
+  MIT License
+
+Copyright (c) 2023 Phosphor Icons
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+  -->
+  <meta name="theme-color" content="#0f141a">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Scanner facets · ASH">
+  <meta property="og:description" content="Automated Security Helper, the agentic security harness: security scanning for code, infrastructure, secrets, and dependencies.">
+  <link rel="preload" href="../../assets/fonts/open-sans.woff2" as="font" type="font/woff2" crossorigin>
+  <noscript>
+    <style>
+      .ash-search-trigger, .ash-menu-toggle, .ash-motion-toggle, .ash-copy,
+       .ash-mode-picker, .ash-filter, [data-ash-run], [data-scan-controls],
+       [data-ash-drawer], [data-ash-handbook] { display: none !important; }
+       @media (max-width: 960px) {
+        .ash-header { position: relative; height: auto; }
+      }
+    </style>
+  </noscript>
+
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="custom">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#scanner-facets-reference" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+<a class="ash-skip" href="#main-content">Skip to content</a>
+<header class="md-header ash-header" data-md-component="header">
+  <nav class="ash-header__inner md-grid" aria-label="Main navigation">
+    <a class="ash-brand" href="../.." aria-label="ASH home" data-md-component="logo">
+      <span class="ash-brand__name">ASH<span class="ash-brand__subtitle">Automated Security Helper</span></span>
+    </a>
+    <div class="ash-header__links">
+      <a href="../.." >Overview</a>
+      <a href="../../docs/quick-start-guide/" aria-current="true">Documentation</a>
+      <a href="../..#scanners">Scanners</a>
+      <a href="../../integrations/" >Integrations</a>
+    </div>
+    <div class="ash-sr-only md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">ASH - Automated Security Helper</div>
+        <div class="md-header__topic" data-md-component="header-topic">Scanner facets</div>
+      </div>
+    </div>
+    <div class="ash-header__actions">
+      
+        <button class="ash-handbook-toggle" type="button" data-ash-handbook aria-label="Browse all documentation" aria-haspopup="dialog" aria-controls="ash-handbook" aria-expanded="false" disabled><span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M232,50H160a38,38,0,0,0-32,17.55A38,38,0,0,0,96,50H24a6,6,0,0,0-6,6V200a6,6,0,0,0,6,6H96a26,26,0,0,1,26,26,6,6,0,0,0,12,0,26,26,0,0,1,26-26h72a6,6,0,0,0,6-6V56A6,6,0,0,0,232,50ZM96,194H30V62H96a26,26,0,0,1,26,26V204.31A37.86,37.86,0,0,0,96,194Zm130,0H160a37.87,37.87,0,0,0-26,10.32V88a26,26,0,0,1,26-26h66ZM160,90h40a6,6,0,0,1,0,12H160a6,6,0,0,1,0-12Zm46,38a6,6,0,0,1-6,6H160a6,6,0,0,1,0-12h40A6,6,0,0,1,206,128Zm0,32a6,6,0,0,1-6,6H160a6,6,0,0,1,0-12h40A6,6,0,0,1,206,160Z"/></svg></span><span>Contents</span></button>
+      
+      <button class="ash-search-trigger" type="button" data-ash-search aria-label="Search documentation" aria-haspopup="dialog" aria-controls="ash-search-dialog" aria-expanded="false" disabled>
+        <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M228.24,219.76l-51.38-51.38a86.15,86.15,0,1,0-8.48,8.48l51.38,51.38a6,6,0,0,0,8.48-8.48ZM38,112a74,74,0,1,1,74,74A74.09,74.09,0,0,1,38,112Z"/></svg></span><span>Search docs</span><kbd data-ash-shortcut>⌘ K</kbd>
+      </button>
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M122,40V16a6,6,0,0,1,12,0V40a6,6,0,0,1-12,0Zm68,88a62,62,0,1,1-62-62A62.07,62.07,0,0,1,190,128Zm-12,0a50,50,0,1,0-50,50A50.06,50.06,0,0,0,178,128ZM59.76,68.24a6,6,0,1,0,8.48-8.48l-16-16a6,6,0,0,0-8.48,8.48Zm0,119.52-16,16a6,6,0,1,0,8.48,8.48l16-16a6,6,0,1,0-8.48-8.48ZM192,70a6,6,0,0,0,4.24-1.76l16-16a6,6,0,0,0-8.48-8.48l-16,16A6,6,0,0,0,192,70Zm4.24,117.76a6,6,0,0,0-8.48,8.48l16,16a6,6,0,0,0,8.48-8.48ZM46,128a6,6,0,0,0-6-6H16a6,6,0,0,0,0,12H40A6,6,0,0,0,46,128Zm82,82a6,6,0,0,0-6,6v24a6,6,0,0,0,12,0V216A6,6,0,0,0,128,210Zm112-88H216a6,6,0,0,0,0,12h24a6,6,0,0,0,0-12Z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M232.13,143.64a6,6,0,0,0-6-1.49A90.07,90.07,0,0,1,113.86,29.85a6,6,0,0,0-7.49-7.48A102.88,102.88,0,0,0,54.48,58.68,102,102,0,0,0,197.32,201.52a102.88,102.88,0,0,0,36.31-51.89A6,6,0,0,0,232.13,143.64Zm-42,48.29a90,90,0,0,1-126-126A90.9,90.9,0,0,1,99.65,37.66,102.06,102.06,0,0,0,218.34,156.35,90.9,90.9,0,0,1,190.1,191.93Z"/></svg>
+      </label>
+    
+  
+</form>
+        <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+      
+      <template data-ash-theme-icons>
+        <span data-color-scheme="default"><span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M122,40V16a6,6,0,0,1,12,0V40a6,6,0,0,1-12,0Zm68,88a62,62,0,1,1-62-62A62.07,62.07,0,0,1,190,128Zm-12,0a50,50,0,1,0-50,50A50.06,50.06,0,0,0,178,128ZM59.76,68.24a6,6,0,1,0,8.48-8.48l-16-16a6,6,0,0,0-8.48,8.48Zm0,119.52-16,16a6,6,0,1,0,8.48,8.48l16-16a6,6,0,1,0-8.48-8.48ZM192,70a6,6,0,0,0,4.24-1.76l16-16a6,6,0,0,0-8.48-8.48l-16,16A6,6,0,0,0,192,70Zm4.24,117.76a6,6,0,0,0-8.48,8.48l16,16a6,6,0,0,0,8.48-8.48ZM46,128a6,6,0,0,0-6-6H16a6,6,0,0,0,0,12H40A6,6,0,0,0,46,128Zm82,82a6,6,0,0,0-6,6v24a6,6,0,0,0,12,0V216A6,6,0,0,0,128,210Zm112-88H216a6,6,0,0,0,0,12h24a6,6,0,0,0,0-12Z"/></svg></span></span>
+        <span data-color-scheme="slate"><span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M232.13,143.64a6,6,0,0,0-6-1.49A90.07,90.07,0,0,1,113.86,29.85a6,6,0,0,0-7.49-7.48A102.88,102.88,0,0,0,54.48,58.68,102,102,0,0,0,197.32,201.52a102.88,102.88,0,0,0,36.31-51.89A6,6,0,0,0,232.13,143.64Zm-42,48.29a90,90,0,0,1-126-126A90.9,90.9,0,0,1,99.65,37.66,102.06,102.06,0,0,0,218.34,156.35,90.9,90.9,0,0,1,190.1,191.93Z"/></svg></span></span>
+      </template>
+      <a class="ash-github" href="https://github.com/awslabs/automated-security-helper" aria-label="ASH on GitHub">
+        <span>GitHub</span><span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M198,64V168a6,6,0,0,1-12,0V78.48L68.24,196.24a6,6,0,0,1-8.48-8.48L177.52,70H88a6,6,0,0,1,0-12H192A6,6,0,0,1,198,64Z"/></svg></span>
+      </a>
+      <button class="ash-menu-toggle" type="button" aria-label="Open navigation" aria-haspopup="dialog" aria-expanded="false" aria-controls="ash-mobile-menu" data-ash-menu disabled>
+        <span class="ash-menu-glyph" aria-hidden="true"><i></i><i></i></span>
+      </button>
+    </div>
+    
+      <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M228.24,219.76l-51.38-51.38a86.15,86.15,0,1,0-8.48,8.48l51.38,51.38a6,6,0,0,0,8.48-8.48ZM38,112a74,74,0,1,1,74,74A74.09,74.09,0,0,1,38,112Z"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M222,128a6,6,0,0,1-6,6H54.49l61.75,61.76a6,6,0,1,1-8.48,8.48l-72-72a6,6,0,0,1,0-8.48l72-72a6,6,0,0,1,8.48,8.48L54.49,122H216A6,6,0,0,1,222,128Z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+          <a href="javascript:void(0)" class="md-search__icon md-icon" title="Share" aria-label="Share" data-clipboard data-clipboard-text="" data-md-component="search-share" tabindex="-1">
+            
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9a3 3 0 0 0-3 3 3 3 0 0 0 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.15c-.05.21-.08.43-.08.66 0 1.61 1.31 2.91 2.92 2.91s2.92-1.3 2.92-2.91A2.92 2.92 0 0 0 18 16.08"/></svg>
+          </a>
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M204.24,195.76a6,6,0,1,1-8.48,8.48L128,136.49,60.24,204.24a6,6,0,0,1-8.48-8.48L119.51,128,51.76,60.24a6,6,0,0,1,8.48-8.48L128,119.51l67.76-67.75a6,6,0,0,1,8.48,8.48L136.49,128Z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+    
+  </nav>
+  <dialog class="ash-mobile-menu" id="ash-mobile-menu" aria-label="Site navigation" hidden>
+    <div class="ash-mobile-menu__heading"><p class="ash-mobile-menu__eyebrow">Navigation</p><button type="button" data-ash-menu-close aria-label="Close navigation"><span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M204.24,195.76a6,6,0,1,1-8.48,8.48L128,136.49,60.24,204.24a6,6,0,0,1-8.48-8.48L119.51,128,51.76,60.24a6,6,0,0,1,8.48-8.48L128,119.51l67.76-67.75a6,6,0,0,1,8.48,8.48L136.49,128Z"/></svg></span></button></div>
+    <a href="../..">Overview <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M198,64V168a6,6,0,0,1-12,0V78.48L68.24,196.24a6,6,0,0,1-8.48-8.48L177.52,70H88a6,6,0,0,1,0-12H192A6,6,0,0,1,198,64Z"/></svg></span></a>
+    <a href="../../docs/quick-start-guide/">Documentation <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M198,64V168a6,6,0,0,1-12,0V78.48L68.24,196.24a6,6,0,0,1-8.48-8.48L177.52,70H88a6,6,0,0,1,0-12H192A6,6,0,0,1,198,64Z"/></svg></span></a>
+    <a href="../..#scanners">Scanners <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M198,64V168a6,6,0,0,1-12,0V78.48L68.24,196.24a6,6,0,0,1-8.48-8.48L177.52,70H88a6,6,0,0,1,0-12H192A6,6,0,0,1,198,64Z"/></svg></span></a>
+    <a href="../../integrations/">Integrations <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M198,64V168a6,6,0,0,1-12,0V78.48L68.24,196.24a6,6,0,0,1-8.48-8.48L177.52,70H88a6,6,0,0,1,0-12H192A6,6,0,0,1,198,64Z"/></svg></span></a>
+    <a href="https://github.com/awslabs/automated-security-helper">GitHub <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M198,64V168a6,6,0,0,1-12,0V78.48L68.24,196.24a6,6,0,0,1-8.48-8.48L177.52,70H88a6,6,0,0,1,0-12H192A6,6,0,0,1,198,64Z"/></svg></span></a>
+    
+      <button type="button" data-ash-drawer>Browse all documentation <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M232,50H160a38,38,0,0,0-32,17.55A38,38,0,0,0,96,50H24a6,6,0,0,0-6,6V200a6,6,0,0,0,6,6H96a26,26,0,0,1,26,26,6,6,0,0,0,12,0,26,26,0,0,1,26-26h72a6,6,0,0,0,6-6V56A6,6,0,0,0,232,50ZM96,194H30V62H96a26,26,0,0,1,26,26V204.31A37.86,37.86,0,0,0,96,194Zm130,0H160a37.87,37.87,0,0,0-26,10.32V88a26,26,0,0,1,26-26h66ZM160,90h40a6,6,0,0,1,0,12H160a6,6,0,0,1,0-12Zm46,38a6,6,0,0,1-6,6H160a6,6,0,0,1,0-12h40A6,6,0,0,1,206,128Zm0,32a6,6,0,0,1-6,6H160a6,6,0,0,1,0-12h40A6,6,0,0,1,206,160Z"/></svg></span></button>
+    
+  </dialog>
+  <noscript>
+    <nav class="ash-static-navigation" aria-label="Site navigation">
+      <a href="../..">Overview</a>
+      <a href="../../docs/quick-start-guide/">Documentation</a>
+      <a href="../..#scanners">Scanners</a>
+      <a href="../../integrations/">Integrations</a>
+      <a href="https://github.com/awslabs/automated-security-helper">GitHub</a>
+    </nav>
+  </noscript>
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="ASH - Automated Security Helper" class="md-nav__button md-logo" aria-label="ASH - Automated Security Helper" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    ASH - Automated Security Helper
+  </label>
+  
+    <div class="md-nav__source">
+      
+<a href="https://github.com/awslabs/automated-security-helper" title="ASH on GitHub" class="md-source" aria-label="ASH on GitHub">
+  <span class="ash-icon md-source__icon" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M230,64a30,30,0,1,0-36,29.4V112a10,10,0,0,1-10,10H96a21.84,21.84,0,0,0-10,2.42v-31a30,30,0,1,0-12,0v69.2a30,30,0,1,0,12,0V144a10,10,0,0,1,10-10h88a22,22,0,0,0,22-22V93.4A30.05,30.05,0,0,0,230,64ZM62,64A18,18,0,1,1,80,82,18,18,0,0,1,62,64ZM98,192a18,18,0,1,1-18-18A18,18,0,0,1,98,192ZM200,82a18,18,0,1,1,18-18A18,18,0,0,1,200,82Z"/></svg></span>
+  <span class="md-source__repository">ASH on GitHub</span>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../personas/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Who uses ASH
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_2" id="__nav_2_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Who uses ASH
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../personas/developer/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ASH for developers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../personas/security-reviewer/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ASH for security reviewers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../personas/security-analyst/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ASH for security analysts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../personas/sdlc-aidlc/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ASH across the SDLC and AI-DLC
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../getting-started/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting started
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_3" id="__nav_3_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/local/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scan on your machine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/ci/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Add ASH to CI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/agents/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Connect an AI agent
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/platform-teams/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Roll out across repositories
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How-to guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    How-to guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/install/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Install ASH
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/advanced-usage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Manage scanner tools
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/configure/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configure ASH
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/choose-scanners/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Choose scanners
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/set-the-gate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Set the gate
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/suppress-findings/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Suppress findings
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/read-results/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Read scan results
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/export-reports/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Export reports
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/deduplicate-findings/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deduplicate findings
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/scanner-sandbox/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Enable the scanner sandbox
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/run-in-a-container/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Run in a container
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/run-offline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Run offline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../integrations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Choose an integration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/pre-commit/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Run ASH with pre-commit
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/express-mode/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Express mode
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_16" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_16" id="__nav_4_16_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CI systems
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_16_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_16">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    CI systems
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/ci/github-actions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GitHub Actions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/ci/gitlab-ci/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GitLab CI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/ci/other-ci/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Other CI systems
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/scale-large-repos/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scale to large repositories
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/mcp-server/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Run the MCP server
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/agent-plugins/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Install an agent plugin
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/aidlc-workflows/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Use ASH with AI-DLC workflows
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/genai-steering-guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ASH GenAI integration guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/deploy-on-aws/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deploy on AWS
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/troubleshoot/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshoot
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/migrate-from-v2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Migrate from v2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Concepts
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/how-ash-works/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How ASH works
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/trust-model/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration trust model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/scanning-untrusted-code/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scanning untrusted code
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/sandbox/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scanner sandbox
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/content-databases/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Content databases
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/suppressions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Suppressions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/glossary/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Glossary
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" checked>
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_6" id="__nav_6_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../environment-variables/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Environment variables
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../scanners/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scanners
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scanner facets
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scanner facets
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Summary
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#actionlint" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        actionlint
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bandit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bandit
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cdk-nag" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        cdk-nag
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cfn-guard" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        cfn-guard
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cfn-lint" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        cfn-lint
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cfn-nag" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        cfn-nag
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#checkov" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        checkov
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#detect-secrets" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        detect-secrets
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#gitleaks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        gitleaks
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#grype" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        grype
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#npm-audit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        npm-audit
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#opengrep" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        opengrep
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#semgrep" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        semgrep
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#syft" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        syft
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#trivy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        trivy
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#zizmor" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        zizmor
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#betterleaks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        betterleaks
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ferret-scan" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ferret-scan
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#guarddog" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        guarddog
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#hadolint" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        hadolint
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#snyk-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        snyk-code
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#trivy-repo" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        trivy-repo
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reporters/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reporters
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../converters/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Converters
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mcp-tools/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP tools
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../exit-codes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Exit codes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../output-files/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Output files
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../coverage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Coverage by language
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../python-api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Python API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../plugins/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Plugins
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_7" id="__nav_7_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Plugins
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_7_2" id="__nav_7_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Built-in scanner pages
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_7_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Built-in scanner pages
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/actionlint/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    actionlint
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/cfn-lint-and-cfn-guard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    cfn-lint and cfn-guard
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/gitleaks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Gitleaks scanner
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/trivy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Trivy filesystem scanner (trivy)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/builtin/zizmor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    zizmor (GitHub Actions)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7_3" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../docs/plugins/community/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Community plugins
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_7_3" id="__nav_7_3_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_7_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Community plugins
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/community/betterleaks-plugin/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Betterleaks (community plugin)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/community/ferret-scan-plugin/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ASH Ferret Scan Plugin
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/community/guarddog-plugin/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GuardDog scanner (community plugin)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/community/hadolint-plugin/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    hadolint (community plugin)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/community/snyk-plugin/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ASH Snyk Code Plugin
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/community/snyk-plugin-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Snyk Plugin CI/CD Setup Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/community/trivy-plugin/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Trivy Plugin
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../plugins/aws/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    AWS reporters
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../plugins/write-a-scanner/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Write a scanner plugin
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../plugins/write-a-reporter/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Write a reporter plugin
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../plugins/write-a-converter/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Write a converter plugin
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../plugins/event-subscribers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Subscribe to scan events
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../contributing/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_8" id="__nav_8_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Contributing
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/testing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/documentation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Documentation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer-guide/interface-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Interface design system
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer-guide/interface-review/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Interaction surface inventory
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer-guide/high-end-design-review/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Design & UX review
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/releases/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Releases
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../faq/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    FAQ
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../support/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Support
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Summary
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#actionlint" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        actionlint
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bandit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bandit
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cdk-nag" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        cdk-nag
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cfn-guard" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        cfn-guard
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cfn-lint" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        cfn-lint
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cfn-nag" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        cfn-nag
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#checkov" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        checkov
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#detect-secrets" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        detect-secrets
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#gitleaks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        gitleaks
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#grype" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        grype
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#npm-audit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        npm-audit
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#opengrep" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        opengrep
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#semgrep" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        semgrep
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#syft" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        syft
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#trivy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        trivy
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#zizmor" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        zizmor
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#betterleaks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        betterleaks
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ferret-scan" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ferret-scan
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#guarddog" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        guarddog
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#hadolint" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        hadolint
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#snyk-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        snyk-code
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#trivy-repo" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        trivy-repo
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+                
+
+
+
+  
+
+
+  <nav class="md-path" aria-label="Navigation" >
+    <ol class="md-path__list">
+      
+        
+  
+  
+    <li class="md-path__item">
+      <a href="../.." class="md-path__link">
+        
+  <span class="md-ellipsis">
+    Home
+  </span>
+
+      </a>
+    </li>
+  
+
+      
+      
+        
+  
+  
+    
+    
+      <li class="md-path__item">
+        <a href="../" class="md-path__link">
+          
+  <span class="md-ellipsis">
+    Reference
+  </span>
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ol>
+  </nav>
+
+              
+              <article class="md-content__inner md-typeset">
+                
+  <div class="ash-doc-label">Documentation</div>
+  <div id="main-content" tabindex="-1">
+    
+
+
+  
+  
+
+
+<!--
+  Generated by scripts/generate_facets_reference.py from the scanner facets register (the `facets` class attribute of every scanner, automated_security_helper/base/scanner_facets.py).
+  Do not edit this file by hand: change the code or the generator, then run
+    uv run python scripts/generate_facets_reference.py
+  CI runs `uv run python scripts/generate_facets_reference.py --check` and fails when this file is stale.
+
+  Anchors: each scanner's heading id is its config name (#bandit).
+-->
+
+<h1 id="scanner-facets-reference">Scanner facets reference<a class="headerlink" href="#scanner-facets-reference" title="Permanent link">&para;</a></h1>
+<p>This page is generated from the scanner facets register in the ASH source code by <code>scripts/generate_facets_reference.py</code>. Edits made to this file by hand are overwritten the next time it is generated.</p>
+<p>ASH ships 22 scanners, and every one declares, per facet of the shared vocabulary, whether its native output maps into the shared pipeline. The register is production code (<code>automated_security_helper/base/scanner_facets.py</code>): the declaration has runtime consumers, and a scanner without one is refused by the registry totality test. The three states:</p>
+<ul>
+<li><code>mapped</code>: the facet lands where the shared pipeline reads it, and the cell names the native field it comes from. The corpus-consistency gate (<code>tests/unit/plugin_modules/test_scanner_facets_corpus_consistency.py</code>) holds these cells against the committed fixtures.</li>
+<li><code>mappable-dropped</code>: the native output carries the value and ASH discards it today: a roadmap record, not a promise. The cell names the native field and why it is dropped.</li>
+<li><code>n/a</code>: this scanner class cannot have the facet (or its output was not read), with the reason.</li>
+</ul>
+<p>The facet vocabulary, in declaration order: <code>rule_id</code>, <code>severity</code>, <code>file_path</code>, <code>line_range</code>, <code>column</code>, <code>message</code>, <code>resource_id</code>, <code>resource_type</code>, <code>package_name</code>, <code>package_version</code>, <code>package_path</code>, <code>taxonomy_cve</code>, <code>taxonomy_cwe</code>, <code>fingerprints</code>, <code>fix_available</code>, <code>remediation_text</code>, <code>snippet</code>, <code>references</code>, <code>tags</code>, <code>extras</code>.</p>
+<h2 id="summary">Summary<a class="headerlink" href="#summary" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Scanner</th>
+<th>Mapped</th>
+<th>Mappable, dropped</th>
+<th>Not applicable</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="#actionlint"><code>actionlint</code></a></td>
+<td>10</td>
+<td>1</td>
+<td>9</td>
+</tr>
+<tr>
+<td><a href="#bandit"><code>bandit</code></a></td>
+<td>9</td>
+<td>2</td>
+<td>9</td>
+</tr>
+<tr>
+<td><a href="#cdk-nag"><code>cdk-nag</code></a></td>
+<td>11</td>
+<td>1</td>
+<td>8</td>
+</tr>
+<tr>
+<td><a href="#cfn-guard"><code>cfn-guard</code></a></td>
+<td>7</td>
+<td>1</td>
+<td>12</td>
+</tr>
+<tr>
+<td><a href="#cfn-lint"><code>cfn-lint</code></a></td>
+<td>6</td>
+<td>2</td>
+<td>12</td>
+</tr>
+<tr>
+<td><a href="#cfn-nag"><code>cfn-nag</code></a></td>
+<td>0</td>
+<td>1</td>
+<td>19</td>
+</tr>
+<tr>
+<td><a href="#checkov"><code>checkov</code></a></td>
+<td>7</td>
+<td>1</td>
+<td>12</td>
+</tr>
+<tr>
+<td><a href="#detect-secrets"><code>detect-secrets</code></a></td>
+<td>8</td>
+<td>0</td>
+<td>12</td>
+</tr>
+<tr>
+<td><a href="#gitleaks"><code>gitleaks</code></a></td>
+<td>9</td>
+<td>1</td>
+<td>10</td>
+</tr>
+<tr>
+<td><a href="#grype"><code>grype</code></a></td>
+<td>1</td>
+<td>1</td>
+<td>18</td>
+</tr>
+<tr>
+<td><a href="#npm-audit"><code>npm-audit</code></a></td>
+<td>10</td>
+<td>3</td>
+<td>7</td>
+</tr>
+<tr>
+<td><a href="#opengrep"><code>opengrep</code></a></td>
+<td>10</td>
+<td>3</td>
+<td>7</td>
+</tr>
+<tr>
+<td><a href="#semgrep"><code>semgrep</code></a></td>
+<td>9</td>
+<td>3</td>
+<td>8</td>
+</tr>
+<tr>
+<td><a href="#syft"><code>syft</code></a></td>
+<td>0</td>
+<td>2</td>
+<td>18</td>
+</tr>
+<tr>
+<td><a href="#trivy"><code>trivy</code></a></td>
+<td>11</td>
+<td>4</td>
+<td>5</td>
+</tr>
+<tr>
+<td><a href="#zizmor"><code>zizmor</code></a></td>
+<td>8</td>
+<td>2</td>
+<td>10</td>
+</tr>
+<tr>
+<td><a href="#betterleaks"><code>betterleaks</code></a></td>
+<td>9</td>
+<td>1</td>
+<td>10</td>
+</tr>
+<tr>
+<td><a href="#ferret-scan"><code>ferret-scan</code></a></td>
+<td>2</td>
+<td>0</td>
+<td>18</td>
+</tr>
+<tr>
+<td><a href="#guarddog"><code>guarddog</code></a></td>
+<td>10</td>
+<td>2</td>
+<td>8</td>
+</tr>
+<tr>
+<td><a href="#hadolint"><code>hadolint</code></a></td>
+<td>7</td>
+<td>0</td>
+<td>13</td>
+</tr>
+<tr>
+<td><a href="#snyk-code"><code>snyk-code</code></a></td>
+<td>2</td>
+<td>2</td>
+<td>16</td>
+</tr>
+<tr>
+<td><a href="#trivy-repo"><code>trivy-repo</code></a></td>
+<td>11</td>
+<td>4</td>
+<td>5</td>
+</tr>
+</tbody>
+</table>
+<h2 id="actionlint"><code>actionlint</code><a class="headerlink" href="#actionlint" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Class: <code>automated_security_helper.plugin_modules.ash_builtin.scanners.actionlint_scanner.ActionlintScanner</code></li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Facet</th>
+<th>State</th>
+<th>Native field</th>
+<th>Reason</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>rule_id</code></td>
+<td><code>mapped</code></td>
+<td>errors[].kind</td>
+<td></td>
+</tr>
+<tr>
+<td><code>severity</code></td>
+<td><code>mapped</code></td>
+<td>errors[].kind (ASH severity table; a message matching the untrusted-input pattern raises it to HIGH)</td>
+<td></td>
+</tr>
+<tr>
+<td><code>file_path</code></td>
+<td><code>mapped</code></td>
+<td>errors[].filepath</td>
+<td></td>
+</tr>
+<tr>
+<td><code>line_range</code></td>
+<td><code>mapped</code></td>
+<td>errors[].line</td>
+<td></td>
+</tr>
+<tr>
+<td><code>column</code></td>
+<td><code>mapped</code></td>
+<td>errors[].column / errors[].end_column</td>
+<td></td>
+</tr>
+<tr>
+<td><code>message</code></td>
+<td><code>mapped</code></td>
+<td>errors[].message</td>
+<td></td>
+</tr>
+<tr>
+<td><code>resource_id</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>locator-only: the output carries file, line and column but no job or step identifier; a workflow position is a locator, never a resource id</td>
+</tr>
+<tr>
+<td><code>resource_type</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>locator-only: no resource exists in the output, so no resource type either</td>
+</tr>
+<tr>
+<td><code>package_name</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>workflow lint findings name a file position, not a package</td>
+</tr>
+<tr>
+<td><code>package_version</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>workflow lint findings name a file position, not a package</td>
+</tr>
+<tr>
+<td><code>package_path</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>workflow lint findings name a file position, not a package</td>
+</tr>
+<tr>
+<td><code>taxonomy_cve</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>actionlint check kinds carry no CVE ids</td>
+</tr>
+<tr>
+<td><code>taxonomy_cwe</code></td>
+<td><code>mapped</code></td>
+<td>errors[].kind == "credentials" (ASH writes the CWE-798 tag; no native CWE field)</td>
+<td></td>
+</tr>
+<tr>
+<td><code>fingerprints</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>actionlint's JSON carries no fingerprint; finding identity keys on scanner/rule/file</td>
+</tr>
+<tr>
+<td><code>fix_available</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>actionlint findings carry no fix data</td>
+</tr>
+<tr>
+<td><code>remediation_text</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>actionlint publishes the check message and no separate remediation field</td>
+</tr>
+<tr>
+<td><code>snippet</code></td>
+<td><code>mapped</code></td>
+<td>errors[].snippet (dropped on a line with a credentials finding, where it would hold the password)</td>
+<td></td>
+</tr>
+<tr>
+<td><code>references</code></td>
+<td><code>mappable-dropped</code></td>
+<td>errors[].kind (ASH builds the pinned checks.md helpUri; no native URL field)</td>
+<td>the helpUri is written at rule level only: the flat reader takes references from result relatedLocations, so the help link is discarded today</td>
+</tr>
+<tr>
+<td><code>tags</code></td>
+<td><code>mapped</code></td>
+<td>errors[].kind == "credentials" (ASH writes the secret/CWE-798 tags; no native tags field)</td>
+<td></td>
+</tr>
+<tr>
+<td><code>extras</code></td>
+<td><code>mapped</code></td>
+<td>ASH-written result properties (issue_severity and actionlint_kind, from errors[].kind); no native property bag</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h2 id="bandit"><code>bandit</code><a class="headerlink" href="#bandit" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Class: <code>automated_security_helper.plugin_modules.ash_builtin.scanners.bandit_scanner.BanditScanner</code></li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Facet</th>
+<th>State</th>
+<th>Native field</th>
+<th>Reason</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>rule_id</code></td>
+<td><code>mapped</code></td>
+<td>results[].ruleId</td>
+<td></td>
+</tr>
+<tr>
+<td><code>severity</code></td>
+<td><code>mapped</code></td>
+<td>results[].properties.issue_severity (and results[].level)</td>
+<td></td>
+</tr>
+<tr>
+<td><code>file_path</code></td>
+<td><code>mapped</code></td>
+<td>results[].locations[].physicalLocation.artifactLocation.uri</td>
+<td></td>
+</tr>
+<tr>
+<td><code>line_range</code></td>
+<td><code>mapped</code></td>
+<td>results[].locations[].physicalLocation.region.startLine/endLine</td>
+<td></td>
+</tr>
+<tr>
+<td><code>column</code></td>
+<td><code>mapped</code></td>
+<td>results[].locations[].physicalLocation.region.startColumn/endColumn</td>
+<td></td>
+</tr>
+<tr>
+<td><code>message</code></td>
+<td><code>mapped</code></td>
+<td>results[].message.text (ASH masks secret-shaped values in it)</td>
+<td></td>
+</tr>
+<tr>
+<td><code>resource_id</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>pure Python code SAST; the only locators in its output are file paths, which are never resource ids</td>
+</tr>
+<tr>
+<td><code>resource_type</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>pure Python code SAST; no deployable resource exists in the output</td>
+</tr>
+<tr>
+<td><code>package_name</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>code findings name a file and a rule, not a package</td>
+</tr>
+<tr>
+<td><code>package_version</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>code findings name a file and a rule, not a package</td>
+</tr>
+<tr>
+<td><code>package_path</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>code findings name a file and a rule, not a package</td>
+</tr>
+<tr>
+<td><code>taxonomy_cve</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>code rules carry no CVE ids</td>
+</tr>
+<tr>
+<td><code>taxonomy_cwe</code></td>
+<td><code>mapped</code></td>
+<td>tool.driver.rules[].properties.tags (external/cwe/cwe-&lt;n&gt;)</td>
+<td></td>
+</tr>
+<tr>
+<td><code>fingerprints</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>bandit SARIF results carry no fingerprints (0 in the M0 capture); finding identity keys on scanner/rule/file</td>
+</tr>
+<tr>
+<td><code>fix_available</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>bandit findings carry no fix or fixed-version data</td>
+</tr>
+<tr>
+<td><code>remediation_text</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>bandit publishes the issue text and a docs link, no remediation field</td>
+</tr>
+<tr>
+<td><code>snippet</code></td>
+<td><code>mapped</code></td>
+<td>results[].locations[].physicalLocation.region.snippet.text (settled by the M0 capture)</td>
+<td></td>
+</tr>
+<tr>
+<td><code>references</code></td>
+<td><code>mappable-dropped</code></td>
+<td>tool.driver.rules[].helpUri</td>
+<td>rule-level only: the flat reader takes references from result relatedLocations, so the help link is discarded today</td>
+</tr>
+<tr>
+<td><code>tags</code></td>
+<td><code>mappable-dropped</code></td>
+<td>tool.driver.rules[].properties.tags</td>
+<td>rule-level only: the flat reader takes tags from result properties, so the rule tags are discarded today (they still feed the CWE read)</td>
+</tr>
+<tr>
+<td><code>extras</code></td>
+<td><code>mapped</code></td>
+<td>results[].properties (issue_confidence, issue_severity)</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h2 id="cdk-nag"><code>cdk-nag</code><a class="headerlink" href="#cdk-nag" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Class: <code>automated_security_helper.plugin_modules.ash_builtin.scanners.cdk_nag_scanner.CdkNagScanner</code></li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Facet</th>
+<th>State</th>
+<th>Native field</th>
+<th>Reason</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>rule_id</code></td>
+<td><code>mapped</code></td>
+<td>violation "ruleName"</td>
+<td></td>
+</tr>
+<tr>
+<td><code>severity</code></td>
+<td><code>mapped</code></td>
+<td>violation "severity" (normalized rule level)</td>
+<td></td>
+</tr>
+<tr>
+<td><code>file_path</code></td>
+<td><code>mapped</code></td>
+<td>the scanned template's path (the wrapper's own scan input)</td>
+<td></td>
+</tr>
+<tr>
+<td><code>line_range</code></td>
+<td><code>mapped</code></td>
+<td>template text line of the resource's logical id</td>
+<td></td>
+</tr>
+<tr>
+<td><code>column</code></td>
+<td><code>mapped</code></td>
+<td>template text column of the resource's logical id</td>
+<td></td>
+</tr>
+<tr>
+<td><code>message</code></td>
+<td><code>mapped</code></td>
+<td>violation "description"</td>
+<td></td>
+</tr>
+<tr>
+<td><code>resource_id</code></td>
+<td><code>mapped</code></td>
+<td>construct "constructPath"</td>
+<td>Example: <code>test-yaml/--src--test.yaml/S3Bucket3</code></td>
+</tr>
+<tr>
+<td><code>resource_type</code></td>
+<td><code>mapped</code></td>
+<td>template Resources[&lt;logical id&gt;]."Type"</td>
+<td></td>
+</tr>
+<tr>
+<td><code>package_name</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>findings are CloudFormation template resources; no package exists in nag pack output</td>
+</tr>
+<tr>
+<td><code>package_version</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>findings are CloudFormation template resources; no package exists in nag pack output</td>
+</tr>
+<tr>
+<td><code>package_path</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>findings are CloudFormation template resources; no package exists in nag pack output</td>
+</tr>
+<tr>
+<td><code>taxonomy_cve</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>nag packs publish their own rule ids; no CVE taxonomy in the violations</td>
+</tr>
+<tr>
+<td><code>taxonomy_cwe</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>nag packs publish their own rule ids; no CWE taxonomy in the violations</td>
+</tr>
+<tr>
+<td><code>fingerprints</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>the synthesized report writes no fingerprints; finding identity keys on scanner/rule/file</td>
+</tr>
+<tr>
+<td><code>fix_available</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>nag violations carry no fix state or fixed version</td>
+</tr>
+<tr>
+<td><code>remediation_text</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>violation "description" states the rule, not a remediation; no remediation field exists</td>
+</tr>
+<tr>
+<td><code>snippet</code></td>
+<td><code>mapped</code></td>
+<td>the matched resource's template block, YAML-rendered into Region.snippet</td>
+<td></td>
+</tr>
+<tr>
+<td><code>references</code></td>
+<td><code>mappable-dropped</code></td>
+<td>per-pack rule help URI (_rule_help_uri, ReportingDescriptor.helpUri)</td>
+<td>rule-level only: the flat reader takes references from result relatedLocations, so the help link is discarded today</td>
+</tr>
+<tr>
+<td><code>tags</code></td>
+<td><code>mapped</code></td>
+<td>pack name, rule id, logical id and CFN type, written as PropertyBag tags</td>
+<td></td>
+</tr>
+<tr>
+<td><code>extras</code></td>
+<td><code>mapped</code></td>
+<td>"cdk_nag_finding" and "cfn_resource" property bags (the legacy bags extract_resource_identity also reads)</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h2 id="cfn-guard"><code>cfn-guard</code><a class="headerlink" href="#cfn-guard" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Class: <code>automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_guard_scanner.CfnGuardScanner</code></li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Facet</th>
+<th>State</th>
+<th>Native field</th>
+<th>Reason</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>rule_id</code></td>
+<td><code>mapped</code></td>
+<td>result ruleId (e.g. LAMBDA_INSIDE_VPC)</td>
+<td></td>
+</tr>
+<tr>
+<td><code>severity</code></td>
+<td><code>mapped</code></td>
+<td>result level (always error); ASH maps every violation to the constant VIOLATION_SEVERITY HIGH because the rules declare no severity of their own</td>
+<td></td>
+</tr>
+<tr>
+<td><code>file_path</code></td>
+<td><code>mapped</code></td>
+<td>result locations[].physicalLocation.artifactLocation.uri (overwritten with the scanned template's path)</td>
+<td></td>
+</tr>
+<tr>
+<td><code>line_range</code></td>
+<td><code>mapped</code></td>
+<td>result locations[].physicalLocation.region startLine</td>
+<td></td>
+</tr>
+<tr>
+<td><code>column</code></td>
+<td><code>mapped</code></td>
+<td>result locations[].physicalLocation.region startColumn</td>
+<td></td>
+</tr>
+<tr>
+<td><code>message</code></td>
+<td><code>mapped</code></td>
+<td>result message.text</td>
+<td></td>
+</tr>
+<tr>
+<td><code>resource_id</code></td>
+<td><code>mapped</code></td>
+<td>DERIVED: result message.text "Value traversed to [Path=/Resources/&lt;LogicalId&gt;/" segment, parsed by _derived_resource_id (anchored at the start of a missing-property message; any other message shape attaches nothing)</td>
+<td>Example: <code>LegacyFunction</code></td>
+</tr>
+<tr>
+<td><code>resource_type</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>the message path names the logical id only; the CloudFormation Type is not in the SARIF and would need a template read the adapter does not make</td>
+</tr>
+<tr>
+<td><code>package_name</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>findings are CloudFormation template rule checks; no package exists in cfn-guard output</td>
+</tr>
+<tr>
+<td><code>package_version</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>findings are CloudFormation template rule checks; no package exists in cfn-guard output</td>
+</tr>
+<tr>
+<td><code>package_path</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>findings are CloudFormation template rule checks; no package exists in cfn-guard output</td>
+</tr>
+<tr>
+<td><code>taxonomy_cve</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>cfn-guard publishes its own rule ids; no CVE taxonomy in the results</td>
+</tr>
+<tr>
+<td><code>taxonomy_cwe</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>cfn-guard publishes its own rule ids; no CWE taxonomy in the results</td>
+</tr>
+<tr>
+<td><code>fingerprints</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>the SARIF results carry no fingerprints (result keys are exactly ruleId, level, message, locations)</td>
+</tr>
+<tr>
+<td><code>fix_available</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>cfn-guard results carry no fix state or fixed version</td>
+</tr>
+<tr>
+<td><code>remediation_text</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>the message states the failed check, not a remediation; no remediation field exists</td>
+</tr>
+<tr>
+<td><code>snippet</code></td>
+<td><code>mappable-dropped</code></td>
+<td>result message.text "Value={...}" segment</td>
+<td>the traversed value is dumped inside the message prose and no region snippet is emitted; ASH keeps the whole message and extracts no snippet from it</td>
+</tr>
+<tr>
+<td><code>references</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>the driver carries no rules array, so no help URI exists</td>
+</tr>
+<tr>
+<td><code>tags</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>the adapter adds no tags and the SARIF results carry none</td>
+</tr>
+<tr>
+<td><code>extras</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>the native results carry no property bag; the only property written is the ASH-computed issue_severity</td>
+</tr>
+</tbody>
+</table>
+<h2 id="cfn-lint"><code>cfn-lint</code><a class="headerlink" href="#cfn-lint" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Class: <code>automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_lint_scanner.CfnLintScanner</code></li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Facet</th>
+<th>State</th>
+<th>Native field</th>
+<th>Reason</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>rule_id</code></td>
+<td><code>mapped</code></td>
+<td>result ruleId (e.g. W2001)</td>
+<td></td>
+</tr>
+<tr>
+<td><code>severity</code></td>
+<td><code>mapped</code></td>
+<td>result ruleId letter (E/W/I), mapped by SEVERITY_BY_RULE_LETTER; the SARIF result carries no level</td>
+<td></td>
+</tr>
+<tr>
+<td><code>file_path</code></td>
+<td><code>mapped</code></td>
+<td>result locations[].physicalLocation.artifactLocation.uri</td>
+<td></td>
+</tr>
+<tr>
+<td><code>line_range</code></td>
+<td><code>mapped</code></td>
+<td>result locations[].physicalLocation.region startLine/endLine</td>
+<td></td>
+</tr>
+<tr>
+<td><code>column</code></td>
+<td><code>mapped</code></td>
+<td>result locations[].physicalLocation.region startColumn/endColumn</td>
+<td></td>
+</tr>
+<tr>
+<td><code>message</code></td>
+<td><code>mapped</code></td>
+<td>result message.text</td>
+<td></td>
+</tr>
+<tr>
+<td><code>resource_id</code></td>
+<td><code>mappable-dropped</code></td>
+<td>finding "Location.Path" (the --format json output format; Path[1] is the logical id, e.g. ["Resources", "M0FixtureBucket", ...])</td>
+<td>the SARIF format ASH requests carries the location only (artifactLocation.uri, region) and names the resource in message prose, so no id is written; the --format json output names it (M0 item c, fixture cfn-lint-1.61.0-m0-bad-property.json), the same dropped shape as cfn-nag and trivy</td>
+</tr>
+<tr>
+<td><code>resource_type</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>no resource is named in the SARIF format ASH consumes, so no type is carried either</td>
+</tr>
+<tr>
+<td><code>package_name</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>findings are CloudFormation template checks; no package exists in cfn-lint output</td>
+</tr>
+<tr>
+<td><code>package_version</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>findings are CloudFormation template checks; no package exists in cfn-lint output</td>
+</tr>
+<tr>
+<td><code>package_path</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>findings are CloudFormation template checks; no package exists in cfn-lint output</td>
+</tr>
+<tr>
+<td><code>taxonomy_cve</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>cfn-lint publishes its own rule ids; no CVE taxonomy in the results</td>
+</tr>
+<tr>
+<td><code>taxonomy_cwe</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>cfn-lint publishes its own rule ids; no CWE taxonomy in the results</td>
+</tr>
+<tr>
+<td><code>fingerprints</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>the SARIF results carry no fingerprints (result keys are exactly ruleId, message, locations)</td>
+</tr>
+<tr>
+<td><code>fix_available</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>cfn-lint results carry no fix state or fixed version</td>
+</tr>
+<tr>
+<td><code>remediation_text</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>rule descriptions state what a rule checks, not a remediation; no remediation field exists</td>
+</tr>
+<tr>
+<td><code>snippet</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>the SARIF regions carry line and column only, no snippet</td>
+</tr>
+<tr>
+<td><code>references</code></td>
+<td><code>mappable-dropped</code></td>
+<td>driver rules[].helpUri</td>
+<td>rule-level only: the flat reader takes references from result relatedLocations, so the help link is discarded today</td>
+</tr>
+<tr>
+<td><code>tags</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>the adapter adds no tags and the SARIF rules carry none</td>
+</tr>
+<tr>
+<td><code>extras</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>the native results carry no property bag; the only property written is the ASH-computed issue_severity</td>
+</tr>
+</tbody>
+</table>
+<h2 id="cfn-nag"><code>cfn-nag</code><a class="headerlink" href="#cfn-nag" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Class: <code>automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_nag_scanner.CfnNagScanner</code></li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Facet</th>
+<th>State</th>
+<th>Native field</th>
+<th>Reason</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>rule_id</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>UNCONFIRMED: the JSON violation "id" (e.g. W51, the committed fixture) should render as the SARIF ruleId, but the SARIF the pipeline reads was never read to a real result (M0 item b FATALed); one cfn_nag_scan --output-format sarif run settles it</td>
+</tr>
+<tr>
+<td><code>severity</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>UNCONFIRMED: the JSON violation "type" (WARN or FAIL) should render as the SARIF result level, but the SARIF the pipeline reads was never read to a real result (M0 item b); one cfn_nag_scan --output-format sarif run settles it</td>
+</tr>
+<tr>
+<td><code>file_path</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>UNCONFIRMED: the JSON file result "filename" should render as the SARIF artifact uri (restored from the staged copy by _restore_cfn_nag_uris), but the SARIF the pipeline reads was never read to a real result (M0 item b); one cfn_nag_scan --output-format sarif run settles it</td>
+</tr>
+<tr>
+<td><code>line_range</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>UNCONFIRMED: the JSON violation "line_numbers" should render as the SARIF region startLine, but the SARIF the pipeline reads was never read to a real result (M0 item b); one cfn_nag_scan --output-format sarif run settles it</td>
+</tr>
+<tr>
+<td><code>column</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>UNCONFIRMED: the tool's JSON carries line_numbers only and no cfn-nag SARIF golden is committed; one cfn_nag_scan --output-format sarif run settles whether a column is emitted</td>
+</tr>
+<tr>
+<td><code>message</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>UNCONFIRMED: the JSON violation "message" should render as the SARIF message text, but the SARIF the pipeline reads was never read to a real result (M0 item b); one cfn_nag_scan --output-format sarif run settles it</td>
+</tr>
+<tr>
+<td><code>resource_id</code></td>
+<td><code>mappable-dropped</code></td>
+<td>violation "logical_resource_ids" (the JSON output format)</td>
+<td>UNCONFIRMED: no SARIF run is committed, so whether the id is a structured SARIF field or only one result per id is open (M0 item b FATALed); the unit that attaches it (M3a) picks its route after one cfn_nag_scan --output-format sarif run</td>
+</tr>
+<tr>
+<td><code>resource_type</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>the JSON "element_types" holds the element class ("resource"), not the CloudFormation Type; the Type would need a template read the adapter does not make</td>
+</tr>
+<tr>
+<td><code>package_name</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>findings are CloudFormation template resources; no package exists in cfn_nag output</td>
+</tr>
+<tr>
+<td><code>package_version</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>findings are CloudFormation template resources; no package exists in cfn_nag output</td>
+</tr>
+<tr>
+<td><code>package_path</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>findings are CloudFormation template resources; no package exists in cfn_nag output</td>
+</tr>
+<tr>
+<td><code>taxonomy_cve</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>cfn_nag publishes its own rule ids; no CVE taxonomy in the violations</td>
+</tr>
+<tr>
+<td><code>taxonomy_cwe</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>cfn_nag publishes its own rule ids; no CWE taxonomy in the violations</td>
+</tr>
+<tr>
+<td><code>fingerprints</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>UNCONFIRMED: the tool's JSON carries no fingerprint and no cfn-nag SARIF golden is committed; one SARIF run settles it</td>
+</tr>
+<tr>
+<td><code>fix_available</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>cfn_nag violations carry no fix state or fixed version</td>
+</tr>
+<tr>
+<td><code>remediation_text</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>violation "message" states the finding, not a remediation; no remediation field exists</td>
+</tr>
+<tr>
+<td><code>snippet</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>UNCONFIRMED: the tool's JSON carries no source excerpt and no cfn-nag SARIF golden is committed; one SARIF run settles whether a region snippet is emitted</td>
+</tr>
+<tr>
+<td><code>references</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>UNCONFIRMED: the tool's JSON carries no URL and no cfn-nag SARIF golden is committed; one SARIF run settles whether the rule driver carries a helpUri</td>
+</tr>
+<tr>
+<td><code>tags</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>the adapter adds no tags and the tool's JSON carries none</td>
+</tr>
+<tr>
+<td><code>extras</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>the adapter writes no result property bag (its only PropertyBag is on the Invocation)</td>
+</tr>
+</tbody>
+</table>
+<h2 id="checkov"><code>checkov</code><a class="headerlink" href="#checkov" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Class: <code>automated_security_helper.plugin_modules.ash_builtin.scanners.checkov_scanner.CheckovScanner</code></li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Facet</th>
+<th>State</th>
+<th>Native field</th>
+<th>Reason</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>rule_id</code></td>
+<td><code>mapped</code></td>
+<td>check "check_id" (e.g. CKV_AWS_55), the SARIF result ruleId</td>
+<td></td>
+</tr>
+<tr>
+<td><code>severity</code></td>
+<td><code>mapped</code></td>
+<td>SARIF result "level" (settled by the committed checkov-3.4.6 capture; the side report's "severity" stays null without a platform key)</td>
+<td></td>
+</tr>
+<tr>
+<td><code>file_path</code></td>
+<td><code>mapped</code></td>
+<td>check "repo_file_path", the SARIF artifact uri (rewritten by rewrite_checkov_paths)</td>
+<td></td>
+</tr>
+<tr>
+<td><code>line_range</code></td>
+<td><code>mapped</code></td>
+<td>check "file_line_range", the SARIF region startLine/endLine</td>
+<td></td>
+</tr>
+<tr>
+<td><code>column</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>UNCONFIRMED: the side report carries a line range only and no checkov SARIF golden is committed; one SARIF run settles whether a column is emitted</td>
+</tr>
+<tr>
+<td><code>message</code></td>
+<td><code>mapped</code></td>
+<td>check "check_name"</td>
+<td></td>
+</tr>
+<tr>
+<td><code>resource_id</code></td>
+<td><code>mapped</code></td>
+<td>check "resource" (the results_json.json side report), copied onto the SARIF result by attach_checkov_resources for the frameworks in _RESOURCE_FRAMEWORKS only</td>
+<td>Example: <code>AWS::S3::Bucket.S3Bucket3</code></td>
+</tr>
+<tr>
+<td><code>resource_type</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>the side report's resource field is one dotted string ("AWS::S3::Bucket.S3Bucket3"); no separate type field exists and splitting it would be a derivation</td>
+</tr>
+<tr>
+<td><code>package_name</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>IaC policy checks over resources; no package exists in checkov's policy-check output</td>
+</tr>
+<tr>
+<td><code>package_version</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>IaC policy checks over resources; no package exists in checkov's policy-check output</td>
+</tr>
+<tr>
+<td><code>package_path</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>IaC policy checks over resources; no package exists in checkov's policy-check output</td>
+</tr>
+<tr>
+<td><code>taxonomy_cve</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>checkov publishes its own check ids; no CVE taxonomy in the policy-check results</td>
+</tr>
+<tr>
+<td><code>taxonomy_cwe</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>checkov publishes its own check ids; no CWE taxonomy in the policy-check results</td>
+</tr>
+<tr>
+<td><code>fingerprints</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>UNCONFIRMED: the side report carries no fingerprint and no checkov SARIF golden is committed; one SARIF run settles it</td>
+</tr>
+<tr>
+<td><code>fix_available</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>UNCONFIRMED: the side report has a fixed_definition key but it is null on every committed check, so whether a fixable check populates it is open; one run over a fixable check settles it</td>
+</tr>
+<tr>
+<td><code>remediation_text</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>check_name states the finding, not a remediation; no remediation text field exists in the side report</td>
+</tr>
+<tr>
+<td><code>snippet</code></td>
+<td><code>mapped</code></td>
+<td>SARIF region.snippet.text (settled by the committed checkov-3.4.6 capture; the side report's "code_block" carries the same lines)</td>
+<td></td>
+</tr>
+<tr>
+<td><code>references</code></td>
+<td><code>mappable-dropped</code></td>
+<td>check "guideline" (a policy documentation URL)</td>
+<td>the side report carries a guideline URL per check; the adapter never reads it</td>
+</tr>
+<tr>
+<td><code>tags</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>the adapter adds no tags and the side report's "entity_tags" is null in the committed record</td>
+</tr>
+<tr>
+<td><code>extras</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>UNCONFIRMED: no checkov SARIF golden is committed, so whether results carry a property bag is open; one SARIF run settles it</td>
+</tr>
+</tbody>
+</table>
+<h2 id="detect-secrets"><code>detect-secrets</code><a class="headerlink" href="#detect-secrets" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Class: <code>automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secrets_scanner.DetectSecretsScanner</code></li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Facet</th>
+<th>State</th>
+<th>Native field</th>
+<th>Reason</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>rule_id</code></td>
+<td><code>mapped</code></td>
+<td>PotentialSecret.type (written as ruleId SECRET-&lt;TYPE&gt;)</td>
+<td></td>
+</tr>
+<tr>
+<td><code>severity</code></td>
+<td><code>mapped</code></td>
+<td>(no native severity) constant Level.error set by the adapter on every result</td>
+<td></td>
+</tr>
+<tr>
+<td><code>file_path</code></td>
+<td><code>mapped</code></td>
+<td>PotentialSecret.filename (the worker's file key)</td>
+<td></td>
+</tr>
+<tr>
+<td><code>line_range</code></td>
+<td><code>mapped</code></td>
+<td>PotentialSecret.line_number</td>
+<td></td>
+</tr>
+<tr>
+<td><code>column</code></td>
+<td><code>mapped</code></td>
+<td>the secret's start column computed by the worker from the scanned file (_secret_columns)</td>
+<td></td>
+</tr>
+<tr>
+<td><code>message</code></td>
+<td><code>mapped</code></td>
+<td>synthesized by the adapter from PotentialSecret.type, filename and line_number; value-free</td>
+<td></td>
+</tr>
+<tr>
+<td><code>resource_id</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>secret findings name a file location, not a deployable resource; the secret hash is baseline-join state and is never a resource id</td>
+</tr>
+<tr>
+<td><code>resource_type</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>secret findings name a file location, not a deployable resource</td>
+</tr>
+<tr>
+<td><code>package_name</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>secret findings carry no package</td>
+</tr>
+<tr>
+<td><code>package_version</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>secret findings carry no package</td>
+</tr>
+<tr>
+<td><code>package_path</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>secret findings carry no package</td>
+</tr>
+<tr>
+<td><code>taxonomy_cve</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>secret findings carry no CVE taxonomy</td>
+</tr>
+<tr>
+<td><code>taxonomy_cwe</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>detect-secrets plugin types carry no CWE taxonomy</td>
+</tr>
+<tr>
+<td><code>fingerprints</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>deliberate policy, not a gap: PotentialSecret.secret_hash is sensitive baseline-join state and never enters the SARIF</td>
+</tr>
+<tr>
+<td><code>fix_available</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>secret findings carry no fix state</td>
+</tr>
+<tr>
+<td><code>remediation_text</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>PotentialSecret carries no remediation text</td>
+</tr>
+<tr>
+<td><code>snippet</code></td>
+<td><code>mapped</code></td>
+<td>placeholder 'Secret of type &lt;type&gt; detected' written to Region.snippet; the secret value never enters the report</td>
+<td></td>
+</tr>
+<tr>
+<td><code>references</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>PotentialSecret carries no reference URLs</td>
+</tr>
+<tr>
+<td><code>tags</code></td>
+<td><code>mapped</code></td>
+<td>adapter-written PropertyBag tags (detect-secrets, secret, security, tool_name, tool_type)</td>
+<td></td>
+</tr>
+<tr>
+<td><code>extras</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>the result property bag carries the tags only</td>
+</tr>
+</tbody>
+</table>
+<h2 id="gitleaks"><code>gitleaks</code><a class="headerlink" href="#gitleaks" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Class: <code>automated_security_helper.plugin_modules.ash_builtin.scanners.gitleaks_scanner.GitleaksScanner</code></li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Facet</th>
+<th>State</th>
+<th>Native field</th>
+<th>Reason</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>rule_id</code></td>
+<td><code>mapped</code></td>
+<td>result "ruleId" (e.g. github-pat)</td>
+<td></td>
+</tr>
+<tr>
+<td><code>severity</code></td>
+<td><code>mapped</code></td>
+<td>(no native severity) constant level error plus properties "issue_severity" CRITICAL, both set by _post_process_sarif</td>
+<td></td>
+</tr>
+<tr>
+<td><code>file_path</code></td>
+<td><code>mapped</code></td>
+<td>locations[].physicalLocation.artifactLocation.uri</td>
+<td></td>
+</tr>
+<tr>
+<td><code>line_range</code></td>
+<td><code>mapped</code></td>
+<td>region.startLine / region.endLine</td>
+<td></td>
+</tr>
+<tr>
+<td><code>column</code></td>
+<td><code>mapped</code></td>
+<td>region.startColumn / region.endColumn</td>
+<td></td>
+</tr>
+<tr>
+<td><code>message</code></td>
+<td><code>mapped</code></td>
+<td>result "message.text"</td>
+<td></td>
+</tr>
+<tr>
+<td><code>resource_id</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>secret findings name a file location, not a deployable resource; the SARIF carries a rule id and a region only</td>
+</tr>
+<tr>
+<td><code>resource_type</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>secret findings name a file location, not a deployable resource</td>
+</tr>
+<tr>
+<td><code>package_name</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>secret findings carry no package</td>
+</tr>
+<tr>
+<td><code>package_version</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>secret findings carry no package</td>
+</tr>
+<tr>
+<td><code>package_path</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>secret findings carry no package</td>
+</tr>
+<tr>
+<td><code>taxonomy_cve</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>secret findings carry no CVE taxonomy</td>
+</tr>
+<tr>
+<td><code>taxonomy_cwe</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>gitleaks rules carry no CWE taxonomy in the SARIF</td>
+</tr>
+<tr>
+<td><code>fingerprints</code></td>
+<td><code>mappable-dropped</code></td>
+<td>result "partialFingerprints" (commitSha, author, email, date, commitMessage)</td>
+<td>dir mode emits empty-string git metadata, which _post_process_sarif drops because an empty fingerprint is identical across every result; git-mode values pass through</td>
+</tr>
+<tr>
+<td><code>fix_available</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>secret findings carry no fix state</td>
+</tr>
+<tr>
+<td><code>remediation_text</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>the SARIF rules carry id and shortDescription only</td>
+</tr>
+<tr>
+<td><code>snippet</code></td>
+<td><code>mapped</code></td>
+<td>region.snippet.text, forced to REDACTED by --redact=100 and again by _post_process_sarif</td>
+<td></td>
+</tr>
+<tr>
+<td><code>references</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>the SARIF rules carry id and shortDescription only; no reference URLs</td>
+</tr>
+<tr>
+<td><code>tags</code></td>
+<td><code>mapped</code></td>
+<td>result properties "tags" (empty natively); the adapter appends secret and security</td>
+<td></td>
+</tr>
+<tr>
+<td><code>extras</code></td>
+<td><code>mapped</code></td>
+<td>result properties "issue_severity" written by the adapter</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h2 id="grype"><code>grype</code><a class="headerlink" href="#grype" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Class: <code>automated_security_helper.plugin_modules.ash_builtin.scanners.grype_scanner.GrypeScanner</code></li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Facet</th>
+<th>State</th>
+<th>Native field</th>
+<th>Reason</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>rule_id</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>UNCONFIRMED: the survey reads the SARIF result ruleId (the vulnerability id) off the conformance tests' presenter shape; no grype SARIF fixture from a real run is committed, so a <code>grype -o sarif</code> capture settles it</td>
+</tr>
+<tr>
+<td><code>severity</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>UNCONFIRMED: the survey reads the SARIF rule properties "security-severity" (CVSS), else the result "level", off the conformance tests' presenter shape; no grype SARIF fixture from a real run is committed, so a <code>grype -o sarif</code> capture settles it</td>
+</tr>
+<tr>
+<td><code>file_path</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>UNCONFIRMED: the survey reads SARIF locations[].physicalLocation.artifactLocation.uri (the manifest or lockfile) off the conformance tests' presenter shape; no grype SARIF fixture from a real run is committed, so a <code>grype -o sarif</code> capture settles it</td>
+</tr>
+<tr>
+<td><code>line_range</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>UNCONFIRMED: the survey reads SARIF region.startLine (grype always writes line 1 of the manifest) off the conformance tests' presenter shape; no grype SARIF fixture from a real run is committed, so a <code>grype -o sarif</code> capture settles it</td>
+</tr>
+<tr>
+<td><code>column</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>UNCONFIRMED: no grype SARIF fixture in-repo; a <code>grype -o sarif</code> run settles whether results carry a startColumn</td>
+</tr>
+<tr>
+<td><code>message</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>UNCONFIRMED: the survey reads SARIF result message.text off the conformance tests' presenter shape; no grype SARIF fixture from a real run is committed, so a <code>grype -o sarif</code> capture settles it</td>
+</tr>
+<tr>
+<td><code>resource_id</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>LOCATOR-ONLY: grype reports packages; the only location is the manifest at line 1, a file locator and package identity (artifact.purl), not a resource with its own lifecycle</td>
+</tr>
+<tr>
+<td><code>resource_type</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>grype output names no resource; artifact.type is a package ecosystem (gem, npm), not a resource type</td>
+</tr>
+<tr>
+<td><code>package_name</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>UNCONFIRMED: the adapter parses the SARIF message "package: &lt;name&gt;, version &lt;version&gt; was found at:" (_GRYPE_PACKAGE_MESSAGE), pinned over the conformance tests' presenter shape only; no grype SARIF fixture from a real run is committed, so a <code>grype -o sarif</code> capture settles it</td>
+</tr>
+<tr>
+<td><code>package_version</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>UNCONFIRMED: the adapter parses the SARIF message "package: &lt;name&gt;, version &lt;version&gt; was found at:" (_GRYPE_PACKAGE_MESSAGE), pinned over the conformance tests' presenter shape only; no grype SARIF fixture from a real run is committed, so a <code>grype -o sarif</code> capture settles it</td>
+</tr>
+<tr>
+<td><code>package_path</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>UNCONFIRMED: the adapter resolves an npm lockfile entry by name and version beside the manifest (set only when exactly one copy matches), pinned over the conformance tests' presenter shape only; no grype SARIF fixture from a real run (over a committed npm tree) is committed, so a <code>grype -o sarif</code> capture settles it</td>
+</tr>
+<tr>
+<td><code>taxonomy_cve</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>UNCONFIRMED: the SARIF result ruleId is the vulnerability id (matches[].vulnerability.id, a CVE or GHSA id; the committed native JSON's eight matches are all GHSA ids, which the flat CVE column never reads); no grype SARIF fixture from a real run with a CVE-named match is committed, so a <code>grype -o sarif</code> capture settles it</td>
+</tr>
+<tr>
+<td><code>taxonomy_cwe</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>UNCONFIRMED: the committed native grype JSON (vulnerability keys advisories, cvss, dataSource, description, epss, fix, id, namespace, severity, urls) carries no CWE; a <code>grype -o sarif</code> run settles whether rule properties do</td>
+</tr>
+<tr>
+<td><code>fingerprints</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>UNCONFIRMED: no grype SARIF fixture in-repo; a <code>grype -o sarif</code> run settles whether results carry fingerprints or partialFingerprints</td>
+</tr>
+<tr>
+<td><code>fix_available</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>UNCONFIRMED: the adapter reads the SARIF rule help.text line "Fix Version: &lt;versions&gt;" (grype's rendering of matches[].vulnerability.fix.versions) and writes fix_available=True only for a non-empty list on a uniquely named rule whose Package and Version lines match the result's own message, pinned over the conformance tests' presenter shape only; no grype SARIF fixture from a real run is committed, so a <code>grype -o sarif</code> capture settles it</td>
+</tr>
+<tr>
+<td><code>remediation_text</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>UNCONFIRMED: not classified by the survey; the flat model has no remediation column, and matchDetails[].fix.suggestedVersion is a version, not text</td>
+</tr>
+<tr>
+<td><code>snippet</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>a package match has no source code snippet</td>
+</tr>
+<tr>
+<td><code>references</code></td>
+<td><code>mappable-dropped</code></td>
+<td>matches[].vulnerability.urls</td>
+<td>the native urls (and relatedVulnerabilities[].urls, dataSource) are never read into references</td>
+</tr>
+<tr>
+<td><code>tags</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>UNCONFIRMED: the survey reads SARIF rule properties.tags off the conformance tests' presenter shape (rule-level, which the flat reader never takes as the tags column anyway); no grype SARIF fixture from a real run is committed, so a <code>grype -o sarif</code> capture settles whether results carry tags</td>
+</tr>
+<tr>
+<td><code>extras</code></td>
+<td><code>mapped</code></td>
+<td>SARIF result properties bag (package identity keys this adapter writes) passed through to the flat properties</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h2 id="npm-audit"><code>npm-audit</code><a class="headerlink" href="#npm-audit" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Class: <code>automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_scanner.NpmAuditScanner</code></li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Facet</th>
+<th>State</th>
+<th>Native field</th>
+<th>Reason</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>rule_id</code></td>
+<td><code>mapped</code></td>
+<td>vulnerabilities.&lt;name&gt;.via[]."url" (the GHSA id, synthesized as the ruleId); "npm-audit-transitive-&lt;name&gt;" for a transitive-only entry</td>
+<td></td>
+</tr>
+<tr>
+<td><code>severity</code></td>
+<td><code>mapped</code></td>
+<td>vulnerabilities.&lt;name&gt;.via[]."severity", else the entry's "severity"</td>
+<td></td>
+</tr>
+<tr>
+<td><code>file_path</code></td>
+<td><code>mapped</code></td>
+<td>vulnerabilities.&lt;name&gt;."nodes" (the install location, synthesized as node_modules/&lt;location&gt;/package.json)</td>
+<td></td>
+</tr>
+<tr>
+<td><code>line_range</code></td>
+<td><code>mapped</code></td>
+<td>(no native line) the adapter writes line 1 of the synthesized manifest location on every result</td>
+<td></td>
+</tr>
+<tr>
+<td><code>column</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>npm audit output carries no column; the adapter synthesizes 1:1, so there is no native column to map</td>
+</tr>
+<tr>
+<td><code>message</code></td>
+<td><code>mapped</code></td>
+<td>vulnerabilities.&lt;name&gt;.via[]."title" composed with the package, "range" and "url"</td>
+<td></td>
+</tr>
+<tr>
+<td><code>resource_id</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>LOCATOR-ONLY (synthesized): the URI node_modules/&lt;loc&gt;/package.json is built from the native "nodes", an install locator; the findings are packages, not resources</td>
+</tr>
+<tr>
+<td><code>resource_type</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>npm audit output names no resource; findings are packages</td>
+</tr>
+<tr>
+<td><code>package_name</code></td>
+<td><code>mapped</code></td>
+<td>vulnerabilities.&lt;name&gt;."name"</td>
+<td></td>
+</tr>
+<tr>
+<td><code>package_version</code></td>
+<td><code>mapped</code></td>
+<td>installed version read from the lockfile beside the manifest (npm audit's own report gives only a vulnerable range)</td>
+<td></td>
+</tr>
+<tr>
+<td><code>package_path</code></td>
+<td><code>mapped</code></td>
+<td>vulnerabilities.&lt;name&gt;."nodes" resolved against the lockfile entry for the install path</td>
+<td></td>
+</tr>
+<tr>
+<td><code>taxonomy_cve</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>npm audit names no CVE field: the advisory id carried as the ruleId is vulnerabilities.&lt;name&gt;.via[]."url" (a GHSA id), and the flat CVE column reads CVE-shaped rule ids only</td>
+</tr>
+<tr>
+<td><code>taxonomy_cwe</code></td>
+<td><code>mappable-dropped</code></td>
+<td>vulnerabilities.&lt;name&gt;.via[]."cwe"</td>
+<td>written to the result property "cwe" only; the flat cwe_id reader reads tags, so the flat column stays empty</td>
+</tr>
+<tr>
+<td><code>fingerprints</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>npm audit output carries no fingerprint; finding identity keys on scanner, rule and package</td>
+</tr>
+<tr>
+<td><code>fix_available</code></td>
+<td><code>mapped</code></td>
+<td>vulnerabilities.&lt;name&gt;."fixAvailable"</td>
+<td></td>
+</tr>
+<tr>
+<td><code>remediation_text</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>UNCONFIRMED: not classified by the survey; the adapter writes a composed "recommendation" property, but the flat model has no remediation column to read it and npm audit's native fixAvailable is a flag or a fix object, not text</td>
+</tr>
+<tr>
+<td><code>snippet</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>a package advisory has no source code snippet</td>
+</tr>
+<tr>
+<td><code>references</code></td>
+<td><code>mappable-dropped</code></td>
+<td>vulnerabilities.&lt;name&gt;.via[]."url" (rule helpUri)</td>
+<td>written at rule level only: the flat reader takes references from result relatedLocations, so the advisory link is discarded today</td>
+</tr>
+<tr>
+<td><code>tags</code></td>
+<td><code>mappable-dropped</code></td>
+<td>rule properties.tags (ASH-composed: security, npm-audit, the severity word)</td>
+<td>written at rule level only: the flat reader takes tags from result properties, so the rule tags are discarded today</td>
+</tr>
+<tr>
+<td><code>extras</code></td>
+<td><code>mapped</code></td>
+<td>result properties bag (vulnerable_versions, recommendation, severity, cwe, cvss, package identity) passed through to the flat properties</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h2 id="opengrep"><code>opengrep</code><a class="headerlink" href="#opengrep" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Class: <code>automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scanner.OpengrepScanner</code></li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Facet</th>
+<th>State</th>
+<th>Native field</th>
+<th>Reason</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>rule_id</code></td>
+<td><code>mapped</code></td>
+<td>results[].ruleId</td>
+<td></td>
+</tr>
+<tr>
+<td><code>severity</code></td>
+<td><code>mapped</code></td>
+<td>results[].level</td>
+<td></td>
+</tr>
+<tr>
+<td><code>file_path</code></td>
+<td><code>mapped</code></td>
+<td>results[].locations[].physicalLocation.artifactLocation.uri</td>
+<td></td>
+</tr>
+<tr>
+<td><code>line_range</code></td>
+<td><code>mapped</code></td>
+<td>results[].locations[].physicalLocation.region.startLine/endLine</td>
+<td></td>
+</tr>
+<tr>
+<td><code>column</code></td>
+<td><code>mapped</code></td>
+<td>results[].locations[].physicalLocation.region.startColumn/endColumn</td>
+<td></td>
+</tr>
+<tr>
+<td><code>message</code></td>
+<td><code>mapped</code></td>
+<td>results[].message.text</td>
+<td></td>
+</tr>
+<tr>
+<td><code>resource_id</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>pure code SAST; the only locators in its output are file paths, which are never resource ids</td>
+</tr>
+<tr>
+<td><code>resource_type</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>pure code SAST; no deployable resource exists in the output</td>
+</tr>
+<tr>
+<td><code>package_name</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>code findings name a file and a rule, not a package</td>
+</tr>
+<tr>
+<td><code>package_version</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>code findings name a file and a rule, not a package</td>
+</tr>
+<tr>
+<td><code>package_path</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>code findings name a file and a rule, not a package</td>
+</tr>
+<tr>
+<td><code>taxonomy_cve</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>code rules carry no CVE ids</td>
+</tr>
+<tr>
+<td><code>taxonomy_cwe</code></td>
+<td><code>mapped</code></td>
+<td>tool.driver.rules[].properties.tags (CWE entries)</td>
+<td></td>
+</tr>
+<tr>
+<td><code>fingerprints</code></td>
+<td><code>mapped</code></td>
+<td>results[].fingerprints."matchBasedId/v1"</td>
+<td></td>
+</tr>
+<tr>
+<td><code>fix_available</code></td>
+<td><code>mappable-dropped</code></td>
+<td>results[].fixes</td>
+<td>SARIF fixes survive the report model and die at the flat reader, which reads only fix_available</td>
+</tr>
+<tr>
+<td><code>remediation_text</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>rule help describes the rule, not a remediation; fixes are recorded under fix_available</td>
+</tr>
+<tr>
+<td><code>snippet</code></td>
+<td><code>mapped</code></td>
+<td>results[].locations[].physicalLocation.region.snippet.text</td>
+<td></td>
+</tr>
+<tr>
+<td><code>references</code></td>
+<td><code>mappable-dropped</code></td>
+<td>tool.driver.rules[].help.markdown</td>
+<td>rule-level only: the flat reader takes references from result relatedLocations, so the rule help is discarded today</td>
+</tr>
+<tr>
+<td><code>tags</code></td>
+<td><code>mappable-dropped</code></td>
+<td>tool.driver.rules[].properties.tags</td>
+<td>rule-level only: the flat reader takes tags from result properties, so the rule tags are discarded today (they still feed the CWE read)</td>
+</tr>
+<tr>
+<td><code>extras</code></td>
+<td><code>mapped</code></td>
+<td>results[].properties (SARIF property bag, passed through unmodified)</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h2 id="semgrep"><code>semgrep</code><a class="headerlink" href="#semgrep" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Class: <code>automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner.SemgrepScanner</code></li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Facet</th>
+<th>State</th>
+<th>Native field</th>
+<th>Reason</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>rule_id</code></td>
+<td><code>mapped</code></td>
+<td>results[].ruleId</td>
+<td></td>
+</tr>
+<tr>
+<td><code>severity</code></td>
+<td><code>mapped</code></td>
+<td>results[].level</td>
+<td></td>
+</tr>
+<tr>
+<td><code>file_path</code></td>
+<td><code>mapped</code></td>
+<td>results[].locations[].physicalLocation.artifactLocation.uri</td>
+<td></td>
+</tr>
+<tr>
+<td><code>line_range</code></td>
+<td><code>mapped</code></td>
+<td>results[].locations[].physicalLocation.region.startLine/endLine</td>
+<td></td>
+</tr>
+<tr>
+<td><code>column</code></td>
+<td><code>mapped</code></td>
+<td>results[].locations[].physicalLocation.region.startColumn/endColumn</td>
+<td></td>
+</tr>
+<tr>
+<td><code>message</code></td>
+<td><code>mapped</code></td>
+<td>results[].message.text</td>
+<td></td>
+</tr>
+<tr>
+<td><code>resource_id</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>pure code SAST; the only locators in its output are file paths, which are never resource ids</td>
+</tr>
+<tr>
+<td><code>resource_type</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>pure code SAST; no deployable resource exists in the output</td>
+</tr>
+<tr>
+<td><code>package_name</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>code findings name a file and a rule, not a package</td>
+</tr>
+<tr>
+<td><code>package_version</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>code findings name a file and a rule, not a package</td>
+</tr>
+<tr>
+<td><code>package_path</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>code findings name a file and a rule, not a package</td>
+</tr>
+<tr>
+<td><code>taxonomy_cve</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>code rules carry no CVE ids</td>
+</tr>
+<tr>
+<td><code>taxonomy_cwe</code></td>
+<td><code>mapped</code></td>
+<td>tool.driver.rules[].properties.tags (CWE entries)</td>
+<td></td>
+</tr>
+<tr>
+<td><code>fingerprints</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>semgrep OSS writes the placeholder 'requires login' as results[].fingerprints."matchBasedId/v1" (the committed capture shows it), which the finding-identity reader discards; a real match-based id needs semgrep's logged-in engine, and the opengrep fork is the build that emits one</td>
+</tr>
+<tr>
+<td><code>fix_available</code></td>
+<td><code>mappable-dropped</code></td>
+<td>results[].fixes</td>
+<td>SARIF fixes survive the report model and die at the flat reader, which reads only fix_available</td>
+</tr>
+<tr>
+<td><code>remediation_text</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>rule help describes the rule, not a remediation; fixes are recorded under fix_available</td>
+</tr>
+<tr>
+<td><code>snippet</code></td>
+<td><code>mapped</code></td>
+<td>results[].locations[].physicalLocation.region.snippet.text</td>
+<td></td>
+</tr>
+<tr>
+<td><code>references</code></td>
+<td><code>mappable-dropped</code></td>
+<td>tool.driver.rules[].helpUri (registry rules; a local rule carries none)</td>
+<td>rule-level only: the flat reader takes references from result relatedLocations, so the help link is discarded today</td>
+</tr>
+<tr>
+<td><code>tags</code></td>
+<td><code>mappable-dropped</code></td>
+<td>tool.driver.rules[].properties.tags</td>
+<td>rule-level only: the flat reader takes tags from result properties, so the rule tags are discarded today (they still feed the CWE read)</td>
+</tr>
+<tr>
+<td><code>extras</code></td>
+<td><code>mapped</code></td>
+<td>results[].properties (SARIF property bag, passed through unmodified)</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h2 id="syft"><code>syft</code><a class="headerlink" href="#syft" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Class: <code>automated_security_helper.plugin_modules.ash_builtin.scanners.syft_scanner.SyftScanner</code></li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Facet</th>
+<th>State</th>
+<th>Native field</th>
+<th>Reason</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>rule_id</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>SBOM scanner: no findings exist, so no rule id</td>
+</tr>
+<tr>
+<td><code>severity</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>SBOM scanner: no findings exist, so no severity</td>
+</tr>
+<tr>
+<td><code>file_path</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>SBOM scanner: no findings exist; component locations are inventory evidence, not a finding location</td>
+</tr>
+<tr>
+<td><code>line_range</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>SBOM scanner: no findings exist, so no line range</td>
+</tr>
+<tr>
+<td><code>column</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>SBOM scanner: no findings exist, so no column</td>
+</tr>
+<tr>
+<td><code>message</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>SBOM scanner: no findings exist, so no message</td>
+</tr>
+<tr>
+<td><code>resource_id</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>no findings exist; the SBOM names packages (package identity), not infrastructure resources, and writes no ash_resource_id</td>
+</tr>
+<tr>
+<td><code>resource_type</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>no findings exist; component types (library, application) are package kinds, not resource types</td>
+</tr>
+<tr>
+<td><code>package_name</code></td>
+<td><code>mappable-dropped</code></td>
+<td>CycloneDX components[].name</td>
+<td>carried in the CycloneDX document the scanner returns, outside the flat-vulnerability path: syft writes no SARIF result, so no flat row ever holds it</td>
+</tr>
+<tr>
+<td><code>package_version</code></td>
+<td><code>mappable-dropped</code></td>
+<td>CycloneDX components[].version</td>
+<td>carried in the CycloneDX document the scanner returns, outside the flat-vulnerability path: syft writes no SARIF result, so no flat row ever holds it</td>
+</tr>
+<tr>
+<td><code>package_path</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>UNCONFIRMED: syft's native artifacts[].locations[].path (fixture syft.src.json) has a CycloneDX counterpart this adapter has not been read against; a cyclonedx-json run settles it</td>
+</tr>
+<tr>
+<td><code>taxonomy_cve</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>SBOM scanner: inventory only, no vulnerability matching</td>
+</tr>
+<tr>
+<td><code>taxonomy_cwe</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>SBOM scanner: inventory only, no vulnerability matching</td>
+</tr>
+<tr>
+<td><code>fingerprints</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>SBOM scanner: no findings exist to fingerprint</td>
+</tr>
+<tr>
+<td><code>fix_available</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>SBOM scanner: no vulnerabilities, so no fix state</td>
+</tr>
+<tr>
+<td><code>remediation_text</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>SBOM scanner: no findings exist, so no remediation</td>
+</tr>
+<tr>
+<td><code>snippet</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>SBOM scanner: no findings exist, so no snippet</td>
+</tr>
+<tr>
+<td><code>references</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>SBOM scanner: no findings exist, so no references</td>
+</tr>
+<tr>
+<td><code>tags</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>SBOM scanner: no findings exist, so no tags</td>
+</tr>
+<tr>
+<td><code>extras</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>SBOM scanner: no SARIF property bag; the CycloneDX document is passed through whole outside the flat path</td>
+</tr>
+</tbody>
+</table>
+<h2 id="trivy"><code>trivy</code><a class="headerlink" href="#trivy" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Class: <code>automated_security_helper.plugin_modules.ash_builtin.scanners.trivy_scanner.TrivyScanner</code></li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Facet</th>
+<th>State</th>
+<th>Native field</th>
+<th>Reason</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>rule_id</code></td>
+<td><code>mapped</code></td>
+<td>SARIF result ruleId</td>
+<td></td>
+</tr>
+<tr>
+<td><code>severity</code></td>
+<td><code>mapped</code></td>
+<td>result message line "Severity: &lt;level&gt;", checked against the result level and the rule tags (issue_severity)</td>
+<td></td>
+</tr>
+<tr>
+<td><code>file_path</code></td>
+<td><code>mapped</code></td>
+<td>SARIF locations[].physicalLocation.artifactLocation.uri</td>
+<td></td>
+</tr>
+<tr>
+<td><code>line_range</code></td>
+<td><code>mapped</code></td>
+<td>SARIF region.startLine / region.endLine</td>
+<td></td>
+</tr>
+<tr>
+<td><code>column</code></td>
+<td><code>mapped</code></td>
+<td>SARIF region.startColumn</td>
+<td></td>
+</tr>
+<tr>
+<td><code>message</code></td>
+<td><code>mapped</code></td>
+<td>SARIF result message.text</td>
+<td></td>
+</tr>
+<tr>
+<td><code>resource_id</code></td>
+<td><code>mappable-dropped</code></td>
+<td>Results[].Misconfigurations[].CauseMetadata.Resource</td>
+<td>misconfig only: the address (aws_s3_bucket.m0_fixture_bucket) exists in trivy's JSON format and is absent from the SARIF ASH reads (0 occurrences, M0 fixture); the vuln findings are packages, so no resource_id is ever written until a side-JSON attach lands</td>
+</tr>
+<tr>
+<td><code>resource_type</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>trivy's CauseMetadata names Provider and Service (AWS, s3) and no resource type; the type is only the prefix of the dropped address, which would be a derivation</td>
+</tr>
+<tr>
+<td><code>package_name</code></td>
+<td><code>mapped</code></td>
+<td>result message line 1 "Package: &lt;name&gt;" (_package_from_message)</td>
+<td></td>
+</tr>
+<tr>
+<td><code>package_version</code></td>
+<td><code>mapped</code></td>
+<td>result message line 2 "Installed Version: &lt;version&gt;" (_package_from_message)</td>
+<td></td>
+</tr>
+<tr>
+<td><code>package_path</code></td>
+<td><code>mapped</code></td>
+<td>npm lockfile entry at the SARIF region.startLine of the result's location (one result per installed copy)</td>
+<td></td>
+</tr>
+<tr>
+<td><code>taxonomy_cve</code></td>
+<td><code>mapped</code></td>
+<td>SARIF result ruleId (the CVE id)</td>
+<td></td>
+</tr>
+<tr>
+<td><code>taxonomy_cwe</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>UNCONFIRMED: trivy's SARIF rules carry no CWE (tags are vulnerability, security, &lt;severity&gt;); the JSON format's CweIDs has no committed vulnerability fixture, and a <code>trivy fs --format json</code> run over a lockfile settles it</td>
+</tr>
+<tr>
+<td><code>fingerprints</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>trivy's SARIF results carry no fingerprints (result keys are level, locations, message, ruleId, ruleIndex)</td>
+</tr>
+<tr>
+<td><code>fix_available</code></td>
+<td><code>mappable-dropped</code></td>
+<td>message line "Fixed Version: &lt;version&gt;"</td>
+<td>the fixed version sits in the message text and is never parsed into the fix_available property the flat model reads</td>
+</tr>
+<tr>
+<td><code>remediation_text</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>UNCONFIRMED: not classified by the survey; the flat model has no remediation column, and the rule help text carries the fixed version already declared under fix_available</td>
+</tr>
+<tr>
+<td><code>snippet</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>trivy's SARIF results carry no code snippet</td>
+</tr>
+<tr>
+<td><code>references</code></td>
+<td><code>mappable-dropped</code></td>
+<td>SARIF rule helpUri</td>
+<td>rule-level only: the flat reader takes references from result relatedLocations, so the help link is discarded today</td>
+</tr>
+<tr>
+<td><code>tags</code></td>
+<td><code>mappable-dropped</code></td>
+<td>SARIF rule properties.tags</td>
+<td>rule-level only: the flat reader takes tags from result properties, so the rule tags are discarded today (the severity word among them still feeds issue_severity)</td>
+</tr>
+<tr>
+<td><code>extras</code></td>
+<td><code>mapped</code></td>
+<td>result properties bag (issue_severity and the package identity keys this adapter writes) passed through to the flat properties</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h2 id="zizmor"><code>zizmor</code><a class="headerlink" href="#zizmor" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Class: <code>automated_security_helper.plugin_modules.ash_builtin.scanners.zizmor_scanner.ZizmorScanner</code></li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Facet</th>
+<th>State</th>
+<th>Native field</th>
+<th>Reason</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>rule_id</code></td>
+<td><code>mapped</code></td>
+<td>results[].ruleId</td>
+<td></td>
+</tr>
+<tr>
+<td><code>severity</code></td>
+<td><code>mapped</code></td>
+<td>results[].properties."zizmor/severity" and "zizmor/confidence" (ASH rewrites them to a severity band)</td>
+<td></td>
+</tr>
+<tr>
+<td><code>file_path</code></td>
+<td><code>mapped</code></td>
+<td>results[].locations[].physicalLocation.artifactLocation.uri</td>
+<td></td>
+</tr>
+<tr>
+<td><code>line_range</code></td>
+<td><code>mapped</code></td>
+<td>results[].locations[].physicalLocation.region.startLine/endLine</td>
+<td></td>
+</tr>
+<tr>
+<td><code>column</code></td>
+<td><code>mapped</code></td>
+<td>results[].locations[].physicalLocation.region.startColumn/endColumn</td>
+<td></td>
+</tr>
+<tr>
+<td><code>message</code></td>
+<td><code>mapped</code></td>
+<td>results[].message.text</td>
+<td></td>
+</tr>
+<tr>
+<td><code>resource_id</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>locator-only: logicalLocations[].properties.symbolic.route (jobs/greet/steps/0) is a position inside one workflow file, not a resource; locators never enter the key (design D1)</td>
+</tr>
+<tr>
+<td><code>resource_type</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>locator-only: a workflow position has no resource type</td>
+</tr>
+<tr>
+<td><code>package_name</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>workflow findings name a file position, not a package</td>
+</tr>
+<tr>
+<td><code>package_version</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>workflow findings name a file position, not a package</td>
+</tr>
+<tr>
+<td><code>package_path</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>workflow findings name a file position, not a package</td>
+</tr>
+<tr>
+<td><code>taxonomy_cve</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>zizmor audits carry no CVE ids</td>
+</tr>
+<tr>
+<td><code>taxonomy_cwe</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>zizmor rule tags are the constant [security]; no CWE taxonomy in the output</td>
+</tr>
+<tr>
+<td><code>fingerprints</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>zizmor SARIF results carry no fingerprints (0 in the committed fixture); finding identity keys on scanner/rule/file</td>
+</tr>
+<tr>
+<td><code>fix_available</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>zizmor findings carry no fix data in the SARIF</td>
+</tr>
+<tr>
+<td><code>remediation_text</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>the rule help describes the audit, not a remediation, and the result message is an annotation of the finding</td>
+</tr>
+<tr>
+<td><code>snippet</code></td>
+<td><code>mapped</code></td>
+<td>results[].locations[].physicalLocation.region.snippet.text</td>
+<td></td>
+</tr>
+<tr>
+<td><code>references</code></td>
+<td><code>mappable-dropped</code></td>
+<td>tool.driver.rules[].helpUri</td>
+<td>rule-level only: the flat reader takes references from result relatedLocations, so the help link is discarded today</td>
+</tr>
+<tr>
+<td><code>tags</code></td>
+<td><code>mappable-dropped</code></td>
+<td>tool.driver.rules[].properties.tags</td>
+<td>rule-level only: the flat reader takes tags from result properties, so the rule tags are discarded today</td>
+</tr>
+<tr>
+<td><code>extras</code></td>
+<td><code>mapped</code></td>
+<td>results[].properties ("zizmor/severity", "zizmor/confidence", "zizmor/persona"), plus the symbolic route in logicalLocations</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h2 id="betterleaks"><code>betterleaks</code><a class="headerlink" href="#betterleaks" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Class: <code>automated_security_helper.plugin_modules.ash_betterleaks_plugins.betterleaks_scanner.BetterleaksScanner</code></li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Facet</th>
+<th>State</th>
+<th>Native field</th>
+<th>Reason</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>rule_id</code></td>
+<td><code>mapped</code></td>
+<td>result "ruleId"</td>
+<td></td>
+</tr>
+<tr>
+<td><code>severity</code></td>
+<td><code>mapped</code></td>
+<td>(no native severity) constant level error plus properties "issue_severity" CRITICAL, both set by _post_process_sarif</td>
+<td></td>
+</tr>
+<tr>
+<td><code>file_path</code></td>
+<td><code>mapped</code></td>
+<td>locations[].physicalLocation.artifactLocation.uri</td>
+<td></td>
+</tr>
+<tr>
+<td><code>line_range</code></td>
+<td><code>mapped</code></td>
+<td>region.startLine / region.endLine</td>
+<td></td>
+</tr>
+<tr>
+<td><code>column</code></td>
+<td><code>mapped</code></td>
+<td>region.startColumn / region.endColumn</td>
+<td></td>
+</tr>
+<tr>
+<td><code>message</code></td>
+<td><code>mapped</code></td>
+<td>result "message.text"</td>
+<td></td>
+</tr>
+<tr>
+<td><code>resource_id</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>secret findings name a file location, not a deployable resource; the SARIF carries a rule id and a region only</td>
+</tr>
+<tr>
+<td><code>resource_type</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>secret findings name a file location, not a deployable resource</td>
+</tr>
+<tr>
+<td><code>package_name</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>secret findings carry no package</td>
+</tr>
+<tr>
+<td><code>package_version</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>secret findings carry no package</td>
+</tr>
+<tr>
+<td><code>package_path</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>secret findings carry no package</td>
+</tr>
+<tr>
+<td><code>taxonomy_cve</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>secret findings carry no CVE taxonomy</td>
+</tr>
+<tr>
+<td><code>taxonomy_cwe</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>betterleaks rules carry no CWE taxonomy in the SARIF</td>
+</tr>
+<tr>
+<td><code>fingerprints</code></td>
+<td><code>mappable-dropped</code></td>
+<td>result "partialFingerprints" (commitSha, author, email, date, commitMessage)</td>
+<td>dir mode emits empty-string git metadata, which _post_process_sarif drops because an empty fingerprint is identical across every result; git-mode values pass through</td>
+</tr>
+<tr>
+<td><code>fix_available</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>secret findings carry no fix state</td>
+</tr>
+<tr>
+<td><code>remediation_text</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>the SARIF rules carry id and shortDescription only</td>
+</tr>
+<tr>
+<td><code>snippet</code></td>
+<td><code>mapped</code></td>
+<td>region.snippet.text, forced to REDACTED by _post_process_sarif</td>
+<td></td>
+</tr>
+<tr>
+<td><code>references</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>the SARIF rules carry id and shortDescription only; no reference URLs</td>
+</tr>
+<tr>
+<td><code>tags</code></td>
+<td><code>mapped</code></td>
+<td>result properties "tags" (empty natively); the adapter appends secret and security</td>
+<td></td>
+</tr>
+<tr>
+<td><code>extras</code></td>
+<td><code>mapped</code></td>
+<td>result properties "issue_severity" written by the adapter</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h2 id="ferret-scan"><code>ferret-scan</code><a class="headerlink" href="#ferret-scan" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Class: <code>automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner.FerretScanScanner</code></li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Facet</th>
+<th>State</th>
+<th>Native field</th>
+<th>Reason</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>rule_id</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>output not read: the survey reads result "ruleId" off the tests' hand-written SARIF shape, and no ferret-scan SARIF from a real run is committed; one <code>ferret-scan --format sarif</code> run over the committed samples would settle it</td>
+</tr>
+<tr>
+<td><code>severity</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>output not read: the survey reads result "level" (the tool's own rating) off the tests' hand-written SARIF shape, and no ferret-scan SARIF from a real run is committed; one <code>ferret-scan --format sarif</code> run would settle it</td>
+</tr>
+<tr>
+<td><code>file_path</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>output not read: the survey reads locations[].physicalLocation.artifactLocation.uri (uriBaseId resolved by the adapter) off the tests' hand-written SARIF shape, and no ferret-scan SARIF from a real run is committed; one <code>ferret-scan --format sarif</code> run would settle it</td>
+</tr>
+<tr>
+<td><code>line_range</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>output not read: the survey reads region.startLine / region.endLine off the tests' hand-written SARIF shape, and no ferret-scan SARIF from a real run is committed; one <code>ferret-scan --format sarif</code> run would settle it</td>
+</tr>
+<tr>
+<td><code>column</code></td>
+<td><code>mapped</code></td>
+<td>region.startColumn / region.endColumn</td>
+<td></td>
+</tr>
+<tr>
+<td><code>message</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>output not read: the survey reads result "message.text" (matched values masked by the shared secret-masking pass downstream) off the tests' hand-written SARIF shape, and no ferret-scan SARIF from a real run is committed; one <code>ferret-scan --format sarif</code> run would settle it</td>
+</tr>
+<tr>
+<td><code>resource_id</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>sensitive-data findings name a file location and a matched value, not a deployable resource; the matched value is masked downstream and is never a resource id</td>
+</tr>
+<tr>
+<td><code>resource_type</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>sensitive-data findings name a file location, not a deployable resource</td>
+</tr>
+<tr>
+<td><code>package_name</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>sensitive-data findings carry no package</td>
+</tr>
+<tr>
+<td><code>package_version</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>sensitive-data findings carry no package</td>
+</tr>
+<tr>
+<td><code>package_path</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>sensitive-data findings carry no package</td>
+</tr>
+<tr>
+<td><code>taxonomy_cve</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>sensitive-data findings carry no CVE taxonomy</td>
+</tr>
+<tr>
+<td><code>taxonomy_cwe</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>ferret-scan results carry no CWE taxonomy</td>
+</tr>
+<tr>
+<td><code>fingerprints</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>UNCONFIRMED: no ferret-scan SARIF fixture is committed; one <code>ferret-scan --format sarif</code> run over a sample with a finding settles whether partialFingerprints is emitted</td>
+</tr>
+<tr>
+<td><code>fix_available</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>sensitive-data findings carry no fix state</td>
+</tr>
+<tr>
+<td><code>remediation_text</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>ferret-scan results carry no remediation text</td>
+</tr>
+<tr>
+<td><code>snippet</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>output not read: the survey reads region.snippet.text (matched values masked by the shared secret-masking pass downstream) off the tests' hand-written SARIF shape, and no ferret-scan SARIF from a real run is committed; one <code>ferret-scan --format sarif</code> run would settle it</td>
+</tr>
+<tr>
+<td><code>references</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>ferret-scan results carry no reference URLs</td>
+</tr>
+<tr>
+<td><code>tags</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>ferret-scan results carry no tags; the adapter attaches scanner details, not tags</td>
+</tr>
+<tr>
+<td><code>extras</code></td>
+<td><code>mapped</code></td>
+<td>result properties "confidenceLevel" and "validator"</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h2 id="guarddog"><code>guarddog</code><a class="headerlink" href="#guarddog" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Class: <code>automated_security_helper.plugin_modules.ash_guarddog_plugins.guarddog_scanner.GuardDogScanner</code></li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Facet</th>
+<th>State</th>
+<th>Native field</th>
+<th>Reason</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>rule_id</code></td>
+<td><code>mapped</code></td>
+<td>"results" key (the heuristic name, e.g. capability-network-lolbas)</td>
+<td></td>
+</tr>
+<tr>
+<td><code>severity</code></td>
+<td><code>mapped</code></td>
+<td>(no native severity) the adapter's risk ladder over the heuristic's category</td>
+<td></td>
+</tr>
+<tr>
+<td><code>file_path</code></td>
+<td><code>mapped</code></td>
+<td>match "location" file part (e.g. setup.py:16)</td>
+<td></td>
+</tr>
+<tr>
+<td><code>line_range</code></td>
+<td><code>mapped</code></td>
+<td>match "location" line part</td>
+<td></td>
+</tr>
+<tr>
+<td><code>column</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>GuardDog locations are file:line only</td>
+</tr>
+<tr>
+<td><code>message</code></td>
+<td><code>mapped</code></td>
+<td>match "message", assembled with the rule and match into the result text by the adapter</td>
+<td></td>
+</tr>
+<tr>
+<td><code>resource_id</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>findings name a package and a file:line inside it, not a deployable resource; package identity is declared under the package facets</td>
+</tr>
+<tr>
+<td><code>resource_type</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>findings name a package and a file:line inside it, not a deployable resource</td>
+</tr>
+<tr>
+<td><code>package_name</code></td>
+<td><code>mapped</code></td>
+<td>the verified requirement's name (verify mode), written as the result property "package_name"</td>
+<td>scan mode's root package identity is not read: the native top-level "package" is a scanned directory path</td>
+</tr>
+<tr>
+<td><code>package_version</code></td>
+<td><code>mapped</code></td>
+<td>the verified requirement's version (verify mode), written as the result property "package_version"</td>
+<td>scan mode's root package version is not read</td>
+</tr>
+<tr>
+<td><code>package_path</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>the adapter writes package_name and package_version only</td>
+</tr>
+<tr>
+<td><code>taxonomy_cve</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>malicious-package heuristics carry no CVE taxonomy</td>
+</tr>
+<tr>
+<td><code>taxonomy_cwe</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>malicious-package heuristics carry no CWE taxonomy</td>
+</tr>
+<tr>
+<td><code>fingerprints</code></td>
+<td><code>mapped</code></td>
+<td>partialFingerprints["guarddog/v1"], a sha256 the adapter computes over rule, uri, line and hits (not a native field)</td>
+<td></td>
+</tr>
+<tr>
+<td><code>fix_available</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>malicious-package findings carry no fix state</td>
+</tr>
+<tr>
+<td><code>remediation_text</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>GuardDog results carry no remediation text</td>
+</tr>
+<tr>
+<td><code>snippet</code></td>
+<td><code>mapped</code></td>
+<td>match "code" / risk "threat_code"</td>
+<td></td>
+</tr>
+<tr>
+<td><code>references</code></td>
+<td><code>mappable-dropped</code></td>
+<td>rule helpUri https://github.com/DataDog/guarddog#heuristics (adapter-written, not per-heuristic)</td>
+<td>rule-level only: the flat reader takes references from result relatedLocations, so the help link is discarded today</td>
+</tr>
+<tr>
+<td><code>tags</code></td>
+<td><code>mappable-dropped</code></td>
+<td>rule-level PropertyBag tags guarddog and malicious-package, written by the adapter</td>
+<td>rule-level only: the flat reader takes tags from result properties, so the rule tags are discarded today</td>
+</tr>
+<tr>
+<td><code>extras</code></td>
+<td><code>mapped</code></td>
+<td>extra_properties merged into the result PropertyBag (package_name and package_version in verify mode)</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h2 id="hadolint"><code>hadolint</code><a class="headerlink" href="#hadolint" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Class: <code>automated_security_helper.plugin_modules.ash_hadolint_plugins.hadolint_scanner.HadolintScanner</code></li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Facet</th>
+<th>State</th>
+<th>Native field</th>
+<th>Reason</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>rule_id</code></td>
+<td><code>mapped</code></td>
+<td>result "ruleId" (DLxxxx / SCxxxx)</td>
+<td></td>
+</tr>
+<tr>
+<td><code>severity</code></td>
+<td><code>mapped</code></td>
+<td>result "level", refined through two lookup tables and a second --format json pass</td>
+<td></td>
+</tr>
+<tr>
+<td><code>file_path</code></td>
+<td><code>mapped</code></td>
+<td>locations[].physicalLocation.artifactLocation.uri</td>
+<td></td>
+</tr>
+<tr>
+<td><code>line_range</code></td>
+<td><code>mapped</code></td>
+<td>region.startLine / region.endLine</td>
+<td></td>
+</tr>
+<tr>
+<td><code>column</code></td>
+<td><code>mapped</code></td>
+<td>region.startColumn / region.endColumn</td>
+<td></td>
+</tr>
+<tr>
+<td><code>message</code></td>
+<td><code>mapped</code></td>
+<td>result "message.text"</td>
+<td></td>
+</tr>
+<tr>
+<td><code>resource_id</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>Dockerfile findings are locators; even the base image named by a DL3007 finding lives only in message text (captured/positive.sarif), and an image locator is not a resource id</td>
+</tr>
+<tr>
+<td><code>resource_type</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>Dockerfile findings are locators, not deployable resources</td>
+</tr>
+<tr>
+<td><code>package_name</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>Dockerfile lint findings carry no package</td>
+</tr>
+<tr>
+<td><code>package_version</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>Dockerfile lint findings carry no package</td>
+</tr>
+<tr>
+<td><code>package_path</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>Dockerfile lint findings carry no package</td>
+</tr>
+<tr>
+<td><code>taxonomy_cve</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>Dockerfile lint rules carry no CVE taxonomy</td>
+</tr>
+<tr>
+<td><code>taxonomy_cwe</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>Dockerfile lint rules carry no CWE taxonomy</td>
+</tr>
+<tr>
+<td><code>fingerprints</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>the native SARIF result carries ruleId, level, message and region only</td>
+</tr>
+<tr>
+<td><code>fix_available</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>Dockerfile lint findings carry no fix state</td>
+</tr>
+<tr>
+<td><code>remediation_text</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>the rule's advice is the message text itself; no separate remediation field exists</td>
+</tr>
+<tr>
+<td><code>snippet</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>the native SARIF region carries no snippet</td>
+</tr>
+<tr>
+<td><code>references</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>the native SARIF driver has no rules array, so no help URIs (captured/positive.sarif)</td>
+</tr>
+<tr>
+<td><code>tags</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>the native SARIF has no rules array and results carry no tags</td>
+</tr>
+<tr>
+<td><code>extras</code></td>
+<td><code>mapped</code></td>
+<td>result properties "issue_severity" and "hadolint_level" written by the adapter</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h2 id="snyk-code"><code>snyk-code</code><a class="headerlink" href="#snyk-code" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Class: <code>automated_security_helper.plugin_modules.ash_snyk_plugins.snyk_code_scanner.SnykCodeScanner</code></li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Facet</th>
+<th>State</th>
+<th>Native field</th>
+<th>Reason</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>rule_id</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>output not read: the survey reads result "ruleId" off the in-test double's shape, and no snyk SARIF from a real run is committed (M0 item e); a licensed <code>snyk code test --sarif</code> run would settle it</td>
+</tr>
+<tr>
+<td><code>severity</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>output not read: the survey reads result "level" (no security-severity on rules, so a bare error reads as CRITICAL) off the in-test double's shape, and no snyk SARIF from a real run is committed (M0 item e); a licensed run would settle it</td>
+</tr>
+<tr>
+<td><code>file_path</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>output not read: the survey reads locations[].physicalLocation.artifactLocation.uri (%SRCROOT% base) off the in-test double's shape, and no snyk SARIF from a real run is committed (M0 item e); a licensed run would settle it</td>
+</tr>
+<tr>
+<td><code>line_range</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>output not read: the survey reads region.startLine / region.endLine off the in-test double's shape, and no snyk SARIF from a real run is committed (M0 item e); a licensed run would settle it</td>
+</tr>
+<tr>
+<td><code>column</code></td>
+<td><code>mapped</code></td>
+<td>region.startColumn / region.endColumn</td>
+<td></td>
+</tr>
+<tr>
+<td><code>message</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>output not read: the survey reads result "message.text" off the in-test double's shape, and no snyk SARIF from a real run is committed (M0 item e); a licensed run would settle it</td>
+</tr>
+<tr>
+<td><code>resource_id</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>pure SAST: findings are source locators, not deployable resources; the result carries a uri and a region only</td>
+</tr>
+<tr>
+<td><code>resource_type</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>pure SAST: findings are source locators, not deployable resources</td>
+</tr>
+<tr>
+<td><code>package_name</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>snyk code findings are source defects and carry no package</td>
+</tr>
+<tr>
+<td><code>package_version</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>snyk code findings are source defects and carry no package</td>
+</tr>
+<tr>
+<td><code>package_path</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>snyk code findings are source defects and carry no package</td>
+</tr>
+<tr>
+<td><code>taxonomy_cve</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>snyk code rules are source-defect classes, not CVEs</td>
+</tr>
+<tr>
+<td><code>taxonomy_cwe</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>output not read: rules' properties "cwe" (e.g. ["CWE-798"]) is normalized by normalize_rule_cwe_into_tags into the rule's tags as external/cwe/cwe-&lt;n&gt;, which the shared flat reader reads -- pinned over the in-test double's shape only, since no snyk SARIF from a real run is committed (M0 item e); a licensed run would settle it</td>
+</tr>
+<tr>
+<td><code>fingerprints</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>output not read: the survey reads result "fingerprints" {"0", "1"} off the in-test double's shape, and no snyk SARIF from a real run is committed (M0 item e); a licensed run would settle it</td>
+</tr>
+<tr>
+<td><code>fix_available</code></td>
+<td><code>mappable-dropped</code></td>
+<td>rule properties "isAutofixable"</td>
+<td>no flat fix_available write exists for snyk; weak signal (autofix availability, not a fixed version); UNCONFIRMED against a real tool run</td>
+</tr>
+<tr>
+<td><code>remediation_text</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>UNCONFIRMED: the survey classified rule help.markdown under references only; a <code>snyk code test --sarif</code> run settles whether remediation text is separate</td>
+</tr>
+<tr>
+<td><code>snippet</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>the survey read no snippet in the native regions; UNCONFIRMED against a real tool run</td>
+</tr>
+<tr>
+<td><code>references</code></td>
+<td><code>mappable-dropped</code></td>
+<td>rule "help.markdown" and properties "exampleCommitFixes"</td>
+<td>the rule help survives the SARIF model and dies at the flat reader; UNCONFIRMED against a real tool run</td>
+</tr>
+<tr>
+<td><code>tags</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>UNCONFIRMED: the survey records ASH-added tags, but no tag write exists in this adapter at this checkout; a <code>snyk code test --sarif</code> run through the pipeline settles it</td>
+</tr>
+<tr>
+<td><code>extras</code></td>
+<td><code>mapped</code></td>
+<td>result and rule properties bags, passed through the SARIF model untouched</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h2 id="trivy-repo"><code>trivy-repo</code><a class="headerlink" href="#trivy-repo" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Class: <code>automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scanner.TrivyRepoScanner</code></li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Facet</th>
+<th>State</th>
+<th>Native field</th>
+<th>Reason</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>rule_id</code></td>
+<td><code>mapped</code></td>
+<td>SARIF result ruleId</td>
+<td></td>
+</tr>
+<tr>
+<td><code>severity</code></td>
+<td><code>mapped</code></td>
+<td>result message line "Severity: &lt;level&gt;", checked against the result level and the rule tags (issue_severity)</td>
+<td></td>
+</tr>
+<tr>
+<td><code>file_path</code></td>
+<td><code>mapped</code></td>
+<td>SARIF locations[].physicalLocation.artifactLocation.uri</td>
+<td></td>
+</tr>
+<tr>
+<td><code>line_range</code></td>
+<td><code>mapped</code></td>
+<td>SARIF region.startLine / region.endLine</td>
+<td></td>
+</tr>
+<tr>
+<td><code>column</code></td>
+<td><code>mapped</code></td>
+<td>SARIF region.startColumn</td>
+<td></td>
+</tr>
+<tr>
+<td><code>message</code></td>
+<td><code>mapped</code></td>
+<td>SARIF result message.text</td>
+<td></td>
+</tr>
+<tr>
+<td><code>resource_id</code></td>
+<td><code>mappable-dropped</code></td>
+<td>Results[].Misconfigurations[].CauseMetadata.Resource</td>
+<td>misconfig only: the address (aws_s3_bucket.m0_fixture_bucket) exists in trivy's JSON format and is absent from the SARIF ASH reads (0 occurrences, M0 fixture); the vuln findings are packages, so no resource_id is ever written until a side-JSON attach lands</td>
+</tr>
+<tr>
+<td><code>resource_type</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>trivy's CauseMetadata names Provider and Service (AWS, s3) and no resource type; the type is only the prefix of the dropped address, which would be a derivation</td>
+</tr>
+<tr>
+<td><code>package_name</code></td>
+<td><code>mapped</code></td>
+<td>result message line 1 "Package: &lt;name&gt;" (_package_from_message)</td>
+<td></td>
+</tr>
+<tr>
+<td><code>package_version</code></td>
+<td><code>mapped</code></td>
+<td>result message line 2 "Installed Version: &lt;version&gt;" (_package_from_message)</td>
+<td></td>
+</tr>
+<tr>
+<td><code>package_path</code></td>
+<td><code>mapped</code></td>
+<td>npm lockfile entry at the SARIF region.startLine of the result's location (one result per installed copy)</td>
+<td></td>
+</tr>
+<tr>
+<td><code>taxonomy_cve</code></td>
+<td><code>mapped</code></td>
+<td>SARIF result ruleId (the CVE id)</td>
+<td></td>
+</tr>
+<tr>
+<td><code>taxonomy_cwe</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>UNCONFIRMED: trivy's SARIF rules carry no CWE (tags are vulnerability, security, &lt;severity&gt;); the JSON format's CweIDs has no committed vulnerability fixture, and a <code>trivy fs --format json</code> run over a lockfile settles it</td>
+</tr>
+<tr>
+<td><code>fingerprints</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>trivy's SARIF results carry no fingerprints (result keys are level, locations, message, ruleId, ruleIndex)</td>
+</tr>
+<tr>
+<td><code>fix_available</code></td>
+<td><code>mappable-dropped</code></td>
+<td>message line "Fixed Version: &lt;version&gt;"</td>
+<td>the fixed version sits in the message text and is never parsed into the fix_available property the flat model reads (and ignore_unfixed defaults to true, so the tool pre-filters unfixed findings)</td>
+</tr>
+<tr>
+<td><code>remediation_text</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>UNCONFIRMED: not classified by the survey; the flat model has no remediation column, and the rule help text carries the fixed version already declared under fix_available</td>
+</tr>
+<tr>
+<td><code>snippet</code></td>
+<td><code>n/a</code></td>
+<td></td>
+<td>trivy's SARIF results carry no code snippet</td>
+</tr>
+<tr>
+<td><code>references</code></td>
+<td><code>mappable-dropped</code></td>
+<td>SARIF rule helpUri</td>
+<td>rule-level only: the flat reader takes references from result relatedLocations, so the help link is discarded today</td>
+</tr>
+<tr>
+<td><code>tags</code></td>
+<td><code>mappable-dropped</code></td>
+<td>SARIF rule properties.tags</td>
+<td>rule-level only: the flat reader takes tags from result properties, so the rule tags are discarded today (the severity word among them still feeds issue_severity)</td>
+</tr>
+<tr>
+<td><code>extras</code></td>
+<td><code>mapped</code></td>
+<td>result properties bag (issue_severity and the package identity keys this adapter writes) passed through to the flat properties</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M204.24,116.24a6,6,0,0,1-8.48,0L134,54.49V216a6,6,0,0,1-12,0V54.49L60.24,116.24a6,6,0,0,1-8.48-8.48l72-72a6,6,0,0,1,8.48,0l72,72A6,6,0,0,1,204.24,116.24Z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+  
+    
+
+<nav class="ash-pagination" aria-label="Previous and next documentation pages">
+  <div class="ash-wrap ash-pagination__inner">
+    
+    <a href="../scanners/" rel="prev">
+      <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M222,128a6,6,0,0,1-6,6H54.49l61.75,61.76a6,6,0,1,1-8.48,8.48l-72-72a6,6,0,0,1,0-8.48l72-72a6,6,0,0,1,8.48,8.48L54.49,122H216A6,6,0,0,1,222,128Z"/></svg></span><span><span class="ash-pagination__direction">PREVIOUS</span>Scanners</span>
+    </a>
+    
+    
+    <a class="ash-pagination__next" href="../reporters/" rel="next">
+      <span><span class="ash-pagination__direction">NEXT</span>Reporters</span><span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M220.24,132.24l-72,72a6,6,0,0,1-8.48-8.48L201.51,134H40a6,6,0,0,1,0-12H201.51L139.76,60.24a6,6,0,0,1,8.48-8.48l72,72A6,6,0,0,1,220.24,132.24Z"/></svg></span>
+    </a>
+    
+  </div>
+</nav>
+
+  
+  <footer class="ash-footer">
+    <div class="ash-wrap ash-footer__top">
+      <div>
+        <a class="ash-brand" href="../.." aria-label="ASH home">
+          <span class="ash-brand__name">ASH<span class="ash-brand__subtitle">Automated Security Helper</span></span>
+        </a>
+      </div>
+      <div class="ash-footer__links">
+        <div><span>Documentation</span><a href="../../getting-started/local/">Quick start</a><a href="../../how-to/configure/">Configuration</a><a href="../cli/">CLI reference</a></div>
+        <div><span>Integrations</span><a href="../scanners/">Scanners</a><a href="../../getting-started/ci/">CI/CD integration</a><a href="../../plugins/">Plugin development</a></div>
+        <div><span>Project</span><a href="https://github.com/awslabs/automated-security-helper">GitHub <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M198,64V168a6,6,0,0,1-12,0V78.48L68.24,196.24a6,6,0,0,1-8.48-8.48L177.52,70H88a6,6,0,0,1,0-12H192A6,6,0,0,1,198,64Z"/></svg></span></a><a href="../../contributing/">Contribute</a><a href="https://github.com/awslabs/automated-security-helper/issues">Get help <span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M198,64V168a6,6,0,0,1-12,0V78.48L68.24,196.24a6,6,0,0,1-8.48-8.48L177.52,70H88a6,6,0,0,1,0-12H192A6,6,0,0,1,198,64Z"/></svg></span></a></div>
+      </div>
+    </div>
+    <div class="ash-wrap ash-footer__bottom">
+      <span class="ash-footer-credit">Build with <span class="ash-footer-heart" role="img" aria-label="love">&lt;3</span> at Amazon Web Services</span>
+      <div><button class="ash-motion-toggle" type="button" data-ash-motion aria-pressed="false"><span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M128,26A102,102,0,1,0,230,128,102.12,102.12,0,0,0,128,26Zm0,192a90,90,0,1,1,90-90A90.1,90.1,0,0,1,128,218ZM110,96v64a6,6,0,0,1-12,0V96a6,6,0,0,1,12,0Zm48,0v64a6,6,0,0,1-12,0V96a6,6,0,0,1,12,0Z"/></svg></span> <span>Pause motion</span></button><a href="https://github.com/awslabs/automated-security-helper/blob/main/LICENSE">License</a><a href="../../contributing/#security-issue-notifications">Security</a></div>
+    </div>
+    <div class="ash-wrap ash-footer__copyright">&copy; Amazon Web Services, Inc. or its affiliates. All rights reserved.</div>
+  </footer>
+  <div class="ash-toast" role="status" aria-live="polite" aria-atomic="true" data-ash-toast></div>
+
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.indexes", "navigation.path", "navigation.top", "navigation.footer", "toc.follow", "content.tabs.link", "search.share", "search.highlight", "search.suggest", "content.code.copy", "content.code.annotate", "content.code.select"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"default": "latest", "provider": "mike"}}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+        <script src="../../assets/javascripts/ash.js"></script>
+      
+    
+  </body>
+</html>
