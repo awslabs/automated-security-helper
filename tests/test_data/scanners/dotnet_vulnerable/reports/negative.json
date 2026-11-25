@@ -1,0 +1,25 @@
+{
+  "parameters": "--vulnerable --include-transitive",
+  "projects": [
+    {
+      "frameworks": [
+        {
+          "framework": "net8.0",
+          "topLevelPackages": [
+            {
+              "id": "Newtonsoft.Json",
+              "requestedVersion": "13.0.3",
+              "resolvedVersion": "13.0.3"
+            }
+          ],
+          "transitivePackages": []
+        }
+      ],
+      "path": "/work/src/App/App.csproj"
+    }
+  ],
+  "sources": [
+    "https://api.nuget.org/v3/index.json"
+  ],
+  "version": 1
+}
