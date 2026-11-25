@@ -567,6 +567,30 @@ def test_an_open_ended_row_still_covers_the_default_tool_constraint(
             )
 
 
+def test_the_gate_reds_on_a_simulated_default_bump(_instances, monkeypatch) -> None:
+    """The committed witness that the LIVE gate above can fire, not only its
+    predicate (``test_the_recheck_fires_when_the_default_constraint_moves``
+    proves ``recheck_fires`` on a fixture row): bump one shipped scanner's
+    default tool constraint and the gate reds, naming the recorded and live
+    constraints in its message."""
+    with_open_ended = [
+        cls
+        for cls in SCANNER_CLASSES
+        if any(row.open_ended for row in _ops(cls).runtime_compat.rows)
+    ]
+    assert with_open_ended, "no shipped open-ended row: the control has no subject"
+    cls = with_open_ended[0]
+    row = next(r for r in _ops(cls).runtime_compat.rows if r.open_ended)
+    bumped = "==999.0.0"
+    assert bumped != (row.recorded_default_constraint or "")
+    monkeypatch.setattr(_instances[cls], "_get_tool_version_constraint", lambda: bumped)
+    with pytest.raises(AssertionError) as excinfo:
+        test_an_open_ended_row_still_covers_the_default_tool_constraint(cls, _instances)
+    message = str(excinfo.value)
+    assert repr(row.recorded_default_constraint) in message
+    assert repr(bumped) in message
+
+
 @pytest.mark.parametrize("cls", SCANNER_CLASSES, ids=lambda c: c.__name__)
 def test_at_most_one_polyfill_row_applies_and_its_shim_ships(cls, _instances) -> None:
     """Python imports one ``sitecustomize``, so a second applicable polyfill

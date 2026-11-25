@@ -94,6 +94,16 @@ def test_an_upstream_issue_must_be_a_url() -> None:
         _pin(upstream_issue="not a url")
 
 
+def test_a_blank_upstream_issue_is_refused_outright() -> None:
+    """Blank-but-non-None slipped between the URL check (which skips blanks)
+    and the renderer (to which any non-empty string is truthy): it would emit
+    a broken whitespace link and drop the recheck_note standing in for it."""
+    with pytest.raises(ValidationError, match="never blank"):
+        _pin(upstream_issue="   ")
+    with pytest.raises(ValidationError, match="never blank"):
+        _open(upstream_issue="   ", recheck_note="what was searched, and where")
+
+
 def test_a_closed_row_needs_no_upstream_issue() -> None:
     assert _pin(open_ended=False).upstream_issue is None
 

@@ -93,7 +93,10 @@ def _import_next_sitecustomize() -> None:
     ``COVERAGE_PROCESS_START`` is the canonical rider) would otherwise
     silently never run. With this directory taken off ``sys.path``, the next
     ``sitecustomize`` (if any) imports and takes over the module name;
-    everything is restored when there is none. Two deliberate bounds: it runs
+    everything is restored when there is none, and a next one that is itself
+    broken (its own import raised) is reported the way stock CPython reports
+    a broken ``sitecustomize``, never read as absent. Two deliberate bounds:
+    it runs
     only when this module IS the interpreter's ``sitecustomize`` (site.py
     imported it under that name), never when a test loads the file under
     another name; and it runs whatever the version gate said, because the
@@ -103,6 +106,19 @@ def _import_next_sitecustomize() -> None:
         return
     import importlib
     import os
+
+    def _report_broken_next(exc: BaseException) -> None:
+        """The next ``sitecustomize`` exists and is broken: mirror what stock
+        ``site.execsitecustomize`` does with a broken one -- report on stderr
+        (or the full traceback under ``PYTHONVERBOSE``) and keep starting up,
+        never crash the tool's startup."""
+        if sys.flags.verbose:
+            sys.excepthook(type(exc), exc, exc.__traceback__)
+        else:
+            sys.stderr.write(
+                "Error in sitecustomize; set PYTHONVERBOSE for traceback:\n"
+                "%s: %s\n" % (type(exc).__name__, exc)
+            )
 
     own_dir = os.path.dirname(os.path.abspath(__file__))
     own_real = os.path.realpath(own_dir)
@@ -119,12 +135,34 @@ def _import_next_sitecustomize() -> None:
         del sys.path[index]
     try:
         importlib.import_module("sitecustomize")
-    except ImportError:
-        # No further sitecustomize exists; put this one back so a later
-        # ``import sitecustomize`` does not re-execute the file.
+    except ImportError as exc:
+        if exc.name == "sitecustomize":
+            # No further sitecustomize exists; put this one back so a later
+            # ``import sitecustomize`` does not re-execute the file.
+            if own_module is not None:
+                sys.modules["sitecustomize"] = own_module
+        else:
+            # The next sitecustomize EXISTS and raised a genuine ImportError
+            # of its own (a coverage rider whose ``import coverage`` fails in
+            # the tool venv is the canonical shape). Stock CPython
+            # (``site.execsitecustomize``) distinguishes the two by
+            # ``exc.name`` exactly this way; swallowing this one would
+            # silently drop the caller's startup code. Report it and go on;
+            # the import machinery already removed the broken module, so put
+            # this one back for the same later-import reason as above.
+            _report_broken_next(exc)
+            if own_module is not None:
+                sys.modules["sitecustomize"] = own_module
+    except Exception as exc:  # as broad as site.execsitecustomize's own handler
+        # The next sitecustomize raised something else while executing; same
+        # treatment as stock CPython's handler for a broken sitecustomize.
+        _report_broken_next(exc)
         if own_module is not None:
             sys.modules["sitecustomize"] = own_module
     finally:
+        # ``removed`` holds ascending original indices and the deletions ran
+        # descending, so ascending re-insertion restores every entry to its
+        # original position.
         for index, entry in removed:
             sys.path.insert(index, entry)
 

@@ -56,7 +56,7 @@ Ranges are written in the grammar native to the runtime: `python` uses PEP 440 s
 
 - `pin`: the interpreter request is constrained to the runtime range. The preferred resolution.
 - `polyfill`: a shim is applied over the runtime range at tool launch. A polyfill row states why a pin cannot serve.
-- open-ended: the incompatibility is unsolved upstream. The row declares only the bounds that are proved, links the upstream issue, and is re-read whenever the tool's version constraint moves.
+- open-ended: the incompatibility is unsolved upstream. The row declares only the bounds that are proved, links the upstream issue (or says what was searched when none exists to cite), and is re-read whenever the tool's version constraint moves.
 
 | Scanner | Runtime | Tool versions | Runtime request | Resolution | Open-ended | Reason |
 |---------|---------|---------------|-----------------|------------|------------|--------|

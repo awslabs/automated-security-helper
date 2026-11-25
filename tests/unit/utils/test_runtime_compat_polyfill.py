@@ -153,7 +153,8 @@ def _startup(env_additions: dict[str, str]) -> subprocess.CompletedProcess:
     env = {
         key: value
         for key, value in os.environ.items()
-        if key not in ("PYTHONPATH", "PYTHONNOUSERSITE", "PYTHONSAFEPATH")
+        if key
+        not in ("PYTHONPATH", "PYTHONNOUSERSITE", "PYTHONSAFEPATH", "PYTHONVERBOSE")
     }
     return subprocess.run(  # noqa: S603 - our own interpreter, our own files
         [sys.executable, "-c", probe],
@@ -195,6 +196,44 @@ def test_the_shim_alone_still_owns_the_module_name(tmp_path) -> None:
     assert result.returncode == 0, result.stderr
     assert f"SITECUSTOMIZE-FILE:{shim_dir / 'sitecustomize.py'}" in result.stdout
     assert "PLANTED-RAN:False" in result.stdout
+    assert "Error in sitecustomize" not in result.stderr, (
+        "an absent next sitecustomize is the silent case\n" + result.stderr
+    )
+
+
+def test_a_broken_chained_sitecustomize_is_reported_not_swallowed(tmp_path) -> None:
+    """A next ``sitecustomize`` that EXISTS but raises a genuine ImportError
+    of its own (a coverage rider whose ``import coverage`` fails in the tool
+    venv is the canonical shape) is distinguished from "no next sitecustomize"
+    by ``exc.name``, the way stock ``site.execsitecustomize`` does it: the
+    error is reported with the site.py-style stderr diagnostic, and startup
+    goes on. The pre-fix chain read every ImportError as absence and reported
+    nothing."""
+    caller = tmp_path / "caller"
+    caller.mkdir()
+    (caller / "sitecustomize.py").write_text(
+        "import sys\n"
+        "sys._ash_planted_sitecustomize = True\n"
+        "import _ash_absent_coverage_rider\n"
+    )
+    shim_dir = env_module.polyfill_directory(SHIM)
+    result = _startup({"PYTHONPATH": str(shim_dir) + os.pathsep + str(caller)})
+    assert result.returncode == 0, (
+        "a broken chained sitecustomize never crashes startup\n" + result.stderr
+    )
+    assert "PLANTED-RAN:True" in result.stdout, (
+        "the chain reached the caller's sitecustomize before it broke\n"
+        + result.stdout
+        + result.stderr
+    )
+    assert "Error in sitecustomize; set PYTHONVERBOSE for traceback:" in result.stderr
+    assert "_ash_absent_coverage_rider" in result.stderr, (
+        "the diagnostic names the error\n" + result.stderr
+    )
+    assert f"SITECUSTOMIZE-FILE:{shim_dir / 'sitecustomize.py'}" in result.stdout, (
+        "the shim keeps the module name so a later import does not re-execute\n"
+        + result.stdout
+    )
 
 
 # ---- the injector ---------------------------------------------------------

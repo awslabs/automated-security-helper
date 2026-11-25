@@ -840,6 +840,12 @@ class RuntimeCompatRow(_Frozen):
             )
         if not self.open_ended and self.recheck_note is not None:
             raise ValueError("recheck_note belongs to an open-ended row")
+        if self.upstream_issue is not None and _blank(self.upstream_issue):
+            raise ValueError(
+                "upstream_issue is its URL or None, never blank: a blank "
+                "string is truthy to the reference renderer, which would emit "
+                "a broken whitespace link and drop the recheck_note"
+            )
         if not _blank(self.upstream_issue) and not (
             self.upstream_issue or ""
         ).startswith(("https://", "http://")):

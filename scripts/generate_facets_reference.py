@@ -136,8 +136,9 @@ def runtime_compat_section(rows: list) -> list[str]:
         ),
         (
             "- open-ended: the incompatibility is unsolved upstream. The row declares "
-            "only the bounds that are proved, links the upstream issue, and is "
-            "re-read whenever the tool's version constraint moves."
+            "only the bounds that are proved, links the upstream issue (or says what "
+            "was searched when none exists to cite), and is re-read whenever the "
+            "tool's version constraint moves."
         ),
         "",
     ]
@@ -155,6 +156,10 @@ def runtime_compat_section(rows: list) -> list[str]:
                         f"{md_prose(row.pin_insufficient)}"
                     )
                 tool_versions = code(row.tool_versions) if row.tool_versions else "all"
+                # A row carrying both fields renders the URL alone: the
+                # recheck_note is the URL's stand-in, not a second link (the
+                # model refuses a blank-but-non-None upstream_issue, so a
+                # truthy value here is a real URL).
                 if row.open_ended and row.upstream_issue:
                     open_ended = (
                         f"yes, [{md_prose(row.upstream_issue)}]({row.upstream_issue})"
