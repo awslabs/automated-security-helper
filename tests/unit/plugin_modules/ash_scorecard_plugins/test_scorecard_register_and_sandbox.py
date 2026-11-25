@@ -223,7 +223,9 @@ class TestSeverityOverTheSampleResult:
 
     def test_the_rule_carries_the_documentation_link(self):
         report = convert_scorecard_result(self._document(), repo=REPO)
-        rules = {r.id.root: r for r in report.runs[0].tool.driver.rules}
+        rules = {
+            getattr(r.id, "root", r.id): r for r in report.runs[0].tool.driver.rules
+        }
         assert str(rules["Branch-Protection"].helpUri).endswith("#branch-protection")
 
 
