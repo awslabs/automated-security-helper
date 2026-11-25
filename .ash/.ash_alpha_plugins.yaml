@@ -724,8 +724,8 @@ global_settings:
       reason: "Imports the SubprocessError type to catch it; the process starts through ASH's subprocess_utils helper."
     - rule_id: B404
       path: automated_security_helper/plugin_modules/ash_builtin/scanners/_trivy_scanner_base.py
-      line_start: 35
-      line_end: 35
+      line_start: 36
+      line_end: 36
       reason: "The import is for list2cmdline, which quotes one argument; processes start through ASH's subprocess_utils helper, not this module."
     - rule_id: B404
       path: automated_security_helper/plugin_modules/ash_builtin/scanners/bandit_scanner.py
@@ -734,8 +734,8 @@ global_settings:
       reason: "The import is for list2cmdline, which quotes one argument; the scanner starts no process through this module."
     - rule_id: B404
       path: automated_security_helper/utils/pre_installed_tool.py
-      line_start: 91
-      line_end: 91
+      line_start: 92
+      line_end: 92
       reason: "The import is for the CompletedProcess and SubprocessError types the version probe answers with; the probe starts through ASH's spawn helper."
     - rule_id: B404
       path: automated_security_helper/utils/scan_output_dirs.py
