@@ -318,8 +318,10 @@ class GgshieldScanner(ScannerPluginBase[GgshieldScannerConfig]):
             "future release adds is overwritten with REDACTED by _post_process_sarif",
         ),
         references=FacetDecl(
-            state=FacetState.NA,
-            reason="ggshield's SARIF writer emits no reference URLs",
+            state=FacetState.MAPPED,
+            native_field="relatedLocations[].physicalLocation.artifactLocation.uri "
+            "(the match locations; ASH reads their URIs as references, made "
+            "source-relative by _post_process_sarif)",
         ),
         tags=FacetDecl(
             state=FacetState.NA,
@@ -701,7 +703,13 @@ class GgshieldScanner(ScannerPluginBase[GgshieldScannerConfig]):
                 result.properties.tags = tags
             setattr(result.properties, "issue_severity", "CRITICAL")  # noqa: B010
 
-            for location in result.locations or []:
+            # relatedLocations holds one entry per match, with the same absolute
+            # file:// URI; the flat row reads their URIs as the finding's references,
+            # so they are made source-relative like the primary location.
+            for location in [
+                *(result.locations or []),
+                *(result.relatedLocations or []),
+            ]:
                 physical = location.physicalLocation
                 if physical is None:
                     continue

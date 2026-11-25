@@ -119,6 +119,25 @@ class TestCapturedReport:
         region = result.locations[0].physicalLocation.root.region
         assert (region.startColumn, region.endLine, region.endColumn) == (14, 2, 47)
 
+    def test_the_match_locations_are_source_relative_too(
+        self, tree, tmp_path, deps_ok, monkeypatch
+    ):
+        """ggshield writes one relatedLocations entry per match with the same
+        absolute file:// URI; the flat row reads those as references, so no
+        absolute path of the host may survive in the report."""
+        report = _run(
+            _scanner(tree, tmp_path),
+            FakeGgshield(report_text=_captured("positive.sarif", tree)),
+            monkeypatch,
+        )
+        (result,) = report.get_all_results()
+        related = [
+            loc.physicalLocation.root.artifactLocation.uri
+            for loc in result.relatedLocations
+        ]
+        assert related == ["app/config.py"]
+        assert tree.absolute().as_posix() not in report.model_dump_json()
+
     def test_the_captured_negative_report_is_a_clean_scan(
         self,
         tree,
