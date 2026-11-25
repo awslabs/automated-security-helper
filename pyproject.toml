@@ -11,7 +11,7 @@ dependencies = [
  "requests>=2.34,<3.0.0",
  "attrs>=26.1,<27.0.0",
  "jsonschema>=4.26,<5.0.0",
- "importlib-metadata>=9.0.1,<10.0.0",
+ "importlib-metadata>=10.2.0,<11.0.0",
  "cattrs>=26.2.1,<27.0.0",
  "docker>=7.2,<8.0.0",
  "GitPython>=3.1.62,<4.0.0",  # floor is advisory-driven: GHSA-59cr-6r3x-644w affects <= 3.1.61
@@ -217,7 +217,7 @@ dev = [
  # writes, and a snapshot no test asserts any more fails the session as unused. It
  # also merges its report across pytest-xdist workers, which this suite runs under.
  # Its only runtime dependency is pytest.
- "syrupy>=6.1.1,<7.0.0",
+ "syrupy>=7.0.2,<8.0.0",
 ]
 
 [build-system]
