@@ -18,8 +18,7 @@ global_settings:
     # === Product code and documents: pinned or scoped to the file ===
     - rule_id: B104
       path: automated_security_helper/cli/mcp/__init__.py
-      line_start: 943
-      line_end: 943
+      symbol: _log_where_the_server_listens
       reason: >-
         False positive. The line only works out the host to show in the "running on"
         message, for a server whose socket is already bound. Nothing binds to it, and
@@ -292,19 +291,17 @@ global_settings:
       reason: "False positive — hatch build config paths contain strings that match secret patterns"
     # === GuardDog false positives, continued: the docs-CI and MCP waves ===
     #
-    # The same dispositions as the line-pinned block below: heuristics matching
+    # The same dispositions as the GuardDog block below: heuristics matching
     # docstrings that NAME sensitive paths, fixtures that PLANT the hazard a test
     # asserts is refused, and a doc-claims harness talking to its own loopback
-    # server. One entry per finding, pinned to its line.
+    # server. One entry per finding, scoped to the named definition that holds it.
     - rule_id: threat-filesystem-read
       path: automated_security_helper/cli/mcp/source_delivery.py
-      line_start: 2501
-      line_end: 2501
+      symbol: _validate_zip_member
       reason: "A docstring bullet naming /etc/passwd as an example of the absolute archive paths delivery REJECTS; prose, not a read."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/utils/path_matching.py
-      line_start: 317
-      line_end: 317
+      symbol: ignore_path_pattern
       reason: "A docstring naming .env and .npmrc as dotfiles the detect-secrets scan set must keep; prose, not a read."
     # === ferret-scan API_KEY_OR_SECRET, unquoted-assignment false positives ===
     # ferret-scan v2.3.3 added unquoted keyword-assignment detection to the SECRETS
@@ -511,26 +508,24 @@ global_settings:
     # === ferret-scan API_KEY_OR_SECRET: new detections in ferret-scan 2.6.0 ===
     # The supported window admits ferret-scan 2.6.0, whose detectors report these
     # nine sites at 95-100% confidence. Each was read at the reported line and is
-    # pinned to it; none is a stored credential. The ferret-scan 2.5.x scans of
+    # pinned to it by line or, where a named definition holds it, by that
+    # definition (symbol); none is a stored credential. The ferret-scan 2.5.x scans of
     # the same files did not report them.
     - path: tests/unit/utils/test_secret_masking_shapes_in_text.py
       rule_id: API_KEY_OR_SECRET
-      line_start: 49
-      line_end: 49
+      symbol: test_a_token_of_a_recorded_shape_is_masked
       reason: >-
         False positive. A masking test's assertion over a made-up fixture value,
         the same shape as the other secret-masking tests.
     - path: tests/unit/utils/test_secret_masking_regression.py
       rule_id: API_KEY_OR_SECRET
-      line_start: 51
-      line_end: 51
+      symbol: TestSecretMasking.test_b106_rule_masks_secret
       reason: >-
         False positive. A masking test's input string holding a made-up password
         literal, so the masker has something to mask.
     - path: tests/unit/utils/test_secret_masking_regression.py
       rule_id: API_KEY_OR_SECRET
-      line_start: 60
-      line_end: 60
+      symbol: TestSecretMasking.test_b107_rule_masks_secret
       reason: >-
         False positive. A masking test's input string holding a made-up password
         literal, so the masker has something to mask.
@@ -550,15 +545,15 @@ global_settings:
         for the trade_secret keywords, pattern text and not a value.
     - path: .ash/.ash.yaml
       rule_id: API_KEY_OR_SECRET
-      line_start: 764
-      line_end: 764
+      line_start: 771
+      line_end: 771
       reason: >-
         False positive. A suppression reason that quotes a placeholder fixture
         literal; the text explains why another finding is a false positive.
     - path: .ash/.ash.yaml
       rule_id: API_KEY_OR_SECRET
-      line_start: 1011
-      line_end: 1011
+      line_start: 1018
+      line_end: 1018
       reason: >-
         False positive. A suppression reason that quotes a placeholder fixture
         literal; the text explains why another finding is a false positive.
@@ -1431,33 +1426,30 @@ global_settings:
     # so a pin under either could never match here. A scan that keeps the product
     # pins and drops the exclusion reads them from .ash/.ash.yaml.
     # tests/unit/test_ci_guarddog_self_scan_pins.py holds the two files in step.
-    # One entry per finding, pinned to its line, so a new hit anywhere else in these
-    # files is still reported. If a line moves, the finding comes back and the entry
-    # needs its line updated, which is the point of not using a range or a glob.
+    # One entry per finding, scoped to the named definition that holds it (symbol),
+    # so a new hit anywhere else in these files is still reported while the entry
+    # keeps covering the finding when edits move the definition. A hit at module
+    # level has no definition to name and stays pinned to its line; if that line
+    # moves, the finding comes back and the entry needs its line updated.
     - rule_id: threat-process-download-exec
       path: automated_security_helper/assets/install-pinned-tool.py
-      line_start: 1030
-      line_end: 1030
+      symbol: uv_tool_dir
       reason: "subprocess.run of `uv tool dir`; it runs nothing this script downloaded."
     - rule_id: threat-process-download-exec
       path: automated_security_helper/assets/install-pinned-tool.py
-      line_start: 1518
-      line_end: 1518
+      symbol: version_output
       reason: "subprocess.run of `<tool> --version` on an installed binary in a throwaway HOME; nothing downloaded is executed."
     - rule_id: threat-process-download-exec
       path: automated_security_helper/assets/install-pinned-tool.py
-      line_start: 1612
-      line_end: 1612
+      symbol: _uv_tool_dir
       reason: "subprocess.run of `uv tool dir`; it runs nothing this script downloaded."
     - rule_id: threat-process-download-exec
       path: automated_security_helper/utils/python_installer.py
-      line_start: 116
-      line_end: 116
+      symbol: python_package_install_command
       reason: "The pip install argv ASH builds for its own interpreter when it runs outside a uv tool environment; returned to the caller, which installs ASH's own pinned requirements. Nothing downloaded here is executed."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/interactions/run_ash_container.py
-      line_start: 4361
-      line_end: 4361
+      symbol: _write_env_file
       reason: "The container.env file ASH writes, under a temporary directory it has checked is outside the source and output trees, to hand its own variables to the container runner; a write of ASH's file, not a read of a dotenv."
     # === GuardDog: hits the self-scan reports with max_hits: 0 ===
     # Measured with GuardDog 3.2.0 over the tree the plugin stages, with no hit limit
@@ -1465,7 +1457,8 @@ global_settings:
     # config the self-scan runs GuardDog under). Each is code whose text is what the
     # rule describes: an input a check must reject, a file planted under a test's
     # temporary directory, a command string a test inspects, or one variable read by
-    # name. One entry per line, as above.
+    # name. One entry per finding, as above: symbol-scoped inside a named
+    # definition, line-pinned at module level.
     - rule_id: threat-runtime-environment-read
       path: deploy/cdk/lib/ash-container-scripts.ts
       line_start: 559
@@ -1488,14 +1481,8 @@ global_settings:
       reason: "'.env' is the dotfile stem whose stage-suffixed variants (.env.local) the converter admits for scanning; a name in a table, not a read."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/plugin_modules/ash_builtin/scanners/npm_audit_scanner.py
-      line_start: 792
-      line_end: 792
-      reason: "A docstring naming .npmrc to say why the version probe's directory holds its own package.json; nothing here reads the file."
-    - rule_id: threat-filesystem-read
-      path: automated_security_helper/plugin_modules/ash_builtin/scanners/npm_audit_scanner.py
-      line_start: 794
-      line_end: 794
-      reason: "A docstring naming .npmrc to say why the version probe's directory holds its own package.json; nothing here reads the file."
+      symbol: NpmAuditScanner._probe_npm_version
+      reason: "A docstring naming .npmrc, on two of its lines, to say why the version probe's directory holds its own package.json; nothing here reads the file. One entry: the definition covers both records, which two line pins used to."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/utils/package_manager_child.py
       line_start: 62
@@ -1503,39 +1490,29 @@ global_settings:
       reason: "Module prose naming .npmrc to document which configuration the package managers would read and why the scan copy avoids it; nothing here reads the file."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/utils/package_manager_child.py
-      line_start: 304
-      line_end: 304
+      symbol: _nearest_real_directory
       reason: "Module prose naming .npmrc to document which configuration the package managers would read and why the scan copy avoids it; nothing here reads the file."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/utils/package_manager_child.py
-      line_start: 319
-      line_end: 319
+      symbol: _untrusted_ancestor
       reason: "Module prose naming .npmrc to document which configuration the package managers would read and why the scan copy avoids it; nothing here reads the file."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/utils/package_manager_child.py
-      line_start: 359
-      line_end: 359
+      symbol: _settings_file_ancestor
       reason: "Module prose naming .npmrc to document which configuration the package managers would read and why the scan copy avoids it; nothing here reads the file."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/utils/package_manager_child.py
-      line_start: 420
-      line_end: 420
-      reason: "Module prose naming .npmrc to document which configuration the package managers would read and why the scan copy avoids it; nothing here reads the file."
+      symbol: _yarn_copy_parent
+      reason: "Function prose naming .npmrc, on two of its lines, to document which configuration the package managers would read and why the scan copy avoids it; nothing here reads the file. One entry: the definition covers both records, which two line pins used to."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/utils/package_manager_child.py
-      line_start: 436
-      line_end: 436
-      reason: "Module prose naming .npmrc to document which configuration the package managers would read and why the scan copy avoids it; nothing here reads the file."
-    - rule_id: threat-filesystem-read
-      path: automated_security_helper/utils/package_manager_child.py
-      line_start: 574
-      line_end: 574
+      symbol: _pnpm_workspace_copy
       reason: "Module prose naming .npmrc to document which configuration the package managers would read and why the scan copy avoids it; nothing here reads the file."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/utils/package_manager_child.py
       line_start: 1186
       line_end: 1186
-      reason: "A refusal message naming ~/.npmrc and ~/.yarnrc as what the audit copy keeps the package managers away from; nothing here reads the files."
+      reason: "A warning message naming ~/.npmrc and ~/.yarnrc as what the audit copy keeps the package managers away from; nothing here reads the files."
     - rule_id: threat-filesystem-read
       path: scripts/generate_plugin_data_partial.py
       line_start: 185

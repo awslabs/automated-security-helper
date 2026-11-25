@@ -317,6 +317,15 @@ env:
   # to the tools it names, and cdk-nag is a Python dependency rather than a
   # downloaded binary.
   #
+  # The `[symbols]` extra is tree-sitter and its grammars, which resolve
+  # suppressions scoped by `symbol` (a qualified definition name instead of a
+  # line pin). Resolution fails closed: without the extra every symbol-scoped
+  # entry matches nothing and its findings come back as residuals, so a config
+  # that uses `symbol` -- this repository's own .ash/.ash.yaml does -- needs the
+  # extra in the environment that runs the scan. The wheels cover the GitHub
+  # hosted runners; the extra exists (rather than core deps) for platforms,
+  # musllinux aarch64, that no wheel covers.
+  #
   # Extras on a PEP 508 direct reference, rather than a second install step: the
   # extra's contents are read from pyproject.toml at the pinned ref, so there is no
   # second list to drift, and the name is not resolved from an index, so this adds
@@ -325,7 +334,7 @@ env:
   # The ` @ ` makes this one requirement string containing spaces, so every use
   # below quotes it. Unquoted, the shell would split it into three words and pass
   # `@` to uvx as the command to run.
-  ASH_UVX_SOURCE: automated-security-helper[cdk] @ git+https://github.com/${{ inputs.ash-repo }}@${{ inputs.ash-version }}
+  ASH_UVX_SOURCE: automated-security-helper[cdk,symbols] @ git+https://github.com/${{ inputs.ash-repo }}@${{ inputs.ash-version }}
   # Where cfn-nag's Gemfile comes from: the same repo and ref the scan itself is
   # installed from, so the gem version can never disagree with the ASH that
   # invokes it, and the scanned checkout never picks it.
@@ -747,7 +756,7 @@ jobs:
             echo "version-url=${version_url}"
             echo "repo=${repo}"
           } >> "${GITHUB_OUTPUT}"
-          echo "ASH_UVX_SOURCE=automated-security-helper[cdk] @ git+https://github.com/${repo}@${version_url}" >> "${GITHUB_ENV}"
+          echo "ASH_UVX_SOURCE=automated-security-helper[cdk,symbols] @ git+https://github.com/${repo}@${version_url}" >> "${GITHUB_ENV}"
 
       # THE ASH REF IS RESOLVED TO ONE COMMIT, ONCE, BEFORE ANYTHING INSTALLS ASH
       #
@@ -829,7 +838,7 @@ jobs:
             fi
           fi
           {
-            echo "ASH_UVX_SOURCE=automated-security-helper[cdk] @ git+https://github.com/${ASH_REPO}@${COMMIT}"
+            echo "ASH_UVX_SOURCE=automated-security-helper[cdk,symbols] @ git+https://github.com/${ASH_REPO}@${COMMIT}"
             echo "ASH_ASSETS_URL=https://raw.githubusercontent.com/${ASH_REPO}/${COMMIT}/automated_security_helper/assets"
           } >> "$GITHUB_ENV"
           echo "commit=${COMMIT}" >> "$GITHUB_OUTPUT"

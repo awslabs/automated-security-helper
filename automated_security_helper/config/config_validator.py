@@ -4328,6 +4328,28 @@ class ConfigValidator:
             if module_check_failure is not None:
                 result.warnings.append(module_check_failure)
 
+        # A symbol-scoped suppression needs a file entry in .ash.lock, as a
+        # scan requires (core/orchestrator.resolve_scan_config). Judged on the
+        # config the model built, relative to the directory a scan would scan.
+        if refused is None and built is not None and source_dir is not None:
+            from automated_security_helper.core.exceptions import (
+                ASHConfigValidationError as _LockRefusal,
+            )
+            from automated_security_helper.utils.ash_lock import (
+                refuse_unlocked_symbol_suppressions,
+            )
+
+            try:
+                refuse_unlocked_symbol_suppressions(
+                    getattr(
+                        getattr(built, "global_settings", None), "suppressions", None
+                    )
+                    or [],
+                    source_dir,
+                )
+            except _LockRefusal as e:
+                result.errors.append(result.redact(str(e)))
+
         # The checks that read the merged result read it as the scan builds
         # it: with --config-overrides applied. A missing project_name an
         # override supplies is not missing, and the ignore and suppression

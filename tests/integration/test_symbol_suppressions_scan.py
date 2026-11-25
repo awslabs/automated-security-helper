@@ -75,6 +75,13 @@ def test_symbol_suppression_in_a_real_bandit_scan(tmp_path):
     source = tmp_path / "project"
     source.mkdir()
     (source / "app.py").write_text(FIXTURE, encoding="utf-8")
+    # A symbol suppression needs its file locked in .ash.lock; the scan
+    # refuses the config otherwise.
+    from automated_security_helper.utils.ash_lock import AshLock, LockScope
+
+    lock = AshLock(source_dir=source)
+    lock.bind("app.py", LockScope("B602", "risky"))
+    lock.save()
     output = tmp_path / "out"
     config_path = tmp_path / "ash.yaml"
     live = {

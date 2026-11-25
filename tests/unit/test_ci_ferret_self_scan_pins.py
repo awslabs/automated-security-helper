@@ -113,6 +113,10 @@ _RANDOM_CALL = (
 #: The same for the other rules, by rule id and path. A moved pin fails below with the
 #: line to use, and so does a row whose entry is gone. An entry with no row here is not
 #: looked at.
+#: Entries scoped by ``symbol`` instead of a line range have no rows here: the
+#: resolver finds the definition wherever it moves, and
+#: tests/unit/config/test_symbol_migration_record.py holds each one to a symbol
+#: that resolves.
 _RANGED_PIN_MARKERS: dict[tuple[str, str], list[_Marker]] = {
     # The three ferret_scanner.py bandit pins are gone: the import and the call carry
     # nosec comments, bandit reports nothing for either, and the pins excused nothing
