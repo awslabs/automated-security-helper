@@ -4045,6 +4045,15 @@ finding's identity, so a re-scan updates a finding and does not add a second one
 repositories that import into the same account and Region. It is required: without it the
 reporter refuses to import, before it calls AWS. Like the Region and the account, it is the
 operator's to set.</p>
+<p>ASH does not deduplicate, so a secret that two scanners find is two findings in Security
+Hub, each with its own <code>Id</code>. A secret detection also carries <code>ash/correlationId</code> in its
+<code>ProductFields</code>: a value ASH derives from <code>findings_scope</code>, the file, the start line and the
+workspace project, and not from the scanner or the rule, so every finding of one secret has
+the same one. Filter or group on it to see one secret with the scanners that reported it.
+It identifies no finding: nothing is merged, left out or archived because of it. Only a
+secret detection has one, since only there does the place say which problem it is; a
+detection with no file or no start line has none. Two secrets on one line share a value,
+and scanners that place one secret on different lines get different values.</p>
 <p>With <code>archive_resolved_findings: true</code>, a finding that an earlier scan of the same scope
 imported and this scan no longer reports is imported again as <code>ARCHIVED</code>, for the scanners
 that lost no target in this run. The option is off by default, because a finding a scan did
