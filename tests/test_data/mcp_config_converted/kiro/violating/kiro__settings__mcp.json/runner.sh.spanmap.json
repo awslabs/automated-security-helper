@@ -1,0 +1,29 @@
+[
+  {
+    "col": 15,
+    "end_col": 6,
+    "end_line": 23,
+    "line": 17,
+    "pointer": "/mcpServers/runner",
+    "script_line": 1,
+    "source_file": ".kiro/settings/mcp.json"
+  },
+  {
+    "col": 15,
+    "end_col": 6,
+    "end_line": 23,
+    "line": 17,
+    "pointer": "/mcpServers/runner",
+    "script_line": 2,
+    "source_file": ".kiro/settings/mcp.json"
+  },
+  {
+    "col": 15,
+    "end_col": 6,
+    "end_line": 23,
+    "line": 17,
+    "pointer": "/mcpServers/runner",
+    "script_line": 3,
+    "source_file": ".kiro/settings/mcp.json"
+  }
+]
