@@ -1,0 +1,1 @@
+{"path":"./src/a.txt","rules":[{"identifier":"demo_marker","meta":[["severity","high"],["description","demo marker"]],"tags":["sample"]},{"identifier":"no_sev","meta":[],"tags":[]}]}
