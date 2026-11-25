@@ -5,8 +5,9 @@
 
 The SARIF below is built by hand to the shape TFLint's formatter writes
 (``formatter/sarif.go`` in terraform-linters/tflint): a ``tflint`` run holding lint
-issues and a ``tflint-errors`` run holding diagnostics. It is NOT a capture from a
-release binary, and the expected findings are written out here, not derived from the
+issues and a ``tflint-errors`` run holding diagnostics. It covers severities the
+captured fixtures (tests/test_data/scanners/tflint/captured, a real 0.66.0 run) did
+not produce, and the expected findings are written out here, not derived from the
 code under test. The scan() tests replace the subprocess with a fake, so they run on
 every platform without the binary.
 """
@@ -14,6 +15,7 @@ every platform without the binary.
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -32,8 +34,21 @@ from automated_security_helper.plugin_modules.ash_tflint_plugins.tflint_scanner 
     TflintScannerConfigOptions,
 )
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
+from automated_security_helper.utils.sandbox.policy import (
+    SandboxRequirements,
+    build_scanner_policy,
+)
+from automated_security_helper.utils.tool_downloads import downloadable_tools
 
 pytestmark = pytest.mark.unit
+
+_CAPTURED = (
+    Path(__file__).resolve().parents[3]
+    / "test_data"
+    / "scanners"
+    / "tflint"
+    / "captured"
+)
 
 
 def _result(rule: str, level: Optional[str], uri: str, line: int) -> Dict[str, Any]:
@@ -489,10 +504,27 @@ class TestNothingToScan:
         assert _scanner(src, tmp_path).nothing_to_scan_reason() is not None
 
 
+_PINNED = "tflint" in downloadable_tools()
+
+
 class TestInstall:
+    @pytest.mark.skipif(
+        _PINNED,
+        reason="only meaningful while utils/tool_downloads.py has no tflint rows",
+    )
+    def test_without_pin_rows_the_scanner_still_builds_and_cannot_install(
+        self, tree, tmp_path, monkeypatch
+    ):
+        scanner = _scanner(tree, tmp_path)
+        assert scanner.custom_install_commands == {}
+        monkeypatch.setattr(ts, "find_executable", lambda cmd: None)
+        assert scanner.validate_plugin_dependencies() is False
+
+    @pytest.mark.skipif(
+        not _PINNED,
+        reason="needs the tflint rows in utils/tool_downloads.py (PR notes)",
+    )
     def test_install_commands_cover_every_published_platform(self, tree, tmp_path):
-        # Needs the tool_downloads.py rows listed in the plugin's integration
-        # manifest: without them the scanner cannot be built at all.
         commands = _scanner(tree, tmp_path).custom_install_commands
         published = {
             ("linux", "amd64"),
@@ -505,3 +537,76 @@ class TestInstall:
             assert commands[platform_name][arch], (platform_name, arch)
         # tflint publishes no windows arm64 asset: absent, not an empty list.
         assert "arm64" not in commands["windows"]
+
+
+class TestCapturedReport:
+    """The adapter over output a real TFLint 0.66.0 wrote."""
+
+    @staticmethod
+    def _captured(name: str) -> str:
+        return (_CAPTURED / name).read_text(encoding="utf-8")
+
+    def test_the_captured_positive_is_rated_and_located(
+        self, tree, tmp_path, monkeypatch, on_path
+    ):
+        fake = FakeTflint(stdout=self._captured("positive.sarif"))
+        report = _run(_scanner(tree, tmp_path), fake, monkeypatch)
+        assert _findings(report) == [
+            ("terraform_required_version", "warning", "MEDIUM", "main.tf", 3),
+            ("terraform_typed_variables", "warning", "MEDIUM", "main.tf", 1),
+            ("terraform_unused_declarations", "warning", "MEDIUM", "main.tf", 1),
+        ]
+        for result in report.get_all_results():
+            assert {"terraform", "lint"} <= set(result.properties.tags)
+
+    def test_the_captured_negative_has_no_findings(
+        self, tree, tmp_path, monkeypatch, on_path
+    ):
+        fake = FakeTflint(stdout=self._captured("negative.sarif"), exit_code=0)
+        report = _run(_scanner(tree, tmp_path), fake, monkeypatch)
+        assert _findings(report) == []
+
+    def test_every_documented_level_maps_and_an_unknown_one_is_high(
+        self, tree, tmp_path
+    ):
+        # The captured run produced warnings only; the other levels are hand-built.
+        assert ts.TFLINT_LEVEL_MAP["error"][0] == "HIGH"
+        assert ts.TFLINT_LEVEL_MAP["warning"][0] == "MEDIUM"
+        assert ts.TFLINT_LEVEL_MAP["note"][0] == "LOW"
+        sarif = _sarif([_result("terraform_x", "none", "main.tf", 2)])
+        report = _scanner(tree, tmp_path)._post_process_sarif(
+            SarifReport.model_validate(json.loads(sarif)), [], tree
+        )
+        severity = [r.properties.issue_severity for r in report.get_all_results()]
+        assert severity == ["HIGH"]
+
+
+class TestFacetsDeclaration:
+    def test_the_register_rows_are_declared_on_the_class_itself(self):
+        assert "facets" in vars(TflintScanner)
+        assert "operational_facets" in vars(TflintScanner)
+        assert TflintScanner.operational_facets.scanner_name == "tflint"
+        assert TflintScanner.operational_facets.exit_codes.success_exit_codes == (0, 2)
+
+
+class TestSandboxRequirements:
+    def test_the_strict_default_is_declared_and_the_policy_has_no_network(
+        self, tmp_path
+    ):
+        assert TflintScanner.sandbox_requirements == SandboxRequirements()
+        source = tmp_path / "src"
+        output = source / ".ash" / "ash_output"
+        output.mkdir(parents=True)
+        policy = build_scanner_policy(
+            "tflint",
+            TflintScanner.sandbox_requirements,
+            argv0=sys.executable,
+            source_dir=source,
+            output_dir=output,
+            results_dir=output / "scanners" / "tflint",
+            scan_target=source,
+            cwd=source,
+            offline=False,
+            network_scanners=None,
+        )
+        assert policy.network is False

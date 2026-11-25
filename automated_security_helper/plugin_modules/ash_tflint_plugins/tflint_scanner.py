@@ -112,13 +112,22 @@ from typing import (
 from pydantic import Field, model_validator
 
 from automated_security_helper.base.options import ScannerOptionsBase
+from automated_security_helper.base import scanner_operational_facets as opsf
+from automated_security_helper.base.scanner_facets import (
+    FacetDecl,
+    FacetState,
+    ScannerFacets,
+)
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
 )
 from automated_security_helper.config.tool_config_trust import empty_tool_config
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
-from automated_security_helper.core.exceptions import ScannerError
+from automated_security_helper.core.exceptions import (
+    ScannerError,
+    ToolNotProvisionableError,
+)
 from automated_security_helper.models.core import IgnorePathWithReason, ToolArgs
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.schemas.sarif_schema_model import (
@@ -195,6 +204,203 @@ class TflintScanner(ScannerPluginBase[TflintScannerConfig]):
 
     # The bundled terraform ruleset needs no network; plugin rulesets are not used.
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
+    #: The facets register row (base/scanner_facets.py). Native fields name TFLint's
+    #: own SARIF (fixture tests/test_data/scanners/tflint/captured/positive.sarif).
+    facets: ClassVar[ScannerFacets] = ScannerFacets(
+        rule_id=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result "ruleId" (terraform_* for the bundled ruleset)',
+        ),
+        severity=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result "level" (error / warning / note), mapped one to '
+            "one onto issue_severity by _post_process_sarif",
+        ),
+        file_path=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="locations[].physicalLocation.artifactLocation.uri",
+        ),
+        line_range=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="region.startLine / region.endLine",
+        ),
+        column=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="region.startColumn / region.endColumn",
+        ),
+        message=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result "message.text"',
+        ),
+        resource_id=FacetDecl(
+            state=FacetState.NA,
+            reason="results name a file region; a Terraform address appears only "
+            "inside message text (captured/positive.sarif), and a value that "
+            "lives only in prose is not a resource id",
+        ),
+        resource_type=FacetDecl(
+            state=FacetState.NA,
+            reason="results carry no resource type field",
+        ),
+        package_name=FacetDecl(
+            state=FacetState.NA,
+            reason="Terraform lint findings carry no package",
+        ),
+        package_version=FacetDecl(
+            state=FacetState.NA,
+            reason="Terraform lint findings carry no package",
+        ),
+        package_path=FacetDecl(
+            state=FacetState.NA,
+            reason="Terraform lint findings carry no package",
+        ),
+        taxonomy_cve=FacetDecl(
+            state=FacetState.NA,
+            reason="lint rules carry no CVE taxonomy",
+        ),
+        taxonomy_cwe=FacetDecl(
+            state=FacetState.NA,
+            reason="lint rules carry no CWE taxonomy",
+        ),
+        fingerprints=FacetDecl(
+            state=FacetState.NA,
+            reason="the native SARIF result carries ruleId, ruleIndex, level, "
+            "message and one location only",
+        ),
+        fix_available=FacetDecl(
+            state=FacetState.NA,
+            reason="the SARIF carries no fix state",
+        ),
+        remediation_text=FacetDecl(
+            state=FacetState.NA,
+            reason="the rule's advice is the message text; no separate remediation "
+            "field exists in the SARIF",
+        ),
+        snippet=FacetDecl(
+            state=FacetState.NA,
+            reason="the native SARIF region carries no snippet",
+        ),
+        references=FacetDecl(
+            state=FacetState.DROPPED,
+            native_field="runs[0].tool.driver.rules[].helpUri",
+            reason="each rule carries a help URI to its documentation page; the "
+            "adapter does not copy it onto the result",
+        ),
+        tags=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="(no native tags) the adapter appends terraform and lint",
+        ),
+        extras=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result properties "issue_severity" written by the adapter',
+        ),
+    )
+
+    #: The operational register row (base/scanner_operational_facets.py),
+    #: checked against the production declarations it mirrors by
+    #: tests/unit/plugin_modules/test_scanner_operational_facets_consistency.py.
+    operational_facets: ClassVar[opsf.ScannerOperationalFacets] = (
+        opsf.ScannerOperationalFacets(
+            scanner_name="tflint",
+            network=opsf.NetworkFacet(
+                fetch_kind=opsf.FetchKind.NONE,
+                fetches=(),
+                prefetch=(),
+                offline_outcome=opsf.OfflineOutcome.UNCHANGED,
+                offline_strategy=OfflineStrategy.BUNDLED,
+                sandbox_network=opsf.SandboxNetwork.NONE,
+                source=(
+                    "tflint_scanner.py offline_strategy, sandbox_requirements; "
+                    "module header (Offline): the bundled terraform ruleset needs "
+                    "no network and ASH never runs --init"
+                ),
+            ),
+            output=opsf.OutputFacet(
+                native_formats=(opsf.OutputFormat.SARIF,),
+                side_reports=(),
+                non_finding_artifacts=(),
+                note="TFLint has no report-file flag; the SARIF is its stdout, kept "
+                "in TflintScanner.stdout.log and read from there",
+            ),
+            targets=opsf.TargetsFacet(
+                kinds=(opsf.TargetKind.IAC_TERRAFORM,),
+                tool_type=ScannerToolType.IAC,
+                selection="tflint --recursive over *.tf and *.tf.json outside hidden "
+                "directories; nothing_to_scan_reason makes the same selection",
+                covers_note="a community scanner; it declares no covers display string",
+            ),
+            runtime=opsf.RuntimeFacet(
+                kind=opsf.RuntimeKind.PINNED_BINARY,
+                external_programs=(),
+                invocations=opsf.Invocations.ONE,
+                tool_versions_key="tflint",
+                python_only=False,
+                use_uv_tool=False,
+            ),
+            platforms=opsf.PlatformsFacet(
+                provisionable=(
+                    "darwin/amd64",
+                    "darwin/arm64",
+                    "linux/amd64",
+                    "linux/arm64",
+                    "windows/amd64",
+                ),
+                note="the release publishes no windows/arm64 asset; the rows are "
+                "owed to utils/tool_downloads.py (see the PR notes)",
+            ),
+            severity=opsf.SeverityFacet(
+                severity_class=opsf.SeverityClass.NATIVE,
+                note="TFLint's three severities arrive as the SARIF levels and map "
+                "one to one onto HIGH, MEDIUM and LOW",
+            ),
+            silencing=opsf.SilencingFacet(
+                tool_side=(
+                    opsf.SilencingLayer(
+                        layer=opsf.SilencingLayerKind.INLINE_COMMENT,
+                        writer=opsf.SilencingWriter.REPOSITORY,
+                        honored=opsf.Honored.YES,
+                        surface="# tflint-ignore: <rule> and # tflint-ignore-file: "
+                        "<rule> comments, applied inside TFLint before ASH sees the "
+                        "report",
+                        cite="tflint_scanner.py module header (Inline annotations): "
+                        "no documented flag turns them off",
+                    ),
+                ),
+            ),
+            identity=opsf.IdentityFacet(
+                fingerprint_class=opsf.FingerprintClass.POSITIONAL_ONLY,
+                note="the SARIF carries no fingerprints; identity is file and line "
+                "through the shared floor",
+            ),
+            extensibility=opsf.ExtensibilityFacet(
+                custom_rules=opsf.CustomRules.NONE,
+                env_prefixes=(),
+                options_surface="no options: the ruleset and the empty config are "
+                "fixed by ASH, and a .tflint.hcl in the tree is not read",
+            ),
+            exit_codes=opsf.ExitCodesFacet(
+                success_exit_codes=(0, 2),
+                semantics="0 is clean and 2 is issues found; 1 is a failure even "
+                "with a report on disk (cmd/cli.go)",
+            ),
+            provenance=opsf.ProvenanceFacet(
+                tier=opsf.Tier.COMMUNITY_OPTIN,
+                source=opsf.ProvenanceSource.PINNED_RELEASE_BINARY,
+                selection_surfaces=("ash_tflint_plugins in ash_plugin_modules",),
+                upstream_license=(
+                    "MPL-2.0, release binaries also embed BUSL-1.1 terraform-package "
+                    "files (source: terraform-linters/tflint README license section, "
+                    "release v0.66.0)"
+                ),
+            ),
+            prerequisites=opsf.PrerequisitesFacet(
+                kinds=(opsf.Prerequisite.TEMPLATE,),
+                note="Terraform files (*.tf, *.tf.json) in the scan set; "
+                "nothing_to_scan_reason reports their absence",
+            ),
+        )
+    )
+
     success_exit_codes: ClassVar[Set[int]] = {0, ISSUES_EXIT_CODE}
     # The strict default; see "Sandbox" in the module docstring.
     sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements()
@@ -212,8 +418,20 @@ class TflintScanner(ScannerPluginBase[TflintScannerConfig]):
 
     @model_validator(mode="after")
     def setup_custom_install_commands(self) -> "TflintScanner":
-        """Install from the pinned release asset in ``utils/tool_downloads.py``."""
-        self.custom_install_commands.update(pinned_tool_install_commands("tflint"))
+        """Install from the pinned release asset in ``utils/tool_downloads.py``.
+
+        Until the ``tflint`` rows exist there (see the PR notes), the pin lookup
+        raises. That must not make the scanner unconstructible, so it leaves the
+        install table empty: the tool then reads as not installable and
+        ``validate_plugin_dependencies`` says so, instead of the whole plugin
+        failing to load.
+        """
+        try:
+            table = pinned_tool_install_commands("tflint")
+        except ToolNotProvisionableError as exc:
+            ASH_LOGGER.debug(f"tflint has no pinned install: {exc}")
+            table = {}
+        self.custom_install_commands.update(table)
         return self
 
     # ------------------------------------------------------------------
