@@ -422,7 +422,7 @@ def to_frame(models: Sequence[Any], spec: FrameSpec) -> "pl.DataFrame":
 def _public_properties(model: type) -> List[str]:
     names: List[str] = []
     for klass in model.__mro__:
-        if not klass.__module__.startswith("automated_security_helper"):
+        if klass.__module__.startswith(("pydantic", "builtins")):
             continue
         for name, member in vars(klass).items():
             if isinstance(member, property) and not name.startswith("_"):
