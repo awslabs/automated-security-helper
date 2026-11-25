@@ -35,6 +35,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.mcp_config_sc
     evaluate_entry,
     host_is_loopback,
 )
+from automated_security_helper.schemas.sarif_schema_model import Run, SarifReport
 from automated_security_helper.utils.mcp_config import (
     FORMATS,
     parse_mcp_config_text,
@@ -562,7 +563,9 @@ def rule_ids(report) -> List[str]:
 @pytest.mark.parametrize("fmt,kind", CASES, ids=lambda v: str(v))
 def test_fixture_verdicts(test_plugin_context, monkeypatch, fmt, kind) -> None:
     stage_tree(test_plugin_context, monkeypatch, FIXTURES / fmt / kind)
-    scanner = make_scanner(test_plugin_context, require_local=True)
+    # The violating fixtures each hold a non-loopback remote entry; the benign ones
+    # hold remote entries too, so only the violating run asks for local-only.
+    scanner = make_scanner(test_plugin_context, require_local=kind == "violating")
     report = run_scan(scanner, test_plugin_context)
     ids = rule_ids(report)
     if kind == "benign":
@@ -583,7 +586,7 @@ def test_every_finding_lands_on_a_real_line_of_the_original_file(
     results = report.runs[0].results
     assert results
     for result in results:
-        location = result.locations[0].physicalLocation
+        location = result.locations[0].physicalLocation.root
         uri = location.artifactLocation.uri
         file = Path(test_plugin_context.source_dir) / uri
         assert str(file) in paths
@@ -603,17 +606,17 @@ def test_findings_point_at_the_field_they_are_about(
     lines = text.splitlines()
     by_rule = {r.ruleId: r for r in report.runs[0].results}
 
-    escalation = by_rule[RULE_PRIVILEGE_ESCALATION].locations[0].physicalLocation
+    escalation = by_rule[RULE_PRIVILEGE_ESCALATION].locations[0].physicalLocation.root
     assert lines[escalation.region.startLine - 1].strip() == '"command": "sudo"'
     assert (
         escalation.region.startColumn
         == lines[escalation.region.startLine - 1].index('"sudo"') + 1
     )
 
-    unpinned = by_rule[RULE_UNPINNED_RUNNER].locations[0].physicalLocation
+    unpinned = by_rule[RULE_UNPINNED_RUNNER].locations[0].physicalLocation.root
     assert lines[unpinned.region.startLine - 1].strip() == '"some-mcp-server"'
 
-    remote = by_rule[RULE_REMOTE_NOT_LOCAL].locations[0].physicalLocation
+    remote = by_rule[RULE_REMOTE_NOT_LOCAL].locations[0].physicalLocation.root
     assert "mcp.example.com" in lines[remote.region.startLine - 1]
 
 
@@ -625,8 +628,8 @@ def test_results_carry_severity_level_and_the_entry_pointer(
     by_rule = {r.ruleId: r for r in report.runs[0].results}
     high = by_rule[RULE_PRIVILEGE_ESCALATION]
     medium = by_rule[RULE_UNPINNED_RUNNER]
-    assert high.level.value == "error"
-    assert medium.level.value == "warning"
+    assert getattr(high.level, "value", high.level) == "error"
+    assert getattr(medium.level, "value", medium.level) == "warning"
     assert getattr(high.properties, "issue_severity") == "HIGH"
     assert getattr(medium.properties, "issue_severity") == "MEDIUM"
     assert getattr(high.properties, "mcp_server_pointer") == "/mcpServers/elevated"
@@ -703,6 +706,41 @@ def test_the_converted_target_is_reported_empty(
     scanner = make_scanner(test_plugin_context)
     report = run_scan(scanner, test_plugin_context, target_type="converted")
     assert rule_ids(report) == []
+
+
+CORPUS = (
+    Path(__file__).resolve().parents[4]
+    / "test_data"
+    / "scanners"
+    / "mcp_config"
+    / "captured"
+    / "mcp-config-violating.sarif"
+)
+
+
+def test_the_committed_corpus_is_what_the_scanner_writes(
+    test_plugin_context, monkeypatch
+) -> None:
+    """The facets register reads this file as the scanner's captured output."""
+    tree = Path(test_plugin_context.source_dir)
+    for fmt in sorted(f.format_id for f in FORMATS):
+        shutil.copytree(FIXTURES / fmt / "violating", tree, dirs_exist_ok=True)
+    paths = sorted(str(p) for p in tree.rglob("*") if p.is_file())
+    monkeypatch.setattr(f"{MODULE}.scan_set", lambda **kwargs: list(paths))
+    scanner = make_scanner(test_plugin_context, require_local=True)
+    run = run_scan(scanner, test_plugin_context).runs[0]
+    written = SarifReport(
+        version="2.1.0", runs=[Run(tool=run.tool, results=run.results)]
+    )
+    text = (
+        json.dumps(
+            json.loads(written.model_dump_json(exclude_none=True, exclude_unset=True)),
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
+    )
+    assert CORPUS.read_text(encoding="utf-8") == text
 
 
 def test_the_scanner_declares_its_register_rows_and_name() -> None:

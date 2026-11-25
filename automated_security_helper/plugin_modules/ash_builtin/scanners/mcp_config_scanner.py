@@ -144,6 +144,7 @@ from automated_security_helper.utils.mcp_config import (
 )
 from automated_security_helper.utils.mcp_config.readers import MAX_CONFIG_BYTES
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
+from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.utils.scanned_tree import (
     TreeInputRefused,
     open_in_scanned_tree,
@@ -714,6 +715,8 @@ class McpConfigScanner(ScannerPluginBase[McpConfigScannerConfig]):
     resolves_tool_off_path: ClassVar[bool] = True
     #: Nothing is fetched, ever.
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
+    #: No network, no extra paths, no variables: the strict default.
+    sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements()
 
     #: The facets register row (base/scanner_facets.py). The scanner builds its own
     #: SARIF from the normalized ``McpServerEntry`` model, so the native fields name
