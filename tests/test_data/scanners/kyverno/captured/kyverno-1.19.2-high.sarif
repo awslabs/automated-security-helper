@@ -1,0 +1,88 @@
+{
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "Kyverno",
+          "version": "1.19.2",
+          "informationUri": "https://kyverno.io",
+          "rules": [
+            {
+              "id": "require-team-label/check-team-label",
+              "name": "check-team-label",
+              "shortDescription": {
+                "text": "validation error: The label team is required. rule check-team-label failed at path /metadata/labels/"
+              },
+              "relationships": [],
+              "properties": {
+                "tags": [
+                  "kyverno",
+                  "kubernetes",
+                  "policy",
+                  "Best Practices"
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "require-team-label/check-team-label",
+          "ruleIndex": -1,
+          "kind": "fail",
+          "level": "error",
+          "message": {
+            "text": "validation error: The label team is required. rule check-team-label failed at path /metadata/labels/",
+            "arguments": []
+          },
+          "locations": [
+            {
+              "id": -1,
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "k8s/bad.yaml",
+                  "index": -1
+                },
+                "region": {
+                  "startLine": 1,
+                  "charOffset": -1,
+                  "byteOffset": -1
+                }
+              },
+              "logicalLocations": [],
+              "annotations": [],
+              "relationships": []
+            }
+          ],
+          "partialFingerprints": {
+            "kyverno/v1": "78df5e0556d67a0cdcf1a63c6d72fb3b"
+          },
+          "stacks": [],
+          "codeFlows": [],
+          "graphs": [],
+          "graphTraversals": [],
+          "relatedLocations": [],
+          "rank": -1.0,
+          "attachments": [],
+          "fixes": [],
+          "taxa": [],
+          "properties": {
+            "tags": [
+              "kyverno",
+              "kubernetes",
+              "policy",
+              "Best Practices"
+            ],
+            "issue_severity": "HIGH",
+            "kyverno_result": "fail",
+            "kyverno_policy": "require-team-label",
+            "kyverno_rule": "check-team-label",
+            "kyverno_resource": "Pod/default/bad-pod"
+          }
+        }
+      ]
+    }
+  ]
+}

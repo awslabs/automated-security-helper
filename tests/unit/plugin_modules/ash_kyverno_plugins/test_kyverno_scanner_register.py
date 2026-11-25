@@ -156,7 +156,7 @@ class TestCapturedReport:
         assert failed == []
         (result,) = results
         assert result.ruleId == "require-team-label/check-team-label"
-        assert result.level.value == "error"
+        assert str(getattr(result.level, "value", result.level)) == "error"
         dumped_props = json.loads(
             result.model_dump_json(exclude_none=True, by_alias=True)
         )["properties"]

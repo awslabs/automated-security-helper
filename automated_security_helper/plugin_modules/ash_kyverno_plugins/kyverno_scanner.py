@@ -340,7 +340,7 @@ def parse_policy_report_output(text: str) -> List[Dict[str, Any]]:
     if start is None:
         return []
     try:
-        documents = [d for d in yaml.safe_load_all(text[start:]) if d is not None]
+        documents = [d for d, _ in _documents(text[start:]) if d is not None]
     except yaml.YAMLError as exc:
         raise ValueError(f"the report is not valid YAML ({type(exc).__name__})")
     results: List[Dict[str, Any]] = []
