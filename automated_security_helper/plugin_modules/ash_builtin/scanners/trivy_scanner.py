@@ -214,7 +214,6 @@ from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.utils.config_trust import (
     NOT_THE_OPERATORS,
     refusal_warning,
-    set_by_operator,
 )
 from automated_security_helper.utils.process_env import snapshot_environ
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
@@ -649,17 +648,18 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         chosen = list(options.scanners)
         if chosen == default:
             return
-        config = self.context.config if self.context is not None else None
-        if set_by_operator(config, "scanners.trivy.options.scanners", chosen):
-            return
-        self._plugin_log(
+        granted = self._operator_gated(
+            "scanners.trivy.options.scanners",
+            chosen,
+            default,
             refusal_warning(
                 f"Ignoring scanners.trivy.options.scanners ({chosen}): "
                 f"{NOT_THE_OPERATORS}. trivy runs the default set, {default}.",
                 NOT_THE_OPERATORS,
             ),
-            level=logging.WARNING,
         )
+        if granted is chosen:
+            return
         if self.config is not None:
             self.config.options = options.model_copy(update={"scanners": default})
 
