@@ -116,12 +116,19 @@ from automated_security_helper.schemas.sarif_schema_model import (
     PropertyBag,
     SarifReport,
 )
+from automated_security_helper.utils.config_trust import (
+    leaves_the_tree_through_a_link,
+    operator_path,
+    refusal_warning,
+    scan_root,
+)
 from automated_security_helper.utils.download_utils import (
     pinned_tool_install_commands,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
+from automated_security_helper.utils.scan_targets import scan_targets
 from automated_security_helper.utils.subprocess_utils import find_executable
 
 #: The directory Conftest reads policies from when ``--policy`` is not passed.
@@ -447,13 +454,62 @@ class ConftestScanner(ScannerPluginBase[ConftestScannerConfig]):
             raise ScannerError("ConftestScanner has no plugin context")
         return Path(self.context.source_dir)
 
+    def _policy_choice(self) -> Tuple[Path, bool]:
+        """The policy directory and whether it is the default ``policy/``.
+
+        Rego is code Conftest evaluates, so which directory it comes from is the
+        operator's choice (``config_trust.operator_path``): a ``policy_dir`` the
+        scanned repository's own config or an MCP client set, or one that leads out
+        of the tree through a symbolic link, is ignored with one warning and the
+        default ``policy/`` under the source directory is used. A directory the
+        operator wrote may sit inside the tree.
+        """
+        source = self._source_dir()
+        value = self._options().policy_dir
+        if value:
+            config = self.context.config if self.context is not None else None
+            chosen = operator_path(
+                config,
+                "scanners.conftest.options.policy_dir",
+                value,
+                source,
+                outside_tree=False,
+            )
+            if chosen.path is not None:
+                return chosen.path, False
+            key = f"policy_dir:{value}"
+            if key not in self._operator_refusals_logged:
+                self._operator_refusals_logged.add(key)
+                self._plugin_log(
+                    refusal_warning(
+                        f"Ignoring scanners.conftest.options.policy_dir "
+                        f"({str(value)!r}): {chosen.refusal}. Using "
+                        f"{DEFAULT_POLICY_DIR}/ under the source directory.",
+                        chosen.refusal,
+                    ),
+                    level=logging.WARNING,
+                )
+        return source / DEFAULT_POLICY_DIR, True
+
     def _policy_path(self) -> Path:
-        chosen = Path(self._options().policy_dir or DEFAULT_POLICY_DIR)
-        return chosen if chosen.is_absolute() else self._source_dir() / chosen
+        return self._policy_choice()[0]
 
     def _policy_gate_reason(self) -> Optional[str]:
         """Why there is nothing to run, or None when the policy directory has Rego."""
-        policy = self._policy_path()
+        policy, is_default = self._policy_choice()
+        if is_default and self.context is not None:
+            source = self._source_dir()
+            config = self.context.config
+            if leaves_the_tree_through_a_link(
+                DEFAULT_POLICY_DIR, source, scan_root(config, source)
+            ):
+                return (
+                    f"conftest has no policies to test: {policy.as_posix()} resolves "
+                    "outside the scanned tree through a symbolic link, so the "
+                    "scanned repository would decide which Rego Conftest "
+                    "evaluates. Name the directory in "
+                    "scanners.conftest.options.policy_dir."
+                )
         try:
             has_rego = policy.is_dir() and any(
                 p.suffix == ".rego" and p.is_file() for p in policy.rglob("*.rego")
@@ -468,8 +524,33 @@ class ConftestScanner(ScannerPluginBase[ConftestScannerConfig]):
             "Conftest ships no rules."
         )
 
+    def _no_files_reason(self, target: Path) -> Optional[str]:
+        """Why ``target`` holds nothing Conftest can parse, or None when it does."""
+        if self._config_files(target):
+            return None
+        return (
+            "no file Conftest can parse was found in the target (it parses yaml, "
+            "json, toml, hcl, terraform, Dockerfile, ini, xml and a few more)"
+        )
+
     def nothing_to_scan_reason(self) -> Optional[str]:
-        return self._policy_gate_reason()
+        """The policy gate's reason, or the lack of any parsable file in every tree.
+
+        Answers for the trees a scan hands the scanner (``scan_targets``): a reason
+        only when ``scan()`` would start Conftest on none of them.
+        """
+        reason = self._policy_gate_reason()
+        if reason is not None:
+            return reason
+        if self.context is None:
+            return None
+        reasons = []
+        for _target_type, tree in scan_targets(self.context):
+            found = self._no_files_reason(tree)
+            if found is None:
+                return None
+            reasons.append(found)
+        return reasons[0] if reasons else None
 
     def scan(  # type: ignore[override]
         self,
@@ -481,6 +562,12 @@ class ConftestScanner(ScannerPluginBase[ConftestScannerConfig]):
     ) -> Any:
         """The template scan, after the policy gate."""
         reason = self._policy_gate_reason()
+        if reason is None and Path(target).is_dir():
+            # A tree with no parsable file is a scan with nothing to evaluate, not
+            # a failed one: the converted tree of a notebook project holds none.
+            found = self._no_files_reason(Path(target))
+            if found is not None:
+                reason = f"{found}."
         if reason is not None:
             self.exit_code = 0
             self._reset_errors()

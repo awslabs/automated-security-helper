@@ -20,7 +20,9 @@ import pytest
 
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.base.scanner_plugin import ScannerPluginBase
+from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.config.default_config import get_default_config
+from automated_security_helper.utils.config_trust import record_provenance
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.plugin_modules import ash_conftest_plugins
 from automated_security_helper.plugin_modules.ash_conftest_plugins import (
@@ -151,14 +153,23 @@ class FakeConftest:
         return self.calls[0]["argv"]
 
 
-def _scanner(source: Path, tmp_path: Path, **options) -> ConftestScanner:
+def _scanner(
+    source: Path, tmp_path: Path, *, operator: bool = True, **options
+) -> ConftestScanner:
+    """``operator``: the options came from the operator, or from the scanned tree."""
+    config = get_default_config()
+    record_provenance(
+        config,
+        in_tree=[] if operator else [source / ".ash" / ".ash.yaml"],
+        trusted=AshConfig(),
+    )
     output = tmp_path / "out"
     return ConftestScanner(
         context=PluginContext(
             source_dir=source,
             output_dir=output,
             work_dir=output / "converted",
-            config=get_default_config(),
+            config=config,
         ),
         config=ConftestScannerConfig(
             enabled=True, options=ConftestScannerConfigOptions(**options)
@@ -251,7 +262,49 @@ class TestPolicyGate:
         scanner = _scanner(tree, tmp_path, policy_dir="rules")
         fake = FakeConftest()
         _run(scanner, fake, monkeypatch)
-        assert f"--policy={(tree / 'rules').as_posix()}" in fake.argv
+        assert f"--policy={(tree / 'rules').resolve().as_posix()}" in fake.argv
+
+    def test_a_policy_dir_the_scanned_tree_set_is_not_used(
+        self, tree, tmp_path, on_path, monkeypatch
+    ):
+        # Rego is code Conftest evaluates: which directory it comes from is the
+        # operator's choice, not a setting the scanned repository can make.
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        (elsewhere / "x.rego").write_text("package main\n")
+        scanner = _scanner(tree, tmp_path, operator=False, policy_dir=str(elsewhere))
+        fake = FakeConftest()
+        _run(scanner, fake, monkeypatch)
+        assert f"--policy={(tree / 'policy').as_posix()}" in fake.argv
+        assert not any(str(elsewhere) in a for a in fake.argv)
+
+    def test_a_policy_dir_leading_out_through_a_link_is_not_used(
+        self, tree, tmp_path, on_path, monkeypatch
+    ):
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (outside / "x.rego").write_text("package main\n")
+        (tree / "rules").symlink_to(outside, target_is_directory=True)
+        scanner = _scanner(tree, tmp_path, policy_dir="rules")
+        fake = FakeConftest()
+        _run(scanner, fake, monkeypatch)
+        assert f"--policy={(tree / 'policy').as_posix()}" in fake.argv
+
+    def test_the_default_policy_dir_leading_out_through_a_link_skips(
+        self, tmp_path, on_path, monkeypatch
+    ):
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "a.yaml").write_text("a: 1\n")
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (outside / "x.rego").write_text("package main\n")
+        (src / "policy").symlink_to(outside, target_is_directory=True)
+        scanner = _scanner(src, tmp_path)
+        fake = FakeConftest()
+        assert _run(scanner, fake, monkeypatch) is True
+        assert fake.calls == []
+        assert "symbolic link" in (scanner._nothing_scanned_reason or "")
 
 
 class TestInvocation:
@@ -294,18 +347,34 @@ class TestInvocation:
         files = _scanner(tree, tmp_path)._config_files(tree)
         assert files == ["Dockerfile", "deploy/app.yaml", "ok.json"]
 
-    def test_a_tree_with_nothing_parsable_fails_before_the_tool(
+    def test_a_tree_with_nothing_parsable_is_skipped_not_failed(
         self, tmp_path, on_path, monkeypatch
     ):
+        # A tree (or the converted tree) with a policy and no configuration file is
+        # a scan with nothing to evaluate, not a failed scan.
         src = tmp_path / "src"
         (src / "policy").mkdir(parents=True)
         (src / "policy" / "p.rego").write_text("package main\n")
         (src / "app.py").write_text("print(1)\n")
         scanner = _scanner(src, tmp_path)
+        assert "no file Conftest can parse" in scanner.nothing_to_scan_reason()
         fake = FakeConftest()
-        with pytest.raises(ScannerError, match="no file Conftest can parse"):
-            _run(scanner, fake, monkeypatch)
+        assert _run(scanner, fake, monkeypatch) is True
         assert fake.calls == []
+        assert "no file Conftest can parse" in (scanner._nothing_scanned_reason or "")
+
+    def test_the_converted_tree_without_configuration_is_skipped(
+        self, tree, tmp_path, on_path, monkeypatch
+    ):
+        converted = tmp_path / "converted"
+        converted.mkdir()
+        (converted / "nb.py").write_text("print(1)\n")
+        scanner = _scanner(tree, tmp_path)
+        fake = FakeConftest()
+        monkeypatch.setattr(scanner, "_run_subprocess", fake(scanner))
+        assert scanner.scan(target=converted, target_type="converted") is True
+        assert fake.calls == []
+        assert scanner.nothing_to_scan_reason() is None  # the source tree has files
 
     def test_too_many_files_for_one_command_line_fail_clearly(
         self, tree, tmp_path, on_path, monkeypatch

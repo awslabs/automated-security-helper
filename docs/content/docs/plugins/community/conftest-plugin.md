@@ -28,6 +28,9 @@ Like the opt-in `snyk-code` scanner, which waits for its credential, Conftest wa
 
 - No `.rego` file in the policy directory: ASH does not start Conftest. It logs one INFO line naming the directory, and the scanner is reported SKIPPED with that reason, not PASSED. A missing Conftest binary in that state is also SKIPPED, since the tool would have had nothing to do.
 - At least one `.rego` file: Conftest runs.
+- A tree with no file Conftest can parse (for example the converted tree of a notebook project): Conftest is not started and the scanner is reported SKIPPED for that tree.
+
+Rego is code Conftest evaluates, so the directory it comes from is your choice. A `policy_dir` set by a config file inside the scanned repository (or by an MCP client), or one that leads out of the scanned tree through a symbolic link, is ignored with a warning and `policy/` under the source directory is used. If `policy/` itself is a symbolic link out of the tree, the scanner is reported SKIPPED and says so.
 
 ## Installing Conftest
 
