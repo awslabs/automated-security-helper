@@ -3,15 +3,14 @@
 
 """SpectralScanner: the invocation, the exit status, and the severity mapping.
 
-The reports below are what Spectral 6.17.1 (the pinned version) wrote when it was
-run as ``spectral lint --ruleset=<extends spectral:oas and spectral:asyncapi>
---format=sarif --output=<file> --fail-severity=hint --ignore-unknown-format --quiet
-'**/*.{json,yaml,yml}'`` from the root of a two-file tree (``api.yaml`` with six
-warnings, ``broken.yaml`` with one error) and from the root of a clean tree.
-Spectral lists all 112 rules of its rulesets in ``tool.driver.rules``; here the list
-is cut to the rules the results name and ``ruleIndex`` renumbered to match. Every
-other field is as Spectral wrote it. The scan() tests replace the subprocess with a
-fake that serves them, so they run on every platform without the binary.
+The reports are the files under ``tests/test_data/scanners/spectral/captured/``,
+what Spectral 6.17.1 wrote when it was run as ``spectral lint
+--ruleset=<extends spectral:oas and spectral:asyncapi> --format=sarif --output=<file>
+--fail-severity=hint --ignore-unknown-format --quiet '**/*.{json,yaml,yml}'`` from the
+root of a two-file tree (``api.yaml`` with six warnings, ``broken.yaml`` with one
+error) and from the root of a clean tree (the README beside them has the details).
+The scan() tests replace the subprocess with a fake that serves them, so they run on
+every platform without the binary.
 """
 
 from __future__ import annotations
@@ -24,6 +23,10 @@ from typing import Any, Dict, List, Optional
 import pytest
 
 from automated_security_helper.base.plugin_context import PluginContext
+from automated_security_helper.base.scanner_facets import ScannerFacets
+from automated_security_helper.base.scanner_operational_facets import (
+    ScannerOperationalFacets,
+)
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.core.exceptions import ScannerError
@@ -42,147 +45,32 @@ from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 
 pytestmark = pytest.mark.unit
 
-HELP = "https://meta.stoplight.io/docs/spectral/docs/reference/openapi-rules.md#"
-
-#: (rule id, description) in the order of ``tool.driver.rules`` below.
-_RULES = [
-    ("path-params", "Path parameters must be defined and valid."),
-    ("info-contact", 'Info object must have "contact" object.'),
-    ("info-description", 'Info "description" must be present and non-empty string.'),
-    (
-        "operation-description",
-        'Operation "description" must be present and non-empty string.',
-    ),
-    ("operation-operationId", 'Operation must have "operationId".'),
-    ("operation-tags", 'Operation must have non-empty "tags" array.'),
-    ("oas3-api-servers", 'OpenAPI "servers" must be present and non-empty array.'),
-]
-
-
-def _driver() -> Dict[str, Any]:
-    return {
-        "name": "spectral",
-        "rules": [
-            {
-                "id": rule_id,
-                "shortDescription": {"text": text},
-                "helpUri": f"{HELP}{rule_id}",
-            }
-            for rule_id, text in _RULES
-        ],
-        "version": "6.17.1",
-        "informationUri": "https://github.com/stoplightio/spectral",
-    }
-
-
-def _result(
-    rule_index: int,
-    level: Optional[str],
-    text: str,
-    uri: str,
-    artifact: int,
-    region: tuple,
-) -> Dict[str, Any]:
-    out: Dict[str, Any] = {
-        "message": {"text": text},
-        "ruleId": _RULES[rule_index][0],
-        "locations": [
-            {
-                "physicalLocation": {
-                    "artifactLocation": {"uri": uri, "index": artifact},
-                    "region": dict(
-                        zip(
-                            ("startLine", "startColumn", "endLine", "endColumn"), region
-                        )
-                    ),
-                }
-            }
-        ],
-        "ruleIndex": rule_index,
-    }
-    if level is not None:
-        out["level"] = level
-    return out
-
-
-def _report(results: List[Dict[str, Any]], artifacts: List[str]) -> Dict[str, Any]:
-    return {
-        "$schema": "http://json.schemastore.org/sarif-2.1.0-rtm.6.json",
-        "version": "2.1.0",
-        "runs": [
-            {
-                "tool": {"driver": _driver()},
-                "results": results,
-                "artifacts": [
-                    {"sourceLanguage": "YAML", "location": {"uri": uri}}
-                    for uri in artifacts
-                ],
-            }
-        ],
-    }
-
-
-POSITIVE = _report(
-    [
-        _result(
-            6,
-            "warning",
-            'OpenAPI "servers" must be present and non-empty array.',
-            "api.yaml",
-            0,
-            (1, 1, 10, 26),
-        ),
-        _result(
-            1,
-            "warning",
-            'Info object must have "contact" object.',
-            "api.yaml",
-            0,
-            (2, 6, 4, 17),
-        ),
-        _result(
-            2,
-            "warning",
-            'Info "description" must be present and non-empty string.',
-            "api.yaml",
-            0,
-            (2, 6, 4, 17),
-        ),
-        _result(
-            3,
-            "warning",
-            'Operation "description" must be present and non-empty string.',
-            "api.yaml",
-            0,
-            (7, 9, 10, 26),
-        ),
-        _result(
-            4,
-            "warning",
-            'Operation must have "operationId".',
-            "api.yaml",
-            0,
-            (7, 9, 10, 26),
-        ),
-        _result(
-            5,
-            "warning",
-            'Operation must have non-empty "tags" array.',
-            "api.yaml",
-            0,
-            (7, 9, 10, 26),
-        ),
-        _result(
-            0,
-            "error",
-            'Operation must define parameter "{petId}" as expected by path "/pets/{petId}".',
-            "broken.yaml",
-            1,
-            (14, 9, 20, 26),
-        ),
-    ],
-    ["api.yaml", "broken.yaml"],
+CAPTURED = Path(__file__).resolve().parents[3] / (
+    "test_data/scanners/spectral/captured"
 )
+
+
+def _captured(name: str) -> Dict[str, Any]:
+    """A report Spectral 6.17.1 wrote, verbatim (see captured/README.md)."""
+    return json.loads((CAPTURED / name).read_text(encoding="utf-8"))
+
+
+POSITIVE = _captured("positive.sarif")
+NEGATIVE = _captured("negative.sarif")
+
+
+def _single_result_report(level: Optional[str]) -> Dict[str, Any]:
+    """The captured positive report cut to its ``info-contact`` result, with that
+    result's level set (or removed when ``level`` is None)."""
+    report = json.loads(json.dumps(POSITIVE))
+    run = report["runs"][0]
+    run["results"] = [r for r in run["results"] if r["ruleId"] == "info-contact"]
+    if level is None:
+        run["results"][0].pop("level", None)
+    else:
+        run["results"][0]["level"] = level
+    return report
+
 
 #: What POSITIVE must produce, written out by hand from the run above, not derived from
 #: the code under test: (ruleId, SARIF level, ASH severity, uri, start line).
@@ -195,9 +83,6 @@ POSITIVE_EXPECTED = [
     ("operation-tags", "warning", "MEDIUM", "api.yaml", 7),
     ("path-params", "error", "HIGH", "broken.yaml", 14),
 ]
-
-#: A tree with nothing to report: Spectral still writes the report, with no results.
-NEGATIVE = _report([], [])
 
 
 def _findings(report: SarifReport) -> List[tuple]:
@@ -341,6 +226,22 @@ class TestCommunityPlugin:
     def test_the_scanner_states_what_it_is(self):
         assert SpectralScanner.python_only is False
         assert SpectralScanner.success_exit_codes == {0, 1}
+
+    def test_the_scanner_declares_both_registers_of_its_own(self):
+        assert isinstance(vars(SpectralScanner)["facets"], ScannerFacets)
+        ops = vars(SpectralScanner)["operational_facets"]
+        assert isinstance(ops, ScannerOperationalFacets)
+        assert ops.scanner_name == SpectralScannerConfig().name
+        assert ops.exit_codes.success_exit_codes == tuple(
+            sorted(SpectralScanner.success_exit_codes)
+        )
+
+    def test_the_captured_reports_are_what_the_register_says_they_are(self):
+        for report in (POSITIVE, NEGATIVE):
+            assert report["version"] == "2.1.0" and "runs" in report
+            assert report["runs"][0]["tool"]["driver"]["version"] == "6.17.1"
+        assert NEGATIVE["runs"][0]["results"] == []
+        assert len(POSITIVE["runs"][0]["results"]) == len(POSITIVE_EXPECTED)
 
     def test_the_tree_may_not_choose_the_ruleset(self):
         assert SpectralScannerConfigOptions().ruleset_file is None
@@ -493,6 +394,22 @@ class TestRulesetOption:
         assert ruleset.resolve() != mine.resolve()
         assert "scanners.spectral.options.ruleset_file" in caplog.text
 
+    def test_an_operators_ruleset_inside_the_scanned_tree_is_refused(
+        self, tree, tmp_path, on_path, monkeypatch, caplog
+    ):
+        """A JavaScript ruleset is code, so the tree does not supply one even when the
+        operator names the path."""
+        mine = tree / "rules.js"
+        mine.write_text("module.exports = {};\n")
+        scanner = _scanner(tree, tmp_path, ruleset_file=str(mine))
+        fake = FakeSpectral()
+        with caplog.at_level("WARNING"):
+            _run(scanner, fake, monkeypatch)
+        ruleset = Path(_flag(fake.argv, "--ruleset="))
+        assert ruleset.resolve() != mine.resolve()
+        assert ruleset.name == "spectral-ruleset.yaml"
+        assert "scanners.spectral.options.ruleset_file" in caplog.text
+
     def test_a_ruleset_that_is_not_a_file_fails_the_scan(
         self, tree, tmp_path, on_path, monkeypatch
     ):
@@ -545,9 +462,7 @@ class TestReport:
     def test_every_level_is_rated_and_the_sarif_level_agrees(
         self, tree, tmp_path, on_path, monkeypatch, level, severity, sarif_level
     ):
-        report_in = _report(
-            [_result(1, level, "x", "api.yaml", 0, (2, 6, 4, 17))], ["api.yaml"]
-        )
+        report_in = _single_result_report(level)
         scanner = _scanner(tree, tmp_path)
         report = _run(scanner, FakeSpectral(report_in), monkeypatch)
         ((_, got_level, got_severity, _, _),) = _findings(report)
@@ -698,20 +613,25 @@ class TestDependencyCheck:
 
 
 class TestInstall:
-    def test_install_commands_cover_every_published_platform(self, tmp_path):
-        """Needs the ``spectral`` rows of ``utils/tool_downloads.py``."""
+    """``utils/tool_downloads.py`` has no ``spectral`` row (a central edit this module
+    does not make), so the scanner must construct without one and offer no install."""
+
+    def test_the_scanner_constructs_without_a_pinned_row(self, tmp_path):
+        scanner = _scanner(tmp_path, tmp_path)
+        assert scanner.custom_install_commands == {}
+
+    def test_no_install_command_is_offered_without_a_pinned_row(self, tmp_path):
         scanner = _scanner(tmp_path, tmp_path)
         for platform, arch in [
             ("linux", "amd64"),
             ("linux", "arm64"),
-            ("darwin", "amd64"),
             ("darwin", "arm64"),
             ("windows", "amd64"),
         ]:
-            commands = scanner.get_installation_commands(platform, arch)
-            assert commands, f"no install command for {platform}/{arch}"
-            assert "spectral" in commands[0]
+            assert not scanner.get_installation_commands(platform, arch)
 
-    def test_windows_arm64_is_not_published(self, tmp_path):
+    def test_a_pinned_row_is_used_once_one_exists(self, tmp_path, monkeypatch):
+        table = {"linux": {"amd64": ["fake-install"]}}
+        monkeypatch.setattr(ss, "pinned_tool_install_commands", lambda tool: table)
         scanner = _scanner(tmp_path, tmp_path)
-        assert not scanner.get_installation_commands("windows", "arm64")
+        assert scanner.custom_install_commands == table

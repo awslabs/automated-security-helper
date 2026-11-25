@@ -24,10 +24,7 @@ Spectral needs no account, license key or network service, so there is no opt-in
 
 ## Installing Spectral
 
-- **Container mode:** the ASH image includes Spectral v6.17.1.
-- **Local mode:** `ash dependencies install --tool spectral`, with the module listed in `ash_plugin_modules` (or added with `--config-overrides 'ash_plugin_modules+=["automated_security_helper.plugin_modules.ash_spectral_plugins"]'`), downloads the pinned v6.17.1 release binary from GitHub and verifies it against the SHA256 digest pinned in ASH before installing it. Linux and macOS on x86_64 and arm64, and Windows on x86_64, are supported. Spectral publishes no Windows arm64 binary.
-- **Nix mode:** the flake does not supply Spectral. Install it with `ash dependencies install`, or have it on `PATH`.
-- Any `spectral` already on `PATH` is also used.
+ASH does not download or bundle Spectral yet: `utils/tool_downloads.py` has no `spectral` row. Install the binary from the [Spectral releases](https://github.com/stoplightio/spectral/releases) (the scanner was measured on v6.17.1, linux x64) and put it on `PATH`. Spectral publishes linux and macOS binaries for x86_64 and arm64 and Windows for x86_64, none for Windows arm64. Without the binary the scanner is reported `MISSING`. Once a pinned row lands, `ash dependencies install --tool spectral` will download the release binary and verify its SHA256 digest.
 
 ## What is scanned
 
@@ -51,9 +48,10 @@ scanners:
     options:
       # A Spectral ruleset (YAML, JSON or JavaScript) used in place of ASH's
       # default. Operator only: honored when set with --config-overrides or an ASH
-      # config file outside every git checkout and the scanned tree. Set by such a
-      # config, it is ignored with a warning. A path that does not exist fails the
-      # scan.
+      # config file outside every git checkout and the scanned tree, and naming a
+      # file outside the scanned tree (a JavaScript ruleset is code). Set by such a
+      # config, or naming a file inside the tree, it is ignored with a warning. A
+      # path that does not exist fails the scan.
       ruleset_file: null
       # Seconds for the whole Spectral scan (default 1800; null for no limit).
       scan_timeout: 1800
@@ -100,9 +98,8 @@ Package-scoped and symbol-scoped suppressions do not apply: no Spectral finding 
 
 ## Offline and air-gapped use
 
-Spectral's rulesets are compiled into the binary, so a run behaves the same offline except for a remote `$ref`, which cannot be fetched. Install the binary before going offline (the container image already has it).
+Spectral's rulesets are compiled into the binary, so a run behaves the same offline except for a remote `$ref`, which cannot be fetched. Install the binary before going offline.
 
 ## License
 
-Spectral is Apache-2.0 licensed. The ASH container image includes the unmodified release binary, and its license is in the image at `/usr/share/doc/ash/third-party/spectral/`, installed the same way as every other bundled tool's (see
-[Third-party license files](../../../how-to/run-in-a-container.md#third-party-licenses)).
+ASH does not bundle or redistribute Spectral. It runs the binary you install, under that binary's own license.

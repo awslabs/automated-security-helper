@@ -22,7 +22,7 @@ Spectral exits 2 for that case (see "Exit status") and ASH reports it as a clean
 
 Invocation
 ----------
-Measured on Spectral 6.17.1 (the pinned release, Linux x64 binary):
+Measured on Spectral 6.17.1 (the Linux x64 release binary):
 
 * ``--ruleset=<file>``: always passed. Without it Spectral reads ``.spectral.yaml``,
   ``.spectral.json`` or ``.spectral.js`` from the working directory, which is the
@@ -110,14 +110,23 @@ from typing import (
 
 from pydantic import Field, model_validator
 
+from automated_security_helper.base import scanner_operational_facets as opsf
 from automated_security_helper.base.options import ScannerOptionsBase
+from automated_security_helper.base.scanner_facets import (
+    FacetDecl,
+    FacetState,
+    ScannerFacets,
+)
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
 )
 from automated_security_helper.config.confinement_remedy import SET_BY_THE_OPERATOR
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
-from automated_security_helper.core.exceptions import ScannerError
+from automated_security_helper.core.exceptions import (
+    ScannerError,
+    ToolNotProvisionableError,
+)
 from automated_security_helper.models.core import IgnorePathWithReason, ToolArgs
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.schemas.sarif_schema_model import (
@@ -197,8 +206,9 @@ class SpectralScannerConfigOptions(ScannerOptionsBase):
                 "the working directory for --config-overrides, not from the source "
                 "directory. A JavaScript ruleset runs code, and a ruleset in the "
                 "scanned repository can drop every rule, so the scanned tree does "
-                f"not choose it. {SET_BY_THE_OPERATOR} Set by such a config, it is "
-                "ignored with a warning. A path that does not exist fails the scan. "
+                f"not choose it. {SET_BY_THE_OPERATOR} Set by such a config, or "
+                "naming a file inside the scanned tree, it is ignored with a "
+                "warning. A path that does not exist fails the scan. "
                 "A `.spectral.yaml` in the scanned tree is never read."
             ),
         ),
@@ -224,6 +234,210 @@ class SpectralScanner(ScannerPluginBase[SpectralScannerConfig]):
 
     # The rulesets are compiled into the binary; only a remote $ref needs the network.
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
+
+    #: The facets register row (base/scanner_facets.py). Declaration only: no
+    #: behavior changes. Native fields name Spectral's own SARIF (fixture
+    #: tests/test_data/scanners/spectral/captured/positive.sarif).
+    facets: ClassVar[ScannerFacets] = ScannerFacets(
+        rule_id=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result "ruleId"',
+        ),
+        severity=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result "level" (error, warning, note), rated HIGH, '
+            'MEDIUM, LOW into properties "issue_severity" by _post_process_sarif',
+        ),
+        file_path=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="locations[].physicalLocation.artifactLocation.uri",
+        ),
+        line_range=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="region.startLine / region.endLine",
+        ),
+        column=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="region.startColumn / region.endColumn",
+        ),
+        message=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result "message.text"',
+        ),
+        resource_id=FacetDecl(
+            state=FacetState.NA,
+            reason="a finding names a range inside an API description, not a "
+            "deployable resource; the SARIF carries a rule id and a region only, "
+            "and an in-document location is not a resource id",
+        ),
+        resource_type=FacetDecl(
+            state=FacetState.NA,
+            reason="a finding names a range inside an API description, not a "
+            "deployable resource",
+        ),
+        package_name=FacetDecl(
+            state=FacetState.NA,
+            reason="API description lint findings carry no package",
+        ),
+        package_version=FacetDecl(
+            state=FacetState.NA,
+            reason="API description lint findings carry no package",
+        ),
+        package_path=FacetDecl(
+            state=FacetState.NA,
+            reason="API description lint findings carry no package",
+        ),
+        taxonomy_cve=FacetDecl(
+            state=FacetState.NA,
+            reason="lint findings carry no CVE taxonomy",
+        ),
+        taxonomy_cwe=FacetDecl(
+            state=FacetState.NA,
+            reason="Spectral rules carry no CWE taxonomy in the SARIF",
+        ),
+        fingerprints=FacetDecl(
+            state=FacetState.NA,
+            reason="the captured results carry no partialFingerprints; identity "
+            "is file and line",
+        ),
+        fix_available=FacetDecl(
+            state=FacetState.NA,
+            reason="lint findings carry no fix state",
+        ),
+        remediation_text=FacetDecl(
+            state=FacetState.NA,
+            reason="the SARIF rules carry id, shortDescription and helpUri only",
+        ),
+        snippet=FacetDecl(
+            state=FacetState.NA,
+            reason="the captured regions carry no snippet; Spectral writes the "
+            "range only",
+        ),
+        references=FacetDecl(
+            state=FacetState.DROPPED,
+            native_field='tool.driver.rules[] "helpUri" (the rule documentation page)',
+            reason="the rule's documentation URL is in the report; ASH does not "
+            "carry it onto the result",
+        ),
+        tags=FacetDecl(
+            state=FacetState.NA,
+            reason="Spectral results carry no tags; the adapter appends lint and "
+            "api-description after the read, which is not a native field",
+        ),
+        extras=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result properties "issue_severity" written by the adapter',
+        ),
+    )
+
+    #: The operational register row (base/scanner_operational_facets.py),
+    #: checked against the production declarations it mirrors by
+    #: tests/unit/plugin_modules/test_scanner_operational_facets_consistency.py.
+    operational_facets: ClassVar[opsf.ScannerOperationalFacets] = (
+        opsf.ScannerOperationalFacets(
+            scanner_name="spectral",
+            network=opsf.NetworkFacet(
+                fetch_kind=opsf.FetchKind.NONE,
+                fetches=(),
+                prefetch=(),
+                offline_outcome=opsf.OfflineOutcome.UNCHANGED,
+                offline_strategy=OfflineStrategy.BUNDLED,
+                sandbox_network=opsf.SandboxNetwork.NONE,
+                source=(
+                    "spectral_scanner.py offline_strategy, sandbox_requirements; "
+                    "module header (Offline): the rulesets are compiled into the "
+                    "binary and ASH passes no flag that fetches"
+                ),
+                unconfirmed=(
+                    "Spectral resolves a remote $ref in a scanned description "
+                    "itself (module header, What the tree can reach); the sandbox "
+                    "grants no network, so there it is an unresolved-reference "
+                    "finding, and outside the sandbox the fetch is the tool's and "
+                    "has no flag to turn it off"
+                ),
+            ),
+            output=opsf.OutputFacet(
+                native_formats=(opsf.OutputFormat.SARIF,),
+                side_reports=(),
+                non_finding_artifacts=(),
+            ),
+            targets=opsf.TargetsFacet(
+                kinds=(opsf.TargetKind.SOURCE_CODE,),
+                tool_type=ScannerToolType.SAST,
+                selection="`spectral lint` over the glob **/*.{json,yaml,yml} under "
+                "the target, dot-directories skipped, non-description files "
+                "ignored (_documents, DOCUMENT_GLOB, --ignore-unknown-format)",
+                covers_note=(
+                    "the community scanners declare no covers display string; the "
+                    "documents are OpenAPI, Swagger and AsyncAPI descriptions"
+                ),
+                tool_type_note=(
+                    "kept as SAST, the type the scanner sets: an API description "
+                    "is source a team writes, and no target kind names it"
+                ),
+            ),
+            runtime=opsf.RuntimeFacet(
+                kind=opsf.RuntimeKind.USER_INSTALLED_CLI,
+                external_programs=(),
+                invocations=opsf.Invocations.ONE,
+                python_only=False,
+                use_uv_tool=False,
+            ),
+            platforms=opsf.PlatformsFacet(
+                provisionable=(),
+                note="utils/tool_downloads.py has no spectral row, so ASH provisions "
+                "nothing; the operator installs the binary. The upstream release "
+                "publishes linux and macOS x64 and arm64 and windows x64",
+            ),
+            severity=opsf.SeverityFacet(
+                severity_class=opsf.SeverityClass.NATIVE,
+                note="error, warning and note map to HIGH, MEDIUM and LOW; "
+                "Spectral's SARIF writes info and hint as one level, note",
+            ),
+            silencing=opsf.SilencingFacet(
+                tool_side=(),
+                none_reason=(
+                    "ASH passes --ruleset=<file> on every run, so the ruleset the "
+                    "scanned tree could write (.spectral.yaml, .json, .js) is never "
+                    "read and ASH passes no other tool-side silencing input; "
+                    "whether Spectral has an inline or ignore-file layer of its own "
+                    "was not measured"
+                ),
+            ),
+            identity=opsf.IdentityFacet(
+                fingerprint_class=opsf.FingerprintClass.POSITIONAL_ONLY,
+                note="the results carry no partialFingerprints; identity is file "
+                "and line",
+            ),
+            extensibility=opsf.ExtensibilityFacet(
+                custom_rules=opsf.CustomRules.OPERATOR_PATHS,
+                env_prefixes=(),
+                options_surface="options.ruleset_file, a ruleset the operator names "
+                "outside the scanned tree; a ruleset in the tree is ignored with a "
+                "warning",
+            ),
+            exit_codes=opsf.ExitCodesFacet(
+                success_exit_codes=(0, 1),
+                semantics="ASH passes --fail-severity=hint, so 1 means any result "
+                "and 0 none; 2 is Spectral's own failure and fails the scan",
+            ),
+            provenance=opsf.ProvenanceFacet(
+                tier=opsf.Tier.COMMUNITY_OPTIN,
+                source=opsf.ProvenanceSource.USER_INSTALLED,
+                selection_surfaces=(
+                    "ash_spectral_plugins in ash_plugin_modules",
+                    "options.ruleset_file",
+                ),
+                upstream_license=opsf.LICENSE_NOT_READ,
+            ),
+            prerequisites=opsf.PrerequisitesFacet(
+                kinds=(opsf.Prerequisite.TEMPLATE,),
+                note="an OpenAPI, Swagger or AsyncAPI description; a tree with no "
+                "JSON or YAML file is skipped (nothing_to_scan_reason)",
+            ),
+        )
+    )
+
     # 0 no results, 1 results, anything else (2 is Spectral's own failure) fails.
     success_exit_codes: ClassVar[Set[int]] = {0, RESULTS_EXIT_CODE}
     # The strict default (no network, baseline environment only); see "Sandbox" in the
@@ -243,8 +457,26 @@ class SpectralScanner(ScannerPluginBase[SpectralScannerConfig]):
 
     @model_validator(mode="after")
     def setup_custom_install_commands(self) -> "SpectralScanner":
-        """Install from the pinned release asset in ``utils/tool_downloads.py``."""
-        self.custom_install_commands.update(pinned_tool_install_commands("spectral"))
+        """Install from the pinned release asset in ``utils/tool_downloads.py``, once
+        that file carries a ``spectral`` row.
+
+        Until it does (the row is a central edit this module does not make; see
+        "Installing the tool" in the plugin README), ASH provisions nothing for
+        Spectral and the operator installs the binary themselves. The lookup raises
+        ``ToolNotProvisionableError`` for a tool with no row, and the scanner must
+        stay constructible, so that case leaves the install table empty and
+        ``validate_plugin_dependencies`` reports the missing executable.
+        """
+        try:
+            self.custom_install_commands.update(
+                pinned_tool_install_commands("spectral")
+            )
+        except ToolNotProvisionableError:
+            ASH_LOGGER.debug(
+                "spectral has no pinned release row in utils/tool_downloads.py; "
+                "no install command is registered and the binary must be installed "
+                "by the operator."
+            )
         return self
 
     # ------------------------------------------------------------------
@@ -295,7 +527,10 @@ class SpectralScanner(ScannerPluginBase[SpectralScannerConfig]):
             "scanners.spectral.options.ruleset_file",
             value,
             self._source_dir(),
-            outside_tree=False,
+            # A JavaScript ruleset is code Spectral runs, so a file inside the scanned
+            # tree is refused even when the operator names it: the tree decides what
+            # is at that path.
+            outside_tree=True,
         )
         if chosen.refusal == LEADS_OUT_OF_THE_TREE:
             raise ScannerError(

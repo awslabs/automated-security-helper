@@ -23,9 +23,7 @@ With the module listed, `spectral` runs by default. `scanners.spectral.enabled: 
 
 ## Installing the tool
 
-- Container mode: the ASH image includes Spectral.
-- Local mode: `ash dependencies install --tool spectral`, with the module listed, downloads the pinned release binary and verifies its digest.
-- Any `spectral` already on `PATH` is also used.
+ASH does not download Spectral yet: `utils/tool_downloads.py` has no `spectral` row, so install the binary yourself from the [release page](https://github.com/stoplightio/spectral/releases) (the scanner was measured on 6.17.1, linux x64) and put it on `PATH`. Without it the scan reports the scanner as missing its dependency and does not run it. Once the pinned row lands, `ash dependencies install --tool spectral` downloads the release binary and verifies its digest. Nothing in this module vendors Spectral code.
 
 ## Configuration
 
