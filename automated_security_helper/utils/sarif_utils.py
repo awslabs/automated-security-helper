@@ -430,7 +430,7 @@ def attach_scanner_details(
     for run in sarif_report.runs:
         # Create or update tool.driver information
         if not run.tool:
-            run.tool = Tool()
+            run.tool = Tool(driver=ToolComponent(name=scanner_name))
 
         if not run.tool.driver:
             run.tool.driver = ToolComponent(name=scanner_name)
@@ -461,7 +461,8 @@ def attach_scanner_details(
             scanner_details["tool_invocation"] = invocation_details
 
         # Add scanner details to properties
-        run.tool.driver.properties.scanner_details = scanner_details
+        # PropertyBag allows extra fields (extra="allow"), which ty cannot see.
+        run.tool.driver.properties.scanner_details = scanner_details  # ty: ignore[unresolved-attribute]
 
         # Also attach scanner information to each result
         if run.results:
@@ -1449,7 +1450,7 @@ def _apply_inline_suppression(
         )
     for isup in inline_cache[file_key]:
         if (
-            isup.rule_id.lower() == result.ruleId.lower()
+            isup.rule_id.lower() == (result.ruleId or "").lower()
             and isup.line_number == result_line
         ):
             if not result.suppressions:
@@ -2281,7 +2282,12 @@ def _apply_suppressions_within_budget(
                     None,
                 )
                 uri_as_written = None
-                if result.ruleId and location is not None:
+                if (
+                    result.ruleId
+                    and location is not None
+                    and location.physicalLocation is not None
+                    and location.physicalLocation.root.artifactLocation is not None
+                ):
                     raw_uri = location.physicalLocation.root.artifactLocation.uri
                     uri = (
                         _normalize_sarif_uri(

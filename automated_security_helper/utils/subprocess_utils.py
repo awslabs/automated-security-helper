@@ -89,6 +89,7 @@ from typing import (
     Sequence,
     Tuple,
     Union,
+    cast,
 )
 
 from typing_extensions import Self, TypeGuard
@@ -1504,7 +1505,8 @@ def _has_a_console() -> bool:
         import ctypes
 
         processes = (ctypes.c_ulong * 1)()
-        attached = ctypes.windll.kernel32.GetConsoleProcessList(processes, 1)  # type: ignore[attr-defined]
+        # windll exists on Windows only; any other platform lands in the except.
+        attached = ctypes.windll.kernel32.GetConsoleProcessList(processes, 1)  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
         return attached != 0
     except (ImportError, AttributeError, OSError):
         # No ctypes (a Python built without _ctypes) or no Windows API: no console
@@ -1989,7 +1991,8 @@ def _communicate_in_slices(
             if first is None:
                 first = expired
             if end is not None and _slice_clock() >= end:
-                first.timeout = timeout
+                # ``end`` is set only when the call had a timeout.
+                first.timeout = cast(float, timeout)
                 first.stdout = expired.stdout
                 first.stderr = expired.stderr
                 raise first from None
@@ -2902,7 +2905,7 @@ def _decoded(captured: Any, process: subprocess.Popen) -> Any:
 
 
 def _late_decoded(
-    captured: Any, encoding: Optional[str], errors: str = "replace"
+    captured: Any, encoding: Optional[str], errors: Optional[str] = "replace"
 ) -> Any:
     """Partial bytes a failed wait carried, decoded as the finished run's
     streams would have been: the caller's encoding, or when the caller named
@@ -3383,7 +3386,9 @@ def _run_stoppable(args: List[str], **kwargs: Any) -> subprocess.CompletedProces
                         if _send_stop(process, process.kill):
                             _wait_after_kill(process)
                         raise
-                expired.stdout, expired.stderr = stdout, stderr
+                # Text mode hands back str; TimeoutExpired types its streams as
+                # bytes, but carries either.
+                expired.stdout, expired.stderr = stdout, stderr  # ty: ignore[invalid-assignment]
                 raise
             except BaseException as error:
                 if started is None:
@@ -3593,7 +3598,7 @@ def _windows_system_directory() -> Optional[str]:
         ctypes = None
 
     windll = getattr(ctypes, "windll", None)
-    if windll is not None:
+    if ctypes is not None and windll is not None:
         try:
             buffer = ctypes.create_unicode_buffer(32768)
             length = windll.kernel32.GetSystemDirectoryW(buffer, len(buffer))
@@ -4914,7 +4919,7 @@ def run_command(
     log_level: int = logging.INFO,
     timeout: Optional[float] = None,
     encoding: Optional[str] = None,
-    errors: str = "replace",
+    errors: Optional[str] = "replace",
     values: Iterable[str] = (),
 ) -> subprocess.CompletedProcess:
     """Run a command and return the completed process.
@@ -5853,7 +5858,7 @@ def run_command_stream_output(
     env: Optional[Dict[str, str]] = None,
     shell: bool = False,
     encoding: Optional[str] = None,
-    errors: str = "replace",
+    errors: Optional[str] = "replace",
 ) -> int:
     """Run a command and stream its output to the console.
 
@@ -5988,7 +5993,7 @@ def run_command_stream_output(
 
         def watch_for_the_cancel() -> None:
             while not watcher_done.wait(CANCEL_POLL_SECONDS):
-                if cancel_event.is_set():
+                if cancel_event is not None and cancel_event.is_set():
                     stop_on_cancel()
                     return
 
@@ -6001,7 +6006,7 @@ def run_command_stream_output(
                 )
                 watcher.start()
             # Stream output, shown: it is the tool's, and quotes what it scanned.
-            for line in process.stdout:
+            for line in process.stdout or ():
                 print(shown_not_obeyed(line.rstrip()))
                 if cancel_event is not None and cancel_event.is_set():
                     if not stop_on_cancel():
@@ -6169,7 +6174,10 @@ def create_completed_process(
 
 
 def raise_called_process_error(
-    returncode: int, cmd: List[str], output: str = None, stderr: str = None
+    returncode: int,
+    cmd: List[str],
+    output: Optional[str] = None,
+    stderr: Optional[str] = None,
 ) -> None:
     """Raise a CalledProcessError with the given attributes.
 
@@ -6195,7 +6203,7 @@ def create_process_with_pipes(
     shell: bool = False,
     stderr_to_stdout: bool = False,
     encoding: Optional[str] = None,
-    errors: str = "replace",
+    errors: Optional[str] = "replace",
 ) -> subprocess.Popen:
     """Create a process with pipes for stdout and stderr.
 
