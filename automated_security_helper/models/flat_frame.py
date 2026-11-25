@@ -15,31 +15,28 @@ The frame has one row per finding, in the order of the list given, so ``i`` is
 the finding's position in the host list: a consumer that needs a field the frame
 does not carry reads ``findings[i]``.
 
-========================  =========  =============================================
-``i``                     Int64      position in the list
-``id``                    String     the finding's id
-``scanner``               String     the finding's scanner; null for none
-``scanner_key``           String     the scanner lower-cased, ``""`` for none: the
-                                     key the suppressed counts are taken by
-``scanner_type``          String     the finding's scanner type
-``rule_id``               String     the rule; null for none
-``severity``              String     the severity as the finding holds it
-``file_path``             String     the file as the finding holds it
-``line_start``            Int64      the first line; null for none, or when it does
-                                     not fit 64 bits (see ``line_overflow``)
-``line_end``              Int64      the last line, as ``line_start``
-``line_overflow``         Boolean    whether either line is a number a 64-bit
-                                     column cannot hold
-``is_suppressed``         Boolean    whether the finding is suppressed
-``source_report``         String     the ``additional_reports`` key the row was read
-                                     from; null for a SARIF row
-``has_identity``          Boolean    whether the finding has an identity
-``fingerprinted``         Boolean    whether its identity key is keyed by a
-                                     fingerprint
-``base``                  String     :func:`~automated_security_helper.utils.
-                                     finding_identity.canonical` of the identity
-                                     base; null without an identity
-========================  =========  =============================================
+The columns, their dtypes and their order are :data:`FLAT_SPEC`, derived from the
+markers on :class:`FlatVulnerability`'s fields and the declared computed columns
+below; ``frame_schema(FLAT_SPEC)`` is the schema. The columns that are not a
+field projected as it is:
+
+``i``
+    the position in the list.
+``scanner_key``
+    the scanner lower-cased, ``""`` for none: the key the suppressed counts are
+    taken by.
+``line_overflow``
+    whether either line is a number a 64-bit column cannot hold; the line
+    columns are null for such a line.
+``source_report``
+    the ``additional_reports`` key the row was read from; null for a SARIF row.
+``has_identity``
+    whether the finding has an identity.
+``fingerprinted``
+    whether its identity key is keyed by a fingerprint.
+``base``
+    :func:`~automated_security_helper.utils.finding_identity.canonical` of the
+    identity base; null without an identity.
 
 Every String column holds text through :func:`~automated_security_helper.utils.
 frame_text.wire`: a path can hold a lone surrogate and polars strings are UTF-8.
@@ -56,106 +53,93 @@ list has its own rules for when it is stale.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence, Tuple
+from typing import TYPE_CHECKING, Dict, Optional, Sequence
 
+from automated_security_helper.models.flat_vulnerability import FlatVulnerability
+from automated_security_helper.models.frame_model import (
+    Computed,
+    FrameSpec,
+    Position,
+    to_frame,
+)
 from automated_security_helper.utils.finding_identity import canonical
-from automated_security_helper.utils.frame_text import unwire, wire
+from automated_security_helper.utils.frame_text import unwire
 
 if TYPE_CHECKING:
     import polars as pl
 
-    from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 
-_INT64_MIN = -(2**63)
-_INT64_MAX = 2**63 - 1
-
-
-def _text(value: Any) -> Optional[str]:
-    return (
-        None if value is None else wire(value if isinstance(value, str) else str(value))
-    )
+def _base(finding: FlatVulnerability) -> Optional[str]:
+    base = finding.identity_base
+    return None if base is None else canonical(base)
 
 
-def _line(value: Optional[int]) -> Tuple[Optional[int], bool]:
-    """*value* as a 64-bit column holds it, and whether it did not fit."""
-    if value is None:
-        return None, False
-    if _INT64_MIN <= value <= _INT64_MAX:
-        return value, False
-    return None, True
+FLAT_SPEC = FrameSpec(
+    FlatVulnerability,
+    columns=(
+        Position("i"),
+        "id",
+        "scanner",
+        Computed(
+            "scanner_key",
+            "String",
+            lambda finding: (finding.scanner or "").lower(),
+            reads=("scanner",),
+            nullable=False,
+            note="the key the suppressed counts are taken by",
+        ),
+        "scanner_type",
+        "rule_id",
+        "severity",
+        "file_path",
+        "line_start",
+        "line_end",
+        "is_suppressed",
+        Computed(
+            "source_report",
+            "String",
+            lambda finding: finding.source_report,
+            reads=("source_report",),
+            note="a property over the private _source_report; model_fields "
+            "cannot see it",
+        ),
+        Computed(
+            "has_identity",
+            "Boolean",
+            lambda finding: finding.identity is not None,
+            reads=("identity",),
+            nullable=False,
+        ),
+        Computed(
+            "fingerprinted",
+            "Boolean",
+            lambda finding: finding.has_fingerprint_identity,
+            reads=("has_fingerprint_identity",),
+            nullable=False,
+        ),
+        Computed("base", "String", _base, reads=("identity_base",)),
+    ),
+    waived={
+        "_identity": "read through the identity and identity_base properties",
+        "_assigned_identity_key": "read through has_fingerprint_identity and "
+        "identity_base",
+        "_identity_message": "the identity message is a join input of the diff "
+        "side, not a column of the flat frame",
+        "_secret_detection": "a baseline-gate policy flag, not a column of the "
+        "flat frame",
+        "_source_report": "read through the source_report property",
+        "identity_message": "the identity message is a join input of the diff "
+        "side, not a column of the flat frame",
+        "requires_exact_identity_match": "a baseline-gate policy flag, not a "
+        "column of the flat frame",
+    },
+)
 
 
-def flat_frame(findings: Sequence["FlatVulnerability"]) -> "pl.DataFrame":
+def flat_frame(findings: Sequence[FlatVulnerability]) -> "pl.DataFrame":
     """*findings*, flattened findings of one run, as a frame (see the module
     docstring for the columns)."""
-    import polars as pl
-
-    columns: Dict[str, List[Any]] = {
-        name: []
-        for name in (
-            "i",
-            "id",
-            "scanner",
-            "scanner_key",
-            "scanner_type",
-            "rule_id",
-            "severity",
-            "file_path",
-            "line_start",
-            "line_end",
-            "line_overflow",
-            "is_suppressed",
-            "source_report",
-            "has_identity",
-            "fingerprinted",
-            "base",
-        )
-    }
-    for index, finding in enumerate(findings):
-        start, start_over = _line(finding.line_start)
-        end, end_over = _line(finding.line_end)
-        base = finding.identity_base
-        row = (
-            index,
-            _text(finding.id),
-            _text(finding.scanner),
-            wire((finding.scanner or "").lower()),
-            _text(finding.scanner_type),
-            _text(finding.rule_id),
-            _text(finding.severity),
-            _text(finding.file_path),
-            start,
-            end,
-            start_over or end_over,
-            bool(finding.is_suppressed),
-            _text(finding.source_report),
-            finding.identity is not None,
-            finding.has_fingerprint_identity,
-            None if base is None else wire(canonical(base)),
-        )
-        for name, value in zip(columns, row):
-            columns[name].append(value)
-    return pl.DataFrame(
-        columns,
-        schema={
-            "i": pl.Int64,
-            "id": pl.String,
-            "scanner": pl.String,
-            "scanner_key": pl.String,
-            "scanner_type": pl.String,
-            "rule_id": pl.String,
-            "severity": pl.String,
-            "file_path": pl.String,
-            "line_start": pl.Int64,
-            "line_end": pl.Int64,
-            "line_overflow": pl.Boolean,
-            "is_suppressed": pl.Boolean,
-            "source_report": pl.String,
-            "has_identity": pl.Boolean,
-            "fingerprinted": pl.Boolean,
-            "base": pl.String,
-        },
-    )
+    return to_frame(findings, FLAT_SPEC)
 
 
 def suppressed_by_scanner(frame: "pl.DataFrame") -> Dict[str, int]:
