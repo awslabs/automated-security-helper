@@ -570,7 +570,8 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
                 offline_reason=(
                     "GRYPE_DB_AUTO_UPDATE=false and GRYPE_DB_VALIDATE_AGE=false against a "
                     "pre-checked local database; the scan-time staleness check holds the "
-                    "database to the declared 120h bound after the scan"
+                    "database to the age bound declared in utils/content_databases.py "
+                    "after the scan"
                 ),
                 offline_strategy=OfflineStrategy.CACHE_FLAGS,
                 sandbox_network=opsf.SandboxNetwork.ONLINE,
