@@ -134,7 +134,10 @@ from automated_security_helper.interactions.run_ash_nix import (
     run_ash_nix,
 )
 from automated_security_helper.models.asharp_model import AshAggregatedResults
-from automated_security_helper.models.workspace import WorkspaceExitCode
+from automated_security_helper.models.workspace import (
+    ProjectRunStatus,
+    WorkspaceExitCode,
+)
 from automated_security_helper.utils.atomic_write import write_text_atomically
 from automated_security_helper.utils.content_db_staleness import ContentDbAgeRecord
 from automated_security_helper.utils import scan_completeness as _scan_completeness
@@ -339,7 +342,7 @@ class ScanOptions(BaseModel):
     # scanners that were supposed to look actually ran.
     fail_on_incomplete_scanners: Optional[bool] = None
     ignore_suppressions: bool = False
-    min_severity: str = "low"
+    min_severity: str = MinSeverity.LOW
     baseline: Optional[str] = None
     baseline_data: Optional[Any] = Field(default=None, exclude=True)
     changed_files_only: bool = False
@@ -439,7 +442,13 @@ class ScanOptions(BaseModel):
 # Keyed by exactly the MinSeverity values, which are what the CLI offers and what
 # ScanOptions accepts, so the lookup in _compute_exit_code never meets a value it does
 # not rank. tests/unit/cli/test_min_severity_is_validated.py holds the two together.
-_SEVERITY_RANK = {"critical": 3, "high": 3, "medium": 2, "low": 1, "none": 0}
+_SEVERITY_RANK = {
+    MinSeverity.CRITICAL: 3,
+    MinSeverity.HIGH: 3,
+    MinSeverity.MEDIUM: 2,
+    MinSeverity.LOW: 1,
+    MinSeverity.NONE: 0,
+}
 
 # The scanners `--mode precommit` always adds to the selection now live in
 # core/constants.py (see the comment there for why: the scan command's help text
@@ -4853,7 +4862,7 @@ def _nix_inner_argv(opts: ScanOptions) -> List[str]:
             if opts.fail_on_incomplete_scanners
             else "--no-fail-on-incomplete-scanners"
         )
-    if opts.min_severity.lower() != "low":
+    if opts.min_severity.lower() != MinSeverity.LOW.value:
         argv.extend(["--min-severity", opts.min_severity])
     if opts.changed_files_only:
         argv.extend(["--changed-files-only", "--base-ref", opts.base_ref])
@@ -6225,13 +6234,13 @@ def _print_workspace_summary(
     print("")
 
     for entry in result.payload.projects:
-        if entry.status.value == "skipped":
+        if entry.status is ProjectRunStatus.SKIPPED:
             reason = entry.skip_reason.value if entry.skip_reason else "unspecified"
             _print_text(
                 "  ", ("skipped", "yellow"), f"  {entry.display_label} ({reason})"
             )
             continue
-        if entry.status.value == "failed":
+        if entry.status is ProjectRunStatus.FAILED:
             _print_text(
                 "  ",
                 ("failed", "bold red"),
@@ -6805,7 +6814,7 @@ def _gating_actionable_count(
     from automated_security_helper.base.reporter_plugin import confined_report_path
 
     # Indexed, not .get() with a default: ScanOptions only holds a ranked value.
-    min_sev_rank = _SEVERITY_RANK[opts.min_severity.lower()]
+    min_sev_rank = _SEVERITY_RANK[MinSeverity(opts.min_severity.lower())]
     # One threshold lookup for this read, shared by the count over the written
     # report and the --min-severity filter over the model: one resolver call per
     # scanner, and one actionability rule (_result_fails_its_scanner_threshold).
@@ -6827,7 +6836,9 @@ def _gating_actionable_count(
                     severity, threshold_for(metric.scanner_name)
                 ):
                     non_sarif_actionable += count
-                    rank = _SEVERITY_RANK.get(severity.lower(), _SEVERITY_RANK["low"])
+                    rank = _SEVERITY_RANK.get(
+                        severity.lower(), _SEVERITY_RANK[MinSeverity.LOW]
+                    )
                     if rank >= min_sev_rank:
                         non_sarif_qualifying = True
     # Set when the count below is taken from the written report: whether that
@@ -7121,7 +7132,7 @@ def run_ash_scan(
     fail_on_findings: bool | None = None,
     fail_on_incomplete_scanners: bool | None = None,
     ignore_suppressions: bool = False,
-    min_severity: str = "low",
+    min_severity: str = MinSeverity.LOW,
     changed_files_only: bool = False,
     base_ref: str = "origin/main",
     staged: bool = False,

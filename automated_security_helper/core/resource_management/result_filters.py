@@ -10,6 +10,7 @@ mcp_get_scan_results into smaller, purpose-specific views.
 
 import copy
 from typing import Any, Dict, List, Optional, TypeGuard
+from automated_security_helper.core.enums import ScannerStatus
 from automated_security_helper.utils.severity_ladder import (
     SEVERITY_THRESHOLDS,
     result_severity,
@@ -36,13 +37,9 @@ _SEVERITY_KEYS = ("critical", "high", "medium", "low", "info", "suppressed")
 _COUNTED_SEVERITY_KEYS = ("critical", "high", "medium", "low", "info")
 
 #: ``scanner_results[*].status`` -> the SummaryStats outcome counter it lands in.
-_OUTCOME_COUNTERS = {
-    "PASSED": "passed",
-    "FAILED": "failed",
-    "MISSING": "missing",
-    "SKIPPED": "skipped",
-    "ERROR": "error",
-}
+#: One counter per ScannerStatus member, named by the member's lowercase value (the
+#: counter field names of SummaryStats); a test pins it against the model's fields.
+_OUTCOME_COUNTERS = {member: member.value.lower() for member in ScannerStatus}
 
 
 #: The coverage fields a results document carries beside ``status``: whether the
@@ -93,10 +90,13 @@ def _outcome_counter(data: Dict[str, Any]) -> Optional[str]:
     count a lower bound shown as exact. A status that is not a string, or a
     word the model does not have, feeds no counter.
     """
-    status = data.get("status", "PASSED")
+    status = data.get("status", ScannerStatus.PASSED.value)
     if not isinstance(status, str):
         return None
-    return _OUTCOME_COUNTERS.get(status.upper())
+    try:
+        return _OUTCOME_COUNTERS[ScannerStatus(status.upper())]
+    except ValueError:
+        return None
 
 
 def _records_a_breakdown(severity_counts: Any) -> TypeGuard[Dict[Any, Any]]:
@@ -358,7 +358,7 @@ def filter_summary(results: Dict[str, Any]) -> Dict[str, Any]:
         # and _outcome_counter read it: the scan_stats above count it as
         # passed, so the row shown here and the completed count read it the
         # same way instead of calling it "UNKNOWN" and leaving it out.
-        status = scanner_data.get("status", "PASSED")
+        status = scanner_data.get("status", ScannerStatus.PASSED.value)
         severity_counts = scanner_data.get("severity_counts", {})
 
         scanner_info = {

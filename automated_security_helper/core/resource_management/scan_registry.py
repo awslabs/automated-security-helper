@@ -74,7 +74,7 @@ def _canonical_directory(directory_path: str) -> Path:
         return Path(directory_path)
 
 
-class MCScanStatus(Enum):
+class MCScanStatus(str, Enum):
     """Status of a scan.
 
     ``INCOMPLETE`` is terminal, like ``COMPLETED``: the run finished and its results
