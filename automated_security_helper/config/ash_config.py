@@ -145,6 +145,9 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_lint_scan
 from automated_security_helper.plugin_modules.ash_builtin.scanners.gitleaks_scanner import (
     GitleaksScannerConfig,
 )
+from automated_security_helper.plugin_modules.ash_builtin.scanners.mcp_config_scanner import (
+    McpConfigScannerConfig,
+)
 from automated_security_helper.plugin_modules.ash_builtin.scanners.trivy_scanner import (
     TrivyScannerConfig,
 )
@@ -947,6 +950,13 @@ class ScannerConfigSegment(_PluginConfigSegment):
     grype: Annotated[
         GrypeScannerConfig, Field(description="Configure the options for Grype")
     ] = GrypeScannerConfig()
+    mcp_config: Annotated[
+        McpConfigScannerConfig,
+        Field(
+            description="Configure the options for the MCP server config scanner",
+            alias="mcp-config",
+        ),
+    ] = McpConfigScannerConfig()
     npm_audit: Annotated[
         NpmAuditScannerConfig,
         Field(description="Configure the options for NpmAudit", alias="npm-audit"),
