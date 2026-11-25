@@ -60,6 +60,7 @@ from automated_security_helper.core.constants import (
     is_blank_bin_path,
     usable_home,
 )
+from automated_security_helper.models.vocab import PluginKind
 from automated_security_helper.core.exceptions import (
     ASHConfigFileNotFoundError,
     ASHConfigValidationError,
@@ -183,19 +184,20 @@ DEPRECATED_TOOL_ALIASES: dict[str, str] = {
 
 #: The plugin types --plugin-type selects, each the plugin manager's own name for
 #: that kind of plugin.
-PLUGIN_KINDS = ("converter", "scanner", "reporter")
+PLUGIN_KINDS = PluginKind.values()
 
 
-def _plugin_kind(plugin_type: str) -> str:
+def _plugin_kind(plugin_type: str) -> PluginKind:
     """The registry kind a --plugin-type value selects.
 
     install_dependencies refuses a value that is not one of PLUGIN_KINDS before
     anything is selected, so a value reaching here is one of them; any other is a
     programming error, not a kind to guess.
     """
-    if plugin_type not in PLUGIN_KINDS:
+    kind = PluginKind.coerce(plugin_type)
+    if kind is None:
         raise ValueError(f"not a plugin type: {plugin_type!r}")
-    return plugin_type
+    return kind
 
 
 def _selection_key(name: str) -> str:
@@ -969,6 +971,16 @@ def _run_install_command(cmd: List[str], shell: bool = False) -> int:
     return code
 
 
+def _run_declared_install_command(cmd: List[str], shell: bool) -> int:
+    """Run one install command with the shell flag its CustomCommand declared.
+
+    The one call that forwards the operator's own declaration, kept in a
+    definition of its own so the self-scan's B604 suppression covers this call
+    and nothing else in the install loop.
+    """
+    return _run_install_command(cmd, shell=shell)  # nosec B604 - Args for this command are evaluated for security prior to this internal method being invoked
+
+
 def _consoles_that_no_color_turns_off() -> tuple:
     """The consoles ``--no-color`` turns color off on: the panels' and the table's,
     the error one and the shared one the ``print()`` lines are written through."""
@@ -1022,7 +1034,7 @@ def install_dependencies(
         metavar="<path>",
     ),
     plugin_types: List[str] = typer.Option(
-        ["converter", "scanner", "reporter"],
+        list(PluginKind.values()),
         "--plugin-type",
         "-t",
         help="Plugin types to install dependencies for",
@@ -1857,7 +1869,7 @@ def install_dependencies(
                 outcome.commands_attempted += 1
                 # A CustomCommand declared with shell=True runs through the shell,
                 # as declared; the flag was dropped before the installer saw it.
-                cmd_exit_code = _run_install_command(cmd, shell=shell)  # nosec B604 - Args for this command are evaluated for security prior to this internal method being invoked
+                cmd_exit_code = _run_declared_install_command(cmd, shell)
                 if cmd_exit_code != 0:
                     print(f"Command failed with exit code: {cmd_exit_code}")
                     outcome.commands_failed += 1

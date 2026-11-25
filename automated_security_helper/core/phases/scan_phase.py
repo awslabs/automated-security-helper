@@ -67,6 +67,8 @@ from automated_security_helper.utils.sarif_utils import (
     get_severity_metrics_from_sarif,
 )
 from automated_security_helper.models.scanner_validation import (
+    EnablementStatus,
+    RegistrationStatus,
     ScannerValidationManager,
     scanner_display_name,
 )
@@ -576,9 +578,9 @@ class ScanPhase(EnginePhase):
         self._completed_scanners: List[ScannerPluginBase] = []
 
     @property
-    def phase_name(self) -> str:
+    def phase_name(self) -> ExecutionPhase:
         """Return the name of this phase."""
-        return "scan"
+        return ExecutionPhase.SCAN
 
     def _track_scanner_state(self, scanner_name: str, **state: Any) -> None:
         """``validation_manager.update_scanner_state``, for a scanner that is
@@ -786,8 +788,8 @@ class ScanPhase(EnginePhase):
 
         self._track_scanner_state(
             display_name,
-            registration_status="registered",
-            enablement_status="excluded",
+            registration_status=RegistrationStatus.REGISTERED,
+            enablement_status=EnablementStatus.EXCLUDED,
             enablement_reason=f"Scanner excluded during filtering: {reason}",
             queued_for_execution=False,
             execution_completed=False,
@@ -839,8 +841,8 @@ class ScanPhase(EnginePhase):
         stored_nothing_reason = home_as_tilde(nothing_reason)
         self.validation_manager.update_scanner_state(
             display_name,
-            registration_status="registered",
-            enablement_status="excluded",
+            registration_status=RegistrationStatus.REGISTERED,
+            enablement_status=EnablementStatus.EXCLUDED,
             enablement_reason=(f"Nothing to scan: {stored_nothing_reason}"),
             queued_for_execution=False,
             execution_completed=False,
@@ -1415,7 +1417,7 @@ class ScanPhase(EnginePhase):
                         # scanner's state would then go untracked.
                         self._track_scanner_state(
                             failed_name,
-                            registration_status="registered",
+                            registration_status=RegistrationStatus.REGISTERED,
                             plugin_class=plugin_class,
                             queued_for_execution=False,
                             execution_completed=False,
@@ -1508,7 +1510,7 @@ class ScanPhase(EnginePhase):
                     try:
                         self.validation_manager.update_scanner_state(
                             display_name,
-                            registration_status="registered",
+                            registration_status=RegistrationStatus.REGISTERED,
                             plugin_class=plugin_instance.__class__,
                         )
                     except ValueError as e:
@@ -2384,8 +2386,8 @@ class ScanPhase(EnginePhase):
                         # CRITICAL: Update validation manager state for queued scanners
                         self.validation_manager.update_scanner_state(
                             display_name,
-                            registration_status="registered",
-                            enablement_status="enabled",
+                            registration_status=RegistrationStatus.REGISTERED,
+                            enablement_status=EnablementStatus.ENABLED,
                             enablement_reason="Scanner passed all checks and was queued for execution",
                             queued_for_execution=True,
                             execution_completed=False,
@@ -2554,7 +2556,7 @@ class ScanPhase(EnginePhase):
                     )
                     self.validation_manager.update_scanner_state(
                         display_name,
-                        registration_status="registered",
+                        registration_status=RegistrationStatus.REGISTERED,
                         queued_for_execution=False,
                         execution_completed=False,
                         failure_reason=unclassified_reason,
@@ -3087,7 +3089,7 @@ class ScanPhase(EnginePhase):
                         AshEventType.WARNING,
                         message=f"Scanner tasks validation found {len(missing_scanners)} missing scanners",
                         missing_scanners=missing_scanners,
-                        phase="scan",
+                        phase=ExecutionPhase.SCAN.value,
                         validation_checkpoint="scanner_tasks_validation",
                     )
                 except Exception as event_error:
@@ -3103,7 +3105,7 @@ class ScanPhase(EnginePhase):
 
             # Add validation results to aggregated results for debugging
             checkpoint_dict = {
-                "checkpoint_name": validation_checkpoint.checkpoint_name,
+                "checkpoint_name": str(validation_checkpoint.checkpoint_name),
                 "timestamp": validation_checkpoint.timestamp.isoformat(),
                 "expected_scanners": validation_checkpoint.expected_scanners,
                 "actual_scanners": validation_checkpoint.actual_scanners,
@@ -3146,7 +3148,7 @@ class ScanPhase(EnginePhase):
                         total_issues=total_issues,
                         discrepancies=validation_checkpoint.discrepancies,
                         errors=validation_checkpoint.errors,
-                        phase="scan",
+                        phase=ExecutionPhase.SCAN.value,
                         validation_checkpoint="scanner_tasks_validation",
                     )
                 except Exception as event_error:
@@ -3165,7 +3167,7 @@ class ScanPhase(EnginePhase):
                         message="Scanner tasks validation completed successfully",
                         expected_count=len(validation_checkpoint.expected_scanners),
                         actual_count=len(validation_checkpoint.actual_scanners),
-                        phase="scan",
+                        phase=ExecutionPhase.SCAN.value,
                         validation_checkpoint="scanner_tasks_validation",
                     )
                 except Exception as event_error:
@@ -3185,7 +3187,7 @@ class ScanPhase(EnginePhase):
                     AshEventType.ERROR,
                     message=error_msg,
                     exception=error_text(e),
-                    phase="scan",
+                    phase=ExecutionPhase.SCAN.value,
                     validation_checkpoint="scanner_tasks_validation",
                 )
             except Exception as event_error:
@@ -3266,7 +3268,7 @@ class ScanPhase(EnginePhase):
                         message=f"Execution completion validation found {total_discrepancies} discrepancies",
                         missing_scanners=missing_scanners,
                         unexpected_scanners=unexpected_scanners,
-                        phase="scan",
+                        phase=ExecutionPhase.SCAN.value,
                         validation_checkpoint="execution_completion_validation",
                     )
                 except Exception as event_error:
@@ -3322,7 +3324,7 @@ class ScanPhase(EnginePhase):
 
             # Add validation results to aggregated results for debugging
             checkpoint_dict = {
-                "checkpoint_name": validation_checkpoint.checkpoint_name,
+                "checkpoint_name": str(validation_checkpoint.checkpoint_name),
                 "timestamp": validation_checkpoint.timestamp.isoformat(),
                 "expected_scanners": validation_checkpoint.expected_scanners,
                 "actual_scanners": validation_checkpoint.actual_scanners,
@@ -3372,7 +3374,7 @@ class ScanPhase(EnginePhase):
                         completion_rate=validation_checkpoint.metadata.get(
                             "completion_rate", 0.0
                         ),
-                        phase="scan",
+                        phase=ExecutionPhase.SCAN.value,
                         validation_checkpoint="execution_completion_validation",
                     )
                 except Exception as event_error:
@@ -3397,7 +3399,7 @@ class ScanPhase(EnginePhase):
                         expected_count=len(validation_checkpoint.expected_scanners),
                         completed_count=len(validation_checkpoint.actual_scanners),
                         completion_rate=completion_rate,
-                        phase="scan",
+                        phase=ExecutionPhase.SCAN.value,
                         validation_checkpoint="execution_completion_validation",
                     )
                 except Exception as event_error:
@@ -3417,7 +3419,7 @@ class ScanPhase(EnginePhase):
                     AshEventType.ERROR,
                     message=error_msg,
                     exception=error_text(e),
-                    phase="scan",
+                    phase=ExecutionPhase.SCAN.value,
                     validation_checkpoint="execution_completion_validation",
                 )
             except Exception as event_error:
@@ -3457,7 +3459,7 @@ class ScanPhase(EnginePhase):
                 "actual_scanners": [],
                 "discrepancies": [],
                 "errors": [],
-                "metadata": {"phase": "scan"},
+                "metadata": {"phase": ExecutionPhase.SCAN.value},
             }
         )
 
@@ -3523,7 +3525,7 @@ class ScanPhase(EnginePhase):
                             added_scanners=added_scanners,
                             unexpected_scanners=unexpected_scanners,
                             total_adjustments=total_adjustments,
-                            phase="scan",
+                            phase=ExecutionPhase.SCAN.value,
                             validation_checkpoint="result_completeness_validation",
                         )
                     except Exception as event_error:
@@ -3578,7 +3580,7 @@ class ScanPhase(EnginePhase):
 
             # Add validation results to aggregated results for debugging
             checkpoint_dict = {
-                "checkpoint_name": validation_checkpoint.checkpoint_name,
+                "checkpoint_name": str(validation_checkpoint.checkpoint_name),
                 "timestamp": validation_checkpoint.timestamp.isoformat(),
                 "expected_scanners": validation_checkpoint.expected_scanners,
                 "actual_scanners": validation_checkpoint.actual_scanners,
@@ -3628,7 +3630,7 @@ class ScanPhase(EnginePhase):
                         completeness_rate=validation_checkpoint.metadata.get(
                             "completeness_rate", 0.0
                         ),
-                        phase="scan",
+                        phase=ExecutionPhase.SCAN.value,
                         validation_checkpoint="result_completeness_validation",
                     )
                 except Exception as event_error:
@@ -3653,7 +3655,7 @@ class ScanPhase(EnginePhase):
                         expected_count=len(validation_checkpoint.expected_scanners),
                         final_count=len(validation_checkpoint.actual_scanners),
                         completeness_rate=completeness_rate,
-                        phase="scan",
+                        phase=ExecutionPhase.SCAN.value,
                         validation_checkpoint="result_completeness_validation",
                     )
                 except Exception as event_error:
@@ -3682,7 +3684,7 @@ class ScanPhase(EnginePhase):
                     AshEventType.ERROR,
                     message=error_msg,
                     exception=error_text(e, environment_values),
-                    phase="scan",
+                    phase=ExecutionPhase.SCAN.value,
                     validation_checkpoint="result_completeness_validation",
                 )
             except Exception as event_error:

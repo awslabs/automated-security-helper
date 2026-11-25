@@ -13,6 +13,7 @@ import stat
 # module for no behavior change -- and tests/unit/cli/mcp/test_stdout_jsonrpc_safety.py
 # reasons about this exact import form. It is utils/console.py's print, not rich's:
 # its console checks each line it writes off a terminal, so none reads as a CI command.
+from automated_security_helper.core.enums import AshExitCode
 from automated_security_helper.utils.console import echo
 from automated_security_helper.utils.console import print  # noqa: A004
 from typing import TYPE_CHECKING, Annotated, Any, List, NoReturn, Optional
@@ -247,7 +248,7 @@ def _fail_config_mark(message: str) -> NoReturn:
     (``shown_on_one_line``); callers pass raw values.
     """
     echo(shown_on_one_line(message), err=True)
-    raise typer.Exit(3) from None
+    raise typer.Exit(AshExitCode.INVALID_CONFIG) from None
 
 
 def _chain_files(configs: List[Path]) -> Optional[set[Path]]:
@@ -411,7 +412,7 @@ def _fail_state(message: str) -> NoReturn:
     Written with ``echo`` to stderr for the reason :func:`_fail_usage` gives.
     """
     echo(message, err=True)
-    raise typer.Exit(1)
+    raise typer.Exit(AshExitCode.SCAN_ERRORS)
 
 
 def _clone_git_source(ctx: typer.Context, url: str, ref: str | None, depth: int) -> str:
@@ -1818,13 +1819,8 @@ def run_ash_scan_cli_command(
     # one simple value here, before anything reads it: the gate below and the
     # run_ash_scan call receive the same flags, or a pre-commit run's gate
     # would sit at INFO while the scan's console sat at ERROR.
-    precommit_mode = mode == RunMode.precommit or str(mode).lower() == "precommit"
-    simple = (
-        simple
-        or precommit_mode
-        or log_level == AshLogLevel.SIMPLE
-        or str(log_level).lower() == "simple"
-    )
+    precommit_mode = mode == RunMode.precommit
+    simple = simple or precommit_mode or log_level == AshLogLevel.SIMPLE
 
     # The process-wide last-resort gate, set once at the command's start: the
     # level the one precedence rule resolves from the flags the scan receives.
@@ -2450,7 +2446,7 @@ def run_ash_scan_cli_command(
                 "--staged: nothing is staged inside the scanned directory, so "
                 "there is nothing to scan. Exiting clean."
             )
-            raise typer.Exit(0)
+            raise typer.Exit(AshExitCode.SUCCESS)
 
     # Call run_ash_scan with all parameters, as a scan the entry point's SIGTERM
     # handler cancels (core/cancellation.py, "SIGTERM on the CLI"). The scope is

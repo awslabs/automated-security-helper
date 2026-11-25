@@ -186,6 +186,7 @@ from typing import (
 from pydantic import BaseModel, ConfigDict
 from typing_extensions import Self
 
+from automated_security_helper.config.patch_ops import VALUE_WRITING_OPS
 from automated_security_helper.core.exceptions import ScannerError
 
 ExclusionKind = Literal[
@@ -2131,7 +2132,7 @@ def _document_writes(
     for op in ops if isinstance(ops, list) else []:
         if not isinstance(op, dict) or "value" not in op:
             continue
-        if op.get("op") not in ("add", "replace"):
+        if op.get("op") not in VALUE_WRITING_OPS:
             continue
         pointer = op.get("path")
         if not isinstance(pointer, str) or not pointer.startswith("/"):

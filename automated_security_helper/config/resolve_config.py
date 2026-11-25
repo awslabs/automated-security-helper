@@ -19,7 +19,6 @@ from typing import (
     FrozenSet,
     Iterable,
     List,
-    Literal,
     Mapping,
     NamedTuple,
     Optional,
@@ -40,6 +39,11 @@ from automated_security_helper.config.ash_config import (
     reduced_plugin_name,
     sandbox_mode_in_document,
 )
+from automated_security_helper.config.patch_ops import (
+    NODE_EDITING_OPS,
+    VALUE_WRITING_OPS,
+)
+from automated_security_helper.models.vocab import PluginKind
 from automated_security_helper.utils import unknown_keys as _unknown_keys
 from automated_security_helper.utils.unknown_keys import WARN_UNKNOWN_KEYS
 from automated_security_helper.config.plugin_section_names import (
@@ -182,6 +186,7 @@ from automated_security_helper.core.constants import (
     ASH_PYPROJECT_FILE_NAME,
     ASH_RC_FILE_NAMES,
 )
+from automated_security_helper.core.enums import SandboxMode
 from automated_security_helper.core.exceptions import (
     ASHConfigFileNotFoundError,
     ASHConfigInputNotPermittedError,
@@ -3320,7 +3325,7 @@ def _folded_onto_trusted(
     trusted: AshConfig,
     overrides: List[str],
     resolved: AshConfig,
-    section: Literal["reporters", "scanners"] = "reporters",
+    section: str = PluginKind.REPORTER.section,
 ) -> List[str]:
     """*overrides*, each *section* segment respelled to the trusted
     base's own key when both files hold that one section under their own
@@ -3557,9 +3562,7 @@ def _repository_members(
 # against it because assignment onto the model is not validated: a value
 # outside this set would otherwise ride into the floor and be requested of
 # the container as written.
-_SANDBOX_MODES: Tuple[str, ...] = tuple(
-    get_args(SandboxConfig.model_fields["mode"].annotation)
-)
+_SANDBOX_MODES: Tuple[str, ...] = tuple(mode.value for mode in SandboxMode)
 
 
 def _owned_file_shown(file: Path | str, environment_paths: Collection[Path]) -> str:
@@ -3690,7 +3693,7 @@ def _mode_after_patch(
         if not isinstance(operation, dict):
             continue
         name = operation.get("op")
-        if name not in ("add", "replace", "remove"):
+        if name not in NODE_EDITING_OPS:
             continue
         segments = _pointer_segments(operation.get("path"))
         if (
@@ -3912,7 +3915,7 @@ def _operator_patch_reporters(
         if segments[0] != section:
             continue
         name = op.get("op")
-        if name not in ("add", "replace", "remove"):
+        if name not in NODE_EDITING_OPS:
             continue
         inside = segments[1:]
         if not inside:
@@ -3976,7 +3979,7 @@ def _operator_patch_reporters(
                 # same misfit, dropped the same way.
                 pass
             continue
-        if name in ("add", "replace"):
+        if name in VALUE_WRITING_OPS:
             value = copy.deepcopy(op.get("value"))
             node = merged
             fits = True
@@ -4509,7 +4512,7 @@ class _ScannerFileView:
 
         # The view holds scanners sections only, and the ownership check
         # consults it for scanners only (operator_wrote_value).
-        if plugin_type != "scanner":
+        if plugin_type != PluginKind.SCANNER:
             return None
         return plugin_section_lookup(
             self.scanners.model_dump(by_alias=True),
@@ -4553,7 +4556,7 @@ def _with_scanner_overrides(
     if not scanner_overrides:
         return view
     scanner_overrides = _folded_onto_trusted(
-        view, scanner_overrides, resolved, section="scanners"
+        view, scanner_overrides, resolved, section=PluginKind.SCANNER.section
     )
     try:
         return apply_config_overrides(view, scanner_overrides)
@@ -4864,9 +4867,11 @@ def trusted_base_config(
                 reads,
                 environment_paths,
             )
-    if trusted.sandbox.mode == "off":
+    if trusted.sandbox.mode == SandboxMode.off:
         if owned_mode is not None:
-            trusted.sandbox.mode = owned_mode
+            # The walk answers a plain str (see _owned_sandbox_mode), and this
+            # assignment is not validated: it becomes its member here.
+            trusted.sandbox.mode = SandboxMode(owned_mode)
         elif merged_fallback:
             trusted.sandbox.mode = merged_mode
     return trusted
@@ -6570,7 +6575,7 @@ def _patch_writes(operations: Any) -> Iterable[Tuple[str, List[str], Any]]:
         if not isinstance(operation, dict):
             continue
         name = operation.get("op")
-        if name not in ("add", "replace", "remove"):
+        if name not in NODE_EDITING_OPS:
             continue
         segments = _pointer_segments(operation.get("path"))
         if segments is not None:

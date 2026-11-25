@@ -60,6 +60,18 @@
   `scripts/generate_wrapper_tables.py` into marked blocks, and the lint job and a unit
   test fail when a block is stale. The generated text is the text the wrappers already
   held, so no option, exit code or message changes.
+- Module-level string constants that spelled a wire vocabulary are replaced by enum
+  members, so a caller that imported one of them by name must import the member
+  instead. The `error_type` spellings of the MCP tools (`CONFIG_INPUT_NOT_PERMITTED`,
+  `CONFIG_ENV_NOT_RESOLVED`, `CLONE_TOO_LARGE`, `SESSION_WORKSPACE_BUSY` and the other
+  names that `cli/mcp_tools.py`, `cli/mcp/source_delivery.py`, `cli/mcp/sessions.py` and
+  `cli/mcp/session_identity.py` exported) are now `McpErrorType` members in
+  `automated_security_helper/cli/mcp/error_types.py`; use `McpErrorType.X.value` for the
+  text. `DEFAULT_TRANSPORT` in `cli/mcp/sandbox.py` is `core.enums.DEFAULT_TRANSPORT`, a
+  `Transport` member. `STALENESS_FAIL`, `STALENESS_WARN` and `STALENESS_POLICIES` in
+  `utils/content_databases.py` are `StalenessPolicy` members, and the three
+  `*_CHECKPOINT` constants of `utils/inner_run_outcome.py` are `InnerRunRecordType`
+  members. The wire spellings themselves do not change.
 
 ### Deprecations
 
@@ -90,6 +102,19 @@
 
 ### Features
 
+- **Symbol suppressions are bound to their file's content hash in `.ash.lock`.**
+  A symbol-scoped suppression whose file has no lock entry is refused when the config is
+  validated (`ash scan`, `ash config validate`), with a message that names the command to
+  run. When a locked file's bytes change, its symbol suppressions stop applying, their
+  findings return, and the scan prints one notice naming the file, the suppressions and
+  `ash suppress refresh`. The new `ash suppress add`, `refresh` and `verify` commands
+  write the suppression and its lock entry together, record a reviewed change, and fail
+  CI when the lock is out of date. Line-range suppressions are unchanged. This
+  repository's own symbol suppressions are locked in the same change. The lock is the
+  root dotfile `.ash.lock`; a lock still at `.ash/ash.lock` is read with a deprecation
+  warning (deprecated in v3.9, removed in v4.0) and rewritten to `.ash.lock` by
+  `ash suppress add` or `refresh`. See
+  [Lock a symbol suppression to its file](docs/content/how-to/suppress-findings.md#lock).
 - **ASFF findings of one secret carry one `ash/correlationId`.** ASH does not
   deduplicate, so a secret that two scanners find is two findings with two Ids in
   Security Hub, and nothing said they were about one secret. Each secret detection now
@@ -99,7 +124,6 @@
   `Id` it had. Only secret detections have the value: for another kind of finding the
   place alone does not say which problem it is. In the `asff` and `aws-security-hub`
   reporters.
-
 - **`default_scanners` sets the default scanners in a trusted config.** `only`
   replaces a mode's default selection in every mode and `add` extends a fixed one such as
   precommit's; a repository config, an MCP client or a patch cannot set it. The command

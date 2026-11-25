@@ -25,6 +25,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Iterator
 
+from automated_security_helper.cli.mcp.error_types import McpErrorType
 import pytest
 import yaml
 
@@ -125,7 +126,7 @@ def test_a_profile_bound_during_the_delete_is_refused_as_busy(
     # The write that landed during the delete was refused as busy, and it
     # created nothing at the session's freed path.
     assert refused["success"] is False, refused
-    assert refused["error_type"] == sessions.SESSION_WORKSPACE_BUSY, refused
+    assert refused["error_type"] == McpErrorType.SESSION_WORKSPACE_BUSY.value, refused
     assert built_during_delete is False, "a refused write built a workspace"
     assert not sandbox.exists(), "the sweep left a workspace at the session's path"
 
