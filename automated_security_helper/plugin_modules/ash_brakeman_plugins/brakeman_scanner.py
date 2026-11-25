@@ -52,11 +52,30 @@ flag::
 * ``--path=<target>``: ``.`` for the source target (the subprocess's working directory
   is the source directory) so reported paths are source-relative, an absolute path
   for the converted target.
+* ``--skip-files=<links>``: only when the target holds a link to a file whose target
+  leaves the tree. Brakeman 8.1.1 reads such a link and reports the file it points at
+  (measured: a symlinked ``.rb`` file under ``app/controllers``), so every one is named
+  here (see "Links leaving the tree").
 * ``--force-scan`` is never passed: a tree with no ``app`` directory is not a Rails
   application and is reported as nothing to scan (see below).
 * Never passed: ``--allow-check-paths-in-config`` (loads Ruby from a config file),
   ``--github-repo`` and ``--compare`` (read other inputs), ``--absolute-paths``
   (puts the host's paths in the report) and ``--ensure-latest`` (reaches the network).
+
+Links leaving the tree
+----------------------
+ASH's scan set leaves out a link to a file whose target, every link resolved, is
+outside the scanned tree, but Brakeman walks the directory itself and reads such a
+link. Each one is given in ``--skip-files`` (``Brakeman::AppTree.regex_for_paths``,
+read from the 8.1.1 gem): a value that does not end in ``/`` becomes
+``Regexp.escape(value) + "\\z"`` and is matched, with no anchor at the start, against
+``/<path below the app root>``. So ``/app/x.rb`` leaves out ``app/x.rb`` and also
+``vendor/app/x.rb``. A link is therefore given only when no other file under the
+target ends with its path, and the scan is refused, naming the link, when one does or
+when the path holds a comma (the option is split on commas): leaving the link
+unnamed would read the file it points at, and naming it would hide another file.
+Links to directories are not entered (``Dir.glob`` does not descend them and
+``--follow-symlinks`` is never passed).
 
 Exit status and output
 ----------------------
@@ -98,6 +117,7 @@ measured; see the plugin README.
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 from typing import (
     Annotated,
@@ -137,6 +157,8 @@ from automated_security_helper.schemas.sarif_schema_model import (
 )
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
+from automated_security_helper.utils.link_exclusions import walked_files
+from automated_security_helper.utils.scanned_tree import REASON_LINK_LEAVES_TREE
 from automated_security_helper.utils.subprocess_utils import (
     find_executable,
     in_tree_refusal,
@@ -438,6 +460,45 @@ class BrakemanScanner(ScannerPluginBase[BrakemanScannerConfig]):
             return "."
         return Path(target).absolute().as_posix()
 
+    def _link_skip_files(self, target: Path) -> List[str]:
+        """``--skip-files`` values: each link to a file whose target leaves ``target``.
+
+        Brakeman reads such a link and reports the file it points at. A value is
+        ``/<path below target>``: Brakeman matches ``<value>\\z`` against
+        ``/<path>`` of each file it reads, with no anchor at the start, so the value
+        also matches any file whose path ends with the link's.
+
+        Raises:
+            ScannerError: Naming the first link that cannot be left out alone: its
+                path holds a comma (the option is split on it), another file's path
+                ends with it, or walked paths are not ``/``-joined (Windows).
+                Brakeman is then not run on ``target``, rather than read the file
+                the link points at or skip another one.
+        """
+        files, links = walked_files(target)
+        if not links:
+            return []
+        root = Path(target).as_posix()
+        values: List[str] = []
+        for relative in links:
+            if os.sep != "/" or "," in relative:
+                raise ScannerError(
+                    f"Not running brakeman on {root}: {relative!r}: "
+                    f"{REASON_LINK_LEAVES_TREE}, and brakeman's --skip-files cannot "
+                    "leave out that file alone, so brakeman would read the file it "
+                    "points at."
+                )
+            value = f"/{relative}"
+            if any(f"/{other}".endswith(value) for other in files if other != relative):
+                raise ScannerError(
+                    f"Not running brakeman on {root}: {relative!r}: "
+                    f"{REASON_LINK_LEAVES_TREE}, and another file's path under the "
+                    "target ends with it, so brakeman's --skip-files would skip that "
+                    "file too, or brakeman would read the file the link points at."
+                )
+            values.append(value)
+        return values
+
     def _build_arguments(self, target: Path, results_file: Path) -> List[str]:
         """The full Brakeman argv for one target.
 
@@ -451,6 +512,7 @@ class BrakemanScanner(ScannerPluginBase[BrakemanScannerConfig]):
         ignore_stub = empty_tool_config(
             "brakeman-empty.ignore", EMPTY_IGNORE_JSON, context=self.context
         )
+        skipped = self._link_skip_files(target)
         return [
             self.command or "brakeman",
             "--format=sarif",
@@ -460,6 +522,7 @@ class BrakemanScanner(ScannerPluginBase[BrakemanScannerConfig]):
             "--no-progress",
             f"--config-file={Path(config_stub).resolve().as_posix()}",
             f"--ignore-config={Path(ignore_stub).resolve().as_posix()}",
+            *([f"--skip-files={','.join(skipped)}"] if skipped else []),
             f"--path={self._scan_path(target)}",
         ]
 

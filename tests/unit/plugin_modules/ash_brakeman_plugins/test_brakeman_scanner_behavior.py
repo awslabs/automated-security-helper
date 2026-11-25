@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import copy
 import json
+import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -499,3 +500,86 @@ class TestMalformedOutput:
         fake = FakeBrakeman(raw="", exit_code=0)
         with pytest.raises(ScannerError):
             _run(_scanner(tree, tmp_path), fake, monkeypatch)
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
+)
+class TestLinksLeavingTheTree:
+    """Brakeman 8.1.1 reads a symlinked file that points outside the app (measured),
+    so each such link goes in ``--skip-files`` and a link that cannot be named alone
+    refuses the scan. The value is matched as ``<escaped>\\z`` against
+    ``/<path below the root>`` with no anchor at the start (AppTree.regex_for_paths).
+    """
+
+    def _link(self, tree: Path, tmp_path: Path, relative: str) -> None:
+        outside = tmp_path / "outside" / "secret.rb"
+        outside.parent.mkdir(exist_ok=True)
+        outside.write_text("x = 1\n")
+        link = tree / relative
+        link.parent.mkdir(parents=True, exist_ok=True)
+        link.symlink_to(outside)
+
+    def _skip(self, argv: List[str]) -> List[str]:
+        return [t for t in argv if t.startswith("--skip-files=")]
+
+    def test_a_link_leaving_the_tree_is_named_in_skip_files(
+        self, tree, tmp_path, on_path, monkeypatch
+    ):
+        self._link(tree, tmp_path, "app/controllers/link_out.rb")
+        fake = FakeBrakeman()
+        _run(_scanner(tree, tmp_path), fake, monkeypatch)
+        argv = fake.calls[0]["argv"]
+        assert self._skip(argv) == ["--skip-files=/app/controllers/link_out.rb"]
+        assert argv[-1] == "--path=."
+
+    def test_every_link_is_named_in_one_value(
+        self, tree, tmp_path, on_path, monkeypatch
+    ):
+        self._link(tree, tmp_path, "app/controllers/link_a.rb")
+        self._link(tree, tmp_path, "app/models/link_b.rb")
+        fake = FakeBrakeman()
+        _run(_scanner(tree, tmp_path), fake, monkeypatch)
+        value = self._skip(fake.calls[0]["argv"])[0].split("=", 1)[1]
+        assert sorted(value.split(",")) == [
+            "/app/controllers/link_a.rb",
+            "/app/models/link_b.rb",
+        ]
+
+    def test_a_link_that_stays_inside_the_tree_is_not_named(
+        self, tree, tmp_path, on_path, monkeypatch
+    ):
+        (tree / "app" / "controllers" / "inside.rb").symlink_to(
+            tree / "app" / "controllers" / "users_controller.rb"
+        )
+        fake = FakeBrakeman()
+        _run(_scanner(tree, tmp_path), fake, monkeypatch)
+        assert self._skip(fake.calls[0]["argv"]) == []
+
+    def test_a_tree_with_no_link_gets_no_skip_files(
+        self, tree, tmp_path, on_path, monkeypatch
+    ):
+        fake = FakeBrakeman()
+        _run(_scanner(tree, tmp_path), fake, monkeypatch)
+        assert self._skip(fake.calls[0]["argv"]) == []
+
+    def test_a_link_whose_path_another_file_ends_with_refuses_the_scan(
+        self, tree, tmp_path, on_path, monkeypatch
+    ):
+        # "/app/x.rb" would also skip "vendor/app/x.rb".
+        self._link(tree, tmp_path, "app/x.rb")
+        (tree / "vendor" / "app").mkdir(parents=True)
+        (tree / "vendor" / "app" / "x.rb").write_text("y = 2\n")
+        fake = FakeBrakeman()
+        with pytest.raises(ScannerError, match="app/x.rb"):
+            _run(_scanner(tree, tmp_path), fake, monkeypatch)
+        assert fake.calls == []
+
+    def test_a_link_with_a_comma_refuses_the_scan(
+        self, tree, tmp_path, on_path, monkeypatch
+    ):
+        self._link(tree, tmp_path, "app/a,b.rb")
+        fake = FakeBrakeman()
+        with pytest.raises(ScannerError, match="a,b.rb"):
+            _run(_scanner(tree, tmp_path), fake, monkeypatch)
+        assert fake.calls == []
