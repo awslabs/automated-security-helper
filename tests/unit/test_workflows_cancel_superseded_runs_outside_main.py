@@ -62,6 +62,7 @@ SUPERSEDING = {
     "ash-docs-ci-runners.yml",
     "ash-iac-drift.yml",
     "ash-install-methods.yml",
+    "ash-offline-scanners.yml",
     "ash-package.yml",
     "ash-pr-title-check.yml",
     "ash-repo-scan-pr-head.yml",
