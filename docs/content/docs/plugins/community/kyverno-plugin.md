@@ -70,11 +70,11 @@ Policy files that live inside the scanned repository (`policy_paths: [policies/]
 
 A directory contributes every `.yaml`, `.yml` and `.json` file under it that holds a policy document or a `PolicyException`. Other files in it are not passed to Kyverno. A configured set that holds no policy document (an empty directory, a submodule that was not checked out, a typo in every file, or only exceptions) is skipped like an empty one, and the log says so at INFO; check that the scan reports `kyverno` as scanned and not skipped. ASH does not report which file under a directory failed to parse as YAML.
 
-ASH hands Kyverno the policies as one file written under the results directory, which holds every policy document found, and the exceptions as a second file passed with `--exception`. A `PolicyException` is applied, and the rule it waives then reports `skip` for that resource, which is not a finding. Kyverno's `CleanupPolicy`, `ClusterCleanupPolicy` and `GlobalContextEntry` kinds are not policies for `kyverno apply` and are left out.
+ASH hands Kyverno the policies as one file written under the results directory, which holds every policy document found, and the exceptions as a second file passed with `kyverno apply --exception`. A `PolicyException` is applied, and the rule it waives then reports `skip` for that resource, which is not a finding. Kyverno's `CleanupPolicy`, `ClusterCleanupPolicy` and `GlobalContextEntry` kinds are not policies for `kyverno apply` and are left out.
 
 ## What is scanned
 
-ASH finds the Kubernetes manifests itself and passes each to Kyverno as its own `--resource=<file>`. A `--resource=<directory>` is not used because Kyverno stops the whole run at the first YAML file in it that is not a Kubernetes object, and its error quotes that file. A file is passed when every document in it parses and has `apiVersion` and `kind`. Empty documents (a leading or trailing `---`, or a document that holds only comments) are ignored. `kind: List` files are read item by item.
+ASH finds the Kubernetes manifests itself and passes each to Kyverno as its own `kyverno apply --resource=<file>`. A `kyverno apply --resource=<directory>` is not used because Kyverno stops the whole run at the first YAML file in it that is not a Kubernetes object, and its error quotes that file. A file is passed when every document in it parses and has `apiVersion` and `kind`. Empty documents (a leading or trailing `---`, or a document that holds only comments) are ignored. `kind: List` files are read item by item.
 
 Left out:
 
@@ -82,11 +82,11 @@ Left out:
 - The policy and exception files themselves, and everything under a directory named in `policy_paths`. A vendored policy library carries Chainsaw tests and negative fixtures that are meant to violate its policies; they are not workloads.
 - Kyverno's own kinds (`kyverno.io`, `policies.kyverno.io`, `cli.kyverno.io`), Chainsaw tests (`chainsaw.kyverno.io`), kustomize files (`kustomize.config.k8s.io`) and policy report kinds. A kustomize patch file is a partial manifest of an ordinary kind and is scanned like any other.
 - A file that holds an object beside a document that is not one (a Deployment and a `PolicyException`, or a manifest and a plain config document in one file). Kyverno stops the run at such a document, so the whole file is left out. ASH names the left-out files in one WARNING and does not count them; split the file to have its objects checked.
-- A file whose name contains a comma or a double quote. Kyverno splits each `--resource` value on commas, so `a,b.yaml` would be read as two other paths, and a quote fails the flag. ASH names these files in a WARNING; rename them to have them scanned.
+- A file whose name contains a comma or a double quote. Kyverno splits each `kyverno apply --resource` value on commas, so `a,b.yaml` would be read as two other paths, and a quote fails the flag. ASH names these files in a WARNING; rename them to have them scanned.
 
 A tree with policies configured and no manifest that qualifies (a Helm-only repository, for instance) is skipped like a tree with no policies: Kyverno is not started, the log says "No Kubernetes manifests found" at INFO, and the row reports skipped.
 
-Kyverno runs offline: ASH does not pass `--cluster`, `--registry` or any flag that reads a kubeconfig or reaches a git repository. Policies that need cluster data or registry access (`apiCall` context entries, image verification) do not get it and report what they can.
+Kyverno runs offline: ASH does not pass `kyverno apply --cluster`, `kyverno apply --registry` or any flag that reads a kubeconfig or reaches a git repository. Policies that need cluster data or registry access (`apiCall` context entries, image verification) do not get it and report what they can.
 
 Kyverno's report names a resource (kind, namespace, name) and no file, so ASH maps each result back to the manifest that declares it. Two files often declare the same object: a kustomize base and its overlays, or per-environment copies. ASH never gives such files the same Kyverno run. It plans the runs so that, inside one run, each (kind, namespace, name) is declared by one file, and maps that run's report with that run's files alone. A copy with no namespace collides with a copy of the same kind and name in any namespace, because Kyverno may report a namespace the manifest does not state. A tree with a base and N overlays of one object therefore makes N+1 Kyverno runs, and every violation is reported at the file that declares the violating copy. A resource ASH cannot match to any file is reported against the scan directory.
 
@@ -135,7 +135,7 @@ A `PolicyException` found under `policy_paths` is applied by Kyverno, and the wa
 
 ## Offline and air-gapped use
 
-Without `--cluster`, Kyverno reads only the files it is given, so it behaves the same offline. Install it before going offline (the container image already has it).
+Without `kyverno apply --cluster`, Kyverno reads only the files it is given, so it behaves the same offline. Install it before going offline (the container image already has it).
 
 ## License
 
