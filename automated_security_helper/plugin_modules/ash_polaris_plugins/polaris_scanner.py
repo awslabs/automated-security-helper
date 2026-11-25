@@ -376,8 +376,9 @@ class PolarisScanner(ScannerPluginBase[PolarisScannerConfig]):
                 tier=opsf.Tier.COMMUNITY_OPTIN,
                 source=opsf.ProvenanceSource.USER_INSTALLED,
                 selection_surfaces=("ash_polaris_plugins in ash_plugin_modules",),
-                upstream_license="Apache-2.0 (FairwindsOps/polaris v10.2.6; no "
-                "license or service gate, the binary is downloaded and never vendored)",
+                upstream_license="Apache-2.0 (source: the LICENSE file inside the "
+                "v10.2.6 release archive, read 2026-11-25; no license or service "
+                "gate, the binary is downloaded and never vendored)",
             ),
             prerequisites=opsf.PrerequisitesFacet(
                 kinds=(opsf.Prerequisite.MANIFEST,),

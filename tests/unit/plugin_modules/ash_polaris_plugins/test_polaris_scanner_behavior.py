@@ -140,13 +140,14 @@ spec:
 """
 
 #: (ruleId, SARIF level, ASH severity, uri, line), written out by hand from POSITIVE and
-#: DEPLOY_YAML (metadata.name is on line 5), in the order the converter emits: the
-#: controller's checks, then the pod's, then each container's, each sorted by check id.
+#: DEPLOY_YAML (metadata.name is on line 4: apiVersion, kind, metadata, name), in the
+#: order the converter emits: the controller's checks, then the pod's, then each
+#: container's, each sorted by check id.
 POSITIVE_EXPECTED = [
-    ("deploymentMissingReplicas", "warning", "MEDIUM", "k8s/deploy.yaml", 5),
-    ("hostNetworkSet", "error", "HIGH", "k8s/deploy.yaml", 5),
-    ("cpuLimitsMissing", "warning", "MEDIUM", "k8s/deploy.yaml", 5),
-    ("runAsPrivileged", "error", "HIGH", "k8s/deploy.yaml", 5),
+    ("deploymentMissingReplicas", "warning", "MEDIUM", "k8s/deploy.yaml", 4),
+    ("hostNetworkSet", "error", "HIGH", "k8s/deploy.yaml", 4),
+    ("cpuLimitsMissing", "warning", "MEDIUM", "k8s/deploy.yaml", 4),
+    ("runAsPrivileged", "error", "HIGH", "k8s/deploy.yaml", 4),
 ]
 
 
@@ -209,9 +210,11 @@ class FakePolaris:
         return self.calls[0]["argv"]
 
 
-def _scanner(source: Path, tmp_path: Path, **options) -> PolarisScanner:
+def _scanner(
+    source: Path, tmp_path: Path, output: Optional[Path] = None, **options
+) -> PolarisScanner:
     config = get_default_config()
-    output = tmp_path / "out"
+    output = output if output is not None else tmp_path / "out"
     return PolarisScanner(
         context=PluginContext(
             source_dir=source,
@@ -439,7 +442,8 @@ class TestReport:
         out.mkdir(parents=True)
         (tree / "k8s" / "deploy.yaml").unlink()
         (out / "copy.yaml").write_text(DEPLOY_YAML)
-        report = _run(_scanner(tree, tmp_path), FakePolaris(), monkeypatch)
+        # ASH's default output directory is the one under the scanned tree.
+        report = _run(_scanner(tree, tmp_path, output=out), FakePolaris(), monkeypatch)
         assert _findings(report) == []
 
     def test_every_result_carries_severity_and_level(
@@ -560,7 +564,10 @@ class TestExitStatusAndFailures:
 
 
 class TestInstall:
-    def test_install_commands_cover_every_published_platform(self, tmp_path):
+    def test_install_commands_cover_every_published_platform(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setenv("ASH_BIN_PATH", str(tmp_path / "bin"))
         scanner = _scanner(tmp_path, tmp_path)
         for platform, arch in [
             ("linux", "amd64"),
@@ -571,4 +578,6 @@ class TestInstall:
         ]:
             commands = scanner.get_installation_commands(platform, arch)
             assert commands, f"no install command for {platform}/{arch}"
-            assert "polaris" in commands[0]
+            # A command is a CustomCommand whose argv runs the module-local installer.
+            argv = " ".join(str(a) for a in commands[0].args)
+            assert "polaris_install" in argv and platform in argv and arch in argv
