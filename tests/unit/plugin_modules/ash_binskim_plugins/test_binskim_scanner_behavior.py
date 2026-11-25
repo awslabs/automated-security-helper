@@ -3,11 +3,12 @@
 
 """BinskimScanner: the invocation, the exit status, and the SARIF it grades.
 
-The SARIF below is written by hand in the shape sarif-sdk gives BinSkim logs (rule ids
-``BA####``, ``file://`` artifact URIs, levels error/warning/note, kind fail/pass). It is
-NOT a capture of a real run: BinSkim was not available when the tests were written.
-Replace it with a captured log when one exists. The scan() tests replace the subprocess
-with a fake, so they run on every platform without the binary.
+The inline SARIF below is written by hand (rule ids ``BA####``, levels
+error/warning/note, kind fail/pass) to reach each branch of the grading. The shape of
+a real log (id-and-arguments messages, percent-encoded absolute ``file://`` URIs, no
+``kind``) is pinned by the captured logs in tests/test_data/scanners/binskim/captured,
+which the ``TestCapturedLog`` rows read. The scan() tests replace the subprocess with
+a fake, so they run on every platform without the binary.
 """
 
 from __future__ import annotations
@@ -243,30 +244,6 @@ class TestReport:
             ("BA2004", "warning", "MEDIUM", "bin/app"),
         ]
 
-    def test_severity_mapping_over_the_committed_reference_log(
-        self, tree, tmp_path, on_path, monkeypatch
-    ):
-        """The mapping read over a committed log file rather than inline dicts.
-
-        The log is hand-written, not captured (tests/test_data/scanners/binskim/
-        README.md says so); this row's job is the file-to-severity path.
-        """
-        text = (
-            Path(__file__).resolve().parents[3]
-            / "test_data"
-            / "scanners"
-            / "binskim"
-            / "reference.sarif"
-        ).read_text(encoding="utf-8")
-        report = _run(
-            _scanner(tree, tmp_path), FakeBinskim(sarif_text=text), monkeypatch
-        )
-        assert _findings(report) == [
-            ("BA2008", "error", "HIGH", "bin/app.exe"),
-            ("BA3010", "warning", "MEDIUM", "bin/tool"),
-            ("BA3003", "note", "LOW", "bin/tool"),
-        ]
-
     def test_non_failure_results_are_dropped(
         self, tree, tmp_path, on_path, monkeypatch
     ):
@@ -289,6 +266,78 @@ class TestReport:
         results = [_result("BA2001", "error", "file:///elsewhere/x.dll")]
         report = _run(_scanner(tree, tmp_path), FakeBinskim(results), monkeypatch)
         assert _findings(report)[0][3] == "file:///elsewhere/x.dll"
+
+
+CAPTURED = Path(__file__).resolve().parents[3] / "test_data/scanners/binskim/captured"
+
+#: The directories the captured runs scanned (see captured/README.md).
+CAPTURE_TARGETS = {
+    "positive": Path("/tmp/binskim-capture/positive"),
+    "negative": Path("/tmp/binskim-capture/negative"),
+}
+
+
+def _grade_capture(name: str, tree: Path, tmp_path: Path) -> SarifReport:
+    """The captured log of run *name*, graded as the scanner grades a run's log."""
+    report = SarifReport.model_validate_json(
+        (CAPTURED / f"{name}.sarif").read_text(encoding="utf-8")
+    )
+    return _scanner(tree, tmp_path)._post_process_sarif(
+        report, [], CAPTURE_TARGETS[name]
+    )
+
+
+class TestCapturedLog:
+    """The adapter over BinSkim 4.4.9.14's own output, not a guess at its shape."""
+
+    def test_the_positive_log_grades_to_one_finding_per_rule_and_file(
+        self, tree, tmp_path
+    ):
+        report = _grade_capture("positive", tree, tmp_path)
+        assert _findings(report) == [
+            (rule, "error", "HIGH", path)
+            for path in ("bin/app", "sp ace/app 2")
+            for rule in ("BA3001", "BA3003", "BA3010", "BA3011")
+        ]
+
+    def test_a_percent_encoded_uri_is_decoded_to_the_real_path(self, tree, tmp_path):
+        """BinSkim writes ``sp%20ace/app%202``; the path on disk has spaces."""
+        uris = {u for *_, u in _findings(_grade_capture("positive", tree, tmp_path))}
+        assert "sp ace/app 2" in uris
+        assert not [u for u in uris if "%" in u]
+
+    def test_the_message_resolves_through_the_rule_message_strings(
+        self, tree, tmp_path
+    ):
+        """The log gives ``{"id": "Error", "arguments": [...]}`` and no text."""
+        from automated_security_helper.utils.sarif_rule_descriptors import (
+            _descriptor_for,
+        )
+        from automated_security_helper.utils.sarif_utils import result_message_text
+
+        report = _grade_capture("positive", tree, tmp_path)
+        run = report.runs[0]
+        stack = next(r for r in run.results if r.ruleId == "BA3003")
+        body = getattr(stack.message, "root", stack.message)
+        assert body.text is None and body.id == "Error"
+        text = result_message_text(stack, _descriptor_for(stack, run.tool))
+        assert text.startswith("The stack protector was not found in 'app'")
+
+    def test_the_negative_log_has_no_findings(self, tree, tmp_path):
+        assert _findings(_grade_capture("negative", tree, tmp_path)) == []
+
+    @pytest.mark.parametrize(
+        ("uri", "expected"),
+        [
+            ("file:///t/x/sp%20ace/a%2Bb", "sp ace/a+b"),
+            ("file://localhost/t/x/a", "a"),
+            ("file:///t/x/a", "a"),
+            ("file:///t/elsewhere/a", "file:///t/elsewhere/a"),
+            ("bin/app", "bin/app"),
+        ],
+    )
+    def test_relative_uri(self, uri, expected):
+        assert BinskimScanner._relative_uri(uri, Path("/t/x")) == expected
 
 
 class TestExitStatus:
@@ -382,6 +431,20 @@ class TestToolAbsent:
         scanner = _scanner(tree, tmp_path)
         assert scanner.validate_plugin_dependencies() is False
 
+    def test_the_missing_tool_warning_names_an_install_that_exists(
+        self, tree, tmp_path, monkeypatch
+    ):
+        """No pin exists, so ``ash dependencies install --tool binskim`` does nothing."""
+        monkeypatch.setattr(bs, "find_executable", lambda cmd: None)
+        seen: List[str] = []
+        monkeypatch.setattr(
+            bs.ASH_LOGGER, "warning", lambda msg, *a, **k: seen.append(msg)
+        )
+        _scanner(tree, tmp_path).validate_plugin_dependencies()
+        assert len(seen) == 1
+        assert "--tool binskim" not in seen[0]
+        assert "Microsoft.CodeAnalysis.BinSkim" in seen[0]
+
     def test_present_binary_satisfies_the_check(self, tree, tmp_path, on_path):
         assert _scanner(tree, tmp_path).validate_plugin_dependencies() is True
 
@@ -407,7 +470,12 @@ class TestNothingToScan:
 
     @pytest.mark.parametrize(
         "head",
-        [b"MZ\x90\x00", ELF_HEAD, b"\xcf\xfa\xed\xfe", b"\xca\xfe\xba\xbe"],
+        [
+            b"MZ\x90\x00",
+            ELF_HEAD,
+            b"\xcf\xfa\xed\xfe",
+            b"\xca\xfe\xba\xbe\x00\x00\x00\x02",
+        ],
         ids=["pe", "elf", "macho64", "fat"],
     )
     def test_a_tree_with_a_binary_has_none(self, tmp_path, head):
@@ -415,6 +483,23 @@ class TestNothingToScan:
         src.mkdir()
         (src / "x.bin").write_bytes(head)
         assert _scanner(src, tmp_path).nothing_to_scan_reason() is None
+
+    @pytest.mark.parametrize(
+        "head",
+        [
+            b"\xca\xfe\xba\xbe\x00\x00\x00\x34",  # Java 8 class file
+            b"\xca\xfe\xba\xbe\x00\x00\x00\x2d",  # Java 1.1, the first major
+            b"\xca\xfe\xba\xbe\x00\x03\x00\x2d",  # Java 1.0.2, minor 3
+            b"\xca\xfe\xba\xbe",  # too short to be either
+        ],
+        ids=["java8", "java1.1", "java1.0.2", "truncated"],
+    )
+    def test_a_java_class_file_is_not_a_binary_for_binskim(self, tmp_path, head):
+        """A class file shares the fat Mach-O magic number; a tree of them is SKIPPED."""
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "A.class").write_bytes(head)
+        assert _scanner(src, tmp_path).nothing_to_scan_reason() is not None
 
     def test_a_binary_under_git_is_not_counted(self, tmp_path):
         src = tmp_path / "src"
@@ -479,10 +564,11 @@ class TestFacetsRegister:
 
         declared = vars(BinskimScanner).get(SCANNER_FACETS_ATTR)
         assert isinstance(declared, ScannerFacets)
-        # Every cell is n/a until a captured BinSkim log exists (see the README
-        # in tests/test_data/scanners/binskim); the register says so, not MAPPED.
+        # Every cell stays n/a until the central corpus row for the captured logs
+        # (tests/test_data/scanners/binskim/captured) lands; the register says so,
+        # not MAPPED.
         assert declared.rule_id.state is FacetState.NA
-        assert "sample run would settle it" in (declared.rule_id.reason or "")
+        assert "corpus row is owed centrally" in (declared.rule_id.reason or "")
         assert declared.resource_id.state is FacetState.NA
 
     def test_the_operational_row_mirrors_the_class(self, tree, tmp_path):

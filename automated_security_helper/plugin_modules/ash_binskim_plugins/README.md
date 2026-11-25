@@ -23,12 +23,9 @@ With the module listed, `binskim` runs by default. `scanners.binskim.enabled: fa
 
 ## Installing the tool
 
-BinSkim is distributed as the NuGet package `Microsoft.CodeAnalysis.BinSkim`; the executable (`BinSkim` on Linux and macOS, `BinSkim.exe` on Windows) is taken from the `tools/<rid>` folder for the platform. Locally:
+BinSkim is distributed as the NuGet package `Microsoft.CodeAnalysis.BinSkim`; the executable (`BinSkim` on Linux and macOS, `BinSkim.exe` on Windows) is taken from the `tools/<rid>` folder for the platform (`linux-x64`, `linux-arm64`, `osx-x64`, `win-x64`). The build is self-contained, so no .NET install is needed (4.4.9.14 ran on a Linux host with no `dotnet`).
 
-<!-- doctest: illustrative reason="downloads and installs the scanner's tool" -->
-```bash
-ash dependencies install --config-overrides "ash_plugin_modules+=[automated_security_helper.plugin_modules.ash_binskim_plugins]" --tool binskim
-```
+ASH pins no BinSkim release yet, so `ash dependencies install` has nothing to install for it: download the package, extract the `tools/<rid>` folder for your platform, mark `BinSkim` executable, and put it on `PATH`. A pin in `utils/tool_downloads.py` is owed (see "Central registration owed" below).
 
 ## Configuration
 

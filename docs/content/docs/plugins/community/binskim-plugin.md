@@ -24,9 +24,9 @@ BinSkim is MIT-licensed and needs no account, token or license acceptance, so li
 
 ## Installing BinSkim
 
-- **Local mode:** `ash dependencies install --tool binskim`, with the module listed in `ash_plugin_modules` (or added with `--config-overrides 'ash_plugin_modules+=["automated_security_helper.plugin_modules.ash_binskim_plugins"]'`), downloads the pinned `Microsoft.CodeAnalysis.BinSkim` NuGet package, verifies it against the digest pinned in ASH, and installs the executable for the platform from its `tools/<rid>` folder (`linux-x64`, `linux-arm64`, `osx-x64`, `win-x64`).
-- **Container mode:** the ASH image includes BinSkim when the integrated build adds it.
-- Any `BinSkim` already on `PATH` is also used. The executable name is case-sensitive on Linux and macOS.
+- **Local mode:** ASH pins no BinSkim release yet, so `ash dependencies install` installs nothing for it. Download the `Microsoft.CodeAnalysis.BinSkim` NuGet package, extract the `tools/<rid>` folder for your platform (`linux-x64`, `linux-arm64`, `osx-x64`, `win-x64`), mark `BinSkim` executable and put it on `PATH`. The build is self-contained, so no .NET install is needed.
+- **Container mode:** the ASH image does not include BinSkim.
+- The executable name is case-sensitive on Linux and macOS.
 
 ## What is scanned
 

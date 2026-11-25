@@ -74,6 +74,7 @@ from typing import (
     Set,
     Tuple,
 )
+from urllib.parse import unquote
 
 from pydantic import Field, model_validator
 
@@ -127,8 +128,14 @@ BINARY_MAGIC: Tuple[bytes, ...] = (
     b"\xfe\xed\xfa\xcf",
     b"\xce\xfa\xed\xfe",
     b"\xcf\xfa\xed\xfe",
-    b"\xca\xfe\xba\xbe",
 )
+
+#: Fat Mach-O files start with the same four bytes as a Java class file.
+FAT_OR_CLASS_MAGIC = b"\xca\xfe\xba\xbe"
+
+#: The first Java class file major version (JDK 1.1). Bytes 4-8 of a class file read
+#: at or above it; the architecture count of a fat Mach-O file reads far below it.
+JAVA_FIRST_MAJOR = 45
 
 #: The most files looked at when deciding whether the tree holds a binary.
 MAX_FILES_PROBED = 50000
@@ -154,9 +161,14 @@ class BinskimScannerConfig(ScannerPluginConfigBase):
 def _looks_like_binary(path: Path) -> bool:
     try:
         with open(path, "rb") as handle:
-            head = handle.read(4)
+            head = handle.read(8)
     except OSError:
         return False
+    if head.startswith(FAT_OR_CLASS_MAGIC):
+        # A fat Mach-O file and a Java class file share this magic number. The next
+        # four bytes tell them apart: a fat file holds its architecture count (a
+        # handful), a class file holds its minor and major version (45 or more).
+        return len(head) == 8 and int.from_bytes(head[4:8], "big") < JAVA_FIRST_MAJOR
     return any(head.startswith(magic) for magic in BINARY_MAGIC)
 
 
@@ -190,32 +202,32 @@ class BinskimScanner(ScannerPluginBase[BinskimScannerConfig]):
     sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements()
 
     #: The facets register row (base/scanner_facets.py). BinSkim's output has not
-    #: been read from a real run (see tests/test_data/scanners/binskim/README.md),
-    #: so every cell is n/a with "a sample run would settle it". The four cells
-    #: the adapter does handle (rule id, severity, file path, message) become
-    #: MAPPED when a captured log and its corpus-table entry land (the integration
-    #: lane; see the plugin README).
+    #: been read from a real run: a capture of BinSkim 4.4.9.14 is committed under
+    #: tests/test_data/scanners/binskim/captured. The register's consistency gate
+    #: refuses a MAPPED cell with no row in its corpus table, and that table is a
+    #: central file, so every cell stays n/a until the integration lane adds the
+    #: row. The four cells the adapter handles (rule id, severity, file path,
+    #: message) become MAPPED then (see the plugin README).
     facets: ClassVar[ScannerFacets] = ScannerFacets(
         rule_id=FacetDecl(
             state=FacetState.NA,
-            reason="output not read; a sample run would settle it (the adapter "
-            "passes result.ruleId through; the register's consistency gate "
-            "refuses a MAPPED cell with no captured corpus)",
+            reason="the adapter passes result.ruleId through; the capture is "
+            "committed and its corpus row is owed centrally",
         ),
         severity=FacetDecl(
             state=FacetState.NA,
-            reason="output not read; a sample run would settle it (the adapter "
-            "maps result.level through BINSKIM_LEVEL_MAP; no captured corpus yet)",
+            reason="the adapter maps result.level through BINSKIM_LEVEL_MAP; the "
+            "capture is committed and its corpus row is owed centrally",
         ),
         file_path=FacetDecl(
             state=FacetState.NA,
-            reason="output not read; a sample run would settle it (the adapter "
-            "makes artifactLocation.uri source-relative; no captured corpus yet)",
+            reason="the adapter decodes artifactLocation.uri and makes it "
+            "source-relative; the capture is committed and its corpus row is "
+            "owed centrally",
         ),
         line_range=FacetDecl(
             state=FacetState.NA,
-            reason="a binary has no source lines; output not read for regions; "
-            "a sample run would settle it",
+            reason="a binary has no source lines; the captured run carries no regions",
         ),
         column=FacetDecl(
             state=FacetState.NA,
@@ -223,8 +235,9 @@ class BinskimScanner(ScannerPluginBase[BinskimScannerConfig]):
         ),
         message=FacetDecl(
             state=FacetState.NA,
-            reason="output not read; a sample run would settle it (the adapter "
-            "passes result.message.text through; no captured corpus yet)",
+            reason="BinSkim names a message string by id with arguments (no text); "
+            "the base resolves it through the rule's messageStrings; the capture "
+            "is committed and its corpus row is owed centrally",
         ),
         resource_id=FacetDecl(
             state=FacetState.NA,
@@ -236,18 +249,15 @@ class BinskimScanner(ScannerPluginBase[BinskimScannerConfig]):
         ),
         package_name=FacetDecl(
             state=FacetState.NA,
-            reason="BinSkim reports on files, not packages; output not read; a "
-            "sample run would settle it",
+            reason="BinSkim reports on files, not packages",
         ),
         package_version=FacetDecl(
             state=FacetState.NA,
-            reason="BinSkim reports on files, not packages; output not read; a "
-            "sample run would settle it",
+            reason="BinSkim reports on files, not packages",
         ),
         package_path=FacetDecl(
             state=FacetState.NA,
-            reason="BinSkim reports on files, not packages; output not read; a "
-            "sample run would settle it",
+            reason="BinSkim reports on files, not packages",
         ),
         taxonomy_cve=FacetDecl(
             state=FacetState.NA,
@@ -255,11 +265,11 @@ class BinskimScanner(ScannerPluginBase[BinskimScannerConfig]):
         ),
         taxonomy_cwe=FacetDecl(
             state=FacetState.NA,
-            reason="output not read; a sample run would settle it",
+            reason="captured run is committed; its corpus row is owed centrally",
         ),
         fingerprints=FacetDecl(
             state=FacetState.NA,
-            reason="output not read; a sample run would settle it",
+            reason="captured run is committed; its corpus row is owed centrally",
         ),
         fix_available=FacetDecl(
             state=FacetState.NA,
@@ -267,7 +277,7 @@ class BinskimScanner(ScannerPluginBase[BinskimScannerConfig]):
         ),
         remediation_text=FacetDecl(
             state=FacetState.NA,
-            reason="output not read; a sample run would settle it",
+            reason="captured run is committed; its corpus row is owed centrally",
         ),
         snippet=FacetDecl(
             state=FacetState.NA,
@@ -275,7 +285,7 @@ class BinskimScanner(ScannerPluginBase[BinskimScannerConfig]):
         ),
         references=FacetDecl(
             state=FacetState.NA,
-            reason="output not read; a sample run would settle it",
+            reason="captured run is committed; its corpus row is owed centrally",
         ),
         tags=FacetDecl(
             state=FacetState.NA,
@@ -284,7 +294,7 @@ class BinskimScanner(ScannerPluginBase[BinskimScannerConfig]):
         ),
         extras=FacetDecl(
             state=FacetState.NA,
-            reason="output not read; a sample run would settle it",
+            reason="captured run is committed; its corpus row is owed centrally",
         ),
     )
 
@@ -350,7 +360,7 @@ class BinskimScanner(ScannerPluginBase[BinskimScannerConfig]):
             ),
             identity=opsf.IdentityFacet(
                 fingerprint_class=opsf.FingerprintClass.UNCONFIRMED,
-                note="output not read; a sample run would settle it",
+                note="captured run is committed; its corpus row is owed centrally",
             ),
             extensibility=opsf.ExtensibilityFacet(
                 custom_rules=opsf.CustomRules.NONE,
@@ -483,7 +493,12 @@ class BinskimScanner(ScannerPluginBase[BinskimScannerConfig]):
         """``uri`` relative to ``target`` when it lies under it, else unchanged."""
         raw = uri
         if raw.startswith("file://"):
-            raw = raw[len("file://") :]
+            # BinSkim writes a file URI with the path percent-encoded
+            # (``sp%20ace/app%202`` for ``sp ace/app 2``), so decode it before
+            # comparing with the filesystem path of the target.
+            raw = unquote(raw[len("file://") :])
+            if raw.startswith("localhost/"):
+                raw = raw[len("localhost") :]
             if len(raw) > 2 and raw[0] == "/" and raw[2] == ":":
                 raw = raw[1:]  # file:///C:/x
         try:
@@ -555,11 +570,13 @@ class BinskimScanner(ScannerPluginBase[BinskimScannerConfig]):
             return False
         found = find_executable(self.command or "BinSkim")
         if not found:
+            # ASH pins no BinSkim release yet, so `ash dependencies install` has
+            # nothing to offer; name the install that works.
             ASH_LOGGER.warning(
-                "BinSkim executable not found in PATH. Install it with "
-                "`ash dependencies install --config-overrides "
-                "'ash_plugin_modules+=[\"automated_security_helper.plugin_modules."
-                "ash_binskim_plugins\"]' --tool binskim`."
+                "BinSkim executable not found in PATH. ASH does not install it: "
+                "extract the linux-x64, linux-arm64 or osx-x64 build from the "
+                "Microsoft.CodeAnalysis.BinSkim NuGet package (it is self-contained, "
+                "no .NET install needed) and put `BinSkim` on PATH."
             )
         return found is not None
 
