@@ -933,6 +933,25 @@ suppressions:
 
 An unknown key in a suppression warns and disables the entry (it suppresses nothing until fixed); `fail_on_unknown_keys: true` makes it an error at config load, which becomes the default at ASH v4.
 
+#### global_settings.exclusions
+Array of rule+path exclusions, which DROP the matching results from SARIF instead of keeping them marked suppressed: for finding classes that are always benign in a known place, such as bandit B101 (`assert`) under `tests/`. Other rules under the path are still reported, which an `ignore_paths` entry would drop too.
+
+**Exclusion Fields**:
+- `rule_id`: Required - the rule whose findings are dropped; the finding's exact ID (case-insensitive) or a glob (`B1*`)
+- `path`: Required - matched like a suppression's path
+- `scanner`: Optional - only drop this scanner's results, by its registered name (e.g. `bandit`)
+- `reason`: Required - explanation for the exclusion
+- `expires`: Optional - ISO date when the exclusion expires
+
+<!-- doctest: config kind=ash-fragment at=global_settings -->
+```yaml
+exclusions:
+  - rule_id: B101
+    path: '**/tests/**'
+    scanner: bandit
+    reason: 'pytest assert idiom; tests are not shipped'
+```
+
 #### scanners
 Configuration for each scanner. Common options:
 - `enabled`: Boolean to enable/disable scanner
