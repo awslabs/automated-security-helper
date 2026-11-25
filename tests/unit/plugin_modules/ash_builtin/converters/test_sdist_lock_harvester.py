@@ -9,10 +9,20 @@ provenance manifest into the converted target. The network is a counted stub on
 ``download_utils._open_url`` -- the one opener every ASH download goes through --
 so "zero network calls" is a measured count, not an absence of evidence, and the
 sha256 verification exercised is the REAL one in ``download_utils``.
+
+Also the cache's trust boundary and the transfer bound, the fix round's rows:
+
+- a cache entry the scanned repository ships in its own tree (committed under
+  the default output directory) is never served as a verified harvest;
+- a cached lockfile whose bytes no longer match the digest recorded when the
+  entry was written is not served: the entry is evicted and treated as cold;
+- the ``max_sdist_mb`` bound holds against the bytes actually streamed, not
+  only against the lock's own (attacker-aligned) size claim.
 """
 
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 from pathlib import Path
@@ -50,31 +60,45 @@ class CountingOpener:
     def __init__(self, payloads: Dict[str, bytes]):
         self.payloads = payloads
         self.calls: List[str] = []
+        #: Every response handed out, so a test can measure how much of a body
+        #: was actually consumed (``.tell()``): an aborted transfer reads less
+        #: than the payload, a completed one reads it whole.
+        self.responses: List[io.BytesIO] = []
 
     def __call__(self, url: str, timeout: float) -> io.BytesIO:
         self.calls.append(url)
         if url not in self.payloads:
             raise AssertionError(f"unexpected fetch of {url}")
-        return io.BytesIO(self.payloads[url])
+        response = io.BytesIO(self.payloads[url])
+        self.responses.append(response)
+        return response
 
 
 @pytest.fixture
 def harvest_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    """A source tree with a fixture uv.lock, a context, and a counted opener."""
+    """A source tree with a fixture uv.lock, a context, and a counted opener.
+
+    ``XDG_CACHE_HOME`` is pinned into the test's own directory so the user-level
+    default harvest cache can never read from or write to the developer's real
+    cache, and so each test starts cold.
+    """
     monkeypatch.delenv("ASH_OFFLINE", raising=False)
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "xdg-cache"))
     source = tmp_path / "src"
     source.mkdir()
     output = tmp_path / "out"
     opener = CountingOpener({SDIST_URL: fixture_sdist_bytes()})
     monkeypatch.setattr(download_utils, "_open_url", opener)
 
-    def build(lock_bytes: bytes | None = None, config=None) -> SdistLockHarvester:
+    def build(
+        lock_bytes: bytes | None = None, config=None, output_dir: Path | None = None
+    ) -> SdistLockHarvester:
         source.joinpath("uv.lock").write_bytes(
             fixture_uv_lock(SDIST_URL, WHEEL_URL) if lock_bytes is None else lock_bytes
         )
         context = PluginContext(
             source_dir=source,
-            output_dir=output,
+            output_dir=output if output_dir is None else output_dir,
             config=get_default_config() if config is None else config,
         )
         return SdistLockHarvester(context=context)
@@ -237,3 +261,131 @@ def test_candidate_input_count_counts_configured_lockfiles(harvest_env) -> None:
     _source, _output, _opener, build = harvest_env
     converter = build()
     assert converter.candidate_input_count() == 1
+
+
+def test_tree_shipped_cache_entry_is_never_served(
+    harvest_env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A cache entry committed INSIDE the scanned tree is ignored.
+
+    The default layout puts the output directory in the scanned tree
+    (``.ash/ash_output``), and a persistent cache there is neither wiped at scan
+    start nor covered by the committed-output refusal: a repository could commit
+    a pre-warmed entry, self-consistent digests included, and have its own bytes
+    served to every scanner as a VERIFIED harvest, provenance stamps and all.
+    The run must treat such a package as a cold miss instead.
+    """
+    monkeypatch.setenv("ASH_OFFLINE", "YES")
+    source, _output, opener, build = harvest_env
+    in_tree_output = source / ".ash" / "ash_output"
+    pin = hashlib.sha256(fixture_sdist_bytes()).hexdigest()
+    poison = b'[[package]]\nname = "poisoned-crate"\nversion = "6.6.6"\n'
+    entry = in_tree_output / "sdist-harvest" / pin
+    entry.mkdir(parents=True)
+    entry.joinpath("Cargo.lock").write_bytes(poison)
+    entry.joinpath("cached-lockfiles.json").write_text(
+        json.dumps(
+            {
+                "sha256": pin,
+                "lockfiles": ["Cargo.lock"],
+                # Self-consistent on purpose: PLACEMENT, not the digest record,
+                # is what must keep tree-shipped bytes out of the harvest.
+                "digests": {"Cargo.lock": hashlib.sha256(poison).hexdigest()},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    converter = build(output_dir=in_tree_output)
+
+    results = converter.convert()
+
+    assert results == [], "tree-shipped cache bytes must never be materialized"
+    assert opener.calls == []
+    assert not _harvest_dir(converter).exists()
+    assert not [
+        path
+        for path in converter.results_dir.glob("**/*")
+        if path.is_file() and poison in path.read_bytes()
+    ], "the poisoned bytes must not reach the converted target anywhere"
+    (record,) = converter.refused_inputs
+    assert HARVEST_SKIPPED_RULE in record.reason
+    assert "offline" in record.reason, "a cold miss offline is a visible skip"
+
+
+def test_tampered_cache_bytes_are_evicted_not_served(
+    harvest_env, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A cached lockfile that no longer matches its recorded digest is not served.
+
+    The cache key (the sdist's sha256 pin) authorizes an entry; the digests
+    recorded when the entry was written are what tie the served BYTES to that
+    key. Bytes that match no recorded digest are evicted with the entry and the
+    package is a cold miss, never a verified harvest.
+    """
+    _source, output, opener, build = harvest_env
+    build().convert()
+    assert len(opener.calls) == 1
+
+    # Wherever the cache root is, exactly one entry was warmed.
+    roots = [output, tmp_path / "xdg-cache"]
+    (index,) = [p for root in roots for p in root.glob("**/cached-lockfiles.json")]
+    entry = index.parent
+    tampered = b'[[package]]\nname = "tampered-crate"\nversion = "6.6.6"\n'
+    entry.joinpath("Cargo.lock").write_bytes(tampered)
+
+    monkeypatch.setenv("ASH_OFFLINE", "YES")
+    converter = build()
+    results = converter.convert()
+
+    assert results == [], "tampered cache bytes must not be materialized"
+    served = _harvest_dir(converter).joinpath("Cargo.lock")
+    assert not served.exists() or tampered not in served.read_bytes()
+    assert not entry.exists(), "an unverifiable entry must be evicted"
+    assert len(opener.calls) == 1, "offline: the eviction must not fetch"
+    (record,) = converter.refused_inputs
+    assert HARVEST_SKIPPED_RULE in record.reason
+    assert "offline" in record.reason
+
+
+def test_oversize_stream_is_aborted_at_the_cap(harvest_env, tmp_path: Path) -> None:
+    """``max_sdist_mb`` holds against the bytes actually streamed.
+
+    The lock's own size claim is the scanned repository's claim, so a lying
+    small claim must not buy an unbounded transfer: the fetch is aborted ON THE
+    WIRE once the bound passes, nothing is extracted, and the skip names the
+    option. The sha256 pin here really is the big body's digest, so without the
+    bound the transfer would verify and harvest end to end.
+    """
+    import random
+
+    _source, output, opener, build = harvest_env
+    # Incompressible filler, so the served archive really is ~5 MiB on the wire.
+    blob = random.Random(1337).randbytes(5 * 1024 * 1024)
+    oversized = fixture_sdist_bytes(extra_members={"fixturepkg-0.1.0/filler.bin": blob})
+    assert len(oversized) > 4 * 1024 * 1024
+    opener.payloads[SDIST_URL] = oversized
+    config = get_default_config()
+    config.scanners.syft.options.sdist_harvest.max_sdist_mb = 1
+    converter = build(
+        lock_bytes=fixture_uv_lock(
+            SDIST_URL, WHEEL_URL, sdist_bytes=oversized, sdist_size=1000
+        ),
+        config=config,
+    )
+
+    results = converter.convert()
+
+    assert results == [], "a transfer past max_sdist_mb must never be harvested"
+    assert not _harvest_dir(converter).exists()
+    (record,) = converter.refused_inputs
+    assert HARVEST_SKIPPED_RULE in record.reason
+    assert "max_sdist_mb" in record.reason
+    (response,) = opener.responses
+    assert response.tell() < len(oversized), (
+        "the transfer must be ABORTED at the bound, not completed and discarded"
+    )
+    roots = [output, tmp_path / "xdg-cache"]
+    assert not [p for root in roots for p in root.glob("**/cached-lockfiles.json")], (
+        "a refused transfer must cache nothing"
+    )

@@ -40,7 +40,9 @@ pytestmark = [
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_ash_harvests_the_polars_crate_tree_from_its_own_lock(tmp_path: Path) -> None:
+def test_ash_harvests_the_polars_crate_tree_from_its_own_lock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from automated_security_helper.base.plugin_context import PluginContext
     from automated_security_helper.config.default_config import get_default_config
     from automated_security_helper.plugin_modules.ash_builtin.converters import (
@@ -51,6 +53,11 @@ def test_ash_harvests_the_polars_crate_tree_from_its_own_lock(tmp_path: Path) ->
         HARVEST_MANIFEST_NAME,
         flagged_packages_in_uv_lock,
     )
+
+    # The user-level default harvest cache is pinned into the test's own
+    # directory, so the oracle neither reads a developer's warmed cache (which
+    # would hide a broken fetch path) nor writes into their real one.
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "xdg-cache"))
 
     lock_bytes = REPO_ROOT.joinpath("uv.lock").read_bytes()
     flagged = {p.name: p for p in flagged_packages_in_uv_lock(lock_bytes, "uv.lock")}
