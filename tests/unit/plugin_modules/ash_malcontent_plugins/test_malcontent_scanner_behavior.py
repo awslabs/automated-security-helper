@@ -19,6 +19,7 @@ import pytest
 
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.default_config import get_default_config
+from automated_security_helper.core.enums import OfflineStrategy
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.plugin_modules import ash_malcontent_plugins
 from automated_security_helper.plugin_modules.ash_malcontent_plugins import (
@@ -201,7 +202,7 @@ class TestCommunityPlugin:
     def test_declarations(self):
         assert MalcontentScanner.python_only is False
         assert MalcontentScanner.success_exit_codes == {0}
-        assert MalcontentScanner.offline_strategy.value == "BUNDLED"
+        assert MalcontentScanner.offline_strategy is OfflineStrategy.BUNDLED
 
 
 class TestInvocation:
