@@ -31,6 +31,7 @@ What is pinned, and what is not:
 from __future__ import annotations
 
 import re
+import sys
 from pathlib import Path
 
 import pytest
@@ -231,7 +232,5 @@ def test_the_link_checker_finds_a_link_to_nothing(tmp_path: Path, monkeypatch) -
     page = tmp_path / "p" / "index.md"
     page.parent.mkdir()
     page.write_text("[ok](index.md) and [gone](gone.md)\n", encoding="utf-8")
-    monkeypatch.setattr(
-        "tests.unit.docs.test_index_page_claims.CONTENT", tmp_path, raising=True
-    )
+    monkeypatch.setattr(sys.modules[__name__], "CONTENT", tmp_path, raising=True)
     assert missing_links("p/index.md") == ["gone.md"]
