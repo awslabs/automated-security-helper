@@ -46,7 +46,7 @@ from textual.widgets.data_table import ColumnKey
 
 from automated_security_helper.config.ash_config import add_suppression_to_config
 from automated_security_helper.core.exceptions import ASHConfigSourceError
-from automated_security_helper.models.vocab import SEVERITY_BUCKETS, Severity
+from automated_security_helper.models.vocab import SEVERITY_BUCKETS
 from automated_security_helper.utils.console import echo, secho
 from automated_security_helper.config.resolve_config import find_config_file
 from automated_security_helper.core.constants import (
@@ -1343,10 +1343,13 @@ class FindingsExplorerApp(App):
                 yield Label("Severity")
                 yield Select(
                     name="Severity",
-                    options=[("All", "all")]
-                    + [
-                        (level.value.title(), f"severity:{level.bucket}")
-                        for level in Severity
+                    options=[
+                        ("All", "all"),
+                        ("Critical", "severity:critical"),
+                        ("High", "severity:high"),
+                        ("Medium", "severity:medium"),
+                        ("Low", "severity:low"),
+                        ("Info", "severity:info"),
                     ],
                     value="all",
                     id="severity_select",
