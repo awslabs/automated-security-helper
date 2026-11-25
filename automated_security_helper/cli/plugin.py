@@ -751,7 +751,7 @@ def verify_plugins(
                 )
             )
         except PluginLoadError as error:
-            secho(f"Error: {shown_on_one_line(str(error))}", err=True)
+            secho(f"Error: {error}", err=True)
             raise typer.Exit(2)
     if as_json:
         echo_raw(json.dumps([r.as_dict() for r in reports], indent=2))
@@ -761,7 +761,7 @@ def verify_plugins(
             for row in report.rows:
                 echo(f"  {row.number}. [{row.status.value}] {row.name}")
                 for detail in row.details:
-                    echo(f"       - {shown_on_one_line(detail)}")
+                    echo(f"       - {detail}")
     codes = {r.exit_code for r in reports}
     raise typer.Exit(
         EXIT_FAIL if EXIT_FAIL in codes else EXIT_INCOMPLETE if codes - {0} else 0
