@@ -493,6 +493,15 @@ class PsalmScanner(ScannerPluginBase[PsalmScannerConfig]):
         )
         return final_args, results_file, None
 
+    def _subprocess_cwd(self, results_dir: Path) -> Optional[Path]:
+        """Run Psalm in the generated config directory, outside the scanned tree.
+
+        Psalm reads a ``psalm.xml`` from its working directory when it is not told
+        otherwise; ``--config`` is always passed, and the working directory is kept
+        away from the scanned repository as well.
+        """
+        return Path(results_dir) / "psalm-config"
+
     def _read_results_file(self, results_file: Path) -> Optional[Dict[str, Any]]:
         """Refuse the report of a run Psalm did not finish (exit other than 0 or 2)."""
         if self.exit_code not in self.success_exit_codes:

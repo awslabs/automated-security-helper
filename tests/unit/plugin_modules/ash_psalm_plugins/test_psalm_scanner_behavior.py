@@ -314,13 +314,15 @@ class TestInvocation:
         _run(scanner, fake, monkeypatch)
         assert fake.calls[0]["timeout"] == 77
 
-    def test_the_working_directory_is_the_source_directory(
+    def test_the_working_directory_is_the_generated_config_directory(
         self, tree, tmp_path, on_path, monkeypatch
     ):
         scanner = _scanner(tree, tmp_path)
         fake = FakePsalm()
         _run(scanner, fake, monkeypatch)
-        assert Path(fake.calls[0]["cwd"]) == Path(tree)
+        cwd = Path(fake.calls[0]["cwd"])
+        assert cwd == Path(_flag(fake.argv, "--root="))
+        assert Path(tree) not in cwd.parents and cwd != Path(tree)
 
 
 class TestReport:
