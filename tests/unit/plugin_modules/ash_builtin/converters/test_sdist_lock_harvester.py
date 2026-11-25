@@ -474,3 +474,53 @@ def test_sha256_pin_that_is_not_hex_is_skipped(harvest_env, digest: str) -> None
     (record,) = converter.refused_inputs
     assert HARVEST_SKIPPED_RULE in record.reason
     assert "not a 64-character hex digest" in record.reason
+
+
+def test_confined_path_refuses_an_up_level_join_and_accepts_a_normal_one(
+    tmp_path: Path,
+) -> None:
+    from automated_security_helper.plugin_modules.ash_builtin.converters.sdist_lock_harvester import (
+        confined_path,
+    )
+
+    root = tmp_path / "root"
+    root.mkdir()
+    assert confined_path(root, "pkg", "1.0") == (root / "pkg" / "1.0").resolve()
+    assert confined_path(root, "..", "x") is None
+    assert confined_path(root, "pkg", "..", "..", "x") is None
+    assert confined_path(root, "/etc") is None
+    assert confined_path(root) is None, "the root itself is not an entry under it"
+
+
+def test_confined_path_refuses_a_symlink_that_leaves_the_root(tmp_path: Path) -> None:
+    from automated_security_helper.plugin_modules.ash_builtin.converters.sdist_lock_harvester import (
+        confined_path,
+    )
+
+    root = tmp_path / "root"
+    root.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    root.joinpath("link").symlink_to(outside, target_is_directory=True)
+
+    assert confined_path(root, "link", "x") is None
+
+
+def test_eviction_never_removes_a_directory_outside_the_cache_root(
+    harvest_env, tmp_path: Path
+) -> None:
+    _source, _output, _opener, build = harvest_env
+    converter = build()
+    cache_root = tmp_path / "cache"
+    cache_root.mkdir()
+    outside = tmp_path / "precious"
+    outside.mkdir()
+    outside.joinpath("keep.txt").write_text("keep")
+    inside = cache_root / ("a" * 64)
+    inside.mkdir()
+
+    assert converter._evict_cache_entry(cache_root, outside, "test") is None
+    assert converter._evict_cache_entry(cache_root, inside, "test") is None
+
+    assert outside.joinpath("keep.txt").is_file(), "never rmtree outside the root"
+    assert not inside.exists(), "an entry under the root is still evicted"
