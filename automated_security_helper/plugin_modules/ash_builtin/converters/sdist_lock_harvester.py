@@ -8,7 +8,7 @@ import ntpath
 import shutil
 import tempfile
 from pathlib import Path
-from typing import Dict, List, Literal, Optional, Tuple
+from typing import Dict, Iterable, List, Literal, Optional, Tuple, Union, cast
 
 from automated_security_helper.base.converter_plugin import (
     ConverterPluginBase,
@@ -182,7 +182,7 @@ class SdistLockHarvester(ConverterPluginBase[SdistLockHarvesterConverterConfig])
                 [
                     lock
                     for lock in self._lockfiles_in_scan_set(
-                        list(options["lockfiles"])  # type: ignore[arg-type]
+                        list(cast(Iterable[str], options["lockfiles"]))
                     )
                     if self._ignored_by(lock, ignore_paths) is None
                 ]
@@ -220,7 +220,7 @@ class SdistLockHarvester(ConverterPluginBase[SdistLockHarvesterConverterConfig])
 
             context_config = getattr(self.context, "config", None)
             root = honored_path(
-                configured,  # type: ignore[arg-type]
+                cast(Union[str, Path], configured),
                 source_dir=Path(self.context.source_dir),
                 config=context_config,
                 key="scanners.syft.options.sdist_harvest.cache_dir",
@@ -501,7 +501,7 @@ class SdistLockHarvester(ConverterPluginBase[SdistLockHarvesterConverterConfig])
                 "and the harvest exists to complete the SBOM it produces"
             )
             return []
-        lockfile_names = list(options["lockfiles"])  # type: ignore[arg-type]
+        lockfile_names = list(cast(Iterable[str], options["lockfiles"]))
         lock_files = self._lockfiles_in_scan_set(lockfile_names)
         if not lock_files:
             ASH_LOGGER.debug(
@@ -510,8 +510,10 @@ class SdistLockHarvester(ConverterPluginBase[SdistLockHarvesterConverterConfig])
             )
             return []
 
-        ecosystems = list(options["ecosystems"])  # type: ignore[arg-type]
-        max_sdist_bytes = int(options["max_sdist_mb"]) * 1024 * 1024  # type: ignore[call-overload]
+        ecosystems = list(cast(Iterable[str], options["ecosystems"]))
+        max_sdist_bytes = (
+            int(cast(Union[int, str], options["max_sdist_mb"])) * 1024 * 1024
+        )
         offline = is_offline_mode() or bool(options["syft_offline"])
         cache_root = self._cache_root(options["cache_dir"])
         run_private_cache: Optional[tempfile.TemporaryDirectory] = None
