@@ -1379,7 +1379,7 @@ docker logs $(docker ps -q --filter ancestor=ash)
 <!-- doctest: illustrative reason="needs a container runtime" -->
 ```bash
 # Use the host network
-ash build-image --container-network host
+ash container build --container-network host
 
 # Pre-download database
 trivy image --download-db-only

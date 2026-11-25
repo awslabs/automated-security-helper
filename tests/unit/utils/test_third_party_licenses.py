@@ -553,7 +553,7 @@ class TestThePythonTools:
         # tools are installed and pinned too.
         assert (
             text.count(
-                '    --config-overrides "ash_plugin_modules+=[${ASH_ALPHA_PLUGIN_MODULES}]"; \\\n'
+                '    --config-overrides "ash_plugin_modules+=[${ASH_COMMUNITY_PLUGIN_MODULES:-${ASH_ALPHA_PLUGIN_MODULES}}]"; \\\n'
             )
             == 2
         )

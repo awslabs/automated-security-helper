@@ -64,6 +64,9 @@ SUPERSEDING = {
     "ash-pr-title-check.yml",
     "ash-repo-scan-pr-head.yml",
     "ash-repo-scan.yml",
+    # Pull request, nightly schedule and dispatch. A pull request run is superseded by
+    # a newer push; the nightly run is on main, so it is never cancelled.
+    "ash-scan-benchmark.yml",
     "ash-typescript-ci.yml",
     "ash-unified-ci.yml",
     "ash-upgrade-paths.yml",

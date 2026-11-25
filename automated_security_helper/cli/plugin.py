@@ -583,7 +583,12 @@ def _print_tables(
 
 def _default_transcripts_root() -> Path:
     """The committed fixture corpus of a source checkout (absent from a wheel)."""
-    return Path(__file__).resolve().parents[2] / "tests" / "test_data" / "scanners"
+    return (
+        Path(__file__).resolve().parents[2]
+        / "tests"
+        / "test_data"
+        / PluginKind.SCANNER.section
+    )
 
 
 def _live_results_by_scanner(

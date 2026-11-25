@@ -77,6 +77,7 @@ WIRE_SPELLINGS = frozenset(
         "config_policy_unreadable",
         "delivered_image_missing",
         "delivered_source_missing",
+        "delivered_image_missing",
         "DirectoryNotFound",
         "environment_value_in_longer_string",
         "git_checkout_failed",

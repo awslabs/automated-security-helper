@@ -10,7 +10,7 @@ so each invocation asks for ``ci`` itself; without it the action would build
 ``non-root`` and then look for a ``ci`` image nothing built.
 
 What it does not cover: a command is checked when, with its backslash continuations
-joined, it starts with ``ash build-image``, ``ash scan`` or ``ash --mode``. A call
+joined, it starts with ``ash container build``, ``ash scan`` or ``ash --mode``. A call
 behind a wrapper or a shell keyword (``timeout 600 ash scan``, ``env X=1 ash scan``,
 ``if ash scan``) or through a variable (``"$ASH" scan``) does not, and is not
 checked. Only this action is read, on purpose: other CI builds the default
@@ -55,7 +55,7 @@ def _ash_invocations() -> List[str]:
     found = []
     for step in _steps():
         for command in _commands(step.get("run") or ""):
-            if command.startswith(("ash build-image", "ash scan", "ash --mode")):
+            if command.startswith(("ash container build", "ash scan", "ash --mode")):
                 found.append(command)
     return found
 
@@ -64,7 +64,7 @@ def test_the_action_builds_and_scans_with_ash():
     """Guards the guard: an empty list would pass the test below vacuously."""
     invocations = _ash_invocations()
 
-    assert sum(cmd.startswith("ash build-image") for cmd in invocations) == 3
+    assert sum(cmd.startswith("ash container build") for cmd in invocations) == 3
     assert any("--mode container" in cmd for cmd in invocations)
 
 

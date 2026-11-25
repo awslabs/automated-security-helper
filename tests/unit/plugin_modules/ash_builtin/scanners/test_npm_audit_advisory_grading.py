@@ -633,10 +633,10 @@ def test_the_result_keeps_its_historical_uri_shape_and_recommendation(scanner):
     historical shape: every ``node_modules/`` in the node path is dropped, so a
     nested copy at node_modules/a/node_modules/pkg is reported at
     node_modules/a/pkg/package.json, a path that does not exist on disk. That
-    shape is kept on purpose, because the path-based suppressions users wrote
-    against it match it; the real install path is ``package_path`` (when the
-    lockfile gives one). A change of the URI is a change of the suppression
-    contract, not a fix this test stands in the way of."""
+    is the location of a report converted with no lockfile known (this call
+    names none); a scan locates each result at its lockfile instead
+    (test_npm_audit_lockfile_locations.py), and the real install path is
+    ``package_path`` (when the lockfile gives one)."""
     document = _report(
         pkg=(
             "high",

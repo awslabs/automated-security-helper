@@ -636,14 +636,3 @@ def model_with_one_high_finding():
         return model
 
     return factory
-
-
-@pytest.fixture(autouse=True)
-def _the_old_spellings_are_already_warned_about(monkeypatch):
-    """``ash build-image`` warns once per process on stderr. The tests that run it
-    by that spelling look at the command's own output, so the warning is marked
-    as given; the tests of the warning itself reset the set
-    (tests/unit/cli/test_container_build_spelling.py)."""
-    from automated_security_helper.cli import deprecation
-
-    monkeypatch.setattr(deprecation, "_warned", {"build-image"})

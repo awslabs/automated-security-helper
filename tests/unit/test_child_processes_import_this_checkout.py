@@ -283,6 +283,11 @@ ALLOWED: Dict[str, str] = {
         "sys.executable is only the --python value that stand-in is asked "
         "about, and no Python child runs"
     ),
+    "tests/unit/scripts/test_measure_precommit_cost.py"
+    "::_builds::unread-script#1@Build": (
+        "the stand-in 'ash' is a few lines that append their argv to a log "
+        "and import nothing of the checkout; the Build record only names it"
+    ),
     "tests/unit/utils/test_cancel_stops_the_whole_process_tree.py"
     "::test_an_unsandboxed_child_in_a_cancel_scope_leads_its_own_group"
     "::unread-code#1@run_command": (_STANDARD_LIBRARY_GROUP_REPORT),

@@ -292,8 +292,12 @@ class TestNpmAuditIdentity:
         assert bundled["installed_version"] == "5.0.9"
         assert bundled["vulnerable_versions"] == "<=1.1.20 || 4.0.0 - 5.0.11"
 
-    def test_uri_is_unchanged(self, npm_scanner, tmp_path):
-        """Existing npm-audit suppressions match on this URI; it must not move."""
+    def test_uri_is_the_lockfile(self, npm_scanner, tmp_path):
+        """The result is located at its lockfile, where grype puts its own.
+
+        A suppression is written as the lockfile path plus ``package_path``, the
+        same for both scanners.
+        """
         cdk = tmp_path / "deploy/cdk"
         write_lockfile(cdk, bundled_and_top_level("1.1.18"))
         report = run_npm_scan(npm_scanner, tmp_path, {cdk: audit_json([BUNDLED_KEY])})
@@ -303,7 +307,7 @@ class TestNpmAuditIdentity:
             .locations[0]
             .physicalLocation.root.artifactLocation.uri
         )
-        assert uri == "node_modules/aws-cdk-lib/brace-expansion/package.json"
+        assert uri == "deploy/cdk/package-lock.json"
 
     def test_node_missing_from_lockfile_gets_no_version(self, npm_scanner, tmp_path):
         cdk = tmp_path / "deploy/cdk"

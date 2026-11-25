@@ -1710,7 +1710,7 @@ def run_ash_scan_cli_command(
             rich_help_panel="Scan",
             help=(
                 "Scan a container image named by reference "
-                "(registry/repo[:tag][@sha256:digest]) instead of a source "
+                "(registry/repo[:tag]) instead of a source "
                 "directory. ASH fetches nothing itself: the image is prepared "
                 "by a container engine or the scanner tools' own registry "
                 "clients. Repeat it, or give a comma list, to scan several "

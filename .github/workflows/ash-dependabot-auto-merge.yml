@@ -121,6 +121,7 @@ on:
       - "ASH - Offline-capable scanners (non-blocking)"
       - "ASH - Package Build"
       - "ASH - PR Title Check"
+      - "ASH - Scan-Time Benchmark"
       - "Run ASH (pull request head, informational)"
       - "Run ASH"
       - "TypeScript CI"

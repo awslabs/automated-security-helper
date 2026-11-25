@@ -63,7 +63,7 @@ def fakes(tmp_path: Path, monkeypatch):
     log = tmp_path / "calls.log"
     monkeypatch.setenv("FAKE_LOG", str(log))
     exes: dict[str, Path] = {}
-    for tag in ("base", "head"):
+    for tag in ("base", "mid", "head"):
         path = tmp_path / f"{tag}_ash.py"
         path.write_text(f'TAG = "{tag}"\n' + FAKE_ASH_BODY, encoding="utf-8")
         exes[tag] = path
@@ -459,12 +459,13 @@ def test_a_slower_head_prints_a_warning_and_still_exits_zero(
             str(tmp_path / "work"),
             "--ash",
             _wrapper(tmp_path, exes["head"]),
-            "--base-ash",
+            "--baseline",
+            "base",
             _wrapper(tmp_path, exes["base"]),
+            "b" * 40,
+            "",
             "--commit",
             "h" * 40,
-            "--base-commit",
-            "b" * 40,
             "--repeats",
             "3",
             "--only",
@@ -498,8 +499,11 @@ def test_equal_builds_print_no_warning(script, fakes, tmp_path: Path):
             str(tmp_path / "work"),
             "--ash",
             _wrapper(tmp_path, exes["head"]),
-            "--base-ash",
+            "--baseline",
+            "base",
             _wrapper(tmp_path, exes["base"]),
+            "b" * 40,
+            "",
             "--repeats",
             "2",
             "--only",
@@ -511,6 +515,226 @@ def test_equal_builds_print_no_warning(script, fakes, tmp_path: Path):
     )
     assert code == 0
     assert "WARNING" not in summary_path.read_text(encoding="utf-8")
+
+
+@pytest.mark.skipif(os.name == "nt", reason="the stand-ins are shell wrappers")
+def test_three_builds_are_timed_and_both_deltas_reach_the_report_and_the_trend(
+    script, fakes, tmp_path: Path, monkeypatch
+):
+    """The tip against its previous commit and against the previous release."""
+    exes, _ = fakes
+    monkeypatch.setenv("FAKE_SLEEP_head", "0.6")
+    report_path = tmp_path / "report.json"
+    summary_path = tmp_path / "summary.md"
+    previous = tmp_path / "previous.jsonl"
+    previous.write_text('{"commit": "old", "scenarios": {}}\n', encoding="utf-8")
+    trend_path = tmp_path / "trend.jsonl"
+    code = script.main(
+        [
+            "bench",
+            str(tmp_path / "work"),
+            "--ash",
+            _wrapper(tmp_path, exes["head"]),
+            "--commit",
+            "h" * 40,
+            "--baseline",
+            "prev-release",
+            _wrapper(tmp_path, exes["base"]),
+            "r" * 40,
+            "v3.8.0",
+            "--baseline",
+            "prev-commit",
+            _wrapper(tmp_path, exes["mid"]),
+            "c" * 40,
+            "",
+            "--repeats",
+            "3",
+            "--only",
+            "whole-repo",
+            "--allow-busy",
+            "--json",
+            str(report_path),
+            "--summary",
+            str(summary_path),
+            "--trend-in",
+            str(previous),
+            "--trend-out",
+            str(trend_path),
+        ]
+    )
+    assert code == 0
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert {r["build"] for r in report["results"]} == {
+        "prev-release",
+        "prev-commit",
+        "head",
+    }
+    assert sorted(c["baseline"] for c in report["comparisons"]) == [
+        "prev-commit",
+        "prev-release",
+    ]
+    assert all(c["warning"] for c in report["comparisons"])
+    release = next(r for r in report["results"] if r["build"] == "prev-release")
+    assert release["ref"] == "v3.8.0"
+    assert release["commit"] == "r" * 40
+    summary = summary_path.read_text(encoding="utf-8")
+    assert "v3.8.0" in summary
+    assert "prev-commit" in summary
+    lines = trend_path.read_text(encoding="utf-8").splitlines()
+    assert json.loads(lines[0]) == {"commit": "old", "scenarios": {}}
+    newest = json.loads(lines[1])
+    assert newest["commit"] == "h" * 40
+    assert set(newest["scenarios"]) == {"whole-repo"}
+    assert set(newest["baselines"]) == {"prev-commit", "prev-release"}
+    assert newest["baselines"]["prev-release"]["ref"] == "v3.8.0"
+    delta = newest["baselines"]["prev-commit"]["scenarios"]["whole-repo"]
+    assert delta["tip_minus_median"] > 0.2
+    assert "tip_minus_min" in delta
+
+
+def test_a_baseline_that_does_not_know_the_flag_is_left_out_not_fatal(
+    script, fakes, tmp_path: Path, monkeypatch
+):
+    """An older release answers a flag added since with the usage-error code."""
+    exes, log = fakes
+    monkeypatch.setenv("FAKE_EXIT_base", "5")
+    builds = _builds(script, exes, tmp_path)
+    samples = script.collect(builds, _scenario(script, "whole-repo"), repeats=2)
+    assert samples["base"] == []
+    assert len(samples["head"]) == 2
+    # The base build was tried once (its warm-up); every later run is the tip's.
+    assert _calls(log) == ["base", "head", "head", "head"]
+
+
+def test_the_tip_answering_with_a_usage_error_still_stops_the_run(
+    script, fakes, tmp_path: Path, monkeypatch
+):
+    exes, _ = fakes
+    monkeypatch.setenv("FAKE_EXIT_head", "5")
+    builds = _builds(script, exes, tmp_path)
+    with pytest.raises(script.BadExit):
+        script.collect(builds, _scenario(script, "whole-repo"), repeats=2)
+
+
+def test_a_baseline_failing_any_other_way_still_stops_the_run(
+    script, fakes, tmp_path: Path, monkeypatch
+):
+    exes, _ = fakes
+    monkeypatch.setenv("FAKE_EXIT_base", "1")
+    builds = _builds(script, exes, tmp_path)
+    with pytest.raises(script.BadExit):
+        script.collect(builds, _scenario(script, "whole-repo"), repeats=2)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="the stand-ins are shell wrappers")
+def test_an_unsupported_scenario_is_reported_and_has_no_comparison(
+    script, fakes, tmp_path: Path, monkeypatch
+):
+    exes, _ = fakes
+    monkeypatch.setenv("FAKE_EXIT_base", "5")
+    report_path = tmp_path / "report.json"
+    summary_path = tmp_path / "summary.md"
+    trend_path = tmp_path / "trend.jsonl"
+    code = script.main(
+        [
+            "bench",
+            str(tmp_path / "work"),
+            "--ash",
+            _wrapper(tmp_path, exes["head"]),
+            "--commit",
+            "h" * 40,
+            "--baseline",
+            "prev-release",
+            _wrapper(tmp_path, exes["base"]),
+            "r" * 40,
+            "v3.8.0",
+            "--repeats",
+            "2",
+            "--only",
+            "whole-repo",
+            "--only",
+            "version",
+            "--allow-busy",
+            "--json",
+            str(report_path),
+            "--summary",
+            str(summary_path),
+            "--trend-out",
+            str(trend_path),
+        ]
+    )
+    assert code == 0
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["unsupported"] == [
+        {"build": "prev-release", "scenario": "whole-repo"}
+    ]
+    assert [c["scenario"] for c in report["comparisons"]] == ["version"]
+    assert (
+        "Not measured: whole-repo on the prev-release build"
+        in summary_path.read_text(encoding="utf-8")
+    )
+    newest = json.loads(trend_path.read_text(encoding="utf-8").splitlines()[-1])
+    assert newest["not_measured"] == {"prev-release": ["whole-repo"]}
+    assert set(newest["baselines"]["prev-release"]["scenarios"]) == {"version"}
+
+
+def test_baseline_labels_must_be_distinct_and_not_the_tip(script, tmp_path: Path):
+    for labels in (("head",), ("a", "a")):
+        argv = ["bench", str(tmp_path / "d")]
+        for label in labels:
+            argv += ["--baseline", label, "ash", "sha", ""]
+        with pytest.raises(SystemExit) as error:
+            script.main(argv)
+        assert error.value.code == 2
+
+
+def test_the_trend_line_keeps_the_old_keys_and_adds_the_baselines(script):
+    stats = {"min": 1.0, "median": 2.0, "mean": 2.0, "max": 3.0}
+    report = {
+        "results": [
+            {"build": "head", "commit": "t", "ref": "", "scenario": "s", **stats},
+            {
+                "build": "prev-commit",
+                "commit": "c",
+                "ref": "",
+                "scenario": "s",
+                "min": 0.5,
+                "median": 1.5,
+                "mean": 1.5,
+                "max": 2.5,
+            },
+        ],
+        "comparisons": [
+            {
+                "baseline": "prev-commit",
+                "scenario": "s",
+                "median_delta": 0.5,
+                "min_delta": 0.5,
+            }
+        ],
+    }
+    line = script.trend_line(report, "2026-11-26")
+    assert {"date", "commit", "scenarios"} <= set(line)
+    assert line["scenarios"] == {"s": stats}
+    entry = line["baselines"]["prev-commit"]
+    assert entry["commit"] == "c"
+    assert entry["scenarios"]["s"]["median"] == 1.5
+    assert entry["scenarios"]["s"]["tip_minus_median"] == 0.5
+    assert entry["scenarios"]["s"]["tip_minus_min"] == 0.5
+
+
+def test_three_builds_alternate_in_the_order_given(script, fakes, tmp_path: Path):
+    exes, log = fakes
+    builds = []
+    for tag in ("base", "mid", "head"):
+        root = tmp_path / f"repo_{tag}"
+        script.build_fixture(root, "bench")
+        script.init_repository(root)
+        builds.append(
+            script.Build(tag, [sys.executable, str(exes[tag])], root, f"{tag}-sha")
+        )
+    script.collect(builds, _scenario(script, "version"), repeats=2)
+    assert _calls(log) == ["base", "mid", "head"] * 3
 
 
 # --- the page that quotes the table points at the job that refreshes it -----------
