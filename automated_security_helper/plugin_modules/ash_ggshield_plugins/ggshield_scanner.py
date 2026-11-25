@@ -84,14 +84,17 @@ The SARIF holds no secret value: only the detector name, the match types and
 positions, and a hash fingerprint (``partialFingerprints["secret/v1"]``). Any
 snippet text a future release adds is overwritten with ``REDACTED``.
 
-Not measured
-------------
-The SARIF shape above was read from ggshield's source, not captured from a run:
-a scan needs a GitGuardian API key. In particular, whether ``--output`` writes a
-report when nothing is found, and whether the location URI is the path as given
-or relative to the working directory, were not observed; a missing or empty report
-fails the scan rather than reading as clean, and the URI is accepted in either
-form (``_relative_uri``).
+Measured, and what is not
+-------------------------
+The SARIF shape above was captured from ggshield 1.56.1's own CLI with only the
+GitGuardian HTTP calls stubbed (tests/test_data/scanners/ggshield/captured/README.md):
+``--output`` writes a report with an empty ``results`` list when nothing is found, the
+location URI is ``file://`` plus the absolute scan path, and exits 0, 1 and 3 are as
+described. Not measured: a scan against the live service, which needs an API key, so
+the detector names, ``extensions[0].version`` and the service-side error cases are
+unobserved. A missing report still fails the scan rather than reading as clean, and
+the URI is accepted as an absolute path, a ``file://`` URI or a ``./`` path
+(``_relative_uri``).
 """
 
 from __future__ import annotations
@@ -150,8 +153,10 @@ API_KEY_ENV = "GITGUARDIAN_API_KEY"
 GGSHIELD_DEFAULT_VERSION_CONSTRAINT = "==1.56.1"
 
 #: The upstream license of record for the register (opsf requires a source citation).
-#: Set from a read of the pinned sdist's LICENSE; see the captured README.
-LICENSE_CITATION = "not read"
+LICENSE_CITATION = (
+    "MIT (source: the ggshield 1.56.1 distribution's licenses/LICENSE, sha256 "
+    "c6e6d1dbc34c4a7908f1b40fb6b487e946d4db9a7cd9386550f8fc39f2ccbdc4)"
+)
 
 #: The text written in place of any snippet a report carries.
 REDACTED = "REDACTED"

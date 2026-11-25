@@ -1,0 +1,1 @@
+{"version": "2.1.0", "$schema": "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json", "runs": [{"tool": {"driver": {"organization": "GitGuardian", "name": "ggshield", "informationUri": "https://github.com/GitGuardian/ggshield", "version": "1.56.1"}, "extensions": [{"name": "secret", "version": null}]}, "results": []}]}
