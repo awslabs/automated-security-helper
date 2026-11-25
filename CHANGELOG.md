@@ -56,10 +56,15 @@
   `utils/ash_helpers.ps1` (`Invoke-ASH`) are unchanged.
 - The subcommand and option tables that `./ash` and `utils/ash_helpers.ps1` carry
   (subcommand names, the root options that take a value, which subcommands take the
-  options a wrapper adds, the OCI runner order) are now generated from the `ash` CLI by
+  options a wrapper adds, the OCI runner order, the CI runner variables passed into the
+  container, the exit codes, and in `Invoke-ASH` the image build targets and the
+  image-name pattern) are now generated from the `ash` CLI by
   `scripts/generate_wrapper_tables.py` into marked blocks, and the lint job and a unit
-  test fail when a block is stale. The generated text is the text the wrappers already
-  held, so no option, exit code or message changes.
+  test fail when a block is stale. `./ash` reads the runner order and the CI variable
+  list from its generated blocks rather than from a second written-out copy. The
+  generated text is the text the wrappers already held, so no option, exit code or
+  message changes. The generator now writes each wrapper back with the line endings it
+  was read with.
 - Module-level string constants that spelled a wire vocabulary are replaced by enum
   members, so a caller that imported one of them by name must import the member
   instead. The `error_type` spellings of the MCP tools (`CONFIG_INPUT_NOT_PERMITTED`,
