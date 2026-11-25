@@ -50,6 +50,7 @@ from automated_security_helper.core.exceptions import (
     WorkspacePathNotUtf8Error,
 )
 from automated_security_helper.cli.params import from_environment as _from_environment
+from automated_security_helper.cli.scan_deprecation import warn_if_legacy_scan_form
 
 # This module is imported on EVERY `ash` invocation (`ash --version` included):
 # cli/main.py registers run_ash_scan_cli_command as the root callback, so nothing
@@ -1030,7 +1031,7 @@ def run_ash_scan_cli_command(
         str | None,
         typer.Option(
             rich_help_panel="Scan",
-            help="The source directory to scan",
+            help="The source directory to scan. Deprecated as an option, removed in ASH v4.0: give it as the PATH argument of `ash scan fs`.",
             envvar="ASH_SOURCE_DIR",
             writable=False,
         ),
@@ -1672,11 +1673,11 @@ def run_ash_scan_cli_command(
 ):
     """Scan code, infrastructure, secrets, and dependencies.
 
-    Start with: ash --mode container --source-dir .
+    Start with: ash scan fs . --mode container
 
     Review the result with: ash inspect findings
 
-    Options are grouped by workflow below. Running ash without a subcommand starts a scan.
+    Options are grouped by workflow below. Running ash without a subcommand starts a scan, but that form is deprecated.
     """
     # Skip if this is tab completion or if a subcommand was invoked
     # When invoked_subcommand is not None, it means we're in the callback and a subcommand
@@ -1687,6 +1688,12 @@ def run_ash_scan_cli_command(
     if version:
         echo(f"awslabs/automated-security-helper v{get_ash_version()}")
         raise typer.Exit
+
+    # Bare `ash [options]` and `ash scan [options]` reach here without a subject;
+    # `ash scan fs` sets the subject in ctx.meta first and prints nothing. A
+    # workspace scan has no subject to move to yet, so it is not told to use one.
+    if workspace is None:
+        warn_if_legacy_scan_form(ctx)
 
     # envvar= above documents ASH_VERBOSE/ASH_DEBUG in --help, but click would
     # also let the variable set the flag outright, so ASH_DEBUG=true would beat

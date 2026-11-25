@@ -1,0 +1,283 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""`./ash scan <subject> [PATH]`: the directory after the subject is the mount.
+
+``ash scan fs <path>`` takes the directory as an argument. The entrypoint reads the word
+after the subject as its own source directory, mounts it, and does not forward it: a
+host path means nothing inside the container, where the scan is given
+ASH_SOURCE_DIR=/src. ``--source-dir`` still names the directory, with one deprecation
+line on stderr.
+
+A fake OCI runner stands in for docker, as in test_ash_bash_entrypoint_subcommand_args.py,
+and prints the argv it was given. The completion rows run the function the entrypoint
+prints, in bash, with no CLI and no Python.
+"""
+
+import os
+import shutil
+import stat
+import subprocess
+from pathlib import Path
+
+import pytest
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+ASH_SCRIPT = REPO_ROOT / "ash"
+IMAGE = "automated-security-helper:non-root"
+
+pytestmark = [
+    pytest.mark.skipif(
+        os.name == "nt",
+        reason="bash on Windows runners is the WSL stub; ./ash is the POSIX entrypoint",
+    ),
+    pytest.mark.skipif(
+        shutil.which("bash") is None, reason="the entrypoint under test is bash"
+    ),
+    pytest.mark.skipif(
+        not ASH_SCRIPT.is_file(),
+        reason="repository ash entrypoint not present (installed-package layout)",
+    ),
+]
+
+RECORDING_RUNNER = """#!/bin/bash
+echo "FAKE-RUNNER-INVOKED-WITH: $*"
+exit 0
+"""
+
+
+@pytest.fixture
+def runner(tmp_path):
+    path = tmp_path / "fake-oci-runner"
+    path.write_text(RECORDING_RUNNER)
+    path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP)
+    return path
+
+
+def _ash(runner, tmp_path, *args):
+    return subprocess.run(  # nosec B603 B607 - fixed script path, list args, no shell
+        [
+            "bash",
+            str(ASH_SCRIPT),
+            "--no-build",
+            "--output-dir",
+            str(tmp_path / "out"),
+            *args,
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(REPO_ROOT),
+        env={**os.environ, "OCI_RUNNER": str(runner)},
+        timeout=180,
+        check=False,
+    )
+
+
+def _run_argv(result):
+    lines = [
+        line
+        for line in result.stdout.splitlines()
+        if line.startswith("FAKE-RUNNER-INVOKED-WITH: run ")
+    ]
+    assert len(lines) == 1, result.stdout + result.stderr
+    return lines[0].split()
+
+
+def _inner_argv(run_argv):
+    return run_argv[run_argv.index(IMAGE) + 1 :]
+
+
+def _mounted_source(run_argv):
+    mounts = [
+        word
+        for word in run_argv
+        if word.startswith("source=") and word.endswith("destination=/src,readonly")
+    ]
+    assert len(mounts) == 1, run_argv
+    return mounts[0].split(",")[0][len("source=") :]
+
+
+@pytest.mark.integration
+def test_the_path_after_the_subject_is_the_mount_and_is_not_forwarded(runner, tmp_path):
+    source = tmp_path / "project"
+    source.mkdir()
+
+    result = _ash(runner, tmp_path, "scan", "fs", str(source))
+    run_argv = _run_argv(result)
+
+    assert os.path.realpath(_mounted_source(run_argv)) == os.path.realpath(source)
+    assert "ASH_SOURCE_DIR=/src" in run_argv
+    assert _inner_argv(run_argv) == ["ash", "scan", "fs", "--sandbox", "off"], (
+        "the host path stays out of the container's command line, and --sandbox off "
+        "follows the subject"
+    )
+    assert "Deprecated" not in result.stderr
+
+
+@pytest.mark.integration
+def test_options_may_stand_between_scan_and_the_subject(runner, tmp_path):
+    source = tmp_path / "project"
+    source.mkdir()
+
+    run_argv = _run_argv(
+        _ash(runner, tmp_path, "scan", "--scanners", "bandit", "fs", str(source))
+    )
+
+    assert os.path.realpath(_mounted_source(run_argv)) == os.path.realpath(source)
+    assert _inner_argv(run_argv) == [
+        "ash",
+        "scan",
+        "--sandbox",
+        "off",
+        "--scanners",
+        "bandit",
+        "fs",
+    ]
+
+
+@pytest.mark.integration
+def test_a_directory_named_like_a_subcommand_is_still_the_directory(runner, tmp_path):
+    source = tmp_path / "report"
+    source.mkdir()
+
+    run_argv = _run_argv(_ash(runner, tmp_path, "scan", "fs", str(source)))
+
+    assert os.path.realpath(_mounted_source(run_argv)) == os.path.realpath(source)
+    assert _inner_argv(run_argv) == ["ash", "scan", "fs", "--sandbox", "off"]
+
+
+@pytest.mark.integration
+def test_options_after_the_path_are_forwarded(runner, tmp_path):
+    source = tmp_path / "project"
+    source.mkdir()
+
+    run_argv = _run_argv(
+        _ash(runner, tmp_path, "scan", "fs", str(source), "--scanners", "bandit")
+    )
+
+    assert _inner_argv(run_argv) == [
+        "ash",
+        "scan",
+        "fs",
+        "--sandbox",
+        "off",
+        "--scanners",
+        "bandit",
+    ]
+
+
+@pytest.mark.integration
+def test_source_dir_still_names_the_directory_and_warns_once(runner, tmp_path):
+    source = tmp_path / "project"
+    source.mkdir()
+
+    result = _ash(runner, tmp_path, "scan", "fs", "--source-dir", str(source))
+    run_argv = _run_argv(result)
+
+    assert os.path.realpath(_mounted_source(run_argv)) == os.path.realpath(source)
+    assert _inner_argv(run_argv) == ["ash", "scan", "fs", "--sandbox", "off"]
+    deprecated = [
+        line for line in result.stderr.splitlines() if line.startswith("Deprecated:")
+    ]
+    assert len(deprecated) == 1, result.stderr
+    assert "--source-dir is deprecated" in deprecated[0]
+    assert "removed in ASH v4.0" in deprecated[0]
+    assert "./ash scan fs <path>" in deprecated[0]
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("path_first", [True, False])
+def test_naming_the_directory_twice_is_refused_with_the_usage_exit_code(
+    runner, tmp_path, path_first
+):
+    source = tmp_path / "project"
+    source.mkdir()
+    words = (
+        ["scan", "fs", str(source), "--source-dir", str(source)]
+        if path_first
+        else ["scan", "fs", "--source-dir", str(source), str(source)]
+    )
+
+    result = _ash(runner, tmp_path, *words)
+
+    assert result.returncode == 5, result.stdout + result.stderr
+    assert "Name the directory once" in result.stderr
+    assert "FAKE-RUNNER-INVOKED-WITH" not in result.stdout
+
+
+@pytest.mark.integration
+def test_the_subject_less_form_still_forwards_its_words(runner, tmp_path):
+    source = tmp_path / "project"
+    source.mkdir()
+
+    result = _ash(runner, tmp_path, "--source-dir", str(source), "scan")
+    run_argv = _run_argv(result)
+
+    assert _inner_argv(run_argv) == ["ash", "scan", "--sandbox", "off"]
+
+
+def _completions(tmp_path, words, cword):
+    """What the printed function offers for COMP_WORDS=words at index cword."""
+    script = tmp_path / "complete.bash"
+    script.write_text(
+        "set -u\n"
+        f'source <(bash "{ASH_SCRIPT}" --show-completion)\n'
+        "COMP_WORDS=(" + " ".join(f"'{word}'" for word in words) + ")\n"
+        f"COMP_CWORD={cword}\n"
+        "COMPREPLY=()\n"
+        "_ash_completion\n"
+        'printf "%s\\n" "${COMPREPLY[@]-}"\n'
+    )
+    result = subprocess.run(  # nosec B603 B607 - fixed argv, no shell
+        ["bash", str(script)],
+        capture_output=True,
+        text=True,
+        cwd=str(tmp_path),
+        timeout=60,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    return [line for line in result.stdout.splitlines() if line]
+
+
+def test_show_completion_prints_a_function_and_exits_without_a_runner(tmp_path):
+    result = subprocess.run(  # nosec B603 B607 - fixed script path, list args
+        ["bash", str(ASH_SCRIPT), "--show-completion"],
+        capture_output=True,
+        text=True,
+        cwd=str(tmp_path),
+        env={k: v for k, v in os.environ.items() if k != "OCI_RUNNER"},
+        timeout=60,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "_ash_completion()" in result.stdout
+    assert "complete -o default -F _ash_completion ash ./ash" in result.stdout
+
+
+def test_completion_offers_the_subjects_after_scan(tmp_path):
+    assert _completions(tmp_path, ["ash", "scan", ""], 2) == ["fs"]
+
+
+def test_completion_offers_the_subcommands_with_none_named(tmp_path):
+    offered = _completions(tmp_path, ["ash", "sc"], 1)
+
+    assert offered == ["scan"]
+
+
+def test_completion_offers_the_options_after_a_dash(tmp_path):
+    offered = _completions(tmp_path, ["ash", "scan", "fs", "--shard-"], 3)
+
+    assert offered == ["--shard-count", "--shard-index"]
+
+
+def test_completion_leaves_a_value_alone(tmp_path):
+    assert _completions(tmp_path, ["ash", "scan", "fs", "--mode", ""], 4) == []
+
+
+def test_completion_skips_an_option_value_when_finding_the_subject(tmp_path):
+    # `--mode scan` names no subject: scan is the value, and fs is still offered.
+    offered = _completions(tmp_path, ["ash", "scan", "--mode", "local", ""], 4)
+
+    assert offered == ["fs"]

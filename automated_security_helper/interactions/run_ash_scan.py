@@ -4788,7 +4788,13 @@ def _nix_inner_argv(opts: ScanOptions) -> List[str]:
         if opts.allow_missing_projects:
             argv.append("--allow-missing-projects")
     else:
-        argv.extend(["--source-dir", str(opts.source_dir)])
+        # The directory is the argument of the `fs` subject, `scan fs <path>`; a
+        # relative name that starts with a dash is given as ./name so it is read
+        # as a path, not an option.
+        source_dir = str(opts.source_dir)
+        argv.extend(
+            ["fs", f"./{source_dir}" if source_dir.startswith("-") else source_dir]
+        )
     argv.extend(["--output-dir", str(opts.output_dir)])
     # The scan CLI fills --config from ASH_CONFIG when none is typed (the
     # option's envvar), and run_ash_nix keeps that variable for the shell, so

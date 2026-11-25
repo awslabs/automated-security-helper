@@ -56,7 +56,9 @@ from automated_security_helper.utils.process_env import (
 from automated_security_helper.utils.terminal_text import shown_not_obeyed
 
 #: The root CLI's subcommand names that are not a scan (cli/main.py registers
-#: them). ``scan`` is deliberately absent. A new subcommand added without
+#: them). ``scan`` is deliberately absent, and so are its subjects (``scan fs``):
+#: a subject is a scan, and the first token ``scan`` already classifies it as one.
+#: A new subcommand added without
 #: updating this list classifies as a scan and reaches the daemon, whose child
 #: parses the real command line with the real CLI -- so the command still runs
 #: correctly, merely through the daemon; tests pin the list against the app.
@@ -65,6 +67,7 @@ NON_SCAN_SUBCOMMANDS = frozenset(
         "build-image",
         "report",
         "diff",
+        "trend",
         "merge",
         "mcp",
         "get-genai-guide",

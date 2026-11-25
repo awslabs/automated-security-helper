@@ -855,11 +855,18 @@ function Invoke-ASH {
         $ashSubcommands = @('scan', 'build-image', 'report', 'diff', 'trend', 'merge', 'mcp', 'get-genai-guide', 'config', 'dependencies', 'inspect', 'plugin', 'express')
         $ashTakesSandbox = @('scan')
         # END generated: ps1-subcommands
+        # The subjects `scan` takes. Invoke-ASH names the directory to scan with
+        # -SourceDir, mounted for the scan inside, so a directory written after the
+        # subject (`scan fs ./src`) would be read inside the container, where the host
+        # path means nothing: it is refused below.
+        # BEGIN generated: ps1-scan-subjects (scripts/generate_wrapper_tables.py)
+        $ashScanSubjects = @('fs')
+        # END generated: ps1-scan-subjects
         # The root ash options that take a value, ASH_ROOT_VALUE_OPTIONS in ./ash. A value
         # can be a subcommand's name (`--phases report`, `--source-dir report`), so the
         # word after one of these is the option's value, not the subcommand.
         # BEGIN generated: ps1-root-value-options (scripts/generate_wrapper_tables.py)
-        $ashRootValueOptions = @('--add-scanners', '--ash-config-from-host', '--ash-plugin-modules', '--ash-revision-to-install', '--base-ref', '--baseline', '--build-target', '--config', '--config-file-from-another-checkout', '--config-file-from-scanned-repository', '--config-overrides', '--container-gid', '--container-uid', '--custom-build-arg', '--custom-containerfile', '--exclude-scanners', '--format', '--formats', '--log-level', '--min-severity', '--mode', '--oci', '--oci-runner', '--offline-semgrep-rulesets', '--only-scanners', '--output-dir', '--output-format', '--output-formats', '--phases', '--require-scanner-selection', '--runner', '--sandbox', '--scanners', '--shard-count', '--shard-index', '--source-dir', '--strategy', '--workspace', '--workspace-config', '-c', '-f', '-g', '-o', '-u')
+        $ashRootValueOptions = @('--add-scanners', '--ash-config-from-host', '--ash-plugin-modules', '--ash-revision-to-install', '--base-ref', '--baseline', '--build-target', '--cli-json-input', '--config', '--config-file-from-another-checkout', '--config-file-from-scanned-repository', '--config-overrides', '--container-gid', '--container-uid', '--custom-build-arg', '--custom-containerfile', '--exclude-scanners', '--format', '--formats', '--log-level', '--min-severity', '--mode', '--oci', '--oci-runner', '--offline-semgrep-rulesets', '--only-scanners', '--output-dir', '--output-format', '--output-formats', '--phases', '--require-scanner-selection', '--runner', '--sandbox', '--scanners', '--shard-count', '--shard-index', '--source-dir', '--strategy', '--workspace', '--workspace-config', '-c', '-f', '-g', '-o', '-u')
         # END generated: ps1-root-value-options
         # BEGIN generated: ps1-option-subcommands (scripts/generate_wrapper_tables.py)
         $ashOptionSubcommands = @{
@@ -909,6 +916,37 @@ function Invoke-ASH {
                         break
                     }
                 }
+            }
+        }
+        # `scan <subject> <path>`: the directory is -SourceDir here, which is mounted for
+        # the scan inside (given as ASH_SOURCE_DIR=/src). A path written after the
+        # subject would reach the container as a host path it cannot read, so it is
+        # refused, with the refusal code, before anything is built or mounted.
+        if ($subcommand -ceq 'scan') {
+            $scanSubject = ''
+            $skipValue = $false
+            for ($i = $subcommandAt + 1; $i -lt $forwardedAshArgs.Count; $i++) {
+                $word = $forwardedAshArgs[$i]
+                if ($skipValue) {
+                    $skipValue = $false
+                    continue
+                }
+                if ($word -cin $ashRootValueOptions) {
+                    $skipValue = $true
+                    continue
+                }
+                if ($word -clike '-*') {
+                    continue
+                }
+                if ($scanSubject -eq '') {
+                    if ($word -cin $ashScanSubjects) {
+                        $scanSubject = $word
+                        continue
+                    }
+                    break
+                }
+                $global:LASTEXITCODE = $refusalExitCode
+                throw "Invoke-ASH mounts the directory it scans from -SourceDir, so 'scan $scanSubject $(Format-AshShownValue $word)' would hand the scan inside the container a host path it cannot read. Give the directory as -SourceDir: Invoke-ASH -SourceDir $(Format-AshShownValue $word) -AshArgs 'scan $scanSubject'."
             }
         }
         # Helpers for the ASH_CONFIG carry below, ports of ./ash's resolve_file and
@@ -2222,6 +2260,10 @@ function Invoke-ASH {
                     $callerWords = @($ashArguments)
                     if ($subcommand -eq '' -or $subcommand -cin $ashTakesSandbox) {
                         $sandboxOffAt = $subcommandAt + 1
+                        # After the subject when scan is followed by one (`scan fs`).
+                        if ($subcommand -ceq 'scan' -and $sandboxOffAt -lt @($ashArguments).Count -and @($ashArguments)[$sandboxOffAt] -cin $ashScanSubjects) {
+                            $sandboxOffAt++
+                        }
                         $callerWords = @($ashArguments | Select-Object -First $sandboxOffAt) + @('--sandbox', 'off') + @($ashArguments | Select-Object -Skip $sandboxOffAt)
                     }
                     $runCmd += $callerWords
@@ -2412,3 +2454,73 @@ Register-ArgumentCompleter -CommandName Invoke-ASH -ParameterName 'BuildTarget' 
             $_, $_, 'ParameterValue', $_)
     }
 }
+
+# Completes the words Invoke-ASH forwards to ash (-AshArgs and the remaining
+# arguments): the subcommands, the subjects of scan, the options. Generated from the
+# tables the wrapper's parser reads, as the bash completion ./ash prints is.
+# BEGIN generated: ps1-completion (scripts/generate_wrapper_tables.py)
+$ashArgumentCompleter = {
+    param($commandName, $parameterName, $wordToComplete, $commandAst, $fakeBoundParameter)
+    $subcommands = @('scan', 'build-image', 'report', 'diff', 'trend', 'merge', 'mcp', 'get-genai-guide', 'config', 'dependencies', 'inspect', 'plugin', 'express')
+    $subjects = @('fs')
+    $options = @('--add-scanners', '--all-enabled-plugins', '--all-enabled-scanners', '--allow-in-tree-tools', '--allow-missing-projects', '--allow-stale-content-db', '--annotate-duplicates', '--ash-config-from-host', '--ash-plugin-modules', '--ash-revision-to-install', '--base-ref', '--baseline', '--build', '--build-target', '--changed-files-only', '--cleanup', '--cli-json-input', '--color', '--compact-report', '--config', '--config-file-from-another-checkout', '--config-file-from-scanned-repository', '--config-from-scanned-repository', '--config-overrides', '--container-gid', '--container-uid', '--custom-build-arg', '--custom-containerfile', '--debug', '--dry-run', '--exclude-scanners', '--express', '--fail-on-findings', '--fail-on-incomplete-scanners', '--fold-duplicates', '--force', '--format', '--formats', '--full', '--generate-cli-skeleton', '--honor-ignore-files', '--ignore-suppressions', '--inspect', '--install-completion', '--log-level', '--min-severity', '--mode', '--no-allow-stale-content-db', '--no-build', '--no-cleanup', '--no-color', '--no-express', '--no-fail-on-findings', '--no-fail-on-incomplete-scanners', '--no-honor-ignore-files', '--no-ignore-suppressions', '--no-inspect', '--no-offline', '--no-progress', '--no-quiet', '--no-run', '--no-show-summary', '--no-simple', '--no-use-existing', '--oci', '--oci-runner', '--offline', '--offline-semgrep-rulesets', '--only-scanners', '--output-dir', '--output-format', '--output-formats', '--phases', '--progress', '--python-based-plugins-only', '--python-based-scanners-only', '--python-only', '--quiet', '--require-scanner-selection', '--run', '--runner', '--sandbox', '--scanners', '--shard-count', '--shard-index', '--show-completion', '--show-summary', '--simple', '--source-dir', '--staged', '--strategy', '--use-existing', '--verbose', '--version', '--workspace', '--workspace-config')
+    $valueOptions = @('--add-scanners', '--ash-config-from-host', '--ash-plugin-modules', '--ash-revision-to-install', '--base-ref', '--baseline', '--build-target', '--cli-json-input', '--config', '--config-file-from-another-checkout', '--config-file-from-scanned-repository', '--config-overrides', '--container-gid', '--container-uid', '--custom-build-arg', '--custom-containerfile', '--exclude-scanners', '--format', '--formats', '--log-level', '--min-severity', '--mode', '--oci', '--oci-runner', '--offline-semgrep-rulesets', '--only-scanners', '--output-dir', '--output-format', '--output-formats', '--phases', '--require-scanner-selection', '--runner', '--sandbox', '--scanners', '--shard-count', '--shard-index', '--source-dir', '--strategy', '--workspace', '--workspace-config', '-c', '-f', '-g', '-o', '-u')
+    if ($parameterName -eq 'AshArgs') {
+        # -AshArgs is one string: complete its last word and keep the rest.
+        $line = "$wordToComplete".Trim([char]39, [char]34)
+        $words = @($line -split '\s+' | Where-Object { $_ -ne '' })
+        if ($line -match '\s$' -or $words.Count -eq 0) {
+            $typed = ''
+            $before = $words
+        }
+        else {
+            $typed = $words[$words.Count - 1]
+            $before = @($words | Select-Object -First ($words.Count - 1))
+        }
+        $lead = if ($before.Count -gt 0) { ($before -join ' ') + ' ' } else { '' }
+    }
+    else {
+        $typed = "$wordToComplete"
+        $all = @($commandAst.CommandElements | Select-Object -Skip 1 | ForEach-Object { "$_" })
+        if ($all.Count -gt 0 -and $all[$all.Count - 1] -eq $typed) {
+            $before = @($all | Select-Object -First ($all.Count - 1))
+        }
+        else {
+            $before = $all
+        }
+        $lead = ''
+    }
+    if ($before.Count -gt 0 -and $before[$before.Count - 1] -cin $valueOptions) {
+        return
+    }
+    $subcommand = ''
+    $subject = ''
+    $skip = $false
+    foreach ($word in $before) {
+        if ($skip) {
+            $skip = $false
+            continue
+        }
+        if ($word -cin $valueOptions) {
+            $skip = $true
+            continue
+        }
+        if ($subcommand -eq '' -and $word -cin $subcommands) {
+            $subcommand = $word
+            continue
+        }
+        if ($subcommand -eq 'scan' -and $subject -eq '' -and $word -cin $subjects) {
+            $subject = $word
+        }
+    }
+    $candidates = if ($typed -like '-*') { $options }
+    elseif ($subcommand -eq '') { $subcommands }
+    elseif ($subcommand -eq 'scan' -and $subject -eq '') { $subjects }
+    else { @() }
+    $candidates | Where-Object { $_ -like "$typed*" } | ForEach-Object {
+        [System.Management.Automation.CompletionResult]::new($lead + $_, $_, 'ParameterValue', $_)
+    }
+}
+Register-ArgumentCompleter -CommandName Invoke-ASH -ParameterName 'AshArgs' -ScriptBlock $ashArgumentCompleter
+Register-ArgumentCompleter -CommandName Invoke-ASH -ParameterName 'RemainingAshArgs' -ScriptBlock $ashArgumentCompleter
+# END generated: ps1-completion

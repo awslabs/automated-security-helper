@@ -90,6 +90,7 @@ CI_CATCH_FALLBACK_EXIT = 1
 
 
 def _options(command: Any) -> set[str]:
+    """The options a command declares itself, not those of commands nested under it."""
     found: set[str] = set()
     for param in command.params:
         found.update(getattr(param, "opts", None) or [])
@@ -113,6 +114,11 @@ class WrapperContract:
     subcommands: tuple[str, ...]
     #: The subcommands that take ``--sandbox``.
     sandbox_subcommands: tuple[str, ...]
+    #: The subjects of ``scan`` (``ash scan <subject>``), in the CLI's own order.
+    scan_subjects: tuple[str, ...]
+    #: Every long option of the root and of the scan's subjects, sorted: what a
+    #: shell completion offers after a dash.
+    root_options: tuple[str, ...]
     #: The root options that take a value, long spellings then short, sorted.
     root_value_options: tuple[str, ...]
     #: For each wrapper-forwarded option, the subcommands that declare it, in order.
@@ -156,26 +162,55 @@ def contract() -> WrapperContract:
     commands = dict(root.commands)
     subcommands = tuple(commands)
 
+    # `scan` is a group of subjects, and the scan's options are declared on each
+    # subject; every other command's own options are the ones read, as before.
+    def options_of(name: str, command: Any) -> set[str]:
+        return _tree_options(command) if name == "scan" else _options(command)
+
+    scan_subjects = tuple(getattr(commands["scan"], "commands", {}))
+    subject_params = [
+        param
+        for subject in getattr(commands["scan"], "commands", {}).values()
+        for param in subject.params
+    ]
+
     forwarded = []
     for option in WRAPPER_FORWARDED_OPTIONS:
         takers = tuple(
-            name for name, command in commands.items() if option in _options(command)
+            name
+            for name, command in commands.items()
+            if option in options_of(name, command)
         )
         forwarded.append((option, takers))
 
     value_options = sorted(
-        spelling
-        for param in root.params
-        if param.param_type_name == "option" and not param.is_flag and not param.count
-        for spelling in param.opts
+        {
+            spelling
+            for param in [*root.params, *subject_params]
+            if param.param_type_name == "option"
+            and not param.is_flag
+            and not param.count
+            for spelling in param.opts
+        }
+    )
+    all_options = sorted(
+        {
+            spelling
+            for param in [*root.params, *subject_params]
+            if param.param_type_name == "option"
+            for spelling in (*param.opts, *param.secondary_opts)
+            if spelling.startswith("--")
+        }
     )
 
     return WrapperContract(
         subcommands=subcommands,
+        scan_subjects=scan_subjects,
+        root_options=tuple(all_options),
         sandbox_subcommands=tuple(
             name
             for name, command in commands.items()
-            if "--sandbox" in _options(command)
+            if "--sandbox" in options_of(name, command)
         ),
         root_value_options=tuple(value_options),
         option_subcommands=tuple(forwarded),

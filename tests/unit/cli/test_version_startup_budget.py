@@ -76,7 +76,7 @@ from typer.testing import CliRunner
 from automated_security_helper.cli.main import app
 
 forbidden = {forbidden!r}
-result = CliRunner().invoke(app, ["--version"])
+result = CliRunner().invoke(app, {args!r})
 present = sorted(
     name
     for name in sys.modules
@@ -95,7 +95,7 @@ print(
 """
 
 
-def _version_run_report() -> dict:
+def _version_run_report(args: tuple[str, ...] = ("--version",)) -> dict:
     # importing_this_checkout routes the child at this checkout (and exits 86 if
     # ASH still resolves from elsewhere), so the budget measured is this tree's,
     # not an installed copy's — and the child-launch scan in
@@ -106,7 +106,7 @@ def _version_run_report() -> dict:
             sys.executable,
             "-c",
             importing_this_checkout(
-                _HARNESS.format(forbidden=FORBIDDEN_AT_VERSION_TIME)
+                _HARNESS.format(forbidden=FORBIDDEN_AT_VERSION_TIME, args=list(args))
             ),
         ],
         capture_output=True,
@@ -138,4 +138,29 @@ def test_version_module_count_stays_bounded():
         f"(ceiling {MODULE_COUNT_CEILING}). Something new is imported at module "
         "scope on the startup path; find it with python -X importtime and defer "
         "it. Raise the ceiling only for a measured, wanted dependency."
+    )
+
+
+def test_scan_help_imports_no_forbidden_module():
+    """`ash scan --help` lists the scan's subjects from the group's own help.
+
+    ``scan`` is a group, and its subject ``fs`` is built from the scan engine's
+    signature; none of that may pull the engine, the config model or the plugins
+    in to print the list.
+    """
+    report = _version_run_report(("scan", "--help"))
+    assert report["exit_code"] == 0, report["output"]
+    assert "fs" in report["output"]
+    assert report["present"] == [], (
+        "`ash scan --help` imported modules that must stay lazy: "
+        f"{report['present']}. Defer the import that pulled them (cli/scan_group.py "
+        "builds `fs` from cli/scan.py's signature and must import nothing heavy)."
+    )
+
+
+def test_scan_help_module_count_stays_bounded():
+    report = _version_run_report(("scan", "--help"))
+    assert report["module_count"] <= MODULE_COUNT_CEILING, (
+        f"`ash scan --help` now loads {report['module_count']} modules "
+        f"(ceiling {MODULE_COUNT_CEILING})."
     )

@@ -31,6 +31,13 @@ class TestClassification:
         [
             ["scan"],
             ["scan", "--source-dir", "x"],
+            # A subject is a scan: `scan` leads, and `fs` (like any subject) is
+            # never one of NON_SCAN_SUBCOMMANDS.
+            ["scan", "fs"],
+            ["scan", "fs", "."],
+            ["scan", "fs", "report"],
+            ["scan", "fs", ".", "--express"],
+            ["scan", "--mode", "local", "fs", "."],
             [],
             ["--source-dir", "x", "--mode", "precommit"],
             ["--express"],
@@ -48,8 +55,11 @@ class TestClassification:
             ["mcp"],
             ["--help"],
             ["scan", "--help"],
+            ["scan", "fs", "--help"],
+            ["trend", "a.json", "b.json"],
             ["--version"],
             ["scan", "--no-express"],
+            ["scan", "fs", "--no-express"],
             # A token that merely looks like a subcommand classifies the whole
             # invocation as not-a-scan: the cold run parses the truth, so the
             # mistake costs warmth, never correctness.

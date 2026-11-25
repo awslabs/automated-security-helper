@@ -19,6 +19,7 @@ from automated_security_helper.cli.json_input import (
     usage_error_text,
 )
 from automated_security_helper.cli.scan import run_ash_scan_cli_command
+from automated_security_helper.cli.scan_group import ScanTyperGroup, build_scan_app
 from automated_security_helper.core.enums import AshLogLevel
 from automated_security_helper.utils.console import echo, typer_console
 from automated_security_helper.utils.log import show_debug_locals
@@ -494,6 +495,10 @@ class AshTyperGroup(TyperGroup):
         if _asks_for_help(command, ctx, ctx.args):
             # The subcommand prints its help and exits; nothing given here is used.
             return []
+        if isinstance(command, ScanTyperGroup):
+            # `scan` takes the scan's options on its subject (`fs`), or on the
+            # subject-less form, which runs as `fs`; the group parses them again.
+            command = command.forwarding_target(ctx, ctx.args)
         subcommand_params = [
             param for param in command.get_params(ctx) if param.name is not None
         ]
@@ -611,11 +616,9 @@ app = typer.Typer(
 # misspelled option or a stray argument would be collected into ctx.args and
 # dropped, and the command would run as though it had not been given.
 app.callback(invoke_without_command=True)(run_ash_scan_cli_command)
-app.command(
-    name="scan",
-    cls=CliJsonInputCommand,
-    no_args_is_help=False,
-)(run_ash_scan_cli_command)
+# `scan` is a group of subjects (`ash scan fs <path>`); with no subject it still
+# runs the scan, as `fs`, and prints a deprecation line (cli/scan_group.py).
+app.add_typer(build_scan_app(), name="scan")
 
 # build-image, report, merge, config, dependencies, inspect and plugin are
 # registered lazily: see _LAZY_SUBCOMMANDS above. Their registration kwargs

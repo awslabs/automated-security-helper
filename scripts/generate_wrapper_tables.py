@@ -10,7 +10,9 @@ Usage:
 
 The two host wrappers exist for hosts with no Python, so they carry written-out copies of
 the ``ash`` CLI's own surface: the subcommand names, the root options that take a value,
-which subcommands take the options a wrapper adds, the runner discovery order. This
+which subcommands take the options a wrapper adds, the subjects of ``scan``, the runner
+discovery order, and the shell completion each wrapper offers (``./ash --show-completion``
+for bash, an argument completer for ``Invoke-ASH`` in PowerShell). This
 script computes those from the real typer app and container mode's constants
 (``automated_security_helper/interactions/wrapper_contract.py``) and writes them between
 marker comments inside each wrapper, in that wrapper's own syntax::
@@ -104,6 +106,85 @@ def ps_runner_discovery(contract) -> list[str]:
     ]
 
 
+def ps_scan_subjects(contract) -> list[str]:
+    return [f"$ashScanSubjects = {_ps_list(contract.scan_subjects)}"]
+
+
+def ps_completion(contract) -> list[str]:
+    """The argument completer for Invoke-ASH's -AshArgs and its remaining arguments.
+
+    Built from the same tables as the wrapper's parser: the subcommands, the subjects
+    of ``scan``, the options and the options that take a value. Written for the
+    PowerShell 5.1 the wrapper supports.
+    """
+    return [
+        "$ashArgumentCompleter = {",
+        "    param($commandName, $parameterName, $wordToComplete, $commandAst, $fakeBoundParameter)",
+        f"    $subcommands = {_ps_list(contract.subcommands)}",
+        f"    $subjects = {_ps_list(contract.scan_subjects)}",
+        f"    $options = {_ps_list(contract.root_options)}",
+        f"    $valueOptions = {_ps_list(contract.root_value_options)}",
+        "    if ($parameterName -eq 'AshArgs') {",
+        "        # -AshArgs is one string: complete its last word and keep the rest.",
+        '        $line = "$wordToComplete".Trim([char]39, [char]34)',
+        "        $words = @($line -split '\\s+' | Where-Object { $_ -ne '' })",
+        "        if ($line -match '\\s$' -or $words.Count -eq 0) {",
+        "            $typed = ''",
+        "            $before = $words",
+        "        }",
+        "        else {",
+        "            $typed = $words[$words.Count - 1]",
+        "            $before = @($words | Select-Object -First ($words.Count - 1))",
+        "        }",
+        "        $lead = if ($before.Count -gt 0) { ($before -join ' ') + ' ' } else { '' }",
+        "    }",
+        "    else {",
+        '        $typed = "$wordToComplete"',
+        '        $all = @($commandAst.CommandElements | Select-Object -Skip 1 | ForEach-Object { "$_" })',
+        "        if ($all.Count -gt 0 -and $all[$all.Count - 1] -eq $typed) {",
+        "            $before = @($all | Select-Object -First ($all.Count - 1))",
+        "        }",
+        "        else {",
+        "            $before = $all",
+        "        }",
+        "        $lead = ''",
+        "    }",
+        "    if ($before.Count -gt 0 -and $before[$before.Count - 1] -cin $valueOptions) {",
+        "        return",
+        "    }",
+        "    $subcommand = ''",
+        "    $subject = ''",
+        "    $skip = $false",
+        "    foreach ($word in $before) {",
+        "        if ($skip) {",
+        "            $skip = $false",
+        "            continue",
+        "        }",
+        "        if ($word -cin $valueOptions) {",
+        "            $skip = $true",
+        "            continue",
+        "        }",
+        "        if ($subcommand -eq '' -and $word -cin $subcommands) {",
+        "            $subcommand = $word",
+        "            continue",
+        "        }",
+        "        if ($subcommand -eq 'scan' -and $subject -eq '' -and $word -cin $subjects) {",
+        "            $subject = $word",
+        "        }",
+        "    }",
+        "    $candidates = if ($typed -like '-*') { $options }",
+        "    elseif ($subcommand -eq '') { $subcommands }",
+        "    elseif ($subcommand -eq 'scan' -and $subject -eq '') { $subjects }",
+        "    else { @() }",
+        '    $candidates | Where-Object { $_ -like "$typed*" } | ForEach-Object {',
+        "        [System.Management.Automation.CompletionResult]::new($lead + $_, $_, 'ParameterValue', $_)",
+        "    }",
+        "}",
+        "Register-ArgumentCompleter -CommandName Invoke-ASH -ParameterName 'AshArgs' -ScriptBlock $ashArgumentCompleter",
+        "Register-ArgumentCompleter -CommandName Invoke-ASH -ParameterName 'RemainingAshArgs' -ScriptBlock $ashArgumentCompleter",
+    ]
+
+
 def ps_build_target_completer(contract) -> list[str]:
     return [
         f'{_ps_list(contract.build_targets)} | Where-Object {{ $_ -like "$wordToComplete*" }} | ForEach-Object {{'
@@ -121,6 +202,65 @@ def _sh_words(values) -> str:
 
 def sh_subcommands(contract) -> list[str]:
     return [f'ASH_SUBCOMMANDS="{_sh_words(contract.subcommands)}"']
+
+
+def sh_scan_subjects(contract) -> list[str]:
+    return [f'ASH_SCAN_SUBJECTS="{_sh_words(contract.scan_subjects)}"']
+
+
+def sh_completion(contract) -> list[str]:
+    """``print_bash_completion``: the bash completion function, printed by
+    ``./ash --show-completion`` for hosts that have no Python to run the CLI's own.
+
+    Built from the same tables as the wrapper's parser, so it cannot name a
+    subcommand, a subject or an option the CLI does not have.
+    """
+    return [
+        "print_bash_completion() {",
+        "  cat <<'ASH_BASH_COMPLETION'",
+        "_ash_completion() {",
+        '  local cur="${COMP_WORDS[COMP_CWORD]}" prev="" subcommand="" subject="" word i skip="NO"',
+        f'  local subcommands="{_sh_words(contract.subcommands)}"',
+        f'  local subjects="{_sh_words(contract.scan_subjects)}"',
+        f'  local options="{_sh_words(contract.root_options)}"',
+        f'  local value_options="{_sh_words(contract.root_value_options)}"',
+        "  if ((COMP_CWORD > 1)); then",
+        '    prev="${COMP_WORDS[COMP_CWORD - 1]}"',
+        "  fi",
+        '  if [[ " ${value_options} " == *" ${prev} "* ]]; then',
+        "    COMPREPLY=()",
+        "    return 0",
+        "  fi",
+        "  for ((i = 1; i < COMP_CWORD; i++)); do",
+        '    word="${COMP_WORDS[i]}"',
+        '    if [[ "${skip}" = "YES" ]]; then',
+        '      skip="NO"',
+        "      continue",
+        "    fi",
+        '    if [[ " ${value_options} " == *" ${word} "* ]]; then',
+        '      skip="YES"',
+        "      continue",
+        "    fi",
+        '    if [[ -z "${subcommand}" && " ${subcommands} " == *" ${word} "* ]]; then',
+        '      subcommand="${word}"',
+        '    elif [[ "${subcommand}" = "scan" && -z "${subject}" && " ${subjects} " == *" ${word} "* ]]; then',
+        '      subject="${word}"',
+        "    fi",
+        "  done",
+        '  if [[ "${cur}" == -* ]]; then',
+        '    mapfile -t COMPREPLY < <(compgen -W "${options}" -- "${cur}")',
+        '  elif [[ -z "${subcommand}" ]]; then',
+        '    mapfile -t COMPREPLY < <(compgen -W "${subcommands}" -- "${cur}")',
+        '  elif [[ "${subcommand}" = "scan" && -z "${subject}" ]]; then',
+        '    mapfile -t COMPREPLY < <(compgen -W "${subjects}" -- "${cur}")',
+        "  else",
+        '    mapfile -t COMPREPLY < <(compgen -d -- "${cur}")',
+        "  fi",
+        "}",
+        "complete -o default -F _ash_completion ash ./ash",
+        "ASH_BASH_COMPLETION",
+        "}",
+    ]
 
 
 def sh_dash_o_subcommands(contract) -> list[str]:
@@ -148,13 +288,17 @@ Renderer = Callable[..., list[str]]
 BLOCKS: dict[str, list[tuple[str, Renderer]]] = {
     POWERSHELL: [
         ("ps1-subcommands", ps_subcommands),
+        ("ps1-scan-subjects", ps_scan_subjects),
         ("ps1-root-value-options", ps_root_value_options),
         ("ps1-option-subcommands", ps_option_subcommands),
         ("ps1-runner-discovery", ps_runner_discovery),
         ("ps1-build-target-completer", ps_build_target_completer),
+        ("ps1-completion", ps_completion),
     ],
     ASH: [
         ("sh-subcommands", sh_subcommands),
+        ("sh-scan-subjects", sh_scan_subjects),
+        ("sh-completion", sh_completion),
         ("sh-dash-o-subcommands", sh_dash_o_subcommands),
         ("sh-root-value-options", sh_root_value_options),
         ("sh-takes-quiet-and-color", sh_takes_quiet_and_color),

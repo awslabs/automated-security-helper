@@ -5025,9 +5025,10 @@ def _assemble_run_command(
     cmd.append(image_name)
     cmd.append("ash")
 
-    # Core ASH path arguments. In workspace mode --source-dir is omitted, because
-    # it is mutually exclusive with --workspace and the workspace root is already
-    # the mount point.
+    # Core ASH path arguments. In workspace mode there is no source directory,
+    # because it is mutually exclusive with --workspace and the workspace root is
+    # already the mount point; a workspace scan has no subject of its own yet, so
+    # it keeps the subject-less form. A directory scan is `scan fs /src`.
     if workspace_relative_file is not None:
         cmd.extend(
             ["--workspace", f"/src/{workspace_relative_file}", "--output-dir", "/out"]
@@ -5037,7 +5038,7 @@ def _assemble_run_command(
         if allow_missing_projects:
             cmd.append("--allow-missing-projects")
     else:
-        cmd.extend(["--source-dir", "/src", "--output-dir", "/out"])
+        cmd.extend(["scan", "fs", "/src", "--output-dir", "/out"])
 
     # Build ash_args from context + parameters
     ash_args: List[str] = []

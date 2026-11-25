@@ -16,6 +16,12 @@
 
 # Set local variables
 SOURCE_DIR=""
+# YES once --source-dir named the directory, so a PATH after `scan <subject>` is
+# refused next to it; SCAN_SUBJECT is the subject word after scan and SCAN_PATH_SEEN
+# whether its PATH has been read (forward_word, below).
+SOURCE_DIR_GIVEN="NO"
+SCAN_SUBJECT=""
+SCAN_PATH_SEEN="NO"
 # Empty until the source directory is resolved: the default is .ash/ash_output inside
 # the scanned directory, as `ash scan` defaults it, not under the working directory.
 OUTPUT_DIR=""
@@ -355,6 +361,60 @@ require_mountable() {
 # BEGIN generated: sh-subcommands (scripts/generate_wrapper_tables.py)
 ASH_SUBCOMMANDS="scan build-image report diff trend merge mcp get-genai-guide config dependencies inspect plugin express"
 # END generated: sh-subcommands
+# The subjects `scan` takes (`./ash scan fs [PATH]`). The first word after scan that
+# is not an option or an option's value names one, and the word after that is the
+# directory to scan (forward_word, below).
+# BEGIN generated: sh-scan-subjects (scripts/generate_wrapper_tables.py)
+ASH_SCAN_SUBJECTS="fs"
+# END generated: sh-scan-subjects
+# The bash completion function `./ash --show-completion` prints, for hosts with no
+# Python to run the CLI's own completion.
+# BEGIN generated: sh-completion (scripts/generate_wrapper_tables.py)
+print_bash_completion() {
+  cat <<'ASH_BASH_COMPLETION'
+_ash_completion() {
+  local cur="${COMP_WORDS[COMP_CWORD]}" prev="" subcommand="" subject="" word i skip="NO"
+  local subcommands="scan build-image report diff trend merge mcp get-genai-guide config dependencies inspect plugin express"
+  local subjects="fs"
+  local options="--add-scanners --all-enabled-plugins --all-enabled-scanners --allow-in-tree-tools --allow-missing-projects --allow-stale-content-db --annotate-duplicates --ash-config-from-host --ash-plugin-modules --ash-revision-to-install --base-ref --baseline --build --build-target --changed-files-only --cleanup --cli-json-input --color --compact-report --config --config-file-from-another-checkout --config-file-from-scanned-repository --config-from-scanned-repository --config-overrides --container-gid --container-uid --custom-build-arg --custom-containerfile --debug --dry-run --exclude-scanners --express --fail-on-findings --fail-on-incomplete-scanners --fold-duplicates --force --format --formats --full --generate-cli-skeleton --honor-ignore-files --ignore-suppressions --inspect --install-completion --log-level --min-severity --mode --no-allow-stale-content-db --no-build --no-cleanup --no-color --no-express --no-fail-on-findings --no-fail-on-incomplete-scanners --no-honor-ignore-files --no-ignore-suppressions --no-inspect --no-offline --no-progress --no-quiet --no-run --no-show-summary --no-simple --no-use-existing --oci --oci-runner --offline --offline-semgrep-rulesets --only-scanners --output-dir --output-format --output-formats --phases --progress --python-based-plugins-only --python-based-scanners-only --python-only --quiet --require-scanner-selection --run --runner --sandbox --scanners --shard-count --shard-index --show-completion --show-summary --simple --source-dir --staged --strategy --use-existing --verbose --version --workspace --workspace-config"
+  local value_options="--add-scanners --ash-config-from-host --ash-plugin-modules --ash-revision-to-install --base-ref --baseline --build-target --cli-json-input --config --config-file-from-another-checkout --config-file-from-scanned-repository --config-overrides --container-gid --container-uid --custom-build-arg --custom-containerfile --exclude-scanners --format --formats --log-level --min-severity --mode --oci --oci-runner --offline-semgrep-rulesets --only-scanners --output-dir --output-format --output-formats --phases --require-scanner-selection --runner --sandbox --scanners --shard-count --shard-index --source-dir --strategy --workspace --workspace-config -c -f -g -o -u"
+  if ((COMP_CWORD > 1)); then
+    prev="${COMP_WORDS[COMP_CWORD - 1]}"
+  fi
+  if [[ " ${value_options} " == *" ${prev} "* ]]; then
+    COMPREPLY=()
+    return 0
+  fi
+  for ((i = 1; i < COMP_CWORD; i++)); do
+    word="${COMP_WORDS[i]}"
+    if [[ "${skip}" = "YES" ]]; then
+      skip="NO"
+      continue
+    fi
+    if [[ " ${value_options} " == *" ${word} "* ]]; then
+      skip="YES"
+      continue
+    fi
+    if [[ -z "${subcommand}" && " ${subcommands} " == *" ${word} "* ]]; then
+      subcommand="${word}"
+    elif [[ "${subcommand}" = "scan" && -z "${subject}" && " ${subjects} " == *" ${word} "* ]]; then
+      subject="${word}"
+    fi
+  done
+  if [[ "${cur}" == -* ]]; then
+    mapfile -t COMPREPLY < <(compgen -W "${options}" -- "${cur}")
+  elif [[ -z "${subcommand}" ]]; then
+    mapfile -t COMPREPLY < <(compgen -W "${subcommands}" -- "${cur}")
+  elif [[ "${subcommand}" = "scan" && -z "${subject}" ]]; then
+    mapfile -t COMPREPLY < <(compgen -W "${subjects}" -- "${cur}")
+  else
+    mapfile -t COMPREPLY < <(compgen -d -- "${cur}")
+  fi
+}
+complete -o default -F _ash_completion ash ./ash
+ASH_BASH_COMPLETION
+}
+# END generated: sh-completion
 # The subcommands whose own -o is NOT the container runtime: get-genai-guide's -o is
 # its --output, config's its --output-dir. After one of these, -o is the
 # subcommand's and is forwarded. After scan, whose -o is the CLI's own alias of
@@ -369,7 +429,7 @@ ASH_DASH_O_IS_THE_SUBCOMMANDS="get-genai-guide config"
 # (`--phases report`, `--phases inspect`), so the token after one of these is
 # the option's value, not the subcommand.
 # BEGIN generated: sh-root-value-options (scripts/generate_wrapper_tables.py)
-ASH_ROOT_VALUE_OPTIONS="--add-scanners --ash-config-from-host --ash-plugin-modules --ash-revision-to-install --base-ref --baseline --build-target --config --config-file-from-another-checkout --config-file-from-scanned-repository --config-overrides --container-gid --container-uid --custom-build-arg --custom-containerfile --exclude-scanners --format --formats --log-level --min-severity --mode --oci --oci-runner --offline-semgrep-rulesets --only-scanners --output-dir --output-format --output-formats --phases --require-scanner-selection --runner --sandbox --scanners --shard-count --shard-index --source-dir --strategy --workspace --workspace-config -c -f -g -o -u"
+ASH_ROOT_VALUE_OPTIONS="--add-scanners --ash-config-from-host --ash-plugin-modules --ash-revision-to-install --base-ref --baseline --build-target --cli-json-input --config --config-file-from-another-checkout --config-file-from-scanned-repository --config-overrides --container-gid --container-uid --custom-build-arg --custom-containerfile --exclude-scanners --format --formats --log-level --min-severity --mode --oci --oci-runner --offline-semgrep-rulesets --only-scanners --output-dir --output-format --output-formats --phases --require-scanner-selection --runner --sandbox --scanners --shard-count --shard-index --source-dir --strategy --workspace --workspace-config -c -f -g -o -u"
 # END generated: sh-root-value-options
 
 # The first word of ASH_ARG_WORDS that names an ash subcommand, in SUBCOMMAND,
@@ -992,6 +1052,23 @@ forward_word() {
     INNER_VALUE_PENDING="NO"
   elif [[ " ${ASH_ROOT_VALUE_OPTIONS} " == *" $1 "* ]]; then
     INNER_VALUE_PENDING="YES"
+  elif [[ "${SUBCOMMAND_WORD}" = "scan" && "$1" != -* && "${SCAN_PATH_SEEN}" = "NO" ]]; then
+    # `scan <subject> [PATH]`: the first word after scan that is not an option or an
+    # option's value names the subject (ASH_SCAN_SUBJECTS), and the next one is the
+    # directory to scan. The directory is this script's SOURCE_DIR, as --source-dir
+    # is, and is not forwarded: the scan inside finds it in ASH_SOURCE_DIR=/src.
+    if [[ "${SCAN_SUBJECT}" = "" ]]; then
+      if [[ " ${ASH_SCAN_SUBJECTS} " == *" $1 "* ]]; then
+        SCAN_SUBJECT="$1"
+      fi
+    else
+      if [[ "${SOURCE_DIR_GIVEN}" = "YES" ]]; then
+        refuse_usage "Name the directory once: as the PATH argument of scan ${SCAN_SUBJECT} or with --source-dir, not both."
+      fi
+      SCAN_PATH_SEEN="YES"
+      SOURCE_DIR="$1"
+      return 0
+    fi
   elif [[ " ${ASH_SUBCOMMANDS} " == *" $1 "* ]]; then
     if [[ "${SUBCOMMAND_SEEN}" = "NO" ]]; then
       SUBCOMMAND_WORD="$1"
@@ -1034,7 +1111,12 @@ while (("$#")); do
     --source-dir | --source-dir=*)
       own_value "$1" "$#" "${2-}"
       shift "${OWN_SHIFT}"
+      if [[ "${SCAN_PATH_SEEN}" = "YES" ]]; then
+        refuse_usage "Name the directory once: as the PATH argument of scan ${SCAN_SUBJECT} or with --source-dir, not both."
+      fi
       SOURCE_DIR="${OWN_VALUE}"
+      SOURCE_DIR_GIVEN="YES"
+      echo "Deprecated: --source-dir is deprecated and will be removed in ASH v4.0. Give the directory as the argument: ./ash scan fs <path>" >&2
       ;;
     --output-dir | --output-dir=*)
       own_value "$1" "$#" "${2-}"
@@ -1160,6 +1242,12 @@ while (("$#")); do
     --version)
       (CDPATH="" cd -- "${ASH_ROOT_DIR}" && python -m automated_security_helper.cli.main --version)
       exit "$?"
+      ;;
+    # The bash completion function, from the same tables as this parser, for a host
+    # with no Python: `source <(./ash --show-completion)`.
+    --show-completion)
+      print_bash_completion
+      exit 0
       ;;
     -v)
       if [[ "${SUBCOMMAND_SEEN}" = "YES" ]]; then
@@ -2019,6 +2107,11 @@ else
       ASH_RUN_WORDS=("${ASH_ARG_WORDS[@]}")
       if [[ -z "${SUBCOMMAND}" || " ${ASH_TAKES_SANDBOX} " == *" ${SUBCOMMAND} "* ]]; then
         SANDBOX_OFF_AT=$((SUBCOMMAND_AT + 1))
+        # After the subject when scan is followed by one (`scan fs`), so the
+        # scan inside reads `scan fs --sandbox off ...`.
+        if [[ "${SUBCOMMAND}" = "scan" && -n "${ASH_ARG_WORDS[SANDBOX_OFF_AT]:-}" && " ${ASH_SCAN_SUBJECTS} " == *" ${ASH_ARG_WORDS[SANDBOX_OFF_AT]} "* ]]; then
+          SANDBOX_OFF_AT=$((SANDBOX_OFF_AT + 1))
+        fi
         # --offline is this script's option too, read by the argument loop and not
         # forwarded: it cut the container's network and set the image's build
         # argument, but told the scan nothing, so with --no-build and an image built

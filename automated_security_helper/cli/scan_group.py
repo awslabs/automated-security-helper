@@ -1,0 +1,208 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""``ash scan <subject>``: the scan group and its ``fs`` subject.
+
+``scan`` is a group whose subjects name what is scanned. ``fs`` scans a directory
+and is today's scan with the directory as an argument. It is built from the same
+function as the root callback, ``run_ash_scan_cli_command``, with one argument
+added to its signature, so the 100+ options exist once and every option added to
+the engine reaches ``fs`` with no second declaration.
+
+``ash scan [options]`` with no subject, and bare ``ash [options]``, still run the
+scan and print the deprecation line of ``scan_deprecation``; both are removed in
+ASH v4.0. This module imports nothing heavy: ``ash scan --help`` lists the subjects
+from the group's own help, and the engine's heavy trees stay deferred as they are
+for ``ash --version`` (tests/unit/cli/test_version_startup_budget.py).
+"""
+
+from __future__ import annotations
+
+import inspect
+from typing import Annotated, Any, Optional
+
+import typer
+from typer.core import TyperGroup
+
+from automated_security_helper.cli.json_input import CliJsonInputCommand
+from automated_security_helper.cli.scan import run_ash_scan_cli_command
+from automated_security_helper.cli.scan_deprecation import (
+    SCAN_FORM_META,
+    SCAN_NOUN_META,
+    SOURCE_DIR_LINE,
+    warn_deprecated,
+)
+
+#: The subject ``ash scan`` takes when none is named, and the only one today.
+DEFAULT_SUBJECT = "fs"
+
+_PATH_HELP = (
+    "The directory to scan. Defaults to the current directory. "
+    "--source-dir and ASH_SOURCE_DIR also name it."
+)
+
+
+def _spellings(param: Any) -> set[str]:
+    return {*param.opts, *param.secondary_opts}
+
+
+def first_positional(args: list[str], params: list[Any]) -> int | None:
+    """Index of the first token in *args* that is neither an option nor an option's value.
+
+    Read as click reads the tokens: a long option takes the next token as its value
+    unless it is a flag or carries ``=value``; in a cluster of short options the
+    first one that takes a value takes the rest of the cluster, or the next token
+    when it is last. Nothing after a bare ``--`` is looked at.
+    """
+    owners = {opt: param for param in params for opt in _spellings(param)}
+    expecting_value = False
+    for index, token in enumerate(args):
+        if expecting_value:
+            expecting_value = False
+            continue
+        if token == "--":
+            return None
+        if token.startswith("--"):
+            name, equals, _ = token.partition("=")
+            owner = owners.get(name)
+            expecting_value = owner is not None and not owner.is_flag and not equals
+            continue
+        if token.startswith("-") and len(token) > 1:
+            rest = token[1:]
+            while rest:
+                name, rest = "-" + rest[0], rest[1:]
+                owner = owners.get(name)
+                if owner is None:
+                    break
+                if not owner.is_flag:
+                    expecting_value = not rest
+                    break
+            continue
+        return index
+    return None
+
+
+class ScanTyperGroup(TyperGroup):
+    """The ``scan`` group: subjects by name, the old no-subject form as an alias.
+
+    A subject may be given after options (``ash --output-dir out scan fs .`` hands
+    the root's option on in front of it), so the first token that is not an option
+    or an option's value is read as the subject. With no subject the arguments run
+    as ``fs`` and the deprecation line prints; a lone ``--help`` is the group's.
+    """
+
+    def fs_command(self) -> Any:
+        return self.commands[DEFAULT_SUBJECT]
+
+    def forwarding_target(self, ctx: Any, args: list[str]) -> Any:
+        """The command that owns the options in *args*: the named subject, else ``fs``."""
+        command = self.fs_command()
+        index = first_positional(args, list(command.get_params(ctx)))
+        if index is not None and args[index] in self.commands:
+            return self.commands[args[index]]
+        return command
+
+    def parse_args(self, ctx: Any, args: list[str]) -> list[str]:
+        if not ctx.resilient_parsing:
+            args = self._routed(ctx, list(args))
+        return super().parse_args(ctx, args)
+
+    def _routed(self, ctx: Any, args: list[str]) -> list[str]:
+        params = list(self.fs_command().get_params(ctx))
+        index = first_positional(args, params)
+        if index is None:
+            help_names = set(self.get_help_option_names(ctx))
+            if args and all(token in help_names for token in args):
+                return args
+            ctx.meta[SCAN_FORM_META] = "scan"
+            return [DEFAULT_SUBJECT, *args]
+        subject = args[index]
+        if subject in self.commands:
+            return [subject, *args[:index], *args[index + 1 :]]
+        names = ", ".join(self.commands)
+        ctx.fail(
+            f"'{subject}' is not a scan subject (subjects: {names}). "
+            f"To scan a directory, run 'ash scan {DEFAULT_SUBJECT} {subject}'."
+        )
+
+
+def _fs_signature() -> inspect.Signature:
+    engine = inspect.signature(run_ash_scan_cli_command)
+    parameters = list(engine.parameters.values())
+    path = inspect.Parameter(
+        "path",
+        inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        default=None,
+        annotation=Annotated[
+            Optional[str],
+            typer.Argument(
+                metavar="[PATH]",
+                help=_PATH_HELP,
+                show_default=False,
+                rich_help_panel="Scan",
+            ),
+        ],
+    )
+    return engine.replace(parameters=[parameters[0], path, *parameters[1:]])
+
+
+def run_ash_scan_fs_cli_command(*args: Any, **kwargs: Any) -> Any:
+    """Scan a directory for code, infrastructure, secrets, and dependency findings.
+
+    Start with: ash scan fs . --mode container
+
+    Review the result with: ash inspect findings
+
+    Options are grouped by workflow below.
+    """
+    ctx = kwargs["ctx"]
+    path = kwargs.pop("path", None)
+    routed_without_subject = ctx.meta.get(SCAN_FORM_META) == "scan"
+    from_command_line = (
+        getattr(ctx.get_parameter_source("source_dir"), "name", None) == "COMMANDLINE"
+    )
+    if path is not None:
+        if routed_without_subject:
+            ctx.fail(
+                f"'{path}' is not a scan subject. "
+                f"To scan a directory, run 'ash scan {DEFAULT_SUBJECT} {path}'."
+            )
+        if from_command_line and kwargs.get("source_dir") != path:
+            ctx.fail(
+                "Name the directory once: as the PATH argument or with --source-dir, "
+                "not both."
+            )
+        kwargs["source_dir"] = path
+    if not routed_without_subject:
+        ctx.meta[SCAN_NOUN_META] = DEFAULT_SUBJECT
+        if from_command_line:
+            warn_deprecated(SOURCE_DIR_LINE)
+    return run_ash_scan_cli_command(*args, **kwargs)
+
+
+run_ash_scan_fs_cli_command.__signature__ = _fs_signature()  # type: ignore[attr-defined]
+run_ash_scan_fs_cli_command.__annotations__ = {
+    **run_ash_scan_cli_command.__annotations__,
+    "path": _fs_signature().parameters["path"].annotation,
+}
+
+
+def build_scan_app() -> typer.Typer:
+    """The ``scan`` Typer app with its subjects registered."""
+    scan_app = typer.Typer(
+        name="scan",
+        cls=ScanTyperGroup,
+        help=(
+            "Scan code, infrastructure, secrets, and dependencies.\n\n"
+            "Name what to scan: `ash scan fs <path>` scans a directory. "
+            "`ash scan` with no subject still scans the working directory, but that "
+            "form is deprecated and will be removed in ASH v4.0."
+        ),
+        no_args_is_help=False,
+    )
+    scan_app.command(
+        name=DEFAULT_SUBJECT,
+        cls=CliJsonInputCommand,
+        no_args_is_help=False,
+    )(run_ash_scan_fs_cli_command)
+    return scan_app
