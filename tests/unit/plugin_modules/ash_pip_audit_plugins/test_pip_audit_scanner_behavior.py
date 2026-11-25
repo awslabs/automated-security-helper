@@ -163,6 +163,29 @@ class TestConversion:
         )
         assert _rows(results) != POSITIVE_EXPECTED
 
+    def test_the_same_package_listed_twice_yields_one_result_per_advisory(self):
+        # A requirements file that names a package twice (two environment
+        # markers, a repeated line) makes pip-audit list one dependency entry
+        # per line; the fingerprint is (advisory, file, package, version), so a
+        # second entry for the same pin must not produce a second result.
+        entry = POSITIVE["dependencies"][0]
+        document = {"dependencies": [entry, json.loads(json.dumps(entry))]}
+        results, _, _ = convert_pip_audit_json(
+            document, uri="requirements.txt", requirements_text=REQUIREMENTS
+        )
+        assert _rows(results) == POSITIVE_EXPECTED
+        prints = [r.partialFingerprints["pip-audit/v1"] for r in results]
+        assert len(prints) == len(set(prints))
+        # Control: the same package at another version is another finding.
+        other = json.loads(json.dumps(entry))
+        other["version"] = "0.6"
+        results, _, _ = convert_pip_audit_json(
+            {"dependencies": [entry, other]},
+            uri="requirements.txt",
+            requirements_text=REQUIREMENTS,
+        )
+        assert len(results) == 4
+
     def test_a_skipped_dependency_is_reported_not_converted(self):
         document = {
             "dependencies": [

@@ -235,6 +235,7 @@ def convert_pip_audit_json(
     results: List[Result] = []
     rules: Dict[str, ReportingDescriptor] = {}
     skipped: List[str] = []
+    seen_findings: set[Tuple[str, str, str]] = set()
     for dep in dependencies:
         if not isinstance(dep, dict) or not isinstance(dep.get("name"), str):
             raise PipAuditConversionError("a dependency entry has no name")
@@ -249,14 +250,18 @@ def convert_pip_audit_json(
         # PYSEC-2021-142 twice under pyyaml): one finding per (package,
         # advisory), the first entry wins, so two results never share a
         # fingerprint.
-        seen_ids: set[str] = set()
+        # The set spans the whole document, keyed on the same parts as the
+        # fingerprint: a requirements file that names one pin twice (two
+        # environment markers, a repeated line) makes pip-audit list the
+        # dependency once per line.
         for vuln in dep.get("vulns") or []:
             if not isinstance(vuln, dict) or not isinstance(vuln.get("id"), str):
                 raise PipAuditConversionError(f"a vulnerability of {name} has no id")
             vuln_id = vuln["id"]
-            if vuln_id in seen_ids:
+            key = (_canonical(name), version, vuln_id)
+            if key in seen_findings:
                 continue
-            seen_ids.add(vuln_id)
+            seen_findings.add(key)
             fixes = [str(v) for v in vuln.get("fix_versions") or []]
             aliases = [str(a) for a in vuln.get("aliases") or []]
             description = vuln.get("description") or None
@@ -430,10 +435,12 @@ class PipAuditScanner(ScannerPluginBase[PipAuditScannerConfig]):
             "reports no install path",
         ),
         taxonomy_cve=FacetDecl(
-            state=FacetState.NA,
-            reason="UNCONFIRMED: the CVE ids sit in vulns[].aliases, written "
-            "only to the result property and the message; no CVE column is "
-            "populated from them, so no taxonomy is claimed",
+            state=FacetState.DROPPED,
+            native_field='dependencies[].vulns[]."aliases" (CVE ids)',
+            reason="written to the result property aliases and the message "
+            "only; the flat cve_id column reads a CVE from the rule id "
+            "(utils/taxonomy_ids.py), and the rule id here is the PYSEC or "
+            "GHSA advisory id pip-audit reports, which names no CVE",
         ),
         taxonomy_cwe=FacetDecl(
             state=FacetState.NA,
