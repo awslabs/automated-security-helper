@@ -175,8 +175,8 @@ def _profile_kept_where_a_scan_may_rewrite_it(path: Path) -> Optional[str]:
 
     - A file a client delivered: under a session workspace below the MCP
       workspace root, by the scan's own classifier
-      (``sandbox.config_is_client_supplied``), which admits the profile files
-      the server itself writes in a session's ``config/`` directory.
+      (``mcp_sandbox.config_is_client_supplied``), which admits the profile
+      files the server itself writes in a session's ``config/`` directory.
     - A git checkout a scan reaches: for a profile under a directory
       ``ASH_MCP_ALLOWED_ROOTS`` names, a ``.git`` entry among the profile's
       ancestors, up to the filesystem root. A checkout below the granted root
@@ -235,6 +235,27 @@ def _top_level_key_text(key: object) -> str:
     return f"{key!r} (a {type(key).__name__} key, not a field name)"
 
 
+@contextlib.contextmanager
+def _profile_check_failures(name: str, path: Path) -> Iterator[None]:
+    """Report a failed check of a profile's path as the startup refusal it is.
+
+    ``Path.exists`` raises on Python 3.10 to 3.12 for an error other than "not
+    found" (``EACCES`` on a directory above the file that cannot be searched), and
+    ``resolve`` raises ``RuntimeError`` for a link loop. Outside the load's own
+    ``try`` these reached the operator as a traceback from the ``--profile``
+    handling, which catches the registry's error and reports ``Validation Error``
+    with exit 3.
+    """
+    try:
+        yield
+    except ProfileRegistryError:
+        raise
+    except (OSError, RuntimeError) as exc:
+        raise ProfileRegistryError(
+            f"--profile {name!r}: {path} could not be checked: {error_text(exc)}"
+        ) from exc
+
+
 def register_profiles(specs: List[str]) -> Dict[str, ProfileEntry]:
     """Parse + load every ``--profile`` spec into a registry dict.
 
@@ -258,20 +279,22 @@ def register_profiles(specs: List[str]) -> Dict[str, ProfileEntry]:
                 f"duplicate --profile name {name!r} (already registered from "
                 f"{registry[name].path})"
             )
-        if not path.exists():
-            raise ProfileRegistryError(
-                f"--profile {name!r} points at missing file: {path}"
-            )
-        # Before the file is read: a profile kept where a client's delivery or a
-        # scanned checkout's owner can rewrite it would still be loaded and
-        # trusted as the operator's, and the scan cannot tell later.
-        kept_in = _profile_kept_where_a_scan_may_rewrite_it(path)
-        if kept_in is not None:
-            raise ProfileRegistryError(
-                f"--profile {name!r} is kept at {path}, inside {kept_in}, so its "
-                "content is not the operator's alone. Keep profiles outside the "
-                "MCP workspace root and outside any checkout the server scans."
-            )
+        with _profile_check_failures(name, path):
+            if not path.exists():
+                raise ProfileRegistryError(
+                    f"--profile {name!r} points at missing file: {path}"
+                )
+            # Before the file is read: a profile kept where a client's delivery
+            # or a scanned checkout's owner can rewrite it would still be loaded
+            # and trusted as the operator's, and the scan cannot tell later.
+            kept_in = _profile_kept_where_a_scan_may_rewrite_it(path)
+            if kept_in is not None:
+                raise ProfileRegistryError(
+                    f"--profile {name!r} is kept at {path}, inside {kept_in}, so "
+                    "its content is not the operator's alone. Keep profiles "
+                    "outside the MCP workspace root and outside any checkout the "
+                    "server scans."
+                )
         unparsed: Optional[str] = None
         # Each file of the profile's chain, by resolved path, as the text the
         # load parsed it from (resolve_config._cached_reader fills it): the
@@ -329,17 +352,18 @@ def register_profiles(specs: List[str]) -> Dict[str, ProfileEntry]:
         # read; the profile's own file was judged before the read above.
         for source in dict.fromkeys(document.chain):
             base = Path(source)
-            if base.resolve() == path.resolve():
-                continue
-            kept_in = _profile_kept_where_a_scan_may_rewrite_it(base)
-            if kept_in is not None:
-                raise ProfileRegistryError(
-                    f"--profile {name!r} extends {describe_config_path(base)}, "
-                    f"kept inside {kept_in}, so its content is not the "
-                    "operator's alone. Keep profiles and the bases they extend "
-                    "outside the MCP workspace root and outside any checkout the "
-                    "server scans."
-                )
+            with _profile_check_failures(name, base):
+                if base.resolve() == path.resolve():
+                    continue
+                kept_in = _profile_kept_where_a_scan_may_rewrite_it(base)
+                if kept_in is not None:
+                    raise ProfileRegistryError(
+                        f"--profile {name!r} extends {describe_config_path(base)}, "
+                        f"kept inside {kept_in}, so its content is not the "
+                        "operator's alone. Keep profiles and the bases they "
+                        "extend outside the MCP workspace root and outside any "
+                        "checkout the server scans."
+                    )
         # Re-validate the *raw* YAML/JSON top-level keys against AshConfig
         # so operator typos in profile YAML fail at MCP boot rather than at
         # silently-ignored runtime. AshConfig.model_config has extra='ignore'
@@ -405,11 +429,13 @@ def register_profiles(specs: List[str]) -> Dict[str, ProfileEntry]:
                 f"--profile {name!r} re-validation against schema failed: "
                 f"{error_text(exc)}"
             ) from exc
+        with _profile_check_failures(name, path):
+            path_sha256 = _sha256_of_path(path)
         registry[name] = ProfileEntry(
             name=name,
             path=path,
             config=cfg,
-            path_sha256=_sha256_of_path(path),
+            path_sha256=path_sha256,
         )
     return registry
 
@@ -500,6 +526,15 @@ class SessionState:
     override_yaml: Optional[str] = None
     config_path: Optional[str] = None
     trusted_config_path: Optional[str] = None
+    #: The sha256 of the bytes this process wrote to ``config_path`` and
+    #: ``trusted_config_path`` (``_replace_staged``), or None for a path the
+    #: binding was handed without this process having written it. A recorded file
+    #: whose bytes are no longer these is not this binding's: another stdio server
+    #: sharing the default session's ``config/`` directory wrote the same name for
+    #: its own profile. It is read as a gone file (``_binding_intact``) and written
+    #: again from the binding.
+    config_sha256: Optional[str] = None
+    trusted_config_sha256: Optional[str] = None
 
     @property
     def client_changed(self) -> bool:
@@ -517,6 +552,57 @@ class SessionState:
 
 _session_lock = RLock()
 _session_state: Dict[str, SessionState] = {}
+
+#: The sha256 of the bytes this process last moved into place at each
+#: materialized path (``_replace_staged``), by the path's POSIX spelling.
+#: ``bind_session_config`` and the rewrite of a gone file copy the entry for a
+#: binding's two paths into its ``SessionState``, so the binding can tell its own
+#: file from another server's. A path this process did not write has no entry,
+#: and a binding for it is checked for presence only, as it was.
+_written_digests: Dict[str, str] = {}
+
+
+def _file_sha256(path: Union[str, Path]) -> Optional[str]:
+    """The sha256 of the file at ``path``, or None when it cannot be read."""
+    try:
+        with open(path, "rb") as handle:
+            return hashlib.sha256(handle.read()).hexdigest()
+    except OSError:
+        return None
+
+
+def _file_intact(path: Union[str, Path], digest: Optional[str]) -> bool:
+    """Whether ``path`` is a file and, when ``digest`` is known, still its bytes."""
+    if not Path(path).is_file():
+        return False
+    return digest is None or _file_sha256(path) == digest
+
+
+def _written_digest(path: Optional[Union[str, Path]]) -> Optional[str]:
+    """The digest this process recorded for ``path`` when it wrote it, or None."""
+    if path is None:
+        return None
+    return _written_digests.get(Path(path).as_posix())
+
+
+def _binding_intact(state: SessionState) -> bool:
+    """Whether a binding's recorded files are on disk and are the ones it wrote.
+
+    The trusted copy is checked when there is one. A file that exists with other
+    bytes than this process wrote there is another server's (two stdio servers
+    share the default session's ``config/`` and ``client-config/`` directories and
+    each writes the one fixed name), and answering its path would run a scan under
+    that server's profile while this binding's rules say another. It reads as
+    gone, so the caller writes the binding's own files again.
+    """
+    if state.config_path is None:
+        return False
+    if not _file_intact(state.config_path, state.config_sha256):
+        return False
+    return state.trusted_config_path is None or _file_intact(
+        state.trusted_config_path, state.trusted_config_sha256
+    )
+
 
 #: One lock per session id around the writes of its binding's files: the
 #: materialization ``select_profile`` does, and the one that writes a gone file
@@ -718,7 +804,8 @@ def materialize_session_config(
 
     Into ``config/``, which counts as the operator's, unless ``client_patched``:
     a profile after a client's ``patch_ops`` or ``override_yaml`` goes into
-    ``client-config/``, which counts as the client's (``sandbox.CLIENT_CONFIG_DIR_NAME``).
+    ``client-config/``, which counts as the client's
+    (``mcp_sandbox.CLIENT_CONFIG_DIR_NAME``).
 
     The operator's copy holds only the fields the registered profile sets
     (``AshConfig.save``'s ``exclude_unset``). It loads back as the same values,
@@ -739,7 +826,7 @@ def materialize_session_config(
 
     Why inside the sandbox
     ----------------------
-    Because ``cli/mcp/sandbox.py`` now confines config inputs, and the sandbox's
+    Because ``config/mcp_sandbox.py`` confines config inputs, and the sandbox's
     ``config/`` directory is a config root for exactly this session. A file
     written anywhere else would be refused by the gate that protects it, and a
     file written to a shared location would be readable by a sibling session.
@@ -894,11 +981,20 @@ def _replace_staged(partial: Path, target: Path) -> None:
     platform the error is the directory's and is raised at once: the retries
     would only delay it (half a second, with a scan waiting on the answer).
     Whatever the outcome, the partial is removed afterward.
+
+    The digest of the bytes moved into place is recorded for ``target``
+    (``_written_digests``), taken from the staged file before the move, so it
+    names what this call wrote and not whatever the name holds a moment later.
     """
+    digest = _file_sha256(partial)
     try:
         for attempt in range(_REPLACE_ATTEMPTS):
             try:
                 os.replace(partial, target)
+                if digest is not None:
+                    _written_digests[target.as_posix()] = digest
+                else:
+                    _written_digests.pop(target.as_posix(), None)
                 return
             except PermissionError:
                 if not _rename_waits_on_readers() or attempt == _REPLACE_ATTEMPTS - 1:
@@ -947,10 +1043,18 @@ def materialize_session_binding(
         # change them; it records them as the profile wrote them. A patch has
         # followed them already: one an op wrote over is the client's text, and
         # one an op moved is at its new entry.
+        #
+        # Set on a copy that is written, not on ``patched``: assigning it there
+        # shared the registry entry's object with the binding's stored config
+        # (``_rematerialize_binding`` passes that one), from outside
+        # ``_session_lock``, and a function that writes files does not change
+        # what it was given.
+        staged = patched
         if not patched._references_followed:
-            patched._environment_references = registered._environment_references
+            staged = patched.model_copy()
+            staged._environment_references = registered._environment_references
         client_partial, client_target, _sandbox = _stage_session_config(
-            session_id, patched, client_patched=True
+            session_id, staged, client_patched=True
         )
         try:
             trusted_partial, trusted_target, _sandbox = _stage_session_config(
@@ -1028,6 +1132,8 @@ def bind_session_config(
             override_yaml=override_yaml,
             config_path=config_path,
             trusted_config_path=trusted_config_path,
+            config_sha256=_written_digest(config_path),
+            trusted_config_sha256=_written_digest(trusted_config_path),
         )
         _session_state[sid] = state
         return state
@@ -1054,6 +1160,13 @@ def resolve_session_config_path(session_id: Optional[str] = None) -> Optional[st
     profile the client selected, never silently under in-tree discovery while
     the profile's client rules stay in force.
 
+    This BLOCKS. It stats the recorded files and reads them to check their digest,
+    and when a file is gone or replaced it waits for the session's binding lock
+    (which ``select_profile`` can hold), dumps the config, renames files, and on
+    Windows sleeps between rename attempts. A coroutine should call it from a
+    worker thread (``asyncio.to_thread``) and not on the event loop every session
+    shares. The same holds for ``resolve_session_trusted_config_path``.
+
     Raises:
         BoundProfileUnavailableError: the file is gone and cannot be written
             again (the profile is no longer registered, or the workspace cannot
@@ -1078,9 +1191,19 @@ def _bound_config_paths(
     """``(config_path, trusted_config_path)`` of the session's binding, on disk.
 
     ``(None, None)`` for an unbound session. When either recorded file is gone,
+    or holds other bytes than this process wrote there (``_binding_intact``),
     both are written again from the stored binding (the registered profile's
     config and, for a client-patched binding, the patched config), and the
     binding records the new paths.
+
+    Two stdio servers on one workspace root share the default session's files:
+    each binding is the fixed name ``ash.yaml``, so one server's bind replaces the
+    other's. A server whose file was replaced writes its own again here, so what
+    it answers is its binding's profile at the time of the answer. The two can
+    still replace each other between an answer and the scan's read of the file;
+    naming the files per server would close that, and is not done because the
+    fixed names are matched by ``is_client_copy_of``, the sandbox's list of the
+    names the server writes, and the callers that read them back.
 
     Raises:
         ProfileRegistryError: as :func:`resolve_session_config_path`.
@@ -1090,17 +1213,12 @@ def _bound_config_paths(
         state = _session_state.get(sid)
         if state is None or state.config_path is None:
             return None, None
-        config_path, trusted = state.config_path, state.trusted_config_path
-    if _both_present(config_path, trusted):
-        return config_path, trusted
+        # A copy, so the check outside the lock reads the paths and digests of
+        # one moment: a rewrite sets the four fields under the lock.
+        snapshot = copy.copy(state)
+    if _binding_intact(snapshot):
+        return snapshot.config_path, snapshot.trusted_config_path
     return _rematerialize_binding(sid)
-
-
-def _both_present(config_path: str, trusted_config_path: Optional[str]) -> bool:
-    """Whether a binding's recorded files are on disk (the trusted one, if any)."""
-    return Path(config_path).is_file() and (
-        trusted_config_path is None or Path(trusted_config_path).is_file()
-    )
 
 
 def _profile_no_longer_registered(profile_name: str) -> "BoundProfileUnavailableError":
@@ -1189,7 +1307,7 @@ def _rematerialize_binding(sid: str) -> Tuple[Optional[str], Optional[str]]:
             if current is not state:
                 if current is None or current.config_path is None:
                     return None, None
-                if _both_present(current.config_path, current.trusted_config_path):
+                if _binding_intact(current):
                     return current.config_path, current.trusted_config_path
                 if current.profile_name is None or current.bound_config is None:
                     # Not a profile binding: nothing to write it again from.
@@ -1198,6 +1316,15 @@ def _rematerialize_binding(sid: str) -> Tuple[Optional[str], Optional[str]]:
                 profile_name = current.profile_name
                 patched = current.bound_config if current.client_changed else None
                 adopted = True
+            elif _binding_intact(current):
+                # The same binding, whose files another thread wrote while this
+                # one waited for the lock: they are there, so they are the
+                # answer. Writing them again would replace files a scan of that
+                # thread is reading (on Windows the rename waits out the reader
+                # for about half a second and then fails a healthy session; a
+                # failed rename of the operator copy removes the client copy the
+                # other scan was handed).
+                return current.config_path, current.trusted_config_path
         if adopted:
             entry = get_profile_registry().get(profile_name)
             if entry is None:
@@ -1217,6 +1344,8 @@ def _rematerialize_binding(sid: str) -> Tuple[Optional[str], Optional[str]]:
             if _session_state.get(sid) is state:
                 state.config_path = config_path
                 state.trusted_config_path = trusted
+                state.config_sha256 = _written_digest(config_path)
+                state.trusted_config_sha256 = _written_digest(trusted)
     return config_path, trusted
 
 
@@ -1230,7 +1359,7 @@ def session_config_was_patched(config_path: Union[str, Path]) -> bool:
 
     Decided by where the file is, not by the recorded session state, so the
     answer is the same after the state is cleared, and it agrees with
-    ``sandbox.config_is_client_supplied`` for a session's profiles. Judged as
+    ``mcp_sandbox.config_is_client_supplied`` for a session's profiles. Judged as
     named and as resolved, as that function is: a link to a patched profile
     counts, wherever the link is. The unit is the file: a profile any client
     patch touched is the client's as a whole.
@@ -1407,12 +1536,19 @@ def clear_session_state(session_id: Optional[str]) -> None:
     goes with its workspace.
     """
     with _session_lock:
-        _session_state.pop(
+        state = _session_state.pop(
             DEFAULT_SESSION_ID if session_id is None else session_id, None
         )
+        if state is not None:
+            # The digests kept for this binding's files go with it, so a server
+            # that sees one new session id per client keeps none for ended ones.
+            for path in (state.config_path, state.trusted_config_path):
+                if path is not None:
+                    _written_digests.pop(Path(path).as_posix(), None)
 
 
 def clear_all_session_state() -> None:
     """Drop every session's SessionState; tests use it to scrub between cases."""
     with _session_lock:
         _session_state.clear()
+        _written_digests.clear()

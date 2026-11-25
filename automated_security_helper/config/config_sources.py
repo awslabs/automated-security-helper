@@ -107,7 +107,7 @@ is.
 A caller can narrow that further with ``permit_base``, a predicate every base
 must also pass after its symlinks are resolved. The MCP server passes one built
 from the calling session's allowed config roots
-(``cli/mcp/sandbox.config_base_gate``), so a grant naming a ``.ash/`` directory
+(``config.mcp_sandbox.config_base_gate``), so a grant naming a ``.ash/`` directory
 confines the chain to that directory rather than to its parent. The predicate is
 consulted before the confinement root, and its refusal,
 ``ASHConfigInputNotPermittedError``, names the ``extends`` entry as written and
@@ -159,15 +159,15 @@ the line or key. Which files is a ``RefuseEnv`` predicate the caller passes to
 ``read_config_file`` and ``resolve_config_document``; ``env_refused_for`` gives
 the MCP server's two:
 
-* For a remote caller (``cli/mcp/sandbox.caller_is_remote``), every file the
+* For a remote caller (``config.mcp_sandbox.caller_is_remote``), every file the
   operator did not set aside: anything outside ``ASH_MCP_ALLOWED_CONFIG_ROOTS``
   except the profile files the server writes in the calling session's
-  ``config/`` directory (``cli/mcp/sandbox.client_named_config_is_untrusted``).
+  ``config/`` directory (``config.mcp_sandbox.client_named_config_is_untrusted``).
   That covers a path the
   client names, a file discovered in a directory it names, and a scan target's
   own config, as well as anything it delivered.
 * For any other caller, the CLI included, and the default when none is passed:
-  a file an MCP client delivered (``cli/mcp/sandbox.config_is_client_supplied``),
+  a file an MCP client delivered (``config.mcp_sandbox.config_is_client_supplied``),
   that is anything under the MCP workspace root except the profile files the
   server writes in the sessions' ``config/`` directories, judged on the path as
   named and on the file it resolves to. A local stdio caller launched the server and holds its
@@ -2116,8 +2116,9 @@ def config_is_client_delivered(path: Path) -> bool:
     ``config.mcp_sandbox.config_is_client_supplied``, imported when called. The
     ``RefuseEnv`` every caller gets unless it passes another.
     """
-    # Imported here, as config/path_trust.py does: importing cli.mcp runs its
-    # __init__, which imports profile_registry and through it ash_config.
+    # Imported when called, as config/path_trust.py does: the sandbox reads this
+    # module's helpers (file_identity, the chain walkers) from inside its own
+    # functions, so neither module imports the other while it is being loaded.
     from automated_security_helper.config.mcp_sandbox import config_is_client_supplied
 
     return config_is_client_supplied(path)
@@ -2998,7 +2999,7 @@ def by_every_name(
 
     The names are the file's resolved path and each path in ``names`` it was
     reached by. ``judge`` takes one path, as named; the checks it is used with
-    (``cli/mcp/sandbox.config_is_client_supplied`` and
+    (``config.mcp_sandbox.config_is_client_supplied`` and
     ``client_named_config_is_untrusted``) also judge each symlink on the way.
     """
     known = names or {}

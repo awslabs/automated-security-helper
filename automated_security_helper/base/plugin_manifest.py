@@ -44,6 +44,7 @@ match.
 
 from __future__ import annotations
 
+import copy
 import importlib
 import re
 from enum import Enum
@@ -291,6 +292,20 @@ class ScannerManifest(_Frozen):
     #: (which changes nothing) is told from a changed one by this row. A test
     #: binds each row to the options model's own default.
     denied_option_defaults: dict[str, Any] = {}
+
+    @field_validator("denied_option_defaults")
+    @classmethod
+    def _denied_option_defaults_are_the_manifests_own(
+        cls, value: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Deep-copied, so the values are this manifest's own objects.
+
+        Validating a ``dict[str, Any]`` builds a new outer dict and keeps the
+        value objects it was given, so a list default here would be the very list
+        a module-level constant holds, and an in-place change to either would
+        change what "the default" means for the whole process.
+        """
+        return copy.deepcopy(value)
 
     @field_validator("name")
     @classmethod

@@ -549,7 +549,7 @@ class ProjectScanSettings:
     #: operator did not set aside resolves no ``!ENV`` (``resolve_config``). The
     #: same value the plan was resolved with.
     remote_client: bool = False
-    #: The MCP session's gate (``cli/mcp/sandbox.config_base_gate``), or None.
+    #: The MCP session's gate (``config.mcp_sandbox.config_base_gate``), or None.
     #: Each project's config file and its bases must resolve to a file it
     #: permits, as for the plan (``resolver.resolve_workspace``'s
     #: ``permit_base``), so a link changed after the plan is refused too.

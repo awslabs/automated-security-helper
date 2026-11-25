@@ -211,7 +211,7 @@ def find_config_file(
     must check its format.
 
     ``permit`` is a caller's gate, the one an MCP session passes as
-    ``permit_base`` (``cli/mcp/sandbox.config_base_gate``). With it, every name
+    ``permit_base`` (``config.mcp_sandbox.config_base_gate``). With it, every name
     discovery looks at that is there (``config_sources.discovery_candidates``),
     the ``pyproject.toml`` discovery reads to learn whether it configures ASH
     among them, must be permitted before discovery runs, and the source
@@ -1916,7 +1916,7 @@ def resolve_config(
             None, with ``client_overrides`` set, takes the trusted base's.
             When set, ``config_overrides`` are the client's too.
         remote_client: The config is read for an MCP call from a remote client
-            (``cli/mcp/sandbox.caller_is_remote``). Every file of the chain the
+            (``config.mcp_sandbox.caller_is_remote``). Every file of the chain the
             operator did not set aside then resolves no ``!ENV``, and one that
             uses it is refused; otherwise only a file an MCP client delivered
             is. The operator's own files (``trusted_config_path``,
@@ -2075,7 +2075,7 @@ def resolve_config(
         _refuse_unless_the_operators(overlay, Path(scanned_root))
     # The copy of a profile a client patched holds each value the profile read
     # from the environment as its reference; it is read from the operator's
-    # copy it was built from (cli/mcp/profile_registry.is_client_copy_of).
+    # copy it was built from (config.session_profiles.is_client_copy_of).
     fill: List[Any] = []
     if config_path is not None and trusted_config_path is not None:
         from automated_security_helper.config.session_profiles import (
@@ -5593,6 +5593,7 @@ def read_config_document(
     refuse_env: Optional[RefuseEnv] = None,
     anchor_relative_paths: Optional[AnchorPaths] = None,
     unquoted: bool = False,
+    expect: Optional[FileIdentity] = None,
 ) -> ResolvedConfigDocument:
     """``resolve_config_document``, refusing a config file that does not load.
 
@@ -5615,8 +5616,12 @@ def read_config_document(
 
     ``log_failure`` False leaves out the "Failed to load configuration file" log
     line, for a caller that reads the file ahead of the resolution that reports
-    the same failure. ``refuse_env`` and ``anchor_relative_paths`` are passed to
-    ``resolve_config_document``.
+    the same failure. ``refuse_env``, ``anchor_relative_paths`` and ``expect`` are
+    passed to ``resolve_config_document``: ``expect`` is the identity
+    (``identity_to_hold``) a caller took of the file when it judged the path, and
+    the root is then read only if it is still that file. Without it the identity
+    is taken when the read starts, so a name that led to one file at the check and
+    another by then is read as the second, which no check saw.
     """
     path = check_config_path(config_path)
     problem: Optional[str] = None
@@ -5627,6 +5632,7 @@ def read_config_document(
             permit_base=permit_base,
             refuse_env=refuse_env,
             anchor_relative_paths=anchor_relative_paths,
+            expect=expect,
         )
     except (OSError, UnicodeDecodeError, yaml.YAMLError, ValueError) as e:
         # json.JSONDecodeError, UnicodeDecodeError and a YAML constructor's
@@ -5981,7 +5987,7 @@ def _not_the_operators(
     """The files of ``paths`` that are not the operator's.
 
     Those inside a scanned tree, which the repository wrote, and those an MCP
-    client delivered (``cli/mcp/sandbox.config_is_client_supplied``), whoever
+    client delivered (``config.mcp_sandbox.config_is_client_supplied``), whoever
     names them: a ``--config`` or ``ASH_CONFIG`` under the MCP workspace root is
     a client's file even on the CLI, scanning another directory. Each file is
     judged by its own path and by each path in ``names`` it was reached by
@@ -6000,7 +6006,7 @@ def _delivered_by_a_client(
     paths: Iterable[Path], names: Optional[ChainNames] = None
 ) -> List[Path]:
     """The files of ``paths`` that an MCP client delivered
-    (``cli/mcp/sandbox.config_is_client_supplied``), whoever names them.
+    (``config.mcp_sandbox.config_is_client_supplied``), whoever names them.
 
     Each file is judged by its own path and by each path in ``names`` it was
     reached by (``config_sources.by_every_name``), so a file reached through a

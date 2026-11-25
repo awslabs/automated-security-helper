@@ -144,7 +144,7 @@ def validate_path_component(value: str, label: str) -> str:
     """Refuse a caller-supplied value that could name anything but one directory.
 
     A delegate, not a rule. The rule lives in
-    :func:`automated_security_helper.cli.mcp.session_paths.validated_path_component`
+    :func:`automated_security_helper.config.session_paths.validated_path_component`
     and is the only one: this module and ``session_paths`` each used to carry a
     copy, the copies disagreed about ``~``, ``+``, ``=`` and length, and an id one
     accepted and the other refused was admitted at the transport and then failed

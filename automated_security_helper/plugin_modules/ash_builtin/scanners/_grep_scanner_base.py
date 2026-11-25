@@ -429,13 +429,13 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
         read. The note is a config warning, which the orchestrator records in the
         results as a ``config_warning`` validation checkpoint, once per file, and
         it is logged whether or not the context's config keeps such a list. A
-        file an MCP client delivered (``cli/mcp/sandbox.config_is_client_supplied``,
+        file an MCP client delivered (``config.mcp_sandbox.config_is_client_supplied``,
         judged by its path, each symlink on the way and the file it resolves to)
         is named as client-supplied. A disabled scanner runs neither tool, so
         there is nothing it leaves unhonored and it records no note.
         """
-        # Imported here, as config/path_trust.py does: importing cli.mcp runs its
-        # __init__, which imports the config modules.
+        # Imported when called, as config/path_trust.py does: a scanner module
+        # loads while the plugins register, before the config layer is needed.
         from automated_security_helper.config.mcp_sandbox import (
             config_is_client_supplied,
         )

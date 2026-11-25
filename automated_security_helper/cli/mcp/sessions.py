@@ -506,7 +506,7 @@ class MCPSessionRegistry:
                 session's own id is admitted: its workspace is a session's. The
                 id names a directory that ``get_or_create`` creates and
                 ``disconnect`` removes, so it is validated here rather than
-                trusted from the caller; ``cli/mcp/session_paths.py`` holds the
+                trusted from the caller; ``config/session_paths.py`` holds the
                 component rule, shared with the other surfaces that build a
                 per-session path.
 

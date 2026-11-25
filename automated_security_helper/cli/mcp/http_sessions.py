@@ -36,7 +36,7 @@ Why per app and not process-wide
 State lives on the middleware instance, so it belongs to the app that served the
 request and ends with it. Process-wide transport state would outlive the server
 and change the answer for every later call in the process; see
-``cli/mcp/sandbox.py``.
+``config/mcp_sandbox.py``.
 
 Failure modes and limits
 ------------------------

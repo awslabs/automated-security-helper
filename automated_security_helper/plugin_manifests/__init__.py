@@ -149,6 +149,14 @@ def plugin_config_sections(
         return tuple(option_sections.REPORTER_SECTIONS)
     if kind == "converters":
         return tuple(option_sections.CONVERTER_SECTIONS)
+    if kind != "scanners":
+        # ``Literal`` is not checked at run time: a misspelled kind ("scanner",
+        # "Reporters") would otherwise be answered with the scanner rows, and
+        # the config root would be built from the wrong sections.
+        raise ValueError(
+            f"{kind!r} is not a plugin kind with config sections; expected "
+            "'scanners', 'reporters' or 'converters'"
+        )
     rows = [
         (manifest.name, manifest.config_section)
         for manifest in scanner_manifests()

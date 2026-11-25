@@ -908,7 +908,7 @@ def resolve_workspace_policy(
             discovery would run with different policy than the operator named.
         project_config_paths: Each project's own config file, where it has one.
             Used to refuse a policy file that is one of them.
-        permit_base: The MCP session's gate (``cli/mcp/sandbox.config_base_gate``),
+        permit_base: The MCP session's gate (``config.mcp_sandbox.config_base_gate``),
             or None. The file the policy path reaches must be one it permits,
             checked before the file is read, for *explicit* and for every
             candidate discovery finds.

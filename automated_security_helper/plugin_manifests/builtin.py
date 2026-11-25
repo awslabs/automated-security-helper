@@ -21,6 +21,7 @@ from automated_security_helper.base.plugin_manifest import (
     ScannerManifest,
 )
 from automated_security_helper.base.plugin_provisioning import provisioning_for
+from automated_security_helper.plugin_manifests import ManifestRegistryError
 
 _PLUGIN = "automated_security_helper.plugin_modules.ash_builtin"
 _SCANNERS = f"{_PLUGIN}.scanners"
@@ -93,6 +94,19 @@ def _builtin(
     owned = [f"{_SOURCES}/{module}.py"]
     if fixtures is not None:
         owned.append(f"tests/test_data/scanners/{fixtures}")
+    # The section's class is the options class without its ``Options`` suffix; a
+    # name that does not end so would leave the section typed by the options
+    # model itself. And a scanner with no description is named here, not as a
+    # bare KeyError from the manifest walk.
+    if not options_class.endswith("Options"):
+        raise ManifestRegistryError(
+            f"builtin scanner {name!r}: options class {options_class!r} does not "
+            "end in 'Options', so its config section class cannot be derived"
+        )
+    if name not in _SECTION_DESCRIPTIONS:
+        raise ManifestRegistryError(
+            f"builtin scanner {name!r} has no entry in _SECTION_DESCRIPTIONS"
+        )
     return ScannerManifest(
         schema_version=MANIFEST_SCHEMA_VERSION,
         name=name,

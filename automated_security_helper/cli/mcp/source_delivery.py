@@ -357,7 +357,7 @@ def _session_workspace(workspace_root: Path, session_id: str) -> Path:
 
     The session id is validated against an explicit allowlist and the joined path
     is confirmed to stay inside ``workspace_root``; see
-    ``cli/mcp/session_paths.py`` for both. That keeps the session sandbox flat, so
+    ``config/session_paths.py`` for both. That keeps the session sandbox flat, so
     one session's directory is a sibling of another's and never a parent of it.
 
     The return value is the unresolved join, unchanged from before, so a caller

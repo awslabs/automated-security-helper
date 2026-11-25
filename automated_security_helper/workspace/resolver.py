@@ -1228,7 +1228,7 @@ def _resolve_project_config(
     resolution search again, so the file the plan reports is definitionally the
     file that was loaded and the two cannot disagree.
 
-    ``permit_base`` is the MCP session's gate (``cli/mcp/sandbox.config_base_gate``),
+    ``permit_base`` is the MCP session's gate (``config.mcp_sandbox.config_base_gate``),
     or None for the CLI. It covers the config discovery finds in the project
     (``find_config_file``) and every base its ``extends`` chain names.
 
@@ -1260,7 +1260,7 @@ def _resolve_project_config(
     project, and they are not trusted either: the patched copy is a project's
     config only when the project has none, and is then checked as a file the
     client delivered, as before. A session's operator copy holds only the fields
-    the profile sets (``profile_registry.materialize_session_config``), so the
+    the profile sets (``session_profiles.materialize_session_config``), so the
     project still fills the rest.
 
     Every file the operator's config is built from must be the operator's.
@@ -2000,7 +2000,7 @@ def resolve_workspace(
             project config the operator did not set aside resolves no ``!ENV``
             (``resolve_config``). Must reach ``ProjectScanSettings.remote_client``
             too.
-        permit_base: The MCP session's gate (``cli/mcp/sandbox.config_base_gate``),
+        permit_base: The MCP session's gate (``config.mcp_sandbox.config_base_gate``),
             or None. Every config source in each project's directory, every
             base a project's chain extends, and the workspace policy file must
             resolve to a file it permits; one that is a link out is refused

@@ -12,7 +12,7 @@ workspace tools' ``config_overrides``. A client can also hand the server a whole
 config file: an upload named as a scan's ``config_path``, the ``.ash.yaml`` of a
 tree it delivered, or a project config inside a delivered workspace. Before this,
 such a file set those fields freely. Now every file of a config's chain that a
-client delivered (``cli/mcp/sandbox.config_is_client_supplied``) is checked
+client delivered (``config.mcp_sandbox.config_is_client_supplied``) is checked
 against the same rules with the same matcher,
 ``runtime_patch.config_document_denials``.
 
@@ -471,6 +471,30 @@ SHIPPED_DEFAULT_DENIED_PATHS: Tuple[FrozenSet[str], ...] = tuple(
 )
 
 
+class _OptionDefaults(Mapping[Tuple[str, str], Any]):
+    """The ``(scanner, option) -> default`` table, which cannot be changed in place.
+
+    The answer to "is this delivered value the default?" decides whether a
+    client-delivered option is allowed, so a list default must not be reachable
+    as a live object: one ``sort`` or ``append`` on it would change that answer
+    for the whole process. The table keeps its own deep copies and hands out a
+    fresh copy on every read. The values stay lists, not tuples, because the
+    comparison with a delivered value is ``==`` over JSON values.
+    """
+
+    def __init__(self, rows: Mapping[Tuple[str, str], Any]) -> None:
+        self._rows = {key: copy.deepcopy(value) for key, value in rows.items()}
+
+    def __getitem__(self, key: Tuple[str, str]) -> Any:
+        return copy.deepcopy(self._rows[key])
+
+    def __iter__(self):
+        return iter(self._rows)
+
+    def __len__(self) -> int:
+        return len(self._rows)
+
+
 #: Defaults of the denied options of scanners that come from a plugin package
 #: (betterleaks, ferret-scan, guarddog, hadolint, snyk-code, trivy-repo). The trusted config
 #: carries a built-in scanner's defaults, so a delivered value equal to one is
@@ -490,11 +514,13 @@ SHIPPED_DEFAULT_DENIED_PATHS: Tuple[FrozenSet[str], ...] = tuple(
 #: values sit beside the plugin that owns them, and read here by scanner name and
 #: option. A scanner whose plugin loads by default (``default_enabled``) declares
 #: none: the trusted config carries its section.
-PLUGIN_OPTION_DEFAULTS: Mapping[Tuple[str, str], Any] = {
-    (manifest.name, option): default
-    for manifest in scanner_manifests()
-    for option, default in manifest.denied_option_defaults.items()
-}
+PLUGIN_OPTION_DEFAULTS: Mapping[Tuple[str, str], Any] = _OptionDefaults(
+    {
+        (manifest.name, option): default
+        for manifest in scanner_manifests()
+        for option, default in manifest.denied_option_defaults.items()
+    }
+)
 
 
 class ClientConfigRules(BaseModel):
@@ -513,7 +539,7 @@ class ClientConfigRules(BaseModel):
     unreadable: Optional[str] = None
     #: The MCP session the rules were built for, or None. Its ``config/``
     #: directory, and no other session's, holds files the operator set aside for
-    #: it (``cli/mcp/sandbox.client_named_config_is_untrusted``).
+    #: it (``config.mcp_sandbox.client_named_config_is_untrusted``).
     session_id: Optional[str] = None
 
 
