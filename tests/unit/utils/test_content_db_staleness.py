@@ -1311,6 +1311,12 @@ class TestNoSecondLiteral:
         registry = {
             REPO_ROOT / "automated_security_helper" / "utils" / "content_databases.py",
             REPO_ROOT / "automated_security_helper" / "base" / "plugin_provisioning.py",
+            # The flat copy hatch_build.py stages beside tool_downloads.py (gitignored;
+            # present in any tree that has been built).
+            REPO_ROOT
+            / "automated_security_helper"
+            / "assets"
+            / "plugin_provisioning.py",
         }
         offenders = []
         for root in ("automated_security_helper", ".github", "scripts"):
