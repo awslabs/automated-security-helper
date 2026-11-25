@@ -1,0 +1,75 @@
+{
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "SecretScanner",
+          "informationUri": "https://github.com/deepfence/SecretScanner"
+        }
+      },
+      "results": [
+        {
+          "ruleId": "aws-access-key",
+          "level": "error",
+          "message": {
+            "text": "Possible secret (aws-access-key) in /app/config/settings.env of image registry.example.com/team/app:1.2.3"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {"uri": "/app/config/settings.env"}
+              }
+            }
+          ],
+          "properties": {
+            "issue_severity": "HIGH",
+            "image_name": "registry.example.com/team/app:1.2.3",
+            "secretscanner_severity": "high",
+            "image_layer_id": "layer-1"
+          }
+        },
+        {
+          "ruleId": "generic-api-key",
+          "level": "warning",
+          "message": {
+            "text": "Possible secret (generic-api-key) in /srv/app/.env of image registry.example.com/team/app:1.2.3"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {"uri": "/srv/app/.env"}
+              }
+            }
+          ],
+          "properties": {
+            "issue_severity": "MEDIUM",
+            "image_name": "registry.example.com/team/app:1.2.3",
+            "secretscanner_severity": "medium",
+            "image_layer_id": "layer-2"
+          }
+        },
+        {
+          "ruleId": "password-in-url",
+          "level": "note",
+          "message": {
+            "text": "Possible secret (password-in-url) in /etc/app/notes.txt of image registry.example.com/team/app:1.2.3"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {"uri": "/etc/app/notes.txt"}
+              }
+            }
+          ],
+          "properties": {
+            "issue_severity": "LOW",
+            "image_name": "registry.example.com/team/app:1.2.3",
+            "secretscanner_severity": "low",
+            "image_layer_id": "layer-2"
+          }
+        }
+      ]
+    }
+  ]
+}

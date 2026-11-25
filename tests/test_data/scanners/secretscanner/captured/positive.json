@@ -1,0 +1,53 @@
+{
+  "Container ID": "",
+  "IOC": [
+    {
+      "Full File Name": "/app/config/settings.env",
+      "Image Layer ID": "layer-1",
+      "Matched Part": "contents",
+      "Matched Rule Name": "aws-access-key",
+      "Severity": "high",
+      "Severity Score": 8.5,
+      "matches": [
+        {
+          "Data": "EXAMPLE-NOT-A-CREDENTIAL",
+          "Offset": 12
+        }
+      ],
+      "rule meta": []
+    },
+    {
+      "Full File Name": "/srv/app/.env",
+      "Image Layer ID": "layer-2",
+      "Matched Part": "contents",
+      "Matched Rule Name": "generic-api-key",
+      "Severity": "medium",
+      "Severity Score": 6.0,
+      "matches": [
+        {
+          "Data": "EXAMPLE-NOT-A-CREDENTIAL",
+          "Offset": 40
+        }
+      ],
+      "rule meta": []
+    },
+    {
+      "Full File Name": "/etc/app/notes.txt",
+      "Image Layer ID": "layer-2",
+      "Matched Part": "contents",
+      "Matched Rule Name": "password-in-url",
+      "Severity": "low",
+      "Severity Score": 3.0,
+      "matches": [
+        {
+          "Data": "EXAMPLE-NOT-A-CREDENTIAL",
+          "Offset": 7
+        }
+      ],
+      "rule meta": []
+    }
+  ],
+  "Image ID": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "Image Name": "registry.example.com/team/app:1.2.3",
+  "Timestamp": "2026-11-18T00:00:00Z"
+}
