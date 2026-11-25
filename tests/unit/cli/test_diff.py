@@ -57,7 +57,7 @@ def diff(tmp_path, before, after, *, json_output=True):
     baseline = write(tmp_path, "before.json", before)
     current = write(tmp_path, "after.json", after)
     options = ["--format", "json"] if json_output else []
-    return CliRunner().invoke(app, ["diff", baseline, current, *options])
+    return CliRunner().invoke(app, ["results", "diff", baseline, current, *options])
 
 
 def test_diff_distinguishes_new_absent_and_changed_findings(tmp_path):
@@ -220,7 +220,9 @@ def test_mcp_diff_preserves_its_existing_response_shape(tmp_path):
         results(finding("B103"), finding("B102", suppressed=True)),
     )
     mcp = mcp_diff_scan_results(baseline, current)
-    cli = CliRunner().invoke(app, ["diff", baseline, current, "--format", "json"])
+    cli = CliRunner().invoke(
+        app, ["results", "diff", baseline, current, "--format", "json"]
+    )
     assert cli.exit_code == 0, cli.output
     diff_json = json.loads(cli.stdout)
     assert set(mcp) == {"new", "resolved", "severity_changed"}
@@ -308,6 +310,7 @@ def test_diff_reports_input_errors_without_echoing_file_contents(tmp_path, conte
     response = CliRunner().invoke(
         app,
         [
+            "results",
             "diff",
             write(tmp_path, "before.json", results()),
             str(current),
