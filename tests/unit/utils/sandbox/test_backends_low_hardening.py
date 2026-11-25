@@ -1228,6 +1228,33 @@ def test_a_refused_profile_leaves_no_temp_directory(layout, monkeypatch):
     assert list(scratch.iterdir()) == []
 
 
+def test_sandbox_exec_gives_a_declared_variable_a_private_home_and_others_do_not(
+    layout, monkeypatch
+):
+    """Go's os.UserCacheDir reads HOME alone on macOS, so a scanner that declares
+    HOME in ``sandbox_exec_cache_env`` gets an empty directory under the results
+    directory under sandbox-exec, removed after the spawn; a scanner that declares
+    nothing keeps the HOME the policy set."""
+    monkeypatch.setattr(tempfile, "tempdir", str(layout.tmp))
+    policy = _policy(layout, sandbox_exec_cache_env=("HOME",))
+
+    plan = SandboxExecBackend().plan(["/bin/true"], {}, policy)
+    try:
+        home = Path(plan.env["HOME"])
+        assert home != layout.home
+        assert home.parent.parent == layout.results
+        assert home.is_dir() and list(home.iterdir()) == []
+    finally:
+        plan.run_cleanup()
+    assert not home.exists()
+
+    undeclared = SandboxExecBackend().plan(["/bin/true"], {}, _policy(layout))
+    try:
+        assert Path(undeclared.env["HOME"]) == layout.home
+    finally:
+        undeclared.run_cleanup()
+
+
 def test_a_refused_profile_leaves_no_cache_roots_or_unpack_directory(
     layout, monkeypatch
 ):

@@ -1977,19 +1977,9 @@ jobs:
           # sandbox-exec has no throwaway overlay and runs programs only from tool
           # paths, so on macOS each scanner's cache and unpack locations are
           # declared per scanner; this leg is what proves the declarations right.
-          #
-          # betterleaks is compared on the bwrap leg only. On this leg its binary
-          # starts, finds the secrets and exits 2, then crashes inside its embedded
-          # regular-expression engine (go-re2 over wazero) before it writes its
-          # results file, so the scan reads ERROR sandboxed and FAILED unsandboxed
-          # (run 45649178317, job 139328618433). The cause is not read yet: the
-          # denial filter below did not name betterleaks, which it now does, so the
-          # next macOS run records what sandbox-exec refused it. Until that is read
-          # and declared in the scanner's sandbox requirements, adding it here would
-          # keep this job red on a scanner whose macOS sandbox support is unmeasured.
           - os: macos-latest
             sandbox: sandbox-exec
-            betterleaks: "false"
+            betterleaks: "true"
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
