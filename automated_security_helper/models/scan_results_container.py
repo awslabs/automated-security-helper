@@ -515,19 +515,15 @@ class ScanResultsContainer(BaseModel):
         gate-failing problems on the rest reports FAILED, not ERROR.
         """
         from automated_security_helper.utils.severity_ladder import (
+            SEVERITIES,
             severity_fails_threshold,
         )
 
         counts = self.severity_counts
-        counts_by_severity = (
-            ("CRITICAL", counts.critical),
-            ("HIGH", counts.high),
-            ("MEDIUM", counts.medium),
-            ("LOW", counts.low),
-            ("INFO", counts.info),
-        )
 
-        for severity, count in counts_by_severity:
-            if count > 0 and severity_fails_threshold(severity, threshold):
+        for severity in SEVERITIES:
+            if getattr(counts, severity.lower()) > 0 and severity_fails_threshold(
+                severity, threshold
+            ):
                 return ScannerStatus.FAILED
         return ScannerStatus.PASSED

@@ -51,11 +51,30 @@ column; the cases' own text stays in Python lists beside the frame and is read b
 
 from __future__ import annotations
 
+from enum import Enum
 from typing import List, Sequence, Tuple
 
 import polars as pl
 
 from automated_security_helper.utils.frame_text import unwire, wire
+
+
+class CaseOutcome(str, Enum):
+    """What a case reports: the frame's ``outcome`` column, and the ``type`` of the
+    ``<skipped>`` element of every outcome but ``error`` and ``pass``.
+
+    One definition for the writer (the cascade below) and the reader (the
+    reporter's element builder), so a skip type a consumer selects on cannot
+    drift from the outcome that produced it.
+    """
+
+    SUPPRESSION = "suppression"
+    NOT_EVALUATED = "not-evaluated"
+    POLICY_NOT_GATING = "policy-not-gating"
+    THRESHOLD = "threshold"
+    ERROR = "error"
+    PASS = "pass"
+
 
 _SCHEMA = {
     "i": pl.Int64,
@@ -118,18 +137,18 @@ def cases_frame(
     frame = frame.with_columns(error_type.alias("error_type"))
     outcome = (
         pl.when(pl.col("in_effect"))
-        .then(pl.lit("suppression"))
+        .then(pl.lit(CaseOutcome.SUPPRESSION.value))
         .when(pl.col("not_applicable"))
-        .then(pl.lit("not-evaluated"))
+        .then(pl.lit(CaseOutcome.NOT_EVALUATED.value))
         .when(pl.col("policy_skip"))
-        .then(pl.lit("policy-not-gating"))
+        .then(pl.lit(CaseOutcome.POLICY_NOT_GATING.value))
         .when(pl.col("actionable").fill_null(False))
         .then(
             pl.when(pl.col("error_type").is_not_null())
-            .then(pl.lit("error"))
-            .otherwise(pl.lit("pass"))
+            .then(pl.lit(CaseOutcome.ERROR.value))
+            .otherwise(pl.lit(CaseOutcome.PASS.value))
         )
-        .otherwise(pl.lit("threshold"))
+        .otherwise(pl.lit(CaseOutcome.THRESHOLD.value))
     )
     return frame.with_columns(outcome.alias("outcome"))
 

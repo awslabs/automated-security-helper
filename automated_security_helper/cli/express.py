@@ -108,7 +108,7 @@ def start_daemon(
         path = runtime.socket_path()
     except runtime.ExpressUnavailable as exc:
         raise _unavailable_exit(exc) from None
-    status = client.control_request(path, {"op": "status"})
+    status = client.control_request(path, runtime.status_frame())
     if status is not None and not status.get("ok"):
         # Something answered on the socket and it was not a healthy daemon's
         # status. Starting over it would only race whatever it is; say so.
@@ -149,7 +149,7 @@ def start_daemon(
         # readiness probe (a concurrent start's winner reads as ready) and
         # this command would print success while the stale daemon still
         # served -- and every later scan still refused by it.
-        if client.control_request(path, {"op": "status"}) is not None or (
+        if client.control_request(path, runtime.status_frame()) is not None or (
             client.daemon_lock_is_held(path)
         ):
             echo(
@@ -191,7 +191,7 @@ def start_daemon(
     # daemon answers only once its warm imports finish, and a healthy one must
     # not read as unusable because it was asked too soon.
     running = client.control_request(
-        path, {"op": "status"}, timeout=runtime.HANDSHAKE_TIMEOUT_SECONDS
+        path, runtime.status_frame(), timeout=runtime.HANDSHAKE_TIMEOUT_SECONDS
     )
     if running is None and runtime.recent_retirement(path):
         echo(
@@ -226,7 +226,7 @@ def stop_daemon() -> None:
         path = runtime.socket_path()
     except runtime.ExpressUnavailable as exc:
         raise _unavailable_exit(exc) from None
-    answer = client.control_request(path, {"op": "stop"})
+    answer = client.control_request(path, runtime.stop_frame())
     if answer is None:
         if os.path.exists(path) or client.daemon_lock_is_held(path):
             # The socket file (or its daemon lock) is there and nothing
@@ -301,7 +301,7 @@ def daemon_status(
         path = runtime.socket_path()
     except runtime.ExpressUnavailable as exc:
         raise _unavailable_exit(exc) from None
-    status = client.control_request(path, {"op": "status"})
+    status = client.control_request(path, runtime.status_frame())
     if status is None:
         socket_exists = os.path.exists(path)
         if socket_exists or client.daemon_lock_is_held(path):
