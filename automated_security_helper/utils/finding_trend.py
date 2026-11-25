@@ -28,12 +28,24 @@ For the boundary *into* run ``k`` (k >= 1), comparing run ``k-1`` with run ``k``
 
 * ``new``: in run ``k`` and not paired with a finding of run ``k-1``;
 * ``carried``: in run ``k`` and paired (exactly, or moved to other lines);
-* ``fixed``: in run ``k-1`` and paired with nothing in run ``k``.
+* ``fixed``: in run ``k-1``, paired with nothing in run ``k``, and of a scanner
+  run ``k`` evaluated: the scanner looked and did not find it;
+* ``unobserved``: in run ``k-1``, paired with nothing in run ``k``, and of a
+  scanner absent from run ``k``'s ``evaluated_scanners``: nothing looked, so a
+  scanner outage is not presented as progress, in the structured counts as in
+  the boundary's warnings.
 
-A finding that goes away and comes back is ``fixed`` and then ``new`` again: its
-streak starts over. Run 0 has no boundary; its findings are counted in the run's
-own totals, and a streak that begins there is marked ``left_censored``, since the
-finding may have been open before the series starts.
+A finding that goes away and comes back is ``fixed`` (or ``unobserved``) and
+then ``new`` again: its streak starts over. Run 0 has no boundary; its findings
+are counted in the run's own totals. A streak is marked ``left_censored`` when
+the finding may have been open before its ``open_since_run``: the streak begins
+at the series' first run, or at a run whose predecessor did not evaluate the
+finding's scanner (the streak the outage cut is censored, not resumed).
+
+Suppression is part of the series' key: each series entry says whether its
+findings are suppressed, and the carried-longest list is split into ``streaks``
+(unsuppressed in the last run) and ``suppressed_streaks``, so an accepted,
+suppressed finding neither ranks among the live streaks nor hides from the data.
 
 Coverage honesty
 ----------------
@@ -78,15 +90,20 @@ if TYPE_CHECKING:
     from automated_security_helper.models.asharp_model import AshAggregatedResults
 
 #: Written into the trend's JSON; a consumer reads it before anything else.
-TREND_VERSION = 1
+#: 2 added the ``unobserved`` status, ``suppressed`` on each series entry,
+#: ``suppressed_streaks`` beside ``streaks``, sorted ``changes`` whose severity
+#: values are normalized, and ``left_censored`` for a streak that begins at a
+#: scanner outage.
+TREND_VERSION = 2
 
-STATUSES = ("new", "carried", "fixed")
+STATUSES = ("new", "carried", "fixed", "unobserved")
 
 _SERIES_SCHEMA = {
     "run": pl.Int64,
     "scanner": pl.String,
     "severity": pl.String,
     "status": pl.String,
+    "suppressed": pl.Boolean,
     "track": pl.Int64,
 }
 
@@ -246,6 +263,41 @@ def _check_series(runs: Sequence[TrendRun]) -> None:
             raise TrendRefusal(f"{run.label}: {exc}") from exc
 
 
+def longest_compatible_suffix(
+    runs: Sequence[TrendRun],
+) -> tuple[list[TrendRun], list[str]]:
+    """The longest suffix of *runs* one series can hold, and the labels cut.
+
+    *runs* are oldest first; the suffix ends at the newest run. A duplicate
+    report id or a foreign-project record refuses a whole series
+    (:func:`build_trend`), so over a recorded history one bad record blocked
+    every trend. Walking from the newest run backwards, a run that repeats a
+    kept run's id or is not the newest run's project ends the walk; it and
+    everything older are cut, and their labels come back for the caller to
+    report. The caller decides whether what is left is still a series (it can
+    be shorter than two runs).
+    """
+    runs = list(runs)
+    if not runs:
+        return [], []
+    newest = runs[-1]
+    kept = [newest]
+    seen = {newest.report_id} if newest.report_id is not None else set()
+    for run in reversed(runs[:-1]):
+        rid = run.report_id
+        if rid is not None and rid in seen:
+            break
+        try:
+            check_same_project(_project_view(newest), _project_view(run))
+        except ComparabilityRefusal:
+            break
+        if rid is not None:
+            seen.add(rid)
+        kept.append(run)
+    kept.reverse()
+    return kept, [run.label for run in runs[: len(runs) - len(kept)]]
+
+
 def _project_view(run: TrendRun) -> Any:
     """What ``check_same_project`` reads, from a record."""
     return SimpleNamespace(
@@ -264,6 +316,7 @@ class Trend:
     boundaries: list[dict[str, Any]]
     series: list[dict[str, Any]]
     streaks: list[dict[str, Any]]
+    suppressed_streaks: list[dict[str, Any]] = field(default_factory=list)
     changes: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -273,6 +326,7 @@ class Trend:
             "boundaries": self.boundaries,
             "series": self.series,
             "streaks": self.streaks,
+            "suppressed_streaks": self.suppressed_streaks,
             "changes": self.changes,
         }
 
@@ -299,7 +353,7 @@ def build_trend(runs: Sequence[TrendRun]) -> Trend:
 
     boundaries: list[dict[str, Any]] = []
     changes: list[dict[str, Any]] = []
-    series_rows: list[tuple[int, str | None, str, str, int]] = []
+    series_rows: list[tuple[int, str | None, str, str, bool, int]] = []
     for k in range(1, len(runs)):
         # The matcher reads only the attributes _Row carries; its pairs are our rows.
         match: Any = match_findings(cast(Any, rows[k - 1]), cast(Any, rows[k]))
@@ -312,13 +366,22 @@ def build_trend(runs: Sequence[TrendRun]) -> Trend:
                     wire(after.scanner),
                     _severity(after.severity),
                     "carried",
+                    after.is_suppressed,
                     track_of[k][after.index],
                 )
             )
             if _severity(before.severity) != _severity(after.severity):
+                # Normalized, as the comparison that found the change reads
+                # them: a consumer of ("high", "HIGH") saw a change whose from
+                # and to were equal under the compare that reported it.
                 changes.append(
                     _change(
-                        k, "severity", before, after, before.severity, after.severity
+                        k,
+                        "severity",
+                        before,
+                        after,
+                        _severity(before.severity),
+                        _severity(after.severity),
                     )
                 )
             if before.is_suppressed != after.is_suppressed:
@@ -340,29 +403,49 @@ def build_trend(runs: Sequence[TrendRun]) -> Trend:
                     wire(after.scanner),
                     _severity(after.severity),
                     "new",
+                    after.is_suppressed,
                     next_track,
                 )
             )
             next_track += 1
+        # A row the later run did not pair is "fixed" only when the later run's
+        # scanner coverage could have seen it: with its scanner absent from
+        # evaluated_scanners nothing looked, and the row is "unobserved".
+        evaluated_later = set(runs[k].record["coverage"]["evaluated_scanners"])
         for before in match.absent:
+            observed = before.scanner is None or before.scanner in evaluated_later
             series_rows.append(
                 (
                     k,
                     wire(before.scanner),
                     _severity(before.severity),
-                    "fixed",
+                    "fixed" if observed else "unobserved",
+                    before.is_suppressed,
                     track_of[k - 1][before.index],
                 )
             )
         boundaries.append(_boundary(k, runs[k - 1], runs[k]))
 
+    # The matcher's iteration order is no part of the contract: sorted, so two
+    # runs over one series list the same changes in the same order.
+    changes.sort(
+        key=lambda change: (
+            change["run"],
+            change["kind"],
+            change["scanner"] or "",
+            change["rule_id"] or "",
+            change["file_path"] or "",
+            change["finding_id"] or "",
+        )
+    )
     series = _series(series_rows)
-    streaks = _streaks(runs, rows, track_of)
+    streaks, suppressed_streaks = _streaks(runs, rows, track_of)
     return Trend(
         runs=[_run_entry(run, run_rows) for run, run_rows in zip(runs, rows)],
         boundaries=boundaries,
         series=series,
         streaks=streaks,
+        suppressed_streaks=suppressed_streaks,
         changes=changes,
     )
 
@@ -410,16 +493,18 @@ def _boundary(k: int, earlier: TrendRun, later: TrendRun) -> dict[str, Any]:
     }
 
 
-def _series(rows: list[tuple[int, str | None, str, str, int]]) -> list[dict[str, Any]]:
+def _series(
+    rows: list[tuple[int, str | None, str, str, bool, int]],
+) -> list[dict[str, Any]]:
     frame = pl.DataFrame(
         rows,
         schema=_SERIES_SCHEMA,
         orient="row",
     )
     counted = (
-        frame.group_by(["run", "scanner", "severity", "status"])
+        frame.group_by(["run", "scanner", "severity", "status", "suppressed"])
         .agg(pl.len().alias("count"))
-        .sort(["run", "scanner", "severity", "status"])
+        .sort(["run", "scanner", "severity", "status", "suppressed"])
     )
     return [
         {
@@ -427,16 +512,24 @@ def _series(rows: list[tuple[int, str | None, str, str, int]]) -> list[dict[str,
             "scanner": unwire(scanner) if scanner is not None else None,
             "severity": severity,
             "status": status,
+            "suppressed": suppressed,
             "count": count,
         }
-        for run, scanner, severity, status, count in counted.iter_rows()
+        for run, scanner, severity, status, suppressed, count in counted.iter_rows()
     ]
 
 
 def _streaks(
     runs: list[TrendRun], rows: list[list[_Row]], track_of: list[dict[int, int]]
-) -> list[dict[str, Any]]:
-    """Findings open in the last run that were open before it, longest first."""
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Findings open in the last run that were open before it, longest first.
+
+    Two lists: the unsuppressed streaks, and apart from them the streaks whose
+    finding is suppressed in the last run, so an accepted finding never ranks
+    among the live ones. ``left_censored`` is True when the streak may reach
+    further back than ``open_since_run``: it begins at the series' first run,
+    or at a run whose predecessor did not evaluate the finding's scanner.
+    """
     presence = pl.DataFrame(
         [(k, track) for k, tracks in enumerate(track_of) for track in tracks.values()],
         schema={"run": pl.Int64, "track": pl.Int64},
@@ -450,6 +543,7 @@ def _streaks(
     last = len(runs) - 1
     open_now = spans.filter((pl.col("last") == last) & (pl.col("runs") > 1))
     by_track = {track: (n, first) for track, n, first, _ in open_now.iter_rows()}
+    evaluated = [set(run.record["coverage"]["evaluated_scanners"]) for run in runs]
     out: list[dict[str, Any]] = []
     for row in rows[last]:
         found = by_track.get(track_of[last][row.index])
@@ -468,7 +562,10 @@ def _streaks(
                 "streak_runs": length,
                 "open_since_run": first,
                 "open_since": runs[first].label,
-                "left_censored": first == 0,
+                "left_censored": first == 0
+                or (
+                    row.scanner is not None and row.scanner not in evaluated[first - 1]
+                ),
             }
         )
     out.sort(
@@ -481,4 +578,7 @@ def _streaks(
             s["finding_id"] or "",
         )
     )
-    return out
+    return (
+        [streak for streak in out if not streak["is_suppressed"]],
+        [streak for streak in out if streak["is_suppressed"]],
+    )

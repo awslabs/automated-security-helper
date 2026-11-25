@@ -80,7 +80,7 @@ def test_trend_json_counts_each_boundary(tmp_path):
     assert response.stderr == ""
     assert "Snippet that must not appear" not in response.stdout
     payload = json.loads(response.stdout)
-    assert payload["trend_version"] == 1
+    assert payload["trend_version"] == 2
     assert [run["findings"] for run in payload["runs"]] == [2, 2, 3]
     run1 = {
         (r["severity"], r["status"]): r["count"]

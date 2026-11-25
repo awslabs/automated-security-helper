@@ -216,16 +216,140 @@ def test_the_json_form_is_versioned_and_serializable():
         results(finding("B101"), second=1), results(finding("B101"), second=2)
     )
     data = trend.to_dict()
-    assert data["trend_version"] == finding_trend.TREND_VERSION == 1
+    assert data["trend_version"] == finding_trend.TREND_VERSION == 2
     assert set(data) == {
         "trend_version",
         "runs",
         "boundaries",
         "series",
         "streaks",
+        "suppressed_streaks",
         "changes",
     }
+    assert all(row["suppressed"] is False for row in data["series"])
     json.dumps(data)
+
+
+def test_a_scanner_outage_is_unobserved_and_the_return_is_censored():
+    # Run 2 did not evaluate bandit at all: its findings are not "fixed" (nothing
+    # looked), and the streak that restarts when one returns is censored, so
+    # open_since does not read as a measured start.
+    trend = series(
+        results(finding("B101"), second=1),
+        results(second=2, scanners=("semgrep",)),
+        results(finding("B101"), second=3),
+        results(finding("B101"), second=4),
+    )
+    assert counts(trend, 1) == {("bandit", "HIGH", "unobserved"): 1}
+    assert counts(trend, 2) == {("bandit", "HIGH", "new"): 1}
+    assert counts(trend, 3) == {("bandit", "HIGH", "carried"): 1}
+    assert trend.boundaries[0]["like_for_like"] is False
+    (streak,) = trend.streaks
+    assert streak["streak_runs"] == 2
+    assert streak["open_since_run"] == 2
+    assert streak["left_censored"] is True
+
+
+def test_a_finding_an_evaluated_scanner_no_longer_reports_stays_fixed():
+    trend = series(results(finding("B101"), second=1), results(second=2))
+    assert counts(trend, 1) == {("bandit", "HIGH", "fixed"): 1}
+    (streak_entry,) = [row for row in trend.series if row["run"] == 1]
+    assert streak_entry["status"] == "fixed"
+
+
+def test_suppression_splits_the_series_and_the_streaks():
+    trend = series(
+        results(finding("B101"), finding("B102", line=20, suppressed=True), second=1),
+        results(finding("B101"), finding("B102", line=20, suppressed=True), second=2),
+    )
+    entries = {
+        (row["status"], row["suppressed"]): row["count"]
+        for row in trend.series
+        if row["run"] == 1
+    }
+    assert entries == {("carried", False): 1, ("carried", True): 1}
+    assert [s["rule_id"] for s in trend.streaks] == ["B101"]
+    assert [s["rule_id"] for s in trend.suppressed_streaks] == ["B102"]
+    assert trend.suppressed_streaks[0]["is_suppressed"] is True
+
+
+def test_changes_are_sorted_and_carry_normalized_severities():
+    trend = series(
+        results(finding("B101"), finding("B102", line=20), second=1),
+        results(
+            finding("B101", severity="low"),
+            finding("B102", line=20, suppressed=True),
+            second=2,
+        ),
+    )
+    assert [(c["kind"], c["rule_id"]) for c in trend.changes] == [
+        ("severity", "B101"),
+        ("suppression", "B102"),
+    ]
+    assert (trend.changes[0]["from"], trend.changes[0]["to"]) == ("HIGH", "LOW")
+    assert trend.changes[1]["from"] is False and trend.changes[1]["to"] is True
+
+
+def test_a_bad_record_cuts_the_history_to_the_longest_compatible_suffix():
+    from automated_security_helper.utils.finding_trend import (
+        longest_compatible_suffix,
+        run_from_record,
+    )
+
+    def record(second, project="project"):
+        return scan_history.run_record_body(
+            results(finding("B101"), second=second, project_name=project)
+        )
+
+    runs = [
+        run_from_record(record(1), "r1"),
+        run_from_record(record(2, project="other"), "r2-foreign"),
+        run_from_record(record(3), "r3"),
+        run_from_record(record(4), "r4"),
+    ]
+    kept, cut = longest_compatible_suffix(runs)
+    assert [run.label for run in kept] == ["r3", "r4"]
+    assert cut == ["r1", "r2-foreign"]
+    build_trend(kept)
+
+    duplicate = run_from_record(record(4), "r4-again")
+    kept, cut = longest_compatible_suffix([duplicate, *runs[2:]])
+    assert [run.label for run in kept] == ["r3", "r4"]
+    assert cut == ["r4-again"]
+
+    assert longest_compatible_suffix([]) == ([], [])
+
+
+def test_build_trend_statuses_equal_the_matchers_on_real_findings():
+    # The only history-vs-files parity test compared the record adapter against
+    # itself; this one pairs build_trend against match_findings over real
+    # FlatVulnerability lists, across the four shapes a boundary can hold.
+    from automated_security_helper.utils.finding_diff import match_findings
+
+    a = results(
+        finding("B101"),
+        finding("B102", line=20),
+        finding("B103", line=30),
+        second=1,
+    )
+    b = results(
+        finding("B101"),
+        finding("B102", line=25),
+        finding("B104", line=40),
+        second=2,
+    )
+    match = match_findings(a.to_flat_vulnerabilities(), b.to_flat_vulnerabilities())
+    assert len(match.new) == 1 and len(match.absent) == 1
+    assert len(match.exact) + len(match.moved) == 2
+    trend = series(a, b)
+    by_status: dict = {}
+    for row in trend.series:
+        by_status[row["status"]] = by_status.get(row["status"], 0) + row["count"]
+    assert by_status == {
+        "carried": len(match.exact) + len(match.moved),
+        "new": len(match.new),
+        "fixed": len(match.absent),
+    }
 
 
 def test_a_path_with_a_lone_surrogate_survives_the_series():
