@@ -76,7 +76,7 @@
           "symbol": "NpmAuditScanner._probe_npm_version"
         }
       ],
-      "sha256": "9aa3b69af57d29f732e752a142eef82e1d04946aa4b4afe48507074886030b79"
+      "sha256": "a10c3e78bb1dbcc51631fdcdef05022d646c1b661fee28ffd2a9581ae90c1f5e"
     },
     "automated_security_helper/plugin_modules/ash_ferret_plugins/ferret_scanner.py": {
       "created": "2026-11-25T17:03:42Z",
@@ -90,7 +90,7 @@
           "symbol": "FerretScanScanner._get_installed_version"
         }
       ],
-      "sha256": "f956a7851f1f8764d0cbf62b46545d16feff18c26bebbcc90234c4f2cb3af6b1"
+      "sha256": "52ba825f3fe7cf49f4217bda910821fe9ed1326213664cace65bef12997ce9d6"
     },
     "automated_security_helper/utils/content_db_refresh.py": {
       "created": "2026-11-25T17:03:23Z",
@@ -146,7 +146,7 @@
           "symbol": "ignore_path_pattern"
         }
       ],
-      "sha256": "414fc8003e6da907a57379d6c6d10755ab4a45077a3b19d21a0d946e6af35bc0"
+      "sha256": "0cbe22a1d0f95a09dd8951c77fc4a5929b338d88947c8203f13034ee1486e9ab"
     },
     "automated_security_helper/utils/python_installer.py": {
       "created": "2026-11-25T17:02:57Z",

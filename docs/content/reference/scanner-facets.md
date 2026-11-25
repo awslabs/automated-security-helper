@@ -11,40 +11,41 @@
 
 This page is generated from the scanner facets register in the ASH source code by `scripts/generate_facets_reference.py`. Edits made to this file by hand are overwritten the next time it is generated.
 
-ASH ships 22 scanners, and every one declares, per facet of the shared vocabulary, whether its native output maps into the shared pipeline. The register is production code (`automated_security_helper/base/scanner_facets.py`): the declaration has runtime consumers, and a scanner without one is refused by the registry totality test. The three states:
+ASH ships 22 scanners, and every one declares, per facet of the shared vocabulary, whether its native output maps into the shared pipeline. The register is production code (`automated_security_helper/base/scanner_facets.py`): the declaration has runtime consumers, and a scanner without one is refused by the registry totality test. The four states:
 
 - `mapped`: the facet lands where the shared pipeline reads it, and the cell names the native field it comes from. The corpus-consistency gate (`tests/unit/plugin_modules/test_scanner_facets_corpus_consistency.py`) holds these cells against the committed fixtures.
 - `mappable-dropped`: the native output carries the value and ASH discards it today: a roadmap record, not a promise. The cell names the native field and why it is dropped.
-- `n/a`: this scanner class cannot have the facet (or its output was not read), with the reason.
+- `n/a`: this scanner class cannot have the facet, with the reason. The corpus gate treats a populated column here as contamination.
+- `unconfirmed`: no real run of the tool has been read for the facet, so the register claims neither that it maps nor that it cannot exist. The cell says what was read instead and the run that would settle it. The corpus gate lists it as a fixture owed and fails nothing.
 
 The facet vocabulary, in declaration order: `rule_id`, `severity`, `file_path`, `line_range`, `column`, `message`, `resource_id`, `resource_type`, `package_name`, `package_version`, `package_path`, `taxonomy_cve`, `taxonomy_cwe`, `fingerprints`, `fix_available`, `remediation_text`, `snippet`, `references`, `tags`, `extras`.
 
 ## Summary
 
-| Scanner | Mapped | Mappable, dropped | Not applicable |
-|---------|--------|-------------------|----------------|
-| [`actionlint`](#actionlint) | 10 | 1 | 9 |
-| [`bandit`](#bandit) | 9 | 2 | 9 |
-| [`cdk-nag`](#cdk-nag) | 11 | 1 | 8 |
-| [`cfn-guard`](#cfn-guard) | 7 | 1 | 12 |
-| [`cfn-lint`](#cfn-lint) | 7 | 1 | 12 |
-| [`cfn-nag`](#cfn-nag) | 6 | 0 | 14 |
-| [`checkov`](#checkov) | 7 | 0 | 13 |
-| [`detect-secrets`](#detect-secrets) | 8 | 0 | 12 |
-| [`gitleaks`](#gitleaks) | 9 | 1 | 10 |
-| [`grype`](#grype) | 1 | 1 | 18 |
-| [`npm-audit`](#npm-audit) | 11 | 2 | 7 |
-| [`opengrep`](#opengrep) | 10 | 2 | 8 |
-| [`semgrep`](#semgrep) | 9 | 2 | 9 |
-| [`syft`](#syft) | 0 | 2 | 18 |
-| [`trivy`](#trivy) | 13 | 2 | 5 |
-| [`zizmor`](#zizmor) | 8 | 2 | 10 |
-| [`betterleaks`](#betterleaks) | 9 | 1 | 10 |
-| [`ferret-scan`](#ferret-scan) | 2 | 0 | 18 |
-| [`guarddog`](#guarddog) | 10 | 2 | 8 |
-| [`hadolint`](#hadolint) | 7 | 0 | 13 |
-| [`snyk-code`](#snyk-code) | 2 | 2 | 16 |
-| [`trivy-repo`](#trivy-repo) | 13 | 2 | 5 |
+| Scanner | Mapped | Mappable, dropped | Not applicable | Unconfirmed |
+|---------|--------|-------------------|----------------|-------------|
+| [`actionlint`](#actionlint) | 11 | 0 | 9 | 0 |
+| [`bandit`](#bandit) | 11 | 0 | 9 | 0 |
+| [`cdk-nag`](#cdk-nag) | 12 | 0 | 8 | 0 |
+| [`cfn-guard`](#cfn-guard) | 7 | 1 | 12 | 0 |
+| [`cfn-lint`](#cfn-lint) | 8 | 0 | 12 | 0 |
+| [`cfn-nag`](#cfn-nag) | 6 | 0 | 14 | 0 |
+| [`checkov`](#checkov) | 7 | 0 | 13 | 0 |
+| [`detect-secrets`](#detect-secrets) | 8 | 0 | 12 | 0 |
+| [`gitleaks`](#gitleaks) | 9 | 1 | 10 | 0 |
+| [`grype`](#grype) | 12 | 0 | 4 | 4 |
+| [`npm-audit`](#npm-audit) | 14 | 0 | 5 | 1 |
+| [`opengrep`](#opengrep) | 11 | 0 | 8 | 1 |
+| [`semgrep`](#semgrep) | 10 | 0 | 9 | 1 |
+| [`syft`](#syft) | 0 | 2 | 17 | 1 |
+| [`trivy`](#trivy) | 15 | 0 | 3 | 2 |
+| [`zizmor`](#zizmor) | 10 | 0 | 10 | 0 |
+| [`betterleaks`](#betterleaks) | 9 | 1 | 10 | 0 |
+| [`ferret-scan`](#ferret-scan) | 8 | 0 | 12 | 0 |
+| [`guarddog`](#guarddog) | 12 | 0 | 8 | 0 |
+| [`hadolint`](#hadolint) | 7 | 0 | 13 | 0 |
+| [`snyk-code`](#snyk-code) | 10 | 2 | 6 | 2 |
+| [`trivy-repo`](#trivy-repo) | 15 | 0 | 3 | 2 |
 
 ## `actionlint`
 
@@ -69,7 +70,7 @@ The facet vocabulary, in declaration order: `rule_id`, `severity`, `file_path`, 
 | `fix_available` | `n/a` |  | actionlint findings carry no fix data |
 | `remediation_text` | `n/a` |  | actionlint publishes the check message and no separate remediation field |
 | `snippet` | `mapped` | errors[].snippet (dropped on a line with a credentials finding, where it would hold the password) |  |
-| `references` | `mappable-dropped` | errors[].kind (ASH builds the pinned checks.md helpUri; no native URL field) | the helpUri is written at rule level only: the flat reader takes references from result relatedLocations, so the help link is discarded today |
+| `references` | `mapped` | errors[].kind (ASH builds the pinned checks.md helpUri; no native URL field), read into the flat references when the result carries no relatedLocations |  |
 | `tags` | `mapped` | errors[].kind == "credentials" (ASH writes the secret/CWE-798 tags; no native tags field) |  |
 | `extras` | `mapped` | ASH-written result properties (issue_severity and actionlint_kind, from errors[].kind); no native property bag |  |
 
@@ -96,8 +97,8 @@ The facet vocabulary, in declaration order: `rule_id`, `severity`, `file_path`, 
 | `fix_available` | `n/a` |  | bandit findings carry no fix or fixed-version data |
 | `remediation_text` | `n/a` |  | bandit publishes the issue text and a docs link, no remediation field |
 | `snippet` | `mapped` | results[].locations[].physicalLocation.region.snippet.text (settled by the M0 capture) |  |
-| `references` | `mappable-dropped` | tool.driver.rules[].helpUri | rule-level only: the flat reader takes references from result relatedLocations, so the help link is discarded today |
-| `tags` | `mappable-dropped` | tool.driver.rules[].properties.tags | rule-level only: the flat reader takes tags from result properties, so the rule tags are discarded today (they still feed the CWE read) |
+| `references` | `mapped` | tool.driver.rules[].helpUri, read into the flat references when the result carries no relatedLocations |  |
+| `tags` | `mapped` | tool.driver.rules[].properties.tags, read into the flat tags when the result carries none (they also feed the CWE read) |  |
 | `extras` | `mapped` | results[].properties (issue_confidence, issue_severity) |  |
 
 ## `cdk-nag`
@@ -123,7 +124,7 @@ The facet vocabulary, in declaration order: `rule_id`, `severity`, `file_path`, 
 | `fix_available` | `n/a` |  | nag violations carry no fix state or fixed version |
 | `remediation_text` | `n/a` |  | violation "description" states the rule, not a remediation; no remediation field exists |
 | `snippet` | `mapped` | the matched resource's template block, YAML-rendered into Region.snippet |  |
-| `references` | `mappable-dropped` | per-pack rule help URI (\_rule_help_uri, ReportingDescriptor.helpUri) | rule-level only: the flat reader takes references from result relatedLocations, so the help link is discarded today |
+| `references` | `mapped` | per-pack rule help URI (\_rule_help_uri, ReportingDescriptor.helpUri), read into the flat references when the result carries no relatedLocations |  |
 | `tags` | `mapped` | pack name, rule id, logical id and CFN type, written as PropertyBag tags |  |
 | `extras` | `mapped` | "cdk_nag_finding" and "cfn_resource" property bags (the legacy bags extract_resource_identity also reads) |  |
 
@@ -177,7 +178,7 @@ The facet vocabulary, in declaration order: `rule_id`, `severity`, `file_path`, 
 | `fix_available` | `n/a` |  | cfn-lint results carry no fix state or fixed version |
 | `remediation_text` | `n/a` |  | rule descriptions state what a rule checks, not a remediation; no remediation field exists |
 | `snippet` | `n/a` |  | the SARIF regions carry line and column only, no snippet |
-| `references` | `mappable-dropped` | driver rules[].helpUri | rule-level only: the flat reader takes references from result relatedLocations, so the help link is discarded today |
+| `references` | `mapped` | driver rules[].helpUri, read into the flat references when the result carries no relatedLocations |  |
 | `tags` | `n/a` |  | the adapter adds no tags and the SARIF rules carry none |
 | `extras` | `n/a` |  | the native results carry no property bag; the only property written is the ASH-computed issue_severity |
 
@@ -218,7 +219,7 @@ The facet vocabulary, in declaration order: `rule_id`, `severity`, `file_path`, 
 | `severity` | `mapped` | SARIF result "level" (settled by the committed checkov-3.4.6 capture; the side report's "severity" stays null without a platform key) |  |
 | `file_path` | `mapped` | check "repo_file_path", the SARIF artifact uri (rewritten by rewrite_checkov_paths) |  |
 | `line_range` | `mapped` | check "file_line_range", the SARIF region startLine/endLine |  |
-| `column` | `n/a` |  | UNCONFIRMED: the side report carries a line range only and no checkov SARIF golden is committed; one SARIF run settles whether a column is emitted |
+| `column` | `n/a` |  | the committed checkov-3.4.6 capture's six SARIF regions carry startLine, endLine and snippet only, and the side report carries a line range only |
 | `message` | `mapped` | check "check_name" |  |
 | `resource_id` | `mapped` | check "resource" (the results_json.json side report), copied onto the SARIF result by attach_checkov_resources for the frameworks in \_RESOURCE_FRAMEWORKS only | Example: `AWS::S3::Bucket.S3Bucket3` |
 | `resource_type` | `n/a` |  | the side report's resource field is one dotted string ("AWS::S3::Bucket.S3Bucket3"); no separate type field exists and splitting it would be a derivation |
@@ -227,13 +228,13 @@ The facet vocabulary, in declaration order: `rule_id`, `severity`, `file_path`, 
 | `package_path` | `n/a` |  | IaC policy checks over resources; no package exists in checkov's policy-check output |
 | `taxonomy_cve` | `n/a` |  | checkov publishes its own check ids; no CVE taxonomy in the policy-check results |
 | `taxonomy_cwe` | `n/a` |  | checkov publishes its own check ids; no CWE taxonomy in the policy-check results |
-| `fingerprints` | `n/a` |  | UNCONFIRMED: the side report carries no fingerprint and no checkov SARIF golden is committed; one SARIF run settles it |
+| `fingerprints` | `n/a` |  | none of the committed checkov-3.4.6 capture's six SARIF results carries fingerprints or partialFingerprints, and the side report carries no fingerprint |
 | `fix_available` | `n/a` |  | the side report has a fixed_definition key and it is null on every record read: 34 of 34 across terraform, cloudformation, kubernetes and dockerfile (checkov 3.4.5, an offline desk run beside the committed fixture), so no run ASH makes has shown a fix state to map; a populated record would redeclare it |
 | `remediation_text` | `n/a` |  | check_name states the finding, not a remediation; no remediation text field exists in the side report |
 | `snippet` | `mapped` | SARIF region.snippet.text (settled by the committed checkov-3.4.6 capture; the side report's "code_block" carries the same lines) |  |
 | `references` | `n/a` |  | the side report has a "guideline" key and it is null on every record of the committed capture (9 of 9, checkov 3.4.6 insecure-s3), so no run ASH makes has shown a URL to map; attach_checkov_guidelines copies a non-null guideline onto the result as a related location, which the flat references read, so a capture whose records carry one redeclares this cell MAPPED |
 | `tags` | `n/a` |  | the adapter adds no tags and the side report's "entity_tags" is null in the committed record |
-| `extras` | `n/a` |  | UNCONFIRMED: no checkov SARIF golden is committed, so whether results carry a property bag is open; one SARIF run settles it |
+| `extras` | `n/a` |  | none of the committed checkov-3.4.6 capture's six SARIF results carries a properties bag |
 
 ## `detect-secrets`
 
@@ -295,25 +296,25 @@ The facet vocabulary, in declaration order: `rule_id`, `severity`, `file_path`, 
 
 | Facet | State | Native field | Reason |
 |-------|-------|--------------|--------|
-| `rule_id` | `n/a` |  | UNCONFIRMED: the survey reads the SARIF result ruleId (the vulnerability id) off the conformance tests' presenter shape; no grype SARIF fixture from a real run is committed, so a `grype -o sarif` capture settles it |
-| `severity` | `n/a` |  | UNCONFIRMED: the survey reads the SARIF rule properties "security-severity" (CVSS), else the result "level", off the conformance tests' presenter shape; no grype SARIF fixture from a real run is committed, so a `grype -o sarif` capture settles it |
-| `file_path` | `n/a` |  | UNCONFIRMED: the survey reads SARIF locations[].physicalLocation.artifactLocation.uri (the manifest or lockfile) off the conformance tests' presenter shape; no grype SARIF fixture from a real run is committed, so a `grype -o sarif` capture settles it |
-| `line_range` | `n/a` |  | UNCONFIRMED: the survey reads SARIF region.startLine (grype always writes line 1 of the manifest) off the conformance tests' presenter shape; no grype SARIF fixture from a real run is committed, so a `grype -o sarif` capture settles it |
-| `column` | `n/a` |  | UNCONFIRMED: no grype SARIF fixture in-repo; a `grype -o sarif` run settles whether results carry a startColumn |
-| `message` | `n/a` |  | UNCONFIRMED: the survey reads SARIF result message.text off the conformance tests' presenter shape; no grype SARIF fixture from a real run is committed, so a `grype -o sarif` capture settles it |
+| `rule_id` | `mapped` | SARIF result ruleId (the vulnerability id plus the package name) |  |
+| `severity` | `mapped` | SARIF rule properties "security-severity" (CVSS), else the result "level" |  |
+| `file_path` | `mapped` | SARIF locations[].physicalLocation.artifactLocation.uri (the manifest or lockfile) |  |
+| `line_range` | `mapped` | SARIF region.startLine (grype writes line 1 of the manifest) |  |
+| `column` | `mapped` | SARIF region.startColumn / region.endColumn (always 1 in the capture, as the finding is the manifest's line 1) |  |
+| `message` | `mapped` | SARIF result message.text |  |
 | `resource_id` | `n/a` |  | LOCATOR-ONLY: grype reports packages; the only location is the manifest at line 1, a file locator and package identity (artifact.purl), not a resource with its own lifecycle |
 | `resource_type` | `n/a` |  | grype output names no resource; artifact.type is a package ecosystem (gem, npm), not a resource type |
-| `package_name` | `n/a` |  | UNCONFIRMED: the adapter parses the SARIF message "package: &lt;name&gt;, version &lt;version&gt; was found at:" (\_GRYPE_PACKAGE_MESSAGE), pinned over the conformance tests' presenter shape only; no grype SARIF fixture from a real run is committed, so a `grype -o sarif` capture settles it |
-| `package_version` | `n/a` |  | UNCONFIRMED: the adapter parses the SARIF message "package: &lt;name&gt;, version &lt;version&gt; was found at:" (\_GRYPE_PACKAGE_MESSAGE), pinned over the conformance tests' presenter shape only; no grype SARIF fixture from a real run is committed, so a `grype -o sarif` capture settles it |
-| `package_path` | `n/a` |  | UNCONFIRMED: the adapter resolves an npm lockfile entry by name and version beside the manifest (set only when exactly one copy matches), pinned over the conformance tests' presenter shape only; no grype SARIF fixture from a real run (over a committed npm tree) is committed, so a `grype -o sarif` capture settles it |
-| `taxonomy_cve` | `n/a` |  | UNCONFIRMED: the SARIF result ruleId is the vulnerability id (matches[].vulnerability.id, a CVE or GHSA id; the committed native JSON's eight matches are all GHSA ids, which the flat CVE column never reads); no grype SARIF fixture from a real run with a CVE-named match is committed, so a `grype -o sarif` capture settles it |
-| `taxonomy_cwe` | `n/a` |  | UNCONFIRMED: the committed native grype JSON (vulnerability keys advisories, cvss, dataSource, description, epss, fix, id, namespace, severity, urls) carries no CWE; a `grype -o sarif` run settles whether rule properties do |
-| `fingerprints` | `n/a` |  | UNCONFIRMED: no grype SARIF fixture in-repo; a `grype -o sarif` run settles whether results carry fingerprints or partialFingerprints |
-| `fix_available` | `n/a` |  | UNCONFIRMED: the adapter reads the SARIF rule help.text line "Fix Version: &lt;versions&gt;" (grype's rendering of matches[].vulnerability.fix.versions) and writes fix_available=True only for a non-empty list on a uniquely named rule whose Package and Version lines match the result's own message, pinned over the conformance tests' presenter shape only; no grype SARIF fixture from a real run is committed, so a `grype -o sarif` capture settles it |
-| `remediation_text` | `n/a` |  | UNCONFIRMED: not classified by the survey; the flat model has no remediation column, and matchDetails[].fix.suggestedVersion is a version, not text |
+| `package_name` | `mapped` | SARIF message "package: &lt;name&gt;, version &lt;version&gt; was found at:" parsed by \_GRYPE_PACKAGE_MESSAGE |  |
+| `package_version` | `mapped` | SARIF message "package: &lt;name&gt;, version &lt;version&gt; was found at:" parsed by \_GRYPE_PACKAGE_MESSAGE |  |
+| `package_path` | `unconfirmed` |  | UNCONFIRMED: the adapter resolves an npm lockfile entry by name and version beside the manifest (set only when exactly one copy matches), pinned over the conformance tests' presenter shape only; no grype SARIF fixture from a real run (over a committed npm tree) is committed, so a `grype -o sarif` capture settles it |
+| `taxonomy_cve` | `unconfirmed` |  | UNCONFIRMED: the SARIF result ruleId is the vulnerability id (matches[].vulnerability.id, a CVE or GHSA id; the committed native JSON's eight matches are all GHSA ids, which the flat CVE column never reads); no grype SARIF fixture from a real run with a CVE-named match is committed, so a `grype -o sarif` capture settles it |
+| `taxonomy_cwe` | `n/a` |  | the committed native grype JSON (vulnerability keys advisories, cvss, dataSource, description, epss, fix, id, namespace, severity, urls) carries no CWE, and the captured SARIF rule properties hold only purls and security-severity |
+| `fingerprints` | `mapped` | SARIF result partialFingerprints.primaryLocationLineHash (a hash of the manifest line, so findings at one manifest line share a value; 6 distinct values over 21 results in the capture) |  |
+| `fix_available` | `mapped` | the SARIF rule help.text line "Fix Version: &lt;versions&gt;" (grype's rendering of matches[].vulnerability.fix.versions); fix_available=True is written only for a non-empty list on a uniquely named rule whose Package and Version lines match the result's own message |  |
+| `remediation_text` | `unconfirmed` |  | UNCONFIRMED: not classified by the survey; the flat model has no remediation column, and matchDetails[].fix.suggestedVersion is a version, not text |
 | `snippet` | `n/a` |  | a package match has no source code snippet |
-| `references` | `mappable-dropped` | matches[].vulnerability.urls | the native urls (and relatedVulnerabilities[].urls, dataSource) are never read into references |
-| `tags` | `n/a` |  | UNCONFIRMED: the survey reads SARIF rule properties.tags off the conformance tests' presenter shape (rule-level, which the flat reader never takes as the tags column anyway); no grype SARIF fixture from a real run is committed, so a `grype -o sarif` capture settles whether results carry tags |
+| `references` | `mapped` | tool.driver.rules[].helpUri, read into the flat references by the shared rule read when the result carries none of its own | grype writes the advisory dataSource as the rule helpUri; the native match urls (matches[].vulnerability.urls, relatedVulnerabilities[].urls) are still never read |
+| `tags` | `unconfirmed` |  | UNCONFIRMED: the survey reads SARIF rule properties.tags off the conformance tests' presenter shape (rule-level, which the flat reader never takes as the tags column anyway); no grype SARIF fixture from a real run is committed, so a `grype -o sarif` capture settles whether results carry tags |
 | `extras` | `mapped` | SARIF result properties bag (package identity keys this adapter writes) passed through to the flat properties |  |
 
 ## `npm-audit`
@@ -326,7 +327,7 @@ The facet vocabulary, in declaration order: `rule_id`, `severity`, `file_path`, 
 | `severity` | `mapped` | vulnerabilities.&lt;name&gt;.via[]."severity", else the entry's "severity" |  |
 | `file_path` | `mapped` | vulnerabilities.&lt;name&gt;."nodes" (the install location, synthesized as node_modules/&lt;location&gt;/package.json) |  |
 | `line_range` | `mapped` | (no native line) the adapter writes line 1 of the synthesized manifest location on every result |  |
-| `column` | `n/a` |  | npm audit output carries no column; the adapter synthesizes 1:1, so there is no native column to map |
+| `column` | `mapped` | (no native column) the adapter writes column 1 of the synthesized manifest location on every result, beside the line_range cell's line 1 |  |
 | `message` | `mapped` | vulnerabilities.&lt;name&gt;.via[]."title" composed with the package, "range" and "url" |  |
 | `resource_id` | `n/a` |  | LOCATOR-ONLY (synthesized): the URI node_modules/&lt;loc&gt;/package.json is built from the native "nodes", an install locator; the findings are packages, not resources |
 | `resource_type` | `n/a` |  | npm audit output names no resource; findings are packages |
@@ -337,10 +338,10 @@ The facet vocabulary, in declaration order: `rule_id`, `severity`, `file_path`, 
 | `taxonomy_cwe` | `mapped` | vulnerabilities.&lt;name&gt;.via[]."cwe" (and the v1 advisory "cwe"), written as CWE-&lt;n&gt; rule tags by \_cwe_tags and kept in the result property "cwe" |  |
 | `fingerprints` | `n/a` |  | npm audit output carries no fingerprint; finding identity keys on scanner, rule and package |
 | `fix_available` | `mapped` | vulnerabilities.&lt;name&gt;."fixAvailable" |  |
-| `remediation_text` | `n/a` |  | UNCONFIRMED: not classified by the survey; the adapter writes a composed "recommendation" property, but the flat model has no remediation column to read it and npm audit's native fixAvailable is a flag or a fix object, not text |
+| `remediation_text` | `unconfirmed` |  | UNCONFIRMED: not classified by the survey; the adapter writes a composed "recommendation" property, but the flat model has no remediation column to read it and npm audit's native fixAvailable is a flag or a fix object, not text |
 | `snippet` | `n/a` |  | a package advisory has no source code snippet |
-| `references` | `mappable-dropped` | vulnerabilities.&lt;name&gt;.via[]."url" (rule helpUri) | written at rule level only: the flat reader takes references from result relatedLocations, so the advisory link is discarded today |
-| `tags` | `mappable-dropped` | rule properties.tags (ASH-composed: security, npm-audit, the severity word) | written at rule level only: the flat reader takes tags from result properties, so the rule tags are discarded today |
+| `references` | `mapped` | vulnerabilities.&lt;name&gt;.via[]."url" (rule helpUri), read into the flat references when the result carries no relatedLocations |  |
+| `tags` | `mapped` | rule properties.tags (ASH-composed: security, npm-audit, the severity word), read into the flat tags when the result carries none |  |
 | `extras` | `mapped` | result properties bag (vulnerable_versions, recommendation, severity, cwe, cvss, package identity) passed through to the flat properties |  |
 
 ## `opengrep`
@@ -366,8 +367,8 @@ The facet vocabulary, in declaration order: `rule_id`, `severity`, `file_path`, 
 | `fix_available` | `n/a` |  | opengrep 2.0.0's SARIF has no fixes key even for a rule that carries `fix:` (tests/test_data/scanners/opengrep/captured/opengrep-2.0.0-fix-rule.sarif: result keys are exactly fingerprints, locations, message, properties, ruleId), so there is nothing in the SARIF ASH reads to map |
 | `remediation_text` | `n/a` |  | rule help describes the rule, not a remediation; fixes are recorded under fix_available |
 | `snippet` | `mapped` | results[].locations[].physicalLocation.region.snippet.text |  |
-| `references` | `mappable-dropped` | tool.driver.rules[].help.markdown | rule-level only: the flat reader takes references from result relatedLocations, so the rule help is discarded today |
-| `tags` | `mappable-dropped` | tool.driver.rules[].properties.tags | rule-level only: the flat reader takes tags from result properties, so the rule tags are discarded today (they still feed the CWE read) |
+| `references` | `unconfirmed` |  | UNCONFIRMED: the committed captures' SARIF rules carry no helpUri (the rule help is help.markdown text, not a link). A rule helpUri would be read into the flat references by the shared rule read (FlatVulnerability.from_sarif_result); redeclare MAPPED when a capture carrying one is committed (the corpus gate lists this cell as a fixture owed until then) |
+| `tags` | `mapped` | tool.driver.rules[].properties.tags, read into the flat tags when the result carries none (they also feed the CWE read) |  |
 | `extras` | `mapped` | results[].properties (SARIF property bag, passed through unmodified) |  |
 
 ## `semgrep`
@@ -393,8 +394,8 @@ The facet vocabulary, in declaration order: `rule_id`, `severity`, `file_path`, 
 | `fix_available` | `n/a` |  | semgrep 1.187.0's SARIF has no fixes key even for a rule that carries `fix:` (tests/test_data/scanners/semgrep/captured/semgrep-1.187.0-fix-rule.sarif: result keys are exactly fingerprints, locations, message, properties, ruleId), so there is nothing in the SARIF ASH reads to map |
 | `remediation_text` | `n/a` |  | rule help describes the rule, not a remediation; fixes are recorded under fix_available |
 | `snippet` | `mapped` | results[].locations[].physicalLocation.region.snippet.text |  |
-| `references` | `mappable-dropped` | tool.driver.rules[].helpUri (registry rules; a local rule carries none) | rule-level only: the flat reader takes references from result relatedLocations, so the help link is discarded today |
-| `tags` | `mappable-dropped` | tool.driver.rules[].properties.tags | rule-level only: the flat reader takes tags from result properties, so the rule tags are discarded today (they still feed the CWE read) |
+| `references` | `unconfirmed` |  | UNCONFIRMED: the committed captures are local-rule runs, whose SARIF rules carry no helpUri. A registry rule's helpUri is read into the flat references by the shared rule read (FlatVulnerability.from_sarif_result); redeclare MAPPED when a registry-rule capture is committed (the corpus gate lists this cell as a fixture owed until then) |
+| `tags` | `mapped` | tool.driver.rules[].properties.tags, read into the flat tags when the result carries none (they also feed the CWE read) |  |
 | `extras` | `mapped` | results[].properties (SARIF property bag, passed through unmodified) |  |
 
 ## `syft`
@@ -413,7 +414,7 @@ The facet vocabulary, in declaration order: `rule_id`, `severity`, `file_path`, 
 | `resource_type` | `n/a` |  | no findings exist; component types (library, application) are package kinds, not resource types |
 | `package_name` | `mappable-dropped` | CycloneDX components[].name | carried in the CycloneDX document the scanner returns, outside the flat-vulnerability path: syft writes no SARIF result, so no flat row ever holds it |
 | `package_version` | `mappable-dropped` | CycloneDX components[].version | carried in the CycloneDX document the scanner returns, outside the flat-vulnerability path: syft writes no SARIF result, so no flat row ever holds it |
-| `package_path` | `n/a` |  | UNCONFIRMED: syft's native artifacts[].locations[].path (fixture syft.src.json) has a CycloneDX counterpart this adapter has not been read against; a cyclonedx-json run settles it |
+| `package_path` | `unconfirmed` |  | UNCONFIRMED: syft's native artifacts[].locations[].path (fixture syft.src.json) has a CycloneDX counterpart this adapter has not been read against; a cyclonedx-json run settles it |
 | `taxonomy_cve` | `n/a` |  | SBOM scanner: inventory only, no vulnerability matching |
 | `taxonomy_cwe` | `n/a` |  | SBOM scanner: inventory only, no vulnerability matching |
 | `fingerprints` | `n/a` |  | SBOM scanner: no findings exist to fingerprint |
@@ -442,13 +443,13 @@ The facet vocabulary, in declaration order: `rule_id`, `severity`, `file_path`, 
 | `package_version` | `mapped` | result message line 2 "Installed Version: &lt;version&gt;" (\_package_from_message) |  |
 | `package_path` | `mapped` | npm lockfile entry at the SARIF region.startLine of the result's location (one result per installed copy) |  |
 | `taxonomy_cve` | `mapped` | SARIF result ruleId (the CVE id) |  |
-| `taxonomy_cwe` | `n/a` |  | UNCONFIRMED: trivy's SARIF rules carry no CWE (tags are vulnerability, security, &lt;severity&gt;); the JSON format's CweIDs has no committed vulnerability fixture, and a `trivy fs --format json` run over a lockfile settles it |
+| `taxonomy_cwe` | `unconfirmed` |  | UNCONFIRMED: trivy's SARIF rules carry no CWE (tags are vulnerability, security, &lt;severity&gt;); the JSON format's CweIDs has no committed vulnerability fixture, and a `trivy fs --format json` run over a lockfile settles it |
 | `fingerprints` | `n/a` |  | trivy's SARIF results carry no fingerprints (result keys are level, locations, message, ruleId, ruleIndex) |
 | `fix_available` | `mapped` | message line "Fixed Version: &lt;version&gt;", written as fix_available=True when non-empty by TrivyScannerBase.\_fixed_version_from_message (an empty value writes nothing) |  |
-| `remediation_text` | `n/a` |  | UNCONFIRMED: not classified by the survey; the flat model has no remediation column, and the rule help text carries the fixed version already declared under fix_available |
+| `remediation_text` | `unconfirmed` |  | UNCONFIRMED: not classified by the survey; the flat model has no remediation column, and the rule help text carries the fixed version already declared under fix_available |
 | `snippet` | `n/a` |  | trivy's SARIF results carry no code snippet |
-| `references` | `mappable-dropped` | SARIF rule helpUri | rule-level only: the flat reader takes references from result relatedLocations, so the help link is discarded today |
-| `tags` | `mappable-dropped` | SARIF rule properties.tags | rule-level only: the flat reader takes tags from result properties, so the rule tags are discarded today (the severity word among them still feeds issue_severity) |
+| `references` | `mapped` | SARIF rule helpUri, read into the flat references by FlatVulnerability.from_sarif_result when the result carries no relatedLocations |  |
+| `tags` | `mapped` | SARIF rule properties.tags, read into the flat tags by FlatVulnerability.from_sarif_result when the result carries none (the severity word among them still feeds issue_severity) |  |
 | `extras` | `mapped` | result properties bag (issue_severity and the package identity keys this adapter writes) passed through to the flat properties |  |
 
 ## `zizmor`
@@ -474,8 +475,8 @@ The facet vocabulary, in declaration order: `rule_id`, `severity`, `file_path`, 
 | `fix_available` | `n/a` |  | zizmor findings carry no fix data in the SARIF |
 | `remediation_text` | `n/a` |  | the rule help describes the audit, not a remediation, and the result message is an annotation of the finding |
 | `snippet` | `mapped` | results[].locations[].physicalLocation.region.snippet.text |  |
-| `references` | `mappable-dropped` | tool.driver.rules[].helpUri | rule-level only: the flat reader takes references from result relatedLocations, so the help link is discarded today |
-| `tags` | `mappable-dropped` | tool.driver.rules[].properties.tags | rule-level only: the flat reader takes tags from result properties, so the rule tags are discarded today |
+| `references` | `mapped` | tool.driver.rules[].helpUri, read into the flat references when the result carries no relatedLocations |  |
+| `tags` | `mapped` | tool.driver.rules[].properties.tags, read into the flat tags when the result carries none |  |
 | `extras` | `mapped` | results[].properties ("zizmor/severity", "zizmor/confidence", "zizmor/persona"), plus the symbolic route in logicalLocations |  |
 
 ## `betterleaks`
@@ -511,12 +512,12 @@ The facet vocabulary, in declaration order: `rule_id`, `severity`, `file_path`, 
 
 | Facet | State | Native field | Reason |
 |-------|-------|--------------|--------|
-| `rule_id` | `n/a` |  | output not read: the survey reads result "ruleId" off the tests' hand-written SARIF shape, and no ferret-scan SARIF from a real run is committed; one `ferret-scan --format sarif` run over the committed samples would settle it |
-| `severity` | `n/a` |  | output not read: the survey reads result "level" (the tool's own rating) off the tests' hand-written SARIF shape, and no ferret-scan SARIF from a real run is committed; one `ferret-scan --format sarif` run would settle it |
-| `file_path` | `n/a` |  | output not read: the survey reads locations[].physicalLocation.artifactLocation.uri (uriBaseId resolved by the adapter) off the tests' hand-written SARIF shape, and no ferret-scan SARIF from a real run is committed; one `ferret-scan --format sarif` run would settle it |
-| `line_range` | `n/a` |  | output not read: the survey reads region.startLine / region.endLine off the tests' hand-written SARIF shape, and no ferret-scan SARIF from a real run is committed; one `ferret-scan --format sarif` run would settle it |
+| `rule_id` | `mapped` | result "ruleId" (the detected data type, e.g. CREDIT_CARD) |  |
+| `severity` | `mapped` | result "level" (the tool's own rating) |  |
+| `file_path` | `mapped` | locations[].physicalLocation.artifactLocation.uri (uriBaseId resolved by the adapter) |  |
+| `line_range` | `mapped` | region.startLine |  |
 | `column` | `mapped` | region.startColumn / region.endColumn |  |
-| `message` | `n/a` |  | output not read: the survey reads result "message.text" (matched values masked by the shared secret-masking pass downstream) off the tests' hand-written SARIF shape, and no ferret-scan SARIF from a real run is committed; one `ferret-scan --format sarif` run would settle it |
+| `message` | `mapped` | result "message.text" (matched values masked by the shared secret-masking pass downstream) |  |
 | `resource_id` | `n/a` |  | sensitive-data findings name a file location and a matched value, not a deployable resource; the matched value is masked downstream and is never a resource id |
 | `resource_type` | `n/a` |  | sensitive-data findings name a file location, not a deployable resource |
 | `package_name` | `n/a` |  | sensitive-data findings carry no package |
@@ -524,11 +525,11 @@ The facet vocabulary, in declaration order: `rule_id`, `severity`, `file_path`, 
 | `package_path` | `n/a` |  | sensitive-data findings carry no package |
 | `taxonomy_cve` | `n/a` |  | sensitive-data findings carry no CVE taxonomy |
 | `taxonomy_cwe` | `n/a` |  | ferret-scan results carry no CWE taxonomy |
-| `fingerprints` | `n/a` |  | UNCONFIRMED: no ferret-scan SARIF fixture is committed; one `ferret-scan --format sarif` run over a sample with a finding settles whether partialFingerprints is emitted |
+| `fingerprints` | `n/a` |  | the captured 2.5.3 SARIF (108 results over sample.txt) carries no fingerprints or partialFingerprints on any result |
 | `fix_available` | `n/a` |  | sensitive-data findings carry no fix state |
 | `remediation_text` | `n/a` |  | ferret-scan results carry no remediation text |
-| `snippet` | `n/a` |  | output not read: the survey reads region.snippet.text (matched values masked by the shared secret-masking pass downstream) off the tests' hand-written SARIF shape, and no ferret-scan SARIF from a real run is committed; one `ferret-scan --format sarif` run would settle it |
-| `references` | `n/a` |  | ferret-scan results carry no reference URLs |
+| `snippet` | `n/a` |  | the captured 2.5.3 SARIF regions carry startLine, startColumn and endColumn and no snippet, and the flat snippet column is empty across all 108 results |
+| `references` | `mapped` | tool.driver.rules[].helpUri, read into the flat references by the shared rule read when the result carries none of its own | ferret-scan results carry no reference URLs of their own; the rule-level helpUri is what the flat row carries |
 | `tags` | `n/a` |  | ferret-scan results carry no tags; the adapter attaches scanner details, not tags |
 | `extras` | `mapped` | result properties "confidenceLevel" and "validator" |  |
 
@@ -555,8 +556,8 @@ The facet vocabulary, in declaration order: `rule_id`, `severity`, `file_path`, 
 | `fix_available` | `n/a` |  | malicious-package findings carry no fix state |
 | `remediation_text` | `n/a` |  | GuardDog results carry no remediation text |
 | `snippet` | `mapped` | match "code" / risk "threat_code" |  |
-| `references` | `mappable-dropped` | rule helpUri https://github.com/DataDog/guarddog#heuristics (adapter-written, not per-heuristic) | rule-level only: the flat reader takes references from result relatedLocations, so the help link is discarded today |
-| `tags` | `mappable-dropped` | rule-level PropertyBag tags guarddog and malicious-package, written by the adapter | rule-level only: the flat reader takes tags from result properties, so the rule tags are discarded today |
+| `references` | `mapped` | rule helpUri https://github.com/DataDog/guarddog#heuristics (adapter-written, not per-heuristic), read into the flat references when the result carries no relatedLocations |  |
+| `tags` | `mapped` | rule-level PropertyBag tags guarddog and malicious-package, written by the adapter, read into the flat tags when the result carries none |  |
 | `extras` | `mapped` | extra_properties merged into the result PropertyBag (package_name and package_version in verify mode) |  |
 
 ## `hadolint`
@@ -592,25 +593,25 @@ The facet vocabulary, in declaration order: `rule_id`, `severity`, `file_path`, 
 
 | Facet | State | Native field | Reason |
 |-------|-------|--------------|--------|
-| `rule_id` | `n/a` |  | output not read: the survey reads result "ruleId" off the in-test double's shape, and no snyk SARIF from a real run is committed (M0 item e); a licensed `snyk code test --sarif` run would settle it |
-| `severity` | `n/a` |  | output not read: the survey reads result "level" (no security-severity on rules, so a bare error reads as CRITICAL) off the in-test double's shape, and no snyk SARIF from a real run is committed (M0 item e); a licensed run would settle it |
-| `file_path` | `n/a` |  | output not read: the survey reads locations[].physicalLocation.artifactLocation.uri (%SRCROOT% base) off the in-test double's shape, and no snyk SARIF from a real run is committed (M0 item e); a licensed run would settle it |
-| `line_range` | `n/a` |  | output not read: the survey reads region.startLine / region.endLine off the in-test double's shape, and no snyk SARIF from a real run is committed (M0 item e); a licensed run would settle it |
+| `rule_id` | `mapped` | result "ruleId" |  |
+| `severity` | `mapped` | result "level" (no security-severity on rules, so a bare error reads as CRITICAL) |  |
+| `file_path` | `mapped` | locations[].physicalLocation.artifactLocation.uri (%SRCROOT% base) |  |
+| `line_range` | `mapped` | region.startLine / region.endLine |  |
 | `column` | `mapped` | region.startColumn / region.endColumn |  |
-| `message` | `n/a` |  | output not read: the survey reads result "message.text" off the in-test double's shape, and no snyk SARIF from a real run is committed (M0 item e); a licensed run would settle it |
+| `message` | `mapped` | result "message.text" |  |
 | `resource_id` | `n/a` |  | pure SAST: findings are source locators, not deployable resources; the result carries a uri and a region only |
 | `resource_type` | `n/a` |  | pure SAST: findings are source locators, not deployable resources |
 | `package_name` | `n/a` |  | snyk code findings are source defects and carry no package |
 | `package_version` | `n/a` |  | snyk code findings are source defects and carry no package |
 | `package_path` | `n/a` |  | snyk code findings are source defects and carry no package |
 | `taxonomy_cve` | `n/a` |  | snyk code rules are source-defect classes, not CVEs |
-| `taxonomy_cwe` | `n/a` |  | output not read: rules' properties "cwe" (e.g. ["CWE-798"]) is normalized by normalize_rule_cwe_into_tags into the rule's tags as external/cwe/cwe-&lt;n&gt;, which the shared flat reader reads -- pinned over the in-test double's shape only, since no snyk SARIF from a real run is committed (M0 item e); a licensed run would settle it |
-| `fingerprints` | `n/a` |  | output not read: the survey reads result "fingerprints" {"0", "1"} off the in-test double's shape, and no snyk SARIF from a real run is committed (M0 item e); a licensed run would settle it |
+| `taxonomy_cwe` | `mapped` | rule properties "cwe" (e.g. ["CWE-798"]), normalized by normalize_rule_cwe_into_tags into the rule's tags as external/cwe/cwe-&lt;n&gt;, which the shared flat reader reads |  |
+| `fingerprints` | `mapped` | result "fingerprints" {"0", "1"} |  |
 | `fix_available` | `mappable-dropped` | rule properties "isAutofixable" | no flat fix_available write exists for snyk; weak signal (autofix availability, not a fixed version); UNCONFIRMED against a real tool run |
-| `remediation_text` | `n/a` |  | UNCONFIRMED: the survey classified rule help.markdown under references only; a `snyk code test --sarif` run settles whether remediation text is separate |
-| `snippet` | `n/a` |  | the survey read no snippet in the native regions; UNCONFIRMED against a real tool run |
+| `remediation_text` | `unconfirmed` |  | UNCONFIRMED: the survey classified rule help.markdown under references only; a `snyk code test --sarif` run settles whether remediation text is separate |
+| `snippet` | `unconfirmed` |  | the survey read no snippet in the native regions; UNCONFIRMED against a real tool run |
 | `references` | `mappable-dropped` | rule "help.markdown" and properties "exampleCommitFixes" | the rule help survives the SARIF model and dies at the flat reader; UNCONFIRMED against a real tool run |
-| `tags` | `n/a` |  | UNCONFIRMED: the survey records ASH-added tags, but no tag write exists in this adapter at this checkout; a `snyk code test --sarif` run through the pipeline settles it |
+| `tags` | `mapped` | tool.driver.rules[].properties.tags, read into the flat tags by the shared rule read when the result carries none of its own | no tag write exists in this adapter at this checkout; the rule-level tags are what the flat row carries |
 | `extras` | `mapped` | result and rule properties bags, passed through the SARIF model untouched |  |
 
 ## `trivy-repo`
@@ -631,11 +632,11 @@ The facet vocabulary, in declaration order: `rule_id`, `severity`, `file_path`, 
 | `package_version` | `mapped` | result message line 2 "Installed Version: &lt;version&gt;" (\_package_from_message) |  |
 | `package_path` | `mapped` | npm lockfile entry at the SARIF region.startLine of the result's location (one result per installed copy) |  |
 | `taxonomy_cve` | `mapped` | SARIF result ruleId (the CVE id) |  |
-| `taxonomy_cwe` | `n/a` |  | UNCONFIRMED: trivy's SARIF rules carry no CWE (tags are vulnerability, security, &lt;severity&gt;); the JSON format's CweIDs has no committed vulnerability fixture, and a `trivy fs --format json` run over a lockfile settles it |
+| `taxonomy_cwe` | `unconfirmed` |  | UNCONFIRMED: trivy's SARIF rules carry no CWE (tags are vulnerability, security, &lt;severity&gt;); the JSON format's CweIDs has no committed vulnerability fixture, and a `trivy fs --format json` run over a lockfile settles it |
 | `fingerprints` | `n/a` |  | trivy's SARIF results carry no fingerprints (result keys are level, locations, message, ruleId, ruleIndex) |
 | `fix_available` | `mapped` | message line "Fixed Version: &lt;version&gt;", written as fix_available=True when non-empty by TrivyScannerBase.\_fixed_version_from_message (an empty value writes nothing; ignore_unfixed defaults to true, so the tool pre-filters unfixed findings) |  |
-| `remediation_text` | `n/a` |  | UNCONFIRMED: not classified by the survey; the flat model has no remediation column, and the rule help text carries the fixed version already declared under fix_available |
+| `remediation_text` | `unconfirmed` |  | UNCONFIRMED: not classified by the survey; the flat model has no remediation column, and the rule help text carries the fixed version already declared under fix_available |
 | `snippet` | `n/a` |  | trivy's SARIF results carry no code snippet |
-| `references` | `mappable-dropped` | SARIF rule helpUri | rule-level only: the flat reader takes references from result relatedLocations, so the help link is discarded today |
-| `tags` | `mappable-dropped` | SARIF rule properties.tags | rule-level only: the flat reader takes tags from result properties, so the rule tags are discarded today (the severity word among them still feeds issue_severity) |
+| `references` | `mapped` | SARIF rule helpUri, read into the flat references by FlatVulnerability.from_sarif_result when the result carries no relatedLocations |  |
+| `tags` | `mapped` | SARIF rule properties.tags, read into the flat tags by FlatVulnerability.from_sarif_result when the result carries none (the severity word among them still feeds issue_severity) |  |
 | `extras` | `mapped` | result properties bag (issue_severity and the package identity keys this adapter writes) passed through to the flat properties |  |

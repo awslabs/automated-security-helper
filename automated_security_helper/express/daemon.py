@@ -666,11 +666,11 @@ class ExpressDaemon:
         if request is None:
             raise runtime.ExpressProtocolError("connection ended before any request")
         op = request.get("op")
-        if op == "status":
+        if op == runtime.OP_STATUS:
             runtime.send_frame(connection.sock, self._status())
             connection.close()
             return
-        if op == "stop":
+        if op == runtime.OP_STOP:
             # The pid is in the answer so the stopper can wait for this
             # process to actually exit instead of guessing with a timer.
             runtime.send_frame(
@@ -679,7 +679,7 @@ class ExpressDaemon:
             connection.close()
             self.stopping = True
             return
-        if op != "scan":
+        if op != runtime.OP_SCAN:
             runtime.send_frame(
                 connection.sock, {"ok": False, "reason": f"unknown op {op!r}"}
             )
@@ -791,7 +791,7 @@ class ExpressDaemon:
             _log(f"client went away before the scan started ({exc}); not forking")
             self._discard(connection, kill=False)
             return
-        if not isinstance(go, dict) or go.get("op") != "go":
+        if not isinstance(go, dict) or go.get("op") != runtime.OP_GO:
             _log("client never sent go after the ok; not forking")
             self._discard(connection, kill=False)
             return
@@ -1078,7 +1078,7 @@ class ExpressDaemon:
             # is told to stop rather than left running unowned.
             self._discard(connection, kill=True)
             return
-        if frame.get("op") == "signal":
+        if frame.get("op") == runtime.OP_SIGNAL:
             signum = frame.get("signum")
             if connection.child_pid is not None and signum in (
                 int(signal.SIGINT),
