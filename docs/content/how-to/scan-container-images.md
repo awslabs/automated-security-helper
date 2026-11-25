@@ -102,11 +102,12 @@ as written. Three attribution columns say which image it came from:
 | Column | Meaning |
 |---|---|
 | `image_ref` | The image as submitted: the reference, or the archive or layout path. |
-| `image_digest` | The image's sha256 digest, when the scan resolved one: the tool's own run output (trivy records the image ID), else the digest an engine answered at scan start. |
+| `image_digest` | The image's sha256 digest, when there is one: the tool's own run output (trivy records the image ID), else the digest a pinned reference (`repo@sha256:...`) states. A tag-only reference scanned by a tool that reports no digest (grype, syft) has none. |
 | `layer_digest` | The layer that introduced the finding, for a scanner that reports one. Attribution only. |
 
 A finding's id keys on the in-image path and the image's digest, or on the submitted
-reference when no digest was resolved. Two scans of one pinned image therefore agree
+reference when there is no digest. Pin the reference by digest when ids must survive a
+tag moving. Two scans of one pinned image therefore agree
 across machines and output directories, a re-tagged image that resolves to the same
 digest keeps its ids, and an image finding never shares an id with a source finding at
 the same path. The layer digest is not part of the id: a rebuilt layer that still

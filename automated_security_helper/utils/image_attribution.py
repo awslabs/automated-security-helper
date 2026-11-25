@@ -10,8 +10,9 @@ properties are the subject itself:
 
 - ``imageRef``: the locator as submitted (``ImageLocator.shown()``), always;
 - ``imageDigest``: the image's sha256 digest: the tool's own run output when it
-  names one, else the locator's ``resolved_digest`` (an engine's answer at scan
-  start, when one was asked). The executor never asks an engine itself;
+  names one, else the locator's ``resolved_digest``, else the digest a pinned
+  reference (``repo@sha256:...``) states. The executor never asks an engine
+  itself;
 - ``layerDigest``: left to the scanner. None of the wired scanners' SARIF
   output carries per-result layer digests today, so a result has one only when
   a tool (or a post-process of its plugin) wrote it; the property name is the
@@ -90,9 +91,10 @@ def mark_image_results(sarif_report: Any, image: Optional[ImageLocator]) -> int:
         return 0
     shown = image.shown()
     marked = 0
-    # The tool's own run output names the image it read; the locator's digest
-    # (an engine's answer at scan start, when one was asked) is the fallback.
-    fallback = _digest_text(image.resolved_digest)
+    # The tool's own run output names the image it read. Failing that, the
+    # locator's: an engine's resolved digest, else the digest a pinned reference
+    # (``repo@sha256:...``) states itself.
+    fallback = _digest_text(image.resolved_digest) or _digest_text(image.ref)
     for run in getattr(sarif_report, "runs", None) or []:
         digest = image_digest_of_run(run) or fallback
         for result in getattr(run, "results", None) or []:

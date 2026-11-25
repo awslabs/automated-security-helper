@@ -110,6 +110,29 @@ def test_the_locators_resolved_digest_is_the_fallback_digest():
     assert getattr(run.results[0].properties, IMAGE_DIGEST_PROPERTY) == OTHER_DIGEST
 
 
+def test_a_digest_pinned_ref_is_its_own_digest():
+    run = _run()
+    mark_image_results(
+        _Report(run), ImageLocator(ref=f"registry.example.com/team/app@{DIGEST}")
+    )
+    assert getattr(run.results[0].properties, IMAGE_DIGEST_PROPERTY) == DIGEST
+
+
+def test_a_tag_only_ref_names_no_digest():
+    run = _run()
+    mark_image_results(_Report(run), ImageLocator(ref="registry.example.com/app:1.2"))
+    assert getattr(run.results[0].properties, IMAGE_DIGEST_PROPERTY, None) is None
+
+
+def test_a_pinned_ref_and_a_tag_of_the_same_image_share_ids_when_the_run_names_the_digest():
+    pinned = _stamped(
+        _run(imageID=DIGEST),
+        ImageLocator(ref=f"registry.example.com/team/app@{DIGEST}"),
+    )
+    tagged = _stamped(_run(imageID=DIGEST), ImageLocator(ref=REF))
+    assert pinned.id == tagged.id
+
+
 def test_the_runs_own_digest_beats_the_locators():
     run = _run(imageID=DIGEST)
     mark_image_results(
