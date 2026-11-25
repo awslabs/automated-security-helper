@@ -721,6 +721,19 @@ def _directory_as_one_token(argv: List[str]) -> List[str]:
     return out
 
 
+#: Interpreters checkov can be installed into and run on. On CPython 3.15,
+#: ``json.decoder.JSONArray`` takes a required ``array_hook`` argument that
+#: checkov's ``Decoder.json_array`` (checkov/common/parsers/json/decoder.py) does
+#: not pass, so every JSON document with an array fails to parse with ``TypeError:
+#: JSONArray() missing 1 required positional argument: 'array_hook'``, and with
+#: many templates checkov's parallel runner deadlocks instead of exiting. Measured
+#: with checkov 3.4.11, the newest release in the default range: on 3.12
+#: ``json.loads('{"a": [1]}', cls=Decoder)`` parses, and on 3.15.0 it raises.
+#: uv picks the newest interpreter it can find or download, so leave 3.15 out
+#: until checkov passes the argument.
+CHECKOV_PYTHON_REQUEST = ">=3.10,<3.15"
+
+
 class CheckovScannerConfigOptions(ScannerOptionsBase):
     config_file: Annotated[
         Path | str | None,
@@ -1247,6 +1260,9 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         about 1.9 s warm (it imports its framework first), so the recorded
         version is read from the installed environment's metadata."""
         return True
+
+    def _get_tool_python_request(self) -> str | None:
+        return CHECKOV_PYTHON_REQUEST
 
     def _get_tool_version_constraint(self) -> str | None:
         """Get version constraint for checkov installation.
