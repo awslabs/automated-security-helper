@@ -814,6 +814,10 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         results_file = self.results_dir.joinpath("image", "results_sarif.sarif")
         results_file.parent.mkdir(exist_ok=True, parents=True)
         results_file.unlink(missing_ok=True)
+        # Where this run's layer pass writes trivy's JSON report
+        # (_attach_image_layers). Set per image run, and read only for one.
+        self._image_layers_json = results_file.parent / "results_layers.json"
+        self._image_layers_json.unlink(missing_ok=True)
 
         extra: List[str] = []
         extra.append(f"--timeout={trivy_timeout(self._effective_scan_timeout())}")
@@ -884,6 +888,70 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         The severity step is ``TrivyScannerBase._attach_trivy_severity``, shared
         with trivy-repo; see "Severity" above for the rule.
         """
+        if len(final_args) > 1 and final_args[1] == "image":
+            self._attach_image_layers(sarif_report, final_args)
         sarif_report = self._attach_package_identity(sarif_report, target)
         sarif_report = self._attach_misconfig_resources(sarif_report, final_args)
         return self._attach_trivy_severity(sarif_report)
+
+    def _attach_image_layers(
+        self, sarif_report: SarifReport, final_args: List[str]
+    ) -> int:
+        """Write each image result's ``layerDigest`` from trivy's JSON report.
+
+        trivy's SARIF names no layer, its JSON does, so the same invocation runs
+        once more with ``--format json`` and the two reports are joined
+        (``utils/image_layer_digests``). The extra pass is an attribution
+        read: any way it fails (no JSON option to translate, the tool failing,
+        a report that cannot be read) leaves the column empty, says so once,
+        and never fails or changes the scan. The pass reads the image the way
+        the scan did, so the layers it names are the ones the findings came
+        from. Returns the number of results given a layer digest.
+        """
+        from automated_security_helper.utils.image_layer_digests import (
+            attach_layer_digests,
+            json_argv,
+            read_layer_index,
+        )
+        from automated_security_helper.utils.offline_tool_env import (
+            with_offline_tool_environment,
+        )
+        from automated_security_helper.utils.subprocess_utils import spawn_run
+
+        json_path = getattr(self, "_image_layers_json", None)
+        argv = json_argv(final_args, json_path) if json_path is not None else None
+        if argv is None:
+            self._plugin_log(
+                "The image scan's layer attribution is skipped: the invocation "
+                "names no --format and --output to ask for trivy's JSON report.",
+                level=logging.WARNING,
+            )
+            return 0
+        env = {**snapshot_environ(), **self.extra_env} if self.extra_env else None
+        env = with_offline_tool_environment(env, self._scanner_offline())
+        try:
+            completed = spawn_run(
+                argv,
+                capture_output=True,
+                text=True,
+                timeout=self._effective_scan_timeout(),
+                check=False,
+                cwd=self._subprocess_cwd(json_path.parent),
+                env=env,
+            )
+            if completed.returncode != 0:
+                raise ScannerError(f"trivy exited {completed.returncode}")
+            index = read_layer_index(json_path)
+        except Exception as error:  # noqa: BLE001 - attribution never fails a scan
+            self._plugin_log(
+                "The image scan's layer attribution could not be read "
+                f"({type(error).__name__}); results carry no layer digest.",
+                level=logging.WARNING,
+            )
+            return 0
+        return attach_layer_digests(sarif_report, index, self._package_name)
+
+    @classmethod
+    def _package_name(cls, message: Optional[str]) -> Optional[str]:
+        """The package a trivy vulnerability message is about, or None."""
+        return cls._package_from_message(message)[0]

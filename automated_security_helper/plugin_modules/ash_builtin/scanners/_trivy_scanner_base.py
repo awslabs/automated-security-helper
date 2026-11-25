@@ -933,6 +933,10 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
     # the cache (``cache.dir``).
     _scan_config_file: Optional[str] = PrivateAttr(default=None)
 
+    # Where the image scan's second, JSON pass writes its report (trivy's SARIF
+    # names no layer, its JSON does; see utils/image_layer_digests).
+    _image_layers_json: Optional[Path] = PrivateAttr(default=None)
+
     def _environment_values(self) -> Tuple[str, ...]:
         """The configuration's environment values, plus the two input-file variables
         both trivy scanners read straight from the environment (never through the

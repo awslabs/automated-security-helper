@@ -13,10 +13,11 @@ properties are the subject itself:
   names one, else the locator's ``resolved_digest``, else the digest a pinned
   reference (``repo@sha256:...``) states. The executor never asks an engine
   itself;
-- ``layerDigest``: left to the scanner. None of the wired scanners' SARIF
-  output carries per-result layer digests today, so a result has one only when
-  a tool (or a post-process of its plugin) wrote it; the property name is the
-  contract so that one that does flows through to the flat columns.
+- ``layerDigest``: written by the scanner, not here. trivy's SARIF carries no
+  layer, so its image scan joins its JSON report (``utils/image_layer_digests``)
+  onto the results; grype and syft name none, so their results have none. The
+  property name is the contract: any tool or plugin post-process that writes it
+  flows through to the flat columns.
 
 The identity keys on the digest when there is one, else the submitted ref
 (``finding_identity``'s ``image`` argument), so two scans of one pinned image

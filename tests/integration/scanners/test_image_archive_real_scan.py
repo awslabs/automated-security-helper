@@ -80,6 +80,20 @@ def test_the_findings_carry_the_image_attribution(tmp_path, trivy_on_path):
     assert all(r.properties.imageRef == locator.shown() for r in results)
 
 
+def test_the_findings_name_the_layer_that_holds_them(tmp_path, trivy_on_path):
+    """trivy's SARIF has no layer; the JSON pass fills ``layerDigest``.
+
+    The digest is the fixture's one layer, the blob digest in the archive's own
+    manifest (tests/test_data/images/README.md describes the fixture).
+    """
+    report = _scan(tmp_path, ImageLocator(oci_archive=ARCHIVE))
+    results = [r for run in report.runs for r in run.results or []]
+    assert results
+    assert {getattr(r.properties, "layerDigest", None) for r in results} == {
+        "sha256:9fd2968b2b1e3dfa271598db3b56fb431faf5827450d945c04c335b51ae4c077"
+    }
+
+
 def test_the_archive_repacked_as_a_layout_gives_the_same_finding(
     tmp_path, trivy_on_path
 ):
