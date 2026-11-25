@@ -244,7 +244,8 @@ class TestReport:
         report = _run(_scanner(tree, tmp_path), FakeClamscan(), monkeypatch)
         for r in report.get_all_results():
             assert {"malware", "security"} <= set(r.properties.tags)
-        assert report.runs[0].tool.driver.name == "ClamAV"
+        # The base names the SARIF driver after the scanner, not the tool.
+        assert report.runs[0].tool.driver.name == "clamav"
 
     def test_results_under_ashs_output_directory_are_dropped(
         self, tree, tmp_path, monkeypatch, on_path
@@ -389,23 +390,25 @@ class TestTimeout:
 
 
 class TestDependencyCheck:
-    def test_tool_absent_is_reported_with_the_install_hint(self, monkeypatch, caplog):
+    def test_tool_absent_is_reported_with_the_install_hint(
+        self, tree, tmp_path, monkeypatch
+    ):
         monkeypatch.setattr(cs, "find_executable", lambda cmd: None)
         warnings: List[str] = []
         monkeypatch.setattr(
             cs.ASH_LOGGER, "warning", lambda m, *a, **k: warnings.append(m)
         )
-        scanner = ClamAVScanner()
+        scanner = _scanner(tree, tmp_path)
         assert scanner.validate_plugin_dependencies() is False
         assert any("freshclam" in w and "clamscan" in w for w in warnings)
 
-    def test_tool_present(self, monkeypatch):
+    def test_tool_present(self, tree, tmp_path, monkeypatch):
         monkeypatch.setattr(cs, "find_executable", lambda cmd: "/usr/bin/" + cmd)
-        assert ClamAVScanner().validate_plugin_dependencies() is True
+        assert _scanner(tree, tmp_path).validate_plugin_dependencies() is True
 
-    def test_an_unavailable_reason_wins(self, monkeypatch):
+    def test_an_unavailable_reason_wins(self, tree, tmp_path, monkeypatch):
         monkeypatch.setattr(cs, "find_executable", lambda cmd: "/usr/bin/" + cmd)
-        scanner = ClamAVScanner()
+        scanner = _scanner(tree, tmp_path)
         scanner.dependency_unavailable_reason = "refused"
         assert scanner.validate_plugin_dependencies() is False
 
@@ -475,8 +478,8 @@ class TestRegisterRows:
         assert ops.platforms.provisionable == ()
         assert ops.provenance.source is opsf.ProvenanceSource.USER_INSTALLED
 
-    def test_the_instance_matches_the_declared_tool_type(self):
-        assert ClamAVScanner().tool_type is ScannerToolType.CUSTOM
+    def test_the_instance_matches_the_declared_tool_type(self, tree, tmp_path):
+        assert _scanner(tree, tmp_path).tool_type is ScannerToolType.CUSTOM
 
 
 class TestCorpusFixtures:
