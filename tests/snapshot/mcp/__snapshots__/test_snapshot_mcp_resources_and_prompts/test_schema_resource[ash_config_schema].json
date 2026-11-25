@@ -1863,7 +1863,12 @@
         "confidence_level": {
           "anyOf": [
             {
-              "pattern": "^(all|low|medium|high)$",
+              "enum": [
+                "all",
+                "low",
+                "medium",
+                "high"
+              ],
               "type": "string"
             },
             {
