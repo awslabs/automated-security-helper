@@ -324,3 +324,72 @@ def test_the_archive_converter_skips_an_archive_below_it(test_plugin_context):
     assert converter._skipped(str(source / "app" / "bundle.zip")) is False
     # A file named vendor is not inside the directory.
     assert converter._skipped(str(source / "vendor")) is False
+
+
+class TestSlashlessDirectorySuppressions:
+    """``tests`` as a suppression path matches only a path named ``tests``, so for a
+    directory it suppressed nothing and said nothing (#894, the slashless spelling)."""
+
+    def test_a_slashless_directory_name_is_warned_about(self, tmp_path, ash_warnings):
+        (tmp_path / "tests").mkdir()
+        suppression = AshSuppression(path="tests", rule_id="R1", reason="r")
+
+        assert suppression.matches_path("tests/a.py") is False
+        suppression_matcher.warn_unmatched_directory_suppressions(
+            [suppression], used_ids=set(), source_dir=tmp_path
+        )
+
+        messages = [record.getMessage() for record in ash_warnings]
+        assert len(messages) == 1, messages
+        assert "'tests'" in messages[0]
+        assert "'tests/**/*'" in messages[0]
+
+    def test_a_nested_directory_name_is_warned_about(self, tmp_path, ash_warnings):
+        (tmp_path / "src" / "gen").mkdir(parents=True)
+        suppression = AshSuppression(path="src/gen", rule_id="R1", reason="r")
+
+        suppression_matcher.warn_unmatched_directory_suppressions(
+            [suppression], used_ids=set(), source_dir=tmp_path
+        )
+
+        assert any("'src/gen/**/*'" in r.getMessage() for r in ash_warnings)
+
+    @pytest.mark.parametrize("name", ["setup.py", "missing", "t*sts", "tests/a.py"])
+    def test_a_file_a_missing_path_or_a_glob_is_not_warned_about(
+        self, tmp_path, ash_warnings, name
+    ):
+        (tmp_path / "tests").mkdir()
+        (tmp_path / "tests" / "a.py").write_text("a\n", encoding="utf-8")
+        (tmp_path / "setup.py").write_text("a\n", encoding="utf-8")
+        suppression = AshSuppression(path=name, rule_id="R1", reason="r")
+
+        suppression_matcher.warn_unmatched_directory_suppressions(
+            [suppression], used_ids=set(), source_dir=tmp_path
+        )
+
+        assert ash_warnings == []
+
+    def test_a_used_suppression_and_a_path_outside_the_tree_are_not_warned_about(
+        self, tmp_path, ash_warnings
+    ):
+        (tmp_path / "tests").mkdir()
+        used = AshSuppression(path="tests", rule_id="R1", reason="r")
+        outside = AshSuppression(path="../tests", rule_id="R2", reason="r")
+
+        suppression_matcher.warn_unmatched_directory_suppressions(
+            [used, outside], used_ids={used.id}, source_dir=tmp_path
+        )
+
+        assert ash_warnings == []
+
+    def test_without_a_source_directory_only_the_slash_form_is_warned_about(
+        self, tmp_path, ash_warnings
+    ):
+        (tmp_path / "tests").mkdir()
+        suppression = AshSuppression(path="tests", rule_id="R1", reason="r")
+
+        suppression_matcher.warn_unmatched_directory_suppressions(
+            [suppression], used_ids=set()
+        )
+
+        assert ash_warnings == []
