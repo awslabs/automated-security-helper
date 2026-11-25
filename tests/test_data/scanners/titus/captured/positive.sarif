@@ -1,0 +1,186 @@
+{
+  "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "titus",
+          "version": "0.1.0",
+          "rules": [
+            {
+              "id": "np.generic.2",
+              "name": "Generic API Key",
+              "shortDescription": {
+                "text": ""
+              }
+            },
+            {
+              "id": "np.github.1",
+              "name": "GitHub Personal Access Token",
+              "shortDescription": {
+                "text": ""
+              },
+              "helpUri": "https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/about-authentication-to-github"
+            },
+            {
+              "id": "np.slack.2",
+              "name": "Slack Bot Token",
+              "shortDescription": {
+                "text": "A Slack Bot Token was found. An attacker could use the token to impersonate or control the corresponding Slack bot.\n"
+              },
+              "helpUri": "https://api.slack.com/authentication"
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "np.slack.2",
+          "level": "warning",
+          "message": {
+            "text": "Slack Bot Token"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "notes.txt"
+                },
+                "region": {
+                  "startLine": 1,
+                  "startColumn": 10,
+                  "endLine": 1,
+                  "endColumn": 66,
+                  "snippet": {
+                    "text": "FIXTURE-PLACEHOLDER-FOR-MATCHED-TEXT"
+                  }
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "titusLocation/v1": "a49f36e0b75916d27039f72bbae0d714df0619dd72c3331446391fc1bc1b1b0f"
+          },
+          "properties": {
+            "security-severity": "5.0",
+            "titus_score": {
+              "Final": 50,
+              "Base": 70,
+              "SuggestedSeverity": "medium",
+              "Applied": [
+                {
+                  "Name": "bot-token-prefix",
+                  "Scorer": "slack-token-scope",
+                  "Kind": "delta",
+                  "Value": 5,
+                  "Priority": 100
+                },
+                {
+                  "Name": "code-accessibility",
+                  "Scorer": "scan-context",
+                  "Kind": "delta",
+                  "Value": -25,
+                  "Priority": 0
+                }
+              ]
+            },
+            "absolute_path": "/lane/src/notes.txt"
+          }
+        },
+        {
+          "ruleId": "np.generic.2",
+          "level": "note",
+          "message": {
+            "text": "Generic API Key"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "services/settings.py"
+                },
+                "region": {
+                  "startLine": 2,
+                  "startColumn": 12,
+                  "endLine": 2,
+                  "endColumn": 65,
+                  "snippet": {
+                    "text": "FIXTURE-PLACEHOLDER-FOR-MATCHED-TEXT"
+                  }
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "titusLocation/v1": "74e30b0b85e69b27fdf93424311339dcd36f8b4f4055cbb34136e9c4beb670a1"
+          },
+          "properties": {
+            "security-severity": "2.5",
+            "titus_score": {
+              "Final": 25,
+              "Base": 50,
+              "SuggestedSeverity": "low",
+              "Applied": [
+                {
+                  "Name": "code-accessibility",
+                  "Scorer": "scan-context",
+                  "Kind": "delta",
+                  "Value": -25,
+                  "Priority": 0
+                }
+              ]
+            },
+            "absolute_path": "/lane/src/services/settings.py"
+          }
+        },
+        {
+          "ruleId": "np.github.1",
+          "level": "warning",
+          "message": {
+            "text": "GitHub Personal Access Token"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "ci.env"
+                },
+                "region": {
+                  "startLine": 1,
+                  "startColumn": 10,
+                  "endLine": 1,
+                  "endColumn": 50,
+                  "snippet": {
+                    "text": "FIXTURE-PLACEHOLDER-FOR-MATCHED-TEXT"
+                  }
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "titusLocation/v1": "10a2be5b015286d56a9a038b7e95a161897627bf7a17a6b75a60182d3d265391"
+          },
+          "properties": {
+            "security-severity": "5.0",
+            "titus_score": {
+              "Final": 50,
+              "Base": 75,
+              "SuggestedSeverity": "medium",
+              "Applied": [
+                {
+                  "Name": "code-accessibility",
+                  "Scorer": "scan-context",
+                  "Kind": "delta",
+                  "Value": -25,
+                  "Priority": 0
+                }
+              ]
+            },
+            "absolute_path": "/lane/src/ci.env"
+          }
+        }
+      ]
+    }
+  ]
+}
