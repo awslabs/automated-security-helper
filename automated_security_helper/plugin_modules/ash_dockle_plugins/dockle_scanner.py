@@ -221,10 +221,10 @@ class DockleScanner(ScannerPluginBase[DockleScannerConfig]):
             "DOCKLE_LEVEL_MAP in _post_process_sarif to HIGH, MEDIUM, LOW, INFO",
         ),
         file_path=FacetDecl(
-            state=FacetState.NA,
-            reason="the location uri is an in-image path (app/id_rsa), the word "
-            "metadata, a host note or empty (captured/positive.sarif), never a "
-            "file in the scanned tree",
+            state=FacetState.MAPPED,
+            native_field="locations[].physicalLocation.artifactLocation.uri "
+            "(an in-image path such as app/id_rsa, or the word metadata; never "
+            "a file in the scanned tree; captured/positive.sarif)",
         ),
         line_range=FacetDecl(
             state=FacetState.NA,
@@ -291,9 +291,10 @@ class DockleScanner(ScannerPluginBase[DockleScannerConfig]):
             reason="the adapter does not copy the rule help URI into the finding",
         ),
         tags=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field='result properties "tags" (empty natively); the adapter '
-            "appends container-image and security",
+            state=FacetState.NA,
+            reason="Dockle's SARIF carries no tags (0 of 10 results in "
+            "captured/*.sarif); the container-image and security tags are "
+            "added by _post_process_sarif, not read from the output",
         ),
         extras=FacetDecl(
             state=FacetState.MAPPED,
