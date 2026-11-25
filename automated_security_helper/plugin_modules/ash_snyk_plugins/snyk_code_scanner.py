@@ -378,49 +378,40 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.SKIP_OFFLINE
 
     #: The facets register row (base/scanner_facets.py). Declaration only: no
-    #: behavior changes. snyk code is a pure SARIF pass-through. UNCONFIRMED
-    #: for the whole row: no snyk SARIF fixture from a real tool run is
-    #: committed (the tests' in-test double generates the shape), so the
-    #: native fields below are the survey's reading of that shape; a
-    #: `snyk code test --sarif` run over a sample with a finding settles them.
+    #: behavior changes. snyk code is a pure SARIF pass-through. The mapped
+    #: cells below are observed by the facets corpus gate over the committed,
+    #: authored SARIF in tests/test_data/scanners/snyk/authored (the shape the
+    #: tests' in-test double generates), through the adapter's own rule-CWE
+    #: normalization. No snyk SARIF from a licensed tool run is committed, so
+    #: the native field names are the survey's reading of that shape; a
+    #: `snyk code test --sarif` capture under snyk/captured/ joins the corpus
+    #: and would show any difference.
     facets: ClassVar[ScannerFacets] = ScannerFacets(
         rule_id=FacetDecl(
-            state=FacetState.NA,
-            reason='output not read: the survey reads result "ruleId" off the '
-            "in-test double's shape, and no snyk SARIF from a real run is "
-            "committed (M0 item e); a licensed `snyk code test --sarif` run "
-            "would settle it",
+            state=FacetState.MAPPED,
+            native_field='result "ruleId"',
         ),
         severity=FacetDecl(
-            state=FacetState.NA,
-            reason='output not read: the survey reads result "level" (no '
-            "security-severity on rules, so a bare error reads as CRITICAL) "
-            "off the in-test double's shape, and no snyk SARIF from a real "
-            "run is committed (M0 item e); a licensed run would settle it",
+            state=FacetState.MAPPED,
+            native_field='result "level" (no security-severity on rules, so a '
+            "bare error reads as CRITICAL)",
         ),
         file_path=FacetDecl(
-            state=FacetState.NA,
-            reason="output not read: the survey reads locations[]."
-            "physicalLocation.artifactLocation.uri (%SRCROOT% base) off the "
-            "in-test double's shape, and no snyk SARIF from a real run is "
-            "committed (M0 item e); a licensed run would settle it",
+            state=FacetState.MAPPED,
+            native_field="locations[].physicalLocation.artifactLocation.uri "
+            "(%SRCROOT% base)",
         ),
         line_range=FacetDecl(
-            state=FacetState.NA,
-            reason="output not read: the survey reads region.startLine / "
-            "region.endLine off the in-test double's shape, and no snyk "
-            "SARIF from a real run is committed (M0 item e); a licensed run "
-            "would settle it",
+            state=FacetState.MAPPED,
+            native_field="region.startLine / region.endLine",
         ),
         column=FacetDecl(
             state=FacetState.MAPPED,
             native_field="region.startColumn / region.endColumn",
         ),
         message=FacetDecl(
-            state=FacetState.NA,
-            reason='output not read: the survey reads result "message.text" '
-            "off the in-test double's shape, and no snyk SARIF from a real "
-            "run is committed (M0 item e); a licensed run would settle it",
+            state=FacetState.MAPPED,
+            native_field='result "message.text"',
         ),
         resource_id=FacetDecl(
             state=FacetState.NA,
@@ -448,20 +439,14 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
             reason="snyk code rules are source-defect classes, not CVEs",
         ),
         taxonomy_cwe=FacetDecl(
-            state=FacetState.NA,
-            reason='output not read: rules\' properties "cwe" (e.g. '
-            '["CWE-798"]) is normalized by normalize_rule_cwe_into_tags into '
-            "the rule's tags as external/cwe/cwe-<n>, which the shared flat "
-            "reader reads -- pinned over the in-test double's shape only, "
-            "since no snyk SARIF from a real run is committed (M0 item e); a "
-            "licensed run would settle it",
+            state=FacetState.MAPPED,
+            native_field='rule properties "cwe" (e.g. ["CWE-798"]), normalized '
+            "by normalize_rule_cwe_into_tags into the rule's tags as "
+            "external/cwe/cwe-<n>, which the shared flat reader reads",
         ),
         fingerprints=FacetDecl(
-            state=FacetState.NA,
-            reason="output not read: the survey reads result "
-            '"fingerprints" {"0", "1"} off the in-test double\'s shape, and '
-            "no snyk SARIF from a real run is committed (M0 item e); a "
-            "licensed run would settle it",
+            state=FacetState.MAPPED,
+            native_field='result "fingerprints" {"0", "1"}',
         ),
         fix_available=FacetDecl(
             state=FacetState.DROPPED,
@@ -488,10 +473,12 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
             "flat reader; UNCONFIRMED against a real tool run",
         ),
         tags=FacetDecl(
-            state=FacetState.NA,
-            reason="UNCONFIRMED: the survey records ASH-added tags, but no tag "
-            "write exists in this adapter at this checkout; a "
-            "`snyk code test --sarif` run through the pipeline settles it",
+            state=FacetState.MAPPED,
+            native_field="tool.driver.rules[].properties.tags, read into the "
+            "flat tags by the shared rule read when the result carries none "
+            "of its own",
+            reason="no tag write exists in this adapter at this checkout; the "
+            "rule-level tags are what the flat row carries",
         ),
         extras=FacetDecl(
             state=FacetState.MAPPED,
@@ -548,7 +535,12 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
             ),
             platforms=opsf.PlatformsFacet(
                 provisionable=(),
-                note="the user's installed Snyk CLI; absent from TOOL_VERSIONS and the platform matrix is unread",
+                note="the user's installed Snyk CLI, absent from TOOL_VERSIONS, so ASH provisions "
+                "no platform. Adapter read: the command is the bare name `snyk` resolved on PATH "
+                "(self.command, no per-OS branch), and the one platform branch in the module is "
+                "_hold, which returns None where fcntl is missing (Windows), so a copy a Windows "
+                "run leaves behind is never swept; whether the Snyk CLI itself runs on a given "
+                "OS is the user's install",
             ),
             severity=opsf.SeverityFacet(
                 severity_class=opsf.SeverityClass.DEGRADED,

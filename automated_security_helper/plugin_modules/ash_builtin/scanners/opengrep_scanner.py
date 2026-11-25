@@ -379,17 +379,20 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
             native_field="results[].locations[].physicalLocation.region.snippet.text",
         ),
         references=FacetDecl(
-            state=FacetState.DROPPED,
-            native_field="tool.driver.rules[].help.markdown",
-            reason="rule-level only: the flat reader takes references from "
-            "result relatedLocations, so the rule help is discarded today",
+            state=FacetState.NA,
+            reason="UNCONFIRMED: the committed captures' SARIF rules carry no "
+            "helpUri (the rule help is help.markdown text, not a link). A "
+            "rule helpUri would be read into the flat references by the "
+            "shared rule read (FlatVulnerability.from_sarif_result); "
+            "redeclare MAPPED when a capture carrying one is committed (the "
+            "corpus gate fails this cell as soon as the observed column is "
+            "populated)",
         ),
         tags=FacetDecl(
-            state=FacetState.DROPPED,
-            native_field="tool.driver.rules[].properties.tags",
-            reason="rule-level only: the flat reader takes tags from result "
-            "properties, so the rule tags are discarded today (they still "
-            "feed the CWE read)",
+            state=FacetState.MAPPED,
+            native_field="tool.driver.rules[].properties.tags, read into the "
+            "flat tags when the result carries none (they also feed the CWE "
+            "read)",
         ),
         extras=FacetDecl(
             state=FacetState.MAPPED,
@@ -495,14 +498,14 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
                 ),
             ),
             prerequisites=opsf.PrerequisitesFacet(
-                kinds=(opsf.Prerequisite.GIT_CHECKOUT,),
+                kinds=(opsf.Prerequisite.NONE,),
                 note=(
-                    "opengrep runs git ls-files itself and exits 2 when git refuses the "
-                    "directory; ASH supplies safe.directory"
-                ),
-                unconfirmed=(
-                    "behavior on a tree that is not a git checkout was not read; the "
-                    "declared prerequisite is the conservative reading"
+                    "no prerequisite: opengrep 2.0.0 (the pinned release, sha256 checked) "
+                    "scanned a copy of tests/test_data/scanners/opengrep/fixture_repo with "
+                    "no .git directory and exited 0 with the one finding it reports on a "
+                    "git copy of the same files. In a git checkout it runs git ls-files "
+                    "itself and exits 2 when git refuses the directory; ASH supplies "
+                    "safe.directory"
                 ),
             ),
         )

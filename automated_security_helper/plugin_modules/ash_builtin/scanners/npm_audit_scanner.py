@@ -540,18 +540,16 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             reason="a package advisory has no source code snippet",
         ),
         references=FacetDecl(
-            state=FacetState.DROPPED,
-            native_field='vulnerabilities.<name>.via[]."url" (rule helpUri)',
-            reason="written at rule level only: the flat reader takes "
-            "references from result relatedLocations, so the advisory link "
-            "is discarded today",
+            state=FacetState.MAPPED,
+            native_field='vulnerabilities.<name>.via[]."url" (rule helpUri), '
+            "read into the flat references when the result carries no "
+            "relatedLocations",
         ),
         tags=FacetDecl(
-            state=FacetState.DROPPED,
+            state=FacetState.MAPPED,
             native_field="rule properties.tags (ASH-composed: security, "
-            "npm-audit, the severity word)",
-            reason="written at rule level only: the flat reader takes tags "
-            "from result properties, so the rule tags are discarded today",
+            "npm-audit, the severity word), read into the flat tags when the "
+            "result carries none",
         ),
         extras=FacetDecl(
             state=FacetState.MAPPED,
