@@ -38,6 +38,7 @@ from automated_security_helper.utils import (
     offline_tool_env,
     tool_downloads,
 )
+from tests.utils.helpers import importing_this_checkout
 
 pytestmark = pytest.mark.unit
 
@@ -280,7 +281,7 @@ def _fresh(imports: str, tables: str = "None") -> dict:
             "-I",
             "-B",
             "-c",
-            _PROBE.format(imports=imports, tables=tables),
+            importing_this_checkout(_PROBE.format(imports=imports, tables=tables)),
         ],
         capture_output=True,
         text=True,

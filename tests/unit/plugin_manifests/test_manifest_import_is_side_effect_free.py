@@ -22,6 +22,8 @@ import sys
 
 import pytest
 
+from tests.utils.helpers import importing_this_checkout
+
 pytestmark = pytest.mark.unit
 
 _PROBE = """
@@ -37,7 +39,13 @@ print(json.dumps({{"plugin_modules": loaded}}))
 
 def _run(imports: str) -> list[str]:
     result = subprocess.run(
-        [sys.executable, "-I", "-B", "-c", _PROBE.format(imports=imports)],
+        [
+            sys.executable,
+            "-I",
+            "-B",
+            "-c",
+            importing_this_checkout(_PROBE.format(imports=imports)),
+        ],
         capture_output=True,
         text=True,
         check=False,
