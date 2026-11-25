@@ -13,3 +13,7 @@ Direct `set_by_operator` calls left, each a different shape from the base method
 Count of direct `set_by_operator(` calls in `plugin_modules`: 8 before, 4 after (the pin test also covers the planted case).
 
 Verification: on dev-dsk-d14420e2 (`-n 8`, `env -i`), the plugin_modules, base, and hoisted-mechanism families plus the refused-settings and off-host-plugin tests ran on origin/main 84771d0aa4f and on this tip. Failing-id delta against main is 0 new failures (5 existing failures on both). The new pin test is red on main and green here.
+
+### Known difference: trivy warns once per instance
+
+The trivy `scanners` refusal used to warn on every call that saw the refused set. It now goes through `_operator_gated`, which warns once per option per instance. Warning text is unchanged; only the repetition drops. Left as is (LOW).

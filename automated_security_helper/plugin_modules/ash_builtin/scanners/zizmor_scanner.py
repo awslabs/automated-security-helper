@@ -1178,6 +1178,10 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
             return False
         # Online audits send the GitHub token in the environment to the GitHub
         # API, so only the operator can turn them on, as for config_file.
+        # No plugin context raises ScannerError here, as the direct
+        # self._plugin_context.config read did before the conversion; the base
+        # method would read a missing context as "nothing set" and refuse quietly.
+        self._plugin_context  # noqa: B018
         if not self._operator_gated(
             "scanners.zizmor.options.online_audits",
             True,
@@ -1210,6 +1214,8 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
         """
         if not self._options.honor_inline_ignores:
             return False
+        # No plugin context raises ScannerError, as before the conversion.
+        self._plugin_context  # noqa: B018
         return self._operator_gated(
             "scanners.zizmor.options.honor_inline_ignores",
             True,
