@@ -995,6 +995,7 @@ class ScanExecutionEngine:
                     self._context.config.global_settings.suppressions or [],
                     getattr(self._results, "used_suppressions", None) or (),
                     config=self._context.config,
+                    source_dir=self._context.source_dir,
                 )
             else:
                 self._results.sarif = exclude_output_dir_results(
