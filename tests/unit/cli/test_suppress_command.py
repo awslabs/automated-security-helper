@@ -220,6 +220,19 @@ class TestRoundTrip:
         result = _run("verify")
         assert result.exit_code == 0, result.output
 
+    def test_refresh_moves_a_legacy_lock_to_the_root_file(self, repo):
+        assert _add(repo).exit_code == 0
+        text = (repo / ".ash.lock").read_bytes()
+        (repo / ".ash.lock").unlink()
+        (repo / ".ash" / "ash.lock").write_bytes(text)
+
+        result = _run("refresh")
+
+        assert result.exit_code == 0, result.output
+        assert (repo / ".ash.lock").read_bytes() == text
+        assert "git rm .ash/ash.lock" in result.output
+        assert _run("verify").exit_code == 0
+
     def test_the_same_commands_on_the_same_tree_write_the_same_lock(
         self, repo, tmp_path_factory
     ):

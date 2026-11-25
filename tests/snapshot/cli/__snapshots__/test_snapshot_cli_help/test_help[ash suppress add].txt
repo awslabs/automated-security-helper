@@ -4,7 +4,7 @@
  Add a symbol suppression and lock its file's content hash.
 
  Writes the suppression into the config and the hash of the file's bytes
- into .ash/ash.lock. While the file is unchanged the suppression applies;
+ into .ash.lock. While the file is unchanged the suppression applies;
  after any edit to the file its findings are reported again until the change
  is reviewed and `ash suppress refresh` records it.
 
@@ -29,7 +29,7 @@
 │ *  --reason              <str>  Why the finding is safe to suppress. [required]                  │
 │    --config      -c      <str>  The YAML config file to write the suppression to. Defaults to    │
 │                                 the config a scan of the source directory uses.                  │
-│    --source-dir          <str>  The directory the scan covers, which holds .ash/ash.lock.        │
-│                                 Defaults to the current directory.                               │
+│    --source-dir          <str>  The directory the scan covers, which holds .ash.lock. Defaults   │
+│                                 to the current directory.                                        │
 │    --help                       Show this message and exit.                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯

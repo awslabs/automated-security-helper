@@ -2043,7 +2043,7 @@ def _symbol_resolver_for(
 ) -> SymbolResolver | None:
     """The resolver symbol suppressions are checked with, or None without any.
 
-    It carries the scan root's ``.ash/ash.lock``, so a symbol suppression whose
+    It carries the scan root's ``.ash.lock``, so a symbol suppression whose
     file changed since it was locked (or was never locked) does not apply. A
     lock that cannot be read leaves every symbol suppression inert and says why
     once: fail closed, as every other gap in a symbol check does.

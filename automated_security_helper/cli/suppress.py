@@ -1,10 +1,10 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""``ash suppress``: write symbol suppressions and keep ``.ash/ash.lock`` current.
+"""``ash suppress``: write symbol suppressions and keep ``.ash.lock`` current.
 
 ``ash suppress add`` writes a symbol-scoped suppression into a config file and
-the content hash of the file it covers into ``.ash/ash.lock`` in one operation.
+the content hash of the file it covers into ``.ash.lock`` in one operation.
 It is the supported way to create the lock entry a symbol suppression needs
 (``utils/ash_lock.py`` says why). ``ash suppress refresh`` records a new review
 of files whose bytes changed, and ``ash suppress verify`` exits non-zero when
@@ -18,6 +18,7 @@ import typer
 import yaml
 
 from automated_security_helper.utils.ash_lock import (
+    LEGACY_LOCK_RELATIVE_PATH,
     LOCK_RELATIVE_PATH,
     REFRESH_COMMAND,
     AshLock,
@@ -45,7 +46,7 @@ suppress_app = typer.Typer(
 )
 
 _SOURCE_DIR_HELP = (
-    "The directory the scan covers, which holds .ash/ash.lock. Defaults to the "
+    "The directory the scan covers, which holds .ash.lock. Defaults to the "
     "current directory."
 )
 
@@ -67,6 +68,19 @@ def _load_lock(root: Path) -> AshLock:
         return AshLock.load(root)
     except AshLockError as e:
         _fail(str(e))
+
+
+def _note_legacy(lock: AshLock) -> None:
+    """After a save: the lock now lives at ``.ash.lock``; say what to do with the
+    legacy file it was read from, which is left in place."""
+    if lock.from_legacy:
+        echo(
+            shown_on_one_line(
+                f"The lock was read from the deprecated {LEGACY_LOCK_RELATIVE_PATH} "
+                f"and written to {LOCK_RELATIVE_PATH}. Remove the old file with "
+                f"`git rm {LEGACY_LOCK_RELATIVE_PATH}`."
+            )
+        )
 
 
 def _key_for(root: Path, path: str) -> str:
@@ -165,7 +179,7 @@ def add(
     """Add a symbol suppression and lock its file's content hash.
 
     Writes the suppression into the config and the hash of the file's bytes
-    into .ash/ash.lock. While the file is unchanged the suppression applies;
+    into .ash.lock. While the file is unchanged the suppression applies;
     after any edit to the file its findings are reported again until the change
     is reviewed and `ash suppress refresh` records it.
 
@@ -248,6 +262,7 @@ def add(
             f"Locked {key} at sha256 {entry.sha256[:12]} in {LOCK_RELATIVE_PATH}"
         )
     )
+    _note_legacy(lock)
 
 
 @suppress_app.command(name="refresh")
@@ -295,11 +310,12 @@ def refresh(
             echo(shown_on_one_line(f"refreshed: {key} {old[:12]} -> {new[:12]}"))
         else:
             echo(shown_on_one_line(f"unchanged: {key}"))
-    if changed:
+    if changed or lock.from_legacy:
         try:
             lock.save()
         except OSError as e:
             _fail(f"the lock was not written ({type(e).__name__})")
+        _note_legacy(lock)
     echo(
         f"{changed} refreshed, {len(keys) - changed - missing} unchanged, {missing} missing"
     )

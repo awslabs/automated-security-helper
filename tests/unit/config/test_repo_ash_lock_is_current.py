@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""This repository's own ``.ash/ash.lock`` covers every symbol suppression and is current.
+"""This repository's own ``.ash.lock`` covers every symbol suppression and is current.
 
 Why this exists
 ---------------

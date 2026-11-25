@@ -386,7 +386,7 @@ _CONTAINER_ENV_DIR = (
     "(the function refuses one inside either), the file created with O_EXCL at 0600"
 )
 _ASH_LOCK = (
-    "the repository's own .ash/ash.lock, written by `ash suppress`: a staging file "
+    "the repository's own .ash.lock, written by `ash suppress`: a staging file "
     "beside it, renamed over it in one step"
 )
 _MCP_SESSION_WORKSPACE = (

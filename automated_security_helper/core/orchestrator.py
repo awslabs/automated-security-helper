@@ -162,7 +162,7 @@ def resolve_scan_config(
         remote_client=remote_client,
     )
     # A symbol-scoped suppression is bound to its file's content hash in
-    # .ash/ash.lock; one whose file has no entry is refused here, as any other
+    # .ash.lock; one whose file has no entry is refused here, as any other
     # invalid configuration is (utils/ash_lock.py).
     global_settings = getattr(config, "global_settings", None)
     refuse_unlocked_symbol_suppressions(

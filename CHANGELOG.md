@@ -75,7 +75,7 @@
 
 ### Features
 
-- **Symbol suppressions are bound to their file's content hash in `.ash/ash.lock`.**
+- **Symbol suppressions are bound to their file's content hash in `.ash.lock`.**
   A symbol-scoped suppression whose file has no lock entry is refused when the config is
   validated (`ash scan`, `ash config validate`), with a message that names the command to
   run. When a locked file's bytes change, its symbol suppressions stop applying, their
@@ -83,7 +83,10 @@
   `ash suppress refresh`. The new `ash suppress add`, `refresh` and `verify` commands
   write the suppression and its lock entry together, record a reviewed change, and fail
   CI when the lock is out of date. Line-range suppressions are unchanged. This
-  repository's own symbol suppressions are locked in the same change. See
+  repository's own symbol suppressions are locked in the same change. The lock is the
+  root dotfile `.ash.lock`; a lock still at `.ash/ash.lock` is read with a deprecation
+  warning (deprecated in v3.9, removed in v4.0) and rewritten to `.ash.lock` by
+  `ash suppress add` or `refresh`. See
   [Lock a symbol suppression to its file](docs/content/how-to/suppress-findings.md#lock).
 - **`default_scanners` sets the default scanners in a trusted config.** `only`
   replaces a mode's default selection in every mode and `add` extends a fixed one such as

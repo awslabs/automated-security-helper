@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""``.ash/ash.lock``: the content hash a symbol-scoped suppression is bound to.
+"""``.ash.lock``: the content hash a symbol-scoped suppression is bound to.
 
 A symbol suppression keeps covering a definition wherever edits move it, which
 is its strength and its risk: the definition can be rewritten and the old
@@ -56,9 +56,20 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from automated_security_helper.core.exceptions import ASHConfigValidationError
+from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
 
-#: The lock's place, relative to the scan root.
-LOCK_RELATIVE_PATH = ".ash/ash.lock"
+#: The lock's place, relative to the scan root: a dotfile at the repository root,
+#: beside ``.ash.yaml``.
+LOCK_RELATIVE_PATH = ".ash.lock"
+
+#: Where the lock was first written. Still read, with a deprecation warning, when
+#: ``.ash.lock`` does not exist; never written. Deprecated since v3.9, removed in
+#: v4.0, as the other renamed config paths are.
+LEGACY_LOCK_RELATIVE_PATH = ".ash/ash.lock"
+
+#: The legacy locations already warned about in this process, so a scan that loads
+#: the lock for each file it checks says it once.
+_LEGACY_WARNED: set[str] = set()
 
 #: The lock format version this module reads and writes.
 LOCK_VERSION = 1
@@ -149,18 +160,29 @@ def file_sha256(source_dir: Path, key: str) -> Optional[str]:
 
 @dataclass
 class AshLock:
-    """The parsed ``.ash/ash.lock`` of one scan root."""
+    """The parsed ``.ash.lock`` of one scan root."""
 
     source_dir: Path
     entries: Dict[str, LockEntry] = field(default_factory=dict)
+    #: True when the entries were read from the legacy ``.ash/ash.lock``. The
+    #: next ``save`` writes ``.ash.lock``; the legacy file is left as it is.
+    from_legacy: bool = False
 
     @property
     def path(self) -> Path:
+        """The file ``save`` writes: always ``.ash.lock``."""
         return Path(self.source_dir) / LOCK_RELATIVE_PATH
+
+    @property
+    def legacy_path(self) -> Path:
+        return Path(self.source_dir) / LEGACY_LOCK_RELATIVE_PATH
 
     @classmethod
     def load(cls, source_dir: Path | str) -> "AshLock":
         """Read the lock of ``source_dir``; a missing file is an empty lock.
+
+        ``.ash.lock`` wins. Only when it does not exist is the legacy
+        ``.ash/ash.lock`` read, with a deprecation warning (once per process).
 
         Raises:
             AshLockError: the file exists and cannot be used. A broken lock is
@@ -169,18 +191,33 @@ class AshLock:
         """
         root = Path(source_dir)
         lock = cls(source_dir=root)
+        shown = LOCK_RELATIVE_PATH
         path = lock.path
+        if not path.exists() and lock.legacy_path.exists():
+            path = lock.legacy_path
+            shown = LEGACY_LOCK_RELATIVE_PATH
+            lock.from_legacy = True
+            key = str(root.resolve())
+            if key not in _LEGACY_WARNED:
+                _LEGACY_WARNED.add(key)
+                ASH_LOGGER.warning(
+                    f"{LEGACY_LOCK_RELATIVE_PATH} is deprecated since v3.9 and "
+                    f"will not be read from v4.0. Move it with "
+                    f"`git mv {LEGACY_LOCK_RELATIVE_PATH} {LOCK_RELATIVE_PATH}`, "
+                    f"or run `{REFRESH_COMMAND}`, which writes {LOCK_RELATIVE_PATH}.",
+                    extra=NO_MARKUP,
+                )
         try:
             raw = path.read_bytes()
         except FileNotFoundError:
             return lock
         except OSError as e:
-            raise AshLockError(f"{LOCK_RELATIVE_PATH} cannot be read: {e}") from None
+            raise AshLockError(f"{shown} cannot be read: {e}") from None
         try:
             document = json.loads(raw.decode("utf-8"))
         except (UnicodeDecodeError, ValueError):
-            raise AshLockError(f"{LOCK_RELATIVE_PATH} is not valid JSON") from None
-        lock.entries = _entries_of(document)
+            raise AshLockError(f"{shown} is not valid JSON") from None
+        lock.entries = _entries_of(document, shown)
         return lock
 
     def to_text(self) -> str:
@@ -266,18 +303,17 @@ class AshLock:
         return found
 
 
-def _entries_of(document: Any) -> Dict[str, LockEntry]:
+def _entries_of(document: Any, where: str = LOCK_RELATIVE_PATH) -> Dict[str, LockEntry]:
+    """The entries of a parsed lock; ``where`` names the file in a refusal."""
     if not isinstance(document, dict) or document.get("version") != LOCK_VERSION:
-        raise AshLockError(
-            f"{LOCK_RELATIVE_PATH} is not a version {LOCK_VERSION} lock file"
-        )
+        raise AshLockError(f"{where} is not a version {LOCK_VERSION} lock file")
     files = document.get("files")
     if not isinstance(files, dict):
-        raise AshLockError(f"{LOCK_RELATIVE_PATH} has no 'files' mapping")
+        raise AshLockError(f"{where} has no 'files' mapping")
     entries: Dict[str, LockEntry] = {}
     for key, raw in files.items():
         if lock_key(key) != key or not isinstance(raw, dict):
-            raise AshLockError(f"{LOCK_RELATIVE_PATH} has a malformed entry for a file")
+            raise AshLockError(f"{where} has a malformed entry for a file")
         digest = raw.get("sha256")
         created = raw.get("created")
         scopes = raw.get("scopes", [])
@@ -287,7 +323,7 @@ def _entries_of(document: Any) -> Dict[str, LockEntry]:
             or not isinstance(created, str)
             or not isinstance(scopes, list)
         ):
-            raise AshLockError(f"{LOCK_RELATIVE_PATH} has a malformed entry for {key}")
+            raise AshLockError(f"{where} has a malformed entry for {key}")
         parsed: List[LockScope] = []
         for scope in scopes:
             if (
@@ -295,9 +331,7 @@ def _entries_of(document: Any) -> Dict[str, LockEntry]:
                 or not isinstance(scope.get("symbol"), str)
                 or not isinstance(scope.get("rule_id", ""), str)
             ):
-                raise AshLockError(
-                    f"{LOCK_RELATIVE_PATH} has a malformed scope for {key}"
-                )
+                raise AshLockError(f"{where} has a malformed scope for {key}")
             parsed.append(LockScope(scope.get("rule_id", ""), scope["symbol"]))
         entries[key] = LockEntry(sha256=digest, created=created, scopes=sorted(parsed))
     return entries

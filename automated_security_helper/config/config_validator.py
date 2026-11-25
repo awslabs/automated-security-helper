@@ -4328,7 +4328,7 @@ class ConfigValidator:
             if module_check_failure is not None:
                 result.warnings.append(module_check_failure)
 
-        # A symbol-scoped suppression needs a file entry in .ash/ash.lock, as a
+        # A symbol-scoped suppression needs a file entry in .ash.lock, as a
         # scan requires (core/orchestrator.resolve_scan_config). Judged on the
         # config the model built, relative to the directory a scan would scan.
         if refused is None and built is not None and source_dir is not None:

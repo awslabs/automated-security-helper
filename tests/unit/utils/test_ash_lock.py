@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""``.ash/ash.lock`` binds a symbol suppression to its file's content hash.
+"""``.ash.lock`` binds a symbol suppression to its file's content hash.
 
 Why this exists
 ---------------
@@ -48,7 +48,9 @@ from automated_security_helper.schemas.sarif_schema_model import (
     ToolComponent,
 )
 from automated_security_helper.utils import symbol_spans
+from automated_security_helper.utils import ash_lock as ash_lock_module
 from automated_security_helper.utils.ash_lock import (
+    LEGACY_LOCK_RELATIVE_PATH,
     LOCK_RELATIVE_PATH,
     AshLock,
     AshLockError,
@@ -230,7 +232,7 @@ class TestRefusalWithoutALockEntry:
     def test_a_damaged_lock_is_refused_not_read_as_empty(self, tmp_path):
         root = _tree(tmp_path)
         lock_path = root / LOCK_RELATIVE_PATH
-        lock_path.parent.mkdir(parents=True)
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
         lock_path.write_text("{not json", encoding="utf-8")
         with pytest.raises(AshLockError):
             AshLock.load(root)
@@ -374,3 +376,66 @@ class TestLockFile:
         (root / "src" / "app.py").write_text(SOURCE + "# edit\n", encoding="utf-8")
         with pytest.raises(AshLockError, match="ash suppress refresh"):
             lock.bind("src/app.py", LockScope("B602", "other"))
+
+
+def _legacy_lock(root: Path) -> bytes:
+    """A lock written where v3.8-era commands wrote it, .ash/ash.lock."""
+    lock = _lock(root, LockScope("B602", "risky"))
+    text = lock.to_text().encode("utf-8")
+    (root / LOCK_RELATIVE_PATH).unlink()
+    legacy = root / LEGACY_LOCK_RELATIVE_PATH
+    legacy.parent.mkdir(parents=True, exist_ok=True)
+    legacy.write_bytes(text)
+    return text
+
+
+class TestTheLockIsTheRootDotfile:
+    def test_the_lock_is_written_at_the_root_and_not_under_dot_ash(self, tmp_path):
+        root = _tree(tmp_path)
+        _lock(root, LockScope("B602", "risky"))
+        assert LOCK_RELATIVE_PATH == ".ash.lock"
+        assert (root / ".ash.lock").is_file()
+        assert not (root / ".ash" / "ash.lock").exists()
+
+    def test_a_legacy_lock_is_still_read_with_a_deprecation_warning(
+        self, tmp_path, caplog, monkeypatch
+    ):
+        monkeypatch.setattr(ash_lock_module, "_LEGACY_WARNED", set())
+        root = _tree(tmp_path)
+        _legacy_lock(root)
+        with caplog.at_level(logging.WARNING, logger="ash"):
+            lock = AshLock.load(root)
+            AshLock.load(root)
+        assert lock.from_legacy and "src/app.py" in lock.entries
+        refuse_unlocked_symbol_suppressions([_symbol_suppression()], root)
+        notices = [
+            r.getMessage() for r in caplog.records if "deprecated" in r.getMessage()
+        ]
+        assert len(notices) == 1, notices
+        assert ".ash/ash.lock" in notices[0] and "v4.0" in notices[0]
+        assert "git mv .ash/ash.lock .ash.lock" in notices[0]
+
+    def test_saving_a_legacy_lock_writes_the_root_file_and_leaves_the_old_one(
+        self, tmp_path
+    ):
+        root = _tree(tmp_path)
+        text = _legacy_lock(root)
+        lock = AshLock.load(root)
+        lock.save()
+        assert (root / ".ash.lock").read_bytes() == text
+        assert (root / ".ash" / "ash.lock").read_bytes() == text
+
+    def test_the_root_lock_wins_and_the_legacy_one_is_not_even_warned_about(
+        self, tmp_path, caplog, monkeypatch
+    ):
+        monkeypatch.setattr(ash_lock_module, "_LEGACY_WARNED", set())
+        root = _tree(tmp_path)
+        _legacy_lock(root)
+        (root / "src" / "b.py").write_text("x = 1\n", encoding="utf-8")
+        current = AshLock(source_dir=root)
+        current.bind("src/b.py", LockScope("B101", "f"))
+        current.save()
+        with caplog.at_level(logging.WARNING, logger="ash"):
+            lock = AshLock.load(root)
+        assert set(lock.entries) == {"src/b.py"} and not lock.from_legacy
+        assert not [r for r in caplog.records if "deprecated" in r.getMessage()]

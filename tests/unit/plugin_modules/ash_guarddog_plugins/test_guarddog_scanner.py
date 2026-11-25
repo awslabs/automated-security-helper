@@ -1450,7 +1450,7 @@ def _suppressed(tmp_path, report, **suppression):
     repo = tmp_path / "supp-src"
     if not repo.exists():
         shutil.copytree(FIXTURE_REPO, repo)
-    # A symbol suppression applies only to a file locked in .ash/ash.lock.
+    # A symbol suppression applies only to a file locked in .ash.lock.
     if suppression.get("symbol") and (repo / suppression["path"]).is_file():
         from automated_security_helper.utils.ash_lock import AshLock, LockScope
 

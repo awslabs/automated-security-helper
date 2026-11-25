@@ -86,13 +86,13 @@ global_settings:
       reason: run_hook only runs commands from the deploy manifest
 ```
 
-A symbol suppression also needs an entry for its file in `.ash/ash.lock`; [create both with `ash suppress add`](#lock).
+A symbol suppression also needs an entry for its file in `.ash.lock`; [create both with `ash suppress add`](#lock).
 
 ASH finds the definition by parsing the file with tree-sitter, for Python, JavaScript, TypeScript, and Java files. The parsers are in the `symbols` extra, which is not installed by default; without it, a suppression with `symbol` matches nothing and the scan logs a warning that names the extra. The container image includes it. For the qualified-name grammar, the fail-closed rules, and the resolver's API and limits, see [Symbol resolution](../reference/symbol-resolution.md).
 
 ### Lock a symbol suppression to its file {#lock}
 
-A symbol suppression follows its definition when the code moves, so a definition that is rewritten would keep a review that no longer describes it. The lock prevents that. `.ash/ash.lock` is a committed JSON file that records the SHA-256 of each file a symbol suppression names, taken when the suppression was reviewed:
+A symbol suppression follows its definition when the code moves, so a definition that is rewritten would keep a review that no longer describes it. The lock prevents that. `.ash.lock`, at the repository root beside `.ash.yaml`, is a committed JSON file that records the SHA-256 of each file a symbol suppression names, taken when the suppression was reviewed:
 
 - A symbol suppression whose file has no entry in the lock is refused when the config is validated, by `ash scan` and by `ash config validate`. The message names the `ash suppress add` command to run.
 - When the file's bytes no longer hash to the entry, every symbol suppression bound to that file stops applying. Its findings are reported again, and the scan prints one notice that names the file, the suppressions, and the refresh command.
@@ -107,7 +107,7 @@ ash suppress add B602 --symbol Deployer.run_hook --file src/deploy.py \
   --reason "run_hook only runs commands from the deploy manifest"
 ```
 
-This writes the suppression to the config a scan of the current directory uses (`--config` names another YAML file) and the hash to `.ash/ash.lock`. A suppression already in the config for the same rule, file, and symbol is not written twice, which is how you bring an existing symbol suppression under the lock. Pass `--source-dir` to run it from another directory.
+This writes the suppression to the config a scan of the current directory uses (`--config` names another YAML file) and the hash to `.ash.lock`. A suppression already in the config for the same rule, file, and symbol is not written twice, which is how you bring an existing symbol suppression under the lock. Pass `--source-dir` to run it from another directory.
 
 After you change a locked file, read the change, confirm the suppressions still hold, and record the review:
 
@@ -117,7 +117,9 @@ ash suppress refresh src/deploy.py   # or no path, for every locked file
 
 `ash suppress verify` exits 1 and lists every locked file that changed or is gone, and every symbol suppression in the config that has no lock entry. Run it in CI. `--config` is repeatable for a repository with more than one config.
 
-Commit `.ash/ash.lock` with the change it belongs to, so a reviewer sees the new hash beside the edit it covers. The commands are the supported way to write the file; its keys are sorted, so the same tree always produces the same bytes.
+Commit `.ash.lock` with the change it belongs to, so a reviewer sees the new hash beside the edit it covers. The commands are the supported way to write the file; its keys are sorted, so the same tree always produces the same bytes.
+
+The lock was first written to `.ash/ash.lock`. ASH still reads that path when `.ash.lock` does not exist, with a deprecation warning, and `ash suppress add` or `refresh` writes `.ash.lock`; remove the old file with `git rm .ash/ash.lock`. Reading it is deprecated since v3.9 and ends in v4.0.
 
 ### Installing the extra {#installing-the-extra}
 

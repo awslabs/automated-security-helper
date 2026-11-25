@@ -920,7 +920,7 @@ def _sarif(uri: str, lines) -> SarifReport:
 def _context(root: Path, out: Path, suppressions) -> PluginContext:
     suppressions = list(suppressions)
     # A scan applies a symbol suppression only to a file locked in
-    # .ash/ash.lock (utils/ash_lock.py); these tests are about the spans, so
+    # .ash.lock (utils/ash_lock.py); these tests are about the spans, so
     # each file a suppression names is locked as it stands.
     lock = AshLock(source_dir=root)
     for s in suppressions:

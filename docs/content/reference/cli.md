@@ -48,7 +48,7 @@ The Environment variable column names the variable click reads for the option; a
 | [`ash plugin list`](#plugin-list) | The `plugin list` command lists what a scan with this configuration loads, on or off. |
 | [`ash report`](#report) | Generate a report from ASH scan results using the specified reporter plugin. |
 | [`ash scan`](#scan) | Scan code, infrastructure, secrets, and dependencies. |
-| [`ash suppress`](#suppress) | Create symbol suppressions and keep their content-hash lock (.ash/ash.lock) current. |
+| [`ash suppress`](#suppress) | Create symbol suppressions and keep their content-hash lock (.ash.lock) current. |
 | [`ash suppress add`](#suppress-add) | Add a symbol suppression and lock its file's content hash. |
 | [`ash suppress refresh`](#suppress-refresh) | Record a new review: re-hash locked files whose bytes changed. |
 | [`ash suppress verify`](#suppress-verify) | Check the lock against the tree. Exits 1 when anything is out of date. |
@@ -782,7 +782,7 @@ ash scan [OPTIONS]
 
 ## <a id="suppress"></a>`ash suppress`
 
-Create symbol suppressions and keep their content-hash lock (.ash/ash.lock) current.
+Create symbol suppressions and keep their content-hash lock (.ash.lock) current.
 
 ```text
 ash suppress [OPTIONS] COMMAND [ARGS]...
@@ -797,7 +797,7 @@ Subcommands: [`ash suppress add`](#suppress-add), [`ash suppress refresh`](#supp
 Add a symbol suppression and lock its file's content hash.
 
 Writes the suppression into the config and the hash of the file's bytes
-into .ash/ash.lock. While the file is unchanged the suppression applies;
+into .ash.lock. While the file is unchanged the suppression applies;
 after any edit to the file its findings are reported again until the change
 is reviewed and `ash suppress refresh` records it.
 
@@ -828,7 +828,7 @@ ash suppress add [OPTIONS] {rule_id}
 | <a id="suppress-add--file"></a>`--file` | text | required |  | The file that holds the definition, relative to the source directory. Its content hash is recorded in the lock. |
 | <a id="suppress-add--reason"></a>`--reason` | text | required |  | Why the finding is safe to suppress. |
 | <a id="suppress-add--config"></a>`--config`, `-c` | text | not set |  | The YAML config file to write the suppression to. Defaults to the config a scan of the source directory uses. |
-| <a id="suppress-add--source-dir"></a>`--source-dir` | text | not set |  | The directory the scan covers, which holds .ash/ash.lock. Defaults to the current directory. |
+| <a id="suppress-add--source-dir"></a>`--source-dir` | text | not set |  | The directory the scan covers, which holds .ash.lock. Defaults to the current directory. |
 
 ### <a id="suppress-refresh"></a>`ash suppress refresh`
 
@@ -850,7 +850,7 @@ ash suppress refresh [OPTIONS] [paths]...
 <!-- doctest: options of=cli.suppress.refresh -->
 | Option | Type | Default | Environment variable | Description |
 |--------|------|---------|----------------------|-------------|
-| <a id="suppress-refresh--source-dir"></a>`--source-dir` | text | not set |  | The directory the scan covers, which holds .ash/ash.lock. Defaults to the current directory. |
+| <a id="suppress-refresh--source-dir"></a>`--source-dir` | text | not set |  | The directory the scan covers, which holds .ash.lock. Defaults to the current directory. |
 
 ### <a id="suppress-verify"></a>`ash suppress verify`
 
@@ -868,7 +868,7 @@ ash suppress verify [OPTIONS]
 | Option | Type | Default | Environment variable | Description |
 |--------|------|---------|----------------------|-------------|
 | <a id="suppress-verify--config"></a>`--config`, `-c` | text, repeatable | not set |  | A YAML config file whose symbol suppressions must each have a lock entry. Repeat it for several. Defaults to the config a scan of the source directory uses. |
-| <a id="suppress-verify--source-dir"></a>`--source-dir` | text | not set |  | The directory the scan covers, which holds .ash/ash.lock. Defaults to the current directory. |
+| <a id="suppress-verify--source-dir"></a>`--source-dir` | text | not set |  | The directory the scan covers, which holds .ash.lock. Defaults to the current directory. |
 
 ## <a id="trend"></a>`ash trend`
 

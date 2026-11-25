@@ -11,7 +11,7 @@
 │   paths      <str>  Locked files to re-hash. Every locked file when none is named.              │
 └─────────────────────────────────────────────────────────────────────────────────────────────────┘
 ┌─ Options ───────────────────────────────────────────────────────────────────────────────────────┐
-│ --source-dir        <str>  The directory the scan covers, which holds .ash/ash.lock. Defaults   │
-│                            to the current directory.                                            │
+│ --source-dir        <str>  The directory the scan covers, which holds .ash.lock. Defaults to    │
+│                            the current directory.                                               │
 │ --help                     Show this message and exit.                                          │
 └─────────────────────────────────────────────────────────────────────────────────────────────────┘

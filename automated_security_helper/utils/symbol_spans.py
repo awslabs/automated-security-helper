@@ -550,7 +550,7 @@ class SymbolResolver:
     def __init__(self, source_dir: Path, lock: "Optional[AshLock]" = None):
         self._source_dir = Path(source_dir).resolve()
         self._warned: set[Tuple[str, str]] = set()
-        # The scan root's ``.ash/ash.lock``, or None to resolve spans with no
+        # The scan root's ``.ash.lock``, or None to resolve spans with no
         # content-hash binding (the span resolver on its own). With a lock, a
         # file whose bytes no longer hash to its entry, or that has none, gets
         # no match: the suppression is inert and a notice says so once.

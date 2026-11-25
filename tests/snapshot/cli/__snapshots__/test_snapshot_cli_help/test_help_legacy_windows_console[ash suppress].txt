@@ -1,7 +1,7 @@
 
  Usage: ash suppress [OPTIONS] COMMAND [ARGS]...
 
- Create symbol suppressions and keep their content-hash lock (.ash/ash.lock) current.
+ Create symbol suppressions and keep their content-hash lock (.ash.lock) current.
 
 ┌─ Options ───────────────────────────────────────────────────────────────────────────────────────┐
 │ --help          Show this message and exit.                                                     │
