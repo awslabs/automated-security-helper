@@ -1703,7 +1703,7 @@ def run_ash_scan_cli_command(
     # The image options come last, so no existing option's position shifts for a
     # caller that passes them positionally.
     image: Annotated[
-        str | None,
+        list[str] | None,
         typer.Option(
             "--image",
             rich_help_panel="Scan",
@@ -1712,9 +1712,12 @@ def run_ash_scan_cli_command(
                 "(registry/repo[:tag][@sha256:digest]) instead of a source "
                 "directory. ASH fetches nothing itself: the image is prepared "
                 "by a container engine or the scanner tools' own registry "
-                "clients. Exclusive with --source-dir, --image-archive and "
-                "--image-layout; scanners that do not declare container_image "
-                "targets are reported SKIPPED."
+                "clients. Repeat it, or give a comma list, to scan several "
+                "images: each is its own scan, with its own reports under "
+                "<output-dir>/<NN>-<image>-<hash>/, and the exit code is the "
+                "worst of theirs. Exclusive with --source-dir, --image-archive "
+                "and --image-layout; scanners that do not declare "
+                "container_image targets are reported SKIPPED."
             ),
         ),
     ] = None,
@@ -1845,12 +1848,25 @@ def run_ash_scan_cli_command(
         ).value
     )
 
+    # The images --image names, one entry per image whether it was repeated or
+    # given as a comma list (utils/image_batch). More than one is a batch of
+    # one-subject scans, each into its own report directory.
+    from automated_security_helper.utils.image_batch import (
+        ImageListRefused,
+        split_image_arguments,
+    )
+
+    try:
+        images = split_image_arguments(image)
+    except ImageListRefused as refusal:
+        _fail_usage(str(refusal))
+
     # Options that read or filter by the directory the scan starts in are not
     # an image scan's subject: --staged could exit 0 as "nothing staged"
     # without the image ever being scanned. Refused first, before the options'
     # own mode checks, so the operator is told the real conflict.
     for image_flag, image_value in (
-        ("--image", image),
+        ("--image", images or None),
         ("--image-archive", image_archive),
         ("--image-layout", image_layout),
     ):
@@ -1862,10 +1878,25 @@ def run_ash_scan_cli_command(
             ("--use-existing", use_existing),
         ):
             if other_given:
-                _fail_usage(
-                    f"{image_flag} cannot be combined with {other_flag}: "
+                reason = (
                     f"{other_flag} reads the working directory, which an image "
                     "scan does not scan. Scan the image on its own."
+                )
+                if other_flag == "--baseline":
+                    # Kept refused on purpose, and the reason is the tool's:
+                    # a baseline is scoped to a scanned directory (its
+                    # scan_source) and matched on finding identity, which for an
+                    # image carries the image's digest, with a looser
+                    # rule-file-message pairing beside it that would pair a
+                    # different image's findings.
+                    reason = (
+                        "a baseline is scoped to a scanned directory, and an "
+                        "image's findings are matched on identities that carry "
+                        "its digest, so no baseline can stand for another image. "
+                        "Scan the image on its own."
+                    )
+                _fail_usage(
+                    f"{image_flag} cannot be combined with {other_flag}: {reason}"
                 )
         if changed_files_only:
             # An image has no diff base, so the scope means nothing there. It is
@@ -2155,7 +2186,7 @@ def run_ash_scan_cli_command(
     image_flags_given = [
         name
         for name, value in (
-            ("--image", image),
+            ("--image", images or None),
             ("--image-archive", image_archive),
             ("--image-layout", image_layout),
         )
@@ -2213,7 +2244,7 @@ def run_ash_scan_cli_command(
                 source_dir is not None,
             ),
             ("--workspace", workspace is not None),
-            ("--image", image is not None),
+            ("--image", bool(images)),
             ("--image-archive", image_archive is not None),
             ("--image-layout", image_layout is not None),
             ("--staged", staged),
@@ -2465,76 +2496,96 @@ def run_ash_scan_cli_command(
     record_die_now_message(_SCAN_INTERRUPTED_MESSAGE)
     try:
         with shutdown_cancels(cancel_event), cancel_scope(cancel_event):
-            _deferred("run_ash_scan")(
-                # With an image option, the subject is the image: source_dir
-                # stays unnamed, as run_ash_scan's exclusivity rule reads it
-                # (the cwd default above served only the output-dir settling).
-                source_dir=None if image_flags_given else source_dir,
-                image=image,
-                image_archive=image_archive,
-                image_layout=image_layout,
-                output_dir=output_dir,
-                config=config,
-                config_overrides=config_overrides,
-                offline=offline,
-                strategy=strategy,
-                scanners=scanners,
-                exclude_scanners=exclude_scanners,
-                only_scanners=only_scanners,
-                add_scanners=add_scanners,
-                required_scanner_selection=require_scanner_selection,
-                progress=cli_final_show_progress,
-                output_formats=parsed_output_formats,
-                cleanup=cleanup,
-                phases=phases,
-                inspect=inspect,
-                existing_results=existing_results,
-                python_based_plugins_only=python_based_plugins_only,
-                log_level=log_level,
-                quiet=quiet,
-                verbose=verbose,
-                debug=debug,
-                color=color,
-                fail_on_findings=fail_on_findings,
-                fail_on_incomplete_scanners=fail_on_incomplete_scanners,
-                ignore_suppressions=ignore_suppressions,
-                min_severity=MinSeverity(min_severity).value,
-                **(
-                    {"baseline": str(baseline), "baseline_data": baseline_data}
-                    if baseline is not None
-                    else {}
-                ),
-                changed_files_only=changed_files_only,
-                base_ref=base_ref,
-                staged=staged,
-                staged_files=staged_for_scan,
-                shard_index=shard_index,
-                shard_count=shard_count,
-                mode=mode or RunMode.local,
-                show_summary=show_summary,
-                simple=simple,
-                # Pass the ash_plugin_modules parameter
-                ash_plugin_modules=ash_plugin_modules,
-                # Container-specific params
-                build=build,
-                run=run,
-                force=force,
-                # Read only in a mode that starts a runner. A relative path is read
-                # against the working directory where it was typed (the option, or
-                # a --cli-json-input document) and refused when it came from
-                # OCI_RUNNER: oci_runner_for_this_run.
-                oci_runner=runner_for_the_run,
-                build_target=build_target,
-                offline_semgrep_rulesets=offline_semgrep_rulesets,
-                container_uid=container_uid,
-                container_gid=container_gid,
-                ash_revision_to_install=ash_revision_to_install,
-                custom_containerfile=custom_containerfile,
-                custom_build_arg=custom_build_arg,
-                workspace_plan=workspace_plan,
-                allow_missing_projects=allow_missing_projects,
-                workspace_config_as_named=workspace_config,
-            )
+
+            def _scan_one(image_for_run: str | None, output_dir_for_run):
+                """One subject's scan: the whole command's options, this image."""
+                _deferred("run_ash_scan")(
+                    # With an image option, the subject is the image: source_dir
+                    # stays unnamed, as run_ash_scan's exclusivity rule reads it
+                    # (the cwd default above served only the output-dir settling).
+                    source_dir=None if image_flags_given else source_dir,
+                    image=image_for_run,
+                    image_archive=image_archive,
+                    image_layout=image_layout,
+                    output_dir=output_dir_for_run,
+                    config=config,
+                    config_overrides=config_overrides,
+                    offline=offline,
+                    strategy=strategy,
+                    scanners=scanners,
+                    exclude_scanners=exclude_scanners,
+                    only_scanners=only_scanners,
+                    add_scanners=add_scanners,
+                    required_scanner_selection=require_scanner_selection,
+                    progress=cli_final_show_progress,
+                    output_formats=parsed_output_formats,
+                    cleanup=cleanup,
+                    phases=phases,
+                    inspect=inspect,
+                    existing_results=existing_results,
+                    python_based_plugins_only=python_based_plugins_only,
+                    log_level=log_level,
+                    quiet=quiet,
+                    verbose=verbose,
+                    debug=debug,
+                    color=color,
+                    fail_on_findings=fail_on_findings,
+                    fail_on_incomplete_scanners=fail_on_incomplete_scanners,
+                    ignore_suppressions=ignore_suppressions,
+                    min_severity=MinSeverity(min_severity).value,
+                    **(
+                        {"baseline": str(baseline), "baseline_data": baseline_data}
+                        if baseline is not None
+                        else {}
+                    ),
+                    changed_files_only=changed_files_only,
+                    base_ref=base_ref,
+                    staged=staged,
+                    staged_files=staged_for_scan,
+                    shard_index=shard_index,
+                    shard_count=shard_count,
+                    mode=mode or RunMode.local,
+                    show_summary=show_summary,
+                    simple=simple,
+                    # Pass the ash_plugin_modules parameter
+                    ash_plugin_modules=ash_plugin_modules,
+                    # Container-specific params
+                    build=build,
+                    run=run,
+                    force=force,
+                    # Read only in a mode that starts a runner. A relative path is read
+                    # against the working directory where it was typed (the option, or
+                    # a --cli-json-input document) and refused when it came from
+                    # OCI_RUNNER: oci_runner_for_this_run.
+                    oci_runner=runner_for_the_run,
+                    build_target=build_target,
+                    offline_semgrep_rulesets=offline_semgrep_rulesets,
+                    container_uid=container_uid,
+                    container_gid=container_gid,
+                    ash_revision_to_install=ash_revision_to_install,
+                    custom_containerfile=custom_containerfile,
+                    custom_build_arg=custom_build_arg,
+                    workspace_plan=workspace_plan,
+                    allow_missing_projects=allow_missing_projects,
+                    workspace_config_as_named=workspace_config,
+                )
+
+            if len(images) > 1:
+                # Several images: each its own one-subject scan with its own
+                # reports, the exit code the worst of theirs
+                # (utils/image_batch). An interrupt leaves the loop at once.
+                from automated_security_helper.utils.image_batch import (
+                    run_image_batch,
+                )
+
+                batch_code, _per_image = run_image_batch(
+                    images,
+                    Path(str(output_dir)),
+                    _scan_one,
+                    say=lambda line: echo(line),
+                )
+                raise typer.Exit(batch_code)
+            _scan_one(images[0] if images else None, output_dir)
     except KeyboardInterrupt:
         # Ctrl-C, in every mode. A container runtime has been passed the interrupt and
         # given its grace to stop (run_cmd_direct), and the scan printed no completion
