@@ -91,10 +91,11 @@ its `#`: `symbol: "RetryPolicy.#backoff"`.
 
 ## Every way of not knowing a span fails closed {#fail-closed}
 
-Whenever the resolver cannot know a symbol's span, the suppression does not match, the
-finding stays visible, and one warning per `(file, reason)` names the cause. A partial
-parse tree is not trusted, because an error node can swallow or truncate a definition and
-give it the wrong span. The causes:
+Whenever the resolver cannot know a symbol's span, the suppression does not match and the
+finding stays visible. For every cause below except the last two, one warning per
+`(file, reason)` names the cause; the last two log nothing. A partial parse tree is not
+trusted, because an error node can swallow or truncate a definition and give it the wrong
+span. The causes:
 
 | Cause | Outcome | The warning names |
 |---|---|---|
@@ -113,8 +114,11 @@ and a config that uses `symbol` while the extra is missing.
 
 This repository's CI keeps the fail-closed path load-bearing: the
 `symbols-extra-control` job in `.github/workflows/ash-repo-scan.yml` proves, with
-`scripts/verify_symbol_suppressions_extra.py`, that without the extra every symbol-scoped
-entry of our own configs matches nothing, and that with the extra every one resolves.
+`scripts/verify_symbol_suppressions_extra.py`, that without the extra every entry in the
+migration record (`tests/test_data/suppression_symbol_migration.yaml`) matches nothing,
+and that with the extra every one resolves. The script reads the record, not the two
+configs; a unit test ties the record to the configs entry for entry, so a symbol entry
+added to a config also needs its row in the record to be covered by the job.
 
 ## Languages and extensions {#languages}
 
@@ -134,6 +138,13 @@ The extension is the only selector; a file whose extension is not here fails clo
   and function definitions only, so a module-level constant can only be covered by a line
   range. (JS/TS `const` function bindings are addressable because the grammar reads the
   binding's function value.)
+- **A symbol covers its whole definition.** A new finding of the same rule anywhere in
+  it is suppressed without a report, which a one-line pin never did. For a rule that
+  marks a real hazard (a shell call, an injection pattern, a file read), name the
+  smallest definition that holds the finding, extract a small helper so the symbol is
+  tight, or keep the line pin. This repository's migration test fails a symbol that is
+  not the innermost definition holding the old line, or that runs past 60 lines
+  without a recorded reason.
 - **A shared name covers every definition that bears it** -- getter/setter pairs, overload
   sets, redefinitions. Scope the entry's `path` and `rule_id` accordingly.
 - **Spans include decorators, Java annotations, and a leading `export`**, so a finding

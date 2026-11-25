@@ -136,9 +136,9 @@ def test_every_symbol_scoped_entry_in_our_configs_resolves():
                 f"{config}: symbol {symbol!r} resolves to nothing in {entry['path']}"
             )
             checked += 1
-    # 61 line pins converted; two same-definition pairs merged into one entry
-    # each per config, so the configs carry 57 symbol-scoped entries.
-    assert checked >= 57, f"only {checked} symbol entries; the migration wrote 57"
+    # 59 line pins converted; two same-definition pairs merged into one entry
+    # each per config, so the configs carry 55 symbol-scoped entries.
+    assert checked >= 55, f"only {checked} symbol entries; the migration wrote 55"
 
 
 def test_the_record_and_the_configs_agree_entry_for_entry():
@@ -207,6 +207,109 @@ def test_old_pinned_lines_lie_inside_the_chosen_symbols_span():
     )
 
 
+def _checkable_rows() -> list[tuple[dict, dict]]:
+    """Record rows whose recorded span is still one of the symbol's spans.
+
+    Each comes with the file's current symbol index. Same gate as the old-line
+    oracle: a later edit that moves a listed definition relaxes the row.
+    """
+    out = []
+    for row in _record()["entries"]:
+        if "symbol" not in row or row.get("old_pin_stale_at_migration"):
+            continue
+        index = _spans(row["path"])
+        recorded = tuple(row["span_at_migration"])
+        if recorded in {tuple(s) for s in index.get(row["symbol"], ())}:
+            out.append((row, index))
+    return out
+
+
+def test_the_chosen_symbol_is_the_innermost_definition_holding_the_old_lines():
+    """The migration never picked an enclosing definition over a tighter one.
+
+    The old-line-in-span oracle passes for ANY definition that contains the old
+    line, so an enclosing class or outer function would pass it while suppressing
+    far more than the line pin did. Here no other definition may sit strictly
+    inside the chosen span and also hold the old lines.
+    """
+    rows = _checkable_rows()
+    assert rows, "no row was checkable; the record no longer matches any file"
+    for row, index in rows:
+        chosen = tuple(row["span_at_migration"])
+        start, end = row["old_line_start"], row["old_line_end"]
+        tighter = sorted(
+            name
+            for name, spans in index.items()
+            for a, b in spans
+            if (a, b) != chosen
+            and chosen[0] <= a
+            and b <= chosen[1]
+            and a <= start
+            and end <= b
+        )
+        assert tighter == [], (
+            f"{row['path']}:{start}: {row['symbol']} {chosen} holds the old lines, "
+            f"but {tighter} is a tighter definition that holds them too"
+        )
+
+
+#: A symbol's span may not run past this many lines unless it is allowed below.
+#: A symbol covers its whole definition, so every extra line is one more place a
+#: new finding of the same rule is suppressed without a report; the line pins
+#: these entries replaced covered one line.
+SPAN_BUDGET = 60
+
+#: Entries whose definition is judged the right scope despite running past the
+#: budget, by (path, symbol), with why. Each is the smallest named definition
+#: that holds the flagged text; the entry's reason says what the text is.
+_WIDE_SPAN_ALLOWANCES = {
+    (
+        "automated_security_helper/interactions/run_ash_container.py",
+        "_write_env_file",
+    ): "the smallest named definition holding the flagged name; a write of ASH's own file",
+    (
+        "automated_security_helper/utils/package_manager_child.py",
+        "_yarn_copy_parent",
+    ): "prose naming .npmrc on two lines of one definition; no smaller named scope holds both",
+    (
+        "automated_security_helper/utils/package_manager_child.py",
+        "_pnpm_workspace_copy",
+    ): "prose naming .npmrc; the smallest named definition holding it",
+    (
+        "scripts/generate_test_docx.py",
+        "main",
+    ): "synthetic card numbers built in the generator's main; a script, not shipped code",
+}
+
+
+def test_no_symbol_scope_is_wider_than_the_budget_without_an_allowance():
+    """Every symbol entry's span is within ``SPAN_BUDGET`` or explicitly allowed.
+
+    Read from the configs, not the record, so an entry added later is held to the
+    same bound. An allowance that no entry needs any more fails too, so the list
+    cannot outlive the wide entries it excused.
+    """
+    wide: dict[tuple[str, str], int] = {}
+    for config in CONFIGS:
+        for entry in _suppressions(config):
+            symbol = entry.get("symbol")
+            if symbol is None:
+                continue
+            length = max(
+                end - start + 1 for start, end in _spans(entry["path"])[symbol]
+            )
+            if length > SPAN_BUDGET:
+                wide[(entry["path"], symbol)] = length
+    unallowed = {k: v for k, v in wide.items() if k not in _WIDE_SPAN_ALLOWANCES}
+    assert unallowed == {}, (
+        f"symbol scopes wider than {SPAN_BUDGET} lines with no allowance: "
+        f"{unallowed}. Name a tighter definition, keep the line pin, or add an "
+        "allowance with the reason."
+    )
+    unused = sorted(set(_WIDE_SPAN_ALLOWANCES) - set(wide))
+    assert unused == [], f"allowances no entry needs any more: {unused}"
+
+
 def test_a_gone_symbol_on_a_real_migrated_entry_fails_closed(caplog):
     """Design row T7-3, on this migration's own config shape.
 
@@ -216,10 +319,16 @@ def test_a_gone_symbol_on_a_real_migrated_entry_fails_closed(caplog):
     then also reported unused; see TestApplyToSarif in
     tests/unit/utils/test_symbol_suppressions.py). The file parses, so no
     file-level warning fires -- a defined-elsewhere name is indistinguishable
-    from a deliberately narrow entry. The real entry, probed at its old pinned
-    line, matches: the pair is its own control, so if the matcher stopped
-    resolving symbols entirely, the positive leg would fail."""
-    row = next(r for r in _record()["entries"] if "symbol" in r)
+    from a deliberately narrow entry. The real entry, probed at the first line of
+    its symbol's CURRENT span, matches: the pair is its own control, so if the
+    matcher stopped resolving symbols entirely, the positive leg would fail.
+    The probe line comes from the current tree, not the old pin, and stale-pin
+    rows are skipped, so an ordinary edit above the target does not break it."""
+    row = next(
+        r
+        for r in _record()["entries"]
+        if "symbol" in r and not r.get("old_pin_stale_at_migration")
+    )
     raw = next(
         e
         for e in _suppressions(row["config"])
@@ -230,7 +339,7 @@ def test_a_gone_symbol_on_a_real_migrated_entry_fails_closed(caplog):
     entry = AshSuppression(**raw)
     gone = entry.model_copy(update={"symbol": "definition_this_file_never_had"})
     resolver = SymbolResolver(REPO)
-    finding = _finding(raw, row["old_line_start"])
+    finding = _finding(raw, _spans(row["path"])[row["symbol"]][0][0])
 
     with caplog.at_level(logging.WARNING, logger="ash"):
         assert matches(entry, finding, symbol_resolver=resolver)

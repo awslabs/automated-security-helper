@@ -969,6 +969,16 @@ def _run_install_command(cmd: List[str], shell: bool = False) -> int:
     return code
 
 
+def _run_declared_install_command(cmd: List[str], shell: bool) -> int:
+    """Run one install command with the shell flag its CustomCommand declared.
+
+    The one call that forwards the operator's own declaration, kept in a
+    definition of its own so the self-scan's B604 suppression covers this call
+    and nothing else in the install loop.
+    """
+    return _run_install_command(cmd, shell=shell)  # nosec B604 - Args for this command are evaluated for security prior to this internal method being invoked
+
+
 def _consoles_that_no_color_turns_off() -> tuple:
     """The consoles ``--no-color`` turns color off on: the panels' and the table's,
     the error one and the shared one the ``print()`` lines are written through."""
@@ -1859,7 +1869,7 @@ def install_dependencies(
                 outcome.commands_attempted += 1
                 # A CustomCommand declared with shell=True runs through the shell,
                 # as declared; the flag was dropped before the installer saw it.
-                cmd_exit_code = _run_install_command(cmd, shell=shell)  # nosec B604 - Args for this command are evaluated for security prior to this internal method being invoked
+                cmd_exit_code = _run_declared_install_command(cmd, shell)
                 if cmd_exit_code != 0:
                     print(f"Command failed with exit code: {cmd_exit_code}")
                     outcome.commands_failed += 1

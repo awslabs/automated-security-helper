@@ -541,7 +541,8 @@ global_settings:
     # === ferret-scan API_KEY_OR_SECRET: new detections in ferret-scan 2.6.0 ===
     # The supported window admits ferret-scan 2.6.0, whose detectors report these
     # nine sites at 95-100% confidence. Each was read at the reported line and is
-    # pinned to it; none is a stored credential. The ferret-scan 2.5.x scans of
+    # pinned to it by line or, where a named definition holds it, by that
+    # definition (symbol); none is a stored credential. The ferret-scan 2.5.x scans of
     # the same files did not report them.
     - path: tests/unit/utils/test_secret_masking_shapes_in_text.py
       rule_id: API_KEY_OR_SECRET
@@ -577,15 +578,15 @@ global_settings:
         for the trade_secret keywords, pattern text and not a value.
     - path: .ash/.ash.yaml
       rule_id: API_KEY_OR_SECRET
-      line_start: 1050
-      line_end: 1050
+      line_start: 765
+      line_end: 765
       reason: >-
         False positive. A suppression reason that quotes a placeholder fixture
         literal; the text explains why another finding is a false positive.
     - path: .ash/.ash.yaml
       rule_id: API_KEY_OR_SECRET
-      line_start: 1297
-      line_end: 1297
+      line_start: 1012
+      line_end: 1012
       reason: >-
         False positive. A suppression reason that quotes a placeholder fixture
         literal; the text explains why another finding is a false positive.
@@ -1612,8 +1613,9 @@ global_settings:
       reason: "Module prose naming .npmrc to document which configuration the package managers would read and why the scan copy avoids it; nothing here reads the file."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/utils/package_manager_child.py
-      symbol: package_manager_child
-      reason: "A refusal message naming ~/.npmrc and ~/.yarnrc as what the audit copy keeps the package managers away from; nothing here reads the files."
+      line_start: 1186
+      line_end: 1186
+      reason: "A warning message naming ~/.npmrc and ~/.yarnrc as what the audit copy keeps the package managers away from; nothing here reads the files."
     - rule_id: threat-filesystem-read
       path: scripts/generate_plugin_data_partial.py
       line_start: 185

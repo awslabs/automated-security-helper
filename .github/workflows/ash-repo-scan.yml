@@ -443,14 +443,16 @@ jobs:
 
   # The control that keeps the scan's `symbols` extra load-bearing. The suppression
   # configs scope entries by `symbol`, resolved by tree-sitter from the optional
-  # `symbols` extra (run-ash-security-scan.yml installs it through ASH_UVX_SOURCE;
-  # setup-ash installs it for the unified-CI scan legs). Resolution fails closed,
-  # so a leg that loses the extra re-surfaces every symbol-suppressed finding as a
-  # residual -- loud, but nothing in that leg's output names the cause. This job is
-  # the input that makes that failure attributable: in an environment WITHOUT the
-  # extra, every migrated entry must match nothing (proving the fail-closed path is
-  # live, not documentation); with it, every one must resolve and match (proving
-  # the scan legs that do install it get real coverage from these entries).
+  # `symbols` extra. Resolution fails closed, so an environment that loses the
+  # extra re-surfaces every symbol-suppressed finding as a residual. Where the
+  # extra is installed is guarded elsewhere: setup-ash's "Check the symbols extra
+  # is importable" step fails the unified-CI legs at install, and
+  # tests/unit/test_reusable_workflow_defaults.py pins the extra in the
+  # reusable scan workflow's ASH_UVX_SOURCE. THIS job does not build those
+  # environments. It proves the behavior the extra gates, in a fresh uv
+  # environment: WITHOUT the extra, every entry in the migration record must
+  # match nothing (the fail-closed path is live, not documentation); WITH it,
+  # every one must resolve to its symbol and match.
   # scripts/verify_symbol_suppressions_extra.py names the offending entries when
   # either half breaks.
   symbols-extra-control:
@@ -469,7 +471,12 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
+      # The uv version setup-ash pins, and no cache: this job runs on pull
+      # requests, where setup-uv's default would save a cache entry from the ref.
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: "0.11.4"
+          enable-cache: false
       - name: Without the extra, every symbol suppression fails closed
         run: |
           uv sync --frozen

@@ -176,37 +176,19 @@ def test_every_guarddog_suppression_is_one_rule_one_file_one_line_or_one_symbol(
 
 
 @pytest.mark.parametrize("config", [SELF_SCAN, DEFAULT], ids=lambda p: p.name)
-def test_every_guarddog_entry_names_a_place_that_holds_the_flagged_text(
+def test_every_guarddog_line_pin_names_a_line_that_holds_the_flagged_text(
     config: Path,
 ) -> None:
-    """A line pin's one line, or a symbol entry's resolved span, holds a marker.
+    """A line pin's one line holds a marker for its rule.
 
-    A symbol follows its definition when the file moves, so it cannot point at a
-    blank line the way a stale pin does; what it CAN do is keep naming a
-    definition whose body no longer holds what the rule flags, after the flagged
-    code moved to another function. The span check catches that the same way the
-    line check catches a drifted pin.
+    Needs no tree-sitter: the line pins are checked on every run, whether or not
+    the optional ``symbols`` extra is installed.
     """
-    pins = _guarddog_pins(config)
-    assert pins, f"{config.name} has no GuardDog suppressions to check"
+    pins = [e for e in _guarddog_pins(config) if e.get("symbol") is None]
+    assert pins, f"{config.name} has no line-pinned GuardDog suppressions to check"
     for entry in pins:
         markers = _RULE_LINE_MARKERS.get(entry["rule_id"])
         lines = (REPO_ROOT / entry["path"]).read_text(encoding="utf-8").splitlines()
-        if entry.get("symbol") is not None:
-            where = (
-                f"{config.name}: {entry['rule_id']} {entry['path']} {entry['symbol']}"
-            )
-            assert markers, f"{where}: no line markers for this rule id; add a row"
-            held = [
-                lines[n - 1]
-                for start, end in _symbol_spans(entry)
-                for n in range(start, min(end, len(lines)) + 1)
-            ]
-            assert any(marker in line for marker in markers for line in held), (
-                f"{where}: no line of the definition holds any of {markers}. "
-                "The flagged code moved out of this definition; re-measure the entry."
-            )
-            continue
         where = (
             f"{config.name}: {entry['rule_id']} {entry['path']}:{entry['line_start']}"
         )
@@ -217,6 +199,39 @@ def test_every_guarddog_entry_names_a_place_that_holds_the_flagged_text(
         assert any(marker in line for marker in markers), (
             f"{where}: the pinned line holds none of {markers}; it reads {line!r}. "
             "Re-measure the pin: the file moved under it."
+        )
+
+
+@pytest.mark.parametrize("config", [SELF_SCAN, DEFAULT], ids=lambda p: p.name)
+def test_every_guarddog_symbol_entry_names_a_definition_that_holds_the_flagged_text(
+    config: Path,
+) -> None:
+    """A symbol entry's resolved span holds a marker for its rule.
+
+    A symbol follows its definition when the file moves, so it cannot point at a
+    blank line the way a stale pin does; what it CAN do is keep naming a
+    definition whose body no longer holds what the rule flags, after the flagged
+    code moved to another function. This is a weaker check than the line pin's:
+    a marker needs to appear on SOME line of the definition, not on one named
+    line, so a definition that merely mentions the marker elsewhere still
+    passes. Gated on the ``symbols`` extra (skips without it; fails when
+    ``ASH_REQUIRE_SYMBOLS_EXTRA`` is set); the line pins above are not.
+    """
+    pins = [e for e in _guarddog_pins(config) if e.get("symbol") is not None]
+    assert pins, f"{config.name} has no symbol-scoped GuardDog suppressions to check"
+    for entry in pins:
+        markers = _RULE_LINE_MARKERS.get(entry["rule_id"])
+        lines = (REPO_ROOT / entry["path"]).read_text(encoding="utf-8").splitlines()
+        where = f"{config.name}: {entry['rule_id']} {entry['path']} {entry['symbol']}"
+        assert markers, f"{where}: no line markers for this rule id; add a row"
+        held = [
+            lines[n - 1]
+            for start, end in _symbol_spans(entry)
+            for n in range(start, min(end, len(lines)) + 1)
+        ]
+        assert any(marker in line for marker in markers for line in held), (
+            f"{where}: no line of the definition holds any of {markers}. "
+            "The flagged code moved out of this definition; re-measure the entry."
         )
 
 

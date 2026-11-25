@@ -142,6 +142,15 @@ _RANGED_PIN_MARKERS: dict[tuple[str, str], list[_Marker]] = {
     ("API_KEY_OR_SECRET", BETTERLEAKS_SCANNER_TEST): [
         _Marker((r'^    COMMIT = "',)),
     ],
+    # The two lines of .ash/.ash.yaml where ferret-scan 2.6.0 reports
+    # API_KEY_OR_SECRET at 100% (measured by running it over the file): a
+    # suppression reason that names a placeholder fixture assignment. This file is
+    # edited often, so the pins move with it; the markers say which line each one is
+    # for. The patterns name the line's wording, not the fixture value.
+    ("API_KEY_OR_SECRET", ".ash/.ash.yaml"): [
+        _Marker((r"^        HEAD = .* and TOKEN =$",)),
+        _Marker((r"^        `secret = .abcdefghij",)),
+    ],
 }
 
 

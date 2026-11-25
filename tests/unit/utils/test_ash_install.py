@@ -687,6 +687,7 @@ class TestTheSymbolsHint:
     def test_it_points_at_the_docs_for_uvx(self, monkeypatch):
         """uvx runs ASH from a cached environment; its users need the docs page."""
         from automated_security_helper.utils.symbol_spans import (
+            SYMBOLS_EXTRA_DOCS_URL,
             symbols_extra_install_command,
             symbols_extra_install_hint,
         )
@@ -703,6 +704,15 @@ class TestTheSymbolsHint:
         assert "\n### Installing the extra {#installing-the-extra}\n" in page.read_text(
             encoding="utf-8"
         )
+        # The constant itself, mapped the way the docs site maps a URL: the path
+        # below the site root is the page under docs/content, and the fragment is
+        # an explicit anchor on one of its headings. A moved page or a renamed
+        # anchor breaks here, not in a reader's browser.
+        path_and_fragment = SYMBOLS_EXTRA_DOCS_URL.removeprefix(f"{ASH_DOCS_URL}/")
+        route, _, fragment = path_and_fragment.partition("#")
+        mapped = REPO_ROOT / "docs" / "content" / f"{route.strip('/')}.md"
+        assert mapped.is_file(), f"{SYMBOLS_EXTRA_DOCS_URL} maps to no page: {mapped}"
+        assert f"{{#{fragment}}}" in mapped.read_text(encoding="utf-8")
 
 
 def _name_and_clauses(requirement: str) -> tuple[str, frozenset[str]]:

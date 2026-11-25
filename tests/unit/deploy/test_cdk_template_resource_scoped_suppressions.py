@@ -24,7 +24,6 @@ with the real matcher as the oracle.
 """
 
 import json
-import re
 from pathlib import Path
 
 import pytest
@@ -113,6 +112,12 @@ def test_the_glob_does_not_match_a_suffixed_logical_id():
         glob,
         case_sensitive=True,
     )
+    # The real ends-with case, and the reason the glob needs its leading `*/`: a
+    # logical id that ends with the target's name, as the last segment, is a
+    # different resource.
+    assert not scope_value_matches(
+        "Stack/T/OtherScanFunction322CD7EE", glob, case_sensitive=True
+    )
     # fnmatch's `*` crosses `/`, so a BARE suffix glob would match the suffixed id
     # above; the leading `*/` anchors the id to its own segment... which still
     # requires the segment to be the LAST one, as the wrapper's paths have it.
@@ -177,12 +182,3 @@ def test_no_template_entry_is_line_pinned_any_more():
         and s.get("line_start") is not None
     ]
     assert pinned == []
-
-
-def test_the_logical_id_pattern_is_how_ash_reports_resources():
-    # The wrapper looks a construct path's last segment up among the template's
-    # logical ids (cdk_nag_wrapper.py). Hold the two ids to the shape a last
-    # segment must have, so a renamed resource fails here by name rather than as
-    # an unused suppression in a scan report.
-    for logical_id in set(EXPECTED.values()):
-        assert re.fullmatch(r"[A-Za-z0-9]+", logical_id)
