@@ -120,9 +120,11 @@ import hashlib
 import json
 import posixpath
 import re
-from dataclasses import dataclass, replace
+from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Sequence, Tuple
+
+from pydantic import BaseModel, ConfigDict
 
 from automated_security_helper.utils.frame_ops import ordinal_over
 from automated_security_helper.utils.frame_text import wire, wire_cell
@@ -133,6 +135,8 @@ from automated_security_helper.utils.uri_separators import (
 
 if TYPE_CHECKING:
     import polars as pl
+
+    from automated_security_helper.models.frame_model import FrameSpec
 
 #: Hex digits of the digest in a flattened finding's id. 48 bits: two findings of
 #: one scanner and rule collide with odds near n**2 / 2**49, about 1 in 5 million
@@ -164,9 +168,23 @@ _DRIVE = re.compile(r"^[A-Za-z]:/")
 Fingerprints = Tuple[Tuple[str, Tuple[Tuple[str, str], ...]], ...]
 
 
-@dataclass(frozen=True)
-class FindingIdentity:
+class FindingIdentity(BaseModel):
     """One result's identity, before the run it belongs to is considered.
+
+    A frozen pydantic model; it was a frozen dataclass until the frame-models
+    design's decision R4 converted it, so the frame layer reads one mechanism
+    (``model_fields`` and the drift gate) across every model it projects. What
+    the conversion keeps, pinned by
+    ``tests/unit/utils/test_finding_identity_model.py``: immutability
+    (assignment raises; the one mutation site, :func:`relative_to_scan_root`,
+    copies with ``model_copy(update=...)``, which does not re-validate the
+    update -- the value comes from :func:`relative_path`, the same trust as
+    before); equality (field-wise and same-class, which the derived join keys
+    rely on); and hashing (never hashed at runtime; the generated field-based
+    ``__hash__`` raises on the ``Mapping`` base exactly as the dataclass's
+    did). Construction now validates once, on the flatten hot path, which R4
+    accepts knowingly; the unit's record carries the before/after construction
+    read.
 
     Attributes:
         base: The key's fields every result has: scanner, rule, file, package,
@@ -178,6 +196,8 @@ class FindingIdentity:
         occurrence: The occurrence digest of the column and message.
     """
 
+    model_config = ConfigDict(frozen=True)
+
     base: Mapping[str, Any]
     lines: Tuple[Optional[int], Optional[int]]
     column: Optional[int] = None
@@ -188,6 +208,44 @@ class FindingIdentity:
     def location(self) -> Tuple[Any, ...]:
         """Where the result is, for telling a shared fingerprint value."""
         return (self.base.get("tree"), self.base.get("file"), *self.lines, self.column)
+
+
+@lru_cache(maxsize=None)
+def identity_frame_spec() -> "FrameSpec":
+    """Every name of :class:`FindingIdentity`, accounted for the drift gate.
+
+    The identity frames' columns are derived from a whole run's keys
+    (:func:`identity_keys`): which fingerprints key a result, its occurrence
+    and its ordinal exist only relative to the collection, so no per-identity
+    column can be projected straight off the model and the spec projects none.
+    It exists for the accounted-for gate
+    (``tests/unit/models/test_frame_schemas.py``): a field added to
+    ``FindingIdentity`` fails there until someone decides its frame fate.
+    Built lazily because ``models/frame_model`` lives beside models that
+    import this module.
+    """
+    from automated_security_helper.models.frame_model import FrameSpec
+
+    return FrameSpec(
+        FindingIdentity,
+        (),
+        waived={
+            "base": "a nested mapping; reaches frames only derived, as "
+            "canonical(base) in the fingerprint-choices frame's base column "
+            "and inside the key column's JSON",
+            "lines": "unbounded ints; appear only inside the key column's "
+            "JSON and the loc column's JSON (RankEncoded is for columns, and "
+            "these never become one)",
+            "column": "an input of the occurrence digest and of the loc "
+            "column's JSON, never a column",
+            "fingerprints": "unpacked per pair into the fingerprint-choices "
+            "frame's kind/name/value rows, not per-identity columns",
+            "occurrence": "projected into the located-keys frame beside the "
+            "run's keys, which no single identity can supply",
+            "location": "read by the fingerprint-choices frame as one JSON "
+            "text (the loc column)",
+        },
+    )
 
 
 def _is_absolute(text: str) -> bool:
@@ -350,7 +408,9 @@ def relative_to_scan_root(
     )
     if file == identity.base.get("file"):
         return identity
-    return replace(identity, base={**identity.base, "file": file})
+    # model_copy does not re-validate the update: the boundary rule's shape
+    # (the value comes from relative_path, the same trust replace() carried).
+    return identity.model_copy(update={"base": {**identity.base, "file": file}})
 
 
 def _run_bases(

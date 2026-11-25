@@ -42,6 +42,7 @@ from automated_security_helper.models.frame_model import (
     unaccounted,
 )
 from automated_security_helper.models.core import AshSuppression
+from automated_security_helper.utils.finding_identity import identity_frame_spec
 from automated_security_helper.utils.frame_text import unwire, wire
 from automated_security_helper.utils.suppression_frame import (
     _chunk_frame,
@@ -60,6 +61,18 @@ FRAME_SPECS: Dict[str, Tuple[FrameSpec, Callable[[], pl.DataFrame]]] = {
     "suppression_line_span": (line_span_spec(), lambda: _span_frame([], [])),
 }
 
+# Models whose frames are derived from a whole run's keys, so no per-row column
+# can be projected straight off the model and there is no schema to pin -- but
+# every name the model holds still needs a decided frame fate.
+ACCOUNTED_SPECS: Dict[str, FrameSpec] = {
+    "finding_identity": identity_frame_spec(),
+}
+
+ALL_SPECS: Dict[str, FrameSpec] = {
+    **{name: spec for name, (spec, _build) in FRAME_SPECS.items()},
+    **ACCOUNTED_SPECS,
+}
+
 
 @pytest.mark.parametrize("name", sorted(FRAME_SPECS))
 def test_the_derived_schema_is_the_schema_the_builder_constructs(name):
@@ -69,9 +82,9 @@ def test_the_derived_schema_is_the_schema_the_builder_constructs(name):
     assert list(derived.items()) == list(built.items())
 
 
-@pytest.mark.parametrize("name", sorted(FRAME_SPECS))
+@pytest.mark.parametrize("name", sorted(ALL_SPECS))
 def test_every_name_the_model_holds_has_a_decided_frame_fate(name):
-    spec, _build = FRAME_SPECS[name]
+    spec = ALL_SPECS[name]
     assert unaccounted(spec) == []
     assert_accounted(spec)
 
