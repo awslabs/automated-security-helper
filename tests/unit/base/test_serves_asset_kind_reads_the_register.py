@@ -68,12 +68,17 @@ class TestServesAssetKind:
     def test_a_builtin_scanner_serves_filesystem(self):
         assert serves_asset_kind(_grype_class(), AssetKind.FILESYSTEM) is True
 
-    def test_no_builtin_scanner_serves_container_image_yet(self):
-        # The register's UNCLAIMED_TARGET_KINDS still lists CONTAINER_IMAGE on
-        # this tip, and the consistency suite refuses a claim of an unclaimed
-        # kind, so this row flips together with the wiring commit that claims
-        # it -- which is exactly the drift the iff-rule exists to catch.
-        assert serves_asset_kind(_grype_class(), AssetKind.CONTAINER_IMAGE) is False
+    def test_a_wired_scanner_serves_container_image(self):
+        # grype claims TargetKind.CONTAINER_IMAGE on its row since the wiring
+        # commit; the iff-suite holds the claim to the dispatch override.
+        assert serves_asset_kind(_grype_class(), AssetKind.CONTAINER_IMAGE) is True
+
+    def test_an_unwired_builtin_scanner_does_not_serve_container_image(self):
+        from automated_security_helper.plugin_modules.ash_builtin.scanners.bandit_scanner import (
+            BanditScanner,
+        )
+
+        assert serves_asset_kind(BanditScanner, AssetKind.CONTAINER_IMAGE) is False
 
     def test_an_undeclared_class_serves_filesystem_as_today(self):
         class ThirdPartyScanner:

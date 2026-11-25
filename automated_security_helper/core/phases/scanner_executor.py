@@ -1603,12 +1603,39 @@ class ScannerExecutor:
                                         # ended.
                                         heartbeat.start()
                                         scan_called = True
-                                        raw_results = scanner_plugin.scan(
-                                            target=scan_target,
-                                            config=scanner_config,
-                                            target_type=target_type,
-                                            global_ignore_paths=self._global_ignore_paths,
-                                        )
+                                        if target_type == "image":
+                                            # The image dispatch (design C5): a
+                                            # separate method, not a widened
+                                            # scan(). The scan phase queues an
+                                            # image task only for a scanner
+                                            # whose register row serves the
+                                            # kind, and only when the context
+                                            # carries an image asset; a task
+                                            # without one is ASH's own defect,
+                                            # reported as itself.
+                                            image_asset = getattr(
+                                                self.plugin_context, "asset", None
+                                            )
+                                            image_locator = getattr(
+                                                image_asset, "image", None
+                                            )
+                                            if image_locator is None:
+                                                raise ScannerError(
+                                                    "an image task was queued "
+                                                    "with no image asset on the "
+                                                    "plugin context"
+                                                )
+                                            raw_results = scanner_plugin.scan_image(
+                                                image=image_locator,
+                                                config=scanner_config,
+                                            )
+                                        else:
+                                            raw_results = scanner_plugin.scan(
+                                                target=scan_target,
+                                                config=scanner_config,
+                                                target_type=target_type,
+                                                global_ignore_paths=self._global_ignore_paths,
+                                            )
                                     finally:
                                         heartbeat.stop()
                                     # A tool that never started found nothing, so the

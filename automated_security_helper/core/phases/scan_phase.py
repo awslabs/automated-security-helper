@@ -969,19 +969,47 @@ class ScanPhase(EnginePhase):
             for (name, instance, _tasks) in self._scanner_tasks
             if serves_asset_kind(instance.__class__, AssetKind.CONTAINER_IMAGE)
         ]
-        if image_capable:
-            return
         shown = asset.image.shown() if asset.image is not None else "<unknown>"
+        if not image_capable:
+            reason = (
+                "no selected scanner declares container_image targets in its "
+                "operational facets"
+            )
+        else:
+            # Queued image scanners exist; the note is owed only when every
+            # one of them ended SKIPPED (each cleanly declined the image: an
+            # offline host with no engine, an unreadable locator shape), which
+            # is known only after the executor ran -- the second call site.
+            rows = [
+                aggregated_results.scanner_results.get(name) for name in image_capable
+            ]
+            if any(row is None for row in rows):
+                return
+            if any(row.status != ScannerStatus.SKIPPED for row in rows):
+                return
+            reason = (
+                "every image-capable scanner declined it cleanly (their "
+                "SKIPPED rows say why: typically no container engine was "
+                "detected and network fetching is unavailable, or the "
+                "locator shape is one the tool cannot read)"
+            )
         text = (
-            f"container image {shown} was not scanned: no selected scanner "
-            "declares container_image targets in its operational facets. The "
-            "per-scanner rows above say SKIPPED for the same reason; this scan "
+            f"container image {shown} was not scanned: {reason}. The "
+            "per-scanner rows say SKIPPED for the same reason; this scan "
             "is complete by contract and has not looked at the image."
         )
-        ASH_LOGGER.warning(text, extra=NO_MARKUP)
         sarif = aggregated_results.sarif
         if sarif is None or not sarif.runs:
+            ASH_LOGGER.warning(text, extra=NO_MARKUP)
             return
+        for run in sarif.runs:
+            for result in run.results or []:
+                if result.ruleId == self.IMAGE_NOT_SCANNED_RULE_ID:
+                    # One note per scan: the method runs before the executor
+                    # (nothing queued) and after it (everything skipped), and
+                    # the second call must not double the first's note.
+                    return
+        ASH_LOGGER.warning(text, extra=NO_MARKUP)
         from automated_security_helper.schemas.sarif_schema_model import (
             Kind,
             Level,
@@ -2250,20 +2278,37 @@ class ScanPhase(EnginePhase):
 
                         # Every selection filter and the dependency check have passed.
                         # Add a single task per scanner that will handle both source
-                        # and converted directories.
-                        task_list = [
-                            {
-                                "path": self.plugin_context.source_dir,
-                                "type": "source",
-                            },
-                        ]
-                        if self._include_work_dir:
-                            task_list.append(
+                        # and converted directories -- or, for a container-image
+                        # asset, ONE image task: the routing above let only a
+                        # scanner that serves the kind reach this line, and an
+                        # image presents no source or converted directory to
+                        # scan beside itself. The task's path is the anchoring
+                        # source directory, which exists (the executor's
+                        # existence probe reads it) and is never the subject.
+                        if (
+                            isinstance(scan_asset, Asset)
+                            and scan_asset.kind == AssetKind.CONTAINER_IMAGE
+                        ):
+                            task_list = [
                                 {
-                                    "path": self.plugin_context.work_dir,
-                                    "type": "converted",
-                                }
-                            )
+                                    "path": self.plugin_context.source_dir,
+                                    "type": "image",
+                                },
+                            ]
+                        else:
+                            task_list = [
+                                {
+                                    "path": self.plugin_context.source_dir,
+                                    "type": "source",
+                                },
+                            ]
+                            if self._include_work_dir:
+                                task_list.append(
+                                    {
+                                        "path": self.plugin_context.work_dir,
+                                        "type": "converted",
+                                    }
+                                )
                         self._scanner_tasks.append(
                             (
                                 display_name,
@@ -2699,6 +2744,12 @@ class ScanPhase(EnginePhase):
 
             # Validate execution completion after scanner execution
             self._validate_execution_completion(aggregated_results)
+
+            # The second call site of the image note: queued image scanners
+            # that ALL declined cleanly (offline with no engine, a locator
+            # shape a tool cannot read) are known only now. The method emits
+            # one note per scan whichever call site owes it.
+            self._record_unscanned_image_asset(aggregated_results)
 
             self.progress_display.update_task(
                 phase=ExecutionPhase.SCAN,

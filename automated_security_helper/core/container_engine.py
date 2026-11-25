@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Which container engine can prepare an image for the scanners: none, today.
+"""Which container engine can prepare an image for the scanners.
 
 ASH builds no resource-fetcher layer. Fetching, caching and preparing image
 bytes belong to a container engine (the docker daemon, podman) or to the
@@ -10,20 +10,22 @@ availability, and never stores, pulls, exports or unpacks an image itself. One
 engine present means one pull serves every scanner -- the engine's content
 store is the fanout dedup -- which is why detection exists at all.
 
-This module is the unit-A stub of that detection: it answers
-:data:`ContainerEngine.NONE` without probing anything, so every consumer is
-written against the real vocabulary while no socket is touched. The probe
-order, when wiring lands with the first image-capable scanner, is: the docker
-daemon (``DOCKER_HOST`` if set, else the platform's default socket), then
-podman (``podman.sock`` under ``XDG_RUNTIME_DIR`` or the system path), then
-none -- one cheap socket probe at scan start, recorded in the scan metadata.
-containerd is reached only through a tool's own ``--image-src containerd`` and
-is never probed by ASH.
+The probe order: the docker daemon (``DOCKER_HOST`` if set, else the
+platform's default socket), then podman (``podman.sock`` under
+``XDG_RUNTIME_DIR``, then the system path), then none. One cheap stat per
+candidate, no connection and no request: a socket that exists and is a socket
+is an engine the tools can be pointed at, and a dead daemon behind it is the
+tool's own error to report, exactly as a registry that refuses a pull is.
+containerd is reached only through a tool's own ``--image-src containerd``
+and is never probed by ASH.
 """
 
 from __future__ import annotations
 
+import os
+import stat
 from enum import Enum
+from typing import Mapping, Optional
 
 
 class ContainerEngine(str, Enum):
@@ -34,11 +36,59 @@ class ContainerEngine(str, Enum):
     NONE = "none"
 
 
-def detect_container_engine() -> ContainerEngine:
-    """The engine available to this scan: always ``NONE`` in this phase.
+#: The platform default sockets, module-level so a test can point them into
+#: its own tmp tree: the suite must never read the host's real daemon state.
+DOCKER_DEFAULT_SOCKET = "/var/run/docker.sock"
+PODMAN_SYSTEM_SOCKET = "/run/podman/podman.sock"
 
-    No probe is made. With no image-capable scanner wired yet, an answer other
-    than NONE could change nothing a scan does, so the stub keeps the one
-    truthful answer until the probe has a consumer.
+
+def _is_unix_socket(path: str) -> bool:
+    try:
+        return stat.S_ISSOCK(os.stat(path).st_mode)
+    except (OSError, ValueError):
+        return False
+
+
+def _docker_host_socket(value: str) -> Optional[str]:
+    """The socket path a ``DOCKER_HOST`` names, or None for another transport.
+
+    Only ``unix://`` values are probed: a tcp daemon's reachability cannot be
+    read from a stat, and probing it with a connection is a network action
+    detection deliberately never takes. A tcp ``DOCKER_HOST`` still reaches
+    the tools through their own environment; it is only ASH's engine ANSWER
+    that stays conservative about it.
     """
+    if value.startswith("unix://"):
+        return value[len("unix://") :]
+    if value.startswith("/"):
+        return value
+    return None
+
+
+def detect_container_engine(
+    environment: Optional[Mapping[str, str]] = None,
+) -> ContainerEngine:
+    """The engine available to this scan: docker, podman, or none.
+
+    *environment* defaults to ``os.environ``; tests pass their own mapping so
+    no probe ever depends on the suite's host.
+    """
+    env = os.environ if environment is None else environment
+
+    docker_host = env.get("DOCKER_HOST", "").strip()
+    if docker_host:
+        socket_path = _docker_host_socket(docker_host)
+        if socket_path is not None and _is_unix_socket(socket_path):
+            return ContainerEngine.DOCKER
+    elif _is_unix_socket(DOCKER_DEFAULT_SOCKET):
+        return ContainerEngine.DOCKER
+
+    runtime_dir = env.get("XDG_RUNTIME_DIR", "").strip()
+    if runtime_dir and _is_unix_socket(
+        os.path.join(runtime_dir, "podman", "podman.sock")
+    ):
+        return ContainerEngine.PODMAN
+    if _is_unix_socket(PODMAN_SYSTEM_SOCKET):
+        return ContainerEngine.PODMAN
+
     return ContainerEngine.NONE

@@ -527,3 +527,35 @@ def test_prerequisites_agree_with_the_scanners_own_selection(cls, _instances) ->
             f"{facets.scanner_name} needs a token but its sandbox declaration "
             "passes neither an env name nor a token file"
         )
+
+
+@pytest.mark.parametrize("cls", SCANNER_CLASSES, ids=lambda c: c.__name__)
+def test_a_container_image_claim_and_the_image_dispatch_travel_together(cls) -> None:
+    """The C5 iff-rule: claims CONTAINER_IMAGE ⇔ overrides the image dispatch.
+
+    The register row is the one place capability lives, and the dispatch
+    (``_execute_image_scan`` for a template scanner, a whole ``scan_image``
+    override for a bespoke one such as syft) is the wiring the claim promises.
+    A claim without the wiring would hand a scanner an image it cannot scan,
+    which the base hook reports as ASH's own drift; wiring without the claim
+    would be dead code the routing never reaches. Read from the class's own
+    ``vars()``, as every register reading is, so an inherited override never
+    answers for a subclass.
+    """
+    claims = opsf.TargetKind.CONTAINER_IMAGE in _ops(cls).targets.kinds
+    wires = "_execute_image_scan" in vars(cls) or "scan_image" in vars(cls)
+    assert claims == wires, (
+        f"{_ops(cls).scanner_name}: claims container_image={claims} but "
+        f"overrides the image dispatch={wires}; the register row and the "
+        "wiring must travel together"
+    )
+
+
+def test_the_wired_image_scanners_are_grype_syft_and_trivy() -> None:
+    """The first wave by name, so an accidental claim is a red row, not a drift."""
+    wired = sorted(
+        _ops(cls).scanner_name
+        for cls in SCANNER_CLASSES
+        if opsf.TargetKind.CONTAINER_IMAGE in _ops(cls).targets.kinds
+    )
+    assert wired == ["grype", "syft", "trivy"]
