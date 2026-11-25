@@ -450,7 +450,7 @@ class ReportContentEmitter:
             every = self._graded_frame(self.flat_vulns, actionable=True)
             _add_level_counts(counts, every)
             actionable = flag_total(every, "actionable")
-            suppressed = flag_total(every, "suppressed")
+            suppressed = flag_total(every, "is_suppressed")
         else:
             # The scanner rows count SARIF results. Findings an additional
             # report lists (a plugin's own list of finding dicts) reach the
@@ -461,7 +461,7 @@ class ReportContentEmitter:
                 actionable=not is_workspace_scan(self.model),
             )
             _add_level_counts(counts, extras)
-            suppressed += flag_total(extras, "suppressed")
+            suppressed += flag_total(extras, "is_suppressed")
             if not is_workspace_scan(self.model):
                 # A workspace scan counted every finding above, these included.
                 actionable += flag_total(extras, "actionable")
@@ -603,7 +603,7 @@ class ReportContentEmitter:
         """
         return graded_frame(
             levels=[_severity_level(vuln.severity) for vuln in vulns],
-            suppressed=[bool(vuln.is_suppressed) for vuln in vulns],
+            is_suppressed=[bool(vuln.is_suppressed) for vuln in vulns],
             left_out=[self.is_policy_not_gating(vuln) for vuln in vulns],
             actionable=(
                 [self.is_finding_actionable(vuln) for vuln in vulns]

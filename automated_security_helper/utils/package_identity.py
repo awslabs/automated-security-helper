@@ -475,12 +475,17 @@ def extract_root_advisories(properties: Any) -> List[Dict[str, str]]:
 # that carries a lone surrogate is held, not refused, and comes back unchanged.
 # ---------------------------------------------------------------------------
 
-_PACKAGE_COLUMNS = ("name", "version", "path")
+# A package column is named for the property-bag key it is read from
+# (``package_name``, ``package_version``, ``package_path``), so a join on package
+# identity names the same thing the model does; the bare ``name`` / ``version`` /
+# ``path`` it had read as three other model fields.
+_PACKAGE_COLUMNS = (PACKAGE_NAME_KEY, PACKAGE_VERSION_KEY, PACKAGE_PATH_KEY)
 _RESOURCE_COLUMNS = ("resource_id", "resource_type")
 
 
 def package_identity_frame(properties: Iterable[Any]) -> "pl.DataFrame":
-    """One row per record of *properties*: ``name``, ``version``, ``path``.
+    """One row per record of *properties*: ``package_name``, ``package_version``,
+    ``package_path``.
 
     A row is what :func:`extract_package_identity` reads from that record, so a
     key the record does not carry (or carries as something other than a
@@ -490,8 +495,13 @@ def package_identity_frame(properties: Iterable[Any]) -> "pl.DataFrame":
 
     columns: Dict[str, List[Optional[str]]] = {key: [] for key in _PACKAGE_COLUMNS}
     for record in properties:
-        for key, value in zip(_PACKAGE_COLUMNS, extract_package_identity(record)):
-            columns[key].append(wire(value))
+        # Unpacked by name, not zipped by position: the extractor's tuple order
+        # and the column order are two facts, and each cell lands in the column
+        # that is named for it.
+        name, version, path = extract_package_identity(record)
+        columns[PACKAGE_NAME_KEY].append(wire(name))
+        columns[PACKAGE_VERSION_KEY].append(wire(version))
+        columns[PACKAGE_PATH_KEY].append(wire(path))
     return pl.DataFrame(columns, schema=dict.fromkeys(_PACKAGE_COLUMNS, pl.String))
 
 
@@ -505,8 +515,9 @@ def resource_identity_frame(properties: Iterable[Any]) -> "pl.DataFrame":
 
     columns: Dict[str, List[Optional[str]]] = {key: [] for key in _RESOURCE_COLUMNS}
     for record in properties:
-        for key, value in zip(_RESOURCE_COLUMNS, extract_resource_identity(record)):
-            columns[key].append(wire(value))
+        resource_id, resource_type = extract_resource_identity(record)
+        columns["resource_id"].append(wire(resource_id))
+        columns["resource_type"].append(wire(resource_type))
     return pl.DataFrame(columns, schema=dict.fromkeys(_RESOURCE_COLUMNS, pl.String))
 
 
@@ -517,7 +528,9 @@ def identity_properties_from_frame(frame: "pl.DataFrame") -> List[Dict[str, str]
     :func:`identity_properties` leaves it out.
     """
     out: List[Dict[str, str]] = []
-    for name, version, path in frame.select(*_PACKAGE_COLUMNS).iter_rows():
+    for name, version, path in frame.select(
+        PACKAGE_NAME_KEY, PACKAGE_VERSION_KEY, PACKAGE_PATH_KEY
+    ).iter_rows():
         out.append(
             identity_properties(
                 unwire(name) if name is not None else None,
