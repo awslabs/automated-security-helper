@@ -180,6 +180,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Sequence, 
 
 from pydantic import BaseModel, ConfigDict
 
+from automated_security_helper.models.vocab import TargetType
 from automated_security_helper.utils.frame_ops import ordinal_over
 from automated_security_helper.utils.frame_text import wire, wire_cell
 from automated_security_helper.utils.uri_separators import (
@@ -209,9 +210,6 @@ PLACEHOLDER_FINGERPRINT_VALUES = frozenset({"requires login", ""})
 
 #: The fingerprint kinds, in the order they are preferred.
 FINGERPRINT_KINDS = ("fingerprints", "partialFingerprints")
-
-#: The ``tree`` of a file a converter wrote.
-CONVERTED_TREE = "converted"
 
 #: The SARIF result property the scanner executor records a converted file's path
 #: relative to the converted root in (``utils/scan_output_dirs``).
@@ -448,7 +446,7 @@ def finding_identity(
         base["tree"] = IMAGE_TREE
         base["image"] = image
     elif converted:
-        base["tree"] = CONVERTED_TREE
+        base["tree"] = TargetType.CONVERTED.value
     return FindingIdentity(
         base=base,
         lines=(line_start, line_end),
