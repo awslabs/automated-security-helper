@@ -523,6 +523,36 @@ ALLOWLIST: tuple[Entry, ...] = (
         ),
     ),
     Entry(
+        file=".github/workflows/ash-scan-benchmark.yml",
+        kind=KIND_UPLOAD,
+        action=_UPLOAD,
+        publishes=(
+            "name=scan-benchmark-${{ github.run_id }}"
+            "-attempt-${{ github.run_attempt }} "
+            "path=${{ runner.temp }}/out/benchmark.json"
+        ),
+        reason=(
+            "The scan-time benchmark job's record, kept 30 days: the wall times "
+            "of ASH's own scans of a generated fixture repository, per build and "
+            "scenario, with the exit codes and load averages of the runs. Timing "
+            "figures about public code, not a wheel, image, binary or bundle this "
+            "project distributes, and the job holds a read-only token and no "
+            "secret."
+        ),
+    ),
+    Entry(
+        file=".github/workflows/ash-scan-benchmark.yml",
+        kind=KIND_UPLOAD,
+        action=_UPLOAD,
+        publishes=("name=scan-benchmark-trend path=${{ runner.temp }}/out/trend.jsonl"),
+        reason=(
+            "The nightly run's trend file, kept 90 days: one JSON line per night "
+            "with the head build's min, median, mean and max scan times per "
+            "scenario, appended to the previous night's file. Timing figures "
+            "only, nothing this project distributes."
+        ),
+    ),
+    Entry(
         file=".github/workflows/ash-unified-ci.yml",
         kind=KIND_UPLOAD,
         action=_UPLOAD,
