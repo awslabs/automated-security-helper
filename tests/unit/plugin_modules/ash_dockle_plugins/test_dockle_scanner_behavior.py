@@ -459,7 +459,7 @@ class TestExitStatus:
     ):
         scanner = _scanner(tree, tmp_path, image=IMAGE, scan_timeout=5)
         fake = FakeDockle(timed_out=True)
-        with pytest.raises(ScannerError, match="timed out after 5"):
+        with pytest.raises(ScannerError, match=r"timed out after '5' s"):
             _run(scanner, fake, monkeypatch)
         assert 0 < fake.calls[0]["timeout"] <= 5
 
