@@ -121,10 +121,17 @@ runs:
         else result=miss; fi
         echo "cache ${CACHE_NAME}: ${result}" | tee -a "$GITHUB_STEP_SUMMARY"
 
+    # With the `[symbols]` extra: the jobs this action installs ASH for self-scan
+    # the repository with .ash/.ash.yaml and .ash/.ash_community_plugins.yaml,
+    # whose suppressions are scoped by `symbol` and resolved by tree-sitter from
+    # that extra. Resolution fails closed, so an install without the extra makes
+    # every symbol-scoped entry match nothing and the scan legs go red on the
+    # findings those entries cover. The ash-repo-scan.yml symbols-extra-control
+    # job is the check that keeps this clause load-bearing.
     - name: Install ASH package (Unix)
       if: inputs.install-ash == 'true' && runner.os != 'Windows'
       shell: bash
-      run: pip install .
+      run: pip install ".[symbols]"
 
     # No GITHUB_PATH write. This step used to append "$env:APPDATA\Python\Scripts",
     # on the theory that `pip install .` puts ash.exe in the user scheme. Measured on
@@ -140,7 +147,7 @@ runs:
     - name: Install ASH package (Windows)
       if: inputs.install-ash == 'true' && runner.os == 'Windows'
       shell: pwsh
-      run: pip install .
+      run: pip install ".[symbols]"
 
     # The contract callers rely on: after this action, `ash` on PATH is the ASH that
     # was just installed. Checked here so a runner image that installs console

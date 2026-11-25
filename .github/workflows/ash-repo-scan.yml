@@ -440,3 +440,41 @@ jobs:
         with:
           path: ~/.opengrep/cli/latest
           key: opengrep-${{ runner.os }}-${{ steps.key.outputs.week }}
+
+  # The control that keeps the scan's `symbols` extra load-bearing. The suppression
+  # configs scope entries by `symbol`, resolved by tree-sitter from the optional
+  # `symbols` extra (run-ash-security-scan.yml installs it through ASH_UVX_SOURCE;
+  # setup-ash installs it for the unified-CI scan legs). Resolution fails closed,
+  # so a leg that loses the extra re-surfaces every symbol-suppressed finding as a
+  # residual -- loud, but nothing in that leg's output names the cause. This job is
+  # the input that makes that failure attributable: in an environment WITHOUT the
+  # extra, every migrated entry must match nothing (proving the fail-closed path is
+  # live, not documentation); with it, every one must resolve and match (proving
+  # the scan legs that do install it get real coverage from these entries).
+  # scripts/verify_symbol_suppressions_extra.py names the offending entries when
+  # either half breaks.
+  symbols-extra-control:
+    name: Symbol suppressions fail closed without the extra, resolve with it
+    # Not on push, like the scan: the control guards the scan legs' environments,
+    # so it runs where they run.
+    if: github.event_name != 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - name: Without the extra, every symbol suppression fails closed
+        run: |
+          uv sync --frozen
+          uv run --no-sync python scripts/verify_symbol_suppressions_extra.py fail-closed
+      - name: With the extra, every symbol suppression resolves and matches
+        run: |
+          uv sync --frozen --extra symbols
+          uv run --no-sync python scripts/verify_symbol_suppressions_extra.py resolves
