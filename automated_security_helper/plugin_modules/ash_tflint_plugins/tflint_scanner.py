@@ -47,8 +47,9 @@ everything else fail the scan even when a report is on disk.
 The SARIF holds two runs (``formatter/sarif.go``): ``tflint`` for lint issues and
 ``tflint-errors`` for HCL diagnostics and application errors. A result in the error run
 means TFLint could not evaluate something (a file that does not parse, a module it
-could not load). That is a failed scan, not a finding: ``_post_process_sarif`` raises
-and does not copy the messages, which can quote scanned files.
+could not load). That is a failed scan, not a finding: ``_read_results_file`` raises
+(on the report as written, before ASH renames the runs) and does not copy the
+messages, which can quote scanned files.
 
 Severity
 --------
@@ -523,7 +524,36 @@ class TflintScanner(ScannerPluginBase[TflintScannerConfig]):
                 f"tflint exited {self.exit_code}; it exits 0 when it finds nothing "
                 f"and {ISSUES_EXIT_CODE} when it finds issues, so this run failed"
             )
-        return super()._read_results_file(results_file)
+        raw = super()._read_results_file(results_file)
+        return self._refuse_error_run(raw)
+
+    def _refuse_error_run(
+        self, raw: Optional[Dict[str, Any]]
+    ) -> Optional[Dict[str, Any]]:
+        """Fail on a result in the ``tflint-errors`` run; drop that run when empty.
+
+        Done on the report as TFLint wrote it. By the time ``_post_process_sarif``
+        runs, the base class has stamped its own tool name on every run's driver
+        (measured: both runs read ``tflint``), so the error run can no longer be told
+        apart there and its diagnostics would be reported as findings.
+        """
+        if not isinstance(raw, dict) or not isinstance(raw.get("runs"), list):
+            return raw
+        kept = []
+        for run in raw["runs"]:
+            driver = ((run or {}).get("tool") or {}).get("driver") or {}
+            if driver.get("name") == ERROR_RUN_NAME:
+                count = len((run or {}).get("results") or [])
+                if count:
+                    raise ScannerError(
+                        f"tflint could not evaluate part of the target: its "
+                        f"{ERROR_RUN_NAME} run holds {count} error result(s). A "
+                        "file it cannot parse is a failed scan, not a finding; the "
+                        "messages are not quoted here"
+                    )
+                continue
+            kept.append(run)
+        return {**raw, "runs": kept}
 
     def _process_command_response(self, response: Dict[str, Any]) -> None:
         """Count the exit code; keep stderr out of ``self.errors``.
@@ -571,22 +601,8 @@ class TflintScanner(ScannerPluginBase[TflintScannerConfig]):
         final_args: List[str],
         target: Path,
     ) -> SarifReport:
-        """Fail on the error run, rate every lint result, keep paths target-relative."""
-        kept_runs = []
-        for run in sarif_report.runs or []:
-            driver = run.tool.driver if run.tool else None
-            if driver is not None and driver.name == ERROR_RUN_NAME:
-                if run.results:
-                    raise ScannerError(
-                        f"tflint could not evaluate part of the target: its "
-                        f"{ERROR_RUN_NAME} run holds {len(run.results)} error "
-                        "result(s). A file it cannot parse is a failed scan, not a "
-                        "finding; the messages are not quoted here"
-                    )
-                continue
-            kept_runs.append(run)
-        sarif_report.runs = kept_runs
-
+        """Rate every lint result and keep paths target-relative."""
+        # The error run was refused or dropped in _read_results_file.
         for result in sarif_report.get_all_results():
             raw_level = getattr(result.level, "value", result.level)
             if raw_level is None:
