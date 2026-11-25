@@ -32,10 +32,12 @@ from typing import (
     Optional,
     Set,
     Tuple,
+    cast,
     get_args,
 )
 
 import yaml
+import yaml.composer
 from automated_security_helper.utils.redacted_model import (
     env_resolved_scalar,
     RedactedSection,
@@ -554,7 +556,9 @@ def load_yaml_config(
             # tagged !ENV and one the file tagged look the same once composed.
             explicit = self.peek_event().tag == "!ENV"
             node = super().compose_scalar_node(anchor)
-            node.ash_explicit_env = explicit
+            # A marker of this loader's own on PyYAML's node, read back by
+            # construct_scalar below; ScalarNode declares no such attribute.
+            setattr(node, "ash_explicit_env", explicit)
             return node
 
         def construct_mapping(self, node, deep=False):
@@ -1732,6 +1736,11 @@ def sandbox_mode_in_document(document: Any) -> Any:
     return document
 
 
+SandboxModeName = Literal[
+    "off", "auto", "bwrap", "firejail", "landlock", "sandbox-exec"
+]
+
+
 class SandboxConfig(RedactedSection):
     """OS-level sandboxing of scanner subprocesses. Off by default.
 
@@ -1742,7 +1751,7 @@ class SandboxConfig(RedactedSection):
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
     mode: Annotated[
-        Literal["off", "auto", "bwrap", "firejail", "landlock", "sandbox-exec"],
+        SandboxModeName,
         Field(
             description=(
                 "How scanner subprocesses are confined. 'off' runs them as plain "
@@ -2000,7 +2009,12 @@ class AshConfigGlobalSettingsSection(RedactedSection):
             # test_schema_bytes_do_not_depend_on_the_host.py).
             json_schema_extra={"default": SHIPPED_SEVERITY_LEVEL},
         ),
-    ] = ASH_DEFAULT_SEVERITY_LEVEL
+        # _resolve_default_severity_level returns one of the threshold names, or the
+        # fallback, so the str it is typed as is one of the field's literals.
+    ] = cast(
+        Literal["ALL", "LOW", "MEDIUM", "HIGH", "CRITICAL"],
+        ASH_DEFAULT_SEVERITY_LEVEL,
+    )
 
     ignore_paths: Annotated[
         List[IgnorePathWithReason],
@@ -2634,7 +2648,7 @@ class AshConfig(RedactedSection):
     # Those of the files an extends entry chose with a value read from the
     # environment, and every base below each, which the warning names <value>.
     _repository_config_environment_paths: FrozenSet[Path] = PrivateAttr(
-        default_factory=frozenset
+        default=frozenset()
     )
     # Why those files are not the operator's, in the sentence the other
     # confinement warnings give (sandbox_grants.confinement_membership), set with

@@ -4909,7 +4909,7 @@ def _logged_without(text: str, values: Tuple[str, ...]) -> str:
 
 
 def run_command(
-    args: List[str],
+    args: Union[List[str], str],
     cwd: Optional[Union[str, Path]] = None,
     env: Optional[Dict[str, str]] = None,
     capture_output: bool = True,
