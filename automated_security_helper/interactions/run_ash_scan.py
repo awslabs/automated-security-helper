@@ -26,7 +26,6 @@ from typing import (
     Set,
     Tuple,
     Union,
-    cast,
 )
 
 import typer
@@ -70,6 +69,7 @@ from automated_security_helper.core.scanner_selection import (
     selection_marker,
 )
 from automated_security_helper.core.enums import (
+    DEFAULT_EXECUTION_PHASES,
     AshLogLevel,
     BuildTarget,
     ExecutionPhase,
@@ -79,6 +79,7 @@ from automated_security_helper.core.enums import (
     RunMode,
     SandboxMode,
     ScannerStatus,
+    phase_values,
 )
 from automated_security_helper.core.committed_output import (
     COMMITTED_OUTPUT_REFUSED_EXIT_CODE,
@@ -100,7 +101,6 @@ from automated_security_helper.core.exceptions import (
     WorkspaceDefinitionError,
     WorkspacePathNotUtf8Error,
 )
-from automated_security_helper.core.progress import ExecutionPhaseType
 from automated_security_helper.core.sharding import shown_shard_text
 from automated_security_helper.core.scanner_statistics_calculator import (
     ScannerStatisticsCalculator,
@@ -1132,7 +1132,7 @@ def _refuse_an_inner_run_that_did_not_complete(
     results: AshAggregatedResults,
     opts: ScanOptions,
     run_id: str,
-    mode: str,
+    mode: RunMode,
     output_file: Path,
     logger,
 ) -> None:
@@ -1159,7 +1159,7 @@ def _refuse_an_inner_run_that_did_not_complete(
     # In container mode the inner ASH is the image's, which can be older than this
     # one. In nix mode it is started with this ASH's own interpreter
     # (run_ash_nix._this_ash), so the message names that instead.
-    if mode == "container":
+    if mode is RunMode.container:
         older = (
             " An ASH older than this one does not write that record: "
             f"{_image_rebuild_hint()}"
@@ -1169,7 +1169,7 @@ def _refuse_an_inner_run_that_did_not_complete(
             f" The inner run was started with this ASH's interpreter, {sys.executable}."
         )
     logger.error(
-        f"The {mode} run did not complete, so its results are not read back: "
+        f"The {mode.value} run did not complete, so its results are not read back: "
         f"{output_file} {found}. The run's own output above says what stopped it."
         f"{older}"
     )
@@ -3862,7 +3862,7 @@ def _sandbox_mode_without_the_config(opts: ScanOptions) -> List[str]:
             except Exception:
                 owned = None
             if owned is not None:
-                floor.sandbox.mode = owned
+                floor.sandbox.mode = SandboxMode(owned)
     selected = _sandbox_overrides(opts.config_overrides)
     if selected:
         try:
@@ -4666,7 +4666,7 @@ def _run_container_mode(
     results = _read_back_inner_results(output_file, logger)
     if results is not None:
         _refuse_an_inner_run_that_did_not_complete(
-            results, opts, outer_run_id, "container", output_file, logger
+            results, opts, outer_run_id, RunMode.container, output_file, logger
         )
         _drop_restore_marker_after_a_completed_run(opts, logger)
         _take_own_values_for_record(results, opts, image_may_differ=image_may_differ)
@@ -5000,7 +5000,7 @@ def _run_nix_mode(
     results = _read_back_inner_results(output_file, logger)
     if results is not None:
         _refuse_an_inner_run_that_did_not_complete(
-            results, opts, outer_run_id, "nix", output_file, logger
+            results, opts, outer_run_id, RunMode.nix, output_file, logger
         )
         _drop_restore_marker_after_a_completed_run(opts, logger)
         _take_own_values_for_record(results, opts, image_may_differ=image_may_differ)
@@ -5682,20 +5682,18 @@ def _run_local_mode(
         )
 
         _phases = opts.phases or []
-        phases_to_run = []
-        if ExecutionPhase.CONVERT in _phases:
-            phases_to_run.append("convert")
-        if ExecutionPhase.SCAN in _phases:
-            phases_to_run.append("scan")
-        if ExecutionPhase.REPORT in _phases:
-            phases_to_run.append("report")
-        if ExecutionPhase.INSPECT in _phases or opts.inspect:
-            phases_to_run.append("inspect")
+        # In ExecutionPhase's member order, which is execution order; --inspect
+        # adds the inspect phase beside --phases inspect.
+        phases_to_run = [
+            phase
+            for phase in ExecutionPhase
+            if phase in _phases or (phase is ExecutionPhase.INSPECT and opts.inspect)
+        ]
         if not phases_to_run:
-            phases_to_run = ["convert", "scan", "report"]
+            phases_to_run = list(DEFAULT_EXECUTION_PHASES)
 
         if not opts.quiet and not opts.simple:
-            logger.debug(f"Running phases: {phases_to_run}")
+            logger.debug(f"Running phases: {phase_values(phases_to_run)}")
 
         # With keep_previous_results the caller settles the previous results, after
         # this function's last cancellation check below and after its own. Without
@@ -5703,9 +5701,7 @@ def _run_local_mode(
         settle: Dict[str, bool] = (
             {"settle_on_success": False} if opts.keep_previous_results else {}
         )
-        results = orchestrator.execute_scan(
-            phases=cast(List[ExecutionPhaseType], phases_to_run), **settle
-        )
+        results = orchestrator.execute_scan(phases=phases_to_run, **settle)
 
         if opts.simple and not opts.quiet:
             echo("\nASH scan completed.")
@@ -5967,18 +5963,14 @@ def build_project_scan_settings(opts: ScanOptions) -> "ProjectScanSettings":
 
     workspace_config = _resolve_workspace_execution_config(opts)
 
-    phases: List[str] = []
-    for phase, name in (
-        (ExecutionPhase.CONVERT, "convert"),
-        (ExecutionPhase.SCAN, "scan"),
-        (ExecutionPhase.REPORT, "report"),
-    ):
-        if phase in (opts.phases or []):
-            phases.append(name)
-    if ExecutionPhase.INSPECT in (opts.phases or []) or opts.inspect:
-        phases.append("inspect")
+    phases: List[ExecutionPhase] = [
+        phase
+        for phase in ExecutionPhase
+        if phase in (opts.phases or [])
+        or (phase is ExecutionPhase.INSPECT and opts.inspect)
+    ]
     if not phases:
-        phases = ["convert", "scan", "report"]
+        phases = list(DEFAULT_EXECUTION_PHASES)
 
     return ProjectScanSettings(
         output_dir=opts.output_dir,
@@ -5998,7 +5990,7 @@ def build_project_scan_settings(opts: ScanOptions) -> "ProjectScanSettings":
         config_overrides=tuple(opts.config_overrides or []),
         client_overrides=opts.client_overrides,
         ash_plugin_modules=tuple(opts.ash_plugin_modules or []),
-        strategy=getattr(opts.strategy, "value", str(opts.strategy)),
+        strategy=opts.strategy,
         offline=opts.offline,
         python_based_plugins_only=opts.python_based_plugins_only,
         ignore_suppressions=opts.ignore_suppressions,

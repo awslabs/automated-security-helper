@@ -182,6 +182,7 @@ from automated_security_helper.core.constants import (
     ASH_PYPROJECT_FILE_NAME,
     ASH_RC_FILE_NAMES,
 )
+from automated_security_helper.core.enums import SandboxMode
 from automated_security_helper.core.exceptions import (
     ASHConfigFileNotFoundError,
     ASHConfigInputNotPermittedError,
@@ -3557,9 +3558,7 @@ def _repository_members(
 # against it because assignment onto the model is not validated: a value
 # outside this set would otherwise ride into the floor and be requested of
 # the container as written.
-_SANDBOX_MODES: Tuple[str, ...] = tuple(
-    get_args(SandboxConfig.model_fields["mode"].annotation)
-)
+_SANDBOX_MODES: Tuple[str, ...] = tuple(mode.value for mode in SandboxMode)
 
 
 def _owned_file_shown(file: Path | str, environment_paths: Collection[Path]) -> str:
@@ -4864,9 +4863,11 @@ def trusted_base_config(
                 reads,
                 environment_paths,
             )
-    if trusted.sandbox.mode == "off":
+    if trusted.sandbox.mode == SandboxMode.off:
         if owned_mode is not None:
-            trusted.sandbox.mode = owned_mode
+            # The walk answers a plain str (see _owned_sandbox_mode), and this
+            # assignment is not validated: it becomes its member here.
+            trusted.sandbox.mode = SandboxMode(owned_mode)
         elif merged_fallback:
             trusted.sandbox.mode = merged_mode
     return trusted

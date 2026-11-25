@@ -108,25 +108,30 @@ from automated_security_helper.utils.terminal_text import (
 # Pretty-printed only on an interactive terminal; see _write_report. To a regular
 # file the report is written as the reporter produced it, and to a pipe with its
 # CI command forms broken.
+#
+# The names are ExportFormat values, derived from the members so a renamed or
+# retired format cannot leave a stale spelling here; --format arrives as the
+# reporter's name, a plain string, which is what these sets hold.
 JSON_STDOUT_FORMATS = frozenset(
-    {
-        "asff",
-        "aws-security-hub",
-        "cloudwatch-logs",
-        "cyclonedx",
-        "flat-json",
-        "github-ghas",
-        "gitlab-cyclonedx",
-        "gitlab-sast",
-        "ocsf",
-        "s3",
-        "sarif",
-        "spdx",
+    fmt.value
+    for fmt in (
+        ExportFormat.ASFF,
+        ExportFormat.AWS_SECURITY_HUB,
+        ExportFormat.CLOUDWATCH_LOGS,
+        ExportFormat.CYCLONEDX,
+        ExportFormat.FLAT_JSON,
+        ExportFormat.GITHUB_GHAS,
+        ExportFormat.GITLAB_CYCLONEDX,
+        ExportFormat.GITLAB_SAST,
+        ExportFormat.OCSF,
+        ExportFormat.S3,
+        ExportFormat.SARIF,
+        ExportFormat.SPDX,
         # JSON by default and under output_format json; markdown under
         # output_format markdown, which _is_json_document tells apart by the
         # content, so the markdown is never broken with JSON's escapes.
-        "unused-suppressions",
-    }
+        ExportFormat.UNUSED_SUPPRESSIONS,
+    )
 )
 
 
@@ -148,7 +153,7 @@ def _is_json_document(content: str) -> bool:
 # configuration asks for the text document, so the JSON check the command makes
 # before writing (report_command) is skipped then (_report_is_json). Under any
 # other setting the report is a JSON document and is checked as one.
-TEXT_OR_JSON_FORMATS = frozenset({"unused-suppressions"})
+TEXT_OR_JSON_FORMATS = frozenset({ExportFormat.UNUSED_SUPPRESSIONS.value})
 
 
 def _report_is_json(report_format: str, reporter_plugin: object) -> bool:
@@ -219,7 +224,9 @@ def _non_json_report_text(content: str, error: ValueError) -> str:
 
 # Reporters whose output is Markdown, rendered with rich's Markdown on an
 # interactive terminal.
-MARKDOWN_STDOUT_FORMATS = frozenset({"markdown", "bedrock-summary-reporter"})
+MARKDOWN_STDOUT_FORMATS = frozenset(
+    {ExportFormat.MARKDOWN.value, ExportFormat.BEDROCK_SUMMARY.value}
+)
 
 
 def _shown_not_obeyed(text: str, *, json_text: bool = False) -> str:

@@ -32,8 +32,8 @@ from automated_security_helper.core.enums import ScannerToolType
 from automated_security_helper.utils.scanner_names import SCANNER_TOOL_TYPES
 
 TOOL_TYPE_TAG_PREFIX = "tool_type::"
-SECRETS_TOOL_TYPE = "SECRETS"  # pragma: allowlist secret
-UNKNOWN_TOOL_TYPE = "UNKNOWN"
+SECRETS_TOOL_TYPE = ScannerToolType.SECRETS.value
+UNKNOWN_TOOL_TYPE = ScannerToolType.UNKNOWN.value
 
 #: The types a scanner can declare (``ScannerToolType``'s values), UNKNOWN left out.
 KNOWN_TOOL_TYPES = frozenset(member.value for member in ScannerToolType) - {
