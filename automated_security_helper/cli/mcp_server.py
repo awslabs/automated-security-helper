@@ -42,8 +42,6 @@ from mcp.server.mcpserver import MCPServer, Context
 from pydantic import Field
 
 from automated_security_helper.cli.mcp_tools import (
-    CONFIG_ENV_NOT_RESOLVED,
-    CONFIG_INPUT_NOT_PERMITTED,
     REFUSED_CONFIG_EXIT_CODE,
     REFUSED_INTERNAL_EXIT_CODE,
     REFUSED_TARGET_EXIT_CODE,
@@ -91,6 +89,7 @@ from automated_security_helper.core.resource_management.error_handling import (
 from automated_security_helper.models.workspace import WorkspaceExitCode
 
 from automated_security_helper.core.resource_management.scan_registry import (
+    MCScanStatus,
     get_scan_registry,
 )
 from automated_security_helper.core.resource_management.scan_tracking import (
@@ -112,6 +111,7 @@ from automated_security_helper.cli.mcp.profile_registry import (
     ProfileRegistryError,
     resolve_session_config_path,
 )
+from automated_security_helper.cli.mcp.error_types import McpErrorType
 from automated_security_helper.cli.mcp.sessions import SessionWorkspaceBusyError
 from automated_security_helper.cli.mcp.progress_monitor import monitor_scan_progress
 from automated_security_helper.cli.mcp.sandbox import (
@@ -512,7 +512,7 @@ def _resolve_omitted_source_dir(session_id: str) -> _OmittedSourceResolution:
                         f"the server's working directory instead would report on a "
                         f"tree that is not yours."
                     ),
-                    "error_type": "delivered_source_missing",
+                    "error_type": McpErrorType.DELIVERED_SOURCE_MISSING.value,
                     "session_id": session_id,
                 },
                 REFUSED_TARGET_EXIT_CODE,
@@ -552,7 +552,7 @@ def _resolve_omitted_source_dir(session_id: str) -> _OmittedSourceResolution:
                         "directory would report a clean result for a tree that is "
                         "not yours."
                     ),
-                    "error_type": "session_source_mismatch",
+                    "error_type": McpErrorType.SESSION_SOURCE_MISMATCH.value,
                     "session_id": session_id,
                 },
                 REFUSED_USAGE_EXIT_CODE,
@@ -571,7 +571,7 @@ def _resolve_omitted_source_dir(session_id: str) -> _OmittedSourceResolution:
                     "working directory holds none of your code, and would complete "
                     "with no findings and no error."
                 ),
-                "error_type": "no_source_delivered",
+                "error_type": McpErrorType.NO_SOURCE_DELIVERED.value,
                 "session_id": session_id,
             },
             REFUSED_USAGE_EXIT_CODE,
@@ -870,7 +870,7 @@ async def run_ash_scan(
                     {
                         "success": False,
                         "error": raw_controls_on_one_line(str(config_error)),
-                        "error_type": CONFIG_INPUT_NOT_PERMITTED,
+                        "error_type": McpErrorType.CONFIG_INPUT_NOT_PERMITTED.value,
                         "error_category": config_error.context["error_category"],
                     },
                     REFUSED_CONFIG_EXIT_CODE,
@@ -893,7 +893,7 @@ async def run_ash_scan(
                 {
                     "success": False,
                     "error": raw_controls_on_one_line(str(target.error)),
-                    "error_type": "scan_target_not_permitted",
+                    "error_type": McpErrorType.SCAN_TARGET_NOT_PERMITTED.value,
                     # Mirrors the category create_error_response sets on the
                     # mcp_tools side, so one key identifies a refusal from any
                     # entry point rather than two depending on which tool was
@@ -926,7 +926,7 @@ async def run_ash_scan(
                 {
                     "success": False,
                     "error": raw_controls_on_one_line(str(output_error)),
-                    "error_type": "output_dir_not_permitted",
+                    "error_type": McpErrorType.OUTPUT_DIR_NOT_PERMITTED.value,
                     "error_category": output_error.context["error_category"],
                 },
                 OUTPUT_TREE_REFUSED_EXIT_CODE,
@@ -967,7 +967,7 @@ async def run_ash_scan(
                 {
                     "success": False,
                     "error": raw_controls_on_one_line(str(committed_refusal)),
-                    "error_type": "committed_output_files",
+                    "error_type": McpErrorType.COMMITTED_OUTPUT_FILES.value,
                     "error_category": ErrorCategory.INVALID_PATH.value,
                 },
                 COMMITTED_OUTPUT_REFUSED_EXIT_CODE,
@@ -1002,7 +1002,7 @@ async def run_ash_scan(
         for warning in result.get("warnings") or []:
             await _tell_client(ctx, "warning", raw_controls_on_one_line(str(warning)))
 
-        if result.get("error_type") == CONFIG_ENV_NOT_RESOLVED:
+        if result.get("error_type") == McpErrorType.CONFIG_ENV_NOT_RESOLVED.value:
             # A refusal of the config, reported as itself like the
             # config_input_not_permitted refusal above, not as a failure to
             # start. Passed on as mcp_scan_directory gave it, so the caller
@@ -1040,7 +1040,7 @@ async def run_ash_scan(
                 {
                     "success": False,
                     "error": "Failed to start scan: no scan id was returned",
-                    "error_type": "scan_start_failure",
+                    "error_type": McpErrorType.SCAN_START_FAILURE.value,
                 },
                 REFUSED_INTERNAL_EXIT_CODE,
             )
@@ -1069,7 +1069,7 @@ async def run_ash_scan(
 
         return {
             "success": True,
-            "status": "running",
+            "status": MCScanStatus.RUNNING.value,
             "scan_id": scan_id,
             "progress": 0.0,
             "message": "Scan started, initializing scanners. Use get_scan_progress to track progress.",
@@ -1544,7 +1544,7 @@ async def get_scan_progress(ctx: Context, scan_id: str) -> Dict[str, Any]:
                 "error": raw_controls_on_one_line(
                     f"Scan {scan_id} not found in registry"
                 ),
-                "error_type": "scan_not_found",
+                "error_type": McpErrorType.SCAN_NOT_FOUND.value,
             }
 
         output_dir = Path(entry.output_directory)
@@ -1586,7 +1586,7 @@ async def get_scan_progress(ctx: Context, scan_id: str) -> Dict[str, Any]:
         # own set-up, has written nothing there, and what is there is not its.
         previous_only = (
             bool(progress_info.get("output_holds_previous_results"))
-            or progress_info.get("status") == "pending"
+            or progress_info.get("status") == MCScanStatus.PENDING.value
         )
 
         # The scanners directory, each scanner's and each target's are read only
@@ -2019,7 +2019,7 @@ async def get_scan_result_paths(
             return {
                 "success": False,
                 "error": raw_controls_on_one_line(str(target_error)),
-                "error_type": "scan_target_not_permitted",
+                "error_type": McpErrorType.SCAN_TARGET_NOT_PERMITTED.value,
                 # Mirrors the category create_error_response sets on the
                 # mcp_tools side, so one key identifies a refusal from any entry
                 # point rather than two depending on which tool was called.
@@ -2047,7 +2047,7 @@ async def get_scan_result_paths(
                 "error": raw_controls_on_one_line(
                     f"Output directory does not exist: {output_dir}"
                 ),
-                "error_type": "DirectoryNotFound",
+                "error_type": McpErrorType.DIRECTORY_NOT_FOUND.value,
             }
 
         # A file's existence and size are read through any link to it, so each
@@ -2060,7 +2060,7 @@ async def get_scan_result_paths(
                 "error": raw_controls_on_one_line(
                     f"Reports directory does not exist: {reports_dir}"
                 ),
-                "error_type": "DirectoryNotFound",
+                "error_type": McpErrorType.DIRECTORY_NOT_FOUND.value,
             }
 
         report_files = {
@@ -2441,10 +2441,10 @@ async def list_scanners() -> list:
     still fail on a given target, and a scan may skip a scanner for reasons of
     configuration rather than dependencies.
 
-    The list covers the built-in scanners and the community scanners ASH ships
-    (ferret-scan, snyk-code, trivy-repo). Listing a community scanner does not add
+    The list covers the built-in scanners and the alpha scanners ASH ships
+    (ferret-scan, snyk-code, trivy-repo). Listing an alpha scanner does not add
     it to any scan: a scan runs the built-in scanners plus those of the plugin
-    modules its own ash_plugin_modules names, so a community scanner runs only in a
+    modules its own ash_plugin_modules names, so an alpha scanner runs only in a
     scan whose config or --ash-plugin-modules names its module.
     """
     try:
@@ -2528,7 +2528,7 @@ def validate_config(
                 {
                     "field": "",
                     "message": raw_controls_on_one_line(error_text(e)),
-                    "type": "invalid_session_id",
+                    "type": McpErrorType.INVALID_SESSION_ID.value,
                 }
             ],
             "warnings": [],
@@ -2648,7 +2648,7 @@ def _session_error(e: ValueError) -> Dict[str, Any]:
     return {
         "success": False,
         "error": raw_controls_on_one_line(error_text(e)),
-        "error_type": "invalid_session_id",
+        "error_type": McpErrorType.INVALID_SESSION_ID.value,
     }
 
 

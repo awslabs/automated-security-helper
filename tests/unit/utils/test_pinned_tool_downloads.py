@@ -1296,7 +1296,7 @@ class TestAssetResolution:
             )
 
     def test_the_ferret_suppression_range_still_bounds_the_digest_table(self):
-        """The community config suppresses API_KEY_OR_SECRET over a line range.
+        """The alpha config suppresses API_KEY_OR_SECRET over a line range.
 
         A range wider than the table swallows a real secret written into the
         surrounding prose; a range narrower than it lets the 16 false positives back
@@ -1347,9 +1347,7 @@ class TestAssetResolution:
         closes = tables[-1][1]
 
         config = yaml.safe_load(
-            (repo_root / ".ash" / ".ash_community_plugins.yaml").read_text(
-                encoding="utf-8"
-            )
+            (repo_root / ".ash" / ".ash_alpha_plugins.yaml").read_text(encoding="utf-8")
         )
         entries = [
             s

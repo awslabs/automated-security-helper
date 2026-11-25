@@ -228,7 +228,7 @@ def _warnings(scanner: TruffleHogScanner, monkeypatch) -> List[str]:
     return seen
 
 
-class TestCommunityPlugin:
+class TestAlphaPlugin:
     def test_scanner_is_on_by_default_once_its_module_is_listed(self):
         assert TruffleHogScannerConfig().enabled is True
         assert TruffleHogScannerConfig().name == "trufflehog"

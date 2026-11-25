@@ -38,7 +38,7 @@ The handbook groups pages by the reader's task:
 | Start here | How do I get my first scan? | Installation, concepts, language coverage, local execution, migration |
 | Scan & triage | What ran, what matters, and how do I respond? | Configuration, reports, suppressions, scanner and reporter catalogs |
 | Integrate ASH | Where does this fit in my workflow? | CI, pre-commit, AI assistants, MCP, AWS destinations |
-| Extend ASH | How do I add a capability? | Plugin architecture, development, examples, community plugins |
+| Extend ASH | How do I add a capability? | Plugin architecture, development, examples, alpha plugins |
 | Reference | What is the exact command or interface? | CLI, generated options, Python API, glossary |
 | Contribute & maintain | How do I change ASH safely? | Contribution, design, metrics, validation, testing |
 | Help | How do I recover? | FAQ, troubleshooting, uv installation, support |

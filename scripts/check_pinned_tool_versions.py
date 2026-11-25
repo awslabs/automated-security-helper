@@ -1438,7 +1438,7 @@ def bump_steps(
     steps += _copy_steps(pins, pin, repo_root)
     steps.append(
         f"then `git grep -nF {pin.version.lstrip('v')}` for every other mention, and "
-        "recompute the ferret-scan line ranges in .ash/.ash_community_plugins.yaml if "
+        "recompute the ferret-scan line ranges in .ash/.ash_alpha_plugins.yaml if "
         f"{PINS_FILE} lines moved"
     )
     return steps

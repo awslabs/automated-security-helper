@@ -68,7 +68,7 @@ from automated_security_helper.utils.redacted_model import (
 #: nothing, since the leaf module declares no ``ASH_SCANNERS``. Measured: the leaf
 #: paths yield 0 scanners, the package paths yield every one of the modules'
 #: scanners. tests/unit/cli/mcp/test_list_scanners_import_order.py keeps this list
-#: equal to every in-tree community module.
+#: equal to every in-tree alpha module.
 _VENDORED_SCANNER_PLUGIN_PACKAGES = (
     "automated_security_helper.plugin_modules.ash_betterleaks_plugins",
     "automated_security_helper.plugin_modules.ash_ferret_plugins",

@@ -97,7 +97,7 @@ Failure modes and known limitations
 
 from __future__ import annotations
 
-from typing import Annotated, Literal
+from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -105,6 +105,7 @@ from automated_security_helper.models.core import (
     AshSuppression,
     IgnorePathWithReason,
 )
+from automated_security_helper.models.vocab import SeverityThresholdText
 
 
 class WorkspacePolicyConfig(BaseModel):
@@ -124,7 +125,7 @@ class WorkspacePolicyConfig(BaseModel):
         # ENFORCED, not merely documented, for the case-sensitivity reason in the
         # module docstring. A value pydantic lets through reaches the ladder,
         # which reads an unrecognised threshold as CRITICAL -- no ceiling at all.
-        Literal["ALL", "LOW", "MEDIUM", "HIGH", "CRITICAL"] | None,
+        SeverityThresholdText | None,
         Field(
             None,
             description=(

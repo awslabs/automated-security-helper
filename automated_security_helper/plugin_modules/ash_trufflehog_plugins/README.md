@@ -51,4 +51,4 @@ scanners:
 
 ## Documentation
 
-Verification, severity, suppressions, offline and sandboxed use: [the TruffleHog plugin page](https://awslabs.github.io/automated-security-helper/docs/plugins/community/trufflehog-plugin/).
+Verification, severity, suppressions, offline and sandboxed use: [the TruffleHog plugin page](https://awslabs.github.io/automated-security-helper/docs/plugins/alpha/trufflehog-plugin/).

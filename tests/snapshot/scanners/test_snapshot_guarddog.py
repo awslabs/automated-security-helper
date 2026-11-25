@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""What a user sees when the GuardDog community plugin is listed.
+"""What a user sees when the GuardDog alpha plugin is listed.
 
 The scan runs the real GuardDogScanner through the real ScanPhase and ReportPhase
 over the inert fixture packages in tests/test_data/scanners/guarddog/fixture_repo.
@@ -12,7 +12,7 @@ test_guarddog_scanner.py checks that the real tool still prints the same finding
 
 GuardDog leaves no trace in a scan that does not list its module. That direction is
 pinned by the existing default-scan snapshots, which do not change when GuardDog is added,
-and by tests/unit/core/phases/test_scan_phase_community_modules.py.
+and by tests/unit/core/phases/test_scan_phase_alpha_modules.py.
 """
 
 from __future__ import annotations

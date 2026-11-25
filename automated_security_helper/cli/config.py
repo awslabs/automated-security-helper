@@ -20,6 +20,7 @@ import yaml
 import typer
 from pydantic import ValidationError
 
+from automated_security_helper.core.enums import AshExitCode
 from automated_security_helper.utils.console import (
     ash_console,
     confirm,
@@ -1156,7 +1157,7 @@ def init(
                 shown_on_one_line(f"Not creating {config_path}: {refusal}."),
                 fg=typer.colors.RED,
             )
-            raise typer.Exit(1)
+            raise typer.Exit(AshExitCode.SCAN_ERRORS)
     else:
         config_path = Path(config)
         if not config_path.is_absolute():
@@ -1171,7 +1172,7 @@ def init(
             shown_on_one_line(f"Not writing {config_path}: {_TOML_REFUSAL}."),
             fg=typer.colors.RED,
         )
-        raise typer.Exit(1)
+        raise typer.Exit(AshExitCode.SCAN_ERRORS)
     # Before the --force check too: --force opens the path for writing.
     _refuse_unless_a_file(config_path)
     config_exists = _config_name_exists(config_path.absolute())
@@ -1196,7 +1197,7 @@ def init(
             ),
             fg=typer.colors.RED,
         )
-        raise typer.Exit(1)
+        raise typer.Exit(AshExitCode.SCAN_ERRORS)
     secho(shown_on_one_line(f"Saving ASH config to path: {config_path.absolute()}"))
     project_name = config_path.absolute().parent.name
     if project_name == ".ash":
@@ -1217,7 +1218,7 @@ def init(
             shown_on_one_line(f"Error writing config file: {error_text(e)}"),
             fg=typer.colors.RED,
         )
-        raise typer.Exit(1)
+        raise typer.Exit(AshExitCode.SCAN_ERRORS)
 
 
 @config_app.command()
@@ -1525,7 +1526,7 @@ def update(
             "Config file not found. Use 'ash config init' to create one.",
             fg=typer.colors.RED,
         )
-        raise typer.Exit(1)
+        raise typer.Exit(AshExitCode.SCAN_ERRORS)
     if not _config_name_exists(config_path):
         _refuse_missing_config(config_path)
 
@@ -1553,7 +1554,7 @@ def update(
             shown_on_one_line(f"Cannot update {config_path}: {refusal}"),
             fg=typer.colors.RED,
         )
-        raise typer.Exit(1)
+        raise typer.Exit(AshExitCode.SCAN_ERRORS)
     try:
         config = AshConfig.from_file(config_path=config_path)
     except (
@@ -1599,7 +1600,7 @@ def update(
             "No modifications specified. Use --set to specify changes.",
             fg=typer.colors.YELLOW,
         )
-        raise typer.Exit(0)
+        raise typer.Exit(AshExitCode.SUCCESS)
 
     # The same function, and so the same parsing and refusals, as a scan's
     # --config-overrides. A --set that does not parse, or that leaves a config
@@ -1720,7 +1721,7 @@ def update(
                 shown_on_one_line(f"Error writing config file: {error_text(e)}"),
                 fg=typer.colors.RED,
             )
-            raise typer.Exit(1)
+            raise typer.Exit(AshExitCode.SCAN_ERRORS)
     else:
         secho(
             "Dry run mode: No changes were written to the file", fg=typer.colors.YELLOW
@@ -1781,7 +1782,7 @@ def validate_plugin_dependencies(
     config_file = _config_path_or_discovered(config_path, scan_root)
     if config_file is None:
         _report_no_config_found(scan_root)
-        raise typer.Exit(1)
+        raise typer.Exit(AshExitCode.SCAN_ERRORS)
     try:
         # Not `config`: that is the --config option (see get).
         resolved = resolve_config(
@@ -1830,7 +1831,7 @@ def validate_plugin_dependencies(
             ),
             fg=typer.colors.RED,
         )
-        raise typer.Exit(1)
+        raise typer.Exit(AshExitCode.SCAN_ERRORS)
     # Named by its path: the project name can be a value read from the
     # environment.
     secho(
@@ -1967,7 +1968,7 @@ def lint(
 
     if config_path is None:
         _report_no_config_found(scan_root)
-        raise typer.Exit(1)
+        raise typer.Exit(AshExitCode.SCAN_ERRORS)
     if not _config_name_exists(config_path):
         _refuse_missing_config(config_path)
 
@@ -2005,7 +2006,7 @@ def lint(
     )
     if fix_unused and is_toml_file(config_path):
         secho(shown_on_one_line(toml_refusal), fg=typer.colors.RED)
-        raise typer.Exit(1)
+        raise typer.Exit(AshExitCode.SCAN_ERRORS)
     if fix_unused and is_json_file(config_path):
         secho(
             shown_on_one_line(
@@ -2015,7 +2016,7 @@ def lint(
             ),
             fg=typer.colors.RED,
         )
-        raise typer.Exit(1)
+        raise typer.Exit(AshExitCode.SCAN_ERRORS)
     # The path is the caller's text, so the header is one line whatever it holds.
     secho(
         shown_on_one_line(
@@ -2205,9 +2206,9 @@ def lint(
         )
         raise typer.Exit(INVALID_CONFIG_EXIT_CODE)
     if fix_refused:
-        raise typer.Exit(1)
+        raise typer.Exit(AshExitCode.SCAN_ERRORS)
     if declined:
-        raise typer.Exit(0)
+        raise typer.Exit(AshExitCode.SUCCESS)
     # A scan accepts the file, so the exit is 0, as the docstring says: whatever
     # else is reported is a warning. An ERROR-severity issue a scan accepts
     # exited 1 here, against the documented codes, and 0 when a --fix prompt
@@ -2249,7 +2250,7 @@ def _apply_fixes(
     if not non_interactive:
         if not confirm("\nApply these fixes?"):
             secho("Aborted.", fg=typer.colors.YELLOW)
-            raise typer.Exit(0)
+            raise typer.Exit(AshExitCode.SUCCESS)
 
     fixed_content, fixed_issues = ConfigLinter.fix(
         config_path, fixable, output_dir=output_dir, source_dir=source_dir
@@ -2268,7 +2269,7 @@ def _apply_fixes(
                 shown_on_one_line(f"Error writing config file: {error_text(e)}"),
                 fg=typer.colors.RED,
             )
-            raise typer.Exit(1)
+            raise typer.Exit(AshExitCode.SCAN_ERRORS)
         secho(
             f"\n✅ Fixed {len(fixed_issues)} issue(s) in {config_path}",
             fg=typer.colors.GREEN,
@@ -2377,7 +2378,7 @@ def _apply_unused_fixes(
                 "\nProceed with commenting out unused suppressions based on this old report?"
             ):
                 secho("Aborted.", fg=typer.colors.YELLOW)
-                raise typer.Exit(0)
+                raise typer.Exit(AshExitCode.SUCCESS)
 
     def compute_fix():
         # Lint just listed the unused entries; saying "nothing to comment out"
@@ -2393,7 +2394,7 @@ def _apply_unused_fixes(
                 f"{config_path} is unchanged.",
                 fg=typer.colors.RED,
             )
-            raise typer.Exit(1)
+            raise typer.Exit(AshExitCode.SCAN_ERRORS)
 
     # Compute the fix, to show what it would comment out.
     fixed_content, fixed_issues, _ = compute_fix()
@@ -2418,7 +2419,7 @@ def _apply_unused_fixes(
     if not non_interactive:
         if not confirm("\nComment out these unused suppressions?"):
             secho("Aborted.", fg=typer.colors.YELLOW)
-            raise typer.Exit(0)
+            raise typer.Exit(AshExitCode.SUCCESS)
         # Computed again from the file as it is now: the text computed before
         # the prompt was written after it, over any edit made while the prompt
         # waited (an edit that made the list uneditable is refused the same way).
@@ -2441,7 +2442,7 @@ def _apply_unused_fixes(
                 "the command again.",
                 fg=typer.colors.RED,
             )
-            raise typer.Exit(1)
+            raise typer.Exit(AshExitCode.SCAN_ERRORS)
 
     # Bytes: fixed_content is the file's own text with its line endings (read as
     # bytes by fix_unused_suppressions), and text mode would turn the "\n" of a
@@ -2454,7 +2455,7 @@ def _apply_unused_fixes(
             shown_on_one_line(f"Error writing config file: {error_text(e)}"),
             fg=typer.colors.RED,
         )
-        raise typer.Exit(1)
+        raise typer.Exit(AshExitCode.SCAN_ERRORS)
     secho(
         f"\n✅ Commented out {len(fixed_issues)} unused suppression(s) in {config_path}",
         fg=typer.colors.GREEN,
@@ -2552,7 +2553,7 @@ def wizard(
 
     Reads the existing config (the one a scan of --source-dir, or the current
     directory, would use, or --config), walks through scanner, reporter,
-    offline-mode, and community-plugin settings interactively, then writes the
+    offline-mode, and alpha-plugin settings interactively, then writes the
     result back. With no config yet, it creates .ashrc.yaml there.
     """
     get_logger(
@@ -2610,7 +2611,7 @@ def wizard(
             shown_on_one_line(f"Cannot edit {config_path} with the wizard: {refusal}"),
             fg=typer.colors.RED,
         )
-        raise typer.Exit(1)
+        raise typer.Exit(AshExitCode.SCAN_ERRORS)
     if os.path.lexists(config_path) and not is_regular_file(config_path):
         # A link to nothing, a directory: not "no config yet", and writing the
         # answers would pass through the link to wherever it points. One line:
@@ -2622,7 +2623,7 @@ def wizard(
             ),
             fg=typer.colors.RED,
         )
-        raise typer.Exit(3)
+        raise typer.Exit(AshExitCode.INVALID_CONFIG)
     existing_data: Any = None
     if config_exists:
         console.print(
@@ -2666,7 +2667,7 @@ def wizard(
                 shown_on_one_line(f"Cannot read {config_path}: {error_text(exc)}"),
                 fg=typer.colors.RED,
             )
-            raise typer.Exit(1)
+            raise typer.Exit(AshExitCode.SCAN_ERRORS)
     else:
         console.print(
             Panel(
@@ -2755,8 +2756,8 @@ def wizard(
         default=current_offline,
     )
 
-    # --- 5. Community plugin modules ---
-    console.print("\n[bold]Community plugin modules[/bold]")
+    # --- 5. Alpha plugin modules ---
+    console.print("\n[bold]Alpha plugin modules[/bold]")
     console.print(
         "  Provide Python module paths for additional plugins, "
         "one per line. Leave blank to finish."
@@ -2841,7 +2842,7 @@ def wizard(
             shown_on_one_line(f"Error writing config file: {error_text(e)}"),
             fg=typer.colors.RED,
         )
-        raise typer.Exit(1)
+        raise typer.Exit(AshExitCode.SCAN_ERRORS)
 
     console.print(
         Panel(
@@ -2947,7 +2948,7 @@ def validate(
         if config_path is None:
             if not config_overrides and not environment_modules:
                 _report_no_config_found(scan_root)
-                raise typer.Exit(1)
+                raise typer.Exit(AshExitCode.SCAN_ERRORS)
             # Explicit --config-overrides, or ASH_PLUGIN_MODULES, with no
             # config file: a scan of this directory runs on the defaults with
             # those inputs applied, and `config get` refuses this same input,
@@ -3081,7 +3082,7 @@ def validate(
             shown_on_one_line(f"❌ Error validating config: {error_text(e)}"),
             fg=typer.colors.RED,
         )
-        raise typer.Exit(1)
+        raise typer.Exit(AshExitCode.SCAN_ERRORS)
 
 
 if __name__ == "__main__":

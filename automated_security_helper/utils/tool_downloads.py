@@ -392,7 +392,7 @@ _TRIVY_ASSETS: dict[PlatformArch, str] = {
 # one asset that has any (opengrep's Windows zip).
 #
 # The four tables are adjacent so that one line-pinned suppression covers them (see
-# .ash/.ash_community_plugins.yaml); keep nothing but digests between them.
+# .ash/.ash_alpha_plugins.yaml); keep nothing but digests between them.
 # ---------------------------------------------------------------------------
 
 _DIGESTS: dict[str, str] = {
@@ -999,7 +999,7 @@ def _source_file(repository: str, commit: str, path: str) -> str:
 
 
 # Every hex value the entries below use, and nothing else, in one block: the
-# community config's ferret-scan suppression is pinned to exactly these lines, and
+# alpha config's ferret-scan suppression is pinned to exactly these lines, and
 # tests/unit/utils/test_third_party_licenses.py keeps the two in step.
 #
 # "<tool> commit" is the commit the release tag points to, from
@@ -1232,7 +1232,7 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
         commit=_THIRD_PARTY_HASHES["grype commit"],
         files=(LicenseFile("LICENSE"),),
     ),
-    # The GuardDog community scanner's uv tool. The wheel's dist-info carries
+    # The GuardDog alpha scanner's uv tool. The wheel's dist-info carries
     # licenses/LICENSE, licenses/NOTICE and licenses/LICENSE-3rdparty.csv.
     "guarddog": ThirdPartyLicense(
         tool="guarddog",

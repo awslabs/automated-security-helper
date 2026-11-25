@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""What the TruffleHog community scanner gets from the scanner sandbox.
+"""What the TruffleHog alpha scanner gets from the scanner sandbox.
 
 It declares the strict default: no network, the baseline read-only paths, the
 results directory as the only writable place, and the baseline environment

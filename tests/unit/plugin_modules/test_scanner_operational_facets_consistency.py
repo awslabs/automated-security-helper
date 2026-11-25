@@ -501,7 +501,7 @@ def test_provenance_and_tier_agree_with_the_runtime_and_the_package(cls) -> None
         f"have provenance {facets.provenance.source.value}"
     )
     builtin = ".plugin_modules.ash_builtin." in f".{cls.__module__}."
-    expected = opsf.Tier.BUILTIN_DEFAULT if builtin else opsf.Tier.COMMUNITY_OPTIN
+    expected = opsf.Tier.BUILTIN_DEFAULT if builtin else opsf.Tier.ALPHA_OPTIN
     assert facets.provenance.tier is expected, (
         f"{cls.__module__} implies {expected.value}, the register says "
         f"{facets.provenance.tier.value}"

@@ -5694,7 +5694,16 @@ def _outputs_known_file_names() -> Set[str]:
     import automated_security_helper.plugin_modules as plugin_modules
     from automated_security_helper.core.constants import ASH_CONFIG_FILE_NAMES
 
-    known = {"ash.log", "ash.log.jsonl", "ash.txt", *ASH_CONFIG_FILE_NAMES}
+    # ash.lock is the committed suppression lock (utils/ash_lock.py), an input
+    # ASH reads and ``ash suppress`` writes under .ash/, not a report.
+    known = {
+        "ash.log",
+        "ash.log.jsonl",
+        "ash.txt",
+        "ash.lock",
+        ".ash.lock",
+        *ASH_CONFIG_FILE_NAMES,
+    }
     for module_info in pkgutil.iter_modules(plugin_modules.__path__):
         module = importlib.import_module(
             f"{plugin_modules.__name__}.{module_info.name}"
@@ -11906,9 +11915,9 @@ def test_an_unquoted_off_sandbox_mode_is_read_as_the_mode_off(
     and so names no mode, and a mode that is not lowercase must exit 3.
     """
     assert_on_page(_SANDBOX_HOW_TO, _SANDBOX_MODES_SENTENCE)
-    from automated_security_helper.config.ash_config import SandboxConfig
+    from automated_security_helper.core.enums import SandboxMode
 
-    allowed = typing.get_args(SandboxConfig.model_fields["mode"].annotation)
+    allowed = [mode.value for mode in SandboxMode]
     listed = re.findall(r"`([^`]+)`", _SANDBOX_MODES_SENTENCE.split(", lowercase")[0])
     assert list(allowed) == listed, (allowed, listed)
 
@@ -13724,7 +13733,7 @@ def test_dependencies_install_downloads_a_binary_again_that_lost_its_execute_bit
         assert looked_up is None or not _same_file(looked_up, binary), looked_up
 
 
-TRIVY_PLUGIN = "docs/plugins/community/trivy-plugin.md"
+TRIVY_PLUGIN = "docs/plugins/alpha/trivy-plugin.md"
 
 
 @pytest.mark.parametrize(
@@ -18020,13 +18029,13 @@ def test_the_coverage_tables_name_every_shipped_scanner_by_where_it_comes_from(
     """coverage.md (By stack; By scanner).
 
     The By stack table's built-in column must name exactly the scanners in ASH's
-    built-in plugin module and its community column exactly the scanners of the
-    community plugin modules, and the By scanner table must have one row for each
+    built-in plugin module and its alpha column exactly the scanners of the
+    alpha plugin modules, and the By scanner table must have one row for each
     shipped scanner. The control is that both columns and the table are non-empty.
     """
     assert_on_page(
         COVERAGE_PAGE,
-        "| What your repository has | Built-in scanners | Community plugins |",
+        "| What your repository has | Built-in scanners | Alpha plugins |",
     )
     assert_on_page(
         COVERAGE_PAGE,
@@ -18040,21 +18049,19 @@ def test_the_coverage_tables_name_every_shipped_scanner_by_where_it_comes_from(
     }
     by_stack = _coverage_table(COVERAGE_PAGE, "## By stack")
     built_in = set().union(*(_coverage_names(r["Built-in scanners"]) for r in by_stack))
-    community = set().union(
-        *(_coverage_names(r["Community plugins"]) for r in by_stack)
-    )
+    alpha = set().union(*(_coverage_names(r["Alpha plugins"]) for r in by_stack))
     by_scanner = [r["Scanner"] for r in _coverage_table(COVERAGE_PAGE, "## By scanner")]
-    assert built_in and community and by_scanner
+    assert built_in and alpha and by_scanner
     expected_built_in = {name for name, builtin in shipped.items() if builtin}
-    expected_community = set(shipped) - expected_built_in
+    expected_alpha = set(shipped) - expected_built_in
     assert built_in == expected_built_in, (
         f"By stack names as built-in but ASH does not ship built in: "
         f"{sorted(built_in - expected_built_in)}; ships built in but By stack does not "
         f"name: {sorted(expected_built_in - built_in)}"
     )
-    assert community == expected_community, (
-        f"By stack names as community: {sorted(community - expected_community)} more, "
-        f"{sorted(expected_community - community)} fewer than the community modules ship"
+    assert alpha == expected_alpha, (
+        f"By stack names as alpha: {sorted(alpha - expected_alpha)} more, "
+        f"{sorted(expected_alpha - alpha)} fewer than the alpha modules ship"
     )
     assert sorted(by_scanner) == sorted(shipped), (
         f"By scanner rows {sorted(set(by_scanner) ^ set(shipped))} differ from the "
@@ -18540,9 +18547,9 @@ _PAGES_STEPS_THAT_RUN_A_TOOL = {
         "Merge the shards",
     ],
     ADVANCED_USAGE: ["Run ASH scan"],
-    "docs/plugins/community/snyk-plugin.md": ["Run ASH with Snyk Code"],
-    "docs/plugins/community/ferret-scan-plugin.md": ["Run ASH with Ferret Scan"],
-    "docs/plugins/community/trivy-plugin.md": [
+    "docs/plugins/alpha/snyk-plugin.md": ["Run ASH with Snyk Code"],
+    "docs/plugins/alpha/ferret-scan-plugin.md": ["Run ASH with Ferret Scan"],
+    "docs/plugins/alpha/trivy-plugin.md": [
         "Scan changed files",
         "Run ASH with Trivy",
         "Run Trivy Security Scan",
@@ -22304,7 +22311,7 @@ def test_the_sandbox_page_states_the_plugin_module_rule_as_the_code_keeps_it() -
     )
 
 
-BETTERLEAKS_PLUGIN = "docs/plugins/community/betterleaks-plugin.md"
+BETTERLEAKS_PLUGIN = "docs/plugins/alpha/betterleaks-plugin.md"
 _BETTERLEAKS_MODULE = "automated_security_helper.plugin_modules.ash_betterleaks_plugins"
 _BETTERLEAKS_ENV = (
     "BETTERLEAKS_CONFIG",
@@ -22662,10 +22669,10 @@ def test_betterleaks_is_pinned_where_the_page_says_with_both_digests_on_every_pl
 
 
 # --------------------------------------------------------------------------- #
-# docs/plugins/community/trufflehog-plugin.md
+# docs/plugins/alpha/trufflehog-plugin.md
 # --------------------------------------------------------------------------- #
 
-TRUFFLEHOG_PLUGIN = "docs/plugins/community/trufflehog-plugin.md"
+TRUFFLEHOG_PLUGIN = "docs/plugins/alpha/trufflehog-plugin.md"
 _TRUFFLEHOG_MODULE = "automated_security_helper.plugin_modules.ash_trufflehog_plugins"
 
 
@@ -22976,22 +22983,22 @@ def test_ash_installs_no_trufflehog_and_the_image_carries_none() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Community scanners on the homepage and the plugins overview
+# Alpha scanners on the homepage and the plugins overview
 # --------------------------------------------------------------------------- #
 
 _HOMEPAGE = "index.md"
-_HOMEPAGE_COMMUNITY_SENTENCE = (
-    "Seven more scanners ship with ASH as community plugins: "
-    "[Betterleaks](docs/plugins/community/betterleaks-plugin.md), "
-    "[Ferret Scan](docs/plugins/community/ferret-scan-plugin.md) and "
-    "[TruffleHog](docs/plugins/community/trufflehog-plugin.md) for secrets, "
-    "[GuardDog](docs/plugins/community/guarddog-plugin.md) for malicious packages, "
-    "[hadolint](docs/plugins/community/hadolint-plugin.md) for Dockerfiles, "
-    "[Snyk Code](docs/plugins/community/snyk-plugin.md) for SAST, and "
-    "[Trivy](docs/plugins/community/trivy-plugin.md) for repository scanning. "
+_HOMEPAGE_ALPHA_SENTENCE = (
+    "Seven more scanners ship with ASH as alpha plugins: "
+    "[Betterleaks](docs/plugins/alpha/betterleaks-plugin.md), "
+    "[Ferret Scan](docs/plugins/alpha/ferret-scan-plugin.md) and "
+    "[TruffleHog](docs/plugins/alpha/trufflehog-plugin.md) for secrets, "
+    "[GuardDog](docs/plugins/alpha/guarddog-plugin.md) for malicious packages, "
+    "[hadolint](docs/plugins/alpha/hadolint-plugin.md) for Dockerfiles, "
+    "[Snyk Code](docs/plugins/alpha/snyk-plugin.md) for SAST, and "
+    "[Trivy](docs/plugins/alpha/trivy-plugin.md) for repository scanning. "
     "A scan runs one only when its module is named in `ash_plugin_modules` or "
     "`--ash-plugin-modules`. See the "
-    "[community plugins](docs/plugins/community/index.md) and the "
+    "[alpha plugins](docs/plugins/alpha/index.md) and the "
     "[scanners reference](reference/scanners.md) for all 23 scanners."
 )
 
@@ -22999,66 +23006,66 @@ _HOMEPAGE_COMMUNITY_SENTENCE = (
 def _shipped_scanner_split(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> Tuple[Set[str], Set[str]]:
-    """(built-in scanner names, community scanner names) the code ships."""
+    """(built-in scanner names, alpha scanner names) the code ships."""
     builtin: Set[str] = set()
-    community: Set[str] = set()
+    alpha: Set[str] = set()
     for module, plugin in _instantiated_plugins(tmp_path, monkeypatch, "ASH_SCANNERS"):
-        (builtin if module == "ash_builtin" else community).add(plugin.config.name)
-    return builtin, community
+        (builtin if module == "ash_builtin" else alpha).add(plugin.config.name)
+    return builtin, alpha
 
 
 @pytest.mark.unit
-def test_the_homepage_says_asha_ships_seven_community_scanners_and_links_each(
+def test_the_homepage_says_asha_ships_seven_alpha_scanners_and_links_each(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """index.md (Scanners).
 
     The sentence is on the page. Its count of seven is the number of scanners the
-    vendored community plugin packages declare, which is every in-tree community
-    module; its 23 is built in plus community; and each link it carries resolves to
-    a page under docs/content, the community index and the scanners reference
+    vendored alpha plugin packages declare, which is every in-tree alpha
+    module; its 23 is built in plus alpha; and each link it carries resolves to
+    a page under docs/content, the alpha index and the scanners reference
     included.
     """
     from automated_security_helper.core.scanner_inventory import (
         _VENDORED_SCANNER_PLUGIN_PACKAGES,
     )
 
-    assert_on_page(_HOMEPAGE, _HOMEPAGE_COMMUNITY_SENTENCE)
-    builtin, community = _shipped_scanner_split(tmp_path, monkeypatch)
-    assert len(_VENDORED_SCANNER_PLUGIN_PACKAGES) == len(community) == 7, (
+    assert_on_page(_HOMEPAGE, _HOMEPAGE_ALPHA_SENTENCE)
+    builtin, alpha = _shipped_scanner_split(tmp_path, monkeypatch)
+    assert len(_VENDORED_SCANNER_PLUGIN_PACKAGES) == len(alpha) == 7, (
         len(_VENDORED_SCANNER_PLUGIN_PACKAGES),
-        sorted(community),
+        sorted(alpha),
     )
-    assert len(builtin) + len(community) == 23, (len(builtin), len(community))
-    links = re.findall(r"\]\(([^)#]+\.md)", _HOMEPAGE_COMMUNITY_SENTENCE)
+    assert len(builtin) + len(alpha) == 23, (len(builtin), len(alpha))
+    links = re.findall(r"\]\(([^)#]+\.md)", _HOMEPAGE_ALPHA_SENTENCE)
     assert len(links) == 9, links
     for link in links:
         assert (CONTENT / link).is_file(), link
-    # Each community scanner's own page is one of the links, by its name.
+    # Each alpha scanner's own page is one of the links, by its name.
     linked = " ".join(links)
-    for name in community:
+    for name in alpha:
         stem = name.split("-")[0]
         assert stem in linked, (name, links)
 
 
 @pytest.mark.unit
-def test_the_plugins_overview_names_every_community_scanner_and_no_other(
+def test_the_plugins_overview_names_every_alpha_scanner_and_no_other(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """plugins/index.md (Where plugins come from).
 
-    The community plugins row lists exactly the scanners the community plugin
+    The alpha plugins row lists exactly the scanners the alpha plugin
     modules ship, so an eighth module fails this test until the row names it.
     """
-    _builtin, community = _shipped_scanner_split(tmp_path, monkeypatch)
-    assert community
+    _builtin, alpha = _shipped_scanner_split(tmp_path, monkeypatch)
+    assert alpha
     # Raw text, whitespace-collapsed: _normalize would drop the link this row is
     # matched by.
     text = " ".join(_page_text(_PLUGINS_INDEX).split())
     row = re.search(
-        r"\[community plugins\]\(\.\./docs/plugins/community/index\.md\) \(([^)]*)\)",
+        r"\[alpha plugins\]\(\.\./docs/plugins/alpha/index\.md\) \(([^)]*)\)",
         text,
     )
-    assert row, "the community plugins row no longer has the listed form"
+    assert row, "the alpha plugins row no longer has the listed form"
     named = set(re.findall(r"`([^`]+)`", row.group(1)))
-    assert named == community, (sorted(named - community), sorted(community - named))
+    assert named == alpha, (sorted(named - alpha), sorted(alpha - named))

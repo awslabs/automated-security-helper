@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""TruffleHog: a secret scanner that can verify what it finds, as a community plugin.
+"""TruffleHog: a secret scanner that can verify what it finds, as an alpha plugin.
 
 What it runs
 ------------
@@ -10,7 +10,7 @@ git history, which is what ASH's gitleaks and detect-secrets scanners read as we
 TruffleHog matches a credential with a detector written for its provider, and can
 then ask the provider whether the credential is live ("verification").
 
-TruffleHog is a community plugin: it is loaded only when ``ash_trufflehog_plugins``
+TruffleHog is an alpha plugin: it is loaded only when ``ash_trufflehog_plugins``
 is listed in ``ash_plugin_modules`` (or passed with ``--ash-plugin-modules``), so a
 scan that does not list the module is unchanged by its existence. It runs beside the
 builtin secret scanners, not instead of them, so a secret two of them find is
@@ -413,7 +413,7 @@ class TruffleHogScanner(ScannerPluginBase[TruffleHogScannerConfig]):
                 selection="`trufflehog filesystem` over the target; the files on disk, "
                 "not history, and not .git directories (--exclude-paths; module header)",
                 covers_note=(
-                    "the community scanners declare no covers display string; no "
+                    "the alpha scanners declare no covers display string; no "
                     "scanner claims git-history secrets (UNCLAIMED_TARGET_KINDS)"
                 ),
             ),
@@ -485,7 +485,7 @@ class TruffleHogScanner(ScannerPluginBase[TruffleHogScannerConfig]):
                 "file it cannot read is only logged and the exit stays 0",
             ),
             provenance=opsf.ProvenanceFacet(
-                tier=opsf.Tier.COMMUNITY_OPTIN,
+                tier=opsf.Tier.ALPHA_OPTIN,
                 source=opsf.ProvenanceSource.USER_INSTALLED,
                 selection_surfaces=(
                     "ash_trufflehog_plugins in ash_plugin_modules",

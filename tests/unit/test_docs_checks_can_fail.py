@@ -1965,7 +1965,7 @@ def test_nav_globs_expand_the_way_awesome_nav_does(tmp_path):
         **CLEAN_PAGES,
         "docs/content/plugins/builtin/one.md": "# One\n",
         "docs/content/plugins/builtin/two.md": "# Two\n",
-        "docs/content/plugins/community/three.md": "# Three\n",
+        "docs/content/plugins/alpha/three.md": "# Three\n",
         "docs/content/guides/deep/four.md": "# Four\n",
         "docs/content/section/first.md": "# First\n",
         "docs/content/section/second.md": "# Second\n",
@@ -1973,7 +1973,7 @@ def test_nav_globs_expand_the_way_awesome_nav_does(tmp_path):
     nav = (
         "nav:\n  - index.md\n  - b.md\n  - sub/c.md\n"
         "  - Built in: plugins/builtin\n"
-        "  - plugins/community/*.md\n"
+        "  - plugins/alpha/*.md\n"
         # A glob entry with options. With no other key, {glob: x} is a titled link to
         # x in awesome-nav, which the titled-entry case above reports.
         "  - glob: 'guides/**/*.md'\n    flatten_single_child_sections: true\n"

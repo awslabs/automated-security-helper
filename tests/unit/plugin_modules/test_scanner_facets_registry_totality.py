@@ -7,7 +7,7 @@ The facets register (automated_security_helper/base/scanner_facets.py) is a
 contract only while no registered scanner can skip it. This module iterates
 the loaded plugin registry -- the builtin package's derived inventory
 (plugin_modules/ash_builtin/__init__.py ``ASH_SCANNERS``, derived from the
-scanners package's ``__all__``) and every community plugin package's own
+scanners package's ``__all__``) and every alpha plugin package's own
 ``ASH_SCANNERS`` -- and FAILS, naming the scanner, for each class without its
 own ``ScannerFacets`` declaration. A scanner added to any in-repo plugin
 package without a declaration fails here on the pull request that adds it;
@@ -17,14 +17,14 @@ construction, since the declaration is a class attribute.
 Deliberate choices, said out loud:
 
 - The enumeration walks ``pkgutil.iter_modules`` over the plugin_modules
-  package rather than a hand-written package list, so a new community plugin
+  package rather than a hand-written package list, so a new alpha plugin
   package is swept in without editing this file -- the hand-written second
   inventory is the drift class ash_builtin's own docstring records.
 - The declaration must sit in the class's OWN ``vars()``: an inherited one
   does not count, because a subclass (trivy-repo over the shared trivy base,
   say) has its own native output to classify.
 - The enumeration itself is guarded by planted controls (one builtin and one
-  community scanner by name, and an empty builtin load-error map), because a
+  alpha scanner by name, and an empty builtin load-error map), because a
   silently shrunken universe would pass this suite vacuously.
 """
 
@@ -81,7 +81,7 @@ def _registered_scanner_classes() -> list[type]:
 SCANNER_CLASSES = _registered_scanner_classes()
 
 
-def test_the_enumeration_sees_builtin_and_community_scanners() -> None:
+def test_the_enumeration_sees_builtin_and_alpha_scanners() -> None:
     """Planted controls: a shrunken universe fails loudly, never vacuously."""
     assert not _REMAINING_LOAD_ERRORS, (
         "builtin plugin groups failed to import, so the scanner universe "
@@ -93,7 +93,7 @@ def test_the_enumeration_sees_builtin_and_community_scanners() -> None:
         f"below is vacuous. Saw: {sorted(names)}"
     )
     assert "TrivyRepoScanner" in names, (
-        "no community package contributed scanners; the totality sweep "
+        "no alpha package contributed scanners; the totality sweep "
         f"below is vacuous. Saw: {sorted(names)}"
     )
 
