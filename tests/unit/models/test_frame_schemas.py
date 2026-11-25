@@ -248,10 +248,10 @@ def test_rank_columns_of_one_group_share_one_collection_relative_ranking():
     big = 2**200
     rows = [_toy(lo=30, hi=big), _toy(lo=10, hi=30), _toy(lo=None, hi=10)]
     frame = to_frame(rows, TOY_SPEC)
-    assert frame["lo"].to_list() == [2, 1, None]
-    assert frame["hi"].to_list() == [3, 2, 1]
+    assert frame["lo"].to_list() == [1, 0, None]
+    assert frame["hi"].to_list() == [2, 1, 0]
     # a different collection ranks the same values differently
-    assert to_frame(rows[1:2], TOY_SPEC)["lo"].to_list() == [1]
+    assert to_frame(rows[:1], TOY_SPEC)["lo"].to_list() == [0]
 
 
 def test_position_is_the_index_and_an_empty_collection_keeps_the_schema():

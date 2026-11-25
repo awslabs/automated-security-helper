@@ -130,6 +130,8 @@ FLAT_SPEC = FrameSpec(
         "_source_report": "read through the source_report property",
         "identity_message": "the identity message is a join input of the diff "
         "side, not a column of the flat frame",
+        "location_display": "display text over file_path and the lines, which "
+        "the frame carries as columns",
         "requires_exact_identity_match": "a baseline-gate policy flag, not a "
         "column of the flat frame",
     },
