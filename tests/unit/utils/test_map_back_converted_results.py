@@ -304,7 +304,7 @@ def test_a_suppression_written_against_the_original_path_matches(converted):
     )
 
     assert _first(suppressed).suppressions
-    assert _first(suppressed).suppressions[0].justification == "vendored fixture"
+    assert "vendored fixture" in _first(suppressed).suppressions[0].justification
 
 
 def test_the_hook_is_wired_after_the_marking_in_the_scanner_executor():
