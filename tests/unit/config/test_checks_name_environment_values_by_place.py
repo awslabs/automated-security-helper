@@ -41,6 +41,11 @@ ENVIRONMENT_VALUE_SHOWN = "<value>"
 
 MODULE = "probecanarymodule"
 DIRECTORY = "probecanarydirectory"
+#: An ignore-path pattern read whole from the environment. The bare directory
+#: name matches since the bare-directory rule (issue #894), so the shape that
+#: still draws the directory advice is the "**/<name>" pattern; the validator
+#: resolves a whole-field reference, and the message shows it as "<value>".
+DIRECTORY_PATTERN = f"**/{DIRECTORY}"
 EXPIRATION = "probecanaryexpiry"
 SYMBOL = "probe canary symbol"
 SHORT = "q7"
@@ -80,6 +85,7 @@ CANARIES = (
 def _environment(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[None]:
     monkeypatch.setenv("ASH_PROBE_CANARY_MODULE", MODULE)
     monkeypatch.setenv("ASH_PROBE_CANARY_DIRECTORY", DIRECTORY)
+    monkeypatch.setenv("ASH_PROBE_CANARY_DIRECTORY_PATTERN", DIRECTORY_PATTERN)
     monkeypatch.setenv("ASH_PROBE_CANARY_EXPIRATION", EXPIRATION)
     monkeypatch.setenv("ASH_PROBE_CANARY_SYMBOL", SYMBOL)
     monkeypatch.setenv("ASH_PROBE_CANARY_SHORT", SHORT)
@@ -127,7 +133,7 @@ reason = "probe"
 expiration = "${ASH_PROBE_CANARY_SHORT}"
 
 [[global_settings.ignore_paths]]
-path = "**/${ASH_PROBE_CANARY_DIRECTORY}"
+path = "${ASH_PROBE_CANARY_DIRECTORY_PATTERN}"
 reason = "probe"
 
 [[global_settings.ignore_paths]]
@@ -154,7 +160,7 @@ global_settings:
       reason: probe
       expiration: {tag}${{ASH_PROBE_CANARY_SHORT}}
   ignore_paths:
-    - path: {tag}"**/${{ASH_PROBE_CANARY_DIRECTORY}}"
+    - path: {tag}${{ASH_PROBE_CANARY_DIRECTORY_PATTERN}}
       reason: probe
     - path: "**/literalprobedir"
       reason: probe
@@ -340,13 +346,13 @@ def test_lint_reports_each_directory_read_from_the_environment_once(
 
     other = "probecanaryotherdir"
     (tmp_path / other).mkdir()
-    monkeypatch.setenv("ASH_PROBE_CANARY_OTHER_DIRECTORY", other)
+    monkeypatch.setenv("ASH_PROBE_CANARY_OTHER_DIRECTORY", f"**/{other}")
     config = tmp_path / ".ash.yaml"
     config.write_text(
         "project_name: probe\n"
         "global_settings:\n"
         "  ignore_paths:\n"
-        '    - path: "**/${ASH_PROBE_CANARY_DIRECTORY}"\n'
+        "    - path: ${ASH_PROBE_CANARY_DIRECTORY_PATTERN}\n"
         "      reason: probe\n"
         '    - path: "**/literalprobedir"\n'
         "      reason: probe\n"
@@ -354,7 +360,7 @@ def test_lint_reports_each_directory_read_from_the_environment_once(
         "  - op: add\n"
         "    path: /global_settings/ignore_paths/-\n"
         "    value:\n"
-        '      path: "**/${ASH_PROBE_CANARY_OTHER_DIRECTORY}"\n'
+        "      path: ${ASH_PROBE_CANARY_OTHER_DIRECTORY}\n"
         "      reason: patched\n",
         encoding="utf-8",
     )

@@ -6282,8 +6282,8 @@ _CONFIG_VALIDATE_ROWS = (
     "| `ash config validate` | 0 | A scan accepts the config, apart from the options of "
     "plugins loaded from `ash_plugin_modules`, which only a scan checks. Warnings may be "
     "printed, for example for a missing `project_name`, which a scan does not need, or "
-    "for an ignore or suppression path that names an existing directory and matches no "
-    "file in it ([Check a config](../how-to/configure.md#check)). | "
+    "for a path that starts with `./` and so matches nothing "
+    "([Check a config](../how-to/configure.md#check)). | "
     "| | 1 | No config file is found in the source directory and none is named: "
     "`validate` says so, and that a scan of that directory uses the default "
     "configuration. Also when an error occurred. | "
@@ -14065,21 +14065,22 @@ _CHECKS_WARN_ABOUT_A_PATH_THAT_MATCHES_NOTHING = [
     (
         SUPPRESS_FINDINGS,
         (
-            "They warn in the same way, saying what to write instead, about a path that "
-            "starts with `./` (`./src/app.py` is `src/app.py`) and about an empty path or "
-            "`.`. A path whose leading names match the tree only in another case "
-            "(`tests/**` against `Tests/`) gets a warning that names the tree's spelling "
-            "and says that patterns match case-sensitively."
+            "`ash config validate` and `ash config lint` warn, saying what to write "
+            "instead, about a path that starts with `./` (`./src/app.py` is "
+            "`src/app.py`) and about an empty path or `.`, and exit 0. A path whose "
+            "leading names match the tree only in another case (`tests/**` against "
+            "`Tests/`) gets a warning that names the tree's spelling and says that "
+            "patterns match case-sensitively."
         ),
     ),
     (
         CONFIGURE,
         (
-            "So is a path that matches nothing because it starts with `./` (`./src` is "
-            "`src/`) or is empty or `.`, and the warning says what to write instead. A "
-            "path that matches the tree only in another case (`tests/**` against "
-            "`Tests/`) gets a warning that names the tree's spelling and says that "
-            "patterns match case-sensitively"
+            "A path that matches nothing because it starts with `./` (`./src` is "
+            "`src/`) or is empty or `.` is a warning too, since a scan accepts it, and "
+            "the warning says what to write instead. A path that matches the tree only "
+            "in another case (`tests/**` against `Tests/`) gets a warning that names "
+            "the tree's spelling and says that patterns match case-sensitively"
         ),
     ),
 ]
@@ -14152,8 +14153,8 @@ def _source_dir_tree(parent: Path) -> Dict[str, Path]:
     ``repo`` holds a discovered config and a ``vendor`` directory; ``bounded`` holds a
     config in ``config/`` whose base is in ``shared/``, beside it; ``plain`` has no
     config and no ``vendor``; ``operator`` holds a config outside every repository
-    that ignores ``vendor`` and has a ``vendor`` directory of its own; ``elsewhere``
-    is an empty working directory.
+    that ignores ``**/vendor`` and has a ``vendor`` directory of its own;
+    ``elsewhere`` is an empty working directory.
     """
     paths = {
         name: parent / name
@@ -14166,7 +14167,7 @@ def _source_dir_tree(parent: Path) -> Dict[str, Path]:
         "bounded/shared/base.yaml": "fail_on_findings: false\n",
         "plain/app.py": "x = 1\n",
         "operator/op.yaml": "project_name: demo\nglobal_settings:\n  ignore_paths:\n"
-        "    - path: vendor\n      reason: page claims\n",
+        "    - path: '**/vendor'\n      reason: page claims\n",
         "operator/vendor/a.txt": "x\n",
         "elsewhere/.keep": "",
     }
@@ -14189,8 +14190,8 @@ def test_config_checks_judge_a_config_against_the_source_dir(
     ``bounded/config/`` whose base is in ``bounded/shared/`` is inside the scanned
     directory with ``--source-dir bounded`` and loads, while from ``elsewhere`` it is
     outside it and its base is refused (exit 3), as a scan bounds it. validate and lint
-    must warn about the operator config's ``vendor`` when the source directory has a
-    ``vendor`` directory and not when only the config's own directory has one.
+    must warn about the operator config's ``**/vendor`` when the source directory has
+    a ``vendor`` directory and not when only the config's own directory has one.
     """
     assert_on_page(CONFIGURE, _CHECKS_USE_THE_SOURCE_DIR)
     paths = _source_dir_tree(tmp_path)
@@ -14231,7 +14232,9 @@ def test_config_checks_judge_a_config_against_the_source_dir(
     without_vendor = check("--config", operator, "--source-dir", str(paths["plain"]))
     assert with_vendor.returncode == 0, _output_tail(with_vendor)
     assert without_vendor.returncode == 0, _output_tail(without_vendor)
-    advice = _squeezed("Path 'vendor' points to a directory but matches no file in it")
+    advice = _squeezed(
+        "Path '**/vendor' points to a directory but matches no file in it"
+    )
     assert advice in _squeezed(with_vendor.stdout + with_vendor.stderr), _output_tail(
         with_vendor
     )

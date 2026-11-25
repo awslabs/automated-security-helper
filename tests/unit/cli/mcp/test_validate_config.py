@@ -216,11 +216,14 @@ class TestAnExtendsErrorIsNotAYamlError:
         """
         (tmp_path / "rules.yaml").mkdir()
         config = tmp_path / ".ash.yaml"
+        # "**/rules.yaml" draws the directory advice naming the path; the bare
+        # "rules.yaml" no longer warns, since a glob-free path matches the
+        # directory's subtree (the bare-directory rule, issue #894).
         config.write_text(
             "project_name: demo\n"
             "global_settings:\n"
             "  ignore_paths:\n"
-            "    - path: rules.yaml\n"
+            '    - path: "**/rules.yaml"\n'
             "      reason: generated\n",
             encoding="utf-8",
         )
