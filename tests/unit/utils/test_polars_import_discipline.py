@@ -28,6 +28,9 @@ fail here rather than pass everything.
 from __future__ import annotations
 
 import ast
+import os
+import subprocess
+import sys
 from pathlib import Path
 from typing import Dict, Iterator, List, Optional, Set
 
@@ -68,7 +71,11 @@ MODULE_SCOPE_ALLOWLIST: Dict[str, str] = {
 #: with the config layer; moving their imports into functions retires an entry
 #: here. Measured: the five reporter-package modules on the allowlist.
 CONFIG_CLOSURE_EAGER: Set[str] = {
-    module for module in MODULE_SCOPE_ALLOWLIST if ".reporters." in module
+    f"{PACKAGE}.plugin_modules.ash_builtin.reporters._junitxml_frame",
+    f"{PACKAGE}.plugin_modules.ash_builtin.reporters._report_frames",
+    f"{PACKAGE}.plugin_modules.ash_builtin.reporters.gitlab_cyclonedx_reporter",
+    f"{PACKAGE}.plugin_modules.ash_builtin.reporters.ocsf_reporter",
+    f"{PACKAGE}.plugin_modules.ash_builtin.reporters.report_content_emitter",
 }
 
 
@@ -85,27 +92,24 @@ def _is_type_checking(test: ast.expr) -> bool:
 def _module_scope_statements(body: List[ast.stmt]) -> Iterator[ast.stmt]:
     """The statements that run when the module is imported.
 
-    Function bodies do not; class bodies, ``if``/``try``/``with`` blocks do,
-    except an ``if TYPE_CHECKING`` body.
+    Every child statement is walked, whatever compound statement holds it (``try``,
+    ``try``/``except*``, ``match`` cases, the ``else`` of a loop, ...), so a form
+    this walker does not name is still read. The walk stops at a function body
+    (which does not run at import; a lambda holds no statement) and at the body of
+    an ``if TYPE_CHECKING``.
     """
     for node in body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
         yield node
-        if isinstance(node, ast.If):
-            if not _is_type_checking(node.test):
-                yield from _module_scope_statements(node.body)
-            yield from _module_scope_statements(node.orelse)
-        elif isinstance(node, ast.Try):
-            yield from _module_scope_statements(node.body)
-            for handler in node.handlers:
-                yield from _module_scope_statements(handler.body)
-            yield from _module_scope_statements(node.orelse)
-            yield from _module_scope_statements(node.finalbody)
-        elif isinstance(node, (ast.With, ast.AsyncWith, ast.For, ast.While)):
-            yield from _module_scope_statements(node.body)
-        elif isinstance(node, ast.ClassDef):
-            yield from _module_scope_statements(node.body)
+        for child in ast.iter_child_nodes(node):
+            if isinstance(node, ast.If) and _is_type_checking(node.test):
+                if child in node.body:
+                    continue
+            if isinstance(child, ast.stmt):
+                yield from _module_scope_statements([child])
+            elif isinstance(child, (ast.ExceptHandler, ast.match_case)):
+                yield from _module_scope_statements(child.body)
 
 
 def module_scope_imports(source: str, module: str, is_package: bool) -> Set[str]:
@@ -207,6 +211,10 @@ def eager_polars_modules(modules: Set[str]) -> Set[str]:
         "import polars.selectors as cs\n",
         "try:\n    import polars as pl\nexcept ImportError:\n    pl = None\n",
         "if True:\n    import polars as pl\n",
+        "try:\n    pass\nexcept* ImportError:\n    import polars as pl\n",
+        "match 1:\n    case 1:\n        import polars as pl\n",
+        "for _ in ():\n    pass\nelse:\n    import polars as pl\n",
+        "while False:\n    pass\nelse:\n    import polars as pl\n",
         "class K:\n    import polars as pl\n",
         "from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    pass\nelse:\n    import polars as pl\n",
     ],
@@ -268,6 +276,28 @@ def test_the_models_import_closure_does_not_load_polars():
     closure = import_closure(f"{PACKAGE}.models.core")
     assert f"{PACKAGE}.utils.suppression_frame" in closure
     assert eager_polars_modules(closure) == set()
+
+
+def test_the_named_reporters_are_allowlisted_modules():
+    assert CONFIG_CLOSURE_EAGER <= set(MODULE_SCOPE_ALLOWLIST)
+
+
+def test_importing_the_models_loads_no_polars_in_a_fresh_interpreter():
+    # the source scan cannot see an import-time call that imports polars inside a
+    # helper (frame_schema(...) at module scope, a decorator, importlib)
+    code = (
+        "import sys; import automated_security_helper.models.core; "
+        "assert 'polars' not in sys.modules, 'polars loaded with models.core'"
+    )
+    result = subprocess.run(
+        [sys.executable, "-B", "-c", code],  # -c puts the cwd on sys.path
+        capture_output=True,
+        text=True,
+        cwd=PACKAGE_ROOT.parent,
+        env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+        timeout=300,
+    )
+    assert result.returncode == 0, result.stderr[-2000:]
 
 
 def test_the_config_layer_loads_polars_only_through_the_named_reporters():
