@@ -311,8 +311,8 @@ class TestReport:
         )
         for r in report.get_all_results():
             assert r.properties.issue_severity == cs.CAPSLOCK_SEVERITY == "INFO"
-            assert r.level.value == cs.CAPSLOCK_LEVEL == "none"
-            assert r.kind.value == "informational"
+            assert getattr(r.level, "value", r.level) == cs.CAPSLOCK_LEVEL == "none"
+            assert getattr(r.kind, "value", r.kind) == "informational"
 
     def test_negative_control_clean_module_has_no_findings(
         self, tree, tmp_path, on_path, monkeypatch
