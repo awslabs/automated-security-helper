@@ -205,7 +205,7 @@ def test_the_line_allowlist_does_not_hide_a_second_spelling(tmp_path):
     hits = scan_entry(
         VocabEntry(name="p", enum=TargetType, scope=("planted.py",)), root=tmp_path
     )
-    assert [h.line for h in hits] == [1, 2]
+    assert sorted(h.line for h in hits) == [1, 2]
     # The allowlist is keyed by real package paths and exact lines: a planted file is
     # never in it, and the real file's allowed lines stay the only ones skipped.
     assert len(_unallowed(scan_entry(TARGET_TYPE))) == 0
