@@ -290,7 +290,7 @@
       }
     },
     {
-      "adapter_prep": null,
+      "adapter_prep": "guarddog",
       "also_for": [],
       "argv": null,
       "env_allowlist": [],
@@ -303,7 +303,7 @@
       },
       "id": "verify-pypi-requirements",
       "live_input": false,
-      "note": "the verify mode over a requirements file; no registered prep reads it",
+      "note": "the verify mode over a requirements file, read through the guarddog prep's verify branch",
       "observable": true,
       "pin_stamp": null,
       "provenance": "attested",

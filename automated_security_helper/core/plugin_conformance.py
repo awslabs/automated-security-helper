@@ -209,6 +209,30 @@ def _prep_guarddog(
         "guarddog_scanner:convert_guarddog_scan_result"
     )
     ecosystem = file.stem.split("_")[1]
+    if file.name.startswith("verify_"):
+        # Verify mode is where the adapter writes package identity: a committed
+        # verify capture is a list of {dependency, version, result} entries over
+        # the manifest committed beside it, converted the way the scanner's own
+        # verify path converts them.
+        manifest_line_for = resolve_ref(
+            "automated_security_helper.plugin_modules.ash_guarddog_plugins."
+            "guarddog_scanner:manifest_line_for"
+        )
+        manifest = file.with_suffix(".txt")
+        manifest_text = manifest.read_text(encoding="utf-8")
+        for entry in json.loads(file.read_text(encoding="utf-8")):
+            converted = convert(
+                entry["result"],
+                uri_prefix="",
+                ecosystem=ecosystem,
+                include_capabilities=True,
+                dependency=(entry["dependency"], entry["version"]),
+                manifest_uri=manifest.name,
+                manifest_line=manifest_line_for(manifest_text, entry["dependency"]),
+            )
+            report = SarifReport.model_validate({"version": "2.1.0", "runs": []})
+            yield report, list(converted.results)
+        return
     document = json.loads(file.read_text(encoding="utf-8"))
     converted = convert(
         document, uri_prefix="", ecosystem=ecosystem, include_capabilities=True
@@ -217,13 +241,185 @@ def _prep_guarddog(
     yield report, list(converted.results)
 
 
+def _prep_actionlint(
+    transcript: ToolTranscript, base: Path, file: Path
+) -> Iterator[tuple[SarifReport, list[Result]]]:
+    build_sarif = resolve_ref(f"{_BUILTIN_SCANNERS}.actionlint_scanner:build_sarif")
+    payload = json.loads(file.read_text(encoding="utf-8"))
+    document = build_sarif(payload, 1 if payload.get("errors") else 0)
+    report = SarifReport.model_validate(document)
+    yield report, [r for run in report.runs or [] for r in run.results or []]
+
+
+def _prep_betterleaks(
+    transcript: ToolTranscript, base: Path, file: Path
+) -> Iterator[tuple[SarifReport, list[Result]]]:
+    cls = resolve_ref(
+        "automated_security_helper.plugin_modules.ash_betterleaks_plugins."
+        "betterleaks_scanner:BetterleaksScanner"
+    )
+    report = cls.normalize_results(_load_sarif(file))
+    yield report, [r for run in report.runs or [] for r in run.results or []]
+
+
+def _prep_checkov(
+    transcript: ToolTranscript, base: Path, file: Path
+) -> Iterator[tuple[SarifReport, list[Result]]]:
+    attach = resolve_ref(
+        f"{_BUILTIN_SCANNERS}.checkov_scanner:attach_checkov_resources"
+    )
+    resources = resolve_ref(f"{_BUILTIN_SCANNERS}.checkov_scanner:checkov_resources")
+    sarif = json.loads(file.read_text(encoding="utf-8"))
+    side = json.loads(file.with_suffix(".json").read_text(encoding="utf-8"))
+    attach(sarif, resources(side))
+    report = SarifReport.model_validate(sarif)
+    yield report, [r for run in report.runs or [] for r in run.results or []]
+
+
+def _prep_detect_secrets(
+    transcript: ToolTranscript, base: Path, file: Path
+) -> Iterator[tuple[SarifReport, list[Result]]]:
+    cls = resolve_ref(
+        f"{_BUILTIN_SCANNERS}.detect_secrets_scanner:DetectSecretsScanner"
+    )
+    results = []
+    for _key, secrets in json.loads(file.read_text(encoding="utf-8")):
+        for secret in secrets:
+            results.append(
+                cls.build_secret_result(
+                    finding_type=secret["type"],
+                    uri=secret["filename"],
+                    line_number=secret["line_number"],
+                    start_column=secret.get("ash_start_column"),
+                )
+            )
+    report = SarifReport.model_validate({"version": "2.1.0", "runs": []})
+    yield report, results
+
+
+def _prep_gitleaks(
+    transcript: ToolTranscript, base: Path, file: Path
+) -> Iterator[tuple[SarifReport, list[Result]]]:
+    cls = resolve_ref(f"{_BUILTIN_SCANNERS}.gitleaks_scanner:GitleaksScanner")
+    report = cls.normalize_results(_load_sarif(file))
+    yield report, [r for run in report.runs or [] for r in run.results or []]
+
+
+def _materialized(template: Path, scratch: Path) -> Path:
+    """``template`` copied under ``scratch`` with every ``.fixture`` suffix stripped.
+
+    The suffix dance of ``tests/utils/trivy_fixture.py``: lockfiles naming
+    advisory-bearing versions are committed under a name dependency scanners
+    of this repository do not read, and materialized for a run.
+    """
+    import shutil
+
+    destination = scratch / "src"
+    shutil.copytree(template, destination)
+    for path in sorted(destination.rglob("*.fixture")):
+        path.rename(path.with_name(path.name[: -len(".fixture")]))
+    return destination
+
+
+def _prep_trivy(
+    transcript: ToolTranscript, base: Path, file: Path
+) -> Iterator[tuple[SarifReport, list[Result]]]:
+    import tempfile
+
+    cls = resolve_ref(f"{_BUILTIN_SCANNERS}.trivy_scanner:TrivyScanner")
+    with tempfile.TemporaryDirectory(prefix="conformance-trivy-") as scratch:
+        target = _materialized(base / "fixture_repo", Path(scratch))
+        report = cls._attach_package_identity(_load_sarif(file), target)
+        yield report, [r for run in report.runs or [] for r in run.results or []]
+
+
+def _prep_npm_audit(
+    transcript: ToolTranscript, base: Path, file: Path
+) -> Iterator[tuple[SarifReport, list[Result]]]:
+    import tempfile
+
+    from automated_security_helper.config.ash_config import AshConfig
+
+    cls = resolve_ref(f"{_BUILTIN_SCANNERS}.npm_audit_scanner:NpmAuditScanner")
+    # The conversion constructs a default-configured scanner, whose model
+    # carries forward references to AshConfig; resolve them the way the other
+    # construction tests do.
+    AshConfig.model_rebuild()
+    with tempfile.TemporaryDirectory(prefix="conformance-npmaudit-") as scratch:
+        target = _materialized(base / "fixture_repo", Path(scratch))
+        audit = json.loads(file.read_text(encoding="utf-8"))
+        report = cls.convert_results(
+            audit, target, lock_file=target / "package-lock.json"
+        )
+        yield report, [r for run in report.runs or [] for r in run.results or []]
+
+
+#: The template each committed cdk-nag report CSV was generated over. The pairing
+#: is data the recording carries (the corpus gate pins the same pairs), so a new
+#: report file forces a row here.
+_CDK_NAG_TEMPLATES: Mapping[str, str] = {
+    "AwsSolutions-test-yaml-NagReport.csv": "test-yaml.template.json",
+    "AwsSolutions-test-yaml-cfn-NagReport.csv": "cfn-and-python-test-yaml.template.json",
+}
+
+
+def _prep_cdk_nag(
+    transcript: ToolTranscript, base: Path, file: Path
+) -> Iterator[tuple[SarifReport, list[Result]]]:
+    import csv
+
+    from automated_security_helper.utils.cdk_nag_wrapper import (
+        _NagFinding,
+        build_nag_results,
+    )
+    from automated_security_helper.utils.cfn_template_model import (
+        get_model_from_template_text,
+    )
+
+    pack = file.name.split("-")[0]
+    with file.open(encoding="utf-8", newline="") as handle:
+        findings = [
+            _NagFinding(
+                rule_id=row["Rule ID"],
+                resource_id=row["Resource ID"],
+                compliance=row["Compliance"],
+                exception_reason=row["Exception Reason"],
+                rule_level=row["Rule Level"],
+                rule_info=row["Rule Info"],
+                pack=pack,
+            )
+            for row in csv.DictReader(handle)
+        ]
+    template_path = file.parent / _CDK_NAG_TEMPLATES[file.name]
+    template_text = template_path.read_text(encoding="utf-8")
+    model = get_model_from_template_text(template_text, template_path)
+    if model is None:
+        raise ValueError(f"{template_path} did not parse as a template")
+    per_pack = build_nag_results(
+        {pack: findings},
+        model,
+        template_path,
+        template_text.splitlines(),
+    )
+    report = SarifReport.model_validate({"version": "2.1.0", "runs": []})
+    yield report, [r for results in per_pack.values() for r in results]
+
+
 #: Registered adapter preps: native or adapter-normalized bytes through the adapter's
 #: own pure function. A prep never runs a tool. A transcript names one in
 #: ``adapter_prep``.
 PREPS: Mapping[str, Prep] = {
+    "actionlint": _prep_actionlint,
+    "betterleaks": _prep_betterleaks,
+    "cdk-nag": _prep_cdk_nag,
     "cfn-guard": _prep_cfn_guard,
     "cfn-lint": _prep_cfn_lint,
+    "checkov": _prep_checkov,
+    "detect-secrets": _prep_detect_secrets,
+    "gitleaks": _prep_gitleaks,
     "guarddog": _prep_guarddog,
+    "npm-audit": _prep_npm_audit,
+    "trivy": _prep_trivy,
 }
 
 

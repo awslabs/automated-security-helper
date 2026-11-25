@@ -2,7 +2,7 @@
   "schema_version": 1,
   "transcripts": [
     {
-      "adapter_prep": null,
+      "adapter_prep": "actionlint",
       "also_for": [],
       "argv": null,
       "env_allowlist": [],
@@ -36,7 +36,7 @@
       }
     },
     {
-      "adapter_prep": null,
+      "adapter_prep": "actionlint",
       "also_for": [],
       "argv": null,
       "env_allowlist": [],
@@ -70,7 +70,7 @@
       }
     },
     {
-      "adapter_prep": null,
+      "adapter_prep": "actionlint",
       "also_for": [],
       "argv": null,
       "env_allowlist": [],

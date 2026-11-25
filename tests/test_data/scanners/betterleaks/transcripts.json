@@ -2,7 +2,7 @@
   "schema_version": 1,
   "transcripts": [
     {
-      "adapter_prep": null,
+      "adapter_prep": "betterleaks",
       "also_for": [],
       "argv": [
         "betterleaks",
@@ -50,7 +50,7 @@
       }
     },
     {
-      "adapter_prep": null,
+      "adapter_prep": "betterleaks",
       "also_for": [],
       "argv": [
         "betterleaks",

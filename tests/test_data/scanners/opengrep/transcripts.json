@@ -47,6 +47,40 @@
         "name": "opengrep",
         "version": "2.0.0"
       }
+    },
+    {
+      "adapter_prep": null,
+      "also_for": [],
+      "argv": null,
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": null,
+      "id": "opengrep-2.0.0-m0-cwe",
+      "live_input": false,
+      "note": "one result from a rule that carries a CWE tag; the rule and the flagged file are the fixture tree",
+      "observable": true,
+      "pin_stamp": {
+        "tool": "opengrep",
+        "version": "2.0.0"
+      },
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "sarif",
+          "path": "captured/opengrep-2.0.0-m0-cwe.sarif",
+          "sha256": "fbc2ece6f3cbaf1e4af3186a8682ea9b85b72da28a4cb61f6ec37aab9095ad23"
+        }
+      ],
+      "retention": "current",
+      "scanner": "opengrep",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "opengrep",
+        "version": "2.0.0"
+      }
     }
   ],
   "unrecorded": []

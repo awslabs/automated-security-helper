@@ -142,6 +142,43 @@
         "name": "checkov",
         "version": "3.4.6"
       }
+    },
+    {
+      "adapter_prep": "checkov",
+      "also_for": [],
+      "argv": null,
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": null,
+      "id": "checkov-3.4.6-insecure-s3",
+      "live_input": false,
+      "note": "the SARIF capture over the insecure-s3 fixture template, with the native JSON beside it carrying the resource identities the prep attaches",
+      "observable": true,
+      "pin_stamp": null,
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "sarif",
+          "path": "captured/checkov-3.4.6-insecure-s3.sarif",
+          "sha256": "3c97943263af52f5de9f5049107b41d45cbf2b553a2d9ed56d8a333279249ca7"
+        }
+      ],
+      "retention": "current",
+      "scanner": "checkov",
+      "side_reports": [
+        {
+          "format": "json",
+          "path": "captured/checkov-3.4.6-insecure-s3.json",
+          "sha256": "0801623612b36b7533b54dc6e816d3971dc050b9282de0c893f4f5bd5783a6b8"
+        }
+      ],
+      "stderr_tail": null,
+      "tool": {
+        "name": "checkov",
+        "version": "3.4.6"
+      }
     }
   ],
   "unrecorded": []

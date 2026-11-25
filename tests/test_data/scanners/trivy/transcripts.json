@@ -2,7 +2,7 @@
   "schema_version": 1,
   "transcripts": [
     {
-      "adapter_prep": null,
+      "adapter_prep": "trivy",
       "also_for": [
         "trivy-repo"
       ],
@@ -38,7 +38,7 @@
       }
     },
     {
-      "adapter_prep": null,
+      "adapter_prep": "trivy",
       "also_for": [
         "trivy-repo"
       ],
@@ -74,7 +74,7 @@
       }
     },
     {
-      "adapter_prep": null,
+      "adapter_prep": "trivy",
       "also_for": [
         "trivy-repo"
       ],
@@ -110,7 +110,7 @@
       }
     },
     {
-      "adapter_prep": null,
+      "adapter_prep": "trivy",
       "also_for": [
         "trivy-repo"
       ],

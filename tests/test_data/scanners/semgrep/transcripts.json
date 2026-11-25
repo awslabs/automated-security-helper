@@ -37,6 +37,37 @@
         "name": "semgrep",
         "version": "1.116.0"
       }
+    },
+    {
+      "adapter_prep": null,
+      "also_for": [],
+      "argv": null,
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": null,
+      "id": "semgrep-1.187.0-m0",
+      "live_input": false,
+      "note": "one result over the m0 rule and flagged file beside it; semgrep is deprecated in favor of opengrep, so this recording is kept for the alias dispatch row, not for promotion",
+      "observable": true,
+      "pin_stamp": null,
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "sarif",
+          "path": "captured/semgrep-1.187.0-m0.sarif",
+          "sha256": "0b920be50e85e84e926f000537388cdb1c7f5f1a35e02f2fc82e1a532ebaeaaa"
+        }
+      ],
+      "retention": "current",
+      "scanner": "semgrep",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "semgrep",
+        "version": "1.187.0"
+      }
     }
   ],
   "unrecorded": []
