@@ -113,6 +113,14 @@ import logging
 import re
 from typing import Any, Callable, Dict, Optional, Set, Tuple
 
+from automated_security_helper.models.vocab import (
+    SEVERITY_BUCKETS,
+    SEVERITY_VALUES,
+)
+from automated_security_helper.models.vocab import (
+    SUPPRESSED_COUNT_KEY as SUPPRESSED_COUNT_KEY,
+)
+
 
 def _ash_logger() -> logging.Logger:
     """ASH's logger, by name and at call time.
@@ -142,8 +150,9 @@ _WARNED_DROPPED_SCANNER: Set[str] = set()
 # for why that is the opposite of the severity ordering.
 SEVERITY_THRESHOLDS: Tuple[str, ...] = ("ALL", "LOW", "MEDIUM", "HIGH", "CRITICAL")
 
-# ASH severity names, most severe first.
-SEVERITIES: Tuple[str, ...] = ("CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO")
+# ASH severity names, most severe first: the wire spellings of ``vocab.Severity``,
+# so the ladder is spelled once, in the enum.
+SEVERITIES: Tuple[str, ...] = SEVERITY_VALUES
 
 # Severity rank and the minimum rank each threshold gates on. A finding fails
 # when its rank is at or above its threshold's minimum, which is why the two
@@ -165,11 +174,7 @@ _THRESHOLD_MIN_RANK: Dict[str, int] = {
 #: (``critical``, ``high``, ``medium``, ``low``, ``info``), most severe first.
 #: Findings counts, statistics rows and the UI palette all key on these; derive
 #: them here instead of re-spelling the five names beside each use.
-SEVERITY_COUNT_KEYS: Tuple[str, ...] = tuple(s.lower() for s in SEVERITIES)
-
-#: The count field of findings a suppression hides. It is a count bucket beside
-#: the five severities, not a sixth severity: it never takes part in the gate.
-SUPPRESSED_COUNT_KEY = "suppressed"
+SEVERITY_COUNT_KEYS: Tuple[str, ...] = SEVERITY_BUCKETS
 
 #: Display position of each severity, most severe first (CRITICAL 0 ... INFO 4).
 #: A sort key for listings; the opposite direction to :data:`_SEVERITY_RANK`.

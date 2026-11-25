@@ -16,7 +16,6 @@ from typing import (
     FrozenSet,
     Iterable,
     List,
-    Literal,
     Mapping,
     MutableMapping,
     Optional,
@@ -24,6 +23,7 @@ from typing import (
 )
 
 from automated_security_helper.core.exceptions import ASHConfigValidationError
+from automated_security_helper.models.vocab import PluginKind
 from automated_security_helper.plugins import ash_plugin_manager
 from automated_security_helper.plugins.plugin_manager import (
     callable_module,
@@ -118,7 +118,7 @@ def load_internal_plugins(record: Optional[PluginLoadRecord] = None):
         record = {}
     internal_modules = [INTERNAL_PLUGIN_PACKAGE]
 
-    loaded_plugins = {"converters": [], "scanners": [], "reporters": []}
+    loaded_plugins = {section: [] for section in PluginKind.sections()}
 
     for module_name in internal_modules:
         try:
@@ -148,19 +148,21 @@ def load_internal_plugins(record: Optional[PluginLoadRecord] = None):
                 ASH_LOGGER.debug(
                     f"Found {len(module.ASH_CONVERTERS)} converters in {module_name}"
                 )
-                loaded_plugins["converters"].extend(module.ASH_CONVERTERS)
+                loaded_plugins[PluginKind.CONVERTER.section].extend(
+                    module.ASH_CONVERTERS
+                )
 
             if hasattr(module, "ASH_SCANNERS"):
                 ASH_LOGGER.debug(
                     f"Found {len(module.ASH_SCANNERS)} scanners in {module_name}"
                 )
-                loaded_plugins["scanners"].extend(module.ASH_SCANNERS)
+                loaded_plugins[PluginKind.SCANNER.section].extend(module.ASH_SCANNERS)
 
             if hasattr(module, "ASH_REPORTERS"):
                 ASH_LOGGER.debug(
                     f"Found {len(module.ASH_REPORTERS)} reporters in {module_name}"
                 )
-                loaded_plugins["reporters"].extend(module.ASH_REPORTERS)
+                loaded_plugins[PluginKind.REPORTER.section].extend(module.ASH_REPORTERS)
 
             # Register event handlers
             if hasattr(module, "ASH_EVENT_HANDLERS"):
@@ -588,12 +590,8 @@ _READABLE_NAMESPACE_ROOTS = frozenset(
 #: readable text; the value's other forms stay hidden.
 _ASH_PUBLIC_MODULE_WORDS = _READABLE_NAMESPACE_ROOTS | {
     _OPT_IN_PLUGIN_ROOT.rsplit(".", 1)[1],
-    "converter",
-    "scanner",
-    "reporter",
-    "converters",
-    "scanners",
-    "reporters",
+    *PluginKind.values(),
+    *PluginKind.sections(),
     "event_handler",
     "event_handlers",
 }
@@ -1137,11 +1135,7 @@ class PluginNameClashError(ASHConfigValidationError):
 
 def refuse_plugin_name_clashes(
     filter_callback: Callable[[Any], bool],
-    plugin_types: Iterable[Literal["converter", "scanner", "reporter"]] = (
-        "converter",
-        "scanner",
-        "reporter",
-    ),
+    plugin_types: Iterable[PluginKind | str] = tuple(PluginKind),
 ) -> None:
     """Refuse a run two of whose resolved plugins of one type share a name.
 
@@ -1295,7 +1289,7 @@ def load_additional_plugin_modules(
     if record is None:
         record = {}
     labels = shown or {}
-    discovered = {"converters": [], "scanners": [], "reporters": []}
+    discovered = {section: [] for section in PluginKind.sections()}
 
     unique = split_plugin_modules(plugin_modules)
     if unique:
@@ -1507,11 +1501,11 @@ def load_additional_plugin_modules(
             # and non-iterables are refused, and every other iterable -- a
             # set, dict values, a generator -- is accepted, as it was before
             # the check existed.
-            found: dict = {"converters": [], "scanners": [], "reporters": []}
+            found: dict = {section: [] for section in PluginKind.sections()}
             for group, attribute in (
-                ("converters", "ASH_CONVERTERS"),
-                ("scanners", "ASH_SCANNERS"),
-                ("reporters", "ASH_REPORTERS"),
+                (PluginKind.CONVERTER.section, "ASH_CONVERTERS"),
+                (PluginKind.SCANNER.section, "ASH_SCANNERS"),
+                (PluginKind.REPORTER.section, "ASH_REPORTERS"),
             ):
                 if hasattr(module, attribute):
                     declared = getattr(module, attribute)
@@ -2081,18 +2075,14 @@ def load_plugins(plugin_context=None) -> Dict[str, List[Any]]:
 
     # Combine internal and external plugins
     all_plugins = {
-        "converters": internal_plugins.get("converters", [])
-        + external_plugins.get("converters", []),
-        "scanners": internal_plugins.get("scanners", [])
-        + external_plugins.get("scanners", []),
-        "reporters": internal_plugins.get("reporters", [])
-        + external_plugins.get("reporters", []),
+        section: internal_plugins.get(section, []) + external_plugins.get(section, [])
+        for section in PluginKind.sections()
     }
 
     ASH_LOGGER.info(
-        f"Loaded {len(all_plugins['converters'])} converters, "
-        f"{len(all_plugins['scanners'])} scanners, and "
-        f"{len(all_plugins['reporters'])} reporters"
+        f"Loaded {len(all_plugins[PluginKind.CONVERTER.section])} converters, "
+        f"{len(all_plugins[PluginKind.SCANNER.section])} scanners, and "
+        f"{len(all_plugins[PluginKind.REPORTER.section])} reporters"
     )
 
     return all_plugins

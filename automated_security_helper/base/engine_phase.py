@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 from typing import Any, Callable, Optional, Sequence
 
 from automated_security_helper.base.plugin_context import PluginContext
+from automated_security_helper.core.enums import ExecutionPhase
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.plugins import ash_plugin_manager
 from automated_security_helper.plugins.events import AshEventType
@@ -61,8 +62,14 @@ class EnginePhase(ABC):
 
     @property
     @abstractmethod
-    def phase_name(self) -> str:
-        """Return the name of this phase."""
+    def phase_name(self) -> ExecutionPhase:
+        """Return which phase this is.
+
+        The event names a phase notifies are built from ``phase_name.value`` (see
+        ``execute``): ``<VALUE>_PHASE_START`` and ``<VALUE>_PHASE_COMPLETE`` must
+        be members of ``AshEventType``, a coupling by member NAME that
+        tests/unit/core/test_engine_phase_events.py pins for every phase.
+        """
 
     def notify_event(self, event_type, **kwargs):
         """Notify plugins of an event with the current context.
@@ -76,12 +83,12 @@ class EnginePhase(ABC):
         """
         # Include the plugin context in all notifications
         event_data = {
-            "phase": self.phase_name,
+            "phase": self.phase_name.value,
             "plugin_context": self.plugin_context,
             **kwargs,
         }
         ASH_LOGGER.debug(
-            f"EnginePhase.notify_event: Notifying event {event_type} from phase {self.phase_name}"
+            f"EnginePhase.notify_event: Notifying event {event_type} from phase {self.phase_name.value}"
         )
         return ash_plugin_manager.notify(
             event_type, handler_filter=self._event_handler_filter(), **event_data
@@ -142,7 +149,7 @@ class EnginePhase(ABC):
                 getattr(self.plugin_context, "config", None)
             )
             ASH_LOGGER.error(
-                f"Failed to notify {event} event for phase {self.phase_name}: "
+                f"Failed to notify {event} event for phase {self.phase_name.value}: "
                 f"{error_text(error, values)}"
             )
 
@@ -165,7 +172,7 @@ class EnginePhase(ABC):
             AshAggregatedResults: Phase-specific results
         """
         # Notify phase start
-        start_event_name = f"{self.phase_name.upper()}_PHASE_START"
+        start_event_name = f"{self.phase_name.value.upper()}_PHASE_START"
         try:
             start_event = AshEventType[start_event_name]
         except KeyError:
@@ -178,7 +185,7 @@ class EnginePhase(ABC):
 
         # Execute the phase-specific logic
         ASH_LOGGER.debug(
-            f"EnginePhase.execute: Executing phase-specific logic for {self.phase_name}"
+            f"EnginePhase.execute: Executing phase-specific logic for {self.phase_name.value}"
         )
         results = self._execute_phase(
             aggregated_results=aggregated_results,
@@ -189,7 +196,7 @@ class EnginePhase(ABC):
         # Defensive type checking to catch unexpected return types
         if not isinstance(results, AshAggregatedResults):
             error_msg = (
-                f"Phase {self.phase_name} returned unexpected type {type(results).__name__} "
+                f"Phase {self.phase_name.value} returned unexpected type {type(results).__name__} "
                 f"instead of AshAggregatedResults. This indicates a critical error in phase execution."
             )
             ASH_LOGGER.error(error_msg)
@@ -206,12 +213,12 @@ class EnginePhase(ABC):
             getattr(self, "_update_summary_stats")
         ):
             ASH_LOGGER.debug(
-                f"EnginePhase.execute: Updating summary statistics for {self.phase_name}"
+                f"EnginePhase.execute: Updating summary statistics for {self.phase_name.value}"
             )
             self._update_summary_stats()
 
         # Notify phase complete
-        complete_event_name = f"{self.phase_name.upper()}_PHASE_COMPLETE"
+        complete_event_name = f"{self.phase_name.value.upper()}_PHASE_COMPLETE"
         try:
             complete_event = AshEventType[complete_event_name]
         except KeyError:
@@ -317,7 +324,7 @@ class EnginePhase(ABC):
                 # here is reported to the operator as merely unsatisfied.
                 ASH_LOGGER.warning(
                     f"Excluding {type(instance).__name__} from the "
-                    f"{self.phase_name} phase: its enabled/dependency check "
+                    f"{self.phase_name.value} phase: its enabled/dependency check "
                     f"raised {described}"
                 )
         return result
@@ -330,4 +337,6 @@ class EnginePhase(ABC):
             details: Additional details about the phase result
         """
         if self.progress_display:
-            self.progress_display.add_summary_row(self.phase_name, status, details)
+            self.progress_display.add_summary_row(
+                self.phase_name.value, status, details
+            )

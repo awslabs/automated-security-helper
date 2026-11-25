@@ -17,7 +17,6 @@ from typing import (
     Iterable,
     Iterator,
     List,
-    Literal,
     Optional,
     Tuple,
     cast,
@@ -95,10 +94,12 @@ from automated_security_helper.utils.sarif_utils import (
     sanitize_sarif_paths,
 )
 from automated_security_helper.utils.tool_config_dir import tool_config_scope
+from automated_security_helper.models.vocab import (
+    SEVERITY_COUNT_FIELDS,
+    SeverityThresholdText,
+)
 from automated_security_helper.utils.severity_ladder import (
-    SEVERITY_COUNT_KEYS,
     SEVERITY_THRESHOLDS,
-    SUPPRESSED_COUNT_KEY,
     resolve_missing_levels,
     resolve_scanner_threshold,
 )
@@ -240,7 +241,7 @@ def _exit_is_the_shutdowns(error: BaseException) -> bool:
 
 
 #: The fields of ScannerSeverityCount a returned dict's ``severity_counts`` can set.
-_SEVERITY_COUNT_FIELDS = (SUPPRESSED_COUNT_KEY, *SEVERITY_COUNT_KEYS)
+_SEVERITY_COUNT_FIELDS = SEVERITY_COUNT_FIELDS
 
 #: The levels a target report can record it was graded against
 #: (``ScanResultsContainer.scanner_severity_threshold``). An unrecognised
@@ -2428,8 +2429,7 @@ class ScannerExecutor:
                         # differently from the scan, silently.
                         if threshold in _GRADED_LEVELS:
                             container.scanner_severity_threshold = cast(
-                                Literal["ALL", "LOW", "MEDIUM", "HIGH", "CRITICAL"],
-                                str(threshold),
+                                SeverityThresholdText, str(threshold)
                             )
                         container.status = container.determine_status(threshold)
                         # A clean result from a database the policy rejects is not a

@@ -1,6 +1,7 @@
 """Implementation of the Inspect phase."""
 
 from automated_security_helper.base.engine_phase import EnginePhase
+from automated_security_helper.core.enums import ExecutionPhase
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.utils.error_text import error_text
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -10,9 +11,9 @@ class InspectPhase(EnginePhase):
     """Implementation of the Inspect phase for analyzing SARIF fields."""
 
     @property
-    def phase_name(self) -> str:
+    def phase_name(self) -> ExecutionPhase:
         """Return the name of this phase."""
-        return "inspect"
+        return ExecutionPhase.INSPECT
 
     def _execute_phase(
         self,

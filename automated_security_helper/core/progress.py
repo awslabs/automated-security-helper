@@ -32,9 +32,6 @@ from rich.progress import (
 )
 
 
-ExecutionPhaseType = Literal["convert", "scan", "report", "inspect"]
-
-
 if TYPE_CHECKING:
     # The stub declares StreamHandler generic on every Python version, but the
     # class only accepts a subscript at run time from 3.11 on. A subscripted base

@@ -13,7 +13,6 @@ from typing import (
     Dict,
     Iterator,
     List,
-    Literal,
     Optional,
     Sequence,
     Set,
@@ -41,13 +40,15 @@ from automated_security_helper.config.resolve_config import (
     LoggedResolutionWarning,
     resolve_config,
 )
-from automated_security_helper.core.enums import ExecutionStrategy
+from automated_security_helper.core.enums import (
+    DEFAULT_EXECUTION_PHASES,
+    ExecutionPhase,
+    ExecutionStrategy,
+    phase_values,
+)
 from automated_security_helper.core.scanner_selection import (
     SelectionLayers,
     SelectionOrigin,
-)
-from automated_security_helper.core.progress import (
-    ExecutionPhaseType,
 )
 from automated_security_helper.core.constants import (
     ASH_WORK_DIR_NAME,
@@ -81,6 +82,7 @@ from automated_security_helper.models.asharp_model import (
 from automated_security_helper.models.asharp_model import InputNotScanned
 from automated_security_helper.models.core import IgnoreFileExclusions
 from automated_security_helper.core.enums import ExportFormat
+from automated_security_helper.models.vocab import SeverityThresholdText
 from automated_security_helper.utils.get_ash_version import get_ash_version
 from automated_security_helper.utils.get_scan_set import (
     honors_ignore_files,
@@ -1280,9 +1282,7 @@ class ASHScanOrchestrator(BaseModel):
             # The configured threshold is a ladder value, and stricter_of ranks
             # every value that is not one after CRITICAL, so it is replaced only
             # by a stricter ladder value: the cast names that and checks nothing.
-            settings.severity_threshold = cast(
-                Literal["ALL", "LOW", "MEDIUM", "HIGH", "CRITICAL"], effective
-            )
+            settings.severity_threshold = cast(SeverityThresholdText, effective)
         elif requested != configured and announce:
             ASH_LOGGER.info(
                 f"Severity threshold {requested} requested, looser than "
@@ -1368,11 +1368,13 @@ class ASHScanOrchestrator(BaseModel):
                 }
             )
 
-    def _writes_results_file(self, phases: Sequence[str]) -> bool:
+    def _writes_results_file(self, phases: Sequence[ExecutionPhase]) -> bool:
         """Whether this run owns the results file: a scan ran (not a report over
         existing results) and there is an output directory to write into."""
         return bool(
-            "scan" in phases and self.existing_results_path is None and self.output_dir
+            ExecutionPhase.SCAN in phases
+            and self.existing_results_path is None
+            and self.output_dir
         )
 
     def _remove_results_file_written_before_a_cancel(self) -> None:
@@ -1389,7 +1391,7 @@ class ASHScanOrchestrator(BaseModel):
                 f"the file could not be removed: {error_text(e)}"
             )
 
-    def _write_results_after_failure(self, phases: Sequence[str]) -> None:
+    def _write_results_after_failure(self, phases: Sequence[ExecutionPhase]) -> None:
         """Write the results the engine holds when a phase AFTER the scan raised.
 
         The scan phase used to write ash_aggregated_results.json at its own
@@ -1617,7 +1619,7 @@ class ASHScanOrchestrator(BaseModel):
 
     def execute_scan(
         self,
-        phases: List[ExecutionPhaseType] | None = None,
+        phases: List[ExecutionPhase] | None = None,
         settle_on_success: bool = True,
     ) -> AshAggregatedResults:
         """Execute the security scan and return results.
@@ -1640,8 +1642,8 @@ class ASHScanOrchestrator(BaseModel):
         settle, when it is False (_write_results_file).
 
         Args:
-            phases (List[ExecutionPhaseType], optional): The phases to execute.
-                Defaults to ["convert", "scan", "report"].
+            phases (List[ExecutionPhase], optional): The phases to execute.
+                Defaults to DEFAULT_EXECUTION_PHASES: convert, scan and report.
             settle_on_success: False leaves the previous results set aside when
                 the phases finish, for a caller that still has work to do before
                 the scan counts as having results; it then calls
@@ -1665,7 +1667,7 @@ class ASHScanOrchestrator(BaseModel):
         # that reached it unresolved read as no scan, so the default call
         # (every phase) wrote no results file.
         if phases is None:
-            phases = ["convert", "scan", "report"]
+            phases = list(DEFAULT_EXECUTION_PHASES)
         try:
             # The run id the plugin context recorded its directories under
             # (_build_engine), in this thread and in the scanner pool's copies
@@ -1706,7 +1708,7 @@ class ASHScanOrchestrator(BaseModel):
         return results
 
     def _write_results_file(
-        self, phases: Sequence[str] | None, results: AshAggregatedResults
+        self, phases: Sequence[ExecutionPhase] | None, results: AshAggregatedResults
     ) -> None:
         """Write ash_aggregated_results.json once, after every phase has run.
 
@@ -1806,7 +1808,7 @@ class ASHScanOrchestrator(BaseModel):
             )
 
     def _execute_scan(
-        self, phases: List[ExecutionPhaseType] | None = None
+        self, phases: List[ExecutionPhase] | None = None
     ) -> AshAggregatedResults:
         """execute_scan without the handling of the previous results.
 
@@ -1818,12 +1820,12 @@ class ASHScanOrchestrator(BaseModel):
         """
         values = config_environment_values(self.config)
         if phases is None:
-            phases = ["convert", "scan", "report"]
+            phases = list(DEFAULT_EXECUTION_PHASES)
         ASH_LOGGER.verbose(f"Source directory: {self.source_dir}")
         ASH_LOGGER.verbose(f"Output directory: {self.output_dir}")
         ASH_LOGGER.verbose(f"Work directory: {self.work_dir}")
         ASH_LOGGER.verbose(f"Configuration path: {self.config_path}")
-        ASH_LOGGER.verbose(f"Executing phases: {phases}")
+        ASH_LOGGER.verbose(f"Executing phases: {phase_values(phases)}")
 
         try:
             # If existing results path is provided, load the model from it. By
@@ -1831,7 +1833,7 @@ class ASHScanOrchestrator(BaseModel):
             # results that could not be loaded, where a scan would otherwise
             # start and the phases would find no model.
             if self.existing_results_path is not None:
-                if "inspect" in phases:
+                if ExecutionPhase.INSPECT in phases:
                     # The inspect phase writes analysis/, which initialize did not
                     # check for a report over existing results.
                     refuse_committed_entries(
@@ -1877,8 +1879,10 @@ class ASHScanOrchestrator(BaseModel):
                     phases = [
                         phase
                         for phase in [
-                            "report",
-                            "inspect" if "inspect" in phases else None,
+                            ExecutionPhase.REPORT,
+                            ExecutionPhase.INSPECT
+                            if ExecutionPhase.INSPECT in phases
+                            else None,
                         ]
                         if phase is not None
                     ]
@@ -1903,7 +1907,7 @@ class ASHScanOrchestrator(BaseModel):
                 # refused here as results that failed to load.
                 ensure_reports_dir(self._output_path.joinpath("reports"))
             # Only identify files to scan if we're not using existing results
-            elif "convert" in phases or "scan" in phases:
+            elif ExecutionPhase.CONVERT in phases or ExecutionPhase.SCAN in phases:
                 # Before the walk: a scan with no engine walked the whole tree and
                 # wrote its scan set before the check below said it had nothing to
                 # run the phases with.

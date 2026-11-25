@@ -364,8 +364,9 @@ def test_no_other_enum_typed_field_can_come_from_a_config_file():
     """Every enum-typed config field is covered by the round trips above.
 
     An ``Enum`` member in a Python-mode dump is what broke the YAML writers, so a
-    new enum-typed field must either store its value (``use_enum_values``) or
-    serialize to one, and get a round trip of its own. ``build.custom_scanners``
+    new enum-typed field must serialize to a value (a ``(str, Enum)`` member
+    dumped with ``mode="json"``) and get a round trip of its own. No config model
+    stores values on validation: members in memory, values at the boundary. ``build.custom_scanners``
     is skipped: it holds scanner plugin instances, which a config file cannot
     construct (validating one from a mapping raises), so no file can carry it.
     """
@@ -402,7 +403,10 @@ def test_no_other_enum_typed_field_can_come_from_a_config_file():
 
     walk(AshConfig, "")
 
-    assert enum_fields == {"output_formats"}, (
+    # sandbox.mode is the second: its string dump is pinned in
+    # tests/unit/vocab/test_phase_mode_format_vocabularies.py.
+    tested = {"output_formats", "sandbox.mode"}
+    assert enum_fields == tested, (
         f"enum-typed config fields without a tested string dump: "
-        f"{sorted(enum_fields - {'output_formats'})}"
+        f"{sorted(enum_fields - tested)}"
     )

@@ -5,7 +5,8 @@
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import List, Optional, Dict, Any, Set, TYPE_CHECKING
+from enum import Enum
+from typing import List, Optional, Dict, Any, Set, Union, TYPE_CHECKING
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.core.enums import ScannerStatus
 
@@ -15,6 +16,90 @@ if TYPE_CHECKING:
         AshAggregatedResults,
         ScannerTargetStatusInfo,
     )
+
+
+class RegistrationStatus(str, Enum):
+    """Registration status of a scanner in the validation state.
+
+    Only the values the code assigns are members: a scanner is ``UNKNOWN`` until
+    the scan phase registers it, ``REGISTERED`` once it is, and ``UNTRACKED`` when
+    a result row exists for a scanner the tracker never saw.
+    """
+
+    UNKNOWN = "unknown"
+    REGISTERED = "registered"
+    UNTRACKED = "untracked"
+
+    def __str__(self) -> str:
+        return self.value
+
+
+class EnablementStatus(str, Enum):
+    """Enablement status of a registered scanner in the validation state."""
+
+    UNKNOWN = "unknown"
+    ENABLED = "enabled"
+    DISABLED = "disabled"
+    EXCLUDED = "excluded"
+    MISSING_DEPS = "missing_deps"
+
+    def __str__(self) -> str:
+        return self.value
+
+
+#: The state fields that hold one of the two status vocabularies above, by name.
+_STATUS_FIELD_ENUMS: Dict[str, type] = {
+    "registration_status": RegistrationStatus,
+    "enablement_status": EnablementStatus,
+}
+
+
+def _status_member(field_name: str, value: Any) -> Enum:
+    """The member of *field_name*'s vocabulary that *value* names.
+
+    A member passes through and its wire spelling is looked up. Any other text
+    raises here, at the write, instead of being stored: a status outside the
+    vocabulary matches none of the members the state is compared against, so the
+    scanner would fall through to failed or missing instead of its real state.
+    """
+    vocabulary = _STATUS_FIELD_ENUMS[field_name]
+    try:
+        return vocabulary(value)
+    except ValueError:
+        allowed = ", ".join(member.value for member in vocabulary)
+        raise ValueError(
+            f"{field_name} takes one of {allowed}, not {value!r}"
+        ) from None
+
+
+class ValidationOutcome(str, Enum):
+    """The execution outcome ``determine_scanner_status_from_execution_data`` reports.
+
+    The summary buckets of ``get_scanner_state_summary`` are keyed by these
+    members, so the bucket set and the outcome set cannot drift apart.
+    """
+
+    COMPLETED = "completed"
+    EXCLUDED = "excluded"
+    MISSING_DEPS = "missing_deps"
+    FAILED = "failed"
+    MISSING = "missing"
+
+    def __str__(self) -> str:
+        return self.value
+
+
+class CheckpointName(str, Enum):
+    """The names of the validation checkpoints this module creates."""
+
+    REGISTERED_SCANNERS = "registered_scanners"
+    SCANNER_ENABLEMENT = "scanner_enablement"
+    EXECUTION_COMPLETION = "execution_completion"
+    RESULT_COMPLETENESS = "result_completeness"
+    TASK_QUEUE_VALIDATION = "task_queue_validation"
+
+    def __str__(self) -> str:
+        return self.value
 
 
 @dataclass
@@ -31,11 +116,16 @@ class ScannerValidationState:
     plugin_class: Optional[type] = None
     """The scanner plugin class, if available"""
 
-    registration_status: str = "unknown"
-    """Status of scanner registration: 'registered', 'failed', 'missing'"""
+    registration_status: RegistrationStatus = RegistrationStatus.UNKNOWN
+    """Status of scanner registration: a ``RegistrationStatus`` member
+    (``unknown``, ``registered``, ``untracked``). ``update_scanner_state``
+    converts a spelling to its member and refuses one outside the vocabulary."""
 
-    enablement_status: str = "unknown"
-    """Status of scanner enablement: 'enabled', 'disabled', 'excluded', 'missing_deps'"""
+    enablement_status: EnablementStatus = EnablementStatus.UNKNOWN
+    """Status of scanner enablement: an ``EnablementStatus`` member
+    (``unknown``, ``enabled``, ``disabled``, ``excluded``, ``missing_deps``).
+    ``update_scanner_state`` converts a spelling to its member and refuses one
+    outside the vocabulary."""
 
     enablement_reason: str = ""
     """Detailed reason for the enablement status"""
@@ -67,8 +157,10 @@ class ValidationCheckpoint:
     vs actual scanner states and captures any discrepancies or errors found.
     """
 
-    checkpoint_name: str
-    """Name/identifier of the validation checkpoint"""
+    checkpoint_name: Union[CheckpointName, str]
+    """Name/identifier of the validation checkpoint: a ``CheckpointName`` member
+    for the checkpoints this module creates (the scan phase records further names
+    of its own)."""
 
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     """When this checkpoint was created, as an aware UTC datetime.
@@ -242,6 +334,10 @@ class ScannerStateTracker:
             Updated ScannerValidationState
         """
         self._validate_name(scanner_name, kwargs.get("plugin_class"))
+        kwargs = {
+            key: _status_member(key, value) if key in _STATUS_FIELD_ENUMS else value
+            for key, value in kwargs.items()
+        }
 
         is_new_scanner = scanner_name not in self.scanner_states
         if is_new_scanner:
@@ -306,25 +402,25 @@ class ScannerStateTracker:
 
         if not scanner_state:
             return {
-                "status": "missing",
+                "status": ValidationOutcome.MISSING,
                 "dependencies_satisfied": True,
                 "excluded": False,
                 "execution_completed": False,
                 "failure_reason": "Scanner state not found in validation manager",
             }
 
-        if scanner_state.enablement_status == "missing_deps":
+        if scanner_state.enablement_status == EnablementStatus.MISSING_DEPS:
             return {
-                "status": "missing_deps",
+                "status": ValidationOutcome.MISSING_DEPS,
                 "dependencies_satisfied": False,
                 "excluded": False,
                 "execution_completed": False,
                 "failure_reason": f"Missing dependencies: {', '.join(scanner_state.dependency_errors)}",
             }
 
-        if scanner_state.enablement_status == "excluded":
+        if scanner_state.enablement_status == EnablementStatus.EXCLUDED:
             return {
-                "status": "excluded",
+                "status": ValidationOutcome.EXCLUDED,
                 "dependencies_satisfied": True,
                 "excluded": True,
                 "execution_completed": False,
@@ -337,11 +433,11 @@ class ScannerStateTracker:
         # recorded failure is not an exclusion: it falls through to the failed
         # readings below, so the scan does not report it SKIPPED.
         if (
-            scanner_state.enablement_status == "disabled"
+            scanner_state.enablement_status == EnablementStatus.DISABLED
             and not scanner_state.failure_reason
         ):
             return {
-                "status": "excluded",
+                "status": ValidationOutcome.EXCLUDED,
                 "dependencies_satisfied": True,
                 "excluded": True,
                 "execution_completed": False,
@@ -350,7 +446,7 @@ class ScannerStateTracker:
 
         if scanner_state.execution_completed:
             return {
-                "status": "completed",
+                "status": ValidationOutcome.COMPLETED,
                 "dependencies_satisfied": True,
                 "excluded": False,
                 "execution_completed": True,
@@ -363,9 +459,9 @@ class ScannerStateTracker:
                 or "Scanner was queued for execution but did not complete - execution failed"
             )
             return {
-                "status": "failed",
+                "status": ValidationOutcome.FAILED,
                 "dependencies_satisfied": scanner_state.enablement_status
-                != "missing_deps",
+                != EnablementStatus.MISSING_DEPS,
                 "excluded": False,
                 "execution_completed": False,
                 "failure_reason": failure_reason,
@@ -373,18 +469,20 @@ class ScannerStateTracker:
 
         if scanner_state.failure_reason:
             return {
-                "status": "failed",
+                "status": ValidationOutcome.FAILED,
                 "dependencies_satisfied": scanner_state.enablement_status
-                != "missing_deps",
-                "excluded": scanner_state.enablement_status == "excluded",
+                != EnablementStatus.MISSING_DEPS,
+                "excluded": scanner_state.enablement_status
+                == EnablementStatus.EXCLUDED,
                 "execution_completed": False,
                 "failure_reason": scanner_state.failure_reason,
             }
 
         return {
-            "status": "missing",
-            "dependencies_satisfied": scanner_state.enablement_status != "missing_deps",
-            "excluded": scanner_state.enablement_status == "excluded",
+            "status": ValidationOutcome.MISSING,
+            "dependencies_satisfied": scanner_state.enablement_status
+            != EnablementStatus.MISSING_DEPS,
+            "excluded": scanner_state.enablement_status == EnablementStatus.EXCLUDED,
             "execution_completed": False,
             "failure_reason": "Scanner registered but execution status unclear",
         }
@@ -396,11 +494,7 @@ class ScannerStateTracker:
             Dictionary mapping state names to lists of scanner names in that state
         """
         state_summary: Dict[str, List[str]] = {
-            "completed": [],
-            "excluded": [],
-            "missing_deps": [],
-            "failed": [],
-            "missing": [],
+            outcome.value: [] for outcome in ValidationOutcome
         }
 
         for scanner_name in self.scanner_states:
@@ -414,7 +508,7 @@ class ScannerStateTracker:
             if status in state_summary:
                 state_summary[status].append(scanner_name)
             else:
-                state_summary["missing"].append(scanner_name)
+                state_summary[ValidationOutcome.MISSING.value].append(scanner_name)
 
         return state_summary
 
@@ -495,7 +589,7 @@ class ValidationCheckpointer:
             self._tracker.update_scanner_state(
                 scanner_name,
                 plugin_class=scanner_instance.__class__,
-                registration_status="registered",
+                registration_status=RegistrationStatus.REGISTERED,
             )
 
         scanner_names.sort()
@@ -505,7 +599,7 @@ class ValidationCheckpointer:
             self.logger.verbose(f"  - {name}")
 
         checkpoint = self.create_checkpoint(
-            checkpoint_name="registered_scanners",
+            checkpoint_name=CheckpointName.REGISTERED_SCANNERS,
             expected_scanners=scanner_names,
             actual_scanners=scanner_names,
             metadata={
@@ -542,7 +636,7 @@ class ValidationCheckpointer:
             dependency_errors = {}
 
         all_registered = self._tracker.get_scanners_by_status(
-            "registration_status", "registered"
+            "registration_status", RegistrationStatus.REGISTERED
         )
         enabled_scanners = sorted(enabled_scanners)
         excluded_scanners = sorted(excluded_scanners)
@@ -570,7 +664,7 @@ class ValidationCheckpointer:
             if scanner_name in enabled_scanners:
                 self._tracker.update_scanner_state(
                     scanner_name,
-                    enablement_status="enabled",
+                    enablement_status=EnablementStatus.ENABLED,
                     enablement_reason="Scanner is enabled and ready for execution",
                 )
             elif scanner_name in excluded_scanners:
@@ -583,13 +677,13 @@ class ValidationCheckpointer:
                 specific = (
                     recorded.enablement_reason
                     if recorded is not None
-                    and recorded.enablement_status == "excluded"
+                    and recorded.enablement_status == EnablementStatus.EXCLUDED
                     and recorded.enablement_reason
                     else None
                 )
                 self._tracker.update_scanner_state(
                     scanner_name,
-                    enablement_status="excluded",
+                    enablement_status=EnablementStatus.EXCLUDED,
                     enablement_reason=specific
                     or "Scanner is excluded by configuration",
                 )
@@ -597,19 +691,19 @@ class ValidationCheckpointer:
                 errors = dependency_errors[scanner_name]
                 self._tracker.update_scanner_state(
                     scanner_name,
-                    enablement_status="missing_deps",
+                    enablement_status=EnablementStatus.MISSING_DEPS,
                     enablement_reason=f"Missing dependencies: {', '.join(errors)}",
                     dependency_errors=errors,
                 )
             else:
                 self._tracker.update_scanner_state(
                     scanner_name,
-                    enablement_status="disabled",
+                    enablement_status=EnablementStatus.DISABLED,
                     enablement_reason="Scanner is disabled (reason unknown)",
                 )
 
         return self.create_checkpoint(
-            checkpoint_name="scanner_enablement",
+            checkpoint_name=CheckpointName.SCANNER_ENABLEMENT,
             expected_scanners=all_registered,
             actual_scanners=enabled_scanners,
             metadata={
@@ -692,7 +786,7 @@ class ValidationCheckpointer:
         # it branches on has_issues(), which reads the recorded discrepancies
         # and errors, never the missing-scanner count on its own.
         return self.create_checkpoint(
-            checkpoint_name="execution_completion",
+            checkpoint_name=CheckpointName.EXECUTION_COMPLETION,
             expected_scanners=expected_scanners,
             actual_scanners=completed_scanners,
             discrepancies=[
@@ -767,7 +861,7 @@ class ValidationCheckpointer:
         self.logger.verbose("Starting validation of result completeness")
 
         all_registered = self._tracker.get_scanners_by_status(
-            "registration_status", "registered"
+            "registration_status", RegistrationStatus.REGISTERED
         )
         all_registered = sorted(all_registered)
 
@@ -807,7 +901,7 @@ class ValidationCheckpointer:
         )
 
         checkpoint = self.create_checkpoint(
-            checkpoint_name="result_completeness",
+            checkpoint_name=CheckpointName.RESULT_COMPLETENESS,
             expected_scanners=all_registered,
             actual_scanners=executed_scanners,
             metadata={
@@ -838,7 +932,10 @@ class ValidationCheckpointer:
 
                 scanner_state = self._tracker.get_scanner_state(scanner_name)
 
-                if scanner_state and scanner_state.enablement_status == "excluded":
+                if (
+                    scanner_state
+                    and scanner_state.enablement_status == EnablementStatus.EXCLUDED
+                ):
                     self.logger.debug(
                         f"Scanner '{scanner_name}' was properly excluded, not adding to missing results"
                     )
@@ -886,7 +983,7 @@ class ValidationCheckpointer:
             if scanner_name not in all_registered:
                 self._tracker.update_scanner_state(
                     scanner_name,
-                    registration_status="untracked",
+                    registration_status=RegistrationStatus.UNTRACKED,
                     included_in_results=True,
                 )
             else:
@@ -899,7 +996,10 @@ class ValidationCheckpointer:
                 scanner_state = self._tracker.get_scanner_state(scanner_name)
                 # A scanner the run excluded on purpose left no row by design: it
                 # was skipped above, and it is no discrepancy either.
-                if scanner_state and scanner_state.enablement_status == "excluded":
+                if (
+                    scanner_state
+                    and scanner_state.enablement_status == EnablementStatus.EXCLUDED
+                ):
                     continue
                 # The reason the status reading holds: a scanner with missing
                 # dependencies or a recorded exclusion keeps its reason in
@@ -1014,7 +1114,7 @@ class ValidationCheckpointer:
 
         queued_scanner_names.sort()
         expected_scanners = self._tracker.get_scanners_by_status(
-            "enablement_status", "enabled"
+            "enablement_status", EnablementStatus.ENABLED
         )
 
         self.logger.verbose("Task queue validation summary:")
@@ -1031,7 +1131,7 @@ class ValidationCheckpointer:
         # clean; handle_queue_validation_errors records the failure reason either
         # way.
         return self.create_checkpoint(
-            checkpoint_name="task_queue_validation",
+            checkpoint_name=CheckpointName.TASK_QUEUE_VALIDATION,
             expected_scanners=expected_scanners,
             actual_scanners=queued_scanner_names,
             discrepancies=[
@@ -1066,7 +1166,7 @@ class ValidationCheckpointer:
         self.logger.error(f"Queue validation error: {error_message}")
 
         for checkpoint in reversed(self.checkpoints):
-            if checkpoint.checkpoint_name == "task_queue_validation":
+            if checkpoint.checkpoint_name == CheckpointName.TASK_QUEUE_VALIDATION:
                 checkpoint.add_error(error_message)
                 break
         else:
@@ -1074,7 +1174,7 @@ class ValidationCheckpointer:
                 "No queue validation checkpoint found, creating one for error tracking"
             )
             self.create_checkpoint(
-                checkpoint_name="task_queue_validation",
+                checkpoint_name=CheckpointName.TASK_QUEUE_VALIDATION,
                 expected_scanners=[],
                 actual_scanners=[],
                 errors=[error_message],
@@ -1165,7 +1265,7 @@ class ValidationCheckpointer:
             status_info = self._tracker.determine_scanner_status_from_execution_data(
                 scanner_name
             )
-            if status_info["status"] == "completed":
+            if status_info["status"] == ValidationOutcome.COMPLETED:
                 executed_scanners.append(scanner_name)
                 self.logger.debug(
                     f"Scanner '{scanner_name}' marked as executed in validation state"
@@ -1188,13 +1288,13 @@ class ValidationCheckpointer:
             scanner_name
         )
 
-        if status_info["status"] == "completed":
+        if status_info["status"] == ValidationOutcome.COMPLETED:
             status = ScannerStatus.PASSED
-        elif status_info["status"] == "excluded":
+        elif status_info["status"] == ValidationOutcome.EXCLUDED:
             status = ScannerStatus.SKIPPED
-        elif status_info["status"] == "missing_deps":
+        elif status_info["status"] == ValidationOutcome.MISSING_DEPS:
             status = ScannerStatus.MISSING
-        elif status_info["status"] == "failed":
+        elif status_info["status"] == ValidationOutcome.FAILED:
             status = ScannerStatus.ERROR
         else:
             status = ScannerStatus.MISSING
