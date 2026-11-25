@@ -13,6 +13,14 @@ name: betterleaks macOS probe
 
 on:
   workflow_dispatch:
+  # GitHub dispatches only a workflow file that exists on the default branch, so
+  # while this file lives on its probe branch alone, a push to that branch is what
+  # runs it. Remove this trigger if the file is ever merged.
+  push:
+    branches:
+      - probe/betterleaks-macos
+    paths:
+      - .github/workflows/betterleaks-macos-probe.yml
 
 permissions:
   contents: read
