@@ -110,7 +110,7 @@ def test_a_stopped_scan_exits_terminated_with_one_line(shutdown_state, monkeypat
 
     assert result.exit_code == ASH_EXIT_TERMINATED, result.output
     assert result.output.count("stopped by SIGTERM") == 1, result.output
-    assert "ASH build-image stopped by SIGTERM" in result.output
+    assert "ASH container build stopped by SIGTERM" in result.output
     assert "did not complete" in result.output
     assert cancellation._SHUTDOWN_SCOPES == (), "the scope leaked its registration"
 
@@ -132,7 +132,7 @@ def test_an_interrupted_run_cancels_its_event_before_exiting(
     result = CliRunner().invoke(_build_image_app(), [])
 
     assert result.exit_code == ASH_EXIT_INTERRUPTED, result.output
-    assert "ASH build-image interrupted" in result.output
+    assert "ASH container build interrupted" in result.output
     assert "event" in seen, result.output
     assert seen["event"].is_set()
     assert seen["event"].stop_promptly is True
@@ -149,7 +149,7 @@ def test_a_stopped_build_only_run_owes_no_verdict(shutdown_state, monkeypatch):
     result = CliRunner().invoke(_build_image_app(), ["--no-run"])
 
     assert result.exit_code == ASH_EXIT_TERMINATED, result.output
-    assert "ASH build-image stopped by SIGTERM" in result.output
+    assert "ASH container build stopped by SIGTERM" in result.output
     assert "did not complete" not in result.output
     assert cancellation._SHUTDOWN_SCOPES == (), "the scope leaked its registration"
 
@@ -172,7 +172,7 @@ def test_a_sigterm_nothing_polled_still_ends_the_command_terminated(
     result = CliRunner().invoke(_build_image_app(), ["--no-run"])
 
     assert result.exit_code == ASH_EXIT_TERMINATED, result.output
-    assert "ASH build-image stopped by SIGTERM" in result.output
+    assert "ASH container build stopped by SIGTERM" in result.output
     assert cancellation._SHUTDOWN_SCOPES == (), "the scope leaked its registration"
 
 
@@ -193,7 +193,7 @@ def test_an_interrupt_cancels_the_scope_before_the_exit(shutdown_state, monkeypa
     result = CliRunner().invoke(_build_image_app(), [])
 
     assert result.exit_code == ASH_EXIT_INTERRUPTED, result.output
-    assert "ASH build-image interrupted" in result.output
+    assert "ASH container build interrupted" in result.output
     event = seen["event"]
     assert event.is_set(), "the scope's event is left clear after the interrupt"
     assert event.stop_promptly is True
