@@ -41,7 +41,13 @@ from automated_security_helper.models.frame_model import (
     to_frame,
     unaccounted,
 )
+from automated_security_helper.models.core import AshSuppression
 from automated_security_helper.utils.frame_text import unwire, wire
+from automated_security_helper.utils.suppression_frame import (
+    _chunk_frame,
+    _span_frame,
+    line_span_spec,
+)
 from tests.unit.models.test_flat_frame import SCHEMA as FLAT_HAND_SCHEMA
 from tests.unit.models.test_flat_frame import row
 
@@ -51,6 +57,7 @@ pytestmark = pytest.mark.unit
 # the frame the layer ships, called with no rows.
 FRAME_SPECS: Dict[str, Tuple[FrameSpec, Callable[[], pl.DataFrame]]] = {
     "flat_frame": (FLAT_SPEC, lambda: flat_frame([])),
+    "suppression_line_span": (line_span_spec(), lambda: _span_frame([], [])),
 }
 
 
@@ -71,6 +78,43 @@ def test_every_name_the_model_holds_has_a_decided_frame_fate(name):
 
 def test_the_flat_frame_schema_is_the_documented_one_in_the_documented_order():
     assert list(frame_schema(FLAT_SPEC).items()) == list(FLAT_HAND_SCHEMA.items())
+
+
+def test_the_suppression_line_columns_carry_the_rank_policy_from_the_model():
+    info = {column.name: column for column in frame_columns(line_span_spec())}
+    assert set(info) == {"line_start", "line_end"}
+    for column in info.values():
+        assert column.rank_group == "lines"
+        assert column.dtype == "Int64"
+        assert column.nullable is True  # both fields are Optional on the model
+
+
+def test_the_chunk_frame_line_columns_are_the_derived_span_columns():
+    frame = _chunk_frame(row(0), [])
+    built = dict(frame.schema)
+    # the predicate booleans are results of host predicates, not model fields,
+    # so they stay hand-declared; static_ok is their conjunction with the lines
+    assert list(built) == [
+        "live",
+        "rule",
+        "base",
+        "rest",
+        "engine",
+        "line_start",
+        "line_end",
+        "static_ok",
+    ]
+    derived = frame_schema(line_span_spec())
+    assert {name: built[name] for name in derived} == derived
+
+
+def test_the_suppression_markers_leave_validation_and_the_json_schema_alone():
+    schema = AshSuppression.model_json_schema()
+    assert "RankEncoded" not in str(schema)
+    assert schema["properties"]["line_start"]["anyOf"] == [
+        {"type": "integer"},
+        {"type": "null"},
+    ]
 
 
 class _PlantedField(FlatVulnerability):
