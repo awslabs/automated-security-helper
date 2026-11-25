@@ -2594,7 +2594,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                 "path, a glob ending in '/', or more than the tool is handed) and "
                 "are applied to its findings after the scan.",
                 level=logging.INFO,
-                target_type="image",
+                target_type=TargetType.IMAGE,
             )
         return excludes.globs
 
@@ -2618,7 +2618,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         the context's source directory, which an image scan uses as its
         working anchor, never as its subject.
         """
-        image_target_type = "image"
+        image_target_type = TargetType.IMAGE
         anchor = Path(getattr(self.context, "source_dir", None) or Path.cwd())
 
         # Per target, exactly as scan() resets them, and for the same reasons.
