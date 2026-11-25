@@ -16,7 +16,7 @@
           "symbol": "version_output"
         }
       ],
-      "sha256": "41a86b424e48a7ebd672bc00607efecdd50ebdfb03fe8af3647196c66261e81a"
+      "sha256": "df54c8f38f22b4fc7ddb70b71e40a6034753a1dc6e91d7f11c1ec21e4530ee36"
     },
     "automated_security_helper/cli/dependencies.py": {
       "created": "2026-11-25T17:03:21Z",
@@ -26,7 +26,7 @@
           "symbol": "_run_declared_install_command"
         }
       ],
-      "sha256": "5ee3a90f7cab8895bdabf03e112ad43b7c20ab6a8d6914dcf873af112ff3de1c"
+      "sha256": "5cbb9bbd42377748d45c6d76e0d8cf284100e2e7ed45f9e0bfabb8083f12802a"
     },
     "automated_security_helper/cli/mcp/__init__.py": {
       "created": "2026-11-25T17:03:33Z",
@@ -36,7 +36,7 @@
           "symbol": "_log_where_the_server_listens"
         }
       ],
-      "sha256": "72af24e86d4aa77dffeab8fab43903b08f4b0783a9322a11269a0b958a2aeb06"
+      "sha256": "66710ab8eeec9b1851a66620e0bd7529ae0474a780a5cef45f77346e0ad6f73c"
     },
     "automated_security_helper/cli/mcp/source_delivery.py": {
       "created": "2026-11-25T17:02:52Z",
@@ -46,7 +46,7 @@
           "symbol": "_validate_zip_member"
         }
       ],
-      "sha256": "874142bf8993ba09962828cd1a76d474e49ba00407f8d0c172592f1939da0be3"
+      "sha256": "b0b5c6e44e6a661b1d1d8f61abd39faa07b374ff68be48ea1e6e19cad1dfbd4e"
     },
     "automated_security_helper/interactions/run_ash_container.py": {
       "created": "2026-11-25T17:02:59Z",
@@ -56,7 +56,7 @@
           "symbol": "_write_env_file"
         }
       ],
-      "sha256": "0c8cf8e7ba52a9409875c34dc91ff419ab019d9ca9737db23c42271a094b870a"
+      "sha256": "6ce5751245caf8eaff0d5e10ef425cde3e2ef7177fb9850597a2981a89bbe6e4"
     },
     "automated_security_helper/interactions/run_ash_nix.py": {
       "created": "2026-11-25T17:03:24Z",
@@ -76,7 +76,7 @@
           "symbol": "NpmAuditScanner._probe_npm_version"
         }
       ],
-      "sha256": "34cbe7bb90fb992220fb33ef1856727406f5990527137e6be2e3aac2f66e62cb"
+      "sha256": "c335468d4ea9691659a9bc6db95dbb047f361f3f6c390a9280a6e8f905a89a78"
     },
     "automated_security_helper/utils/content_db_refresh.py": {
       "created": "2026-11-25T17:03:23Z",
@@ -180,7 +180,7 @@
           "symbol": "TestSurvives.test_panel_width_on_a_masked_line"
         }
       ],
-      "sha256": "81c19081d1da1d5de961a90ba1c3e9d3a446b8edb775f51f67ec409c66e1c0ee"
+      "sha256": "b898d9f6c3ae71b6ab1b618bbbbc0a6d5a8ac182736f6db61426e4d008d398d9"
     },
     "tests/unit/test_artifact_contents_gate.py": {
       "created": "2026-11-25T17:03:04Z",
@@ -194,7 +194,7 @@
           "symbol": "TestPlantedPayload.test_link_whose_target_escapes_the_artifact_is_rejected"
         }
       ],
-      "sha256": "6ce5f5e167551af2e6536ca8efecedefab6c3e3d87d273fd8722b50b375f1a4e"
+      "sha256": "25accaee4851d1a27f198df4b86a770f2ba6e4f4a348389ed66587c2d47ece01"
     },
     "tests/unit/test_defense_in_depth.py": {
       "created": "2026-11-25T17:03:07Z",
@@ -214,7 +214,7 @@
           "symbol": "TestOnlyAllowlistedHttpsUrlsAreFetched.test_a_url_outside_the_allowlist_is_refused_unopened"
         }
       ],
-      "sha256": "c13114210299af954f008ba55d0e2ea439dfcfe30562bfeac2bf829461e858f6"
+      "sha256": "489753523d3df6299649fb8b016fc41ff909bbc4f171eaee4a5fba415ef6f9c0"
     },
     "tests/unit/utils/test_opengrep_pinned_download.py": {
       "created": "2026-11-25T17:03:10Z",

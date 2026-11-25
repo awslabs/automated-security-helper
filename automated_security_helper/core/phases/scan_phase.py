@@ -906,8 +906,8 @@ class ScanPhase(EnginePhase):
         nothing_to_scan_names.append(display_name)
         self.validation_manager.update_scanner_state(
             display_name,
-            registration_status="registered",
-            enablement_status="excluded",
+            registration_status=RegistrationStatus.REGISTERED,
+            enablement_status=EnablementStatus.EXCLUDED,
             enablement_reason=f"Asset kind not served: {reason}",
             queued_for_execution=False,
             execution_completed=False,
