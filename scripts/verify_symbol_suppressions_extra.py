@@ -68,6 +68,7 @@ def _finding(row: dict, line: int):
 
 
 def main() -> int:
+    """Run the mode named on the command line; 0 proved, 1 refuted, 2 usage."""
     if len(sys.argv) != 2 or sys.argv[1] not in ("fail-closed", "resolves"):
         print(__doc__)
         return 2

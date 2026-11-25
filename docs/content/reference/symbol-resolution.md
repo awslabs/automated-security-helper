@@ -54,6 +54,41 @@ joined with `.`: `Outer.Inner.method`, `module_function`, `outer_function.inner_
   -- the name covers all of them. That is documented coverage, not ambiguity.
 - A `#` prefix on a segment spells a JavaScript or TypeScript private member.
 
+### A worked example {#example}
+
+Each definition here gets the qualified name in its comment:
+
+```python
+class Reporter:  # Reporter
+    class Formats:  # Reporter.Formats
+        def render(self):  # Reporter.Formats.render
+            pass
+
+
+def flatten(rows):  # flatten
+    def walk(row):  # flatten.walk
+        pass
+```
+
+And a config that scopes suppressions to those names:
+
+```yaml
+global_settings:
+  suppressions:
+    - path: src/reporter.py
+      rule_id: B701
+      symbol: Reporter.Formats.render
+      reason: autoescape is off for the plain-text template only
+    - path: src/reporter.py
+      rule_id: S110
+      symbol: Reporter
+      reason: covers every finding in the class, nested definitions included
+```
+
+The first entry covers findings on `render`'s lines only; the second covers the whole
+`Reporter` span, `Formats.render` included. A TypeScript private method is spelled with
+its `#`: `symbol: "RetryPolicy.#backoff"`.
+
 ## Every way of not knowing a span fails closed {#fail-closed}
 
 Whenever the resolver cannot know a symbol's span, the suppression does not match, the
