@@ -1,0 +1,149 @@
+{
+  "bomFormat": "CycloneDX",
+  "components": [
+    {
+      "bom-ref": "pkg:maven/io.netty/netty-codec-http2@4.1.94.Final?type=jar",
+      "description": "Netty is an asynchronous event-driven network application framework for rapid development of maintainable high performance protocol servers and clients.",
+      "group": "io.netty",
+      "hashes": [
+        {
+          "alg": "MD5",
+          "content": "582a871415311117886a308f4810fc97"
+        },
+        {
+          "alg": "SHA-1",
+          "content": "f651595784d6cca4cbca6a8ad74c48fceed6cea8"
+        },
+        {
+          "alg": "SHA-256",
+          "content": "8fbd2e95abec6155b60ed3c9c1600ed4e17ffe3f053cd5a40677d879c0af961f"
+        },
+        {
+          "alg": "SHA-512",
+          "content": "9c5160f9aba509c525280664be74e5c3f35497bd8b557543e0426bf77f36e7e5de8f8aeecc72fb677a29d9da5de3248153aa9e8d98e97dbca0d17aecb59bac08"
+        },
+        {
+          "alg": "SHA-384",
+          "content": "0b1d50db3a9aaa3f19ebdf3eb4e627bdfa07374cdf20111a301b8416ee3cfe3659b8acf3fbcd2beed0509eb700c2d255"
+        },
+        {
+          "alg": "SHA3-384",
+          "content": "c55466d627cbf0ec43a4711f4fbb7c818be8eec34db8520c639c91b256dd967011703a6fdc22ff298f983aae74ccca89"
+        },
+        {
+          "alg": "SHA3-256",
+          "content": "c48a20378d7d4016e2874fc38f88d8e7e9d1baa6a863b336b5756bb892e70712"
+        },
+        {
+          "alg": "SHA3-512",
+          "content": "c045ac89b70d6aa762ba230ef670484d8be6e7e1aa1c6536d3079f3542c883d4b8d2b8281f092271612e2a56689a3b4a4ec22f1828f496c5533a12f2a9f4faa3"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "Apache-2.0"
+          }
+        }
+      ],
+      "name": "netty-codec-http2",
+      "publisher": "The Netty Project",
+      "purl": "pkg:maven/io.netty/netty-codec-http2@4.1.94.Final?type=jar",
+      "scope": "required",
+      "type": "framework",
+      "version": "4.1.94.Final"
+    },
+    {
+      "bom-ref": "pkg:maven/org.eclipse.parsson/parsson@1.1.2?type=jar",
+      "description": "Jakarta JSON Processing provider",
+      "group": "org.eclipse.parsson",
+      "hashes": [
+        {
+          "alg": "MD5",
+          "content": "1c06598ae885b014ea21d59f8d1e9249"
+        },
+        {
+          "alg": "SHA-1",
+          "content": "f446d3339aa16da8b8891aa11544bc1291a6232e"
+        },
+        {
+          "alg": "SHA-256",
+          "content": "0a0d5fef906ddbbddae6e894f6cf42e7b952d24952f1df09adb0a2426f496bf6"
+        },
+        {
+          "alg": "SHA-512",
+          "content": "ca67e845f8402b60afc33c36a4b4517d70523aff361b4356d7279730d36267b3340ecac6db5acc2348bd7cd5a4259c785cf5c2c9b282672ef97e9bbd00b999a8"
+        },
+        {
+          "alg": "SHA-384",
+          "content": "8d001c20fc00043e1c3d4a7f6e50e0cfa5fe81c0229acebf3783ff3c17dd68eb83a2c38cbe77098f716b29fe18ecc9c5"
+        },
+        {
+          "alg": "SHA3-384",
+          "content": "22dfe1784c65bb2f1ff7f16af16a63b9ccbf5167c3e5a10f39e77b852b01eab445bb6d411d36f3df2a583a4dc00be54d"
+        },
+        {
+          "alg": "SHA3-256",
+          "content": "6e3023b1a8a5113df46001577182adee861917e353dea9dae1175afd32e19033"
+        },
+        {
+          "alg": "SHA3-512",
+          "content": "06f029b68de9439d27174c956f978bb1c5801386944c6dd96dc8ed352e92d3bf671dd467b24c50512d1c650c8416a29f6a3d8864d248fab730b61f7a06245c76"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "EPL-2.0",
+            "url": "https://www.eclipse.org/legal/epl-2.0"
+          }
+        },
+        {
+          "license": {
+            "name": "GNU General Public License, version 2 with the GNU Classpath Exception",
+            "url": "https://projects.eclipse.org/license/secondary-gpl-2.0-cp"
+          }
+        }
+      ],
+      "name": "parsson",
+      "publisher": "Eclipse Foundation",
+      "purl": "pkg:maven/org.eclipse.parsson/parsson@1.1.2?type=jar",
+      "scope": "required",
+      "type": "library",
+      "version": "1.1.2"
+    }
+  ],
+  "metadata": {
+    "authors": [
+      {
+        "name": "OWASP Foundation"
+      }
+    ],
+    "timestamp": "2023-12-15T12:27:01.759Z",
+    "tools": {
+      "components": [
+        {
+          "author": "OWASP Foundation",
+          "bom-ref": "pkg:npm/@cyclonedx/cdxgen@9.9.9",
+          "group": "@cyclonedx",
+          "name": "cdxgen",
+          "publisher": "OWASP Foundation",
+          "purl": "pkg:npm/%40cyclonedx/cdxgen@9.9.9",
+          "type": "application",
+          "version": "9.9.9"
+        },
+        {
+          "bom-ref": "pkg:pypi/owasp-depscan@5.0.4",
+          "name": "owasp-depscan",
+          "purl": "pkg:pypi/owasp-depscan@5.0.4",
+          "type": "application",
+          "version": "5.0.4"
+        }
+      ]
+    }
+  },
+  "serialNumber": "urn:uuid:5dc65b4b-48ff-4b5d-bb40-033f98b8be57",
+  "specVersion": "1.5",
+  "version": 2,
+  "vulnerabilities": []
+}
