@@ -21,10 +21,10 @@ MEDIUM. Nothing is CRITICAL.
 ### Facets declared
 
 - `facets`: rule_id, severity, file_path, line_range, message, extras are MAPPED.
-  resource_id and resource_type are N/A on purpose: the object appears only as
-  `<namespace>/<name>` in the message text, with no kind, so no resource id is written.
-  The remaining cells are N/A with the register's reasons (output not read where it was
-  not read).
+  resource_id and resource_type are N/A on purpose: the object's name, namespace and kind
+  are in the result's `logicalLocations` and message tail, but the adapter does not read
+  them, and no resource id is written from prose. The remaining cells are N/A with the
+  register's reasons, each read against the captured run.
 - `operational_facets`: network none (BUNDLED, helm dependency fetch unconfirmed),
   SARIF output, IAC_KUBERNETES target, runtime USER_INSTALLED_CLI (no central pin),
   severity DERIVED, inline-annotation silencing UNCONFIRMED, positional-only identity,
@@ -41,11 +41,14 @@ MEDIUM. Nothing is CRITICAL.
   `timed out after` and asserts the 1800 s limit reached the subprocess call, plus a test
   that `scan_timeout=42` reaches it.
 - HIGH, row 25: added a sandbox-requirements test (strict default, no network).
-- HIGH, rows 18 and 24: severity and location are now also tested over fixture files in
-  `tests/test_data/scanners/kube_linter/recorded/`. These are hand-built to the v0.8.3
-  formatter's shape, not captured (the binary was not available); the directory is named
-  `recorded/` rather than `captured/` and its README says how to replace them with a real
-  capture. This row stays partly open until a real run is committed.
+- HIGH, rows 18 and 24: severity and location are now also tested over the files a real
+  `kube-linter 0.8.3` run wrote, committed under
+  `tests/test_data/scanners/kube_linter/captured/` with the inputs, the argv, the version
+  and the binary's sha256 in its README. The capture settled three cells the register had
+  left open (no fingerprint on a result; remediation and help URI sit on the driver's
+  rules, not the result) and showed the object kind is present in the result (message tail
+  and `logicalLocations`), so the resource_id and resource_type reasons now say the adapter
+  does not read it rather than that the output has no kind.
 
 ### License posture
 
@@ -60,7 +63,7 @@ Apache-2.0 (KubeLinter at v0.8.3). No license gate applies; nothing is vendored.
 2. `automated_security_helper/utils/scanner_names.py`: `"kube_linter": "IAC",` in
    `SCANNER_TOOL_TYPES`.
 3. `tests/unit/plugin_modules/test_scanner_facets_corpus_consistency.py`: a `CORPORA`
-   row `"kube_linter": CorpusSpec("kube_linter", sarif=("recorded/*.sarif",))`, and the
+   row `"kube_linter": CorpusSpec("kube_linter", sarif=("captured/*.sarif",))`, and the
    shipped-scanner count 22 to 23 here and in `test_scanner_facets_registry_totality.py`
    and `test_scanner_operational_facets_consistency.py`.
 4. `tests/unit/walked_package.py`: `"plugin_modules/ash_kube_linter_plugins",` in

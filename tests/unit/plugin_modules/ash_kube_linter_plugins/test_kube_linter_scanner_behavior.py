@@ -4,10 +4,10 @@
 """KubeLinterScanner: the invocation, the exit status, and the severity it assigns.
 
 The subprocess is replaced by a fake, so these run on every platform without the
-binary. The SARIF the fake writes is built to the shape KubeLinter v0.8.3's SARIF
-formatter produces (pkg/command/lint/sarif_format.go: ruleId is the check name, no
-result level, every region at line 1, message ``<diagnostic>\\nobject: <name>``). It is
-written by hand from that source, not captured from a run of the binary.
+binary. Most tests feed it a small report built to the shape KubeLinter v0.8.3's SARIF
+formatter produces (ruleId is the check name, no result level, every region at line 1).
+``TestCapturedFixture`` feeds it the files a real v0.8.3 run wrote
+(tests/test_data/scanners/kube_linter/captured, whose README gives the argv and inputs).
 """
 
 from __future__ import annotations
@@ -36,12 +36,12 @@ from automated_security_helper.schemas.sarif_schema_model import SarifReport
 
 pytestmark = pytest.mark.unit
 
-_RECORDED = (
+_CAPTURED = (
     Path(__file__).resolve().parents[3]
     / "test_data"
     / "scanners"
     / "kube_linter"
-    / "recorded"
+    / "captured"
 )
 
 
@@ -482,38 +482,99 @@ class TestInstall:
         assert kls.PINNED_VERSION in messages[0]
 
 
-class TestRecordedFixture:
-    """The same checks over the files in tests/test_data/scanners/kube_linter/recorded.
+class TestCapturedFixture:
+    """The same checks over the files a real kube-linter 0.8.3 run wrote.
 
-    They are built by hand to the v0.8.3 formatter's shape (the README beside them says
-    so); they are not captured output.
+    ``captured/README.md`` records the argv, the version and the inputs; the tests below
+    pin what that README says about the files.
     """
+
+    #: ruleId, SARIF level, ASH severity, uri, line: every result the real run reported
+    #: for ``captured/positive/deployment.yaml`` (a privileged Deployment, no requests).
+    CAPTURED_EXPECTED = [
+        ("no-read-only-root-fs", "warning", "MEDIUM", "positive/deployment.yaml", 1),
+        (
+            "privilege-escalation-container",
+            "error",
+            "HIGH",
+            "positive/deployment.yaml",
+            1,
+        ),
+        ("privileged-container", "error", "HIGH", "positive/deployment.yaml", 1),
+        ("run-as-non-root", "warning", "MEDIUM", "positive/deployment.yaml", 1),
+        ("unset-cpu-requirements", "warning", "MEDIUM", "positive/deployment.yaml", 1),
+        (
+            "unset-memory-requirements",
+            "warning",
+            "MEDIUM",
+            "positive/deployment.yaml",
+            1,
+        ),
+    ]
 
     def test_the_positive_file_is_rated_and_located(
         self, tree, tmp_path, monkeypatch, on_path
     ):
         fake = FakeKubeLinter(
-            sarif_text=_RECORDED.joinpath("positive.sarif").read_text()
+            sarif_text=_CAPTURED.joinpath("positive.sarif").read_text()
         )
         report = _run(_scanner(tree, tmp_path), fake, monkeypatch)
-        assert _findings(report) == POSITIVE_EXPECTED
+        assert _findings(report) == self.CAPTURED_EXPECTED
 
     def test_the_negative_file_has_no_findings(
         self, tree, tmp_path, monkeypatch, on_path
     ):
         fake = FakeKubeLinter(
-            sarif_text=_RECORDED.joinpath("negative.sarif").read_text(), exit_code=0
+            sarif_text=_CAPTURED.joinpath("negative.sarif").read_text(), exit_code=0
         )
         report = _run(_scanner(tree, tmp_path), fake, monkeypatch)
         assert _findings(report) == []
 
-    def test_the_hand_built_text_and_the_file_agree(self):
-        assert (
-            json.loads(POSITIVE)["runs"][0]["results"][0]["ruleId"]
-            == json.loads(_RECORDED.joinpath("positive.sarif").read_text())["runs"][0][
-                "results"
-            ][0]["ruleId"]
-        )
+    def test_every_high_check_in_the_capture_is_in_the_table(self):
+        captured = json.loads(_CAPTURED.joinpath("positive.sarif").read_text())
+        rated_high = {
+            r["ruleId"]
+            for r in captured["runs"][0]["results"]
+            if severity_for_check(r["ruleId"])[0] == "HIGH"
+        }
+        assert rated_high == {"privilege-escalation-container", "privileged-container"}
+        assert rated_high <= HIGH_SEVERITY_CHECKS
+
+    def test_every_default_check_is_rated_by_the_table(self):
+        """The 31 checks the capture's driver lists: none is unrated, none is CRITICAL."""
+        captured = json.loads(_CAPTURED.joinpath("negative.sarif").read_text())
+        rules = {r["id"] for r in captured["runs"][0]["tool"]["driver"]["rules"]}
+        assert len(rules) == 31
+        # A HIGH entry that KubeLinter does not ship would never fire.
+        assert HIGH_SEVERITY_CHECKS <= rules
+        for rule in rules:
+            assert severity_for_check(rule)[0] in {"HIGH", "MEDIUM"}
+
+    def test_the_result_shape_the_adapter_relies_on(self):
+        """What the capture shows: no level, no fingerprint, line 1, a relative uri."""
+        results = json.loads(_CAPTURED.joinpath("positive.sarif").read_text())["runs"][
+            0
+        ]["results"]
+        assert results
+        for result in results:
+            assert set(result) == {"ruleId", "ruleIndex", "message", "locations"}
+            region = result["locations"][0]["physicalLocation"]["region"]
+            assert region == {"startLine": 1}
+            uri = result["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
+            assert not uri.startswith("/")
+            assert (
+                "\nobject: shop/demo apps/v1, Kind=Deployment"
+                in result["message"]["text"]
+            )
+
+    def test_the_readme_names_the_tool_version_argv_and_inputs(self):
+        readme = _CAPTURED.joinpath("README.md").read_text()
+        assert "kube-linter 0.8.3" in readme
+        assert "--format=sarif --output=" in readme
+        for name in ("positive/deployment.yaml", "negative/configmap.yaml"):
+            assert name in readme
+            assert _CAPTURED.joinpath(name).is_file()
+        assert _CAPTURED.joinpath("empty-config.yaml").read_text().strip() == "{}"
 
 
 class TestSandboxRequirements:

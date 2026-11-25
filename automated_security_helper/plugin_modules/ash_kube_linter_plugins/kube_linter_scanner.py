@@ -189,9 +189,9 @@ class KubeLinterScanner(ScannerPluginBase[KubeLinterScannerConfig]):
 
     #: The facets register row (base/scanner_facets.py). Declaration only: no
     #: behavior changes. Native fields name KubeLinter's own SARIF as the v0.8.3
-    #: formatter writes it (tests/test_data/scanners/kube_linter/recorded/README.md
-    #: says how the fixture was built). A cell the output was not read for is n/a
-    #: with the reason the register asks for.
+    #: formatter writes it (tests/test_data/scanners/kube_linter/captured/README.md
+    #: records the real run the fixtures come from). A cell the adapter does not read
+    #: is n/a with the reason the register asks for.
     facets: ClassVar[ScannerFacets] = ScannerFacets(
         rule_id=FacetDecl(
             state=FacetState.MAPPED,
@@ -216,18 +216,20 @@ class KubeLinterScanner(ScannerPluginBase[KubeLinterScannerConfig]):
         ),
         message=FacetDecl(
             state=FacetState.MAPPED,
-            native_field='result "message.text" (diagnostic, then "object: <namespace>/<name>")',
+            native_field='result "message.text" (diagnostic, then "object: '
+            '<namespace>/<name> <apiVersion>, Kind=<Kind>")',
         ),
         resource_id=FacetDecl(
             state=FacetState.NA,
-            reason="the object appears only as '<namespace>/<name>' inside the "
-            "message text, with no kind, so it does not name one deployable "
-            "resource, and a value taken from prose is an inference; fail closed",
+            reason="the object is named by the result's logicalLocations "
+            "(Object Name, Object Namespace, GVK/Kind) and the message tail, "
+            "but this adapter does not read either, and a value assembled from "
+            "prose is an inference; fail closed",
         ),
         resource_type=FacetDecl(
             state=FacetState.NA,
-            reason="the native SARIF carries no object kind; it is not in the "
-            "message text either",
+            reason="the object kind is in the result's logicalLocations (GVK/Kind) "
+            "and the message tail, but this adapter does not read either",
         ),
         package_name=FacetDecl(
             state=FacetState.NA,
@@ -251,8 +253,8 @@ class KubeLinterScanner(ScannerPluginBase[KubeLinterScannerConfig]):
         ),
         fingerprints=FacetDecl(
             state=FacetState.NA,
-            reason="output not read; a sample run would settle it (no "
-            "fingerprint field is read from the formatter source)",
+            reason="a result carries only ruleId, ruleIndex, message and "
+            "locations (captured/positive.sarif); no fingerprint field exists",
         ),
         fix_available=FacetDecl(
             state=FacetState.NA,
@@ -260,9 +262,9 @@ class KubeLinterScanner(ScannerPluginBase[KubeLinterScannerConfig]):
         ),
         remediation_text=FacetDecl(
             state=FacetState.NA,
-            reason="output not read; a sample run would settle it (KubeLinter "
-            "holds a remediation per check, but whether its SARIF carries it "
-            "was not read)",
+            reason="the remediation is on tool.driver.rules[].fullDescription and "
+            "help.text, once per check, not on the result; this adapter does "
+            "not read it",
         ),
         snippet=FacetDecl(
             state=FacetState.NA,
@@ -270,7 +272,8 @@ class KubeLinterScanner(ScannerPluginBase[KubeLinterScannerConfig]):
         ),
         references=FacetDecl(
             state=FacetState.NA,
-            reason="output not read; a sample run would settle it",
+            reason="the check's help URI is on tool.driver.rules[].helpUri, not "
+            "on the result; this adapter does not read it",
         ),
         tags=FacetDecl(
             state=FacetState.NA,
