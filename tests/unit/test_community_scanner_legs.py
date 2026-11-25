@@ -17,6 +17,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+pytestmark = pytest.mark.unit
+
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / ".github/scripts/community-scanner-legs.py"
 CONTAINER = ROOT / ".github/actions/validate-container/action.yml"
@@ -88,6 +90,10 @@ class TestMetadataReader:
         with pytest.raises(legs.LegError, match="declares no scanner"):
             legs.module_scanners("automated_security_helper")
 
+    def test_a_module_that_cannot_be_imported_is_a_clean_refusal(self, legs):
+        with pytest.raises(legs.LegError, match="cannot import"):
+            legs.module_scanners("automated_security_helper.no_such_plugins")
+
     def test_cli_args_pair_the_flag_with_each_module(self, legs, capsys):
         assert legs.main(["args"]) == 0
         lines = capsys.readouterr().out.split()
@@ -137,7 +143,8 @@ class TestContainerLeg:
 
     def test_the_betterleaks_fixture_secret_is_not_written_in_the_action(self):
         text = CONTAINER.read_text()
-        assert "AKIAQYLPMN5HHHFPZAM2" not in text
+        assert "ghp_x7Kq9ZmP2vLw4RtYb8NcD3sFh6JgA1eUoW5i" not in text
+        assert not re.search(r"ghp_[0-9a-zA-Z]{36}", text)
         assert not re.search(r"AKIA[A-Z2-7]{16}", text)
 
     def test_the_leg_does_not_name_a_registry(self):

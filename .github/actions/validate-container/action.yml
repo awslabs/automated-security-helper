@@ -965,8 +965,10 @@ runs:
     # plugin served by any registry, or shipped inside the SDK.
     #
     # The secret is assembled when the step runs and never written in this file, so
-    # this repository's own secret scans have nothing to report. It is a well-formed AWS
-    # access key id with no placeholder words in it, which the pinned rule set matches.
+    # this repository's own secret scans have nothing to report. It is a well-formed
+    # GitHub personal access token shape that the pinned betterleaks (1.10.1) reports
+    # as github-pat. An AWS key id in a quoted assignment was measured not to be
+    # reported by that build, so the fixture is not one.
     - name: "Scan with the image's betterleaks (community plugin)"
       shell: bash
       env:
@@ -978,7 +980,7 @@ runs:
         mapfile -t community_args < <(python3 .github/scripts/community-scanner-legs.py args)
         rm -rf /tmp/ash-selftest-betterleaks
         mkdir -p /tmp/ash-selftest-betterleaks
-        printf 'AWS_ACCESS_KEY_ID = "%s%s"\n' AKIA QYLPMN5HHHFPZAM2 > /tmp/ash-selftest-betterleaks/settings.py
+        printf 'token = "%s%s"\n' ghp_ x7Kq9ZmP2vLw4RtYb8NcD3sFh6JgA1eUoW5i > /tmp/ash-selftest-betterleaks/settings.py
         set +e
         ash scan \
           --mode container \
@@ -994,7 +996,7 @@ runs:
         rc=$?
         set -e
         if [ "$rc" -ne 2 ]; then
-          echo "::error::expected exit 2 (the fixture's access key id); got $rc"
+          echo "::error::expected exit 2 (the fixture's token); got $rc"
           exit 1
         fi
         python3 - <<'PY'
@@ -1008,7 +1010,7 @@ runs:
         if str(row.get("status")).upper() in ("MISSING", "ERROR"):
             sys.exit("FAIL: the image's betterleaks did not run")
         if not row.get("finding_count"):
-            sys.exit("FAIL: betterleaks reported nothing for a tree holding an access key id")
+            sys.exit("FAIL: betterleaks reported nothing for a tree holding a token")
         PY
 
     # cfn-lint and cfn-guard also run in the scan above, whose participation check

@@ -61,14 +61,35 @@ def image_modules(dockerfile: Path = DOCKERFILE) -> list[str]:
 
 
 def scanner_name(cls: type) -> str:
-    """The name ``ash scan --scanners`` takes for a scanner class (``CdkNagScanner`` -> ``cdk-nag``)."""
+    """The name ``ash scan --scanners`` takes for a scanner class.
+
+    Read from the scanner's own config class, whose ``name`` field declares it
+    (``GuardDogScanner`` declares ``guarddog``, which no spelling rule on the class
+    name gives). A class that declares none falls back to its name, hyphenated
+    (``CdkNagScanner`` -> ``cdk-nag``).
+    """
+    from automated_security_helper.core.scanner_inventory import (
+        _declared_config_class,
+    )
+
+    config = _declared_config_class(cls)
+    field = getattr(config, "model_fields", {}).get("name")
+    default = getattr(field, "default", None)
+    if isinstance(default, str) and default:
+        return default
     raw = re.sub(r"Scanner$", "", cls.__name__)
     return re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "-", raw).lower()
 
 
 def module_scanners(module: str) -> list[str]:
     """The scanner names the plugin package declares in its ``ASH_SCANNERS``."""
-    declared = getattr(importlib.import_module(module), "ASH_SCANNERS", None) or []
+    try:
+        imported = importlib.import_module(module)
+    except ImportError as err:
+        raise LegError(
+            f"cannot import {module} ({err}); run this with the Python ASH is installed in"
+        ) from err
+    declared = getattr(imported, "ASH_SCANNERS", None) or []
     if not declared:
         raise LegError(f"{module} declares no scanner in ASH_SCANNERS")
     return [scanner_name(cls) for cls in declared]
