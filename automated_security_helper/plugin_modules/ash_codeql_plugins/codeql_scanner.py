@@ -393,9 +393,12 @@ class CodeqlScanner(ScannerPluginBase[CodeqlScannerConfig]):
             "reaches the flat row (UNCONFIRMED against a real run)",
         ),
         tags=FacetDecl(
-            state=FacetState.MAPPED,
+            state=FacetState.DROPPED,
             native_field="tool.driver.rules[].properties.tags (security, "
             "maintainability, external/cwe/...)",
+            reason="the flat row reads tags from the result's own property "
+            "bag; CodeQL's tags sit on the rule and reach the flat row only "
+            "through the CWE reading",
         ),
         extras=FacetDecl(
             state=FacetState.MAPPED,
