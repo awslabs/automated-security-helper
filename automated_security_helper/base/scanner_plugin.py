@@ -22,6 +22,7 @@ from automated_security_helper.base.uv_tool_mixin import (
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason, ToolArgs
+from automated_security_helper.models.vocab import TargetType
 from automated_security_helper.schemas.cyclonedx_bom_1_6_schema import CycloneDXReport
 from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactLocation,
@@ -66,7 +67,6 @@ from typing import (
     Generic,
     Iterable,
     List,
-    Literal,
     Optional,
     Sequence,
     Set,
@@ -943,7 +943,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                 handle.write(content)
 
     def _staged_scope_paths(
-        self, target: str | Path, target_type: str
+        self, target: str | Path, target_type: TargetType
     ) -> Optional[List[Path]]:
         """The staged files this scanner would scan under ``target``, or None.
 
@@ -960,7 +960,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         directory scan's and every suppression and ignore path resolves as in a
         whole-repository run.
         """
-        if target_type != "source":
+        if target_type != TargetType.SOURCE:
             return None
         if self.staged_scope_patterns is None and self.staged_target_style is None:
             return None
@@ -1285,7 +1285,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
     def _pre_scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         config: Optional[ScannerPluginConfigBase] = None,
         *args,
         **kwargs,
@@ -1428,7 +1428,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
     def _post_scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
     ) -> None:
         """Perform pre-scan setup.
 
@@ -1929,7 +1929,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
     def _execute_scan(
         self,
         target: "Path",
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason],
     ) -> Tuple[List[str], "Path", Optional[dict]]:
         """Run the scanner tool and return (final_args, results_file, subprocess_env).
@@ -2226,7 +2226,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
     def scan(
         self,
         target: "Path",
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason] | None = None,
         config: "T | ScannerPluginConfigBase | None" = None,
         *args,
@@ -3070,7 +3070,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
     def safe_scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason] | None = None,
         config: T | ScannerPluginConfigBase | None = None,
         *args,
