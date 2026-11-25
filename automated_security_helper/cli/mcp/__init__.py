@@ -34,7 +34,7 @@ from automated_security_helper.cli.mcp.http_sessions import (
     SessionBoundary,
     _handshake_protocol_versions,
 )
-from automated_security_helper.cli.mcp.profile_registry import (
+from automated_security_helper.config.session_profiles import (
     register_profiles,
     set_profile_registry,
 )
@@ -1581,7 +1581,7 @@ def mcp_command(
     # Before the --transport check: the container entrypoint (ash-mcp-serve)
     # passes this variable's value as --transport too, and the variable is the
     # operator's mistake to report.
-    from automated_security_helper.cli.mcp.sandbox import (
+    from automated_security_helper.config.mcp_sandbox import (
         ASH_MCP_TRANSPORT_ENV,
         KNOWN_TRANSPORTS,
         unknown_transport_override,

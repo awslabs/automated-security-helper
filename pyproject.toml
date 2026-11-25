@@ -853,8 +853,8 @@ disable_error_code = [
 module = [
     "automated_security_helper.base.reporter_plugin",
     "automated_security_helper.cli.inspect.compare_result_fields",
-    "automated_security_helper.cli.mcp.profile_registry",
     "automated_security_helper.config.config_linter",
+    "automated_security_helper.config.session_profiles",
     "automated_security_helper.core.phases.scan_result_processor",
     "automated_security_helper.core.resource_management.exceptions",
     "automated_security_helper.interactions.run_ash_nix",

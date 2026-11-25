@@ -159,7 +159,7 @@ def validate_path_component(value: str, label: str) -> str:
             raises.
     """
 
-    from automated_security_helper.cli.mcp.session_paths import (
+    from automated_security_helper.config.session_paths import (
         validated_path_component,
     )
 
@@ -227,7 +227,7 @@ def resolve_session_id(headers: Optional[Mapping[str, str]]) -> str:
     # Imported here rather than at module scope: profile_registry imports the
     # config stack, and cli/mcp modules are imported from mcp_server at tool
     # registration time.
-    from automated_security_helper.cli.mcp.profile_registry import (
+    from automated_security_helper.config.session_profiles import (
         DEFAULT_SESSION_ID,
     )
 
@@ -298,7 +298,7 @@ def is_reserved_session_id(value: str) -> bool:
     aliases it and none is reserved for it.
     """
 
-    from automated_security_helper.cli.mcp.profile_registry import (
+    from automated_security_helper.config.session_profiles import (
         DEFAULT_SESSION_ID,
     )
     from automated_security_helper.cli.mcp.sessions import (
@@ -356,7 +356,7 @@ def resolve_caller_session_id(ctx: object) -> str:
     """
 
     from automated_security_helper.cli.mcp.http_sessions import caller_of
-    from automated_security_helper.cli.mcp.profile_registry import (
+    from automated_security_helper.config.session_profiles import (
         DEFAULT_SESSION_ID,
     )
 

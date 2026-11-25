@@ -75,7 +75,7 @@ from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, TypeVar
 from automated_security_helper.cli.mcp.session_identity import (
     UNIDENTIFIED_SESSION_ID,
 )
-from automated_security_helper.cli.mcp.session_paths import (
+from automated_security_helper.config.session_paths import (
     hidden_deleting_name,
     mark_session_workspace,
     session_directory,
@@ -855,7 +855,7 @@ def _created_session_dir(root: Path, session_id: str) -> Path:
             ``session_workspace_unavailable``.
     """
 
-    from automated_security_helper.cli.mcp.profile_registry import (
+    from automated_security_helper.config.session_profiles import (
         DEFAULT_SESSION_ID,
     )
 

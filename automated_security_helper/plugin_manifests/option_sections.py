@@ -21,7 +21,7 @@ _REPORTERS = "automated_security_helper.plugin_modules.ash_builtin.reporters"
 _CONVERTERS = "automated_security_helper.plugin_modules.ash_builtin.converters"
 
 
-def _section(package: str, module: str, config_class: str, what: str):
+def _section(package: str, module: str, config_class: str, what: str) -> ConfigSection:
     return ConfigSection(
         model=f"{package}.{module}:{config_class}",
         description=f"Configure the options for {what}",

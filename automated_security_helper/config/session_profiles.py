@@ -1134,7 +1134,9 @@ def set_session_write_hold(
     _write_hold_provider = provider
 
 
-def writing_session_state(session_id: Optional[str]):
+def writing_session_state(
+    session_id: Optional[str],
+) -> contextlib.AbstractContextManager[None]:
     """Hold ``session_id`` against the TTL sweep while a request writes its state.
 
     Delegates to the provider the session lifecycle registered; a no-op context

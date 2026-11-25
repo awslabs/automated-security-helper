@@ -395,7 +395,7 @@ def scanned_tree_judgment(
     resolves, and the marks the host set for the scan inside a container
     (``marked_repository_written``, ``marked_files_repository_written``), whose
     mounted copies sit in no checkout there. Also true, under the MCP server,
-    for any file an MCP client delivered (``cli.mcp.sandbox
+    for any file an MCP client delivered (``config.mcp_sandbox
     .config_is_client_supplied``: a delivered tree, an upload or its staging, in
     this session or another), which a client-written config could otherwise name
     from outside the tree it scans. The one membership test this module and

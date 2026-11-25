@@ -241,7 +241,7 @@ def resolve_scan_target(
     also happens not to exist.
     """
 
-    from automated_security_helper.cli.mcp.sandbox import (
+    from automated_security_helper.config.mcp_sandbox import (
         validate_scan_target_in_sandbox,
     )
 

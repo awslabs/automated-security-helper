@@ -2113,7 +2113,7 @@ def _toml_env_reference(value: Any, key: str = "") -> Optional[str]:
 def config_is_client_delivered(path: Path) -> bool:
     """Whether an MCP client delivered `path`; see "Environment variables".
 
-    ``cli.mcp.sandbox.config_is_client_supplied``, imported when called. The
+    ``config.mcp_sandbox.config_is_client_supplied``, imported when called. The
     ``RefuseEnv`` every caller gets unless it passes another.
     """
     # Imported here, as config/path_trust.py does: importing cli.mcp runs its
@@ -2126,7 +2126,7 @@ def config_is_client_delivered(path: Path) -> bool:
 def env_refused_for(remote_client: bool, session_id: Optional[str] = None) -> RefuseEnv:
     """The files that resolve no ``!ENV`` for a caller; see "Environment variables".
 
-    ``remote_client`` is ``cli.mcp.sandbox.caller_is_remote`` for the MCP call
+    ``remote_client`` is ``config.mcp_sandbox.caller_is_remote`` for the MCP call
     the config is read for, and False for everything else. ``session_id`` is
     that call's session: of the profile files the server writes in the sessions'
     ``config/`` directories, only its own are set aside for a remote caller.
@@ -2551,7 +2551,7 @@ def _parse_text_by_format(path: Path, text: str) -> Any:
 
 def refuse_environment_in_a_delivered_file(path: Path, text: str) -> None:
     """Raise ASHConfigEnvNotResolvedError when ``path`` is a config file an MCP
-    client delivered (``cli.mcp.sandbox.config_is_client_supplied``) and
+    client delivered (``config.mcp_sandbox.config_is_client_supplied``) and
     ``text``, the text read from it, reads from the environment.
 
     A value such a file read from the environment is the server's: the client

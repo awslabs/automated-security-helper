@@ -1725,7 +1725,7 @@ def _apply_workspace_policy(
         ASHConfigInputNotPermittedError: The policy file is outside what
             ``permit_base`` permits.
     """
-    from automated_security_helper.cli.mcp.sandbox import config_is_client_supplied
+    from automated_security_helper.config.mcp_sandbox import config_is_client_supplied
 
     def client_supplied(path: Path) -> bool:
         return remote_client or config_is_client_supplied(path)

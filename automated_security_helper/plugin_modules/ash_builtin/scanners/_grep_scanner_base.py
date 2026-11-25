@@ -436,7 +436,9 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
         """
         # Imported here, as config/path_trust.py does: importing cli.mcp runs its
         # __init__, which imports the config modules.
-        from automated_security_helper.cli.mcp.sandbox import config_is_client_supplied
+        from automated_security_helper.config.mcp_sandbox import (
+            config_is_client_supplied,
+        )
 
         if not getattr(self.config, "enabled", True):
             return

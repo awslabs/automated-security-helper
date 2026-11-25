@@ -187,6 +187,7 @@ from typing_extensions import Self
 
 from automated_security_helper.base.plugin_manifest import (
     ExclusionKind as ExclusionKind,
+    ExclusionOption,
     resolve_ref,
 )
 from automated_security_helper.core.exceptions import ScannerError
@@ -227,7 +228,7 @@ SCANNER_EXCLUSION_OPTIONS: Tuple[ScannerExclusionOption, ...] = tuple(
 )
 
 
-def _declared_option(scanner: str, option: str):
+def _declared_option(scanner: str, option: str) -> Optional[ExclusionOption]:
     """The manifest's declaration of *scanner*'s exclusion *option*, or None."""
     for name, declared in exclusion_options():
         if name == scanner and declared.option == option:

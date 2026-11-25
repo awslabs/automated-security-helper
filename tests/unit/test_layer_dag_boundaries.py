@@ -86,8 +86,9 @@ KNOWN_VIOLATIONS: Dict[Tuple[str, str], int] = {
     ("interactions", "cli"): 1,
     ("models", "config"): 12,
     ("models", "core"): 10,
-    ("plugin_modules", "cli"): 1,
-    ("plugin_modules", "config"): 68,
+    # 68 -> 69: the one plugin -> cli edge (the grep scanner base asking whether a
+    # config file is client-supplied) now reads the rule where it moved to, in config.
+    ("plugin_modules", "config"): 69,
     ("plugin_modules", "core"): 70,
     ("plugin_modules", "interactions"): 2,
     ("plugin_modules", "workspace"): 1,
@@ -98,7 +99,6 @@ KNOWN_VIOLATIONS: Dict[Tuple[str, str], int] = {
     ("utils", "core"): 35,
     ("utils", "interactions"): 2,
     ("utils", "plugin_modules"): 2,
-    ("workspace", "cli"): 1,
 }
 
 
@@ -214,6 +214,8 @@ def test_known_violations_name_edges_that_still_exist():
         ("plugins", "cli"),
         ("core", "plugin_modules"),
         ("workspace", "plugin_modules"),
+        ("workspace", "cli"),
+        ("plugin_modules", "cli"),
     ],
 )
 def test_removed_edges_stay_removed(source: str, target: str):

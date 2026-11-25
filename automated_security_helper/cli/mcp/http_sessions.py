@@ -777,7 +777,7 @@ def _put_back_a_swept_workspace(session_id: str) -> None:
     leave one. A failure is logged and does not fail the request that set the
     sweep off.
     """
-    from automated_security_helper.cli.mcp.session_paths import (
+    from automated_security_helper.config.session_paths import (
         mark_session_workspace,
         session_directory,
     )

@@ -107,13 +107,13 @@ from automated_security_helper.core.resource_management.result_filters import (
     apply_content_filters,
     add_findings_list,
 )
-from automated_security_helper.cli.mcp.profile_registry import (
+from automated_security_helper.config.session_profiles import (
     ProfileRegistryError,
     resolve_session_config_path,
 )
 from automated_security_helper.cli.mcp.sessions import SessionWorkspaceBusyError
 from automated_security_helper.cli.mcp.progress_monitor import monitor_scan_progress
-from automated_security_helper.cli.mcp.sandbox import (
+from automated_security_helper.config.mcp_sandbox import (
     caller_is_remote,
     check_config_input,
 )
@@ -482,7 +482,7 @@ def _resolve_omitted_source_dir(session_id: str) -> _OmittedSourceResolution:
         structured refusal.
     """
 
-    from automated_security_helper.cli.mcp.profile_registry import (
+    from automated_security_helper.config.session_profiles import (
         DEFAULT_SESSION_ID,
     )
 
