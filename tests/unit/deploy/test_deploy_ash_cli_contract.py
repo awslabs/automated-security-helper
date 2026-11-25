@@ -272,6 +272,7 @@ _COMMANDS = frozenset(
         "merge",
         "plugin",
         "report",
+        "results",
         "scan",
         "suppress",
         "trend",
