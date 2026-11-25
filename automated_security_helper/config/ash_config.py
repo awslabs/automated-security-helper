@@ -16,7 +16,6 @@ from pydantic import (
     ValidationInfo,
     field_serializer,
     field_validator,
-    create_model,
     model_validator,
 )
 from typing import (
@@ -54,7 +53,7 @@ from automated_security_helper.base.scanner_plugin import (
     ScannerPluginConfigBase,
 )
 from automated_security_helper.base.extraction_limits import EXTRACTION_LIMIT_OPTIONS
-from automated_security_helper.config.plugin_sections import plugin_section_fields
+from automated_security_helper.config.plugin_sections import build_segment
 from automated_security_helper.core.constants import (
     ASH_CONFIG_ENV_VAR_ALLOWLIST,
     ASH_CONFIG_ENV_VAR_PREFIX,
@@ -838,23 +837,26 @@ if TYPE_CHECKING:
     ScannerConfigSegment = _ScannerConfigSegmentBase
     ReporterConfigSegment = _ReporterConfigSegmentBase
 else:
-    ConverterConfigSegment = create_model(
+    ConverterConfigSegment = build_segment(
         "ConverterConfigSegment",
-        __base__=_ConverterConfigSegmentBase,
-        __module__=__name__,
-        **plugin_section_fields("converters"),
+        _ConverterConfigSegmentBase,
+        ConverterPluginConfigBase,
+        "converters",
+        __name__,
     )
-    ScannerConfigSegment = create_model(
+    ScannerConfigSegment = build_segment(
         "ScannerConfigSegment",
-        __base__=_ScannerConfigSegmentBase,
-        __module__=__name__,
-        **plugin_section_fields("scanners"),
+        _ScannerConfigSegmentBase,
+        ScannerPluginConfigBase,
+        "scanners",
+        __name__,
     )
-    ReporterConfigSegment = create_model(
+    ReporterConfigSegment = build_segment(
         "ReporterConfigSegment",
-        __base__=_ReporterConfigSegmentBase,
-        __module__=__name__,
-        **plugin_section_fields("reporters"),
+        _ReporterConfigSegmentBase,
+        ReporterPluginConfigBase,
+        "reporters",
+        __name__,
     )
 
 

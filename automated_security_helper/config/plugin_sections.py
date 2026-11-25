@@ -24,10 +24,46 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Dict, Literal, Optional, Tuple
 
-from pydantic import Field
+from pydantic import ConfigDict, Field
 
 from automated_security_helper.base.plugin_manifest import resolve_ref
 from automated_security_helper.plugin_manifests import plugin_config_sections
+
+
+def build_segment(
+    name: str,
+    base: type,
+    extra_type: type,
+    kind: Literal["scanners", "reporters", "converters"],
+    module: str,
+) -> type:
+    """The segment class of *kind*: *base* plus one typed section per plugin.
+
+    Built as the class statement it replaces would be: the class's own
+    annotations hold the extra-plugin bucket (``__pydantic_extra__``, any section
+    the manifests do not name, validated as *extra_type*) beside the sections, and
+    its ``model_config`` is the one the hand-written segments had. A walk over a
+    model's own annotations (the redaction structural test reads them) therefore
+    sees the same types it saw on the written-out class.
+    """
+    fields = plugin_section_fields(kind)
+    namespace: Dict[str, Any] = {
+        "__module__": module,
+        "__qualname__": name,
+        "model_config": ConfigDict(
+            str_strip_whitespace=True,
+            arbitrary_types_allowed=True,
+            use_enum_values=True,
+            extra="allow",
+        ),
+        "__annotations__": {
+            "__pydantic_extra__": Dict[str, Any | extra_type],
+            **{field: annotation for field, (annotation, _) in fields.items()},
+        },
+        "__pydantic_extra__": {},
+        **{field: default for field, (_, default) in fields.items()},
+    }
+    return type(base)(name, (base,), namespace)
 
 
 def section_field_name(plugin_name: str) -> str:

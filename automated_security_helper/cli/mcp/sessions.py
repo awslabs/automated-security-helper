@@ -2673,7 +2673,9 @@ def _register_write_hold() -> None:
         set_session_write_hold,
     )
 
-    set_session_write_hold(writing_session_state)
+    # Looked up by name when the hold is taken, so a replaced
+    # ``writing_session_state`` (a test's) is the one the registry takes.
+    set_session_write_hold(lambda session_id: writing_session_state(session_id))
 
 
 _register_write_hold()
