@@ -2078,7 +2078,7 @@ def resolve_config(
     # copy it was built from (cli/mcp/profile_registry.is_client_copy_of).
     fill: List[Any] = []
     if config_path is not None and trusted_config_path is not None:
-        from automated_security_helper.cli.mcp.profile_registry import (
+        from automated_security_helper.config.session_profiles import (
             is_client_copy_of,
         )
 
@@ -2320,7 +2320,7 @@ def resolve_config(
         # ASH_CONFIG is not checked. (The per-file names of that chain are
         # not carried on this protocol; the documents are, from the one
         # load's reads.)
-        from automated_security_helper.cli.mcp.sandbox import (
+        from automated_security_helper.config.mcp_sandbox import (
             config_is_client_supplied,
         )
 
@@ -5815,14 +5815,14 @@ def _override_shown(override: str) -> str:
 
 def _is_a_client_file(path: Path | str) -> bool:
     """Whether ``path`` is a file an MCP client delivered, by any name on its way."""
-    from automated_security_helper.cli.mcp.sandbox import config_is_client_supplied
+    from automated_security_helper.config.mcp_sandbox import config_is_client_supplied
 
     return config_is_client_supplied(Path(path))
 
 
 def _has_a_client_file(document: Any) -> bool:
     """Whether a file of ``document``'s chain is one an MCP client delivered."""
-    from automated_security_helper.cli.mcp.sandbox import config_is_client_supplied
+    from automated_security_helper.config.mcp_sandbox import config_is_client_supplied
 
     delivered = by_every_name(config_is_client_supplied, document.names)
     return any(delivered(path) for path in document.chain)
@@ -6007,7 +6007,7 @@ def _delivered_by_a_client(
     link a client wrote is the client's. The one definition of delivery the
     membership checks share (``_not_the_operators``, ``_with_outside_files``).
     """
-    from automated_security_helper.cli.mcp.sandbox import config_is_client_supplied
+    from automated_security_helper.config.mcp_sandbox import config_is_client_supplied
 
     delivered = by_every_name(config_is_client_supplied, names)
     return [path for path in paths if delivered(path)]
@@ -7570,7 +7570,7 @@ def _whose_file(
     place to move it out of: the scanned checkout (or the scanned directory, when
     it is in no checkout) it is inside or was reached through, else the MCP
     workspace root it was delivered under."""
-    from automated_security_helper.cli.mcp.sandbox import shared_workspace_root
+    from automated_security_helper.config.mcp_sandbox import shared_workspace_root
 
     tree = tree_holding(path, trees, names)
     if tree is None:

@@ -1252,7 +1252,7 @@ def strip_client_scanner_exclusions(
     In place, on ``config`` (an ``AshConfig`` with a client-delivered file in its
     chain), which is returned. ``base`` is the trusted config.
     """
-    from automated_security_helper.cli.mcp.sandbox import config_is_client_supplied
+    from automated_security_helper.config.mcp_sandbox import config_is_client_supplied
     from automated_security_helper.config.sandbox_grants import working_directory
 
     delivered = is_delivered or config_is_client_supplied

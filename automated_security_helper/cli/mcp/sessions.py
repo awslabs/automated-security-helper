@@ -2660,3 +2660,20 @@ __all__ = [
     "touch_session_workspace",
     "writing_session_state",
 ]
+
+
+def _register_write_hold() -> None:
+    """Hand the session write hold to the config layer's profile registry.
+
+    The profile registry (``config.session_profiles``) rewrites a session's
+    binding under this module's hold against the TTL sweep, but sits below this
+    module in the layer order, so it is given the hold here, once, at import.
+    """
+    from automated_security_helper.config.session_profiles import (
+        set_session_write_hold,
+    )
+
+    set_session_write_hold(writing_session_state)
+
+
+_register_write_hold()

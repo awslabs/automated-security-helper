@@ -2118,7 +2118,7 @@ def config_is_client_delivered(path: Path) -> bool:
     """
     # Imported here, as config/path_trust.py does: importing cli.mcp runs its
     # __init__, which imports profile_registry and through it ash_config.
-    from automated_security_helper.cli.mcp.sandbox import config_is_client_supplied
+    from automated_security_helper.config.mcp_sandbox import config_is_client_supplied
 
     return config_is_client_supplied(path)
 
@@ -2133,7 +2133,7 @@ def env_refused_for(remote_client: bool, session_id: Optional[str] = None) -> Re
     """
     if not remote_client:
         return config_is_client_delivered
-    from automated_security_helper.cli.mcp.sandbox import (
+    from automated_security_helper.config.mcp_sandbox import (
         client_named_config_is_untrusted,
     )
 
@@ -2561,7 +2561,7 @@ def refuse_environment_in_a_delivered_file(path: Path, text: str) -> None:
     parse, before it is parsed with the environment, so no value is read for
     the file and a file changed between two reads cannot get past it.
     """
-    from automated_security_helper.cli.mcp.sandbox import config_is_client_supplied
+    from automated_security_helper.config.mcp_sandbox import config_is_client_supplied
 
     if not config_is_client_supplied(path) or not text_reads_the_environment(
         path, text

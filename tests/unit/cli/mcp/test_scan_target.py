@@ -175,7 +175,9 @@ class TestDeniedRootSet:
         symlinks, so nothing here would fail on Linux without the symlink being
         constructed explicitly.
         """
-        import automated_security_helper.cli.mcp.scan_target as scan_target
+        # The denied-root table lives in config.mcp_sandbox (scan_target
+        # re-exports it), and that is the module whose global the policy reads.
+        import automated_security_helper.config.mcp_sandbox as scan_target
 
         real = tmp_path / "private" / "etc"
         real.mkdir(parents=True)
@@ -195,7 +197,9 @@ class TestDeniedRootSet:
         Both the symlink and its target have to be refused. Naming the target
         directly is the bypass that an unresolved root would leave open.
         """
-        import automated_security_helper.cli.mcp.scan_target as scan_target
+        # The denied-root table lives in config.mcp_sandbox (scan_target
+        # re-exports it), and that is the module whose global the policy reads.
+        import automated_security_helper.config.mcp_sandbox as scan_target
 
         real = tmp_path / "private" / "etc"
         (real / "ssl").mkdir(parents=True)

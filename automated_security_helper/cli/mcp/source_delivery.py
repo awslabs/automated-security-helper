@@ -335,25 +335,11 @@ def _drop_session_source_dir(session_id: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def resolve_workspace_root() -> Path:
-    """Resolve the configured MCP workspace root.
-
-    Resolution order:
-
-    1. ``$ASH_MCP_WORKSPACE_ROOT``
-    2. ``$XDG_CACHE_HOME/ash-mcp/``
-    3. ``~/.cache/ash-mcp/``
-    """
-
-    env_root = os.environ.get("ASH_MCP_WORKSPACE_ROOT")
-    if env_root:
-        return Path(env_root).expanduser()
-
-    xdg = os.environ.get("XDG_CACHE_HOME")
-    if xdg:
-        return Path(xdg).expanduser() / "ash-mcp"
-
-    return Path.home() / ".cache" / "ash-mcp"
+#: The workspace root resolution lives in ``config.mcp_sandbox`` (the config
+#: trust layer judges paths against it); it is re-exported here.
+from automated_security_helper.config.mcp_sandbox import (  # noqa: E402
+    resolve_workspace_root as resolve_workspace_root,
+)
 
 
 class InvalidSessionIdError(ValueError):

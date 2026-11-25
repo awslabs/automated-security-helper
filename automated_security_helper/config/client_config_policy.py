@@ -812,10 +812,10 @@ def client_file_denials(
         ASHConfigPolicyUnreadableError: A file is delivered and ``rules`` are
             unreadable, so no policy exists to judge it against.
     """
-    from automated_security_helper.cli.mcp.profile_registry import (
+    from automated_security_helper.config.session_profiles import (
         session_config_was_patched,
     )
-    from automated_security_helper.cli.mcp.sandbox import config_is_client_supplied
+    from automated_security_helper.config.mcp_sandbox import config_is_client_supplied
     from automated_security_helper.config.client_scanner_exclusions import (
         moved_exclusion_pointers,
     )
@@ -1288,7 +1288,7 @@ def apply_client_config_rules(
     from automated_security_helper.config.client_scanner_exclusions import (
         strip_client_scanner_exclusions,
     )
-    from automated_security_helper.cli.mcp.sandbox import config_is_client_supplied
+    from automated_security_helper.config.mcp_sandbox import config_is_client_supplied
     from automated_security_helper.config.config_sources import by_every_name
 
     is_delivered: Callable[[Path], bool] = (
@@ -1406,7 +1406,7 @@ def _mark_client_supplied(
     ``test`` that passed there can fail here. Ending the walk at it would drop
     the operator's entries after it, and they would be marked as the client's.
     """
-    from automated_security_helper.cli.mcp.sandbox import config_is_client_supplied
+    from automated_security_helper.config.mcp_sandbox import config_is_client_supplied
     from automated_security_helper.config.runtime_patch import _walk
     from automated_security_helper.models.core import (
         AshSuppression,
@@ -1536,7 +1536,7 @@ def _trusted_config(
     An operator config a client delivered is not one, and falls back to the
     default, with a warning.
     """
-    from automated_security_helper.cli.mcp.sandbox import config_is_client_supplied
+    from automated_security_helper.config.mcp_sandbox import config_is_client_supplied
     from automated_security_helper.config.config_sources import by_every_name
     from automated_security_helper.config.operator_paths import the_operators_files
     from automated_security_helper.config.resolve_config import _load_operator_config
@@ -1584,7 +1584,7 @@ def trusted_default_config(
     unloadable, and the rules built from it refused every delivered config,
     although the load itself ignores that value.
     """
-    from automated_security_helper.cli.mcp.sandbox import config_is_client_supplied
+    from automated_security_helper.config.mcp_sandbox import config_is_client_supplied
     from automated_security_helper.config.default_config import (
         _ash_config_file,
         get_default_config,

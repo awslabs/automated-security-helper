@@ -97,12 +97,11 @@ if TYPE_CHECKING:
 # against a lowercased key.
 MCP_SESSION_ID_HEADER = "mcp-session-id"
 
-#: The session id of a network caller the server cannot identify: stateless
-#: streamable-HTTP without ``--trust-upstream-session-id``, or a header the
-#: server never issued, or headers that name no session. Remote, owns no
-#: sandbox, and every tool that needs a session refuses it. Never accepted from
-#: a client.
-UNIDENTIFIED_SESSION_ID = "__unidentified__"
+#: The session id of a network caller the server cannot identify. Defined in
+#: ``config.session_paths`` (the config trust layer reads it); re-exported here.
+from automated_security_helper.config.session_paths import (  # noqa: E402
+    UNIDENTIFIED_SESSION_ID as UNIDENTIFIED_SESSION_ID,
+)
 
 #: ``error_type`` of the refusal a session-dependent tool returns for
 #: :data:`UNIDENTIFIED_SESSION_ID`.

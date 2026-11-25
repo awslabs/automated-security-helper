@@ -75,7 +75,6 @@ zip member handling in ``source_delivery`` makes for symlink entries.
 from __future__ import annotations
 
 import os
-import platform
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
@@ -103,35 +102,15 @@ ASH_MCP_ALLOWED_ROOTS_ENV = "ASH_MCP_ALLOWED_ROOTS"
 #: policy error (4).
 OUTPUT_TREE_REFUSED_EXIT_CODE = 3
 
-# Directories refused when no allowlist is configured. A target is refused if it
-# is one of these or lives beneath one. Kept deliberately short: it covers host
-# configuration and kernel interfaces only.
-#
-# Widening it is not free. "/var" would refuse the documented container
-# workspace root (/var/cache/ash-mcp), "/usr" would refuse tool installs, and
-# "/home" would refuse the common case, so none of them belong here. The
-# allowlist is the mechanism for narrowing beyond this.
-_POSIX_DENIED_ROOTS = (
-    "/boot",
-    "/dev",
-    "/etc",
-    "/proc",
-    "/root",
-    "/sys",
-)
-
-# Windows equivalents, read from the shell's own directory variables so the
-# policy follows a system installed on a drive other than C:.
-_WINDOWS_DENIED_ROOT_ENV_VARS = (
-    ("SystemRoot", r"C:\Windows"),
-    ("ProgramFiles", r"C:\Program Files"),
-    ("ProgramFiles(x86)", None),
-    # Under 32-bit Python on 64-bit Windows, WOW64 rewrites ProgramFiles to the
-    # x86 directory, so the 64-bit one is only reachable through ProgramW6432.
-    # Without this entry a 32-bit interpreter would leave C:\Program Files
-    # unrefused.
-    ("ProgramW6432", None),
-    ("ProgramData", r"C:\ProgramData"),
+# The directories refused when no allowlist is configured (the POSIX list, the
+# Windows variables, and the functions that resolve them) are defined in
+# ``config.mcp_sandbox``, beside the sandbox rules that apply them, and are
+# imported here so this module's names stay what they were.
+from automated_security_helper.config.mcp_sandbox import (  # noqa: E402
+    _POSIX_DENIED_ROOTS as _POSIX_DENIED_ROOTS,
+    _WINDOWS_DENIED_ROOT_ENV_VARS as _WINDOWS_DENIED_ROOT_ENV_VARS,
+    _denied_root_values as _denied_root_values,
+    _denied_roots as _denied_roots,
 )
 
 
@@ -148,49 +127,6 @@ def _is_filesystem_root(path: Path) -> bool:
     """
 
     return path.parent == path
-
-
-def _denied_root_values() -> List[str]:
-    """Return the raw directory names refused when no allowlist is configured.
-
-    Split out from :func:`_denied_roots` so that "which directories does the
-    policy name" and "how are they compared to a target" stay separable, on this
-    platform and in tests.
-    """
-
-    if platform.system() == "Windows":
-        values = []
-        for var, fallback in _WINDOWS_DENIED_ROOT_ENV_VARS:
-            value = os.environ.get(var) or fallback
-            if value:
-                values.append(value)
-        return values
-
-    return list(_POSIX_DENIED_ROOTS)
-
-
-def _denied_roots() -> List[Path]:
-    """Return the directories refused when no allowlist is configured.
-
-    A target is refused if it equals one of these or resolves beneath one. The
-    filesystem root is handled separately by :func:`_is_filesystem_root`.
-
-    The roots are resolved, because the target they are compared against is
-    resolved too and a root that is itself a symlink would otherwise never
-    match. macOS is the case that matters: /etc, /tmp and /var are symlinks into
-    /private, so an unresolved "/etc" would be compared against a target that
-    resolved to "/private/etc" and the directory the entry names would not
-    actually be refused. Resolving a root that does not exist on this platform
-    -- /proc on macOS, say -- leaves it unchanged, which is harmless.
-    """
-
-    roots = []
-    for value in _denied_root_values():
-        try:
-            roots.append(Path(value).resolve())
-        except OSError:
-            roots.append(Path(value))
-    return roots
 
 
 def _allowed_roots() -> List[Path]:
