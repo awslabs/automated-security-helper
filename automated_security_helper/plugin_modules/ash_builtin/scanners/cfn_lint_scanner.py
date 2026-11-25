@@ -1279,24 +1279,17 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
         """
         if not self._options().honor_inline_ignores:
             return False
-        if set_by_operator(
-            self.context.config if self.context is not None else None,
+        return self._operator_gated(
             "scanners.cfn-lint.options.honor_inline_ignores",
             True,
-        ):
-            return True
-        if "honor_inline_ignores" not in self._refused_options:
-            self._refused_options.add("honor_inline_ignores")
-            self._plugin_log(
-                refusal_warning(
-                    "Ignoring scanners.cfn-lint.options.honor_inline_ignores: "
-                    f"{NOT_THE_OPERATORS}. A template's own ignore_checks do not "
-                    "apply; suppress findings with ASH suppressions.",
-                    NOT_THE_OPERATORS,
-                ),
-                level=logging.WARNING,
-            )
-        return False
+            False,
+            refusal_warning(
+                "Ignoring scanners.cfn-lint.options.honor_inline_ignores: "
+                f"{NOT_THE_OPERATORS}. A template's own ignore_checks do not "
+                "apply; suppress findings with ASH suppressions.",
+                NOT_THE_OPERATORS,
+            ),
+        )
 
     def _config_file_settings(self, config_file: Path) -> Dict[str, Any]:
         """The operator's ``.cfnlintrc`` as a mapping; a file ASH cannot read stops the scan.

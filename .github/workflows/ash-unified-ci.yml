@@ -2013,6 +2013,11 @@ jobs:
           # once their module is loaded, hence the community config.
           ash dependencies install --config .ash/.ash_community_plugins.yaml \
             --tool hadolint --tool guarddog
+          # betterleaks is a community scanner too, and its module is not in that
+          # file, so its install loads the module with an override as trivy-repo's
+          # does below.
+          ash dependencies install --tool betterleaks \
+            --config-overrides "ash_plugin_modules+=[automated_security_helper.plugin_modules.ash_betterleaks_plugins]"
       # trivy-repo is a plugin scanner, so ASH knows its name only once its module is
       # loaded (`ash dependencies install --tool trivy-repo` without it exits 2,
       # "Unknown tool(s)"): the install loads it with an override, and the config
@@ -2020,7 +2025,7 @@ jobs:
       # then fetched into
       # trivy's own default cache, so that the offline pair has them: offline, ASH
       # updates nothing, and under sandbox-exec the cache is read-only, which an
-      # offline trivy-repo scan must survive. The hadolint and GuardDog community
+      # offline trivy-repo scan must survive. The hadolint, GuardDog and betterleaks community
       # modules join the config so the parity runs load their scanners too.
       - name: Install trivy-repo, enable it, and seed trivy's cache
         env:
@@ -2033,6 +2038,7 @@ jobs:
             '  - automated_security_helper.plugin_modules.ash_trivy_plugins' \
             '  - automated_security_helper.plugin_modules.ash_hadolint_plugins' \
             '  - automated_security_helper.plugin_modules.ash_guarddog_plugins' \
+            '  - automated_security_helper.plugin_modules.ash_betterleaks_plugins' \
             'scanners:' \
             '  trivy-repo:' \
             '    enabled: true' > "$PARITY_CONFIG"
@@ -2068,7 +2074,7 @@ jobs:
       # is MISSING in both runs cannot pass parity by being absent; --require-offline
       # holds trivy-repo to that in the offline pair too. The config loads the Trivy
       # community module, so trivy-repo, which shares the builtin trivy's code, is
-      # compared too, and the hadolint and GuardDog modules for their scanners.
+      # compared too, and the hadolint, GuardDog and betterleaks modules for their scanners.
       - name: Compare every scanner with and without the sandbox
         # The report path through the environment, not interpolated into the script,
         # which is this repository's convention for every context value a shell reads.
@@ -2081,7 +2087,7 @@ jobs:
           python scripts/verify_sandbox_scanner_parity.py \
             --sandbox "$SANDBOX" --online --ash ash \
             --config "$PARITY_CONFIG" \
-            --require bandit,cdk-nag,cfn-nag,checkov,detect-secrets,grype,npm-audit,opengrep,semgrep,syft,actionlint,cfn-lint,cfn-guard,gitleaks,zizmor,trivy,trivy-repo,hadolint,guarddog \
+            --require bandit,cdk-nag,cfn-nag,checkov,detect-secrets,grype,npm-audit,opengrep,semgrep,syft,actionlint,cfn-lint,cfn-guard,gitleaks,zizmor,trivy,trivy-repo,hadolint,guarddog,betterleaks \
             --require-offline trivy-repo \
             --report "$PARITY_REPORT"
       # What a sandboxed scanner was refused, from the unified log, and the end of
