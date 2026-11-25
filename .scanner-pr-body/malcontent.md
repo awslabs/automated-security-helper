@@ -35,22 +35,29 @@ Enable it by listing `automated_security_helper.plugin_modules.ash_malcontent_pl
 - HIGH, sandbox-requirements test missing (PATTERN row 25): added
   `tests/unit/plugin_modules/test_malcontent_sandbox_requirements.py` (strict default, no
   network, baseline environment only), after the Betterleaks test.
-- HIGH, no captured fixtures (rows 18, 21, 24): HELD, not closable at root cause. There is
-  no Malcontent binary or release asset to capture from (GitHub releases v1.28.2 and earlier
-  carry no assets; building needs Go, Rust and YARA-X; running the container image needs a
-  separate approval). What was done instead: the invocation was re-read against the v1.28.2
-  source (`cmd/mal/mal.go` flags, defaults and exit codes; `pkg/malcontent` structs;
-  `pkg/render/json.go`), and the converter was run over the 12 `--format=json` outputs that
-  upstream keeps under `tests/` (440 behaviors; risk levels LOW 267, MEDIUM 144, HIGH 15,
-  CRITICAL 14, upper-case, which `severity_for` lower-cases). `TestUpstreamShape` pins that
-  member set. Those files are upstream's own, so they are not vendored here (no licensing
-  edit). A captured positive and negative still wait for someone who can build or run `mal`;
-  the corpus register row records the absence.
+- HIGH, no captured fixtures (rows 18, 21, 24): the test oracle is now Malcontent's own
+  recorded `--format=json` output, not a hand-written report. There is no `mal` binary or
+  release asset to capture from (GitHub releases v1.28.2 and earlier carry no assets;
+  building needs Go, Rust and YARA-X; running the container image needs a separate
+  approval), so two reports that upstream's test suite records
+  (`tests/macOS/clean/ls.json`, six LOW behaviors; `tests/linux/2024.kubo_injector/injector.json`,
+  sixteen behaviors from LOW to CRITICAL, no third-party rule) are committed under
+  `tests/test_data/scanners/malcontent/recorded/`, with a README naming their source. The
+  repository's JSON formatter re-sorted their keys; the parsed documents equal upstream's.
+  `TestRecordedReports` converts them (one result per behavior, the severity tally, no
+  matched text kept), and `TestUpstreamShape` pins the full member set seen across the
+  eleven report files under upstream's `tests/` (440 behaviors; LOW 267, MEDIUM 144,
+  HIGH 15, CRITICAL 14, upper-case, which `severity_for` lower-cases). The invocation was
+  re-read against the v1.28.2 source (`cmd/mal/mal.go` flags, defaults and exit codes;
+  `pkg/malcontent` structs; `pkg/render/json.go`). Still owed: a capture ASH makes itself,
+  and a recorded negative, once someone can build or run `mal`; the README of the fixture
+  directory says so.
 
 ### License posture
 
 Malcontent is Apache-2.0 (per its README; the facet states `not read` because no pinned
-upstream LICENSE was read). Nothing is vendored or downloaded. The no-install design is
+upstream LICENSE was read). Nothing is downloaded and no Malcontent code or rule is
+vendored; the two recorded reports are test data that name their source. The no-install design is
 deliberate: ASH does not redistribute Malcontent or its rules, and it never enables the
 third-party rule set (`--third-party=false`).
 
@@ -66,8 +73,26 @@ them:
 3. Scanner-count tests: `== 22` becomes `== 23` in
    `test_scanner_facets_registry_totality.py`, `test_scanner_facets_corpus_consistency.py` and
    `test_scanner_operational_facets_consistency.py`.
-4. `test_scanner_facets_corpus_consistency.py`: a `CORPORA` row `"malcontent": None,` and a
-   `_NO_FIXTURE_DIRECTORY` entry (no captured Malcontent output).
+4. `test_scanner_facets_corpus_consistency.py`: a `CORPORA` row
+   `"malcontent": CorpusSpec("malcontent", prep="malcontent"),` and a registered prep (a
+   `None` row would add a 21st red to the 20 existing ones, the same "mapped but no corpus"
+   failure that detect-secrets and snyk-code show):
+
+   ```python
+   def _prep_malcontent(spec):
+       from automated_security_helper.plugin_modules.ash_malcontent_plugins.malcontent_scanner import (
+           convert_malcontent_report,
+       )
+
+       for path in sorted((_FIXTURES / spec.directory / "recorded").glob("*.json")):
+           document = json.loads(path.read_text(encoding="utf-8"))
+           report = SarifReport.model_validate(
+               convert_malcontent_report(document, Path("."))
+           )
+           yield report, [r for run in report.runs or [] for r in run.results or []]
+   ```
+
+   plus `"malcontent": _prep_malcontent` in `_PREPS`.
 5. `tests/unit/plugin_modules/test_walking_scanners_skip_links_leaving_the_tree.py`: a
    `LINK_HANDLING` row `"malcontent": FOLLOWS_NO_LINK` and a `SCANNER_CLASSES` row
    `"malcontent": ("ash_malcontent_plugins.malcontent_scanner", "MalcontentScanner", "Malcontent")`
