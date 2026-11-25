@@ -40,8 +40,11 @@ Severity
     formatter writes ``error`` and ``warning`` as they are and ``info`` as ``note``.
     ASH keeps that and sets the matching ``issue_severity``: error is CRITICAL (a
     credential of this kind is present, as for the other secret scanners), warning
-    is MEDIUM, note is LOW. A result with no level, or one this table does not
-    name, is rated CRITICAL/error, the more severe choice.
+    is MEDIUM, note is LOW. Secretlint always writes a level. A result that
+    states none reads as ``warning`` (SARIF's default, which ASH's SARIF model
+    applies on parse), so it is MEDIUM like every other scanner's unlevelled
+    result. A level the table does not name is rated CRITICAL/error, the more
+    severe choice.
 
 Offline
     The rules are in the npm packages; Secretlint makes no network call while
@@ -136,7 +139,8 @@ SEVERITY_MAP: Dict[str, Tuple[Level, str]] = {
     "warning": (Level.warning, "MEDIUM"),
     "note": (Level.note, "LOW"),
 }
-#: Used for a result with no level or a level not in ``SEVERITY_MAP``.
+#: Used for a level not in ``SEVERITY_MAP`` (for example ``none``). A result with no
+#: level at all is read as ``warning`` by the SARIF model before it gets here.
 UNKNOWN_LEVEL_RATING: Tuple[Level, str] = SEVERITY_MAP["error"]
 
 
@@ -246,9 +250,10 @@ class SecretlintScanner(ScannerPluginBase[SecretlintScannerConfig]):
             "references column today",
         ),
         tags=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="(none native) the adapter writes properties.tags "
-            "secret and security in _post_process_sarif",
+            state=FacetState.NA,
+            reason="the native SARIF carries no tags; the adapter writes the "
+            "generic tags secret and security itself in _post_process_sarif, "
+            "which are not a native field",
         ),
         extras=FacetDecl(
             state=FacetState.MAPPED,
@@ -301,7 +306,7 @@ class SecretlintScanner(ScannerPluginBase[SecretlintScannerConfig]):
             severity=opsf.SeverityFacet(
                 severity_class=opsf.SeverityClass.NATIVE,
                 note="SARIF level error, warning, note maps to CRITICAL, MEDIUM, "
-                "LOW; an unrated result is CRITICAL (SEVERITY_MAP)",
+                "LOW; a level outside that table is CRITICAL (SEVERITY_MAP)",
             ),
             silencing=opsf.SilencingFacet(
                 tool_side=(

@@ -301,7 +301,9 @@ class TestInvocation:
         scanner = _scanner(tree, tmp_path)
         logged: List[str] = []
         monkeypatch.setattr(
-            scanner, "_plugin_log", lambda msg, **kw: logged.append(str(msg))
+            scanner,
+            "_plugin_log",
+            lambda *msgs, **kw: logged.append(" ".join(str(m) for m in msgs)),
         )
         _run(scanner, FakeSecretlint(), monkeypatch)
         assert any(".secretlintignore" in m and "not reported" in m for m in logged)
@@ -330,14 +332,27 @@ class TestReport:
             assert getattr(result.kind, "value", result.kind) == "fail"
             assert {"secret", "security"} <= set(result.properties.tags)
 
-    def test_a_result_with_no_level_is_rated_critical_error(
+    def test_a_result_with_no_level_reads_as_the_sarif_default_warning(
         self, tree, tmp_path, on_path, monkeypatch
     ):
+        # SARIF's default level is warning and ASH's SARIF model applies it on
+        # parse, so an unlevelled result is MEDIUM, as for every other scanner.
         bare = _result(AWS_RULE, "error", "app.py", 4, "found")
         del bare["level"]
         report = _run(
             _scanner(tree, tmp_path),
             FakeSecretlint(sarif_text=_sarif([bare])),
+            monkeypatch,
+        )
+        assert _findings(report) == [(AWS_RULE, "warning", "MEDIUM", "app.py", 4)]
+
+    def test_a_level_outside_the_table_is_rated_critical_error(
+        self, tree, tmp_path, on_path, monkeypatch
+    ):
+        odd = _result(AWS_RULE, "none", "app.py", 4, "found")
+        report = _run(
+            _scanner(tree, tmp_path),
+            FakeSecretlint(sarif_text=_sarif([odd])),
             monkeypatch,
         )
         assert _findings(report) == [(AWS_RULE, "error", "CRITICAL", "app.py", 4)]

@@ -72,7 +72,7 @@ Secretlint rules report `error`, `warning` or `info`. The SARIF formatter writes
 | `warning` | MEDIUM |
 | `note` | LOW |
 
-An `error` is a credential of one kind being present, which is the same severity whichever provider issued it, as for the other secret scanners. A result with no level, or one not in this table, is rated CRITICAL, the more severe choice. With ASH's default `severity_threshold` of `MEDIUM`, error and warning findings fail the scan.
+An `error` is a credential of one kind being present, which is the same severity whichever provider issued it, as for the other secret scanners. Secretlint always writes a level. A result that states none reads as `warning`, SARIF's default, so it is MEDIUM; a level not in this table is rated CRITICAL, the more severe choice. With ASH's default `severity_threshold` of `MEDIUM`, error and warning findings fail the scan.
 
 ## Exit status
 
