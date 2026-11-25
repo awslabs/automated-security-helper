@@ -925,3 +925,23 @@ class TestCapturedFixtures:
         (result,) = converted.results
         assert getattr(result.level, "value", result.level) == sarif_level
         assert result.properties.issue_severity == ash_severity
+
+
+class TestNothingToScan:
+    def test_a_tree_with_a_locked_project_has_something_to_scan(self, tree, tmp_path):
+        assert _scanner(tree, tmp_path).nothing_to_scan_reason() is None
+
+    def test_a_tree_without_a_cargo_lock_has_nothing_to_scan(self, tmp_path):
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "Cargo.toml").write_text('[package]\nname = "x"\n')
+        (src / "main.py").write_text("print(1)\n")
+        reason = _scanner(src, tmp_path).nothing_to_scan_reason()
+        assert reason is not None and "Cargo.lock" in reason
+
+    def test_only_a_target_directory_project_is_nothing_to_scan(self, tmp_path):
+        src = tmp_path / "src"
+        (src / "target" / "pkg").mkdir(parents=True)
+        (src / "target" / "pkg" / "Cargo.toml").write_text("[package]\n")
+        (src / "target" / "pkg" / "Cargo.lock").write_text("version = 4\n")
+        assert _scanner(src, tmp_path).nothing_to_scan_reason() is not None

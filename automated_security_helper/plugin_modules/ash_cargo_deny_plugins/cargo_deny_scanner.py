@@ -822,6 +822,26 @@ class CargoDenyScanner(ScannerPluginBase[CargoDenyScannerConfig]):
             + (f": {reason}" if reason else "")
         )
 
+    def nothing_to_scan_reason(self) -> str | None:
+        """None when either tree holds a Cargo.toml with a Cargo.lock beside it.
+
+        The selection ``scan()`` makes, taken without the ignore paths: an ignore
+        path only removes manifests, so a tree with none even then has nothing to
+        scan, and a tree with one is never reported as having nothing.
+        """
+        trees: List[Literal["source", "converted"]] = ["source"]
+        work_dir = Path(self._ctx.work_dir)
+        if work_dir.is_dir() and any(work_dir.rglob("*.*")):
+            trees.append("converted")
+        for target_type in trees:
+            root = Path(self._ctx.source_dir if target_type == "source" else work_dir)
+            try:
+                if self._manifests(root, target_type, []):
+                    return None
+            except Exception:  # noqa: BLE001 -- cannot tell, so keep MISSING
+                return None
+        return "no Cargo.toml with a Cargo.lock beside it in the scanned files"
+
     def validate_plugin_dependencies(self) -> bool:
         if self.dependency_unavailable_reason:
             return False
