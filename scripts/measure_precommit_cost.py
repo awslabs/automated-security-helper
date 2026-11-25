@@ -28,7 +28,7 @@ The fixtures
 The rows
 --------
 Each row is timed as the whole child process, warm: one discarded run first, then
-``--repeats`` timed runs, and the median is reported. The ``--staged`` rows stage
+``--repeats`` timed runs, and the median, minimum and maximum are reported. The ``--staged`` rows stage
 one ``.py`` file with ``git add`` before the run and leave the fixture's commit
 untouched.
 """
@@ -180,15 +180,21 @@ def _time_run(argv: list[str], cwd: Path) -> float:
     return time.perf_counter() - start
 
 
-def _median_of(argv: list[str], cwd: Path, repeats: int) -> float:
+def _samples(argv: list[str], cwd: Path, repeats: int) -> list[float]:
     _time_run(argv, cwd)  # discarded warm-up
-    return statistics.median(_time_run(argv, cwd) for _ in range(repeats))
+    return [_time_run(argv, cwd) for _ in range(repeats)]
 
 
-def measure(root: Path, ash: str, repeats: int, staged_file: Path) -> dict[str, float]:
-    """Time the table's rows (except the express row) on the repository at ``root``."""
+def measure(
+    root: Path, ash: str, repeats: int, staged_file: Path
+) -> dict[str, list[float]]:
+    """Time the table's rows on the repository at ``root``; return every sample.
+
+    The express row starts a resident daemon with its warm-up run and stops it
+    when the row is done, so it leaves nothing running.
+    """
     base = [ash, "--mode", "precommit"]
-    results = {"whole repository, no --staged": _median_of(base, root, repeats)}
+    results = {"whole repository, no --staged": _samples(base, root, repeats)}
     env = {**os.environ, **_GIT_ENV}
     # Touch one file and stage it; the run reads the staged list from git.
     staged_file.write_text(
@@ -201,12 +207,20 @@ def measure(root: Path, ash: str, repeats: int, staged_file: Path) -> dict[str, 
         check=True,
         capture_output=True,
     )
-    results["--staged, one .py file staged"] = _median_of(
+    results["--staged, one .py file staged"] = _samples(
         [*base, "--staged"], root, repeats
     )
-    results["--staged, --only-scanners bandit,detect-secrets"] = _median_of(
+    results["--staged, --only-scanners bandit,detect-secrets"] = _samples(
         [*base, "--staged", "--only-scanners", "bandit,detect-secrets"], root, repeats
     )
+    try:
+        results["--staged --express, daemon warm"] = _samples(
+            [*base, "--staged", "--express"], root, repeats
+        )
+    finally:
+        subprocess.run(
+            [ash, "express", "stop"], cwd=root, check=False, capture_output=True
+        )
     return results
 
 
@@ -241,8 +255,14 @@ def main(argv: list[str] | None = None) -> int:
     print(
         f"ash={version.stdout.strip() or version.stderr.strip()} cpus={os.cpu_count()}"
     )
-    for label, seconds in measure(args.dest, args.ash, args.repeats, files[-1]).items():
-        print(f"{seconds:6.1f} s  {label}")
+    print(f"loadavg_before={os.getloadavg()[0]:.1f}")
+    rows = measure(args.dest, args.ash, args.repeats, files[-1])
+    for label, samples in rows.items():
+        print(
+            f"{statistics.median(samples):6.1f} s median "
+            f"(min {min(samples):.1f}, max {max(samples):.1f}, n={len(samples)})  {label}"
+        )
+    print(f"loadavg_after={os.getloadavg()[0]:.1f}")
     return 0
 
 

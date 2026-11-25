@@ -18,8 +18,8 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
-SMALL_DIGEST = "PLACEHOLDER"
-LARGE_DIGEST = "PLACEHOLDER"
+SMALL_DIGEST = "ffbd2e49b3745cd1c0cb11cafda6de6c166154d2943f5fb546b812403bb092f3"
+LARGE_DIGEST = "dd60607916dbc43a698d5c548e2b3019b296dce709003a1f08002e8a1077057a"
 
 
 @pytest.fixture
@@ -76,3 +76,17 @@ def test_build_refuses_a_non_empty_directory(script, tmp_path: Path):
 def test_unknown_kind_is_refused(script, tmp_path: Path):
     with pytest.raises(ValueError, match="unknown fixture kind"):
         script.build_fixture(tmp_path / "y", "medium")
+
+
+@pytest.mark.parametrize(
+    "page",
+    ["pre-commit.md", "pre-commit.md.template"],
+)
+def test_cost_table_names_its_fixture_script_and_venue(page: str):
+    """The table's columns come from a rebuildable fixture and a named venue."""
+    root = Path(__file__).resolve().parents[3]
+    text = (root / "docs" / "content" / "how-to" / page).read_text(encoding="utf-8")
+    assert "scripts/measure_precommit_cost.py" in text
+    assert "900-file Python repository" in text
+    assert "2026-11-25" in text
+    assert "earlier\nmeasurement on a different machine" not in text
