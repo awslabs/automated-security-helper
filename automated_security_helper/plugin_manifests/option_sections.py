@@ -179,4 +179,13 @@ CONVERTER_SECTIONS = (
             "the McpConfigConverter",
         ),
     ),
+    (
+        "sdist-lock-harvester",
+        _section(
+            _CONVERTERS,
+            "sdist_lock_harvester",
+            "SdistLockHarvesterConfig",
+            "the SdistLockHarvester",
+        ),
+    ),
 )

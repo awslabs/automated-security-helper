@@ -473,6 +473,11 @@
               "enabled": true,
               "name": "mcp_config",
               "options": {}
+            },
+            "sdist-lock-harvester": {
+              "enabled": true,
+              "name": "sdist-lock-harvester",
+              "options": {}
             }
           },
           "description": "Converter configurations by name."
@@ -3329,6 +3334,15 @@
             "options": {}
           },
           "description": "Configure the options for the McpConfigConverter"
+        },
+        "sdist-lock-harvester": {
+          "$ref": "#/$defs/SdistLockHarvesterConfig",
+          "default": {
+            "enabled": true,
+            "name": "sdist-lock-harvester",
+            "options": {}
+          },
+          "description": "Configure the options for the SdistLockHarvester"
         }
       },
       "title": "ConverterConfigSegment",
@@ -7708,6 +7722,48 @@
         }
       },
       "title": "SdistHarvestOptions",
+      "type": "object"
+    },
+    "SdistLockHarvesterConfig": {
+      "additionalProperties": false,
+      "description": "Configuration for the sdist lockfile harvester.\n\nThe feature's OPTIONS live on the syft scanner's options surface\n(``scanners.syft.options.sdist_harvest``), because that is where the\noperator already configures SBOM behavior and where ASH's config trust\nmachinery polices who wrote a value. This section only turns the converter\nitself on or off; with the converter on, ``sdist_harvest.enabled`` and\noffline mode decide whether anything is fetched.",
+      "properties": {
+        "enabled": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
+          "default": true,
+          "title": "Enabled"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "const": "sdist-lock-harvester",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
+          "default": "sdist-lock-harvester",
+          "title": "Name"
+        },
+        "options": {
+          "$ref": "#/$defs/ConverterOptionsBase",
+          "default": {},
+          "description": "Converter options"
+        }
+      },
+      "title": "SdistLockHarvesterConfig",
       "type": "object"
     },
     "SemgrepScannerConfig": {

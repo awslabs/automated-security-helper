@@ -1674,6 +1674,11 @@
               "enabled": true,
               "name": "mcp_config",
               "options": {}
+            },
+            "sdist-lock-harvester": {
+              "enabled": true,
+              "name": "sdist-lock-harvester",
+              "options": {}
             }
           },
           "description": "Converter configurations by name."
@@ -6339,6 +6344,15 @@
             "options": {}
           },
           "description": "Configure the options for the McpConfigConverter"
+        },
+        "sdist-lock-harvester": {
+          "$ref": "#/$defs/SdistLockHarvesterConfig",
+          "default": {
+            "enabled": true,
+            "name": "sdist-lock-harvester",
+            "options": {}
+          },
+          "description": "Configure the options for the SdistLockHarvester"
         }
       },
       "title": "ConverterConfigSegment",
@@ -22082,6 +22096,39 @@
         }
       },
       "title": "SdistHarvestOptions",
+      "type": "object"
+    },
+    "SdistLockHarvesterConfig": {
+      "additionalProperties": true,
+      "description": "Configuration for the sdist lockfile harvester.\n\nThe feature's OPTIONS live on the syft scanner's options surface\n(``scanners.syft.options.sdist_harvest``), because that is where the\noperator already configures SBOM behavior and where ASH's config trust\nmachinery polices who wrote a value. This section only turns the converter\nitself on or off; with the converter on, ``sdist_harvest.enabled`` and\noffline mode decide whether anything is fetched.",
+      "properties": {
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "const": "sdist-lock-harvester",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
+          "default": "sdist-lock-harvester",
+          "title": "Name"
+        },
+        "options": {
+          "$ref": "#/$defs/ConverterOptionsBase",
+          "default": {},
+          "description": "Converter options"
+        }
+      },
+      "title": "SdistLockHarvesterConfig",
       "type": "object"
     },
     "SecretValueShape": {

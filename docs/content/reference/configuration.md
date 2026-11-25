@@ -88,7 +88,7 @@ A key not listed here is an error when the configuration is loaded.
 <!-- doctest: options of=global_settings -->
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| <a id="global_settings.severity_threshold"></a>`severity_threshold` | one of `ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL` | from `ASH_DEFAULT_SEVERITY_LEVEL`, else `MEDIUM` | Global minimum severity level to consider findings as failures across all scanners |
+| <a id="global_settings.severity_threshold"></a>`severity_threshold` | one of `ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL` | `MEDIUM` | Global minimum severity level to consider findings as failures across all scanners |
 | <a id="global_settings.ignore_paths"></a>`ignore_paths` | list of [section](#section-global_settings-ignore_paths) | `[]` | Global list of IgnorePaths. Each path requires a reason for ignoring, e.g. 'Folder contains test data only and is not committed'. |
 | <a id="global_settings.suppressions"></a>`suppressions` | list of [section](#section-global_settings-suppressions) | `[]` | Global list of suppression rules. Each rule specifies findings to suppress based on rule ID, file path, and optional line numbers. |
 | <a id="global_settings.mcp"></a>`mcp` | [section](#section-global_settings-mcp) | see the section | MCP-server-specific configuration (runtime override allowlist, etc.). |
@@ -378,6 +378,7 @@ The converters ASH declares a configuration for. Other converter names are accep
 | <a id="converters.archive"></a>`archive` | yes | [`archive` options](converters.md#archive) |
 | <a id="converters.jupyter"></a>`jupyter` | yes | [`jupyter` options](converters.md#jupyter) |
 | <a id="converters.mcp_config"></a>`mcp_config` | yes | [`mcp_config` options](converters.md#mcp_config) |
+| <a id="converters.sdist-lock-harvester"></a>`sdist-lock-harvester` | yes | [`sdist-lock-harvester` options](converters.md#sdist-lock-harvester) |
 
 ## Workspace policy file
 

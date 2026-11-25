@@ -8,7 +8,7 @@ A scan runs up to three phases, always in this order: convert, scan, and report.
 
 ```mermaid
 flowchart LR
-    src[Source directory] --> convert[Convert phase<br/>archive, jupyter, mcp_config]
+    src[Source directory] --> convert[Convert phase<br/>archive, jupyter, mcp_config, sdist-lock-harvester]
     convert --> conv[converted/ target]
     src --> scan
     conv --> scan[Scan phase<br/>scanners in parallel]
