@@ -16,6 +16,8 @@ import pytest
 
 import automated_security_helper.plugin_modules as plugin_modules
 
+pytestmark = pytest.mark.unit
+
 PLUGIN_ROOT = Path(plugin_modules.__file__).parent
 
 # Direct ``set_by_operator(...)`` calls that are not the base method's shape:
