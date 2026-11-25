@@ -14,7 +14,9 @@ retirement is decided and wired separately.
 from automated_security_helper.base.plugin_manifest import (
     BUNDLED_VERSION,
     MANIFEST_SCHEMA_VERSION,
+    ConfigSection,
     EntryPoints,
+    ExclusionOption,
     PluginTier,
     ScannerManifest,
 )
@@ -23,6 +25,57 @@ from automated_security_helper.base.plugin_provisioning import provisioning_for
 _PLUGIN = "automated_security_helper.plugin_modules.ash_builtin"
 _SCANNERS = f"{_PLUGIN}.scanners"
 _SOURCES = "automated_security_helper/plugin_modules/ash_builtin/scanners"
+
+
+#: The description each builtin scanner's section carries in the generated config
+#: schema (``ScannerConfigSegment``).
+_SECTION_DESCRIPTIONS = {
+    "actionlint": "Configure the options for actionlint",
+    "bandit": "Configure the options for Bandit",
+    "cdk-nag": "Configure the options for CdkNag",
+    "cfn-guard": "Configure the options for cfn-guard",
+    "cfn-lint": "Configure the options for cfn-lint",
+    "cfn-nag": "Configure the options for CfnNag",
+    "checkov": "Configure the options for Checkov",
+    "detect-secrets": "Configure the options for DetectSecrets",
+    "gitleaks": "Configure the options for Gitleaks",
+    "grype": "Configure the options for Grype",
+    "npm-audit": "Configure the options for NpmAudit",
+    "opengrep": "Configure the options for Opengrep",
+    "semgrep": "Configure the options for Semgrep",
+    "syft": "Configure the options for Syft",
+    "trivy": "Configure the options for Trivy (trivy fs)",
+    "zizmor": "Configure the options for zizmor",
+}
+
+#: The options through which a client-supplied config may keep files or findings
+#: away from a builtin scanner; see ``ExclusionOption``. Keyed by scanner name.
+_EXCLUSIONS = {
+    "bandit": (
+        ExclusionOption(
+            option="excluded_paths",
+            kind="bandit",
+            glob_builder=f"{_SCANNERS}.bandit_scanner:bandit_excluded_path_globs",
+        ),
+    ),
+    "checkov": (ExclusionOption(option="skip_path", kind="checkov"),),
+    "opengrep": (
+        ExclusionOption(
+            option="exclude",
+            kind="glob",
+            default=("*-converted.py", "*_report_result.txt"),
+        ),
+    ),
+    "semgrep": (
+        ExclusionOption(
+            option="exclude",
+            kind="glob",
+            default=("*-converted.py", "*_report_result.txt"),
+        ),
+    ),
+    "syft": (ExclusionOption(option="exclude", kind="glob"),),
+    "trivy": (ExclusionOption(option="ignore_file", kind="trivy-ignore-file"),),
+}
 
 
 def _builtin(
@@ -53,6 +106,11 @@ def _builtin(
         options_model=f"{_SCANNERS}.{module}:{options_class}",
         file_ownership=tuple(owned),
         provisioning=provisioning_for(name),
+        config_section=ConfigSection(
+            model=f"{_SCANNERS}.{module}:{options_class.removesuffix('Options')}",
+            description=_SECTION_DESCRIPTIONS[name],
+        ),
+        exclusion_options=_EXCLUSIONS.get(name, ()),
     )
 
 

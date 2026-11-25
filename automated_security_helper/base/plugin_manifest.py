@@ -44,9 +44,10 @@ match.
 
 from __future__ import annotations
 
+import importlib
 import re
 from enum import Enum
-from typing import Any, Mapping, Optional
+from typing import Any, Literal, Mapping, Optional
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
@@ -153,6 +154,94 @@ def _inside(module: str, package: str) -> bool:
     return module == package or module.startswith(package + ".")
 
 
+def resolve_ref(ref: str) -> Any:
+    """The object a ``package.module:name`` reference names, imported now.
+
+    This is the one place a manifest's reference strings become objects. The
+    manifest never calls it (reading a manifest imports no plugin); a consumer
+    that needs the class or function does, at the moment it needs it, so a
+    layer that must not import a plugin names the plugin by data and reaches it
+    here instead of by an import statement.
+
+    Raises:
+        ValueError: *ref* is not a ``package.module:name`` reference.
+        ImportError, AttributeError: the module or the name is not there.
+    """
+    if not _REF.fullmatch(ref):
+        raise ValueError(f"{ref!r} is not a 'package.module:Class' reference")
+    module, name = ref.split(":", 1)
+    return getattr(importlib.import_module(module), name)
+
+
+class ConfigSection(_Frozen):
+    """How a plugin's section of the ASH config is built and described.
+
+    The root config model has one field per plugin that ships a typed section;
+    the field's type and its schema description come from here, so the config
+    layer names no plugin.
+    """
+
+    #: ``module:Class`` of the section's config class (the plugin's config model
+    #: whose ``options`` field is validated against the manifest's options
+    #: model).
+    model: str
+    #: The section's description in the generated JSON schema.
+    description: str
+
+    @field_validator("model")
+    @classmethod
+    def _model_ref(cls, value: str) -> str:
+        if not _REF.fullmatch(value):
+            raise ValueError(f"{value!r} is not a 'package.module:Class' reference")
+        return value
+
+
+#: The matchers a client-supplied exclusion entry can be read by. The kind says
+#: how the option's entries are matched against a finding's file, not which
+#: scanner reads them: two scanners that read the same kind of entry share it.
+ExclusionKind = Literal[
+    "bandit", "checkov", "glob", "guarddog-path", "trivy-ignore-file"
+]
+
+
+class ExclusionOption(_Frozen):
+    """One option of a scanner that keeps files or findings away from the scanner.
+
+    A config delivered by an MCP client may set it; the entries are then
+    re-applied after the scan as marked suppressions, so the client cannot hide a
+    finding the operator's own scan would have reported.
+    """
+
+    #: The option's field name under ``scanners.<scanner>.options``.
+    option: str
+    kind: ExclusionKind
+    #: The option's default entries, which are ASH's own.
+    default: tuple[str, ...] = ()
+    #: One entry is a comma-joined list of patterns for the tool (the tool is
+    #: given the option as one value).
+    split_commas: bool = False
+    #: For a kind that matches the globs the scanner passes its tool: the
+    #: ``module:function`` of the builder, ``function(anchor, entry)``, which
+    #: returns those globs. Required by (and only for) the ``bandit`` kind.
+    glob_builder: Optional[str] = None
+
+    @field_validator("glob_builder")
+    @classmethod
+    def _builder_ref(cls, value: Optional[str]) -> Optional[str]:
+        if value is not None and not _REF.fullmatch(value):
+            raise ValueError(f"{value!r} is not a 'package.module:name' reference")
+        return value
+
+    @model_validator(mode="after")
+    def _builder_matches_kind(self) -> "ExclusionOption":
+        if (self.kind == "bandit") != (self.glob_builder is not None):
+            raise ValueError(
+                "the 'bandit' exclusion kind names the scanner's glob builder "
+                "(glob_builder), and only that kind does"
+            )
+        return self
+
+
 class ScannerManifest(_Frozen):
     """One scanner plugin's manifest: the fields readable without importing it."""
 
@@ -189,6 +278,13 @@ class ScannerManifest(_Frozen):
     #: ``OFFLINE_TOOL_ENVIRONMENT`` are iterated from these blocks, so a plugin that
     #: provisions nothing declares nothing.
     provisioning: Provisioning = NO_PROVISIONING
+    #: The plugin's typed section of the ASH config, for a plugin that ships one;
+    #: a plugin without it is configured through the root model's free-form
+    #: plugin sections, validated against ``options_model`` when it loads.
+    config_section: Optional[ConfigSection] = None
+    #: The options a client-supplied config may use to exclude files or findings
+    #: from this scanner (see :class:`ExclusionOption`).
+    exclusion_options: tuple[ExclusionOption, ...] = ()
 
     @field_validator("name")
     @classmethod
@@ -274,10 +370,25 @@ class ScannerManifest(_Frozen):
                     f"content database {database.name!r} is declared by "
                     f"{self.name!r} but names {database.scanner!r} as its scanner"
                 )
-        for label, ref in (
+        refs = [
             ("entry_points.scanner", self.entry_points.scanner),
             ("options_model", self.options_model),
+        ]
+        if self.config_section is not None:
+            refs.append(("config_section.model", self.config_section.model))
+        for exclusion in self.exclusion_options:
+            if exclusion.glob_builder is not None:
+                refs.append(
+                    (
+                        f"exclusion_options[{exclusion.option}].glob_builder",
+                        exclusion.glob_builder,
+                    )
+                )
+        if len({e.option for e in self.exclusion_options}) != len(
+            self.exclusion_options
         ):
+            raise ValueError("exclusion_options lists an option twice")
+        for label, ref in refs:
             if not _inside(_module_of(ref), self.plugin_module):
                 raise ValueError(
                     f"{label} {ref!r} lies outside plugin_module {self.plugin_module!r}"

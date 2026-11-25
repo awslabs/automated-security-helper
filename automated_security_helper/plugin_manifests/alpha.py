@@ -16,6 +16,7 @@ from automated_security_helper.base.plugin_manifest import (
     BUNDLED_VERSION,
     MANIFEST_SCHEMA_VERSION,
     EntryPoints,
+    ExclusionOption,
     PluginTier,
     ScannerManifest,
 )
@@ -23,6 +24,17 @@ from automated_security_helper.base.plugin_provisioning import provisioning_for
 
 _BASE = "automated_security_helper.plugin_modules"
 _SOURCES = "automated_security_helper/plugin_modules"
+
+
+#: The options through which a client-supplied config may keep files or findings
+#: away from an alpha scanner; see ``ExclusionOption``. Keyed by scanner name.
+_EXCLUSIONS = {
+    "ferret-scan": (
+        ExclusionOption(option="exclude_patterns", kind="glob", split_commas=True),
+    ),
+    "guarddog": (ExclusionOption(option="excluded_paths", kind="guarddog-path"),),
+    "trivy-repo": (ExclusionOption(option="ignore_file", kind="trivy-ignore-file"),),
+}
 
 
 def _alpha(
@@ -47,6 +59,7 @@ def _alpha(
         options_model=f"{_BASE}.{package}.{module}:{options_class}",
         file_ownership=(f"{_SOURCES}/{package}", *owned),
         provisioning=provisioning_for(name),
+        exclusion_options=_EXCLUSIONS.get(name, ()),
     )
 
 

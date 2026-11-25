@@ -174,7 +174,6 @@ from typing import (
     Dict,
     Iterable,
     List,
-    Literal,
     Mapping,
     Optional,
     Sequence,
@@ -186,11 +185,12 @@ from typing import (
 from pydantic import BaseModel, ConfigDict
 from typing_extensions import Self
 
+from automated_security_helper.base.plugin_manifest import (
+    ExclusionKind as ExclusionKind,
+    resolve_ref,
+)
 from automated_security_helper.core.exceptions import ScannerError
-
-ExclusionKind = Literal[
-    "bandit", "checkov", "glob", "guarddog-path", "trivy-ignore-file"
-]
+from automated_security_helper.plugin_manifests import exclusion_options
 
 T = TypeVar("T")
 
@@ -216,23 +216,23 @@ class ScannerExclusionOption:
 
 
 #: The options whose client-supplied entries are re-applied as marked
-#: suppressions. ``test_the_table_defaults_are_the_scanners_defaults`` checks
-#: ``default`` against each scanner's own option default.
-SCANNER_EXCLUSION_OPTIONS: Tuple[ScannerExclusionOption, ...] = (
-    ScannerExclusionOption("bandit", "excluded_paths", "bandit"),
-    ScannerExclusionOption("checkov", "skip_path", "checkov"),
-    ScannerExclusionOption(
-        "opengrep", "exclude", "glob", ("*-converted.py", "*_report_result.txt")
-    ),
-    ScannerExclusionOption(
-        "semgrep", "exclude", "glob", ("*-converted.py", "*_report_result.txt")
-    ),
-    ScannerExclusionOption("syft", "exclude", "glob"),
-    ScannerExclusionOption("ferret-scan", "exclude_patterns", "glob"),
-    ScannerExclusionOption("guarddog", "excluded_paths", "guarddog-path"),
-    ScannerExclusionOption("trivy-repo", "ignore_file", "trivy-ignore-file"),
-    ScannerExclusionOption("trivy", "ignore_file", "trivy-ignore-file"),
+#: suppressions. Not a table kept here: each scanner's manifest declares its
+#: exclusion options (``ScannerManifest.exclusion_options``), and this is that
+#: declaration read in manifest order, so a scanner that gains such an option
+#: declares it with the scanner. ``test_the_table_defaults_are_the_scanners_defaults``
+#: checks ``default`` against each scanner's own option default.
+SCANNER_EXCLUSION_OPTIONS: Tuple[ScannerExclusionOption, ...] = tuple(
+    ScannerExclusionOption(scanner, option.option, option.kind, option.default)
+    for scanner, option in exclusion_options()
 )
+
+
+def _declared_option(scanner: str, option: str):
+    """The manifest's declaration of *scanner*'s exclusion *option*, or None."""
+    for name, declared in exclusion_options():
+        if name == scanner and declared.option == option:
+            return declared
+    return None
 
 
 class ClientScannerExclusion(BaseModel):
@@ -331,7 +331,8 @@ class ClientScannerExclusion(BaseModel):
         joined with commas, so an entry holding a comma was several patterns
         to it. Matched whole before, such an entry excluded nothing here.
         """
-        if self.scanner == "ferret-scan":
+        declared = _declared_option(self.scanner, self.option)
+        if declared is not None and declared.split_commas:
             return self.pattern.split(",")
         return [self.pattern]
 
@@ -415,9 +416,14 @@ def bandit_would_skip(pattern: str, *, relative: str, absolute: str) -> bool:
     ``vendor/x.py``, so an entry naming the latter hid a finding bandit had
     reported, since bandit matched its globs against the name as it is.
     """
-    from automated_security_helper.plugin_modules.ash_builtin.scanners.bandit_scanner import (
-        bandit_excluded_path_globs,
+    # The builder the scanner that declares this kind passes its tool; named by
+    # its manifest, so this layer does not import the plugin.
+    builder_ref = next(
+        declared.glob_builder
+        for _, declared in exclusion_options()
+        if declared.kind == "bandit" and declared.glob_builder is not None
     )
+    bandit_excluded_path_globs = resolve_ref(builder_ref)
 
     below = _placed_in_tree(relative)
     if below is None:

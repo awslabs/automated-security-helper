@@ -209,12 +209,10 @@ SCANNABLE_MEMBER_SUFFIXES = frozenset(
 
 #: The options of ArchiveConverterConfigOptions that bound what extracting an archive
 #: can write. A config file inside the scanned tree can lower them but not raise
-#: them; see config/archive_limits.py.
-EXTRACTION_LIMIT_OPTIONS = (
-    "max_members",
-    "max_member_bytes",
-    "max_total_bytes",
-    "max_compression_ratio",
+#: them; see config/archive_limits.py. Declared in base/extraction_limits.py (the
+#: config layer reads the names and cannot import this module).
+from automated_security_helper.base.extraction_limits import (  # noqa: E402
+    EXTRACTION_LIMIT_OPTIONS as EXTRACTION_LIMIT_OPTIONS,
 )
 from automated_security_helper.utils.tar_listing import (
     SKIPPED_BYTES_LIMIT,

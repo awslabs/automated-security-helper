@@ -32,9 +32,11 @@ from __future__ import annotations
 import functools
 import importlib
 import pkgutil
-from typing import Dict, Optional
+from typing import Dict, Literal, Optional
 
 from automated_security_helper.base.plugin_manifest import (
+    ConfigSection,
+    ExclusionOption,
     PluginTier,
     ScannerManifest,
 )
@@ -128,6 +130,43 @@ def dispatch_target(name: str) -> Optional[str]:
     return next(
         (m.name for m in scanner_manifests() if wanted in m.aliases),
         None,
+    )
+
+
+def plugin_config_sections(
+    kind: Literal["scanners", "reporters", "converters"],
+) -> tuple[tuple[str, ConfigSection], ...]:
+    """``(plugin name, section)`` for every plugin of *kind* that has a typed config section.
+
+    The order is the order of the config schema: scanners by their Python field
+    name, reporters and converters as declared in ``option_sections``. The config
+    layer builds its root model's plugin sections from these rows, so it names
+    no plugin.
+    """
+    from automated_security_helper.plugin_manifests import option_sections
+
+    if kind == "reporters":
+        return tuple(option_sections.REPORTER_SECTIONS)
+    if kind == "converters":
+        return tuple(option_sections.CONVERTER_SECTIONS)
+    rows = [
+        (manifest.name, manifest.config_section)
+        for manifest in scanner_manifests()
+        if manifest.config_section is not None
+    ]
+    return tuple(sorted(rows, key=lambda row: row[0].replace("-", "_")))
+
+
+@functools.lru_cache(maxsize=1)
+def exclusion_options() -> tuple[tuple[str, ExclusionOption], ...]:
+    """``(scanner name, option)`` for every option a client config may exclude by.
+
+    In manifest order (by scanner name, then as declared).
+    """
+    return tuple(
+        (manifest.name, option)
+        for manifest in scanner_manifests()
+        for option in manifest.exclusion_options
     )
 
 
