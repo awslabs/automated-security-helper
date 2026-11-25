@@ -201,6 +201,30 @@ class FailureKind(str, Enum):
     TOOL = "tool"
 
 
+class Disposition(str, Enum):
+    """What a report does with one finding.
+
+    The value is the spelling the HTML report and its script compare
+    (``data-status``, the finding-scope menu, ``ash-report.js``). The summary's
+    JSON keys spell the same words with underscores, so that spelling is derived:
+    :attr:`summary_key`. One definition, two named egress spellings; neither wire
+    changed when the enum was introduced.
+
+    The menu's ``active`` and ``all`` choices are view scopes over these, not
+    dispositions, and stay in the report template.
+    """
+
+    ACTIONABLE = "actionable"
+    SUPPRESSED = "suppressed"
+    BELOW_THRESHOLD = "below-threshold"
+    POLICY_NOT_GATING = "policy-not-gating"
+
+    @property
+    def summary_key(self) -> str:
+        """The member's spelling as a key of the report summary."""
+        return self.value.replace("-", "_")
+
+
 #: The gate vocabulary as a static type, for the fields that must stay text.
 #:
 #: A pydantic field typed ``SeverityThreshold`` validates differently from this
