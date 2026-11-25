@@ -31,7 +31,7 @@ What this checks
   id. A rule id with no row in ``_RULE_LINE_MARKERS`` fails, so the first pin for a
   new rule adds its row.
 * Both configs carry the same GuardDog suppressions, as their comments say: the
-  self-scan reads only the community config, and ``.ash/.ash.yaml`` keeps the
+  self-scan reads only the community config, and ``.ash.yaml`` keeps the
   same entries for a scan that lists the GuardDog module there.
 """
 
@@ -45,7 +45,7 @@ pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SELF_SCAN = REPO_ROOT / ".ash" / ".ash_community_plugins.yaml"
-DEFAULT = REPO_ROOT / ".ash" / ".ash.yaml"
+DEFAULT = REPO_ROOT / ".ash.yaml"
 GLOB_CHARACTERS = set("*?[")
 
 

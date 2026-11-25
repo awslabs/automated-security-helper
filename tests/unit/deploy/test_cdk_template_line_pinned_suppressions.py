@@ -31,7 +31,7 @@ import yaml
 pytestmark = pytest.mark.unit
 
 REPO = Path(__file__).resolve().parents[3]
-ASH_YAML = REPO / ".ash" / ".ash.yaml"
+ASH_YAML = REPO / ".ash.yaml"
 TEMPLATES = REPO / "deploy" / "cdk" / "templates"
 GATE = "deploy/cdk/templates/AshCodeCommitGate.template.json"
 

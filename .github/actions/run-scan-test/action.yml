@@ -366,7 +366,7 @@ runs:
         if [ "${ASH_TEST_CONFIG_FILE}" = "community" ]; then
           ash config validate --config .ash/.ash_community_plugins.yaml
         else
-          ash config validate --config .ash/.ash.yaml
+          ash config validate --config .ash.yaml
         fi
 
     # The Windows half of "Set up Ruby for cfn-nag" above, deliberately placed here

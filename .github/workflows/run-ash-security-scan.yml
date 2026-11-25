@@ -1078,7 +1078,7 @@ jobs:
             exit 1
           fi
           if [ -z "${CONFIG_PATH}" ]; then
-            echo "::error::config-ref is set but config is empty. Name the config file to read from $(one_line "${CONFIG_REF}"), for example 'config: .ash/.ash.yaml'."
+            echo "::error::config-ref is set but config is empty. Name the config file to read from $(one_line "${CONFIG_REF}"), for example 'config: .ash.yaml'."
             exit 1
           fi
           RELATIVE="${CONFIG_PATH#./}"
