@@ -31,6 +31,7 @@ from typing import Dict, Any, Optional, Tuple
 
 from automated_security_helper.core.constants import ASH_DEFAULT_SEVERITY_LEVEL
 from automated_security_helper.core.enums import ScannerStatus
+from automated_security_helper.models.vocab import SEVERITY_COUNT_FIELDS, Severity
 from automated_security_helper.models.asharp_model import (
     AshAggregatedResults,
     ScannerSeverityCount,
@@ -550,7 +551,7 @@ class ScannerStatisticsCalculator:
         dict_counts = ScannerStatisticsCalculator._dict_result_counts(
             asharp_model, scanner_name
         )
-        for field in ("suppressed", "critical", "high", "medium", "low", "info"):
+        for field in SEVERITY_COUNT_FIELDS:
             setattr(counts, field, getattr(counts, field) + getattr(dict_counts, field))
 
         return (
@@ -611,7 +612,7 @@ class ScannerStatisticsCalculator:
                 counts = ScannerSeverityCount.model_validate(report["severity_counts"])
             except ValueError:
                 continue
-            for field in ("suppressed", "critical", "high", "medium", "low", "info"):
+            for field in SEVERITY_COUNT_FIELDS:
                 setattr(total, field, getattr(total, field) + getattr(counts, field))
         return total
 
@@ -827,16 +828,16 @@ class ScannerStatisticsCalculator:
             Number of actionable findings based on the threshold
         """
         counts = {
-            "CRITICAL": critical,
-            "HIGH": high,
-            "MEDIUM": medium,
-            "LOW": low,
-            "INFO": info,
+            Severity.CRITICAL: critical,
+            Severity.HIGH: high,
+            Severity.MEDIUM: medium,
+            Severity.LOW: low,
+            Severity.INFO: info,
         }
         return sum(
             count
             for severity, count in counts.items()
-            if severity_fails_threshold(severity, threshold)
+            if severity_fails_threshold(severity.value, threshold)
         )
 
     @staticmethod
@@ -2149,8 +2150,7 @@ class ScannerStatisticsCalculator:
                 asharp_model, scanner_name
             )
             dict_finding_count += sum(
-                getattr(dict_counts, field)
-                for field in ("suppressed", "critical", "high", "medium", "low", "info")
+                getattr(dict_counts, field) for field in SEVERITY_COUNT_FIELDS
             )
 
         # Compare counts

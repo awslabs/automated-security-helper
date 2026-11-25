@@ -13,7 +13,6 @@ from typing import (
     Dict,
     Iterator,
     List,
-    Literal,
     Optional,
     Sequence,
     Set,
@@ -78,6 +77,7 @@ from automated_security_helper.models.asharp_model import (
 from automated_security_helper.models.asharp_model import InputNotScanned
 from automated_security_helper.models.core import IgnoreFileExclusions
 from automated_security_helper.core.enums import ExportFormat
+from automated_security_helper.models.vocab import SeverityThresholdText
 from automated_security_helper.utils.get_ash_version import get_ash_version
 from automated_security_helper.utils.get_scan_set import (
     honors_ignore_files,
@@ -1269,9 +1269,7 @@ class ASHScanOrchestrator(BaseModel):
             # The configured threshold is a ladder value, and stricter_of ranks
             # every value that is not one after CRITICAL, so it is replaced only
             # by a stricter ladder value: the cast names that and checks nothing.
-            settings.severity_threshold = cast(
-                Literal["ALL", "LOW", "MEDIUM", "HIGH", "CRITICAL"], effective
-            )
+            settings.severity_threshold = cast(SeverityThresholdText, effective)
         elif requested != configured and announce:
             ASH_LOGGER.info(
                 f"Severity threshold {requested} requested, looser than "
