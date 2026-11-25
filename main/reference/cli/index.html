@@ -1903,6 +1903,8 @@ SOFTWARE.
       
         
       
+        
+      
     
     
     
@@ -2368,6 +2370,56 @@ SOFTWARE.
 </li>
       
         <li class="md-nav__item">
+  <a href="#ash-suppress" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ash suppress
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="ash suppress">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#ash-suppress-add" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ash suppress add
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ash-suppress-refresh" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ash suppress refresh
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ash-suppress-verify" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ash suppress verify
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#ash-trend" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2654,6 +2706,34 @@ SOFTWARE.
     
   
     Coverage by language
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../symbol-resolution/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Symbol resolution
   
 
     
@@ -4091,6 +4171,56 @@ SOFTWARE.
 </li>
       
         <li class="md-nav__item">
+  <a href="#ash-suppress" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ash suppress
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="ash suppress">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#ash-suppress-add" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ash suppress add
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ash-suppress-refresh" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ash suppress refresh
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ash-suppress-verify" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ash suppress verify
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#ash-trend" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4308,6 +4438,22 @@ SOFTWARE.
 <td>Scan code, infrastructure, secrets, and dependencies.</td>
 </tr>
 <tr>
+<td><a href="#suppress"><code>ash suppress</code></a></td>
+<td>Create symbol suppressions and keep their content-hash lock (.ash.lock) current.</td>
+</tr>
+<tr>
+<td><a href="#suppress-add"><code>ash suppress add</code></a></td>
+<td>Add a symbol suppression and lock its file's content hash.</td>
+</tr>
+<tr>
+<td><a href="#suppress-refresh"><code>ash suppress refresh</code></a></td>
+<td>Record a new review: re-hash locked files whose bytes changed.</td>
+</tr>
+<tr>
+<td><a href="#suppress-verify"><code>ash suppress verify</code></a></td>
+<td>Check the lock against the tree. Exits 1 when anything is out of date.</td>
+</tr>
+<tr>
 <td><a href="#trend"><code>ash trend</code></a></td>
 <td>Show new, carried and fixed findings over a series of saved ASH scans.</td>
 </tr>
@@ -4347,7 +4493,7 @@ SOFTWARE.
 </tr>
 </tbody>
 </table>
-<p>Subcommands: <a href="#build-image"><code>ash build-image</code></a>, <a href="#config"><code>ash config</code></a>, <a href="#dependencies"><code>ash dependencies</code></a>, <a href="#diff"><code>ash diff</code></a>, <a href="#express"><code>ash express</code></a>, <a href="#get-genai-guide"><code>ash get-genai-guide</code></a>, <a href="#inspect"><code>ash inspect</code></a>, <a href="#mcp"><code>ash mcp</code></a>, <a href="#merge"><code>ash merge</code></a>, <a href="#plugin"><code>ash plugin</code></a>, <a href="#report"><code>ash report</code></a>, <a href="#scan"><code>ash scan</code></a>, <a href="#trend"><code>ash trend</code></a>.</p>
+<p>Subcommands: <a href="#build-image"><code>ash build-image</code></a>, <a href="#config"><code>ash config</code></a>, <a href="#dependencies"><code>ash dependencies</code></a>, <a href="#diff"><code>ash diff</code></a>, <a href="#express"><code>ash express</code></a>, <a href="#get-genai-guide"><code>ash get-genai-guide</code></a>, <a href="#inspect"><code>ash inspect</code></a>, <a href="#mcp"><code>ash mcp</code></a>, <a href="#merge"><code>ash merge</code></a>, <a href="#plugin"><code>ash plugin</code></a>, <a href="#report"><code>ash report</code></a>, <a href="#scan"><code>ash scan</code></a>, <a href="#suppress"><code>ash suppress</code></a>, <a href="#trend"><code>ash trend</code></a>.</p>
 <h2 id="ash-build-image"><a id="build-image"></a><code>ash build-image</code><a class="headerlink" href="#ash-build-image" title="Permanent link">&para;</a></h2>
 <p>Builds the ASH container image, then scans the current directory with it unless --no-run is given.</p>
 <p>It takes only the options below. To scan with scan options, run <code>ash scan --mode container</code>, which builds the image the same way and accepts every scan option.</p>
@@ -6472,9 +6618,184 @@ across different scanners and ensure fields are preserved during aggregation.</p
 </tr>
 </tbody>
 </table>
+<h2 id="ash-suppress"><a id="suppress"></a><code>ash suppress</code><a class="headerlink" href="#ash-suppress" title="Permanent link">&para;</a></h2>
+<p>Create symbol suppressions and keep their content-hash lock (.ash.lock) current.</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-30-1"><a id="__codelineno-30-1" name="__codelineno-30-1" href="#__codelineno-30-1"></a>ash suppress [OPTIONS] COMMAND [ARGS]...
+</span></code></pre></div>
+<p>This command takes no options.</p>
+<p>Subcommands: <a href="#suppress-add"><code>ash suppress add</code></a>, <a href="#suppress-refresh"><code>ash suppress refresh</code></a>, <a href="#suppress-verify"><code>ash suppress verify</code></a>.</p>
+<h3 id="ash-suppress-add"><a id="suppress-add"></a><code>ash suppress add</code><a class="headerlink" href="#ash-suppress-add" title="Permanent link">&para;</a></h3>
+<p>Add a symbol suppression and lock its file's content hash.</p>
+<p>Writes the suppression into the config and the hash of the file's bytes
+into .ash.lock. While the file is unchanged the suppression applies;
+after any edit to the file its findings are reported again until the change
+is reviewed and <code>ash suppress refresh</code> records it.</p>
+<p>A suppression already in the config for the same rule, file and symbol is
+not written twice; the lock entry is still created or completed, which is
+how an existing suppression is brought under the lock.</p>
+<p>Example:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-31-1"><a id="__codelineno-31-1" name="__codelineno-31-1" href="#__codelineno-31-1"></a>ash suppress add B602 --symbol Handler.run --file src/app.py \
+</span><span id="__span-31-2"><a id="__codelineno-31-2" name="__codelineno-31-2" href="#__codelineno-31-2"></a>    --reason &quot;The command is a constant.&quot;
+</span></code></pre></div>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-32-1"><a id="__codelineno-32-1" name="__codelineno-32-1" href="#__codelineno-32-1"></a>ash suppress add [OPTIONS] {rule_id}
+</span></code></pre></div>
+<!-- doctest: options of=cli.suppress.add -->
+<table>
+<thead>
+<tr>
+<th>Argument</th>
+<th>Type</th>
+<th>Default</th>
+<th>Environment variable</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a id="suppress-add--arg-rule-id"></a><code>rule_id</code></td>
+<td>text</td>
+<td>required</td>
+<td></td>
+<td>The rule id the suppression covers, e.g. B602.</td>
+</tr>
+</tbody>
+</table>
+<!-- doctest: options of=cli.suppress.add -->
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Type</th>
+<th>Default</th>
+<th>Environment variable</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a id="suppress-add--symbol"></a><code>--symbol</code></td>
+<td>text</td>
+<td>required</td>
+<td></td>
+<td>The definition the suppression covers, as a dotted qualified name such as 'MyClass.my_method'.</td>
+</tr>
+<tr>
+<td><a id="suppress-add--file"></a><code>--file</code></td>
+<td>text</td>
+<td>required</td>
+<td></td>
+<td>The file that holds the definition, relative to the source directory. Its content hash is recorded in the lock.</td>
+</tr>
+<tr>
+<td><a id="suppress-add--reason"></a><code>--reason</code></td>
+<td>text</td>
+<td>required</td>
+<td></td>
+<td>Why the finding is safe to suppress.</td>
+</tr>
+<tr>
+<td><a id="suppress-add--config"></a><code>--config</code>, <code>-c</code></td>
+<td>text</td>
+<td>not set</td>
+<td></td>
+<td>The YAML config file to write the suppression to. Defaults to the config a scan of the source directory uses.</td>
+</tr>
+<tr>
+<td><a id="suppress-add--source-dir"></a><code>--source-dir</code></td>
+<td>text</td>
+<td>not set</td>
+<td></td>
+<td>The directory the scan covers, which holds .ash.lock. Defaults to the current directory.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="ash-suppress-refresh"><a id="suppress-refresh"></a><code>ash suppress refresh</code><a class="headerlink" href="#ash-suppress-refresh" title="Permanent link">&para;</a></h3>
+<p>Record a new review: re-hash locked files whose bytes changed.</p>
+<p>Run it after reading what changed in a file and confirming its suppressions
+still hold. It prints each file whose hash changed. A locked file that no
+longer exists is reported and left as it was; exit code 1 then.</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-33-1"><a id="__codelineno-33-1" name="__codelineno-33-1" href="#__codelineno-33-1"></a>ash suppress refresh [OPTIONS] [paths]...
+</span></code></pre></div>
+<!-- doctest: options of=cli.suppress.refresh -->
+<table>
+<thead>
+<tr>
+<th>Argument</th>
+<th>Type</th>
+<th>Default</th>
+<th>Environment variable</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a id="suppress-refresh--arg-paths"></a><code>paths</code></td>
+<td>text, any number</td>
+<td>not set</td>
+<td></td>
+<td>Locked files to re-hash. Every locked file when none is named.</td>
+</tr>
+</tbody>
+</table>
+<!-- doctest: options of=cli.suppress.refresh -->
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Type</th>
+<th>Default</th>
+<th>Environment variable</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a id="suppress-refresh--source-dir"></a><code>--source-dir</code></td>
+<td>text</td>
+<td>not set</td>
+<td></td>
+<td>The directory the scan covers, which holds .ash.lock. Defaults to the current directory.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="ash-suppress-verify"><a id="suppress-verify"></a><code>ash suppress verify</code><a class="headerlink" href="#ash-suppress-verify" title="Permanent link">&para;</a></h3>
+<p>Check the lock against the tree. Exits 1 when anything is out of date.</p>
+<p>Lists every locked file whose bytes changed or that is gone, and every
+symbol suppression in the named configs whose file has no lock entry. Exit
+code 0 means a scan applies every symbol suppression.</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-34-1"><a id="__codelineno-34-1" name="__codelineno-34-1" href="#__codelineno-34-1"></a>ash suppress verify [OPTIONS]
+</span></code></pre></div>
+<!-- doctest: options of=cli.suppress.verify -->
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Type</th>
+<th>Default</th>
+<th>Environment variable</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a id="suppress-verify--config"></a><code>--config</code>, <code>-c</code></td>
+<td>text, repeatable</td>
+<td>not set</td>
+<td></td>
+<td>A YAML config file whose symbol suppressions must each have a lock entry. Repeat it for several. Defaults to the config a scan of the source directory uses.</td>
+</tr>
+<tr>
+<td><a id="suppress-verify--source-dir"></a><code>--source-dir</code></td>
+<td>text</td>
+<td>not set</td>
+<td></td>
+<td>The directory the scan covers, which holds .ash.lock. Defaults to the current directory.</td>
+</tr>
+</tbody>
+</table>
 <h2 id="ash-trend"><a id="trend"></a><code>ash trend</code><a class="headerlink" href="#ash-trend" title="Permanent link">&para;</a></h2>
 <p>Show new, carried and fixed findings over a series of saved ASH scans.</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-30-1"><a id="__codelineno-30-1" name="__codelineno-30-1" href="#__codelineno-30-1"></a>ash trend [OPTIONS] [files]...
+<div class="language-text highlight"><pre><span></span><code><span id="__span-35-1"><a id="__codelineno-35-1" name="__codelineno-35-1" href="#__codelineno-35-1"></a>ash trend [OPTIONS] [files]...
 </span></code></pre></div>
 <!-- doctest: options of=cli.trend -->
 <table>
