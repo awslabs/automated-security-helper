@@ -227,6 +227,24 @@ global_settings:
 
 `path` and `reason` are required, and paths match the way suppression paths do. The findings an ignore path drops include a dependency scanner's findings about a package installed under it: a `node_modules/` ignore path also drops grype's findings located in `node_modules/<package>/package.json`.
 
+npm-audit does not work that way. npm, pnpm and yarn name no file in their audit output, so npm-audit locates each advisory at the lockfile it audited (`package-lock.json`, `npm-shrinkwrap.json`, `pnpm-lock.yaml` or `yarn.lock`), as a path relative to the scanned directory. That file is in your checkout, a `node_modules/` ignore path does not match it, and it is where a fix is made. For an npm lockfile the result also carries the line of the package's entry; for `pnpm-lock.yaml` and `yarn.lock` it has no line. Findings of one lockfile share its location, so the package, its installed version and where it is installed are what tell them apart: they are in the result's `package_name`, `package_version` and `package_path` properties, and in its `partialFingerprints`.
+
+Two ignore paths still silence npm-audit, and neither is a mistake in the scanner. An ignore path that matches a lockfile, such as `**/pnpm-lock.yaml`, drops that lockfile's findings. And a lockfile under an ignore path is skipped rather than audited, so a generic ignore list that names lockfiles leaves those projects out of the audit and the scan has no npm-audit finding for them. Check the ignore list for lockfile names before relying on a clean npm-audit result.
+
+Earlier releases located every npm-audit finding at `node_modules/<package>/package.json`. A suppression whose `path` is that location does not match the finding now, and neither does a baseline keyed on it. Re-key the suppression by setting `path` to the lockfile and keeping `package_name`, `package_version` and `package_path` to name the dependency:
+
+```yaml
+global_settings:
+  suppressions:
+    - rule_id: GHSA-vfj7-8cjw-p6xm
+      path: deploy/cdk/package-lock.json
+      package_name: braces
+      package_path: deploy/cdk/node_modules/braces
+      reason: Not reachable from the deployed code
+```
+
+Grype's findings in a lockfile are suppressed the same way.
+
 An ignore path can also have an `expires` date, which works the way a suppression's does: on that date the ignore path stops applying, so the files it covered are scanned again and their findings count on the next scan. The same holds for the entries of bandit `excluded_paths`, checkov `skip_path`, and syft `exclude`. This expired ignore path no longer drops the finding in `app.py`:
 
 <!-- doctest: run expect-exit=2 -->
