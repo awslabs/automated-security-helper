@@ -191,14 +191,7 @@ class ScannerProgress:
         self.severity_counts = (
             dict(severity_counts)
             if severity_counts
-            else {
-                "critical": 0,
-                "high": 0,
-                "medium": 0,
-                "low": 0,
-                "info": 0,
-                "suppressed": 0,
-            }
+            else dict.fromkeys(SEVERITY_BUCKETS, 0)
         )
         self.start_time: Optional[datetime] = None
         self.end_time: Optional[datetime] = None
