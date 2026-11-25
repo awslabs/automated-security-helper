@@ -22,7 +22,7 @@ this layer.
 
 from __future__ import annotations
 
-from typing import Annotated, Any, Dict, Literal, Optional, Tuple
+from typing import Annotated, Any, Dict, Literal, Optional, Tuple, cast
 
 from pydantic import ConfigDict, Field
 
@@ -57,7 +57,9 @@ def build_segment(
             extra="allow",
         ),
         "__annotations__": {
-            "__pydantic_extra__": Dict[str, Any | extra_type],
+            # ``cast``: *extra_type* is a value here, which the checker will not
+            # take in a subscript of ``Dict``.
+            "__pydantic_extra__": cast(Any, Dict)[str, Any | extra_type],
             **{field: annotation for field, (annotation, _) in fields.items()},
         },
         "__pydantic_extra__": {},
