@@ -34,3 +34,9 @@ None of these were made here (module, its tests and its facets only). Exact edit
 ## Desk validation (dev-dsk-d14420e2, extract as a repository, `uv sync --frozen --all-extras --group dev`, env -i, -n 4)
 
 With the central edits above applied to the extract only: 39 passed in the govulncheck module and sandbox tests; facets totality, resource-id conformance, operational consistency all green for govulncheck; corpus consistency green for govulncheck. Twenty other scanners' corpus-consistency tests (tags/package columns observed empty) fail identically on the desk and are not this module's. Whole-tree collect: 74342/74387 collected, no errors. Extract removed and absence read back.
+
+## Final-review rows (round 2)
+
+- LOW (fixed in this round): the module docstring and docs page said any level other than the three was HIGH, but `none` maps to INFO. Both texts now say so.
+- Carried HIGH (held, not fixable on this branch): no captured fixture from the real tool; needs a Go-equipped venue. Unchanged from the section above.
+- Fixed HIGH: `tool_version` was read from `driver.version`, which govulncheck's SARIF writer does not set; it now reads `semanticVersion` first, with `version` as fallback, pinned by two tests.
