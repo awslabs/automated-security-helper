@@ -1,0 +1,105 @@
+
+ Usage: ash results report [OPTIONS]
+
+ Generate a report from ASH scan results using the specified reporter plugin.
+
+┌─ Options ───────────────────────────────────────────────────────────────────────────────────────┐
+│ --format                                 <str>                      Report format to generate:  │
+│                                                                     a reporter's name. Defaults │
+│                                                                     to 'markdown'. Values:      │
+│                                                                     text, flat-json, yaml, csv, │
+│                                                                     html, junitxml, markdown,   │
+│                                                                     sarif, asff, ocsf,          │
+│                                                                     cyclonedx, spdx,            │
+│                                                                     github-ghas, gitlab-sast,   │
+│                                                                     gitlab-cyclonedx,           │
+│                                                                     unused-suppressions. With   │
+│                                                                     the AWS plugin module       │
+│                                                                     (ash_aws_plugins) in        │
+│                                                                     ash_plugin_modules, also,   │
+│                                                                     once enabled:               │
+│                                                                     aws-security-hub,           │
+│                                                                     bedrock-summary-reporter,   │
+│                                                                     cloudwatch-logs, s3. A      │
+│                                                                     reporter another module     │
+│                                                                     there adds is named the     │
+│                                                                     same way.                   │
+│                                                                     [default: markdown]         │
+│ --output-dir                             <str>                      The directory to output     │
+│                                                                     results to                  │
+│                                                                     [env var: ASH_OUTPUT_DIR]   │
+│ --log-level                              <QUIET|SIMPLE|ERROR|INFO|  Set the log level.          │
+│                                          VERBOSE|DEBUG|TRACE>       [default: INFO]             │
+│ --config               -c                <str>                      The path to the             │
+│                                                                     configuration file. By      │
+│                                                                     default, ASH looks for the  │
+│                                                                     following config file names │
+│                                                                     in the source directory of  │
+│                                                                     a scan: ['.ash.yml',        │
+│                                                                     '.ash.yaml', '.ash.json',   │
+│                                                                     'ash.yml', 'ash.yaml',      │
+│                                                                     'ash.json'] (each at the    │
+│                                                                     root, then in .ash/), then  │
+│                                                                     ['.ashrc.toml',             │
+│                                                                     '.ashrc.yaml',              │
+│                                                                     '.ashrc.yml',               │
+│                                                                     '.ashrc.json',              │
+│                                                                     'ashrc.toml', 'ashrc.yaml', │
+│                                                                     'ashrc.yml', 'ashrc.json']  │
+│                                                                     at the root, then the       │
+│                                                                     tool.ash table of           │
+│                                                                     pyproject.toml at the root; │
+│                                                                     the first found is used.    │
+│                                                                     Alternatively, the full     │
+│                                                                     path to a config file can   │
+│                                                                     be provided by setting the  │
+│                                                                     ASH_CONFIG environment      │
+│                                                                     variable before running     │
+│                                                                     ASH.                        │
+│                                                                     [env var: ASH_CONFIG]       │
+│ --config-overrides                       <str>                      Configuration overrides     │
+│                                                                     specified as key-value      │
+│                                                                     pairs (e.g.,                │
+│                                                                     'reporters.cloudwatch-logs… │
+│ --annotate-duplicates                                               Add `cluster_id`,           │
+│                                                                     `duplicate_of` and          │
+│                                                                     `duplicate_sources` columns │
+│                                                                     to the csv and flat-json    │
+│                                                                     reports, naming findings    │
+│                                                                     that two scanners report    │
+│                                                                     for one defect. Rows, ids   │
+│                                                                     and counts are unchanged.   │
+│                                                                     Adds three columns to the   │
+│                                                                     CSV header, so it is off by │
+│                                                                     default. Sets               │
+│                                                                     `global_settings.deduplica… │
+│ --fold-duplicates                                                   Show one row per duplicate  │
+│                                                                     cluster in the HTML,        │
+│                                                                     Markdown and text reports,  │
+│                                                                     with a note naming the      │
+│                                                                     other scanners that         │
+│                                                                     reported it, and add        │
+│                                                                     deduplicated counts beside  │
+│                                                                     the per-scanner counts. Off │
+│                                                                     by default because it       │
+│                                                                     changes row counts. Sets    │
+│                                                                     `global_settings.deduplica… │
+│ --verbose              -v                                           Enable verbose logging      │
+│ --debug                -d                                           Enable debug logging        │
+│ --color                    --no-color                               Enable/disable colorized    │
+│                                                                     output                      │
+│                                                                     [default: color]            │
+│ --help                                                              Show this message and exit. │
+└─────────────────────────────────────────────────────────────────────────────────────────────────┘
+┌─ Structured input ──────────────────────────────────────────────────────────────────────────────┐
+│ --cli-json-input               PATH  Read parameter values from a JSON object: a path, a        │
+│                                      file:// URI, or '-' for stdin. Keys are parameter names    │
+│                                      (output_dir) or long flag spellings (--output-dir). Flags  │
+│                                      given on the command line override the file; the file      │
+│                                      overrides environment variables. Run with                  │
+│                                      --generate-cli-skeleton for a template.                    │
+│ --generate-cli-skeleton              Print a JSON template for --cli-json-input, listing every  │
+│                                      parameter of this command with its default, or null where  │
+│                                      it is required or an environment variable backs it, and    │
+│                                      exit.                                                      │
+└─────────────────────────────────────────────────────────────────────────────────────────────────┘
