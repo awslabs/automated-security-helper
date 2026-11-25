@@ -110,7 +110,11 @@ class TestEngineDetection:
         runtime = tmp_path / "runtime"
         (runtime / "podman").mkdir(parents=True)
         server = socket.socket(socket.AF_UNIX)
-        server.bind(str(runtime / "podman" / "podman.sock"))
+        # Bound by a relative name from inside the directory: an AF_UNIX path
+        # holds about 100 bytes, and a deep basetemp (a CI runner's, a lane's)
+        # makes the full path too long for the bind.
+        monkeypatch.chdir(runtime / "podman")
+        server.bind("podman.sock")
         monkeypatch.setenv("XDG_RUNTIME_DIR", str(runtime))
         try:
             assert detect_container_engine() == ContainerEngine.PODMAN
@@ -226,7 +230,9 @@ class TestTrivyImageArgv:
         )
         assert argv[:2] == ["trivy", "image"]
         assert "--image-src=remote" in argv
-        assert argv[-1] == IMAGE_REF
+        # The tool's own flags (the output file) may follow the target; what
+        # matters is that the engine selection precedes it.
+        assert argv.index("--image-src=remote") < argv.index(IMAGE_REF)
         assert results_file.parent.name == "image"
 
     def test_a_ref_with_a_daemon_scans_through_it(self, monkeypatch, tmp_path):
@@ -238,8 +244,7 @@ class TestTrivyImageArgv:
             )
         finally:
             server.close()
-        assert "--image-src=docker" in argv
-        assert argv[-1] == IMAGE_REF
+        assert argv.index("--image-src=docker") < argv.index(IMAGE_REF)
 
     def test_an_archive_goes_through_input(self, monkeypatch, tmp_path):
         _no_engine(monkeypatch, tmp_path)
@@ -249,7 +254,8 @@ class TestTrivyImageArgv:
             ImageLocator(oci_archive=archive)
         )
         assert argv[:2] == ["trivy", "image"]
-        assert argv[-1] == f"--input={archive.absolute().as_posix()}"
+        assert f"--input={archive.absolute().as_posix()}" in argv
+        assert not any(token.startswith("--image-src") for token in argv)
         assert IMAGE_REF not in argv
         assert not any(value.startswith("--image-src") for value in argv)
 
