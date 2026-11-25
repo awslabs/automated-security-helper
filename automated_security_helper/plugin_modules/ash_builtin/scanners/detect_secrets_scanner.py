@@ -3512,7 +3512,14 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                                 else None
                             ),
                             config_name=self.config.name,
-                            tool_type=str(self.tool_type or "UNKNOWN"),
+                            # The enum's value, not str(): str() of a (str, Enum)
+                            # reads "ScannerToolType.SECRETS" on every Python,
+                            # where the f-string this replaced gave the bare
+                            # value on 3.10 and 3.11 (the project supports 3.10).
+                            tool_type=str(
+                                getattr(self.tool_type, "value", self.tool_type)
+                                or "UNKNOWN"
+                            ),
                         )
                     )
             if kept_known:

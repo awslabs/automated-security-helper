@@ -461,7 +461,7 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
             'was found at:" parsed by _GRYPE_PACKAGE_MESSAGE',
         ),
         package_path=FacetDecl(
-            state=FacetState.NA,
+            state=FacetState.UNCONFIRMED,
             reason="UNCONFIRMED: the adapter resolves an npm lockfile entry "
             "by name and version beside the manifest (set only when exactly "
             "one copy matches), pinned over the conformance tests' presenter "
@@ -470,7 +470,7 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
             "settles it",
         ),
         taxonomy_cve=FacetDecl(
-            state=FacetState.NA,
+            state=FacetState.UNCONFIRMED,
             reason="UNCONFIRMED: the SARIF result ruleId is the vulnerability "
             "id (matches[].vulnerability.id, a CVE or GHSA id; the committed "
             "native JSON's eight matches are all GHSA ids, which the flat CVE "
@@ -501,7 +501,7 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
             "Package and Version lines match the result's own message",
         ),
         remediation_text=FacetDecl(
-            state=FacetState.NA,
+            state=FacetState.UNCONFIRMED,
             reason="UNCONFIRMED: not classified by the survey; the flat "
             "model has no remediation column, and matchDetails[].fix."
             "suggestedVersion is a version, not text",
@@ -520,7 +520,7 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
             "relatedVulnerabilities[].urls) are still never read",
         ),
         tags=FacetDecl(
-            state=FacetState.NA,
+            state=FacetState.UNCONFIRMED,
             reason="UNCONFIRMED: the survey reads SARIF rule properties.tags "
             "off the conformance tests' presenter shape (rule-level, which "
             "the flat reader never takes as the tags column anyway); no grype "

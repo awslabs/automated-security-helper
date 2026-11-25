@@ -456,13 +456,13 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
             "against a real tool run",
         ),
         remediation_text=FacetDecl(
-            state=FacetState.NA,
+            state=FacetState.UNCONFIRMED,
             reason="UNCONFIRMED: the survey classified rule help.markdown "
             "under references only; a `snyk code test --sarif` run settles "
             "whether remediation text is separate",
         ),
         snippet=FacetDecl(
-            state=FacetState.NA,
+            state=FacetState.UNCONFIRMED,
             reason="the survey read no snippet in the native regions; "
             "UNCONFIRMED against a real tool run",
         ),

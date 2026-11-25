@@ -257,7 +257,7 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
             native_field="SARIF result ruleId (the CVE id)",
         ),
         taxonomy_cwe=FacetDecl(
-            state=FacetState.NA,
+            state=FacetState.UNCONFIRMED,
             reason="UNCONFIRMED: trivy's SARIF rules carry no CWE (tags are "
             "vulnerability, security, <severity>); the JSON format's CweIDs "
             "has no committed vulnerability fixture, and a `trivy fs --format "
@@ -277,7 +277,7 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
             "pre-filters unfixed findings)",
         ),
         remediation_text=FacetDecl(
-            state=FacetState.NA,
+            state=FacetState.UNCONFIRMED,
             reason="UNCONFIRMED: not classified by the survey; the flat "
             "model has no remediation column, and the rule help text carries "
             "the fixed version already declared under fix_available",

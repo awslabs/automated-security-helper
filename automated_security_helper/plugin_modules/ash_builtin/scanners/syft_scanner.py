@@ -184,7 +184,7 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
             "result, so no flat row ever holds it",
         ),
         package_path=FacetDecl(
-            state=FacetState.NA,
+            state=FacetState.UNCONFIRMED,
             reason="UNCONFIRMED: syft's native artifacts[].locations[].path "
             "(fixture syft.src.json) has a CycloneDX counterpart this "
             "adapter has not been read against; a cyclonedx-json run "
