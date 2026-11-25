@@ -27,6 +27,7 @@ from typing import (
     ClassVar,
     Generic,
     List,
+    Literal,
     Optional,
     Tuple,
     TypeVar,
@@ -54,6 +55,14 @@ from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.process_env import snapshot_environ
 
 C = TypeVar("C", bound=ScannerPluginConfigBase)
+
+#: The rule severities the grep tools filter on (``--severity``). Their own words,
+#: not ASH's ladder, so a named alias both scanners' option models share and not an
+#: ``ash`` enum: the tool owns the vocabulary.
+GrepRuleSeverityText = Literal["INFO", "WARNING", "ERROR"]
+
+#: The usage-metrics switch both grep tools take (``--metrics``). The tool's words.
+GrepMetricsText = Literal["auto", "on", "off"]
 
 
 #: The default ``exclude`` entry of both scanners that names the files the

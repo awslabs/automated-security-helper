@@ -158,7 +158,7 @@ from automated_security_helper.config.confinement_remedy import SET_BY_THE_OPERA
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason, ToolArgs
-from automated_security_helper.models.vocab import TargetType
+from automated_security_helper.models.vocab import Severity, TargetType
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.schemas.sarif_schema_model import (
     Level,
@@ -180,21 +180,21 @@ from automated_security_helper.utils.subprocess_utils import find_executable
 from automated_security_helper.utils.process_env import snapshot_environ
 
 #: hadolint level -> (ASH severity, SARIF level). See the module docstring.
-HADOLINT_LEVEL_MAP: Dict[str, Tuple[str, Level]] = {
-    "error": ("HIGH", Level.error),
-    "warning": ("MEDIUM", Level.warning),
-    "info": ("LOW", Level.note),
-    "style": ("INFO", Level.none),
+HADOLINT_LEVEL_MAP: Dict[str, Tuple[Severity, Level]] = {
+    "error": (Severity.HIGH, Level.error),
+    "warning": (Severity.MEDIUM, Level.warning),
+    "info": (Severity.LOW, Level.note),
+    "style": (Severity.INFO, Level.none),
 }
 
 #: What a SARIF level means when the JSON pass cannot refine it. ``note`` is
 #: ``info`` here, not ``style``: of the two levels hadolint writes as ``note``,
 #: info is the more severe, so an unrefined note is never under-reported.
-_SARIF_LEVEL_TO_HADOLINT: Dict[str, str] = {
-    "error": "error",
-    "warning": "warning",
-    "note": "info",
-    "none": "style",
+_SARIF_LEVEL_TO_HADOLINT: Dict[Level, str] = {
+    Level.error: "error",
+    Level.warning: "warning",
+    Level.note: "info",
+    Level.none: "style",
 }
 
 #: The rule hadolint reports a Dockerfile it could not parse under. It is not a
@@ -988,7 +988,7 @@ class HadolintScanner(ScannerPluginBase[HadolintScannerConfig]):
             result.level = level
             if result.properties is None:
                 result.properties = PropertyBag()
-            setattr(result.properties, "issue_severity", severity)  # noqa: B010
+            setattr(result.properties, "issue_severity", severity.value)  # noqa: B010
             setattr(result.properties, "hadolint_level", hadolint_level)  # noqa: B010
         return sarif_report
 

@@ -64,6 +64,7 @@ from automated_security_helper.core.enums import OfflineStrategy
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason, ToolExtraArg
 from automated_security_helper.schemas.sarif_schema_model import (
+    Level,
     PropertyBag,
     SarifReport,
 )
@@ -215,17 +216,17 @@ TRIVY_SEVERITIES = ("CRITICAL", "HIGH", "MEDIUM", "LOW")
 
 #: The SARIF level trivy gives a result of each severity (``toSarifErrorLevel``).
 _SARIF_LEVEL = {
-    "CRITICAL": "error",
-    "HIGH": "error",
-    "MEDIUM": "warning",
-    "LOW": "note",
+    "CRITICAL": Level.error,
+    "HIGH": Level.error,
+    "MEDIUM": Level.warning,
+    "LOW": Level.note,
 }
 
 #: ``_SARIF_LEVEL`` with trivy's fifth severity: ``toSarifErrorLevel`` gives
 #: UNKNOWN the ``note`` level, LOW's. Read against a message's ``Severity:`` lines
 #: (``trivy_severity``), so a line trivy wrote for an UNKNOWN rating still reads as
 #: trivy's own, and the result is left to ASH's generic mapping as before.
-_MESSAGE_LEVEL = {**_SARIF_LEVEL, "UNKNOWN": "note"}
+_MESSAGE_LEVEL = {**_SARIF_LEVEL, "UNKNOWN": Level.note}
 
 #: trivy's severities from the highest down, UNKNOWN last. Between two
 #: ``Severity:`` lines of one level, ``trivy_severity`` reads the higher.

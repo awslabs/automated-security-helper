@@ -105,7 +105,7 @@ from automated_security_helper.core.enums import OfflineStrategy, ScannerToolTyp
 from automated_security_helper.config.confinement_remedy import SET_BY_THE_OPERATOR
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason
-from automated_security_helper.models.vocab import TargetType
+from automated_security_helper.models.vocab import Severity, TargetType
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactLocation,
@@ -181,8 +181,8 @@ DEFAULT_RULE_SET = "wa-Security-Pillar"
 #: level is ``error`` to match, and ``issue_severity`` is set as well, because ASH's
 #: two severity readers disagree on a bare ``error`` (the gate reads CRITICAL, the
 #: flat reporters HIGH) and both honor ``issue_severity``, so every reader says HIGH.
-VIOLATION_SEVERITY = "HIGH"
-VIOLATION_LEVEL = "error"
+VIOLATION_SEVERITY = Severity.HIGH
+VIOLATION_LEVEL = Level.error
 
 _SUCCESS_EXIT_CODES = frozenset({0, 19})
 
@@ -1098,10 +1098,10 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
                     ):
                         physical.root.artifactLocation.uri = uri
                         physical.root.artifactLocation.uriBaseId = None
-                result.level = Level(VIOLATION_LEVEL)
+                result.level = VIOLATION_LEVEL
                 if result.properties is None:
                     result.properties = PropertyBag()
-                setattr(result.properties, "issue_severity", VIOLATION_SEVERITY)  # noqa: B010
+                setattr(result.properties, "issue_severity", VIOLATION_SEVERITY.value)  # noqa: B010
                 resource_id = CfnGuardScanner._derived_resource_id(result)
                 if resource_id is not None:
                     setattr(result.properties, ASH_RESOURCE_ID_KEY, resource_id)  # noqa: B010

@@ -118,7 +118,7 @@ from automated_security_helper.base.uv_tool_mixin import guarded_values
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason
-from automated_security_helper.models.vocab import TargetType
+from automated_security_helper.models.vocab import Severity, TargetType
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactLocation,
@@ -176,10 +176,10 @@ from automated_security_helper.utils.uv_tool_runner import get_uv_tool_command
 #: level to the one that matches keeps reporters that read only the level (the GitHub
 #: code-scanning output) consistent with the rest. cfn-lint's own letter is never lost:
 #: it is the first character of the rule id.
-SEVERITY_BY_RULE_LETTER: Dict[str, Tuple[str, str]] = {
-    "E": ("MEDIUM", "warning"),
-    "W": ("LOW", "note"),
-    "I": ("INFO", "none"),
+SEVERITY_BY_RULE_LETTER: Dict[str, Tuple[Severity, Level]] = {
+    "E": (Severity.MEDIUM, Level.warning),
+    "W": (Severity.LOW, Level.note),
+    "I": (Severity.INFO, Level.none),
 }
 
 #: Rule id cfn-lint uses for its own configuration errors, which includes a template
@@ -341,14 +341,15 @@ def attach_cfn_lint_resources(
     return attached
 
 
-def severity_for_rule(rule_id: Optional[str]) -> Tuple[str, str]:
+def severity_for_rule(rule_id: Optional[str]) -> Tuple[str, Level]:
     """The (ASH severity, SARIF level) for a cfn-lint rule id.
 
     An id that does not start with E, W or I is treated as E: an unknown class is
     reported at the level that fails a default scan rather than below it.
     """
     letter = (rule_id or "E")[:1].upper()
-    return SEVERITY_BY_RULE_LETTER.get(letter, SEVERITY_BY_RULE_LETTER["E"])
+    severity, level = SEVERITY_BY_RULE_LETTER.get(letter, SEVERITY_BY_RULE_LETTER["E"])
+    return severity.value, level
 
 
 def mandatory_prefixes(ignored: List[str]) -> List[str]:
@@ -1593,7 +1594,7 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
                         )
                         artifact.uri = shown or written
                 severity, level = severity_for_rule(result.ruleId)
-                result.level = Level(level)
+                result.level = level
                 if result.properties is None:
                     result.properties = PropertyBag()
                 setattr(result.properties, "issue_severity", severity)  # noqa: B010

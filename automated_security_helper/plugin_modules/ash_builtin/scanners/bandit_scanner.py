@@ -719,10 +719,9 @@ class BanditScannerConfigOptions(ScannerOptionsBase):
         ),
     ] = None
     confidence_level: Annotated[
-        str,
+        Literal["all", "low", "medium", "high"],
         Field(
             description="Confidence level for bandit scan (all, low, medium, high)",
-            pattern="^(all|low|medium|high)$",
         ),
     ] = "all"
     ignore_nosec: Annotated[

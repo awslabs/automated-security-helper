@@ -23,7 +23,7 @@ from automated_security_helper.base.scanner_facets import (
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.models.core import ToolArgs
-from automated_security_helper.models.vocab import TargetType
+from automated_security_helper.models.vocab import Severity, TargetType
 from automated_security_helper.models.core import (
     IgnorePathWithReason,
     ignore_paths_that_skip_scanning,
@@ -35,6 +35,7 @@ from automated_security_helper.base.uv_tool_mixin import guarded_values_read
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.schemas.sarif_schema_model import (
+    Level,
     MultiformatMessageString,
     SarifReport,
     Run,
@@ -109,11 +110,11 @@ def _has_problem_text(problems: List[str]) -> bool:
 
 # Advisory severity to SARIF level, for npm, yarn and pnpm alike.
 _SEVERITY_LEVEL = {
-    "critical": "error",
-    "high": "error",
-    "moderate": "warning",
-    "low": "note",
-    "info": "note",
+    "critical": Level.error,
+    "high": Level.error,
+    "moderate": Level.warning,
+    "low": Level.note,
+    "info": Level.note,
 }
 
 # Advisory severity to the ASH severity a result declares (``issue_severity``,
@@ -123,11 +124,11 @@ _SEVERITY_LEVEL = {
 # graded CRITICAL and an info one LOW. With a usable score the rule's
 # security_severity is copied onto the result instead (sarif_utils).
 _SEVERITY_GRADE = {
-    "critical": "CRITICAL",
-    "high": "HIGH",
-    "moderate": "MEDIUM",
-    "low": "LOW",
-    "info": "INFO",
+    "critical": Severity.CRITICAL,
+    "high": Severity.HIGH,
+    "moderate": Severity.MEDIUM,
+    "low": Severity.LOW,
+    "info": Severity.INFO,
 }
 
 # npm's severity words, lowest first.
@@ -273,7 +274,7 @@ def _grade_properties(severity: str) -> Dict[str, str]:
     for an advisory with no usable CVSS score; empty for a word not in the table,
     which leaves the SARIF level to decide as before."""
     grade = _SEVERITY_GRADE.get(str(severity).lower())
-    return {"issue_severity": grade} if grade else {}
+    return {"issue_severity": grade.value} if grade else {}
 
 
 def _ndjson_lines(text: str) -> List[str]:
@@ -1838,7 +1839,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         for record, vuln_id in zip(records, rule_ids):
             pkg_name = record["package"]
             severity = str(record["severity"])
-            level = _SEVERITY_LEVEL.get(severity, "warning")
+            level = _SEVERITY_LEVEL.get(severity, Level.warning).value
             title = record["title"] or f"Vulnerability in {pkg_name}"
             score = _usable_cvss_score(record["cvss"])
             grade = {} if score is not None else _grade_properties(severity)
@@ -2661,7 +2662,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                     # read an unscored low or moderate advisory as the
                     # package's highest.
                     via_severity = str(via.get("severity") or severity)
-                    via_level = _SEVERITY_LEVEL.get(via_severity, "warning")
+                    via_level = _SEVERITY_LEVEL.get(via_severity, Level.warning).value
                     via_range = via.get("range") or vuln_info.get("range", "*")
                     cvss = via.get("cvss") if isinstance(via.get("cvss"), dict) else {}
                     score = _usable_cvss_score(cvss)
@@ -2795,7 +2796,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                         if has_dict_via
                         else severity
                     )
-                    level = _SEVERITY_LEVEL.get(severity, "warning")
+                    level = _SEVERITY_LEVEL.get(severity, Level.warning).value
                     via_refs = ", ".join(via_names)
                     title = f"Transitive vulnerability in {pkg_name} (via {via_refs})"
                     description = title

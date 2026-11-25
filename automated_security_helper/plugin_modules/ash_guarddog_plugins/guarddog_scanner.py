@@ -137,11 +137,12 @@ from automated_security_helper.core.constants import KNOWN_IGNORE_PATHS
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason, ToolArgs
-from automated_security_helper.models.vocab import TargetType
+from automated_security_helper.models.vocab import Severity, TargetType
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactLocation,
     Invocation,
+    Level,
     MultiformatMessageString,
     PropertyBag,
     ReportingDescriptor,
@@ -271,11 +272,11 @@ def _inside_seatbelt_sandbox() -> bool:
 #: ``[]`` and exits 0, which would otherwise read as "no dependencies, no findings".
 _GUARDDOG_ERROR_LINE = re.compile(r"^ERROR:", re.MULTILINE)
 
-_SEVERITY_LEVELS = {
-    "HIGH": "error",
-    "MEDIUM": "warning",
-    "LOW": "note",
-    "INFO": "none",
+_SEVERITY_LEVELS: Dict[Severity, Level] = {
+    Severity.HIGH: Level.error,
+    Severity.MEDIUM: Level.warning,
+    Severity.LOW: Level.note,
+    Severity.INFO: Level.none,
 }
 
 #: Run as ``python -c _HIT_LIMIT_BOOTSTRAP <limit> <set|raise> <guarddog args>`` in
@@ -309,7 +310,7 @@ sys.exit(cli())
 """
 
 
-def _risk_severity(value: Any) -> str:
+def _risk_severity(value: Any) -> Severity:
     """ASH severity for a GuardDog risk severity (``high``/``medium``/``low``).
 
     GuardDog derives a risk's severity from the matching threat rule's own
@@ -320,7 +321,11 @@ def _risk_severity(value: Any) -> str:
     and reporting it below the default threshold would hide it.
     """
     text = str(value or "").strip().lower()
-    return {"high": "HIGH", "medium": "MEDIUM", "low": "LOW"}.get(text, "MEDIUM")
+    return {
+        "high": Severity.HIGH,
+        "medium": Severity.MEDIUM,
+        "low": Severity.LOW,
+    }.get(text, Severity.MEDIUM)
 
 
 def _is_package_manifest(ecosystem: str, filename: str) -> bool:
@@ -527,9 +532,9 @@ class _Converted:
     #: once across invocations, and its ASH severity. Kept beside the SARIF
     #: model rather than read back out of it, where every field is optional.
     keys: List[Tuple[Any, ...]] = field(default_factory=list)
-    severities: List[str] = field(default_factory=list)
+    severities: List[Severity] = field(default_factory=list)
 
-    def take(self, made: "Tuple[Result, Tuple[Any, ...], str]") -> None:
+    def take(self, made: "Tuple[Result, Tuple[Any, ...], Severity]") -> None:
         result, key, severity = made
         self.results.append(result)
         self.keys.append(key)
@@ -554,14 +559,14 @@ def _rule_descriptor(rule_id: str, description: str | None) -> ReportingDescript
 def _make_result(
     *,
     rule_id: str,
-    severity: str,
+    severity: Severity,
     message: str,
     uri: str,
     line: int | None,
     snippet: str | None,
     extra_properties: Dict[str, Any],
     fingerprint_parts: Iterable[Any],
-) -> Tuple[Result, Tuple[Any, ...], str]:
+) -> Tuple[Result, Tuple[Any, ...], Severity]:
     """A SARIF result, its de-duplication key and its ASH severity."""
     physical: Dict[str, Any] = {"artifactLocation": {"uri": uri}}
     if line is not None and line > 0:
@@ -572,11 +577,11 @@ def _make_result(
     result = Result.model_validate(
         {
             "ruleId": rule_id,
-            "level": _SEVERITY_LEVELS[severity],
+            "level": _SEVERITY_LEVELS[severity].value,
             "message": {"text": message},
             "locations": [{"physicalLocation": physical}],
             "partialFingerprints": {"guarddog/v1": _fingerprint(*fingerprint_parts)},
-            "properties": {"issue_severity": severity, **extra_properties},
+            "properties": {"issue_severity": severity.value, **extra_properties},
         }
     )
     key = (
@@ -715,7 +720,7 @@ def convert_guarddog_scan_result(
             out.take(
                 _make_result(
                     rule_id=rule_id,
-                    severity="MEDIUM",
+                    severity=Severity.MEDIUM,
                     message=f"{dep_text}{hits}",
                     uri=uri,
                     line=out_line,
@@ -739,11 +744,11 @@ def convert_guarddog_scan_result(
             if is_capability:
                 if not include_capabilities:
                     continue
-                severity = "INFO"
+                severity = Severity.INFO
             else:
                 if (rule_id, hit.get("location"), hit.get("code")) in consumed:
                     continue
-                severity = "LOW"
+                severity = Severity.LOW
             message = hit.get("message") or rule_id
             out.rules.setdefault(rule_id, _rule_descriptor(rule_id, message))
             qualifier = (
@@ -1819,8 +1824,9 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
         results: List[Result] = []
         failures: List[str] = []
         seen: Dict[Tuple[Any, ...], int] = {}
-        kept_severity: List[str] = []
-        severity_rank = {"INFO": 0, "LOW": 1, "MEDIUM": 2, "HIGH": 3}
+        kept_severity: List[Severity] = []
+        # Least severe first, so the rank rises with severity.
+        severity_rank = {member: rank for rank, member in enumerate(reversed(Severity))}
 
         def add(converted: _Converted) -> None:
             for rule_id, descriptor in converted.rules.items():

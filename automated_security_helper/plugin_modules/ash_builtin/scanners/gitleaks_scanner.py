@@ -180,7 +180,7 @@ from automated_security_helper.config.tool_config_trust import (
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason, ToolArgs
-from automated_security_helper.models.vocab import TargetType
+from automated_security_helper.models.vocab import Severity, TargetType
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.schemas.sarif_schema_model import (
     Invocation,
@@ -1906,7 +1906,7 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
                 result.properties = PropertyBag(tags=tags)
             else:
                 result.properties.tags = tags
-            setattr(result.properties, "issue_severity", "CRITICAL")  # noqa: B010
+            setattr(result.properties, "issue_severity", Severity.CRITICAL.value)  # noqa: B010
 
             for location in result.locations or []:
                 physical = location.physicalLocation

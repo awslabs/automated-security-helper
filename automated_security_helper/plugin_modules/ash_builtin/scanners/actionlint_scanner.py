@@ -212,13 +212,13 @@ from automated_security_helper.base.scanner_plugin import (
 from automated_security_helper.core.constants import KNOWN_IGNORE_PATHS
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
-from automated_security_helper.models.vocab import TargetType
+from automated_security_helper.models.vocab import Severity, TargetType
 from automated_security_helper.models.core import (
     IgnorePathWithReason,
     ignore_paths_that_skip_scanning,
 )
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
-from automated_security_helper.schemas.sarif_schema_model import SarifReport
+from automated_security_helper.schemas.sarif_schema_model import Level, SarifReport
 from automated_security_helper.utils.download_utils import (
     pinned_tool_install_commands,
 )
@@ -300,34 +300,34 @@ INJECTABLE_DEPRECATED_COMMANDS = ('"set-env"', '"add-path"')
 #: Severity for each actionlint rule kind, as listed by ``allKinds`` in v1.7.12.
 #: ``expression`` and ``deprecated-commands`` are LOW here and raised per finding by
 #: :func:`severity_for`.
-KIND_SEVERITY: Dict[str, str] = {
-    "action": "LOW",
-    "credentials": "HIGH",
-    "deprecated-commands": "LOW",
-    "env-var": "LOW",
-    "events": "LOW",
-    "expression": "LOW",
-    "glob": "LOW",
-    "id": "LOW",
-    "if-cond": "MEDIUM",
-    "job-needs": "LOW",
-    "matrix": "LOW",
-    "permissions": "MEDIUM",
-    "pyflakes": "LOW",
-    "runner-label": "LOW",
-    "shell-name": "LOW",
-    "shellcheck": "LOW",
-    "syntax-check": "LOW",
-    "workflow-call": "LOW",
+KIND_SEVERITY: Dict[str, Severity] = {
+    "action": Severity.LOW,
+    "credentials": Severity.HIGH,
+    "deprecated-commands": Severity.LOW,
+    "env-var": Severity.LOW,
+    "events": Severity.LOW,
+    "expression": Severity.LOW,
+    "glob": Severity.LOW,
+    "id": Severity.LOW,
+    "if-cond": Severity.MEDIUM,
+    "job-needs": Severity.LOW,
+    "matrix": Severity.LOW,
+    "permissions": Severity.MEDIUM,
+    "pyflakes": Severity.LOW,
+    "runner-label": Severity.LOW,
+    "shell-name": Severity.LOW,
+    "shellcheck": Severity.LOW,
+    "syntax-check": Severity.LOW,
+    "workflow-call": Severity.LOW,
 }
 
 #: Severity for a kind KIND_SEVERITY does not list.
-UNKNOWN_KIND_SEVERITY = "LOW"
+UNKNOWN_KIND_SEVERITY = Severity.LOW
 
-_SEVERITY_TO_LEVEL: Dict[str, str] = {
-    "HIGH": "error",
-    "MEDIUM": "warning",
-    "LOW": "note",
+_SEVERITY_TO_LEVEL: Dict[Severity, Level] = {
+    Severity.HIGH: Level.error,
+    Severity.MEDIUM: Level.warning,
+    Severity.LOW: Level.note,
 }
 
 #: Tags on a ``credentials`` result and its rule. The finding reports a password
@@ -357,14 +357,14 @@ NO_WORKFLOW_FILE = (
 _KNOWN_IGNORED_DIRS = frozenset(item.strip("/") for item in KNOWN_IGNORE_PATHS)
 
 
-def severity_for(kind: str, message: str) -> str:
+def severity_for(kind: str, message: str) -> Severity:
     """The ASH severity for one actionlint finding."""
     if kind == "expression" and _UNTRUSTED_INPUT_MESSAGE.match(message):
-        return "HIGH"
+        return Severity.HIGH
     if kind == "deprecated-commands" and any(
         command in message for command in INJECTABLE_DEPRECATED_COMMANDS
     ):
-        return "MEDIUM"
+        return Severity.MEDIUM
     return KIND_SEVERITY.get(kind, UNKNOWN_KIND_SEVERITY)
 
 
@@ -1057,7 +1057,7 @@ def build_sarif(
         if kind not in KIND_SEVERITY and kind not in kinds_seen:
             ASH_LOGGER.warning(
                 f"actionlint reported rule kind {kind!r}, which ASH has no severity "
-                f"for; reporting it as {UNKNOWN_KIND_SEVERITY}."
+                f"for; reporting it as {UNKNOWN_KIND_SEVERITY.value}."
             )
         severity = severity_for(kind, message)
         kinds_seen.setdefault(kind, KIND_SEVERITY.get(kind, UNKNOWN_KIND_SEVERITY))
@@ -1071,7 +1071,7 @@ def build_sarif(
         if (
             not untrusted_shape_drift_logged
             and kind == "expression"
-            and severity != "HIGH"
+            and severity is not Severity.HIGH
             and UNTRUSTED_INPUT_MARKER in message
         ):
             untrusted_shape_drift_logged = True
@@ -1135,7 +1135,7 @@ def build_sarif(
             physical_location["region"] = region
 
         properties: Dict[str, Any] = {
-            "issue_severity": severity,
+            "issue_severity": severity.value,
             "actionlint_kind": kind,
         }
         if kind == "credentials":
@@ -1144,7 +1144,7 @@ def build_sarif(
         results.append(
             {
                 "ruleId": kind,
-                "level": _SEVERITY_TO_LEVEL[severity],
+                "level": _SEVERITY_TO_LEVEL[severity].value,
                 "message": {"text": message},
                 "locations": [{"physicalLocation": physical_location}],
                 "properties": properties,
@@ -1158,7 +1158,9 @@ def build_sarif(
             "name": kind,
             "shortDescription": {"text": f"actionlint {kind} check"},
             "helpUri": ACTIONLINT_CHECKS_URL,
-            "defaultConfiguration": {"level": _SEVERITY_TO_LEVEL[default_severity]},
+            "defaultConfiguration": {
+                "level": _SEVERITY_TO_LEVEL[default_severity].value
+            },
         }
         if kind == "credentials":
             rule["properties"] = {"tags": list(CREDENTIALS_TAGS)}

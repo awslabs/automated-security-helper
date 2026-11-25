@@ -149,7 +149,7 @@ from automated_security_helper.core.constants import KNOWN_IGNORE_PATHS
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason, ToolArgs
-from automated_security_helper.models.vocab import TargetType
+from automated_security_helper.models.vocab import Severity, TargetType
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.schemas.sarif_schema_model import (
     Level,
@@ -387,31 +387,33 @@ def _is_a_uv_route(command: Optional[List[str]]) -> bool:
     return executable in _UV_EXECUTABLE_NAMES and command[1:3] == ["tool", "run"]
 
 
-_BASE_SEVERITY: Dict[str, str] = {
-    "high": "HIGH",
-    "medium": "MEDIUM",
-    "low": "LOW",
-    "informational": "INFO",
+_BASE_SEVERITY: Dict[str, Severity] = {
+    "high": Severity.HIGH,
+    "medium": Severity.MEDIUM,
+    "low": Severity.LOW,
+    "informational": Severity.INFO,
 }
-_ONE_BAND_LOWER: Dict[str, str] = {
-    "CRITICAL": "HIGH",
-    "HIGH": "MEDIUM",
-    "MEDIUM": "LOW",
-    "LOW": "INFO",
-    "INFO": "INFO",
+_ONE_BAND_LOWER: Dict[Severity, Severity] = {
+    Severity.CRITICAL: Severity.HIGH,
+    Severity.HIGH: Severity.MEDIUM,
+    Severity.MEDIUM: Severity.LOW,
+    Severity.LOW: Severity.INFO,
+    Severity.INFO: Severity.INFO,
 }
-_LEVEL_TO_SEVERITY: Dict[str, str] = {
-    "error": "HIGH",
-    "warning": "MEDIUM",
-    "note": "LOW",
-    "none": "INFO",
+# Keyed by the SARIF level members; the lookup text is a level word read from the
+# tool's output, and a str-backed member hashes and compares as that word.
+_LEVEL_TO_SEVERITY: Dict[Level, Severity] = {
+    Level.error: Severity.HIGH,
+    Level.warning: Severity.MEDIUM,
+    Level.note: Severity.LOW,
+    Level.none: Severity.INFO,
 }
-_SEVERITY_TO_LEVEL: Dict[str, Level] = {
-    "CRITICAL": Level.error,
-    "HIGH": Level.error,
-    "MEDIUM": Level.warning,
-    "LOW": Level.note,
-    "INFO": Level.none,
+_SEVERITY_TO_LEVEL: Dict[Severity, Level] = {
+    Severity.CRITICAL: Level.error,
+    Severity.HIGH: Level.error,
+    Severity.MEDIUM: Level.warning,
+    Severity.LOW: Level.note,
+    Severity.INFO: Level.none,
 }
 
 _CONSTRAINT_CLAUSE = re.compile(
@@ -505,10 +507,12 @@ def map_zizmor_severity(
     """
     base = _BASE_SEVERITY.get(str(zizmor_severity or "").strip().lower())
     if base is None:
-        return _LEVEL_TO_SEVERITY.get(str(sarif_level or "").strip().lower(), "MEDIUM")
+        return _LEVEL_TO_SEVERITY.get(
+            str(sarif_level or "").strip().lower(), Severity.MEDIUM
+        ).value
     if str(zizmor_confidence or "").strip().lower() == "low":
-        return _ONE_BAND_LOWER[base]
-    return base
+        return _ONE_BAND_LOWER[base].value
+    return base.value
 
 
 def is_zizmor_input(relative_path: PurePath, scan_root: Optional[Path] = None) -> bool:
@@ -1918,5 +1922,5 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
                 if result.properties is None:
                     result.properties = PropertyBag()
                 setattr(result.properties, "issue_severity", severity)  # noqa: B010
-                result.level = _SEVERITY_TO_LEVEL[severity]
+                result.level = _SEVERITY_TO_LEVEL[Severity(severity)]
         return sarif_report
