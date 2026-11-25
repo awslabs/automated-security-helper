@@ -996,8 +996,8 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
                 ),
             ),
             identity=opsf.IdentityFacet(
-                fingerprint_class=opsf.FingerprintClass.UNCONFIRMED,
-                note="no fixture read classifies checkov's fingerprints; reads as positional-only until one does",
+                fingerprint_class=opsf.FingerprintClass.POSITIONAL_ONLY,
+                note="the committed side-report fixtures (tests/test_data/scanners/checkov/src.*.json) carry no fingerprint key and the adapter writes none; identity is file and line through the shared floor",
             ),
             extensibility=opsf.ExtensibilityFacet(
                 custom_rules=opsf.CustomRules.NONE,

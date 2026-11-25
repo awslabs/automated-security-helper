@@ -459,8 +459,11 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
                 ),
             ),
             identity=opsf.IdentityFacet(
-                fingerprint_class=opsf.FingerprintClass.UNCONFIRMED,
-                note="whether the fork emits matchBasedId; one fixture read settles it",
+                fingerprint_class=opsf.FingerprintClass.STABLE_NATIVE,
+                note=(
+                    "matchBasedId/v1, read in tests/test_data/scanners/opengrep/"
+                    "captured/opengrep-2.0.0-m0.sarif (results[].fingerprints)"
+                ),
             ),
             extensibility=opsf.ExtensibilityFacet(
                 custom_rules=opsf.CustomRules.BOTH,
