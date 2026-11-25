@@ -47,6 +47,14 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters._report_fram
     GRADED_SCHEMA,
     graded_frame,
 )
+from automated_security_helper.plugin_modules.ash_builtin.reporters.asff_formatter import (
+    _derived_frame,
+    _derived_schema,
+)
+from automated_security_helper.plugin_modules.ash_builtin.reporters.gitlab_sast_reporter import (
+    _projection,
+    _projection_schema,
+)
 from automated_security_helper.utils.finding_diff import SIDE_SPEC, _side
 from automated_security_helper.utils.finding_identity import identity_frame_spec
 from automated_security_helper.utils.frame_text import unwire, wire
@@ -95,6 +103,8 @@ HAND_SCHEMAS: Dict[
         lambda: dict(GRADED_SCHEMA),
         lambda: graded_frame([], [], [], []),
     ),
+    "asff_derived_input": (_derived_schema, lambda: _derived_frame([])),
+    "gitlab_sast_projection": (_projection_schema, lambda: _projection([])),
 }
 
 
