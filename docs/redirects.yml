@@ -7,6 +7,15 @@
 #
 # docs/contributing.md is not listed: it was served at /contributing/, the URL the new
 # contributing/index.md is served at, so that URL keeps working without a redirect.
+#
+# Entries under docs/development/, docs/plugins/builtin/event-callbacks.md,
+# docs/plugins/workflow.md, docs/prerequisites.md, tutorials/ashv3-quick-start-guide.md
+# and tutorials/cloud9-quickstart.md cover URLs the site served in earlier releases
+# (most of them only in the June-July 2025 v3 betas) whose pages have no one successor,
+# so each points at the page that owns its subject today. The full historical URL
+# inventory and the dead-URL map these entries materialize live in docs/url-history/,
+# and scripts/validate_url_history.py checks in CI that every inventoried URL is
+# served, redirected or tombstoned, with no redirect chains or loops.
 redirects:
   developer-guide/scanner-validation-system.md: contributing/testing.md
   developer-guide/unified-metrics.md: concepts/how-ash-works.md
@@ -25,6 +34,71 @@ redirects:
   docs/concepts.md: concepts/how-ash-works.md
   docs/config-overrides.md: how-to/configure.md
   docs/configuration-guide.md: how-to/configure.md
+  docs/development/api.md: reference/python-api.md
+  docs/development/api/base.converter_plugin.md: reference/python-api.md
+  docs/development/api/base.md: reference/python-api.md
+  docs/development/api/base.options.md: reference/python-api.md
+  docs/development/api/base.plugin_config.md: reference/python-api.md
+  docs/development/api/base.reporter_plugin.md: reference/python-api.md
+  docs/development/api/base.scanner_plugin.md: reference/python-api.md
+  docs/development/api/cli.md: reference/cli.md
+  docs/development/api/config.ash_config.md: reference/python-api.md
+  docs/development/api/config.default_config.md: reference/python-api.md
+  docs/development/api/config.md: reference/python-api.md
+  docs/development/api/config.scanner_types.md: reference/python-api.md
+  docs/development/api/converters.ash_default.archive_converter.md: reference/converters.md
+  docs/development/api/converters.ash_default.jupyter_converter.md: reference/converters.md
+  docs/development/api/converters.ash_default.md: reference/converters.md
+  docs/development/api/converters.md: reference/converters.md
+  docs/development/api/core.constants.md: reference/python-api.md
+  docs/development/api/core.exceptions.md: reference/python-api.md
+  docs/development/api/core.execution_engine.md: reference/python-api.md
+  docs/development/api/core.md: reference/python-api.md
+  docs/development/api/core.orchestrator.md: reference/python-api.md
+  docs/development/api/core.plugin_registry.md: reference/python-api.md
+  docs/development/api/core.scanner_factory.md: reference/python-api.md
+  docs/development/api/models.aggregation.md: reference/python-api.md
+  docs/development/api/models.asharp_model.md: reference/python-api.md
+  docs/development/api/models.core.md: reference/python-api.md
+  docs/development/api/models.md: reference/python-api.md
+  docs/development/api/models.scan_results_container.md: reference/python-api.md
+  docs/development/api/models.security_vulnerability.md: reference/python-api.md
+  docs/development/api/reporters.ash_default.asff_reporter.md: reference/reporters.md
+  docs/development/api/reporters.ash_default.csv_reporter.md: reference/reporters.md
+  docs/development/api/reporters.ash_default.cyclonedx_reporter.md: reference/reporters.md
+  docs/development/api/reporters.ash_default.html_reporter.md: reference/reporters.md
+  docs/development/api/reporters.ash_default.json_reporter.md: reference/reporters.md
+  docs/development/api/reporters.ash_default.junitxml_reporter.md: reference/reporters.md
+  docs/development/api/reporters.ash_default.md: reference/reporters.md
+  docs/development/api/reporters.ash_default.sarif_reporter.md: reference/reporters.md
+  docs/development/api/reporters.ash_default.spdx_reporter.md: reference/reporters.md
+  docs/development/api/reporters.ash_default.text_reporter.md: reference/reporters.md
+  docs/development/api/reporters.ash_default.yaml_reporter.md: reference/reporters.md
+  docs/development/api/reporters.md: reference/reporters.md
+  docs/development/api/scanners.ash_default.bandit_scanner.md: reference/scanners.md
+  docs/development/api/scanners.ash_default.cdk_nag_scanner.md: reference/scanners.md
+  docs/development/api/scanners.ash_default.checkov_scanner.md: reference/scanners.md
+  docs/development/api/scanners.ash_default.custom_scanner.md: reference/scanners.md
+  docs/development/api/scanners.ash_default.detect_secrets_scanner.md: reference/scanners.md
+  docs/development/api/scanners.ash_default.md: reference/scanners.md
+  docs/development/api/scanners.md: reference/scanners.md
+  docs/development/api/schemas.cyclonedx_bom_1_6_schema.md: reference/python-api.md
+  docs/development/api/schemas.cyclonedx_bom_1_6_schema.spdx.md: reference/python-api.md
+  docs/development/api/schemas.data_interchange.md: reference/python-api.md
+  docs/development/api/schemas.generate_schemas.md: reference/python-api.md
+  docs/development/api/schemas.md: reference/python-api.md
+  docs/development/api/schemas.ocsf.md: reference/python-api.md
+  docs/development/api/schemas.sarif_schema_model.md: reference/python-api.md
+  docs/development/api/utils.cdk_nag_wrapper.md: reference/python-api.md
+  docs/development/api/utils.get_ash_version.md: reference/python-api.md
+  docs/development/api/utils.get_scan_set.md: reference/python-api.md
+  docs/development/api/utils.md: reference/python-api.md
+  docs/development/api/utils.normalizers.md: reference/python-api.md
+  docs/development/customization/converters.md: plugins/write-a-converter.md
+  docs/development/customization/parsers.md: plugins/index.md
+  docs/development/customization/reporters.md: plugins/write-a-reporter.md
+  docs/development/customization/scanners.md: plugins/write-a-scanner.md
+  docs/development/customization/workflow.md: plugins/index.md
   docs/glossary.md: concepts/glossary.md
   docs/installation-guide.md: how-to/install.md
   docs/mcp-performance-scalability.md: how-to/mcp-server.md
@@ -45,6 +119,7 @@ redirects:
   docs/plugins/aws/security-hub-reporter.md: plugins/aws.md
   docs/plugins/builtin/converters-diagrams.md: reference/converters.md
   docs/plugins/builtin/converters.md: reference/converters.md
+  docs/plugins/builtin/event-callbacks.md: plugins/event-subscribers.md
   docs/plugins/builtin/event-handlers-diagrams.md: plugins/event-subscribers.md
   docs/plugins/builtin/event-handlers.md: plugins/event-subscribers.md
   docs/plugins/builtin/index.md: reference/scanners.md
@@ -71,6 +146,8 @@ redirects:
   docs/plugins/reporter-plugins.md: plugins/write-a-reporter.md
   docs/plugins/scanner-plugins-diagrams.md: plugins/write-a-scanner.md
   docs/plugins/scanner-plugins.md: plugins/write-a-scanner.md
+  docs/plugins/workflow.md: plugins/index.md
+  docs/prerequisites.md: how-to/install.md
   docs/quick-start-guide.md: getting-started/local.md
   docs/support.md: support.md
   docs/supported-languages.md: reference/coverage.md
@@ -84,6 +161,8 @@ redirects:
   docs/troubleshooting-uv-installation.md: how-to/troubleshoot.md
   docs/troubleshooting.md: how-to/troubleshoot.md
   docs/uv-tool-installation-guide.md: docs/advanced-usage.md
+  tutorials/ashv3-quick-start-guide.md: getting-started/local.md
+  tutorials/cloud9-quickstart.md: how-to/pre-commit.md
   tutorials/mcp-streaming-guide.md: how-to/mcp-server.md
   tutorials/running-ash-in-ci.md: getting-started/ci.md
   tutorials/running-ash-locally.md: getting-started/local.md

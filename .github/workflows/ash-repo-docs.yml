@@ -1,7 +1,8 @@
 name: Docs Deploy
-# Publishes the documentation site. It only deploys: the strict site build and the
-# versioned-site check run in ash-unified-ci.yml (the build-docs job), on every pull
-# request and merge queue entry, where required-checks depends on them.
+# Publishes the documentation site. The strict site build and the versioned-site
+# check run in ash-unified-ci.yml (the build-docs job), on every pull request and
+# merge queue entry, where required-checks depends on them; the deploy job here only
+# re-validates the URL-history mapping against the ref it publishes, then deploys.
 #
 # A tag push never deploys. A tag pushed on any commit runs that commit's own copy of
 # this file, and the deploy job holds a contents: write token, so the push trigger
@@ -236,6 +237,21 @@ jobs:
 
       - name: Install dependencies
         run: uv sync
+
+      # Each publish re-validates the URL-history mapping against this ref's own
+      # build, so a release cannot publish redirects its own site contradicts
+      # (scripts/validate_url_history.py; mkdocs.yml sets strict: true, so the build
+      # here fails on whatever the build gate would fail on). A release tag from
+      # before the validator existed has nothing to validate with, so the step says
+      # so and the deploy proceeds as it always has for that tag.
+      - name: Validate the URL history mapping
+        run: |
+          if [ ! -f scripts/validate_url_history.py ]; then
+            echo "this ref predates scripts/validate_url_history.py; nothing to validate"
+            exit 0
+          fi
+          uv run mkdocs build --clean --strict
+          uv run python -I -B scripts/validate_url_history.py --site-dir public
 
       # Not `mkdocs gh-deploy`: it replaces the whole branch with one unversioned
       # build, which would delete every published version. The script fetches
