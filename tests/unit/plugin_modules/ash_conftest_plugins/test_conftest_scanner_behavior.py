@@ -3,10 +3,11 @@
 
 """ConftestScanner: the policy gate, the invocation, the exit status and the report.
 
-The SARIF below is written by hand to the shape Conftest's ``output/sarif.go`` builds
-(rule ids ``<namespace>/<deny|warn|allow|success|skip>``, levels error, warning, note
-and none), not captured from a binary; the fake subprocess serves it, so the tests
-run on every platform without Conftest installed.
+The positive and negative reports are real Conftest 0.62.0 output, committed under
+``tests/test_data/scanners/conftest/captured/``; the fake subprocess serves them, so
+the tests run on every platform without Conftest installed. The ``allow``, ``skip`` and
+``note`` results no run of that policy produced are built by hand to the shape
+Conftest's ``output/sarif.go`` writes.
 """
 
 from __future__ import annotations
@@ -73,30 +74,28 @@ def _sarif(results: List[Dict[str, Any]]) -> str:
     )
 
 
-#: One deny, one warn, one allow exception, and the success and skip entries Conftest
-#: adds for files with no failure. Only the first two are findings.
-POSITIVE = _sarif(
-    [
-        _result("main/deny", "error", "no root user", "deploy/app.yaml", 3),
-        _result("main/warn", "warning", "latest tag", "deploy/app.yaml", 7),
-        _result("main/allow", "note", "excepted", "deploy/app.yaml", None),
-        _result(
-            "main/success", "none", "Policy was satisfied successfully", "ok.json", None
-        ),
-        _result("main/skip", "none", "Policy check was skipped", "b.toml", None),
-    ]
-)
-NEGATIVE = _sarif(
-    [
-        _result(
-            "main/success", "none", "Policy was satisfied successfully", "ok.json", None
-        )
-    ]
+CAPTURED = (
+    Path(__file__).resolve().parents[3]
+    / "test_data"
+    / "scanners"
+    / "conftest"
+    / "captured"
 )
 
+#: Real Conftest 0.62.0 output (see captured/README.md): one deny and one warn on
+#: deploy/bad.yaml, and a success result for deploy/good.yaml. No result has a region.
+POSITIVE = (CAPTURED / "positive.sarif").read_text(encoding="utf-8")
+NEGATIVE = (CAPTURED / "negative.sarif").read_text(encoding="utf-8")
+
+#: Hand-built, for the shapes no run produced: the allow, skip and note results.
+EXTRA_NON_FINDINGS = [
+    _result("main/allow", "note", "excepted", "deploy/app.yaml", None),
+    _result("main/skip", "none", "Policy check was skipped", "b.toml", None),
+]
+
 POSITIVE_EXPECTED = [
-    ("main/deny", "error", "HIGH", "deploy/app.yaml", 3),
-    ("main/warn", "warning", "MEDIUM", "deploy/app.yaml", 7),
+    ("main/deny", "error", "HIGH", "deploy/bad.yaml", None),
+    ("main/warn", "warning", "MEDIUM", "deploy/bad.yaml", None),
 ]
 
 
@@ -329,6 +328,16 @@ class TestReport:
         )
         assert _findings(report) == []
 
+    def test_allow_skip_and_note_results_are_not_findings(
+        self, tree, tmp_path, on_path, monkeypatch
+    ):
+        data = json.loads(POSITIVE)
+        data["runs"][0]["results"].extend(EXTRA_NON_FINDINGS)
+        report = _run(
+            _scanner(tree, tmp_path), FakeConftest(stdout=json.dumps(data)), monkeypatch
+        )
+        assert _findings(report) == POSITIVE_EXPECTED
+
     def test_results_without_a_level_are_medium_and_unknown_levels_high(
         self, tree, tmp_path, on_path, monkeypatch
     ):
@@ -440,6 +449,64 @@ class TestStdoutBecomesTheReport:
         scanner._run_subprocess(["conftest"], results_dir=tmp_path / "res")
         assert seen["stdout_preference"] == "return"
         assert scanner._results_file.read_text(encoding="utf-8") == POSITIVE
+
+
+class TestInstall:
+    def test_the_scanner_constructs_with_no_pinned_release(self, tree, tmp_path):
+        """ASH pins no Conftest release, so there is no install command to build."""
+        from automated_security_helper.utils.tool_downloads import TOOL_VERSIONS
+
+        assert "conftest" not in TOOL_VERSIONS
+        scanner = _scanner(tree, tmp_path)
+        assert not any(scanner.custom_install_commands.values())
+
+    def test_a_pinned_release_yields_commands_when_one_exists(
+        self, tree, tmp_path, monkeypatch
+    ):
+        from automated_security_helper.utils.download_utils import CustomCommand
+
+        sentinel = {"linux": {"amd64": [CustomCommand(args=["true"], shell=False)]}}
+        monkeypatch.setattr(cs, "pinned_tool_install_commands", lambda tool: sentinel)
+        scanner = _scanner(tree, tmp_path)
+        assert (
+            scanner.custom_install_commands["linux"]["amd64"]
+            == sentinel["linux"]["amd64"]
+        )
+
+    def test_the_dependency_hint_does_not_name_an_install_ash_lacks(
+        self, tree, tmp_path, monkeypatch, caplog
+    ):
+        from automated_security_helper.utils.log import ASH_LOGGER
+
+        messages: List[str] = []
+        monkeypatch.setattr(cs, "find_executable", lambda cmd: None)
+        monkeypatch.setattr(
+            ASH_LOGGER, "warning", lambda m, *a, **k: messages.append(m)
+        )
+        assert _scanner(tree, tmp_path).validate_plugin_dependencies() is False
+        assert messages and "ash dependencies install" not in messages[0]
+
+
+class TestRegister:
+    def test_the_facets_declare_what_the_captured_report_carries(self):
+        from automated_security_helper.base.scanner_facets import FacetState
+
+        facets = ConftestScanner.facets
+        assert facets.rule_id.state is FacetState.MAPPED
+        assert facets.file_path.state is FacetState.MAPPED
+        # No region in the captured report, so no line or column is claimed.
+        assert facets.line_range.state is FacetState.NA
+        assert facets.column.state is FacetState.NA
+        # A policy result names a file, not a deployable resource.
+        assert facets.resource_id.state is FacetState.NA
+
+    def test_the_operational_row_mirrors_the_class(self):
+        row = ConftestScanner.operational_facets
+        assert row.scanner_name == ConftestScannerConfig().name
+        assert row.exit_codes.success_exit_codes == tuple(
+            sorted(ConftestScanner.success_exit_codes)
+        )
+        assert row.network.offline_strategy is ConftestScanner.offline_strategy
 
 
 class TestDependencyCheck:

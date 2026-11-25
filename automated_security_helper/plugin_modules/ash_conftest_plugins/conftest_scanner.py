@@ -92,13 +92,22 @@ from typing import (
 
 from pydantic import Field, PrivateAttr, model_validator
 
+from automated_security_helper.base import scanner_operational_facets as opsf
 from automated_security_helper.base.options import ScannerOptionsBase
+from automated_security_helper.base.scanner_facets import (
+    FacetDecl,
+    FacetState,
+    ScannerFacets,
+)
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
 )
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
-from automated_security_helper.core.exceptions import ScannerError
+from automated_security_helper.core.exceptions import (
+    ScannerError,
+    ToolNotProvisionableError,
+)
 from automated_security_helper.models.core import IgnorePathWithReason, ToolArgs
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.schemas.sarif_schema_model import (
@@ -199,7 +208,7 @@ class ConftestScannerConfig(ScannerPluginConfigBase):
 class ConftestScanner(ScannerPluginBase[ConftestScannerConfig]):
     """Rego policy tests over configuration files using Conftest."""
 
-    #: A native binary, installed from its pinned release asset.
+    #: A native binary, installed by the operator (ASH pins no release yet).
     python_only: ClassVar[bool | None] = False
 
     # No network at scan time unless a policy asks for one, which the sandbox refuses.
@@ -208,6 +217,186 @@ class ConftestScanner(ScannerPluginBase[ConftestScannerConfig]):
     success_exit_codes: ClassVar[Set[int]] = {0}
     # The strict default; see "Sandbox" in the module docstring.
     sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements()
+
+    #: The facets register row (base/scanner_facets.py). Declaration only. Native
+    #: fields name Conftest's SARIF (``output/sarif.go``); the captured report is
+    #: tests/test_data/scanners/conftest/captured/positive.sarif.
+    facets: ClassVar[ScannerFacets] = ScannerFacets(
+        rule_id=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result "ruleId" (<namespace>/<deny|warn>)',
+        ),
+        severity=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result "level" (error, warning), rewritten by '
+            '_post_process_sarif together with properties "issue_severity"',
+        ),
+        file_path=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="locations[].physicalLocation.artifactLocation.uri",
+        ),
+        line_range=FacetDecl(
+            state=FacetState.NA,
+            reason="Conftest SARIF carries no region: a policy result names the "
+            "file, not a line",
+        ),
+        column=FacetDecl(
+            state=FacetState.NA,
+            reason="Conftest SARIF carries no region",
+        ),
+        message=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result "message.text" (the policy author\'s msg)',
+        ),
+        resource_id=FacetDecl(
+            state=FacetState.NA,
+            reason="a policy result names a file and a message, not a deployable "
+            "resource; the rule id is the policy's, not an infrastructure address",
+        ),
+        resource_type=FacetDecl(
+            state=FacetState.NA,
+            reason="the SARIF carries no resource type",
+        ),
+        package_name=FacetDecl(
+            state=FacetState.NA, reason="policy findings carry no package"
+        ),
+        package_version=FacetDecl(
+            state=FacetState.NA, reason="policy findings carry no package"
+        ),
+        package_path=FacetDecl(
+            state=FacetState.NA, reason="policy findings carry no package"
+        ),
+        taxonomy_cve=FacetDecl(
+            state=FacetState.NA, reason="policy findings carry no CVE taxonomy"
+        ),
+        taxonomy_cwe=FacetDecl(
+            state=FacetState.NA,
+            reason="Conftest rules are the operator's Rego; none carries a CWE",
+        ),
+        fingerprints=FacetDecl(
+            state=FacetState.NA,
+            reason="the SARIF carries no fingerprints",
+        ),
+        fix_available=FacetDecl(
+            state=FacetState.NA, reason="policy findings carry no fix state"
+        ),
+        remediation_text=FacetDecl(
+            state=FacetState.NA,
+            reason="the SARIF carries the policy message only",
+        ),
+        snippet=FacetDecl(
+            state=FacetState.NA, reason="the SARIF carries no source snippet"
+        ),
+        references=FacetDecl(
+            state=FacetState.NA,
+            reason="the SARIF rules list is empty; no reference URLs",
+        ),
+        tags=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="(no native tags) the adapter writes policy and "
+            "conftest into result properties tags",
+        ),
+        extras=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result properties "issue_severity" written by the adapter',
+        ),
+    )
+
+    #: The operational register row (base/scanner_operational_facets.py). Conftest
+    #: is not in ``tool_downloads`` yet, so it is declared as a user-installed CLI;
+    #: the pin edit this needs is in the pull request body.
+    operational_facets: ClassVar[opsf.ScannerOperationalFacets] = (
+        opsf.ScannerOperationalFacets(
+            scanner_name="conftest",
+            network=opsf.NetworkFacet(
+                fetch_kind=opsf.FetchKind.NONE,
+                fetches=(),
+                prefetch=(),
+                offline_outcome=opsf.OfflineOutcome.UNCHANGED,
+                offline_strategy=OfflineStrategy.BUNDLED,
+                sandbox_network=opsf.SandboxNetwork.NONE,
+                source=(
+                    "conftest_scanner.py offline_strategy, sandbox_requirements; "
+                    "module header (Offline): no network unless a policy calls "
+                    "http.send, and ASH never passes --update"
+                ),
+            ),
+            output=opsf.OutputFacet(
+                native_formats=(opsf.OutputFormat.SARIF,),
+                side_reports=(),
+                non_finding_artifacts=(),
+                note="--output=sarif on stdout, written to conftest.sarif by the scanner",
+            ),
+            targets=opsf.TargetsFacet(
+                kinds=(opsf.TargetKind.IAC_OTHER,),
+                tool_type=ScannerToolType.IAC,
+                selection="the files under the target whose extension Conftest "
+                "parses, listed by _config_files and passed after `--`",
+                covers_note="the community scanners declare no covers display string",
+            ),
+            runtime=opsf.RuntimeFacet(
+                kind=opsf.RuntimeKind.USER_INSTALLED_CLI,
+                external_programs=(),
+                invocations=opsf.Invocations.ONE,
+                python_only=False,
+                use_uv_tool=False,
+            ),
+            platforms=opsf.PlatformsFacet(
+                provisionable=(),
+                note="ASH pins no Conftest release yet (no TOOL_VERSIONS entry), so "
+                "it provisions nothing; the operator installs Conftest",
+            ),
+            severity=opsf.SeverityFacet(
+                severity_class=opsf.SeverityClass.DERIVED,
+                note="the policy's own deny/warn level: error -> HIGH, warning -> "
+                "MEDIUM, any other level HIGH (CONFTEST_LEVEL_MAP)",
+            ),
+            silencing=opsf.SilencingFacet(
+                tool_side=(
+                    opsf.SilencingLayer(
+                        layer=opsf.SilencingLayerKind.TOOL_DEFAULT_FILTER,
+                        writer=opsf.SilencingWriter.REPOSITORY,
+                        honored=opsf.Honored.YES,
+                        surface="`exception` rules in the Rego policies, which Conftest "
+                        "reports as allow results",
+                        cite="conftest_scanner.py NON_FINDING_RULE_SUFFIXES and "
+                        "_post_process_sarif: allow, success and skip results are dropped",
+                    ),
+                ),
+            ),
+            identity=opsf.IdentityFacet(
+                fingerprint_class=opsf.FingerprintClass.POSITIONAL_ONLY,
+                note="the SARIF carries no fingerprints and no line, so identity is "
+                "the file and the rule id",
+            ),
+            extensibility=opsf.ExtensibilityFacet(
+                custom_rules=opsf.CustomRules.OPERATOR_PATHS,
+                env_prefixes=(),
+                options_surface="options.policy_dir, a directory of Rego policies "
+                "(default policy/ under the source directory); Conftest ships no rules",
+            ),
+            exit_codes=opsf.ExitCodesFacet(
+                success_exit_codes=(0,),
+                semantics="ASH passes --no-fail, so 0 is ran to completion and any "
+                "other status is a failure (Conftest exits 1 for a failed policy "
+                "and for an error alike)",
+            ),
+            provenance=opsf.ProvenanceFacet(
+                tier=opsf.Tier.COMMUNITY_OPTIN,
+                source=opsf.ProvenanceSource.USER_INSTALLED,
+                selection_surfaces=(
+                    "ash_conftest_plugins in ash_plugin_modules",
+                    "options.policy_dir",
+                ),
+                upstream_license="not read",
+            ),
+            prerequisites=opsf.PrerequisitesFacet(
+                kinds=(opsf.Prerequisite.NONE,),
+                note="a Rego policy directory is the operator's input, not a "
+                "prerequisite file kind; without one the scan reads SKIPPED",
+            ),
+        )
+    )
 
     _results_file: Optional[Path] = PrivateAttr(default=None)
 
@@ -223,8 +412,22 @@ class ConftestScanner(ScannerPluginBase[ConftestScannerConfig]):
 
     @model_validator(mode="after")
     def setup_custom_install_commands(self) -> "ConftestScanner":
-        """Install from the pinned release asset in ``utils/tool_downloads.py``."""
-        self.custom_install_commands.update(pinned_tool_install_commands("conftest"))
+        """Install from the pinned release asset, once ASH pins one.
+
+        ``utils/tool_downloads.py`` has no ``conftest`` entry yet (a central file this
+        module does not edit), so ``pinned_tool_install_commands`` raises
+        ``ToolNotProvisionableError`` and constructing the scanner would fail. Until
+        the pin lands the scanner ships no install command, and the dependency hint
+        tells the operator to install Conftest themselves. A pair with no command is
+        left absent, never an empty list, so ASH does not report an install it did
+        not do.
+        """
+        try:
+            self.custom_install_commands.update(
+                pinned_tool_install_commands("conftest")
+            )
+        except ToolNotProvisionableError:
+            pass
         return self
 
     # ------------------------------------------------------------------
@@ -483,10 +686,10 @@ class ConftestScanner(ScannerPluginBase[ConftestScannerConfig]):
         found = find_executable(self.command or "conftest")
         if not found:
             ASH_LOGGER.warning(
-                "conftest executable not found in PATH. Install it with "
-                "`ash dependencies install --config-overrides "
-                "'ash_plugin_modules+=[\"automated_security_helper.plugin_modules."
-                "ash_conftest_plugins\"]' --tool conftest`."
+                "conftest executable not found in PATH. ASH does not install it "
+                "yet (no pinned release); install Conftest from "
+                "https://github.com/open-policy-agent/conftest/releases and put it "
+                "on PATH."
             )
         return found is not None
 

@@ -31,10 +31,10 @@ Like the opt-in `snyk-code` scanner, which waits for its credential, Conftest wa
 
 ## Installing Conftest
 
-- **Container mode:** the ASH image includes Conftest.
-- **Local mode:** `ash dependencies install --tool conftest`, with the module listed in `ash_plugin_modules` (or added with `--config-overrides 'ash_plugin_modules+=["automated_security_helper.plugin_modules.ash_conftest_plugins"]'`), downloads the pinned release archive from GitHub and verifies it against the digest pinned in ASH.
-- **Nix mode:** the flake does not supply Conftest. Install it with `ash dependencies install`, or have it on `PATH`.
-- Any `conftest` already on `PATH` is also used.
+ASH pins no Conftest release yet, so it does not install the tool in any mode, and the container image and the Nix flake do not supply it.
+
+- Install a release from [the Conftest releases page](https://github.com/open-policy-agent/conftest/releases) and put `conftest` on `PATH`. The scanner uses any `conftest` found there.
+- `ash dependencies install --tool conftest` has nothing to install for it.
 
 ## What is scanned
 
@@ -82,24 +82,22 @@ A failed `deny` is HIGH, not the CRITICAL that ASH's generic `error` level maps 
 
 ## Suppressions
 
-ASH suppressions by rule, path and line work as for any scanner. The rule id is `<namespace>/deny` or `<namespace>/warn`, for example `main/deny`:
+ASH suppressions by rule and path work as for any scanner. The rule id is `<namespace>/deny` or `<namespace>/warn`, for example `main/deny`:
 
 ```yaml
 global_settings:
   suppressions:
     - rule_id: main/deny
       path: deploy/legacy.yaml
-      line_start: 3
-      line_end: 3
       reason: a legacy workload with an accepted exception
 ```
 
-Package-scoped and symbol-scoped suppressions do not apply: no Conftest finding names a package or a symbol.
+Conftest reports the file and no line, so a suppression names no line range. Package-scoped and symbol-scoped suppressions do not apply: no Conftest finding names a package or a symbol.
 
 ## Offline and air-gapped use
 
-Conftest reads only the files it is given and the policies in the policy directory, so it behaves the same offline. Install it before going offline (the container image already has it).
+Conftest reads only the files it is given and the policies in the policy directory, so it behaves the same offline. Install it before going offline.
 
 ## License
 
-Conftest is Apache-2.0-licensed. The ASH container image includes the unmodified binary, and its license is in the image at `/usr/share/doc/ash/third-party/conftest/`, installed the same way as every other bundled tool's (see [Third-party license files](../../../how-to/run-in-a-container.md#third-party-licenses)).
+ASH does not download, bundle or redistribute Conftest, so no Conftest license file ships with ASH. The license terms are those of the Conftest release you install.

@@ -29,12 +29,10 @@ Conftest has nothing to test without policies. Its own convention is a `policy/`
 
 ## Installing the tool
 
-The ASH container image includes it. Locally:
-
-<!-- doctest: illustrative reason="downloads and installs the scanner's tool" -->
-```bash
-ash dependencies install --config-overrides "ash_plugin_modules+=[automated_security_helper.plugin_modules.ash_conftest_plugins]" --tool conftest
-```
+ASH does not install Conftest: it pins no Conftest release yet, so
+`ash dependencies install` has nothing to provision for it. Install a release from
+<https://github.com/open-policy-agent/conftest/releases> and put `conftest` on `PATH`.
+The scanner is reported `MISSING` until it is there.
 
 ## Configuration
 
