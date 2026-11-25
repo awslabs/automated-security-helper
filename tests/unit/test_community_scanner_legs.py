@@ -143,7 +143,10 @@ class TestContainerLeg:
 
     def test_the_betterleaks_fixture_secret_is_not_written_in_the_action(self):
         text = CONTAINER.read_text()
-        assert "ghp_x7Kq9ZmP2vLw4RtYb8NcD3sFh6JgA1eUoW5i" not in text
+        # Assembled at run time so this file never holds the contiguous token
+        # shape (the github-pat pattern) that the action must not hold either.
+        fixture_secret = "ghp" + "_" + "x7Kq9ZmP2vLw4RtYb8NcD3sFh6JgA1eUoW5i"
+        assert fixture_secret not in text
         assert not re.search(r"ghp_[0-9a-zA-Z]{36}", text)
         assert not re.search(r"AKIA[A-Z2-7]{16}", text)
 

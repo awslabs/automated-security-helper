@@ -18,5 +18,7 @@ Follow-ups from the Betterleaks plugin PR: the community-plugin container valida
 
 ### Not done, and why
 
+- The self-scan suppression pass (the 61 betterleaks findings over this tree) is deferred to its own unit.
+
 - The container, nix and sandbox-parity legs themselves run only in GitHub Actions and were not run here; the first CI run is their measurement. In particular the nix leg's use of nixpkgs 1.8.1 is unmeasured against the scanner.
 - The repository self-scan config (`.ash/.ash_community_plugins.yaml`) is unchanged: betterleaks over this tree reports 61 findings (generic-api-key, generic-credential-uri, generic-password, generic-username, mostly test fixtures), so adding the module there needs a suppression pass of its own.
