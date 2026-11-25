@@ -295,10 +295,6 @@ UNCLAIMED_TARGET_KINDS: dict[TargetKind, str] = {
         "'answers a different question', gitleaks_scanner module header), and "
         "no other secrets scanner reads git history"
     ),
-    TargetKind.CONTAINER_IMAGE: (
-        "grype is wired to a `dir:` scan of the source tree; its covers text "
-        "used to say container images, which no code path scans"
-    ),
     TargetKind.SBOM_DOCUMENT: (
         "no scanner consumes an SBOM document as input; syft produces one and "
         "grype scans the directory, so syft-to-grype is a potential pipeline, "
@@ -339,6 +335,9 @@ TOOL_TYPE_SERVED_BY: dict[ScannerToolType, frozenset[TargetKind]] = {
         }
     ),
     ScannerToolType.SBOM: frozenset({TargetKind.PACKAGE_INVENTORY}),
+    # dockle audits a container image tarball (``--input``), the one scanner
+    # wired to claim ``container_image``.
+    ScannerToolType.CONTAINER: frozenset({TargetKind.CONTAINER_IMAGE}),
 }
 
 

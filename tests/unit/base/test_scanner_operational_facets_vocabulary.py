@@ -176,6 +176,21 @@ def test_targets_refuse_a_kind_no_scanner_is_wired_for() -> None:
             )
 
 
+def test_a_container_scanner_may_claim_a_container_image() -> None:
+    """dockle audits an image tarball, so ``container_image`` is wired: it is
+    not unclaimed, and the CONTAINER tool type is served by it."""
+    assert opsf.TargetKind.CONTAINER_IMAGE not in opsf.UNCLAIMED_TARGET_KINDS
+    assert opsf.TOOL_TYPE_SERVED_BY[ScannerToolType.CONTAINER] == frozenset(
+        {opsf.TargetKind.CONTAINER_IMAGE}
+    )
+    row = opsf.TargetsFacet(
+        kinds=(opsf.TargetKind.CONTAINER_IMAGE,),
+        tool_type=ScannerToolType.CONTAINER,
+        selection="an image tarball handed to --input",
+    )
+    assert row.kinds == (opsf.TargetKind.CONTAINER_IMAGE,)
+
+
 def test_targets_need_a_kind_and_a_selection() -> None:
     with pytest.raises(ValidationError):
         opsf.TargetsFacet(
