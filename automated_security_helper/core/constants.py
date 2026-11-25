@@ -8,6 +8,7 @@ import threading
 from pathlib import Path, PurePath
 from typing import Any, Dict, List, Optional, Set, Tuple
 
+from automated_security_helper.models.vocab import SEVERITY_VALUES, SeverityThreshold
 from automated_security_helper.utils.severity_ladder import (
     SEVERITY_THRESHOLDS,
     normalize_threshold,
@@ -338,7 +339,7 @@ ASH_BIN_PATH: Optional[Path] = _bin_path_at_import()
 #: Used when ``ASH_DEFAULT_SEVERITY_LEVEL`` is unset or names no threshold. MEDIUM
 #: is what ASH has always shipped, so an unusable value behaves as though the
 #: variable were absent rather than moving the gate somewhere new.
-_FALLBACK_SEVERITY_LEVEL = "MEDIUM"
+_FALLBACK_SEVERITY_LEVEL = SeverityThreshold.MEDIUM.value
 #: The threshold ASH ships, as a schema or a help text says it. Those are written
 #: from the models, so a text built from ``ASH_DEFAULT_SEVERITY_LEVEL`` would carry
 #: the environment of whichever process generated it; this value does not move.
@@ -1127,7 +1128,7 @@ KNOWN_SCANNABLE_EXTENSIONS = [
     # "sqlite3db",
     # "sqlite3db",
 ]
-VALID_SEVERITY_VALUES = frozenset({"CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"})
+VALID_SEVERITY_VALUES = frozenset(SEVERITY_VALUES)
 
 #: The command line could not be used, so nothing ran: an unknown command, option
 #: or argument, a missing required option, an option value ASH does not accept, or

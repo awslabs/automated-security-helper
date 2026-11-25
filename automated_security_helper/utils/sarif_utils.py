@@ -11,6 +11,7 @@ from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
 from automated_security_helper.models.core import IgnorePathWithReason
+from automated_security_helper.models.vocab import SEVERITY_VALUES, Severity
 from automated_security_helper.schemas.sarif_schema_model import (
     SarifReport,
     Tool,
@@ -504,13 +505,13 @@ def _severity_from_security_score(value: object) -> str | None:
     if not math.isfinite(score) or not 0 <= score <= 10:
         return None
     if score >= 9:
-        return "CRITICAL"
+        return Severity.CRITICAL.value
     if score >= 7:
-        return "HIGH"
+        return Severity.HIGH.value
     if score >= 4:
-        return "MEDIUM"
+        return Severity.MEDIUM.value
     if score > 0:
-        return "LOW"
+        return Severity.LOW.value
     # A score of exactly 0 is treated as "no usable score", not as INFO, so it
     # is skipped by normalize_sarif_result_severities and the result keeps its
     # SARIF level fallback. npm-audit defaults its rule security-severity to 0
@@ -524,7 +525,7 @@ def _severity_from_security_score(value: object) -> str | None:
 #: The severity bands _resolve_result_severity honors from ``issue_severity``.
 #: Kept as one constant so the normalizer's skip test and the resolver's read
 #: cannot drift apart.
-_CANONICAL_SEVERITIES = ("CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO")
+_CANONICAL_SEVERITIES = SEVERITY_VALUES
 
 
 def _rule_for_result(
@@ -2344,7 +2345,7 @@ def _apply_suppressions_within_budget(
                         id=get_finding_id(result.ruleId, uri, line_start, line_end),
                         title=message_text or "Unknown Issue",
                         description=message_text or "No description available",
-                        severity="MEDIUM",
+                        severity=Severity.MEDIUM.value,
                         scanner=_suppression_scanner_identity(
                             result, run, scanner_name
                         ),

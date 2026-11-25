@@ -21,6 +21,7 @@ from threading import Event, Lock
 from time import monotonic
 
 from automated_security_helper.core.cancellation import CancelEvent
+from automated_security_helper.models.vocab import SeverityThreshold
 from automated_security_helper.core.constants import ASH_EXIT_CODES
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
@@ -165,7 +166,7 @@ class ScanRegistryEntry:
         scan_id: str,
         directory_path: str,
         output_directory: str,
-        severity_threshold: Optional[str] = "MEDIUM",
+        severity_threshold: Optional[str] = SeverityThreshold.MEDIUM.value,
         config_path: Optional[str] = None,
         session_id: Optional[str] = None,
         slot: Optional[str] = None,
@@ -907,7 +908,7 @@ class ScanRegistry:
         self,
         directory_path: str,
         output_directory: str,
-        severity_threshold: Optional[str] = "MEDIUM",
+        severity_threshold: Optional[str] = SeverityThreshold.MEDIUM.value,
         config_path: Optional[str] = None,
         scan_id: Optional[str] = None,
         max_active: Optional[int] = None,
@@ -989,7 +990,7 @@ class ScanRegistry:
         self,
         directory_path: str,
         output_directory: str,
-        severity_threshold: Optional[str] = "MEDIUM",
+        severity_threshold: Optional[str] = SeverityThreshold.MEDIUM.value,
         config_path: Optional[str] = None,
         scan_id: Optional[str] = None,
         max_active: Optional[int] = None,

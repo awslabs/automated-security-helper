@@ -29,6 +29,7 @@ from automated_security_helper.models.asharp_model import (
     AshAggregatedResults,
     warning_of_dropped_keys,
 )
+from automated_security_helper.models.vocab import SEVERITY_BUCKETS as _LADDER_BUCKETS
 from automated_security_helper.utils.error_text import (
     error_text,
     log_unexpected_error,
@@ -63,7 +64,7 @@ _logger = ASH_LOGGER
 # canonical per-scanner counts in the aggregated results file are typed by
 # ScannerTargetStatusInfo and have a fixed field set; this constant governs only
 # the MCP progress and summary views assembled in this module.
-SEVERITY_BUCKETS = ("critical", "high", "medium", "low", "info", "suppressed")
+SEVERITY_BUCKETS = _LADDER_BUCKETS + ("suppressed",)
 UNKNOWN_SEVERITY = "unknown"
 
 
@@ -190,14 +191,7 @@ class ScannerProgress:
         self.severity_counts = (
             dict(severity_counts)
             if severity_counts
-            else {
-                "critical": 0,
-                "high": 0,
-                "medium": 0,
-                "low": 0,
-                "info": 0,
-                "suppressed": 0,
-            }
+            else dict.fromkeys(SEVERITY_BUCKETS, 0)
         )
         self.start_time: Optional[datetime] = None
         self.end_time: Optional[datetime] = None
