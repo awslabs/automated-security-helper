@@ -42,7 +42,12 @@ from automated_security_helper.core.constants import (
     ASH_EXIT_INTERRUPTED,
     ASH_EXIT_USAGE_ERROR,
 )
-from automated_security_helper.core.enums import AshLogLevel
+from automated_security_helper.core.enums import (
+    TRANSPORT_HELP,
+    TRANSPORT_VALUES,
+    AshLogLevel,
+    Transport,
+)
 from automated_security_helper.core.exceptions import ASHValidationError
 from automated_security_helper.utils.ash_install import ash_reinstall_command
 from automated_security_helper.utils.console import ash_console
@@ -73,9 +78,13 @@ _logger = ASH_LOGGER
 # paths never did. --quiet still controls *whether* to write, not where.
 _stderr = ash_console(stderr=True)
 
-# Valid --transport values. Kept as a tuple so typer can render help cleanly
-# without forcing an Enum class on the public CLI surface.
-_VALID_TRANSPORTS = ("stdio", "streamable-http", "sse")
+# The valid --transport values are the members of ``Transport``. The typer
+# parameter stays a plain ``str``, and ``mcp_command`` turns it into a member
+# itself, for two reasons measured on typer 0.27.2: an enum-typed option renders
+# its metavar as <stdio|streamable-http|sse> where the option has always shown
+# <str>, and click rejects an unknown value with exit 2 before this command runs,
+# where the documented contract is ``ASH_EXIT_USAGE_ERROR`` (5) and the message
+# below.
 
 #: Exit code for an invocation the server can't run with: a usage error, apart
 #: from 3, which reports a config that can't be used. An unknown
@@ -413,7 +422,7 @@ def _validate_stateless_http(transport: str, stateless_http: bool) -> None:
     Raises:
         ASHValidationError: if stateless_http is set on a non-streamable transport.
     """
-    if stateless_http and transport != "streamable-http":
+    if stateless_http and transport != Transport.STREAMABLE_HTTP:
         raise ASHValidationError(
             f"--stateless-http only applies to '--transport streamable-http', but "
             f"transport is '{transport}'. stdio has a single implicit session and "
@@ -437,7 +446,7 @@ def _validate_trust_upstream_session_id(
             streamable-HTTP.
     """
     if trust_upstream_session_id and not (
-        transport == "streamable-http" and stateless_http
+        transport == Transport.STREAMABLE_HTTP and stateless_http
     ):
         raise ASHValidationError(
             "--trust-upstream-session-id only applies to '--transport "
@@ -840,7 +849,7 @@ def build_sse_app(
     ``--host 0.0.0.0`` never mentions ``--allowed-host`` and so trips no
     validation, and their server still refuses every proxied request. sse being
     deprecated upstream is an argument against giving it new capabilities, not
-    against making a transport ASH still advertises in ``_VALID_TRANSPORTS``
+    against making a transport ASH still advertises in :class:`Transport`
     work at the address the operator asked for.
 
     Returns:
@@ -1379,9 +1388,9 @@ def mcp_command(
         str,
         typer.Option(
             "--transport",
-            help="Transport: 'stdio' (default), 'streamable-http', or 'sse'.",
+            help=TRANSPORT_HELP,
         ),
-    ] = "stdio",
+    ] = Transport.STDIO.value,
     host: Annotated[
         str,
         typer.Option("--host", help="Host to bind for HTTP transports."),
@@ -1591,7 +1600,8 @@ def mcp_command(
     if unknown is not None:
         _stderr.print(
             f"[red]Validation Error: {ASH_MCP_TRANSPORT_ENV}={escape_markup(repr(unknown))} "
-            f"names no transport; use one of {sorted(KNOWN_TRANSPORTS)} (any case), "
+            f"names no transport; use one of "
+            f"{sorted(known.value for known in KNOWN_TRANSPORTS)} (any case), "
             f"or unset it.[/red]",
             highlight=False,
         )
@@ -1599,9 +1609,12 @@ def mcp_command(
 
     # Each value below is the operator's or an error's, printed to a console that
     # reads markup, so it is escaped once: a "[/x]" in it raised MarkupError.
-    if transport not in _VALID_TRANSPORTS:
+    # The one place the plain string becomes a member; every comparison below is
+    # against members.
+    selected = Transport.parse(transport)
+    if selected is None:
         _stderr.print(
-            f"[red]Validation Error: --transport must be one of {_VALID_TRANSPORTS}, "
+            f"[red]Validation Error: --transport must be one of {TRANSPORT_VALUES}, "
             f"got '{escape_markup(transport)}'.[/red]"
         )
         raise typer.Exit(ASH_EXIT_USAGE_ERROR)
@@ -1622,11 +1635,11 @@ def mcp_command(
     # transport combined with --stateless-http should be reported as an unknown
     # transport, which is the operator's actual mistake.
     try:
-        _validate_stateless_http(transport, stateless_http)
+        _validate_stateless_http(selected, stateless_http)
         _validate_trust_upstream_session_id(
-            transport, stateless_http, trust_upstream_session_id
+            selected, stateless_http, trust_upstream_session_id
         )
-        if transport == "stdio":
+        if selected is Transport.STDIO:
             if trust_upstream_host_check:
                 raise ASHValidationError(
                     "--trust-upstream-host-check only applies to the HTTP "
@@ -1692,7 +1705,7 @@ def mcp_command(
 
     # Log the command execution
     _logger.info(
-        f"Starting MCP server with transport={transport}, log level={log_level_value}"
+        f"Starting MCP server with transport={selected.value}, log level={log_level_value}"
     )
 
     # Before any transport starts: MCP scans never run a tool from inside a scanned
@@ -1709,20 +1722,20 @@ def mcp_command(
     # Initialize and start the MCP server with comprehensive error handling
     listen_socket = None
     try:
-        if transport != "stdio" and port == 0:
+        if selected is not Transport.STDIO and port == 0:
             # A loopback app accepts only its own port, so it is built for the
             # port the system chose: bind first. The bind is checked before
             # anything is bound.
             _validate_bind(host, allowed_host, trust_upstream_host_check)
             listen_socket = _bind_listen_socket(host)
             port = listen_socket.getsockname()[1]
-        if transport == "stdio":
+        if selected is Transport.STDIO:
             # Import and run the stdio MCP server implementation here to avoid
             # circular imports.
             from automated_security_helper.cli.mcp_server import run_mcp_server
 
             run_mcp_server()
-        elif transport == "streamable-http":
+        elif selected is Transport.STREAMABLE_HTTP:
             app = build_streamable_http_app(
                 mount_path=mount_path,
                 auth_header_name=auth_header_name,
@@ -1750,7 +1763,7 @@ def mcp_command(
                 log_level=log_level_value,
                 listen_socket=listen_socket,
             )
-        elif transport == "sse":
+        elif selected is Transport.SSE:
             # The mount-path default is /mcp, but SSE conventionally lives at
             # /sse. Honor whatever the user passed; only override if they kept
             # the streamable-HTTP default.
