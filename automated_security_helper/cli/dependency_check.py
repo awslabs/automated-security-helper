@@ -84,7 +84,7 @@ def check_dependencies(
         policy_source = f" ({result.policy_source})" if result.policy_source else ""
         echo(
             shown_on_one_line(
-                f"{result.tool.value}: {result.state.value}; policy: {result.policy}{policy_source}; "
+                f"{result.tool.value}: {result.state.value}; policy: {result.policy.value}{policy_source}; "
                 f"{'blocked' if result.blocks else 'allowed'}"
             )
         )

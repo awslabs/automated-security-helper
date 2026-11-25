@@ -630,7 +630,7 @@ def _persist_verdict(
                 if pinned
                 else _UNPINNED_VERDICT_TTL_SECONDS
             ),
-            "status": verdict.status.value,
+            "status": ToolInstallStatus(verdict.status).value,
             "executable": verdict.executable,
             "requirement": verdict.requirement,
             "detail": verdict.detail,

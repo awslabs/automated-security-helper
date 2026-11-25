@@ -41,8 +41,10 @@ def test_message_variants(snapshot):
                 age=None,
                 error=f"ValueError: {entry.scanner} printed no build time",
             )
-            messages[f"{entry.name} / {policy} / stale"] = stale.message()
-            messages[f"{entry.name} / {policy} / unreadable"] = unreadable.message()
+            messages[f"{entry.name} / {policy.value} / stale"] = stale.message()
+            messages[f"{entry.name} / {policy.value} / unreadable"] = (
+                unreadable.message()
+            )
 
     assert messages == snapshot
 

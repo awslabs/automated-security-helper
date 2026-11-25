@@ -40,7 +40,7 @@ class OfflineCacheResult:
     tool: OfflineCacheTool
     database: Path
     state: CacheState
-    policy: str
+    policy: StalenessPolicy
     policy_source: str | None
     max_age: str
     built: datetime | None = None
