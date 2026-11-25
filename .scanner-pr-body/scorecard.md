@@ -85,6 +85,16 @@ because no pinned upstream LICENSE read is cited.
 - Optional: a pinned `scorecard` release table in `utils/tool_downloads.py` (the module
   already calls `pinned_tool_install_commands("scorecard")` and picks it up).
 
+### Final-review rows (round 2)
+
+- HIGH, carried to the integration lane: the central vendored-package registration above
+  (`scanner_inventory.py`, `PACKAGE_DIRS`, the count assertions). It is outside this module and
+  stays owed to the combined registration pass.
+- HIGH, open: the sample result is schema-derived, not a capture. A recorded run needs a GitHub
+  token and the `scorecard` binary, neither of which a fix lane holds; rows 18, 21 and 24 close
+  when someone with a token records one run and adds its corpus spec.
+- Held, not touched: any licensing text (the register keeps the license as "not read").
+
 ### Desk validation (dev-dsk-cbc4ff77, env -i, `-n 4`)
 
 - Module tests: 101 passed, 0 failed.
