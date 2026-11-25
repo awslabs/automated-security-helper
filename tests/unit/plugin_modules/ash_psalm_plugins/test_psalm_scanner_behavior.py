@@ -501,6 +501,39 @@ class TestNothingToScan:
         assert _scanner(src, tmp_path).nothing_to_scan_reason() is not None
 
 
+_FIXTURE = (
+    Path(__file__).resolve().parents[3]
+    / "test_data"
+    / "scanners"
+    / "psalm"
+    / "handwritten"
+    / "positive.sarif"
+)
+
+
+class TestCommittedFixture:
+    def test_severity_mapping_over_the_committed_report(
+        self, tree, tmp_path, on_path, monkeypatch
+    ):
+        fake = FakePsalm(sarif_text=_FIXTURE.read_text(encoding="utf-8"))
+        report = _run(_scanner(tree, tmp_path), fake, monkeypatch)
+        assert _findings(report) == [
+            ("201", "error", "HIGH", "src/db.php", 12),
+            ("205", "note", "LOW", "src/view.php", 7),
+        ]
+
+
+class TestFacetsDeclaration:
+    def test_the_register_rows_are_declared_on_the_class_itself(self):
+        assert "facets" in vars(PsalmScanner)
+        assert "operational_facets" in vars(PsalmScanner)
+        assert PsalmScanner.operational_facets.scanner_name == "psalm"
+
+    def test_success_exit_codes_mirror_the_operational_row(self):
+        declared = PsalmScanner.operational_facets.exit_codes.success_exit_codes
+        assert set(declared) == PsalmScanner.success_exit_codes == {0, 2}
+
+
 class TestInstall:
     def test_install_commands_cover_every_published_platform(self, tmp_path):
         from automated_security_helper.utils import tool_downloads
