@@ -2689,6 +2689,14 @@ jobs:
         run: uv sync
       - name: Build the documentation site
         run: uv run mkdocs build --clean --strict
+      # Every URL the site ever served must keep landing on the right page:
+      # scripts/validate_url_history.py holds docs/url-history/ (the historical URL
+      # ledger and the dead-URL map) and docs/redirects.yml in agreement, with no
+      # redirect chains or loops, and resolves each URL in the tree the step above
+      # just built. The docs deploy workflow runs the same validation again on every
+      # publish, main and release tags alike.
+      - name: Validate the URL history mapping
+        run: uv run python -I -B scripts/validate_url_history.py --site-dir public
       - name: Check the versioned site
         run: uv run python scripts/docs_versions.py check
 
