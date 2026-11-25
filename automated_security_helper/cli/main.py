@@ -19,6 +19,7 @@ from automated_security_helper.cli.json_input import (
     CliJsonInputCommand,
     usage_error_text,
 )
+from automated_security_helper.cli.deprecation import deprecated_command_message
 from automated_security_helper.cli.scan import run_ash_scan_cli_command
 from automated_security_helper.core.enums import (
     TRANSPORT_HELP,
@@ -210,10 +211,11 @@ def _asks_for_help(command: Any, ctx: Any, args: list[str]) -> bool:
 #: tests/unit/cli/test_version_startup_budget.py pins that none of these modules
 #: is imported by ``import automated_security_helper.cli.main``.
 _LAZY_SUBCOMMANDS: dict[str, tuple[str, str]] = {
-    # The 3.8 spelling of `ash container build`: same command, one warning.
+    # The 3.8 spelling of `ash container build`: the same command, deprecated
+    # through DEPRECATED_SPELLINGS like the results spellings.
     "build-image": (
         "automated_security_helper.cli.image",
-        "build_image_deprecated_cli_command",
+        "build_ash_image_cli_command",
     ),
     "container": ("automated_security_helper.cli.container", "container_app"),
     "report": ("automated_security_helper.cli.report", "report_command"),
@@ -241,6 +243,15 @@ _LAZY_SUBCOMMANDS: dict[str, tuple[str, str]] = {
 DEPRECATED_RESULTS_SPELLINGS: frozenset[str] = frozenset(
     {"report", "diff", "trend", "merge", "inspect"}
 )
+
+#: Every top-level spelling deprecated in 3.9, mapped to the spelling that replaces
+#: it: the results commands that moved under ``ash results``, and ``ash build-image``,
+#: which is ``ash container build``. All of them deprecate the same way: hidden from
+#: the root ``--help``, one warning on stderr per invocation, removed in 4.0.
+DEPRECATED_SPELLINGS: dict[str, str] = {
+    **{name: f"results {name}" for name in sorted(DEPRECATED_RESULTS_SPELLINGS)},
+    "build-image": "container build",
+}
 
 #: The merge command's help, shared by ``ash merge`` and ``ash results merge``.
 MERGE_COMMAND_HELP = """Merges the results of a sharded scan into one unified report.
@@ -308,7 +319,7 @@ def _built_lazy_command(name: str) -> Any:
 
     module_path, attribute = _LAZY_SUBCOMMANDS[name]
     target = getattr(importlib.import_module(module_path), attribute)
-    hidden = name in DEPRECATED_RESULTS_SPELLINGS
+    hidden = name in DEPRECATED_SPELLINGS
     if isinstance(target, typer.Typer):
         return typer.main.get_group_from_info(
             TyperInfo(typer_instance=target, name=name, hidden=hidden),
@@ -529,6 +540,10 @@ class AshTyperGroup(TyperGroup):
             # A nested group: the options belong to the leaf it names.
             leaf = command.get_command(ctx, ctx.args[0])
             if leaf is not None:
+                # The refusal below names what the operator would type: the
+                # group takes no options, so 'ash container --force' is itself a
+                # usage error and its help does not list the leaf's options.
+                name = f"{name} {ctx.args[0]}"
                 command, leaf_args = leaf, ctx.args[1:]
                 ctx.meta["ash.leaf_name_tokens"] = 1
         if _asks_for_help(command, ctx, leaf_args):
@@ -639,18 +654,19 @@ class AshRootTyperGroup(AshTyperGroup):
         return super().invoke(ctx)
 
     def _warn_deprecated_spelling(self, ctx: Any) -> None:
-        """Say, once and on stderr, that a top-level results command moved.
+        """Say, on stderr and on every invocation, that a top-level command moved.
 
-        ``ash report`` and the other spellings in ``DEPRECATED_RESULTS_SPELLINGS``
-        still run unchanged through the 3.9 window; this is the only thing the
-        old spelling adds. A help request and ``--generate-cli-skeleton`` only
+        ``ash report``, ``ash build-image`` and the other spellings in
+        ``DEPRECATED_SPELLINGS`` still run unchanged through the 3.9 window; this
+        is the only thing the old spelling adds. A help request and ``--generate-cli-skeleton`` only
         print what the command takes, which is not a use of it, and shell
         completion (``resilient_parsing``) must print nothing, so none of them warns.
         """
         if ctx.resilient_parsing or not ctx._protected_args:
             return
         name = ctx._protected_args[0]
-        if name not in DEPRECATED_RESULTS_SPELLINGS:
+        replacement = DEPRECATED_SPELLINGS.get(name)
+        if replacement is None:
             return
         command = self.get_command(ctx, name)
         if (
@@ -659,12 +675,7 @@ class AshRootTyperGroup(AshTyperGroup):
             or "--generate-cli-skeleton" in ctx.args
         ):
             return
-        echo(
-            f"DeprecationWarning: 'ash {name}' is deprecated and is removed in 4.0. "
-            f"Use 'ash results {name}' instead; 'ash {name}' keeps its current "
-            "behavior until then.",
-            err=True,
-        )
+        echo(deprecated_command_message(name, replacement), err=True)
 
 
 app = typer.Typer(

@@ -537,7 +537,7 @@ scans keep grype's and trivy's databases current, so this usually happens offlin
 with an old image.
 
 Fix: refresh the database. For an offline image, rebuild it with
-`ash build-image --offline`. For offline rules on your machine, download them again
+`ash container build --offline`. For offline rules on your machine, download them again
 ([Seeding the semgrep and opengrep rule cache](../docs/advanced-usage.md#seeding-the-semgrep-and-opengrep-rule-cache)).
 To scan with the old database anyway, pass `--allow-stale-content-db` or set
 `content_db_staleness: warn`: the stale database then no longer fails the scan, and
