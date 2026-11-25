@@ -579,7 +579,13 @@ def test_cache_index_is_written_atomically(
 
     build().convert()
 
-    assert [p.name for p in written] == ["cached-lockfiles.json"]
-    assert json.loads(written[0].read_text(encoding="utf-8"))["lockfiles"] == [
+    # The harvest manifest goes through the same writer; the index is written once.
+    index = [p for p in written if p.name == "cached-lockfiles.json"]
+    assert len(index) == 1
+    assert sorted(p.name for p in written) == [
+        "cached-lockfiles.json",
+        "harvest-manifest.json",
+    ]
+    assert json.loads(index[0].read_text(encoding="utf-8"))["lockfiles"] == [
         "Cargo.lock"
     ]
