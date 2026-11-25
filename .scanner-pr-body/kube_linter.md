@@ -73,4 +73,6 @@ Run on a dev desktop from a repository extract, `uv sync --frozen --all-extras -
 facets registry totality, resource-id conformance, vocabulary and operational consistency
 families 0 failed for kube_linter (572 passed in the families run; the 20 failures are the
 corpus-gate rows of other scanners, each failing on that scanner's own missing or unconverted corpus; a main-only baseline run was not done);
-whole-tree collect 74360 tests, 0 errors. `ruff format --check` and `ruff check` green.
+whole-tree collect 72858 tests, 0 errors (re-run on main e0aac6c3aff, desk cbc4ff77:
+module 59 passed, conformance 61 passed, vocabulary 40 passed, totality/operational/corpus
+families 472 passed with kube_linter's own rows green). `ruff format --check` and `ruff check` green.
