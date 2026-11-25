@@ -322,9 +322,10 @@ class GgshieldScanner(ScannerPluginBase[GgshieldScannerConfig]):
             reason="ggshield's SARIF writer emits no reference URLs",
         ),
         tags=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field='result properties "tags" (none natively); the adapter '
-            "appends secret and security",
+            state=FacetState.NA,
+            reason="ggshield's SARIF writer emits no result properties and so no "
+            "tags; the adapter adds the constant tags secret and security "
+            "(_post_process_sarif), which come from ASH, not from the tool's output",
         ),
         extras=FacetDecl(
             state=FacetState.MAPPED,
