@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from automated_security_helper.models.asharp_model import AshAggregatedResults
 
 from automated_security_helper.base.options import ReporterOptionsBase
+from automated_security_helper.core.enums import ScannerStatus
 from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
     ReporterPluginConfigBase,
@@ -526,8 +527,11 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
             shown = 0
             for result in emitter.get_scanner_results():
                 if options.compact and (
-                    result["status"] == "SKIPPED"
-                    or (result["total"] == 0 and result["status"] == "PASSED")
+                    result["status"] == ScannerStatus.SKIPPED.value
+                    or (
+                        result["total"] == 0
+                        and result["status"] == ScannerStatus.PASSED.value
+                    )
                 ):
                     continue
                 threshold = f"{result['threshold']} ({result['threshold_source']})"
@@ -569,7 +573,9 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
             not_run = [
                 entry
                 for entry in emitter.get_scanners_not_run()
-                if not (options.compact and entry["status"] == "SKIPPED")
+                if not (
+                    options.compact and entry["status"] == ScannerStatus.SKIPPED.value
+                )
             ]
             if not_run:
                 parts.append("Scanners that did not run:\n")
