@@ -23,6 +23,8 @@ from tests.unit.vocab._drift_gate import (
     scan_entry,
 )
 
+pytestmark = pytest.mark.unit
+
 ENTRIES = list(entries())
 
 

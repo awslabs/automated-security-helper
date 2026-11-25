@@ -316,12 +316,12 @@ class ScannerStatisticsCalculator:
 
             # Store statistics for this scanner
             scanner_stats[scanner_name] = {
-                "suppressed": suppressed,
-                "critical": critical,
-                "high": high,
-                "medium": medium,
-                "low": low,
-                "info": info,
+                **dict(
+                    zip(
+                        SEVERITY_COUNT_FIELDS,
+                        (suppressed, critical, high, medium, low, info),
+                    )
+                ),
                 "total": total,
                 "actionable": actionable,
                 "duration": duration,

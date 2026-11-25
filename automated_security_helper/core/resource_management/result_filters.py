@@ -327,12 +327,7 @@ def filter_summary(results: Dict[str, Any]) -> Dict[str, Any]:
 
     summary["findings_summary"] = {
         "by_severity": {
-            "critical": _severity("critical"),
-            "high": _severity("high"),
-            "medium": _severity("medium"),
-            "low": _severity("low"),
-            "info": _severity("info"),
-            "suppressed": _severity("suppressed"),
+            **{bucket: _severity(bucket) for bucket in _SEVERITY_KEYS},
             "total": _stat("total"),
             "actionable": _stat("actionable"),
         },
@@ -370,12 +365,7 @@ def filter_summary(results: Dict[str, Any]) -> Dict[str, Any]:
             "suppressed_findings": scanner_data.get("suppressed_finding_count", 0),
             "duration": scanner_data.get("duration", 0),
             "by_severity": {
-                "critical": severity_counts.get("critical", 0),
-                "high": severity_counts.get("high", 0),
-                "medium": severity_counts.get("medium", 0),
-                "low": severity_counts.get("low", 0),
-                "info": severity_counts.get("info", 0),
-                "suppressed": severity_counts.get("suppressed", 0),
+                bucket: severity_counts.get(bucket, 0) for bucket in _SEVERITY_KEYS
             },
         }
 

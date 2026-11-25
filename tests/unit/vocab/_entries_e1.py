@@ -206,6 +206,17 @@ SEVERITY_BUCKET_NAMES = register(
         mode="positive",
         min_hits=4,
         values=tuple(SEVERITY_BUCKETS),
+        allowlist={
+            "interactions/run_ash_scan.py": (
+                "the MinSeverity rank table (critical/high/medium/low/none) is the "
+                "min-severity family's, keyed by core.enums.MinSeverity in the "
+                "status-family unit, and is deliberately not the ladder"
+            ),
+            "utils/ui_theme.py": (
+                "COLORS is the palette dict; its severity keys are color names the "
+                "theme looks up through SEVERITY_LEVELS, the derived tuple"
+            ),
+        },
     )
 )
 

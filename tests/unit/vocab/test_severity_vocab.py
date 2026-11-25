@@ -19,6 +19,9 @@ from automated_security_helper.models.vocab import (
 )
 
 
+pytestmark = pytest.mark.unit
+
+
 def test_severity_members_are_the_wire_spellings_most_severe_first():
     assert SEVERITY_VALUES == ("CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO")
     assert [m.name for m in Severity] == list(SEVERITY_VALUES)
