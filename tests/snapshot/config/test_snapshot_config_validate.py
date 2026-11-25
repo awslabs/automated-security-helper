@@ -40,7 +40,10 @@ converters:
     install_timeout: 10
 global_settings:
   ignore_paths:
-    - path: vendor
+    # "**/vendor" still draws the directory advice; a glob-free "vendor" names
+    # the directory and matches the files below it since the bare-directory
+    # rule (issue #894), and gets no advice.
+    - path: "**/vendor"
       reason: third party code
 fail_on_findings: false
 """
@@ -89,7 +92,7 @@ def test_config_validate_numbers_every_error(project_dir):
         "Scanner 'bandit' contains internal-only field 'name'",
         "Reporter 'html' contains internal-only field 'extension'",
         "Converter 'archive' contains internal-only field 'install_timeout'",
-        "'vendor'",
+        "'**/vendor'",
     ):
         assert expected in run.output, expected
 

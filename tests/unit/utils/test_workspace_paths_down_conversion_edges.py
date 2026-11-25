@@ -79,9 +79,14 @@ class TestFixedLengthLeadingThatCannotSpanThePrefix:
         assert converted is None
         _contract_holds(pattern, prefix, converted)
 
-    def test_a_leading_spanning_the_prefix_exactly_still_converts(self):
-        assert _down("?roject-a/src/x.py", "project-a") == "src/x.py"
-        _contract_holds("?roject-a/src/x.py", "project-a", "src/x.py")
+    def test_a_leading_spanning_the_prefix_exactly_is_refused(self):
+        """``?roject-a`` matches only the prefix, so the glob pattern covers
+        exactly ``project-a/src/x.py`` -- but its remainder ``src/x.py`` is
+        glob-free, and under the bare-directory rule (issue #894) a glob-free
+        project pattern also covers the subtree below ``src/x.py``, which the
+        workspace pattern never matched; it is refused, not widened."""
+        with pytest.raises(WorkspacePatternError, match="bare-directory"):
+            _down("?roject-a/src/x.py", "project-a")
 
     @pytest.mark.parametrize(
         "pattern,prefix",
