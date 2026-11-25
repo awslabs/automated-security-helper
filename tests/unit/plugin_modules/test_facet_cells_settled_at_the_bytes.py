@@ -43,6 +43,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scann
 )
 from automated_security_helper.plugin_modules.ash_guarddog_plugins.guarddog_scanner import (
     GuardDogScanner,
+    _risk_severity,
 )
 from automated_security_helper.schemas.sarif_schema_model import (
     PropertyBag,
@@ -191,3 +192,98 @@ def test_an_npm_advisory_cwe_reaches_the_flat_cwe_column(test_plugin_context) ->
     assert isinstance(result.properties, PropertyBag)
     flat = FlatVulnerability.from_sarif_result(result, "npm-audit", "SCA", run)
     assert flat.cwe_id == "CWE-1321, CWE-770"
+
+
+# --------------------------------------------------------------------------
+# semgrep, opengrep: the level lives on the rule, not on the result.
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("fixture", "cls"),
+    [
+        ("semgrep/captured/semgrep-1.187.0-m0.sarif", SemgrepScanner),
+        ("opengrep/captured/opengrep-2.0.0-m0.sarif", OpengrepScanner),
+    ],
+    ids=["semgrep", "opengrep"],
+)
+def test_the_severity_cell_names_the_rule_level_the_capture_carries(
+    fixture, cls
+) -> None:
+    """The cell read ``results[].level`` while no result carried a level.
+
+    A cell that names a field the capture lacks is the defect class the corpus
+    gate cannot see (the flat severity defaults to MEDIUM, so the column reads
+    populated either way). Pin both halves: no result has a level, every rule
+    carries ``defaultConfiguration.level``, and the declaration names the rule.
+    """
+    sarif = json.loads((DATA / fixture).read_text(encoding="utf-8"))
+    run = sarif["runs"][0]
+    assert run["results"], "the capture holds results"
+    assert all("level" not in result for result in run["results"])
+    rules = run["tool"]["driver"]["rules"]
+    assert rules and all(r["defaultConfiguration"]["level"] for r in rules)
+    severity = _facets(cls).severity
+    assert severity.state is FacetState.MAPPED
+    assert severity.native_field == "tool.driver.rules[].defaultConfiguration.level"
+    # the property bag the extras cell passes through is empty in the capture
+    assert all(result["properties"] == {} for result in run["results"])
+
+
+# --------------------------------------------------------------------------
+# guarddog: a correlated risk's severity is GuardDog's own.
+# --------------------------------------------------------------------------
+
+
+def test_the_guarddog_severity_cell_names_the_risk_severity_it_maps() -> None:
+    risks = []
+    for path in sorted((DATA / "guarddog" / "captured").glob("scan_*.json")):
+        risks += json.loads(path.read_text(encoding="utf-8")).get("risks", [])
+    assert risks, "the captures hold correlated risks"
+    assert {risk["severity"] for risk in risks} <= {"high", "medium", "low"}
+    severity = _facets(GuardDogScanner).severity
+    assert 'risks[] "severity"' in severity.native_field
+    assert "_risk_severity" in severity.native_field
+    # one to one, and the classes GuardDog does not rate are fixed by the adapter
+    assert [_risk_severity(s) for s in ("high", "medium", "low")] == [
+        "HIGH",
+        "MEDIUM",
+        "LOW",
+    ]
+    for adapter_fixed in ("LOW", "MEDIUM", "INFO"):
+        assert adapter_fixed in severity.reason
+
+
+# --------------------------------------------------------------------------
+# npm-audit: yarn and pnpm results carry no install path.
+# --------------------------------------------------------------------------
+
+
+def test_an_npm_audit_v1_advisory_carries_no_package_path(test_plugin_context) -> None:
+    """The package_path cell is the npm 7+ path; the v1 path writes none."""
+    scanner = NpmAuditScanner(
+        context=test_plugin_context, config=NpmAuditScannerConfig()
+    )
+    record = NpmAuditScanner._v1_advisory_record(
+        {
+            "module_name": "lodash",
+            "id": 1,
+            "title": "Prototype Pollution",
+            "url": "https://github.com/advisories/GHSA-x",
+            "severity": "high",
+            "cwe": "CWE-1321",
+            "vulnerable_versions": "<4.17.21",
+            "patched_versions": ">=4.17.21",
+            "findings": [{"version": "4.17.20", "paths": ["app>lodash"]}],
+        }
+    )
+    assert record is not None
+    results: list = []
+    scanner._add_yarn_results([record], {}, results)
+    (result,) = results
+    flat = FlatVulnerability.from_sarif_result(result, "npm-audit", "SCA", None)
+    assert flat.package_path is None
+    assert flat.package_name == "lodash" and flat.package_version == "4.17.20"
+    cell = _facets(NpmAuditScanner).package_path
+    assert cell.state is FacetState.MAPPED
+    assert "yarn and pnpm" in cell.reason and "None" in cell.reason

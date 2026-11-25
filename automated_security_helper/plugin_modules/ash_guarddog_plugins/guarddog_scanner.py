@@ -820,21 +820,27 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
     facets: ClassVar[ScannerFacets] = ScannerFacets(
         rule_id=FacetDecl(
             state=FacetState.MAPPED,
-            native_field='"results" key (the heuristic name, e.g. '
-            "capability-network-lolbas)",
+            native_field='risks[] "threat_rule" for a correlated risk, else the '
+            '"results" key (the heuristic name, e.g. '
+            "threat-process-download-exec)",
         ),
         severity=FacetDecl(
             state=FacetState.MAPPED,
-            native_field="(no native severity) the adapter's risk ladder over "
-            "the heuristic's category",
+            native_field='risks[] "severity" (high/medium/low), mapped one to '
+            "one by _risk_severity",
+            reason="the results that GuardDog's risk engine did not correlate "
+            "carry no native severity, so the adapter fixes them by class: "
+            "LOW for an uncorrelated threat match, MEDIUM for a metadata "
+            "rule, INFO for a capability match",
         ),
         file_path=FacetDecl(
             state=FacetState.MAPPED,
-            native_field='match "location" file part (e.g. setup.py:16)',
+            native_field='risks[] "threat_location" or match "location" file '
+            "part (e.g. setup.py:16)",
         ),
         line_range=FacetDecl(
             state=FacetState.MAPPED,
-            native_field='match "location" line part',
+            native_field='risks[] "threat_location" or match "location" line part',
         ),
         column=FacetDecl(
             state=FacetState.NA,
@@ -842,8 +848,9 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
         ),
         message=FacetDecl(
             state=FacetState.MAPPED,
-            native_field='match "message", assembled with the rule and match '
-            "into the result text by the adapter",
+            native_field='risks[] "threat_description" or match "message", '
+            "assembled with the rule, the location and the correlated "
+            "capability into the result text by the adapter",
         ),
         resource_id=FacetDecl(
             state=FacetState.NA,
@@ -901,7 +908,7 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
         ),
         snippet=FacetDecl(
             state=FacetState.MAPPED,
-            native_field='match "code" / risk "threat_code"',
+            native_field='match "code" / risks[] "threat_code"',
         ),
         references=FacetDecl(
             state=FacetState.MAPPED,
@@ -917,8 +924,11 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
         ),
         extras=FacetDecl(
             state=FacetState.MAPPED,
-            native_field="extra_properties merged into the result PropertyBag "
-            "(package_name and package_version in verify mode)",
+            native_field="extra_properties merged into the result PropertyBag: "
+            "issue_severity and guarddog_ecosystem on every result, "
+            "guarddog_match on matches, guarddog_risk, guarddog_risk_severity, "
+            "guarddog_capability_rule and mitre_tactics on correlated risks, "
+            "and package_name and package_version in verify mode",
         ),
     )
 
