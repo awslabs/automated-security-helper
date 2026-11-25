@@ -284,6 +284,9 @@ class TestReport:
             for r in document["runs"][0]["results"]
         }
         assert len(fingerprints) == 2
+        props = [r["properties"] for r in document["runs"][0]["results"]]
+        assert [p["tags"] for p in props] == [["sample"], []]
+        assert [p["yara_tags"] for p in props] == [["sample"], []]
 
     @pytest.mark.parametrize(
         "reported, expected",
@@ -459,7 +462,7 @@ class TestExitStatusAndOutput:
     ):
         scanner = _scanner(tree, tmp_path, rules_path=str(rules), scan_timeout=5)
         fake = FakeYr(timed_out=True)
-        with pytest.raises(ScannerError, match="timed out after 5"):
+        with pytest.raises(ScannerError, match=r"timed out after '5' s and was killed"):
             _run(scanner, fake, monkeypatch)
         assert 0 < fake.calls[0]["timeout"] <= 5
 

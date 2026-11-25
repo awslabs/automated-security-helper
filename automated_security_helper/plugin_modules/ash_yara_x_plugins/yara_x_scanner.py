@@ -337,6 +337,7 @@ def convert_ndjson(
                     "partialFingerprints": {"yara_x/v1": fingerprint[:32]},
                     "properties": {
                         "issue_severity": severity,
+                        "tags": tags,
                         "yara_tags": tags,
                     },
                 }
@@ -456,7 +457,8 @@ class YaraXScanner(ScannerPluginBase[YaraXScannerConfig]):
         tags=FacetDecl(
             state=FacetState.MAPPED,
             native_field='rules[]."tags", written as the SARIF rule property '
-            'tags (after "yara-x") and the result property "yara_tags"',
+            'tags (after "yara-x") and the result properties "tags" and '
+            '"yara_tags"',
         ),
         extras=FacetDecl(
             state=FacetState.MAPPED,
@@ -829,6 +831,8 @@ class YaraXScanner(ScannerPluginBase[YaraXScannerConfig]):
             for result in run.results or []:
                 locations = result.locations or []
                 physical = locations[0].physicalLocation if locations else None
+                # physicalLocation is a RootModel union: read through ``.root``.
+                physical = getattr(physical, "root", physical)
                 location = physical.artifactLocation if physical else None
                 uri = location.uri if location is not None and location.uri else ""
                 if uri and excluded(uri):
