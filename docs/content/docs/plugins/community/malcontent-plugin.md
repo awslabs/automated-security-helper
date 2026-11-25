@@ -35,10 +35,10 @@ ASH runs this from the source directory, so paths in the report are source-relat
 
 <!-- doctest: illustrative reason="shows the argv ASH builds; the placeholders are not runnable" -->
 ```text
-mal --format=json --output=<results>/<target>/malcontent.json --min-risk=low --ignore-self analyze -- .
+mal --format=json --output=<results>/<target>/malcontent.json --min-risk=low --third-party=false --ignore-self analyze -- .
 ```
 
-Malcontent walks the path itself and decides which files are programs. ASH converts the JSON report to SARIF: one result per behavior, located at line 1 of its file because Malcontent reports no line numbers. The text Malcontent matched in your files is never copied into the report. ASH drops results under its own output directory.
+Malcontent walks the path itself and decides which files are programs. ASH converts the JSON report to SARIF: one result per behavior, located at its file with no line number, because Malcontent reports no line numbers, so findings are file-level. The text Malcontent matched in your files is never copied into the report. ASH drops results under its own output directory.
 
 Always passed: `--third-party=false`. Malcontent includes its third-party rules, which may have licensing restrictions, unless the flag is turned off, so ASH turns it off and only Malcontent's own rules run.
 
@@ -78,15 +78,13 @@ An unrecognized level is rated HIGH so it is not hidden under the default thresh
 
 ## Suppressions
 
-ASH suppressions by rule, path and line work as for any scanner. The rule ID is the Malcontent behavior ID.
+ASH suppressions by rule and path work as for any scanner. Findings are file-level, so a suppression with a line range never matches a Malcontent finding; leave `line_start` and `line_end` out. The rule ID is the Malcontent behavior ID.
 
 ```yaml
 global_settings:
   suppressions:
     - rule_id: net/socket/connect
       path: tools/healthcheck.py
-      line_start: 1
-      line_end: 1
       reason: a documented health check, not a callback
 ```
 

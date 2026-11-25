@@ -129,3 +129,9 @@ extract only, `uv sync --frozen --all-extras --group dev`, `env -i`, `-n 4`:
 - Whole-tree collect smoke (`pytest --collect-only -q tests/unit`): 72,856 tests collected
   with edit 2 applied; without it the collection stops on the PACKAGE_DIRS check.
 - The extract was removed and its absence read back.
+
+### Round 2 final-review rows
+
+- Docs page: the Suppressions example and the "line 1" sentence were re-cut because the adapter no longer writes a region (a line-scoped suppression can never match a file-level finding). The argv block now shows `--third-party=false` in code order.
+- Residual, unchanged: no ASH-made capture and no recorded negative report exist yet; Malcontent publishes no release binary.
+- Central rows still owed to the integration lane (SCANNER_TOOL_TYPES, PACKAGE_DIRS, count pins, CORPORA prep row, LINK_HANDLING FOLLOWS_NO_LINK) are listed above.
