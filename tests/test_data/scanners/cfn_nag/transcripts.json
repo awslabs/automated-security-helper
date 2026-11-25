@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "transcripts": [
+    {
+      "adapter_prep": null,
+      "also_for": [],
+      "argv": null,
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": null,
+      "id": "cfn-nag-src-test-yaml",
+      "live_input": false,
+      "note": "a loose native capture from before transcripts; no SARIF capture exists (the M0 run could not produce a real cfn-nag result, see M0-FINDINGS.md)",
+      "observable": true,
+      "pin_stamp": null,
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "json",
+          "path": "src.test.yaml.json",
+          "sha256": "2e060b0c5a5d3403066a68ae75993431a35b5df75f3d3763fb1bdddbee631a11"
+        }
+      ],
+      "retention": "current",
+      "scanner": "cfn-nag",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "cfn-nag",
+        "version": "unknown"
+      }
+    },
+    {
+      "adapter_prep": null,
+      "also_for": [],
+      "argv": null,
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": null,
+      "id": "cfn-nag-src-cfn-and-python-test-yaml",
+      "live_input": false,
+      "note": "a loose native capture from before transcripts",
+      "observable": true,
+      "pin_stamp": null,
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "json",
+          "path": "src.cfn_and_python.test.yaml.json",
+          "sha256": "a1ffd4dee1b9ece62a91268f17dfcf7c3b5a95c083bc68f77b2870f3a7fc619b"
+        }
+      ],
+      "retention": "current",
+      "scanner": "cfn-nag",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "cfn-nag",
+        "version": "unknown"
+      }
+    }
+  ],
+  "unrecorded": []
+}

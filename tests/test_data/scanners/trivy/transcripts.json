@@ -1,0 +1,167 @@
+{
+  "schema_version": 1,
+  "transcripts": [
+    {
+      "adapter_prep": "trivy",
+      "also_for": [
+        "trivy-repo"
+      ],
+      "argv": null,
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": null,
+      "id": "trivy-0.69.3-all",
+      "live_input": true,
+      "note": null,
+      "observable": true,
+      "pin_stamp": {
+        "tool": "trivy",
+        "version": "0.69.3"
+      },
+      "provenance": "attested",
+      "reason": "recorded with trivy 0.69.3, before the pin moved to v0.76.2; the native shape is still read by the adapter, so the recording stays until it is re-recorded at the pin",
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "sarif",
+          "path": "trivy-0.69.3.all.sarif",
+          "sha256": "fc59fa72ea36b0f5a7769222c29b6dfcf7d90fa5f6517081aac4d1d1be202c14"
+        }
+      ],
+      "retention": "historical",
+      "scanner": "trivy",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "trivy",
+        "version": "0.69.3"
+      }
+    },
+    {
+      "adapter_prep": "trivy",
+      "also_for": [
+        "trivy-repo"
+      ],
+      "argv": null,
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": null,
+      "id": "trivy-0.69.3-vuln",
+      "live_input": true,
+      "note": null,
+      "observable": true,
+      "pin_stamp": {
+        "tool": "trivy",
+        "version": "0.69.3"
+      },
+      "provenance": "attested",
+      "reason": "recorded with trivy 0.69.3, before the pin moved to v0.76.2; the native shape is still read by the adapter, so the recording stays until it is re-recorded at the pin",
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "sarif",
+          "path": "trivy-0.69.3.vuln.sarif",
+          "sha256": "60f0e37de3add3903676e82c731b200a31aad243f80c983c2d065be07f79d2ee"
+        }
+      ],
+      "retention": "historical",
+      "scanner": "trivy",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "trivy",
+        "version": "0.69.3"
+      }
+    },
+    {
+      "adapter_prep": "trivy",
+      "also_for": [
+        "trivy-repo"
+      ],
+      "argv": null,
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": null,
+      "id": "trivy-0.75.0-shared-cve",
+      "live_input": true,
+      "note": null,
+      "observable": true,
+      "pin_stamp": {
+        "tool": "trivy",
+        "version": "0.75.0"
+      },
+      "provenance": "attested",
+      "reason": "recorded with trivy 0.75.0, before the pin moved to v0.76.2; the native shape is still read by the adapter, so the recording stays until it is re-recorded at the pin",
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "sarif",
+          "path": "trivy-0.75.0.shared-cve.sarif",
+          "sha256": "fa56b8ef7aae3926e673c473ff76293a36546f4cbb52531e4300ed7a97d1fab4"
+        }
+      ],
+      "retention": "historical",
+      "scanner": "trivy",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "trivy",
+        "version": "0.75.0"
+      }
+    },
+    {
+      "adapter_prep": "trivy",
+      "also_for": [
+        "trivy-repo"
+      ],
+      "argv": [
+        "trivy",
+        "fs",
+        "--scanners",
+        "misconfig",
+        "<fixture_repo_misconfig>"
+      ],
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": {
+        "paths": [
+          "fixture_repo_misconfig/main.tf"
+        ],
+        "sha256": "6e26a73ab113e353b4b739addde9d4c6448cbc070d4a08231a75ae8a7991e713"
+      },
+      "id": "trivy-0.76.2-misconfig-terraform",
+      "live_input": true,
+      "note": "eight misconfigurations on one aws_s3_bucket; the JSON report carries the terraform resource address the SARIF drops (M0-FINDINGS.md (a))",
+      "observable": true,
+      "pin_stamp": {
+        "tool": "trivy",
+        "version": "0.76.2"
+      },
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "sarif",
+          "path": "captured/trivy-0.76.2-misconfig-terraform.sarif",
+          "sha256": "9a4d1db59fda35a92aa2594bbf3d8584ad562f8c02e4b03122f45d494bee569a"
+        }
+      ],
+      "retention": "current",
+      "scanner": "trivy",
+      "side_reports": [
+        {
+          "format": "json",
+          "path": "captured/trivy-0.76.2-misconfig-terraform.json",
+          "sha256": "c1da3c777bf06b60df17180aae515352ed2e1507c78a193b23756eb55e9c3247"
+        }
+      ],
+      "stderr_tail": null,
+      "tool": {
+        "name": "trivy",
+        "version": "0.76.2"
+      }
+    }
+  ],
+  "unrecorded": []
+}

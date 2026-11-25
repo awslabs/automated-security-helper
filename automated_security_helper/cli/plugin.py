@@ -40,7 +40,12 @@ from automated_security_helper.plugins.loader import (
     plugin_module_fix,
     scan_plugin_filter,
 )
-from automated_security_helper.utils.console import ash_console, secho
+from automated_security_helper.utils.console import (
+    ash_console,
+    echo,
+    echo_raw,
+    secho,
+)
 from automated_security_helper.utils.error_text import error_text, text_without_values
 from automated_security_helper.utils.log import (
     escape_markup,
@@ -77,14 +82,19 @@ def _version_label(entry) -> str:
     return entry.get("version") or "Unknown"
 
 
-plugin_app = typer.Typer(
-    name="plugin",
-    help="Manage ASH plugins",
-    pretty_exceptions_enable=True,
-    pretty_exceptions_short=True,
-    # Not on a CI runner: locals can hold secrets (utils/log.py).
-    pretty_exceptions_show_locals=show_debug_locals(),
-)
+def _new_plugin_typer() -> typer.Typer:
+    """One construction for both ``plugin`` apps, so their settings cannot diverge."""
+    return typer.Typer(
+        name="plugin",
+        help="Manage ASH plugins",
+        pretty_exceptions_enable=True,
+        pretty_exceptions_short=True,
+        # Not on a CI runner: locals can hold secrets (utils/log.py).
+        pretty_exceptions_show_locals=show_debug_locals(),
+    )
+
+
+plugin_app = _new_plugin_typer()
 
 
 @plugin_app.command(
@@ -567,6 +577,195 @@ def _print_tables(
                     )
 
         console.print(table)
+
+
+def _default_transcripts_root() -> Path:
+    """The committed fixture corpus of a source checkout (absent from a wheel)."""
+    return Path(__file__).resolve().parents[2] / "tests" / "test_data" / "scanners"
+
+
+def _live_results_by_scanner(
+    entries: List[str], verified: List[str]
+) -> dict[str, dict[str, bool]]:
+    """``{scanner: {platform: passed}}`` from the ``--live-result`` values.
+
+    A live cell is one tool's CI result, so a result vouches for the scanner it names
+    and no other: ``SCANNER@PLATFORM=pass``. The bare ``PLATFORM=pass`` form is
+    accepted only when the run verifies exactly one scanner. A malformed entry, an empty
+    platform, a scanner this run does not verify, and a platform given twice (a retried
+    job whose second result would silently replace the first) are usage errors.
+    """
+
+    def refuse(message: str):
+        secho(f"Error: --live-result {message}", err=True)
+        raise typer.Exit(2)
+
+    results: dict[str, dict[str, bool]] = {}
+    for entry in entries:
+        target, _, outcome = entry.partition("=")
+        if outcome not in ("pass", "fail"):
+            refuse(
+                f"{entry!r} is not [SCANNER@]PLATFORM=pass or [SCANNER@]PLATFORM=fail."
+            )
+        scanner, at, platform = target.partition("@")
+        if not at:
+            scanner, platform = "", target
+            if len(verified) != 1:
+                refuse(
+                    f"{entry!r} names no scanner, and this run verifies "
+                    f"{len(verified)}: write SCANNER@PLATFORM={outcome}, so one tool's "
+                    "CI result cannot vouch for another."
+                )
+            scanner = verified[0]
+        if not scanner or not platform.strip():
+            refuse(
+                f"{entry!r} needs both a scanner and a platform in SCANNER@PLATFORM."
+            )
+        if scanner not in verified:
+            refuse(
+                f"{entry!r} is a result for {scanner!r}, which this run does not "
+                f"verify ({', '.join(verified) or 'none'})."
+            )
+        if platform in results.setdefault(scanner, {}):
+            refuse(
+                f"names {scanner}@{platform} more than once; give one result per cell."
+            )
+        results[scanner][platform] = outcome == "pass"
+    return results
+
+
+#: ``ash plugin``: the group the CLI mounts. ``plugin_app`` stays the one-command app
+#: (``list``) that ``python -m automated_security_helper.cli.plugin`` and the list tests
+#: drive as their root, where a single command collapses into the app itself; the group
+#: carries the same ``list`` registration beside ``verify``.
+plugin_group = _new_plugin_typer()
+plugin_group.registered_commands.extend(plugin_app.registered_commands)
+
+
+@plugin_group.command(
+    name="verify",
+    help="""
+The `plugin verify` command evaluates the alpha-to-supported promotion bar for scanner
+plugins.
+
+It reads each plugin's manifest and its recorded tool transcripts: no tool is run and no
+network is touched. The five rows are the facets over the committed transcripts, the
+operational declarations (zero unconfirmed), the live-tool cell on every declared
+platform, pinned provisioning, and docs generated from the manifest. A row that cannot
+be evaluated here reads not-run, which is not a pass.
+
+Exit status: 0 when every named plugin passes, 1 when any row is red, 3 when none is red
+but some row was not run, 2 for a usage error (an unknown plugin, no transcript root).
+""",
+)
+def verify_plugins(
+    names: Annotated[
+        List[str],
+        typer.Argument(
+            help="Scanner names to verify (as in `ash plugin list`). Omit with --all."
+        ),
+    ] = None,
+    all_plugins: Annotated[
+        bool,
+        typer.Option("--all", help="Verify every scanner with a manifest."),
+    ] = False,
+    transcripts_root: Annotated[
+        Path,
+        typer.Option(
+            "--transcripts-root",
+            help="The directory holding the committed fixture directories "
+            "(searched for transcripts.json). Defaults to tests/test_data/scanners "
+            "of a source checkout.",
+        ),
+    ] = None,
+    live_result: Annotated[
+        List[str],
+        typer.Option(
+            "--live-result",
+            help="A live-cell result CI recorded, as SCANNER@PLATFORM=pass or "
+            "SCANNER@PLATFORM=fail (for example hadolint@linux/amd64=pass). The "
+            "scanner must be one this run verifies; with exactly one scanner the "
+            "bare PLATFORM=pass form is accepted. A platform may be given once. "
+            "Without any, row 3 is not-run.",
+        ),
+    ] = [],
+    as_json: Annotated[
+        bool, typer.Option("--json", help="Print the reports as JSON.")
+    ] = False,
+):
+    """Verify scanner plugins against the promotion bar."""
+    from automated_security_helper.core.plugin_conformance import (
+        EXIT_FAIL,
+        EXIT_INCOMPLETE,
+        PluginLoadError,
+        discover_transcripts,
+        verify_plugin,
+    )
+    from automated_security_helper.plugin_manifests import (
+        manifest_for,
+        scanner_manifests,
+    )
+
+    root = transcripts_root or _default_transcripts_root()
+    if not root.is_dir():
+        secho(
+            f"Error: no transcript directory at {root}. Pass --transcripts-root "
+            "with a checkout's tests/test_data/scanners.",
+            err=True,
+        )
+        raise typer.Exit(2)
+    discovery = discover_transcripts(root)
+    if not discovery.files and not discovery.unreadable:
+        secho(
+            f"Error: no transcripts.json under {root}. Pass --transcripts-root with "
+            "a checkout's tests/test_data/scanners.",
+            err=True,
+        )
+        raise typer.Exit(2)
+    if all_plugins == bool(names):
+        secho("Error: name scanners to verify, or pass --all (not both).", err=True)
+        raise typer.Exit(2)
+    manifests = []
+    for name in sorted(names or []):
+        manifest = manifest_for(name)
+        if manifest is None:
+            secho(
+                f"Error: {name!r} has no manifest. Scanners with one: "
+                f"{', '.join(m.name for m in scanner_manifests())}.",
+                err=True,
+            )
+            raise typer.Exit(2)
+        manifests.append(manifest)
+    if all_plugins:
+        manifests = list(scanner_manifests())
+    live = _live_results_by_scanner(live_result, [m.name for m in manifests])
+    reports = []
+    for manifest in manifests:
+        try:
+            reports.append(
+                verify_plugin(
+                    manifest,
+                    root,
+                    live_results=live.get(manifest.name),
+                    discovered=discovery,
+                )
+            )
+        except PluginLoadError as error:
+            secho(f"Error: {shown_on_one_line(str(error))}", err=True)
+            raise typer.Exit(2)
+    if as_json:
+        echo_raw(json.dumps([r.as_dict() for r in reports], indent=2))
+    else:
+        for report in reports:
+            echo(f"{report.scanner} ({report.tier}): {report.verdict}")
+            for row in report.rows:
+                echo(f"  {row.number}. [{row.status.value}] {row.name}")
+                for detail in row.details:
+                    echo(f"       - {shown_on_one_line(detail)}")
+    codes = {r.exit_code for r in reports}
+    raise typer.Exit(
+        EXIT_FAIL if EXIT_FAIL in codes else EXIT_INCOMPLETE if codes - {0} else 0
+    )
 
 
 if __name__ == "__main__":
