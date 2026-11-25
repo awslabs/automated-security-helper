@@ -70,9 +70,9 @@ def shared_correlation_ids_by_position(
 
 
 def _shared_values_by_position(
-    flat: List[Any], results: List[Any], read: Callable[[Any], Optional[str]]
+    flat: List[Any], results: List[Any], value_of: Callable[[Any], Optional[str]]
 ) -> List[Optional[str]]:
-    """What *read* gives for each result's paired row; see the public wrappers."""
+    """What *value_of* gives for each result's paired row; see the public wrappers."""
     rows = [item for item in flat if getattr(item, "source_report", None) is None]
     pairs = _describing_pairs(rows, results)
     ids: List[Optional[str]] = []
@@ -80,7 +80,7 @@ def _shared_values_by_position(
         # By position: result ``i`` takes row ``i`` when that pair describes it.
         agreed = {result for result, row in pairs if result == row}
         for position, item in enumerate(rows):
-            ids.append(read(item) if position in agreed else None)
+            ids.append(value_of(item) if position in agreed else None)
         return ids
     # Walked: each result takes the first row, at or after the last one taken,
     # that describes it. The frame says which rows describe each result; the
@@ -94,7 +94,7 @@ def _shared_values_by_position(
         at = bisect_left(listed, cursor)
         if at < len(listed):
             cursor = listed[at] + 1
-            ids.append(read(rows[listed[at]]))
+            ids.append(value_of(rows[listed[at]]))
         else:
             ids.append(None)
     return ids
