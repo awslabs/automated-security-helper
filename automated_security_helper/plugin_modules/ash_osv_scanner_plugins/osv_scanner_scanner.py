@@ -293,9 +293,10 @@ class OsvScannerScanner(ScannerPluginBase[OsvScannerScannerConfig]):
             reason="output not read; a sample run would settle it",
         ),
         tags=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="result properties.tags, written by the adapter "
-            "(sca, security)",
+            state=FacetState.NA,
+            reason="the captured report carries no tags on its rules or results; "
+            "the adapter adds sca and security to each result after the run, which "
+            "is not a native field",
         ),
         extras=FacetDecl(
             state=FacetState.MAPPED,
