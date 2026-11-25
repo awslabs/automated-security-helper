@@ -111,3 +111,22 @@ Desk cbc4ff77, repository extract under `/run/user/<uid>/`,
 - Whole-tree collect smoke: 74317 of 74362 collected, 1 error: the
   `PACKAGE_DIRS` item above.
 - Extract removed and its absence read back.
+
+### Final-review rows (round 2)
+
+Open HIGH, held: no real captured Capslock report exists. The module's fixtures
+under `tests/test_data/scanners/capslock/schema_derived/` are derived from the
+published proto schema and say so. A capture needs a Go toolchain and a built
+`capslock` binary (upstream publishes none), and ASH installs nothing on a scan
+host. The test pins the absence of a `captured/` directory. The row stays held
+until a capture is made on a venue where installing the tool is approved.
+
+Low-severity rows, no round:
+
+1. The `MAX_MODULES` raise path skips `_post_scan`, while the other raise paths
+   call it. Bookkeeping only.
+2. `stderr_preference="both"` routes tool stderr into `self.errors` on
+   successful runs through the base response handler. The same holds for
+   cfn_lint, cfn_nag and npm_audit.
+3. `_empty_report()` reads `self.tool_version` before `_pre_scan` on the
+   empty-target path. `ToolComponent.version` is optional, so this is cosmetic.
