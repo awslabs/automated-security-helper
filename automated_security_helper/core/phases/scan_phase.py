@@ -63,6 +63,8 @@ from automated_security_helper.utils.sarif_utils import (
     get_severity_metrics_from_sarif,
 )
 from automated_security_helper.models.scanner_validation import (
+    EnablementStatus,
+    RegistrationStatus,
     ScannerValidationManager,
     scanner_display_name,
 )
@@ -782,8 +784,8 @@ class ScanPhase(EnginePhase):
 
         self._track_scanner_state(
             display_name,
-            registration_status="registered",
-            enablement_status="excluded",
+            registration_status=RegistrationStatus.REGISTERED,
+            enablement_status=EnablementStatus.EXCLUDED,
             enablement_reason=f"Scanner excluded during filtering: {reason}",
             queued_for_execution=False,
             execution_completed=False,
@@ -835,8 +837,8 @@ class ScanPhase(EnginePhase):
         stored_nothing_reason = home_as_tilde(nothing_reason)
         self.validation_manager.update_scanner_state(
             display_name,
-            registration_status="registered",
-            enablement_status="excluded",
+            registration_status=RegistrationStatus.REGISTERED,
+            enablement_status=EnablementStatus.EXCLUDED,
             enablement_reason=(f"Nothing to scan: {stored_nothing_reason}"),
             queued_for_execution=False,
             execution_completed=False,
@@ -1184,7 +1186,7 @@ class ScanPhase(EnginePhase):
                         # scanner's state would then go untracked.
                         self._track_scanner_state(
                             failed_name,
-                            registration_status="registered",
+                            registration_status=RegistrationStatus.REGISTERED,
                             plugin_class=plugin_class,
                             queued_for_execution=False,
                             execution_completed=False,
@@ -1277,7 +1279,7 @@ class ScanPhase(EnginePhase):
                     try:
                         self.validation_manager.update_scanner_state(
                             display_name,
-                            registration_status="registered",
+                            registration_status=RegistrationStatus.REGISTERED,
                             plugin_class=plugin_instance.__class__,
                         )
                     except ValueError as e:
@@ -2103,8 +2105,8 @@ class ScanPhase(EnginePhase):
                         # CRITICAL: Update validation manager state for queued scanners
                         self.validation_manager.update_scanner_state(
                             display_name,
-                            registration_status="registered",
-                            enablement_status="enabled",
+                            registration_status=RegistrationStatus.REGISTERED,
+                            enablement_status=EnablementStatus.ENABLED,
                             enablement_reason="Scanner passed all checks and was queued for execution",
                             queued_for_execution=True,
                             execution_completed=False,
@@ -2273,7 +2275,7 @@ class ScanPhase(EnginePhase):
                     )
                     self.validation_manager.update_scanner_state(
                         display_name,
-                        registration_status="registered",
+                        registration_status=RegistrationStatus.REGISTERED,
                         queued_for_execution=False,
                         execution_completed=False,
                         failure_reason=unclassified_reason,
@@ -2810,7 +2812,7 @@ class ScanPhase(EnginePhase):
 
             # Add validation results to aggregated results for debugging
             checkpoint_dict = {
-                "checkpoint_name": validation_checkpoint.checkpoint_name,
+                "checkpoint_name": str(validation_checkpoint.checkpoint_name),
                 "timestamp": validation_checkpoint.timestamp.isoformat(),
                 "expected_scanners": validation_checkpoint.expected_scanners,
                 "actual_scanners": validation_checkpoint.actual_scanners,
@@ -3029,7 +3031,7 @@ class ScanPhase(EnginePhase):
 
             # Add validation results to aggregated results for debugging
             checkpoint_dict = {
-                "checkpoint_name": validation_checkpoint.checkpoint_name,
+                "checkpoint_name": str(validation_checkpoint.checkpoint_name),
                 "timestamp": validation_checkpoint.timestamp.isoformat(),
                 "expected_scanners": validation_checkpoint.expected_scanners,
                 "actual_scanners": validation_checkpoint.actual_scanners,
@@ -3285,7 +3287,7 @@ class ScanPhase(EnginePhase):
 
             # Add validation results to aggregated results for debugging
             checkpoint_dict = {
-                "checkpoint_name": validation_checkpoint.checkpoint_name,
+                "checkpoint_name": str(validation_checkpoint.checkpoint_name),
                 "timestamp": validation_checkpoint.timestamp.isoformat(),
                 "expected_scanners": validation_checkpoint.expected_scanners,
                 "actual_scanners": validation_checkpoint.actual_scanners,
