@@ -47,7 +47,7 @@ from automated_security_helper.utils.terminal_text import (
     shown_on_one_line,
 )
 
-from automated_security_helper.core.asset import Asset, ImageLocator
+from automated_security_helper.core.asset import Asset, AssetKind, ImageLocator
 from automated_security_helper.core.cancellation import raise_if_cancelled
 from automated_security_helper.core.previous_results import (
     HELD_DIR_NAME,
@@ -7103,6 +7103,51 @@ def _in_a_run_log_scope(scan):
 
 @_in_a_run_log_scope
 @_in_scanned_tree_from_arguments
+def _refuse_an_image_scan_scope(
+    *,
+    mode: RunMode,
+    workspace_plan: "WorkspacePlan | None",
+    existing_results: str | None,
+    changed_files_only: bool,
+) -> None:
+    """The scope rules every image scan obeys, whichever form submitted it.
+
+    Shared by the image OPTIONS (:func:`_image_asset_or_refusal`) and the
+    pre-built ``asset`` an infrastructure caller passes: an image scan runs in
+    local mode, single-directory, on a fresh scan, with no git-history scope.
+    Each refusal exits with the usage code (5).
+    """
+    if workspace_plan is not None:
+        _printed_refusal(
+            ASH_EXIT_USAGE_ERROR,
+            "an image option cannot be combined with a workspace scan: a "
+            "workspace names directories, and one scan has one subject.",
+            one_line=True,
+        )
+    if mode != RunMode.local:
+        _printed_refusal(
+            ASH_EXIT_USAGE_ERROR,
+            f"an image option is supported in local mode only, not mode="
+            f"{mode.value!r}: the scan that routes by asset kind is the local "
+            "orchestrator's.",
+            one_line=True,
+        )
+    if existing_results is not None:
+        _printed_refusal(
+            ASH_EXIT_USAGE_ERROR,
+            "an image option cannot be combined with existing results: saved "
+            "results already name their subject, and nothing would be scanned.",
+            one_line=True,
+        )
+    if changed_files_only:
+        _printed_refusal(
+            ASH_EXIT_USAGE_ERROR,
+            "an image option cannot be combined with changed_files_only, which "
+            "scopes a scan by git history: an image has none.",
+            one_line=True,
+        )
+
+
 def _image_asset_or_refusal(
     *,
     image: str | None,
@@ -7155,35 +7200,12 @@ def _image_asset_or_refusal(
             "one subject. Scan the directory and the image as two runs.",
             one_line=True,
         )
-    if workspace_plan is not None:
-        _printed_refusal(
-            ASH_EXIT_USAGE_ERROR,
-            "an image option cannot be combined with a workspace scan: a "
-            "workspace names directories, and one scan has one subject.",
-            one_line=True,
-        )
-    if mode != RunMode.local:
-        _printed_refusal(
-            ASH_EXIT_USAGE_ERROR,
-            f"an image option is supported in local mode only, not mode="
-            f"{mode.value!r}: the scan that routes by asset kind is the local "
-            "orchestrator's.",
-            one_line=True,
-        )
-    if existing_results is not None:
-        _printed_refusal(
-            ASH_EXIT_USAGE_ERROR,
-            "an image option cannot be combined with existing results: saved "
-            "results already name their subject, and nothing would be scanned.",
-            one_line=True,
-        )
-    if changed_files_only:
-        _printed_refusal(
-            ASH_EXIT_USAGE_ERROR,
-            "an image option cannot be combined with changed_files_only, which "
-            "scopes a scan by git history: an image has none.",
-            one_line=True,
-        )
+    _refuse_an_image_scan_scope(
+        mode=mode,
+        workspace_plan=workspace_plan,
+        existing_results=existing_results,
+        changed_files_only=changed_files_only,
+    )
     if image is not None:
         if not image.strip():
             _printed_refusal(
@@ -7245,6 +7267,7 @@ def run_ash_scan(
     image: str | None = None,
     image_archive: str | Path | None = None,
     image_layout: str | Path | None = None,
+    asset: "Asset | None" = None,
     shard_index: int | None = None,
     shard_count: int | None = None,
     mode: RunMode = RunMode.local,
@@ -7302,17 +7325,42 @@ def run_ash_scan(
     # their exclusivity rules read the arguments as given: source_dir=None is
     # "not named", which an image option may accompany, where an explicit
     # source_dir beside one leaves which subject was meant to the reader.
-    asset = _image_asset_or_refusal(
-        image=image,
-        image_archive=image_archive,
-        image_layout=image_layout,
-        source_dir=source_dir,
-        mode=mode,
-        workspace_plan=workspace_plan,
-        existing_results=existing_results,
-        changed_files_only=changed_files_only,
-    )
+    #
+    # ``asset`` is the pre-built form for an infrastructure caller (the MCP
+    # scan runner), which anchors the scan's output and config discovery in a
+    # directory it owns -- the session workspace -- while the subject is the
+    # image: for it, source_dir is the deliberate anchor, not a second
+    # subject, so the source_dir exclusivity rule binds the OPTIONS only.
+    # The mode, workspace and scope rules bind both forms alike.
+    if asset is not None and (
+        image is not None or image_archive is not None or image_layout is not None
+    ):
+        _printed_refusal(
+            ASH_EXIT_USAGE_ERROR,
+            "asset cannot be combined with image, image_archive or "
+            "image_layout: the asset already names the subject.",
+            one_line=True,
+        )
     if asset is not None:
+        if asset.kind == AssetKind.CONTAINER_IMAGE:
+            _refuse_an_image_scan_scope(
+                mode=mode,
+                workspace_plan=workspace_plan,
+                existing_results=existing_results,
+                changed_files_only=changed_files_only,
+            )
+    else:
+        asset = _image_asset_or_refusal(
+            image=image,
+            image_archive=image_archive,
+            image_layout=image_layout,
+            source_dir=source_dir,
+            mode=mode,
+            workspace_plan=workspace_plan,
+            existing_results=existing_results,
+            changed_files_only=changed_files_only,
+        )
+    if asset is not None and asset.kind == AssetKind.CONTAINER_IMAGE:
         # An image asset runs no convert phase: converters read source files,
         # which an image asset does not present (the design's C7). The caller's
         # other phases stand.

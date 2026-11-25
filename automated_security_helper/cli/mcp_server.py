@@ -61,6 +61,9 @@ from automated_security_helper.cli.mcp_tools import (
     mcp_explain_finding,
     mcp_suggest_suppression,
     mcp_set_source_git,
+    mcp_set_source_image,
+    mcp_set_source_image_archive_chunk,
+    mcp_set_source_image_archive_finalize,
     mcp_set_source_zip_chunk,
     mcp_set_source_zip_finalize,
     mcp_clear_source,
@@ -670,6 +673,7 @@ async def run_ash_scan(
     severity_threshold: Optional[str] = None,
     config_path: Optional[str] = None,
     clean_output: bool = True,
+    execution: str = "auto",
 ) -> Dict[str, Any]:
     """
     Start a security scan and return immediately.
@@ -711,8 +715,14 @@ async def run_ash_scan(
 
     Args:
         source_dir: Path to the directory to scan. This should be the absolute path!
-            Omit it to scan a source tree this session delivered with
-            set_source_git or set_source_zip_finalize.
+            Omit it to scan what this session delivered: the container image a
+            set_source_image or set_source_image_archive_finalize recorded (the
+            latest delivery wins), else a source tree set_source_git or
+            set_source_zip_finalize delivered. An image scan runs in the
+            session's own workspace and writes its output tree there; scanners
+            that do not declare container_image targets are reported SKIPPED.
+            Naming source_dir explicitly always scans that directory, whatever
+            the session delivered.
         severity_threshold: The least severe finding that still counts as actionable:
             ALL, LOW, MEDIUM, HIGH or CRITICAL, in any case. It can make the
             config's global_settings.severity_threshold stricter for this scan,
@@ -726,6 +736,19 @@ async def run_ash_scan(
             replaced once it finishes; with false they stay visible until the scan's
             own set-up moves them a moment later. A call refused because the
             directory already has a scan touches nothing in it.
+        execution: How the scan executes: "auto" (the default), "in_process" or
+            "express". auto and in_process run the scan in this server's own
+            process, today's path, which is what keeps the in-process progress
+            hooks. express asks for the warm express daemon and, like the CLI's
+            own thin client, falls back to the in-process run whenever
+            delegation cannot preserve the scan exactly -- which on this server
+            is always, for two measured reasons the response names: the daemon
+            protocol takes over the client's stdio file descriptors, and this
+            server's are the JSON-RPC transport; and the sandbox restrictions
+            the server passes (the config base gate, the client config policy)
+            have no command-line form, so a delegated run would drop them. A
+            fallback costs warmth, never correctness; the response's
+            execution_used says which path ran.
 
     Refused (error_type source_delivery_busy) while clear_source, set_source_git
     or set_source_zip_finalize is changing this session's delivered source;
@@ -773,17 +796,88 @@ async def run_ash_scan(
             # unusable session header is, so it reports the same usage code.
             return with_exit_code(refusal, REFUSED_USAGE_EXIT_CODE)
 
+        # The execution selection, validated before anything acts: an unknown
+        # word is the request's own fault, the usage code, as an unusable
+        # severity_threshold is.
+        execution_asked = (execution or "auto").strip().lower()
+        if execution_asked not in ("auto", "in_process", "express"):
+            message = (
+                f"execution must be one of auto, in_process or express, not "
+                f"{execution!r}"
+            )
+            await _tell_client_error(ctx, raw_controls_on_one_line(message))
+            return with_exit_code(
+                {
+                    "success": False,
+                    "error": raw_controls_on_one_line(message),
+                    "error_type": "invalid_execution",
+                },
+                REFUSED_USAGE_EXIT_CODE,
+            )
+        execution_used = "in_process"
+        if execution_asked == "express":
+            # The thin-client contract (express/client.py): anything that
+            # cannot be delegated exactly errs toward the in-process run,
+            # which costs warmth and never correctness. Delegation from this
+            # server cannot be exact on this tip: the daemon takes over the
+            # client's stdio (this server's is the JSON-RPC transport), and
+            # the sandbox restrictions below have no command-line form, so a
+            # delegated run would drop them.
+            await _tell_client(
+                ctx,
+                "info",
+                "execution=express fell back to the in-process run: the "
+                "express daemon's handover takes the client's stdio, which "
+                "on this server is the JSON-RPC transport, and the session's "
+                "sandbox restrictions have no command-line form.",
+            )
+
         # An empty or blank source_dir names no directory: it is the omitted
-        # form, which resolves to the delivered tree or refuses, never the
-        # server's working directory (Path("") is the working directory).
+        # form, which resolves to the delivered image or tree or refuses,
+        # never the server's working directory (Path("") is the working
+        # directory).
+        scan_asset = None
         if source_dir is None or not source_dir.strip():
-            resolved = _resolve_omitted_source_dir(session_id)
-            if resolved.error is not None:
-                await _tell_client_error(
-                    ctx, raw_controls_on_one_line(resolved.error["error"])
-                )
-                return resolved.error
-            source_dir = resolved.source_dir
+            from automated_security_helper.cli.mcp.source_delivery import (
+                ensure_session_workspace,
+                get_session_image_locator,
+            )
+
+            image_locator = get_session_image_locator(session_id)
+            if image_locator is not None:
+                # The image is the session's one scan subject (the delivery
+                # setters keep it the latest delivery). The scan anchors in
+                # the session's own workspace: an image has no target
+                # directory, so the output tree goes under the directory the
+                # server already owns for the session (the design's output
+                # placement row), which the sandbox already permits.
+                from automated_security_helper.core.asset import Asset
+
+                scan_asset = Asset.for_image(image_locator)
+                try:
+                    source_dir = str(ensure_session_workspace(session_id))
+                except Exception as workspace_error:  # noqa: BLE001 - one refusal
+                    message = raw_controls_on_one_line(
+                        "the session workspace for the delivered image could "
+                        f"not be created: {error_text(workspace_error)}"
+                    )
+                    await _tell_client_error(ctx, message)
+                    return with_exit_code(
+                        {
+                            "success": False,
+                            "error": message,
+                            "error_type": "session_workspace_unavailable",
+                        },
+                        REFUSED_INTERNAL_EXIT_CODE,
+                    )
+            else:
+                resolved = _resolve_omitted_source_dir(session_id)
+                if resolved.error is not None:
+                    await _tell_client_error(
+                        ctx, raw_controls_on_one_line(resolved.error["error"])
+                    )
+                    return resolved.error
+                source_dir = resolved.source_dir
         # The working directory is the server's filesystem layout, which this
         # module withholds from a network caller (_resolve_omitted_source_dir):
         # only the local client, whose directory it is, is told it.
@@ -996,7 +1090,11 @@ async def run_ash_scan(
             session_id=session_id,
             config_check=config_check,
             clean_output=clean_output,
+            asset=scan_asset,
         )
+        # Which path ran, for the execution argument's contract: in_process is
+        # the only one this server runs today, express having erred toward it.
+        result.setdefault("execution_used", execution_used)
 
         for warning in result.get("warnings") or []:
             await _tell_client(ctx, "warning", raw_controls_on_one_line(str(warning)))
@@ -2999,6 +3097,196 @@ async def clear_source(ctx: Context) -> Dict[str, Any]:
         await _tell_client_error(
             ctx,
             raw_controls_on_one_line(str(result.get("error", "clear_source failed"))),
+        )
+    return _with_session(result, session_id)
+
+
+@mcp.tool()
+async def set_source_image(
+    ctx: Context,
+    image_ref: str,
+) -> Dict[str, Any]:
+    """Record a container image reference as this session's scan subject.
+
+    The indirect-reference half of the image submission contract: the ref
+    (registry/repo[:tag][@sha256:digest]) is stored on the session and NOTHING
+    is fetched at delivery time -- image fetching, caching and preparing are
+    delegated to a container engine or the scanner tools' own registry clients
+    at scan start. Digest-pinned refs are preferred; a tag-only ref is resolved
+    where an engine is present. run_ash_scan with no source_dir then scans this
+    image; scanners that do not declare container_image targets are reported
+    SKIPPED, and until an image-capable scanner is wired the report carries one
+    informational note that the image was not scanned.
+
+    A later set_source_git or set_source_zip_finalize replaces the subject with
+    the delivered tree (the latest delivery wins), and a later set_source_image
+    replaces it back; clear_source forgets it.
+
+    Args:
+        image_ref: The image reference. For an archive you hold the bytes of,
+            use set_source_image_archive_chunk/-finalize instead, which needs
+            no engine and no network.
+
+    Returns:
+        Dict with success and image_ref; success=False with error for a value
+        that can never be a reference, and error_type source_delivery_busy
+        while a scan of this session runs.
+    """
+    try:
+        session_id = resolve_caller_session_id(ctx)
+    except ValueError as e:
+        await _tell_client_error(ctx, raw_controls_on_one_line(error_text(e)))
+        return _session_error(e)
+
+    refusal = session_identity_refusal(session_id, "set_source_image", ctx=ctx)
+    if refusal is not None:
+        await _tell_client_error(ctx, raw_controls_on_one_line(refusal["error"]))
+        return refusal
+
+    try:
+        result = await _run_delivery(
+            mcp_set_source_image,
+            image_ref=image_ref,
+            session_id=session_id,
+        )
+    except Exception as e:
+        log_unexpected_error(logger, e, "Error in set_source_image")
+        return {
+            "success": False,
+            "error": raw_controls_on_one_line(
+                f"Error recording image reference: {error_text(e)}"
+            ),
+            "error_type": type(e).__name__,
+        }
+    return _with_session(result, session_id)
+
+
+@mcp.tool()
+async def set_source_image_archive_chunk(
+    ctx: Context,
+    upload_id: str,
+    sequence: int,
+    data_b64: str,
+    last: bool,
+) -> Dict[str, Any]:
+    """Upload one base64 chunk of a saved container image (docker save tar).
+
+    The direct-payload half of the image submission contract, the zip channel's
+    shape byte for byte: chunks arrive in order, each at most 1 MiB decoded,
+    the final one with last=True, then set_source_image_archive_finalize
+    verifies and records the archive as this session's scan subject. Needs no
+    container engine and no network on the server: the scanner tools read the
+    archive directly.
+
+    Args:
+        upload_id: Identifier you choose, scoping this one upload.
+        sequence: Zero-based ordinal of this chunk.
+        data_b64: Base64-encoded chunk payload.
+        last: True on the final chunk.
+
+    Returns:
+        Dict with success, received, next_sequence and last; the same errors
+        and error_types as set_source_zip_chunk.
+    """
+    try:
+        session_id = resolve_caller_session_id(ctx)
+    except ValueError as e:
+        await _tell_client_error(ctx, raw_controls_on_one_line(error_text(e)))
+        return _session_error(e)
+
+    refusal = session_identity_refusal(
+        session_id, "set_source_image_archive_chunk", ctx=ctx
+    )
+    if refusal is not None:
+        await _tell_client_error(ctx, raw_controls_on_one_line(refusal["error"]))
+        return refusal
+
+    try:
+        return _with_session(
+            await _run_delivery(
+                mcp_set_source_image_archive_chunk,
+                upload_id=upload_id,
+                sequence=sequence,
+                data_b64=data_b64,
+                last=last,
+                session_id=session_id,
+            ),
+            session_id,
+        )
+    except Exception as e:
+        log_unexpected_error(logger, e, "Error in set_source_image_archive_chunk")
+        return {
+            "success": False,
+            "error": raw_controls_on_one_line(
+                f"Error accepting image archive chunk: {error_text(e)}"
+            ),
+            "error_type": type(e).__name__,
+        }
+
+
+@mcp.tool()
+async def set_source_image_archive_finalize(
+    ctx: Context,
+    upload_id: str,
+    expected_sha256: str,
+) -> Dict[str, Any]:
+    """Verify an uploaded image archive and record it as this session's subject.
+
+    The assembled upload must hash to expected_sha256 and be a plain tar (what
+    docker save writes; a gzip-compressed archive is refused with the remedy).
+    Nothing is extracted: the archive is moved whole into the session workspace
+    and the session's image locator points at it. run_ash_scan with no
+    source_dir then scans it, exactly as a set_source_image reference is
+    scanned.
+
+    Args:
+        upload_id: Identifier matching the prior chunk calls.
+        expected_sha256: Hex sha256 the assembled archive must hash to.
+
+    Returns:
+        Dict with success and image_archive (the archive's server-side path);
+        success=False with error on checksum mismatch, oversize upload, bytes
+        that are not a plain tar, or an upload that never received its last
+        chunk, with error_type source_delivery_busy while a scan of this
+        session runs and session_workspace_unavailable when the workspace
+        cannot take the file.
+    """
+    try:
+        session_id = resolve_caller_session_id(ctx)
+    except ValueError as e:
+        await _tell_client_error(ctx, raw_controls_on_one_line(error_text(e)))
+        return _session_error(e)
+
+    refusal = session_identity_refusal(
+        session_id, "set_source_image_archive_finalize", ctx=ctx
+    )
+    if refusal is not None:
+        await _tell_client_error(ctx, raw_controls_on_one_line(refusal["error"]))
+        return refusal
+
+    try:
+        result = await _run_delivery(
+            mcp_set_source_image_archive_finalize,
+            upload_id=upload_id,
+            expected_sha256=expected_sha256,
+            session_id=session_id,
+        )
+    except Exception as e:
+        log_unexpected_error(logger, e, "Error in set_source_image_archive_finalize")
+        return {
+            "success": False,
+            "error": raw_controls_on_one_line(
+                f"Error finalizing image archive: {error_text(e)}"
+            ),
+            "error_type": type(e).__name__,
+        }
+    if result.get("success"):
+        await _tell_client(
+            ctx,
+            "info",
+            raw_controls_on_one_line(
+                f"Image archive delivered for session {session_id}"
+            ),
         )
     return _with_session(result, session_id)
 

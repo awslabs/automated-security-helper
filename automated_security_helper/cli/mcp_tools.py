@@ -96,6 +96,7 @@ from automated_security_helper.utils.log import (
 if TYPE_CHECKING:
     # Typing only: the runtime import stays local to the tools that need it.
     from automated_security_helper.cli.mcp.sandbox import ConfigInputCheck
+    from automated_security_helper.core.asset import Asset
     from automated_security_helper.config.ash_config import (
         AshConfig,
         MCPResourceManagementConfig,
@@ -1756,6 +1757,7 @@ async def mcp_scan_directory(
     clean_output: bool = False,
     *,
     config_check: Optional["ConfigInputCheck"] = None,
+    asset: Optional["Asset"] = None,
 ) -> Dict[str, Any]:
     """
     Start a security scan with file-based progress tracking.
@@ -1790,6 +1792,13 @@ async def mcp_scan_directory(
             ``config_path``, this session and this target, when the caller has
             already run it (``run_ash_scan`` does, before it acts on the
             target). The file is then not read again here.
+        asset: The scan's subject when it is not ``directory_path``: a
+            CONTAINER_IMAGE asset carrying the locator the session delivered
+            (``run_ash_scan`` builds it from the session's image binding).
+            ``directory_path`` is then the deliberate anchor -- the session's
+            own workspace, where the output tree goes -- and the scan phase
+            routes every scanner by the asset's kind. None (the default) scans
+            ``directory_path`` exactly as today.
 
     Returns:
         Dictionary with scan ID and status information
@@ -2458,6 +2467,7 @@ async def mcp_scan_directory(
                     scan_counted=counted,
                     scan_timeout_seconds=limits.scan_timeout_seconds or None,
                     environment_values=environment_values,
+                    asset=asset,
                 ),
                 if_never_run=_give_back_what_the_runner_never_took,
             )
@@ -2819,6 +2829,7 @@ async def _run_scan_async(
     scan_counted: Optional[Any] = None,
     scan_timeout_seconds: Optional[float] = None,
     environment_values: Tuple[str, ...] = (),
+    asset: Optional["Asset"] = None,
 ) -> None:
     """Run an ASH scan asynchronously, then release what it held of its session.
 
@@ -2843,6 +2854,7 @@ async def _run_scan_async(
             session_id=session_id,
             scan_timeout_seconds=scan_timeout_seconds,
             environment_values=environment_values,
+            asset=asset,
         )
     finally:
         _give_back_the_scans_claim(scan_counted, scan_claim)
@@ -2872,6 +2884,7 @@ async def _run_scan(
     session_id: Optional[str] = None,
     scan_timeout_seconds: Optional[float] = None,
     environment_values: Tuple[str, ...] = (),
+    asset: Optional["Asset"] = None,
 ) -> None:
     """
     Run an ASH scan asynchronously.
@@ -3517,6 +3530,7 @@ async def _run_scan(
         return run_ash_scan(
             source_dir=directory_path,
             output_dir=output_dir,
+            asset=asset,
             config=config_path,
             severity_threshold_restriction=severity_threshold,
             mode=RunMode.local,
@@ -7728,3 +7742,150 @@ def mcp_clear_source(session_id: str) -> Dict[str, Any]:
             "error_type": SOURCE_DELIVERY_BUSY,
         }
     return {"success": True}
+
+
+def mcp_set_source_image(
+    image_ref: str,
+    *,
+    session_id: str,
+) -> Dict[str, Any]:
+    """Record a container image reference as this session's scan subject.
+
+    The indirect-reference half of the image submission contract: the ref is
+    stored on the session and nothing is fetched at delivery time. The scan
+    that resolves its omitted target reads it as the subject, exactly as a
+    delivered source tree is read.
+
+    Args:
+        image_ref: ``registry/repo[:tag][@sha256:digest]``. Digest-pinned refs
+            preferred; a tag-only ref is resolved at scan start where a
+            container engine is present.
+        session_id: MCP session identifier.
+
+    Returns:
+        ``{"success": True, "image_ref": str}`` on success;
+        ``{"success": False, "error": str}`` for a value that can never be a
+        reference, with ``error_type`` ``source_delivery_busy`` while a scan
+        of the session runs or another change to its source is in progress.
+    """
+    from automated_security_helper.cli.mcp.source_delivery import (
+        SOURCE_DELIVERY_BUSY,
+        SourceDeliveryBusyError,
+        set_source_image,
+    )
+
+    try:
+        locator = set_source_image(image_ref, session_id=session_id)
+    except SourceDeliveryBusyError as e:
+        return {
+            "success": False,
+            "error": raw_controls_on_one_line(str(e)),
+            "error_type": SOURCE_DELIVERY_BUSY,
+        }
+    except ValueError as e:
+        return {"success": False, "error": raw_controls_on_one_line(error_text(e))}
+    return {"success": True, "image_ref": locator.ref}
+
+
+def mcp_set_source_image_archive_chunk(
+    upload_id: str,
+    sequence: int,
+    data_b64: str,
+    last: bool,
+    *,
+    session_id: str,
+) -> Dict[str, Any]:
+    """Append one base64-encoded chunk to an in-flight image-archive upload.
+
+    The zip channel's chunk contract byte for byte (``mcp_set_source_zip_chunk``):
+    same ordering rule, caps, errors and ``upload_id`` namespace. What makes
+    the bytes an image archive is the finalize that claims them.
+    """
+    from automated_security_helper.cli.mcp.sessions import (
+        SESSION_WORKSPACE_BUSY,
+        SessionWorkspaceBusyError,
+    )
+    from automated_security_helper.cli.mcp.source_delivery import (
+        SESSION_WORKSPACE_UNAVAILABLE,
+        SessionWorkspaceError,
+        set_source_image_archive_chunk,
+    )
+
+    try:
+        result = set_source_image_archive_chunk(
+            upload_id=upload_id,
+            sequence=sequence,
+            data_b64=data_b64,
+            last=last,
+            session_id=session_id,
+        )
+    except SessionWorkspaceBusyError as e:
+        return {
+            "success": False,
+            "error": raw_controls_on_one_line(str(e)),
+            "error_type": SESSION_WORKSPACE_BUSY,
+        }
+    except SessionWorkspaceError as e:
+        return {
+            "success": False,
+            "error": raw_controls_on_one_line(error_text(e)),
+            "error_type": SESSION_WORKSPACE_UNAVAILABLE,
+        }
+    except ValueError as e:
+        return {"success": False, "error": raw_controls_on_one_line(error_text(e))}
+
+    return {"success": True, **result}
+
+
+def mcp_set_source_image_archive_finalize(
+    upload_id: str,
+    expected_sha256: str,
+    *,
+    session_id: str,
+) -> Dict[str, Any]:
+    """Verify an uploaded image archive and record it as the scan subject.
+
+    The zip finalize's verification without its extraction: checksum, size
+    cap, the tar shape sniff (the gate the CLI's ``--image-archive`` runs),
+    then the archive moved whole under the session workspace and the session's
+    image locator pointed at it.
+
+    Returns:
+        ``{"success": True, "image_archive": str}`` on success;
+        ``{"success": False, "error": str}`` on checksum mismatch, oversize
+        upload, bytes that are not a plain tar, or an upload that never
+        received its last chunk, with ``error_type`` ``source_delivery_busy``
+        while a scan of the session runs and ``session_workspace_unavailable``
+        when the workspace cannot take the file.
+    """
+    from automated_security_helper.cli.mcp.source_delivery import (
+        SESSION_WORKSPACE_UNAVAILABLE,
+        SOURCE_DELIVERY_BUSY,
+        SessionWorkspaceError,
+        SourceDeliveryBusyError,
+        UploadNotFoundError,
+        set_source_image_archive_finalize,
+    )
+
+    try:
+        archive = set_source_image_archive_finalize(
+            upload_id=upload_id,
+            expected_sha256=expected_sha256,
+            session_id=session_id,
+        )
+    except SourceDeliveryBusyError as e:
+        return {
+            "success": False,
+            "error": raw_controls_on_one_line(str(e)),
+            "error_type": SOURCE_DELIVERY_BUSY,
+        }
+    except SessionWorkspaceError as e:
+        return {
+            "success": False,
+            "error": raw_controls_on_one_line(error_text(e)),
+            "error_type": SESSION_WORKSPACE_UNAVAILABLE,
+        }
+    except (UploadNotFoundError, ValueError) as e:
+        return {"success": False, "error": raw_controls_on_one_line(error_text(e))}
+
+    return {"success": True, "image_archive": str(archive)}

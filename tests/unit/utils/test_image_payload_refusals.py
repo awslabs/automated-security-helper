@@ -26,9 +26,19 @@ pytestmark = pytest.mark.unit
 
 
 def _real_tar(path):
-    """A genuine (empty) tar at *path*, as ``docker save`` writes one: ustar."""
+    """A genuine one-member tar at *path*, as ``docker save`` writes one.
+
+    One member, deliberately: the ustar magic sits in each MEMBER's header
+    block, so an empty archive (end-of-archive zero blocks only) carries none
+    and is refused -- the row below pins that too, because a saved image
+    always has members and an all-zero file is not one.
+    """
+    import io
+
     with tarfile.open(path, "w") as archive:
-        assert archive is not None
+        info = tarfile.TarInfo(name="manifest.json")
+        info.size = 2
+        archive.addfile(info, io.BytesIO(b"[]"))
     return path
 
 
@@ -36,6 +46,13 @@ class TestImageArchiveRefusals:
     def test_a_real_tar_is_accepted(self, tmp_path):
         archive = _real_tar(tmp_path / "image.tar")
         assert image_archive_refusal(archive) is None
+
+    def test_an_empty_archive_has_no_member_and_no_magic(self, tmp_path):
+        empty = tmp_path / "empty.tar"
+        with tarfile.open(empty, "w"):
+            pass
+        refusal = image_archive_refusal(empty)
+        assert refusal == f"Image archive is not a tar archive: {empty}"
 
     def test_a_missing_file_does_not_exist(self, tmp_path):
         missing = tmp_path / "absent.tar"

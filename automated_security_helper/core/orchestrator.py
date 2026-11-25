@@ -31,7 +31,7 @@ from pydantic import (
 )
 
 from automated_security_helper.base.plugin_context import PluginContext
-from automated_security_helper.core.asset import Asset
+from automated_security_helper.core.asset import Asset, AssetKind
 
 from automated_security_helper.config.path_trust import (
     derived_roots_scope,
@@ -1905,6 +1905,20 @@ class ASHScanOrchestrator(BaseModel):
                 # refused here as results that failed to load.
                 ensure_reports_dir(self._output_path.joinpath("reports"))
             # Only identify files to scan if we're not using existing results
+            elif (
+                self.asset is not None and self.asset.kind == AssetKind.CONTAINER_IMAGE
+            ):
+                # An image asset presents no source files: the scan-set walker
+                # is filesystem-only by design (C4/C7 of the container-targets
+                # design), and walking the anchoring directory here would list
+                # files no scanner of this run reads -- on the MCP server that
+                # directory is the server's own workspace, not anything the
+                # caller delivered for scanning.
+                self.source_scan_set = []
+                ASH_LOGGER.info(
+                    "The scan's subject is a container image; no source files "
+                    "are identified and the scan-set walk is skipped."
+                )
             elif "convert" in phases or "scan" in phases:
                 # Before the walk: a scan with no engine walked the whole tree and
                 # wrote its scan set before the check below said it had nothing to

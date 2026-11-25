@@ -58,8 +58,14 @@ def _refusal_of(**overrides) -> str:
 
 
 def _real_tar(path: Path) -> Path:
-    with tarfile.open(path, "w"):
-        pass
+    # One member: the ustar magic sits in a member's header, and an empty
+    # archive carries none (the payload gate's own suite pins that row).
+    import io
+
+    with tarfile.open(path, "w") as archive:
+        info = tarfile.TarInfo(name="manifest.json")
+        info.size = 2
+        archive.addfile(info, io.BytesIO(b"[]"))
     return path
 
 

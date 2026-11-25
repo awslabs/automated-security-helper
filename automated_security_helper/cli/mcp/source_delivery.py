@@ -72,6 +72,7 @@ import zipfile
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, TypeVar, cast
 
+from automated_security_helper.core.asset import ImageLocator
 from automated_security_helper.cli.mcp.session_identity import (
     UNIDENTIFIED_SESSION_ID,
 )
@@ -160,6 +161,15 @@ _S_IFMT_SHIFTED = 0xF000 << 16
 # ---------------------------------------------------------------------------
 
 _SESSION_SOURCE_DIRS: Dict[str, Path] = {}
+
+#: The image each session delivered as its scan subject, keyed like
+#: ``_SESSION_SOURCE_DIRS`` and living by the same rule: process-local, the
+#: single source of truth, nothing persisted on ``MCPSession``. One session has
+#: ONE scan subject, so the two registries are kept mutually consistent by the
+#: setters below: a source delivery drops the image binding (the latest
+#: delivery wins), and an image binding present therefore means it was
+#: delivered after any source tree the session still holds.
+_SESSION_IMAGE_LOCATORS: Dict[str, "ImageLocator"] = {}
 
 
 class SourceDeliveryBusyError(RuntimeError):
@@ -324,10 +334,49 @@ def delivered_session_count() -> int:
 
 def _set_session_source_dir(session_id: str, source_dir: Path) -> None:
     _SESSION_SOURCE_DIRS[session_id] = source_dir
+    # The latest delivery wins: a source tree delivered after an image makes
+    # the tree the session's one scan subject, exactly as an image delivered
+    # after a tree makes the image it (get_session_image_locator's contract).
+    _SESSION_IMAGE_LOCATORS.pop(session_id, None)
 
 
 def _drop_session_source_dir(session_id: str) -> None:
     _SESSION_SOURCE_DIRS.pop(session_id, None)
+
+
+def ensure_session_workspace(
+    session_id: str, *, workspace_root: Optional[Path] = None
+) -> Path:
+    """The session's workspace directory, created and marked as the server's.
+
+    The anchor an image scan runs in: an image asset has no target directory
+    of its own, so its output tree (``<workspace>/<session>/.ash/ash_output``)
+    goes under the directory the server already owns for the session, which is
+    also why ``ASH_MCP_ALLOWED_ROOTS`` is not implicated by a bare ref -- the
+    sandbox already permits a session its own workspace.
+    """
+
+    root = workspace_root if workspace_root is not None else resolve_workspace_root()
+    return _created_session_dir(root, session_id)
+
+
+def get_session_image_locator(session_id: str) -> Optional["ImageLocator"]:
+    """The image this session delivered as its scan subject, or None.
+
+    Not None means the image was delivered after any source tree the session
+    still holds (the setters keep that invariant), so a scan that resolves its
+    omitted target reads this first and the recorded ``source_dir`` second.
+    """
+
+    return _SESSION_IMAGE_LOCATORS.get(session_id)
+
+
+def _set_session_image_locator(session_id: str, locator: "ImageLocator") -> None:
+    _SESSION_IMAGE_LOCATORS[session_id] = locator
+
+
+def _drop_session_image_locator(session_id: str) -> None:
+    _SESSION_IMAGE_LOCATORS.pop(session_id, None)
 
 
 # ---------------------------------------------------------------------------
@@ -2876,6 +2925,7 @@ def remove_session_workspace(
     doomed = _set_aside_for_removal(session_dir, session_id)
     gone = True if doomed is None else _remove_tree(doomed)
     _drop_session_source_dir(session_id)
+    _drop_session_image_locator(session_id)
     return gone
 
 
@@ -2908,3 +2958,239 @@ def _set_aside_for_removal(workspace: Path, session_id: str) -> Optional[Path]:
     with contextlib.suppress(OSError):
         os.utime(doomed)
     return doomed
+
+
+# ---------------------------------------------------------------------------
+# Image delivery: the session's scan subject as a container image.
+#
+# The submission contract's MCP side (C2 of the container-targets design), in
+# the two shapes the design names:
+#
+# 1. ``set_source_image`` -- an indirect reference. The ref is stored on the
+#    session and NOTHING is fetched at delivery time: resolution belongs to a
+#    container engine or the scanner tools' own registry clients at scan start.
+# 2. ``set_source_image_archive_chunk`` + ``..._finalize`` -- the direct
+#    payload, the exact shape of the zip channel: base64 chunks of at most
+#    1 MiB through the SAME chunk machinery, caps and locks, a sha256 verified
+#    at finalize, and a staging-into-place rename, differing only in what
+#    finalize does with the verified bytes: no extraction (a saved image stays
+#    one tar the scanners read whole), one stat-level shape sniff
+#    (utils/image_payload_refusals.image_archive_refusal, the gate the CLI's
+#    --image-archive runs), and the file moved under ``<session>/image/``.
+#
+# One session has one scan subject: these setters and the source setters keep
+# the two registries mutually consistent (see _SESSION_IMAGE_LOCATORS).
+# ---------------------------------------------------------------------------
+
+#: Control characters and whitespace cannot appear in any registry reference
+#: grammar, and a leading ``-`` reads as a flag to any tool argv the ref later
+#: lands in; both are refused at delivery, where the CLI's --image relies on
+#: the shell having tokenized its value already.
+_REF_REFUSED = re.compile(r"[\s\x00-\x1f\x7f]")
+
+
+def validate_image_ref(image_ref: str) -> str:
+    """The ref as stored, or a ValueError naming what cannot be one.
+
+    A grammar floor, not a parser: registries disagree on fine points, and the
+    tools that resolve the ref answer malformed ones themselves. What is
+    refused here is only what can never be a reference (empty, whitespace,
+    control characters) or what would read as something else where the ref is
+    later used (a leading ``-``, which is an option to any argv).
+    """
+
+    ref = (image_ref or "").strip()
+    if not ref:
+        raise ValueError("image_ref names no reference: it is empty or whitespace")
+    if ref.startswith("-"):
+        raise ValueError(
+            "image_ref cannot start with '-': a reference never does, and the "
+            "value would read as an option where the ref is used"
+        )
+    if _REF_REFUSED.search(ref):
+        raise ValueError(
+            "image_ref carries whitespace or a control character, which no "
+            "registry reference grammar allows"
+        )
+    return ref
+
+
+@_while_no_scan_runs(removes_workspace=False)
+def set_source_image(
+    image_ref: str,
+    *,
+    session_id: str,
+) -> ImageLocator:
+    """Record *image_ref* as this session's scan subject. Nothing is fetched.
+
+    Under the session's change lock, as every delivery is: the scan subject
+    must not flip while a scan of the session reads it. Returns the stored
+    locator. Digest-pinned refs are preferred (the attribution then agrees
+    across machines); a tag-only ref is accepted and resolved at scan start
+    where an engine is present.
+
+    Raises:
+        ValueError: for a value that can never be a reference
+            (:func:`validate_image_ref`).
+    """
+
+    locator = ImageLocator(ref=validate_image_ref(image_ref))
+    _set_session_image_locator(session_id, locator)
+    ASH_LOGGER.info(
+        "session %s delivered image ref %s as its scan subject",
+        session_id,
+        locator.ref,
+    )
+    return locator
+
+
+def set_source_image_archive_chunk(
+    upload_id: str,
+    sequence: int,
+    data_b64: str,
+    last: bool,
+    *,
+    workspace_root: Optional[Path] = None,
+    session_id: str,
+) -> Dict[str, object]:
+    """Append one chunk of a saved-image archive upload.
+
+    The zip channel's chunk machinery, byte for byte
+    (:func:`set_source_zip_chunk`): same locks, same ordering rule, same
+    per-chunk and per-upload caps, same ``upload_id`` namespace -- one upload
+    is one id whichever finalize it is meant for. What makes the bytes an
+    image archive is the finalize that claims them
+    (:func:`set_source_image_archive_finalize`).
+    """
+
+    return set_source_zip_chunk(
+        upload_id,
+        sequence,
+        data_b64,
+        last,
+        workspace_root=workspace_root,
+        session_id=session_id,
+    )
+
+
+@_while_no_scan_runs(removes_workspace=False)
+def set_source_image_archive_finalize(
+    upload_id: str,
+    expected_sha256: str,
+    *,
+    workspace_root: Optional[Path] = None,
+    session_id: str,
+) -> Path:
+    """Verify an uploaded image archive and record it as the scan subject.
+
+    The zip finalize's verification, without its extraction: the assembled
+    upload must hash to *expected_sha256* and carry tar magic where every
+    ``docker save`` / OCI archive carries it; it is then moved whole under
+    ``<session>/image/`` and the session's image locator points at it. A
+    saved image is one file the scanner tools read themselves, so nothing is
+    unpacked, which is also why the zip channel's member validation has no
+    counterpart here: no member is ever extracted.
+
+    Returns:
+        The archive's path in the session workspace (the locator's
+        ``oci_archive``).
+
+    Raises:
+        UploadNotFoundError: the upload never received its final chunk.
+        ValueError: sha256 mismatch, oversize upload, bytes that are not a
+            plain tar (the gate's wording, a gzip remedy included), or an
+            upload replaced by another chunk while this finalize read it
+            (send the finalize again).
+        SessionWorkspaceError: the session's ``image/`` directory could not
+            be created.
+    """
+
+    root = workspace_root if workspace_root is not None else resolve_workspace_root()
+    session_dir = _created_session_dir(root, session_id)
+    final = _final_zip_path(session_dir, upload_id)
+
+    try:
+        handle = final.open("rb")
+    except FileNotFoundError:
+        raise UploadNotFoundError(
+            f"no finalized upload for upload_id={upload_id!r} "
+            f"(did the last chunk arrive with last=True?)"
+        ) from None
+    opened = os.fstat(handle.fileno())
+
+    def remove_upload() -> None:
+        _remove_zip_still_at(final, opened, session_id, upload_id)
+
+    with handle:
+        actual_size = opened.st_size
+        if actual_size > _MAX_ZIP_BYTES:
+            with contextlib.suppress(OSError):
+                remove_upload()
+            raise ValueError(
+                f"upload too large: {actual_size} > {_MAX_ZIP_BYTES} bytes"
+            )
+        digest = hashlib.sha256()
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+        actual_sha = digest.hexdigest()
+        if actual_sha.lower() != expected_sha256.lower():
+            with contextlib.suppress(OSError):
+                remove_upload()
+            raise ValueError(
+                f"sha256 mismatch: expected {expected_sha256}, got {actual_sha}"
+            )
+
+    image_dir = session_dir / "image"
+    _ensure_dir(image_dir)
+    destination = image_dir / f"{upload_id}.tar"
+
+    # Under the upload's lock, and only while the path still names the file
+    # the checksum read: a chunk of the same upload can assemble a new file
+    # over the path meanwhile (set_source_zip_chunk's last=True renames over
+    # it), and that one belongs to its own finalize.
+    with _upload_lock(session_id, upload_id):
+        try:
+            still_there = os.path.samestat(opened, final.stat())
+        except FileNotFoundError:
+            still_there = False
+        if not still_there:
+            raise ValueError(
+                f"the upload {upload_id!r} changed while this finalize read "
+                "it; send the finalize again"
+            )
+        os.replace(final, destination)
+
+    # The gate the CLI's --image-archive runs, one wording for both surfaces.
+    # After the move: the destination is the server's own file now, no chunk
+    # writes there, and a refusal removes it so nothing half-delivered stays.
+    from automated_security_helper.utils.image_payload_refusals import (
+        image_archive_refusal,
+    )
+
+    refusal = image_archive_refusal(destination)
+    if refusal is not None:
+        with contextlib.suppress(OSError):
+            destination.unlink()
+        raise ValueError(refusal)
+
+    # The previous archive, when this one replaces it, is scratch now: the
+    # binding below is the subject of record. Best effort, as every scratch
+    # removal here is.
+    previous = _SESSION_IMAGE_LOCATORS.get(session_id)
+    if (
+        previous is not None
+        and previous.oci_archive is not None
+        and previous.oci_archive != destination
+        and previous.oci_archive.parent == image_dir
+    ):
+        with contextlib.suppress(OSError):
+            previous.oci_archive.unlink()
+
+    locator = ImageLocator(oci_archive=destination)
+    _set_session_image_locator(session_id, locator)
+    ASH_LOGGER.info(
+        "session %s delivered image archive %s as its scan subject",
+        session_id,
+        destination,
+    )
+    return destination
