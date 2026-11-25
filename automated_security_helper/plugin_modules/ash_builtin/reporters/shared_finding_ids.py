@@ -12,7 +12,12 @@ spelling; new code imports from ``utils``.
 
 from automated_security_helper.utils.shared_finding_ids import (
     flat_describes_result,
+    shared_correlation_ids_by_position,
     shared_ids_by_position,
 )
 
-__all__ = ["shared_ids_by_position", "flat_describes_result"]
+__all__ = [
+    "shared_ids_by_position",
+    "shared_correlation_ids_by_position",
+    "flat_describes_result",
+]

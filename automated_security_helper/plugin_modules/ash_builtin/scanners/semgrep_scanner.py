@@ -31,7 +31,9 @@ from automated_security_helper.core.enums import OfflineStrategy, ScannerToolTyp
 from automated_security_helper.models.core import ToolArgs
 from automated_security_helper.plugin_modules.ash_builtin.scanners._grep_scanner_base import (
     DEFAULT_EXCLUDES,
+    GrepMetricsMode,
     GrepScannerBase,
+    GrepSeverityWord,
 )
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.utils.process_env import hold_environ, release_environ
@@ -88,14 +90,14 @@ class SemgrepScannerConfigOptions(ScannerOptionsBase):
     ] = []
 
     severity: Annotated[
-        List[Literal["INFO", "WARNING", "ERROR"]],
+        List[GrepSeverityWord],
         Field(
             description="Report findings only from rules matching the supplied severity level.",
         ),
     ] = []
 
     metrics: Annotated[
-        Literal["auto", "on", "off"],
+        GrepMetricsMode,
         Field(
             description="Configures how usage metrics are sent to the Semgrep server.",
         ),
@@ -368,7 +370,6 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
                 semantics="the base default {0, 1}; _grep_scanner_base.py notes it matches the tool",
             ),
             provenance=opsf.ProvenanceFacet(
-                tier=opsf.Tier.BUILTIN_DEFAULT,
                 source=opsf.ProvenanceSource.PYPI_VIA_UV,
                 selection_surfaces=("options.config",),
                 upstream_license=(
@@ -468,7 +469,7 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
         directly.
         """
         if direct_only:
-            found = find_executable(self.command)
+            found = find_executable(self._tool_command())
             if found is None:
                 self._plugin_log(
                     "uv's install of semgrep failed and no semgrep binary is on PATH; "
@@ -486,7 +487,7 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
         # set and ASH online, the resolver used to probe (and could install) from
         # PyPI while the scan, the version probe and the install ran offline.
         command = get_uv_tool_command(
-            self.command,
+            self._tool_command(),
             from_spec=self._uv_probe_from_spec(),
             offline=self._is_offline_mode(),
         )
@@ -532,7 +533,7 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
 
         extras = self._get_tool_package_extras()
         constraint = self._get_tool_version_constraint()
-        package = self.uv_tool_package_name or self.command
+        package = self._uv_package()
         requirement = build_requirement(package, extras, constraint)
         # The values hook is read ONCE, guarded, for the verify and every line
         # below, as _select_tool_execution reads it: a bare read let a raising
@@ -574,7 +575,7 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
                 text,
                 values,
                 plugin_inputs=self._uv_run_inputs_for_records(),
-                tool_name=self.command,
+                tool_name=self._tool_command(),
                 limit=None,
             )
 

@@ -32,6 +32,7 @@ global_settings:
 | `expires` | no | The date, `YYYY-MM-DD`, from which the suppression stops matching. `expiration` is a deprecated alias, removed in ASH v4. |
 | `symbol` | no | Only findings inside this function, class, or method; see [Scope a suppression to a symbol](#symbol) |
 | `package_name`, `package_version`, `package_path` | no | Only findings about this dependency, for dependency scanners such as grype and npm-audit |
+| `image` | no | Only findings inside a container image whose submitted reference or resolved digest matches this case-insensitive glob; see [Scan container images](scan-container-images.md#findings-identity-and-suppressions). A finding that is not inside an image never matches |
 | `resource_id` | no | Only findings about this resource, for the scanners that name one: cdk-nag (the construct path) and checkov (for Terraform, a Terraform plan, CloudFormation and Kubernetes; the name checkov gives it, such as `aws_db_instance.this`, `module.db.aws_db_instance.this` or `AWS::S3::Bucket.Bucket`). A finding with no resource never matches |
 
 - Paths match case-sensitively: `tests/**` does not match `Tests/`. In a pattern without `**`, `*` also matches across directory separators, so `src/*.py` matches `src/sub/app.py`; `**` matches any depth. A path that starts with `./` matches nothing, and neither does an empty path, `.` or `./`. A path with no glob character names a file and the directory of that name: `tests` and `tests/` both match every finding below `tests/`, and the bare `tests` also matches a file named `tests`. Both are anchored at the top of the scanned directory, so neither matches anything in `pkg/tests/`; write `**/tests/**` for a `tests` directory at any depth. `ash config validate` and `ash config lint` warn, saying what to write instead, about a path that starts with `./` (`./src/app.py` is `src/app.py`) and about an empty path or `.`, and exit 0. A path whose leading names match the tree only in another case (`tests/**` against `Tests/`) gets a warning that names the tree's spelling and says that patterns match case-sensitively.
@@ -48,6 +49,35 @@ ash --source-dir . --scanners detect-secrets --offline --no-progress \
 ```
 
 With `rule_id` misspelled, the entry suppresses nothing instead of suppressing every rule in `app.py`: the run warns, naming the key, and fails on the finding the entry was meant to suppress (exit 2). Set `fail_on_unknown_keys: true` to refuse the config outright (exit 3); ASH v4 makes that the default.
+
+### Suppress a finding in a harvested lockfile {#harvested}
+
+A finding can sit in a file the scan materialized rather than one in your tree:
+the [sdist lockfile harvest](../docs/plugins/builtin/syft.md#the-sdist-lockfile-harvest)
+writes a compiled dependency's embedded lockfiles into the converted target at
+`sdist-locks/<package>/<version>/<lockfile>`, and grype and trivy report
+advisories against them. Such a finding is fixed by upgrading the parent
+package, never by an edit, so while no fixed release exists the honest
+disposition is a time-boxed suppression whose `path` globs over the harvest
+layout -- the version segment is a `*` so the entry survives a version bump,
+and `expires` plus the pinned package version force the revisit:
+
+```yaml
+global_settings:
+  suppressions:
+    - rule_id: "GHSA-2mjx-qc3c-rqvc"
+      path: "**/sdist-locks/polars-runtime-32/*/Cargo.lock"
+      package_name: "rustls"
+      package_version: "0.23.43"
+      expires: "2026-12-27"
+      reason: >-
+        rustls 0.23.43 is statically linked into the polars-runtime-32 wheel;
+        only a polars release built against rustls 0.23.45 or later removes it.
+```
+
+ASH's own `.ash/.ash.yaml` carries the worked set of these entries (the rustls
+advisories in polars' harvested `Cargo.lock`), one per scanner spelling of the
+same GHSA id, each with the evidence in its reason.
 
 <!-- doctest: run expect-exit=2 -->
 ```bash

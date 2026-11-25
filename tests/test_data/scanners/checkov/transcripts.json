@@ -1,0 +1,185 @@
+{
+  "schema_version": 1,
+  "transcripts": [
+    {
+      "adapter_prep": null,
+      "also_for": [],
+      "argv": null,
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": null,
+      "id": "checkov-src-test-yaml",
+      "live_input": false,
+      "note": "a loose native capture from before transcripts; the file records no tool version",
+      "observable": true,
+      "pin_stamp": null,
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "json",
+          "path": "src.test.yaml.json",
+          "sha256": "0a0493302613ce6c234c45a407fd44718971a1ed3192aebc4d33a76cec88b0ba"
+        }
+      ],
+      "retention": "current",
+      "scanner": "checkov",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "checkov",
+        "version": "unknown"
+      }
+    },
+    {
+      "adapter_prep": null,
+      "also_for": [],
+      "argv": null,
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": null,
+      "id": "checkov-src-cfn-and-python-test-yaml",
+      "live_input": false,
+      "note": "a loose native capture from before transcripts; the file records no tool version",
+      "observable": true,
+      "pin_stamp": null,
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "json",
+          "path": "src.cfn_and_python.test.yaml.json",
+          "sha256": "14b38bb543f37da00926bc22165f28e7926a3798b288188cb48b83ca9c05898f"
+        }
+      ],
+      "retention": "current",
+      "scanner": "checkov",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "checkov",
+        "version": "unknown"
+      }
+    },
+    {
+      "adapter_prep": null,
+      "also_for": [],
+      "argv": null,
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": null,
+      "id": "checkov-src-js-docker-dockerfile",
+      "live_input": false,
+      "note": "a loose native capture from before transcripts; the file records no tool version",
+      "observable": true,
+      "pin_stamp": null,
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "json",
+          "path": "src.js.docker.Dockerfile.json",
+          "sha256": "9e95a2389c0c985748381882bea071aac2abd908f7d21bc5e046ae86cc5f8b6c"
+        }
+      ],
+      "retention": "current",
+      "scanner": "checkov",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "checkov",
+        "version": "unknown"
+      }
+    },
+    {
+      "adapter_prep": null,
+      "also_for": [],
+      "argv": [
+        "checkov",
+        "--directory",
+        "<proj>",
+        "--framework",
+        "all",
+        "--output",
+        "sarif",
+        "--output",
+        "json",
+        "--output-file-path",
+        "<out>"
+      ],
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": null,
+      "id": "checkov-3.4.6-resources",
+      "live_input": false,
+      "note": "reduced by hand to the fields attach_checkov_resources reads; messages, snippets and rules are left out, so it cannot witness the message or snippet facets. Run from the filesystem root, as ASH runs checkov.",
+      "observable": false,
+      "pin_stamp": null,
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "sarif",
+          "path": "resources/results_sarif.sarif",
+          "sha256": "717c0e0b547a45b7619a29ffe96938cae475973f02ecdc72343d4b1305a787d8"
+        }
+      ],
+      "retention": "current",
+      "scanner": "checkov",
+      "side_reports": [
+        {
+          "format": "json",
+          "path": "resources/results_json.json",
+          "sha256": "01b4199f5c0691ed69653e4271ab93e09335933812a2587d7531f9ca8b210dfb"
+        }
+      ],
+      "stderr_tail": null,
+      "tool": {
+        "name": "checkov",
+        "version": "3.4.6"
+      }
+    },
+    {
+      "adapter_prep": "checkov",
+      "also_for": [],
+      "argv": null,
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": null,
+      "id": "checkov-3.4.6-insecure-s3",
+      "live_input": false,
+      "note": "the SARIF capture over the insecure-s3 fixture template, with the native JSON beside it carrying the resource identities the prep attaches",
+      "observable": true,
+      "pin_stamp": null,
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "sarif",
+          "path": "captured/checkov-3.4.6-insecure-s3.sarif",
+          "sha256": "3c97943263af52f5de9f5049107b41d45cbf2b553a2d9ed56d8a333279249ca7"
+        }
+      ],
+      "retention": "current",
+      "scanner": "checkov",
+      "side_reports": [
+        {
+          "format": "json",
+          "path": "captured/checkov-3.4.6-insecure-s3.json",
+          "sha256": "0801623612b36b7533b54dc6e816d3971dc050b9282de0c893f4f5bd5783a6b8"
+        }
+      ],
+      "stderr_tail": null,
+      "tool": {
+        "name": "checkov",
+        "version": "3.4.6"
+      }
+    }
+  ],
+  "unrecorded": []
+}

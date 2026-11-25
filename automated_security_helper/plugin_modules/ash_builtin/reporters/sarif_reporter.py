@@ -13,9 +13,12 @@ from automated_security_helper.base.reporter_plugin import (
 )
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 from automated_security_helper.utils.converter_refusals import refusal_invocations
+from automated_security_helper.utils.finding_identity import CORRELATION_ID_PROPERTY
 from automated_security_helper.utils.get_ash_version import get_ash_version
+from automated_security_helper.utils.sarif_utils import shared_correlation_ids
 from automated_security_helper.utils.severity_ladder import effective_sarif_level
 from automated_security_helper.schemas.sarif_schema_model import (
+    PropertyBag,
     ReportingDescriptorReference,
     ReportingDescriptorReference1,
     Run,
@@ -120,6 +123,7 @@ class SarifReporter(ReporterPluginBase[SARIFReporterConfig]):
                         run.invocations = (
                             list(run.invocations or []) + project_invocations
                         )
+        sarif = _with_correlation_properties(model, sarif)
         restore = complete_results_for_the_dump(sarif)
         try:
             return sarif.model_dump_json(
@@ -127,6 +131,44 @@ class SarifReporter(ReporterPluginBase[SARIFReporterConfig]):
             )
         finally:
             restore()
+
+
+def _with_correlation_properties(
+    model: "AshAggregatedResults", sarif: SarifReport
+) -> SarifReport:
+    """*sarif* with ``ash/correlationId`` in each carrying result's property bag.
+
+    The cross-scanner correlation ids are assigned once at flatten time
+    (``models/flat_vulnerability.assign_correlation_ids``) and joined to the
+    results by the same positional pairing every shared id uses
+    (``utils/sarif_utils.shared_correlation_ids``), so this document and every
+    other report carry one value for one finding. Written on a copy: the stored
+    ``model.sarif``, which the exit-code gates and the saved results file read,
+    is left as it is, so the flattened rows a reload builds (their
+    ``properties`` and ``raw_data`` record the result's property bag) are the
+    same bytes the scan built. A document with no carrying result is returned
+    as given, byte-identical.
+    """
+    try:
+        all_results = sarif.get_all_results()
+    except Exception:  # noqa: BLE001 -- an unreadable document is dumped as is
+        return sarif
+    if not all_results:
+        return sarif
+    ids = shared_correlation_ids(model, all_results)
+    if not any(ids):
+        return sarif
+    if sarif is model.sarif:
+        sarif = sarif.model_copy(deep=True)
+        all_results = sarif.get_all_results()
+    for result, value in zip(all_results, ids):
+        if not value:
+            continue
+        if result.properties is None:
+            result.properties = PropertyBag(**{CORRELATION_ID_PROPERTY: value})
+        else:
+            setattr(result.properties, CORRELATION_ID_PROPERTY, value)
+    return sarif
 
 
 def _run_carrying(invocations: List[Any]) -> Run:

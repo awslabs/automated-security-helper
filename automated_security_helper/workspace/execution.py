@@ -554,7 +554,7 @@ class ProjectScanSettings:
     #: operator did not set aside resolves no ``!ENV`` (``resolve_config``). The
     #: same value the plan was resolved with.
     remote_client: bool = False
-    #: The MCP session's gate (``cli/mcp/sandbox.config_base_gate``), or None.
+    #: The MCP session's gate (``config.mcp_sandbox.config_base_gate``), or None.
     #: Each project's config file and its bases must resolve to a file it
     #: permits, as for the plan (``resolver.resolve_workspace``'s
     #: ``permit_base``), so a link changed after the plan is refused too.
@@ -978,8 +978,8 @@ def refuse_unresolvable_scanner_selection(
     :func:`prewarm_plugin_registry` has loaded the one plugin-module set every
     project shares, with the builders every selection refusal shares --
     ``core.scanner_selection.selection_after_exclusions`` for the cancelled
-    selection, ``alpha_scanner_refusal`` for the one that names an alpha
-    scanner whose module this run did not load, and
+    selection, ``plugins.enablement.unloaded_opt_in_refusal`` for the one that
+    names a shipped scanner whose module this run did not load, and
     ``refuse_selection_matching_no_scanner`` for the one that matches nothing --
     so the answer is the one each project's scan phase would reach, in the same
     words, named for the selection's origin. That this
@@ -1013,10 +1013,10 @@ def refuse_unresolvable_scanner_selection(
         split_plugin_names,
     )
     from automated_security_helper.core.scanner_selection import (
-        alpha_scanner_refusal,
         refuse_selection_matching_no_scanner,
     )
     from automated_security_helper.plugins import ash_plugin_manager
+    from automated_security_helper.plugins.enablement import unloaded_opt_in_refusal
     from automated_security_helper.plugins.loader import plugins_of
 
     settings = settled_scanner_selection(plan, settings)
@@ -1043,12 +1043,12 @@ def refuse_unresolvable_scanner_selection(
         if declared is None:
             return
         declared_names.append(declared)
-    # A selection that resolves to nothing and names an alpha scanner ASH
-    # ships whose module this run did not load is refused naming the module to
-    # add (and any misspelled name beside it), in the one text the engine and
-    # the scan phase raise; read as spelling advice alone, it sent the operator
-    # to fix a name that was right.
-    refusal = alpha_scanner_refusal(remaining, declared_names, scanner_classes)
+    # A selection that resolves to nothing and names a scanner ASH ships whose
+    # module this run did not load is refused naming the module to add (and
+    # any misspelled name beside it), in the one text the engine and the scan
+    # phase raise; read as spelling advice alone, it sent the operator to fix
+    # a name that was right.
+    refusal = unloaded_opt_in_refusal(remaining, declared_names, scanner_classes)
     if refusal:
         raise ScannerSelectionError(refusal)
     refuse_selection_matching_no_scanner(

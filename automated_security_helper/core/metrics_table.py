@@ -2,7 +2,7 @@
 
 import os
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 from rich.console import Console
 from rich.table import Table
 from rich.text import Text
@@ -74,7 +74,7 @@ def generate_metrics_table_from_unified_data(
     asharp_model: AshAggregatedResults,
     source_dir: str | Path | None = None,
     output_dir: str | Path | None = None,
-    console: Console = None,
+    console: Console | None = None,
 ) -> Table:
     """Generate a Rich table with metrics using unified data source.
 
@@ -418,7 +418,7 @@ def display_metrics_table(
         environ = {}
         if os.environ.get("NO_COLOR"):
             environ["NO_COLOR"] = os.environ["NO_COLOR"]
-        console_kwargs = {
+        console_kwargs: dict[str, Any] = {
             "force_terminal": use_color,
             "legacy_windows": platform.system().lower() == "windows",
             "safe_box": platform.system().lower() == "windows",

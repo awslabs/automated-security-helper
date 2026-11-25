@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "transcripts": [
+    {
+      "adapter_prep": null,
+      "also_for": [],
+      "argv": [
+        "fixture-lint",
+        "--format",
+        "sarif",
+        "input/app.py"
+      ],
+      "env_allowlist": [
+        "HOME",
+        "PATH"
+      ],
+      "exit_code": 1,
+      "fixture_tree": {
+        "paths": [
+          "input"
+        ],
+        "sha256": "25deb3ec403decaa5608aba1a157f16f490e2168a84c120c4e42b74237b89e7f"
+      },
+      "id": "fixture-lint-1.0.0-app",
+      "live_input": false,
+      "note": "a synthetic recording for the conformance tests; no real tool produced it",
+      "observable": true,
+      "pin_stamp": null,
+      "provenance": "captured",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "sarif",
+          "path": "captured/fixture-lint-1.0.0.sarif",
+          "sha256": "142d47d32cd2452630d54a96f7b2cb5161a1c88bac49f88a480c996a42f5c3b2"
+        }
+      ],
+      "retention": "current",
+      "scanner": "fixture-lint",
+      "side_reports": [],
+      "stderr_tail": "",
+      "tool": {
+        "name": "fixture-lint",
+        "version": "1.0.0"
+      }
+    }
+  ],
+  "unrecorded": []
+}

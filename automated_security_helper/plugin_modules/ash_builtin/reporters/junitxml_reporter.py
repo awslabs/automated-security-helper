@@ -422,7 +422,7 @@ class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
                 if "scanner_name" in extra:
                     actual_scanner = extra["scanner_name"]
                 elif props is not None and getattr(props, "tags", None):
-                    for tag in props.tags:
+                    for tag in props.tags or ():
                         if tag.startswith("tool_name::"):
                             actual_scanner = tag.split("::")[1]
                             break

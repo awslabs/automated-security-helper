@@ -224,7 +224,7 @@ _LAZY_SUBCOMMANDS: dict[str, tuple[str, str]] = {
         "dependencies_cli_app",
     ),
     "inspect": ("automated_security_helper.cli.inspect", "inspect_app"),
-    "plugin": ("automated_security_helper.cli.plugin", "plugin_app"),
+    "plugin": ("automated_security_helper.cli.plugin", "plugin_group"),
     "suppress": ("automated_security_helper.cli.suppress", "suppress_app"),
     "express": ("automated_security_helper.cli.express", "express_app"),
 }

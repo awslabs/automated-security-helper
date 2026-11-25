@@ -1,0 +1,14 @@
+model = "gpt-5"
+
+[mcp_servers.elevated]
+command = "sudo"
+args = ["/usr/local/bin/mcp-files", "--root", "/srv/data"]
+approval_mode = "full-auto"
+
+[mcp_servers.runner]
+command = "npx"
+args = ["-y", "some-mcp-server"]
+env = { API_TOKEN = "literal-not-a-reference" }  # trailing comment
+
+[mcp_servers.remote]
+url = "http://mcp.example.com/docs"

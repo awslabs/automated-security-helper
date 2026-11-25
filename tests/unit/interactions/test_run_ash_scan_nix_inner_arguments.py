@@ -544,6 +544,11 @@ _NOT_FORWARDED_ON_PURPOSE = {
     "required_scanner_selection": (
         "container mode's image compatibility marker; the shell runs this install"
     ),
+    "asset": (
+        "an image asset is refused in every mode but local before the Nix run "
+        "starts (run_ash_scan), and a filesystem asset names the source directory "
+        "the inner scan is given anyway"
+    ),
     "build": "container only; no shell reads it",
     "run": "container only; no shell reads it",
     "force": "container only; no shell reads it",

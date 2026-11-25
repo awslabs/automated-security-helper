@@ -1,0 +1,30 @@
+
+ Usage: ash plugin verify [OPTIONS] [names]...
+
+ The `plugin verify` command evaluates the alpha-to-supported promotion bar for scanner plugins.
+
+ It reads each plugin's manifest and its recorded tool transcripts: no tool is run and no
+ network is touched. The five rows are the facets over the committed transcripts, the
+ operational declarations (zero unconfirmed), the live-tool cell on every declared
+ platform, pinned provisioning, and docs generated from the manifest. A row that cannot
+ be evaluated here reads not-run, which is not a pass.
+
+ Exit status: 0 when every named plugin passes, 1 when any row is red, 3 when none is red
+ but some row was not run, 2 for a usage error (an unknown plugin, no transcript root).
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│   names      <str>  Scanner names to verify (as in `ash plugin list`). Omit with --all.          │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --all                             Verify every scanner with a manifest.                          │
+│ --transcripts-root        <path>  The directory holding the committed fixture directories        │
+│                                   (searched for transcripts.json). Defaults to                   │
+│                                   tests/test_data/scanners of a source checkout.                 │
+│ --live-result             <str>   A live-cell result CI recorded, as SCANNER@PLATFORM=pass or    │
+│                                   SCANNER@PLATFORM=fail (for example hadolint@linux/amd64=pass). │
+│                                   The scanner must be one this run verifies; with exactly one    │
+│                                   scanner the bare PLATFORM=pass form is accepted. A platform    │
+│                                   may be given once. Without any, row 3 is not-run.              │
+│ --json                            Print the reports as JSON.                                     │
+│ --help                            Show this message and exit.                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯

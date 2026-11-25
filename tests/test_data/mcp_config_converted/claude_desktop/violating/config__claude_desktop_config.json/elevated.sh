@@ -1,0 +1,3 @@
+#!/bin/sh
+# ash-mcp-span: {"source":"config/claude_desktop_config.json","pointer":"/mcpServers/elevated","line":3,"col":17}
+exec 'sudo' '/usr/local/bin/mcp-files' '--root' '/srv/data'

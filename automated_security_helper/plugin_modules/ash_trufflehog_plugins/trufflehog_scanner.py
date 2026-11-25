@@ -485,7 +485,6 @@ class TruffleHogScanner(ScannerPluginBase[TruffleHogScannerConfig]):
                 "file it cannot read is only logged and the exit stays 0",
             ),
             provenance=opsf.ProvenanceFacet(
-                tier=opsf.Tier.ALPHA_OPTIN,
                 source=opsf.ProvenanceSource.USER_INSTALLED,
                 selection_surfaces=(
                     "ash_trufflehog_plugins in ash_plugin_modules",
@@ -772,17 +771,19 @@ class TruffleHogScanner(ScannerPluginBase[TruffleHogScannerConfig]):
             return artifact.uri, (region.startLine if region else None) or 0
         return None
 
-    def _drop_generic_duplicates(self, sarif_report: SarifReport) -> None:
+    @staticmethod
+    def _drop_generic_duplicates(sarif_report: SarifReport) -> None:
         """Drop a generic detector's result a provider detector already reports.
 
         See "Duplicates" in the module docstring.
         """
+        where_of = TruffleHogScanner._where
         for run in sarif_report.runs or []:
             if not run.results:
                 continue
             strongest: Dict[Tuple[str, int], int] = {}
             for result in run.results:
-                where = self._where(result)
+                where = where_of(result)
                 if where is None or result.ruleId in GENERIC_DETECTORS:
                     continue
                 rank = _rank(result.level)
@@ -792,7 +793,7 @@ class TruffleHogScanner(ScannerPluginBase[TruffleHogScannerConfig]):
                 for result in run.results
                 if not (
                     result.ruleId in GENERIC_DETECTORS
-                    and (where := self._where(result)) is not None
+                    and (where := where_of(result)) is not None
                     and strongest.get(where, -1) >= _rank(result.level)
                 )
             ]
@@ -803,9 +804,18 @@ class TruffleHogScanner(ScannerPluginBase[TruffleHogScannerConfig]):
         final_args: List[str],
         target: Path,
     ) -> SarifReport:
-        """Drop ASH's own files and generic duplicates, then rate every result."""
+        """Drop ASH's own files, then drop generic duplicates and rate every result."""
         self._drop_results_under_output_dir(sarif_report, target)
-        self._drop_generic_duplicates(sarif_report)
+        return self.normalize_results(sarif_report)
+
+    @staticmethod
+    def normalize_results(sarif_report: SarifReport) -> SarifReport:
+        """Drop generic duplicates and rate every result, in place.
+
+        The part of the post-processing that needs no scan context, so the
+        conformance transcripts can replay it on a captured report.
+        """
+        TruffleHogScanner._drop_generic_duplicates(sarif_report)
         for result in sarif_report.get_all_results():
             # See "Severity" in the module docstring.
             verified = result.level == Level.error

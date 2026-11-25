@@ -1,0 +1,92 @@
+{
+  "schema_version": 1,
+  "transcripts": [
+    {
+      "adapter_prep": "trufflehog",
+      "also_for": [],
+      "argv": [
+        "trufflehog",
+        "filesystem",
+        "--sarif",
+        "--no-update",
+        "--no-color",
+        "--fail-on-scan-errors",
+        "--no-verification",
+        "--no-ignore-tag",
+        "--exclude-paths=<file>",
+        "--",
+        "."
+      ],
+      "env_allowlist": [],
+      "exit_code": 0,
+      "fixture_tree": null,
+      "id": "trufflehog-3.100.0-positive",
+      "live_input": false,
+      "note": "three files holding one fabricated GitHub token each; the URL case is reported by the Github and the generic URI detectors; the SARIF holds no secret",
+      "observable": true,
+      "pin_stamp": null,
+      "provenance": "captured",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "sarif",
+          "path": "captured/positive.sarif",
+          "sha256": "9d2e915e5b987b3c7ebfa966f441e2896a459ab864f50095bfceb88f3d1e52c5"
+        }
+      ],
+      "retention": "current",
+      "scanner": "trufflehog",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "trufflehog",
+        "version": "3.100.0"
+      }
+    },
+    {
+      "adapter_prep": "trufflehog",
+      "also_for": [],
+      "argv": [
+        "trufflehog",
+        "filesystem",
+        "--sarif",
+        "--no-update",
+        "--no-color",
+        "--fail-on-scan-errors",
+        "--no-verification",
+        "--no-ignore-tag",
+        "--exclude-paths=<file>",
+        "--",
+        "."
+      ],
+      "env_allowlist": [],
+      "exit_code": 0,
+      "fixture_tree": null,
+      "id": "trufflehog-3.100.0-negative",
+      "live_input": false,
+      "note": "one clean file",
+      "observable": true,
+      "pin_stamp": null,
+      "provenance": "captured",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "sarif",
+          "path": "captured/negative.sarif",
+          "sha256": "4aa9c732a127253329678ba722a3699f48cd173ff087b3c2faca7ea7c6811307"
+        }
+      ],
+      "retention": "current",
+      "scanner": "trufflehog",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "trufflehog",
+        "version": "3.100.0"
+      }
+    }
+  ],
+  "unrecorded": []
+}

@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "transcripts": [
+    {
+      "adapter_prep": "snyk-code",
+      "also_for": [],
+      "argv": null,
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": null,
+      "id": "snyk-code-authored-shape",
+      "live_input": false,
+      "note": "authored, not captured: two invented findings in the shape `snyk code test --sarif` writes, read through the adapter's rule-CWE normalization; a licensed capture committed under captured/ replaces it",
+      "observable": true,
+      "pin_stamp": null,
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "sarif",
+          "path": "authored/snyk-code-shape.sarif",
+          "sha256": "34b7fb6d1b0377d5559b4152b4fc11e43cf6b57695b3ca2cfe7d2b759432c0ba"
+        }
+      ],
+      "retention": "current",
+      "scanner": "snyk-code",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "snyk",
+        "version": "none (authored shape)"
+      }
+    }
+  ],
+  "unrecorded": []
+}

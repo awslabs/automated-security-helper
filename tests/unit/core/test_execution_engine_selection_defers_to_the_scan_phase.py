@@ -9,10 +9,10 @@ scanner classes declare. Two shapes used to be refused there wrongly. A scanner
 class that declares no name (the documented unparametrized plugin pattern) has
 its selectable name only as ``config.name`` on an instance the phase constructs,
 so the engine keyed it by its lowercased class name and refused the configured
-name the phase accepts, making the scanner unselectable. And a request naming an
-alpha scanner whose module this run did not load was refused as a spelling
+name the phase accepts, making the scanner unselectable. And a request naming a
+shipped scanner whose module this run did not load was refused as a spelling
 error; it is still refused here, before anything is cleared, but with the one
-text the phase also raises (core.scanner_selection.alpha_scanner_refusal),
+text the phase also raises (plugins.enablement.unloaded_opt_in_refusal),
 which names the module to add and any misspelled name beside it, and only when
 some scanner class is in scope to judge the names against.
 
@@ -111,7 +111,7 @@ def test_an_alpha_scanner_whose_module_is_not_loaded_is_refused_naming_the_modul
     with pytest.raises(ScannerSelectionError, match="ash_snyk_plugins") as refused:
         _reinitialize(engine, ["snyk-code"], [_NamedScanner])
 
-    assert "alpha scanner" in str(refused.value)
+    assert "is provided by" in str(refused.value)
     assert "--ash-plugin-modules" in str(refused.value)
 
 

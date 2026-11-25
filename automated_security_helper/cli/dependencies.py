@@ -13,7 +13,15 @@ import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path, PurePath, PureWindowsPath
-from typing import Annotated, Any, Iterable, List, NoReturn, Optional, Tuple
+from typing import (
+    Annotated,
+    Any,
+    Iterable,
+    List,
+    NoReturn,
+    Optional,
+    Tuple,
+)
 
 import typer
 
@@ -1138,7 +1146,7 @@ def install_dependencies(
     # The default when no bin path was given, or a blank one, from the option or
     # from a whitespace-only ASH_BIN_PATH that click passes through as given.
     target_bin_path: Optional[Path]
-    if is_blank_bin_path(bin_path):
+    if bin_path is None or is_blank_bin_path(bin_path):
         target_bin_path = ASH_BIN_PATH
     elif (
         from_environment(ctx, "bin_path")
@@ -1680,29 +1688,30 @@ def install_dependencies(
                     + escape(", ".join(sorted(o.name for o in failed_to_load)))
                 )
             )
-            # An alpha scanner that ships with ASH is not a typo when its module
-            # is simply not loaded: say which module to add.
-            from automated_security_helper.core.alpha_scanners import (
-                alpha_module_for,
+            # A scanner that ships with ASH is not a typo when its module is
+            # simply not loaded: say which module to add.
+            from automated_security_helper.plugin_manifests import (
+                opt_in_module_for,
             )
 
-            alpha = {
-                name: module for name in unknown if (module := alpha_module_for(name))
+            unloaded = {
+                name: module for name in unknown if (module := opt_in_module_for(name))
             }
-            alpha_note = "".join(
-                f"\n[yellow]{escape(name)}[/yellow] is an alpha plugin scanner: "
+            unloaded_note = "".join(
+                f"\n[yellow]{escape(name)}[/yellow] is provided by a plugin "
+                "module this run did not load: "
                 + escape(
                     f"load {module} with --config (ash_plugin_modules) or "
                     f'--config-overrides "ash_plugin_modules+=[{module}]".'
                 )
-                for name, module in sorted(alpha.items())
+                for name, module in sorted(unloaded.items())
             )
             console.print(
                 Panel(
                     f"[bold red]Unknown tool(s): "
                     f"{escape(', '.join(sorted(unknown)))}[/bold red]\n"
                     f"[cyan]Available:[/cyan] {escape(', '.join(available))}"
-                    f"{alpha_note}{broken_note}",
+                    f"{unloaded_note}{broken_note}",
                     title="Nothing installed",
                     expand=False,
                 )
@@ -1911,7 +1920,11 @@ def install_dependencies(
         ]
         if outcome.needs_external_tool:
             outcome.executable = _resolved_executable(outcome, source_dir)
-            if outcome.executable is None and outcome.uv_managed:
+            if (
+                outcome.executable is None
+                and outcome.uv_managed
+                and outcome.command is not None
+            ):
                 outcome.executable = _uv_tool_executable(outcome.command)
             # Last, and only for a plugin the verdict counts (see
             # _report_and_exit) that declares its check can start the tool off
@@ -2019,6 +2032,8 @@ def _resolved_executable(
     """
     if outcome.runs_in_ash_interpreter and os.path.isabs(sys.executable or ""):
         return sys.executable
+    if outcome.command is None:
+        return None
     return find_executable_for_scan(outcome.command, source_dir)
 
 

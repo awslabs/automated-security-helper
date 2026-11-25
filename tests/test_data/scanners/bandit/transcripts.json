@@ -1,0 +1,90 @@
+{
+  "schema_version": 1,
+  "transcripts": [
+    {
+      "adapter_prep": null,
+      "also_for": [],
+      "argv": [
+        "bandit",
+        "--format",
+        "sarif",
+        "m0_flagged.py"
+      ],
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": {
+        "paths": [
+          "m0_flagged.py"
+        ],
+        "sha256": "002fd30e52c0aaf375b92eac0c575c59c0bd35e6fcc49abbf2c0f7a614198da1"
+      },
+      "id": "bandit-1.9.4-m0",
+      "live_input": false,
+      "note": "the plain-JSON run is the side report; both are from the M0 sample run",
+      "observable": true,
+      "pin_stamp": null,
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "sarif",
+          "path": "captured/bandit-1.9.4-m0.sarif",
+          "sha256": "d8672bec59a946db7f247d6039833b22cefebcdc914aa96d8d21f35f89b66297"
+        }
+      ],
+      "retention": "current",
+      "scanner": "bandit",
+      "side_reports": [
+        {
+          "format": "json",
+          "path": "captured/bandit-1.9.4-m0.json",
+          "sha256": "71aabfcf6904a9f59e395239559f44983b5d20b3fbfcbbf9abf5b03dbf61240c"
+        }
+      ],
+      "stderr_tail": null,
+      "tool": {
+        "name": "bandit",
+        "version": "1.9.4"
+      }
+    },
+    {
+      "adapter_prep": null,
+      "also_for": [],
+      "argv": null,
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": null,
+      "id": "bandit-unversioned-src",
+      "live_input": false,
+      "note": "a loose capture from before transcripts; the file records no tool version, and the work file is ASH's own copy of the same run",
+      "observable": true,
+      "pin_stamp": null,
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "json",
+          "path": "src.json",
+          "sha256": "13cf3e85a45669822af62a51b0e9791fd7d6d3fc4c216120aa0fd5844cce8f94"
+        }
+      ],
+      "retention": "current",
+      "scanner": "bandit",
+      "side_reports": [
+        {
+          "format": "json",
+          "path": "src.ash_output.work.json",
+          "sha256": "cb89f9bb871411bd68918d4a35333620a1cac70ca48bc604eefc84be0f5a12a9"
+        }
+      ],
+      "stderr_tail": null,
+      "tool": {
+        "name": "bandit",
+        "version": "unknown"
+      }
+    }
+  ],
+  "unrecorded": []
+}

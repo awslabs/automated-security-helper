@@ -5,7 +5,7 @@
 
 Why this exists
 ---------------
-snyk-code, ferret-scan, trivy-repo, GuardDog, hadolint and Betterleaks live in alpha plugin
+snyk-code, ferret-scan, trivy-repo, GuardDog and hadolint live in alpha plugin
 modules (``plugin_modules/ash_*_plugins``). Listing a module is the opt-in: a run
 that does not list it never loads its scanners. Two things follow, and are tested
 here:
@@ -32,16 +32,16 @@ from automated_security_helper.base.scanner_plugin import (
     ScannerPluginConfigBase,
 )
 from automated_security_helper.config.default_config import get_default_config
-from automated_security_helper.core.alpha_scanners import (
-    alpha_module_for,
-    alpha_scanner_modules,
-)
 from automated_security_helper.core.exceptions import ScannerSelectionError
 from automated_security_helper.core.phases.scan_phase import ScanPhase
 from automated_security_helper.core.unified_metrics import (
     populate_metrics_from_unified_source,
 )
 from automated_security_helper.models.asharp_model import AshAggregatedResults
+from automated_security_helper.plugin_manifests import (
+    opt_in_module_for,
+    opt_in_scanner_modules,
+)
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 
 pytestmark = pytest.mark.unit
@@ -130,7 +130,6 @@ def _scan(context, plugins, enabled_scanners: List[str]) -> AshAggregatedResults
 @pytest.mark.parametrize(
     "scanner,module",
     [
-        ("betterleaks", "ash_betterleaks_plugins"),
         ("ferret-scan", "ash_ferret_plugins"),
         ("guarddog", "ash_guarddog_plugins"),
         ("hadolint", "ash_hadolint_plugins"),
@@ -139,8 +138,8 @@ def _scan(context, plugins, enabled_scanners: List[str]) -> AshAggregatedResults
     ],
 )
 def test_each_alpha_scanner_maps_to_its_module(scanner, module):
-    assert alpha_module_for(scanner) == f"{PKG}.{module}"
-    assert alpha_module_for(f"  {scanner.upper()} ") == f"{PKG}.{module}"
+    assert opt_in_module_for(scanner) == f"{PKG}.{module}"
+    assert opt_in_module_for(f"  {scanner.upper()} ") == f"{PKG}.{module}"
 
 
 @pytest.mark.parametrize(
@@ -160,13 +159,13 @@ def test_each_alpha_scanner_maps_to_its_module(scanner, module):
     ],
 )
 def test_builtin_scanners_are_not_alpha_scanners(builtin):
-    assert alpha_module_for(builtin) is None
+    assert opt_in_module_for(builtin) is None
 
 
 def test_the_map_agrees_with_what_each_module_registers():
     """Read from source; checked here against the classes the modules export."""
     by_module = {}
-    for name, module in alpha_scanner_modules().items():
+    for name, module in opt_in_scanner_modules().items():
         by_module.setdefault(module, set()).add(name)
     assert by_module, "no alpha module found; the check below would be vacuous"
     for module, names in by_module.items():
@@ -199,7 +198,9 @@ def test_an_unloaded_alpha_scanner_is_refused_with_its_module(tmp_path):
     with pytest.raises(ScannerSelectionError) as raised:
         _scan(_context(tmp_path), [DummyControlScanner], ["snyk-code"])
     message = str(raised.value)
-    assert "snyk-code is an alpha scanner" in message
+    assert "snyk-code is provided by" in message
+    assert "did not load" in message
+    assert "alpha" not in message.lower()
     assert f"{PKG}.ash_snyk_plugins" in message
     assert f"--ash-plugin-modules {PKG}.ash_snyk_plugins" in message
 
@@ -217,7 +218,7 @@ def test_a_partly_resolved_selection_warns_with_the_module(tmp_path, caplog):
             _context(tmp_path), [DummyControlScanner], [CONTROL_NAME, "ferret-scan"]
         )
     assert CONTROL_NAME in results.scanner_results
-    assert "ferret-scan is an alpha scanner" in caplog.text
+    assert "ferret-scan is provided by" in caplog.text
     assert f"--ash-plugin-modules {PKG}.ash_ferret_plugins" in caplog.text
 
 
@@ -255,7 +256,7 @@ def test_several_unloaded_scanners_name_every_module_once(tmp_path):
             ["snyk-code", "SNYK-CODE", "trivy-repo"],
         )
     message = str(raised.value)
-    assert "are alpha scanners" in message
+    assert "are provided by" in message
     assert message.count(f"--ash-plugin-modules {PKG}.ash_snyk_plugins") == 1
     assert f"{PKG}.ash_trivy_plugins" in message
 

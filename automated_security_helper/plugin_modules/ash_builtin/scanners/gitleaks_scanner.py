@@ -168,6 +168,7 @@ from automated_security_helper.base.scanner_facets import (
     FacetState,
     ScannerFacets,
 )
+from automated_security_helper.models.vocab import Severity, TargetType
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
@@ -202,6 +203,7 @@ from automated_security_helper.utils.config_trust import (
 )
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.process_env import snapshot_environ
+from automated_security_helper.utils.subprocess_utils import OutputPreference
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.utils.sandbox.scope import active_scope
@@ -718,7 +720,6 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
                 semantics="ASH passes --exit-code=2 because the tool's default 1 means both leaks and some errors",
             ),
             provenance=opsf.ProvenanceFacet(
-                tier=opsf.Tier.BUILTIN_DEFAULT,
                 source=opsf.ProvenanceSource.PINNED_RELEASE_BINARY,
                 selection_surfaces=("options.honor_inline_ignores",),
                 upstream_license=(
@@ -1043,7 +1044,7 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
     def _execute_scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason],
     ) -> Tuple[List[str], Path, Optional[Dict[str, str]]]:
         """Resolve the argv and results path for one gitleaks run.
@@ -1179,14 +1180,26 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
             )
         return data
 
-    def _run_subprocess(  # type: ignore[override]
+    def _run_subprocess(
         self,
         command: List[str],
         results_dir: str | Path | None = None,
-        **kwargs: Any,
-    ) -> Dict[str, str]:
+        stdout_preference: OutputPreference = "write",
+        stderr_preference: OutputPreference = "write",
+        cwd: Path | str | None = None,
+        env: Dict[str, str] | None = None,
+        timeout: float | None = None,
+    ) -> Dict[str, Any]:
         """Run gitleaks, then mask what its log quotes from ``.gitleaksignore``."""
-        response = super()._run_subprocess(command, results_dir=results_dir, **kwargs)
+        response = super()._run_subprocess(
+            command,
+            results_dir=results_dir,
+            stdout_preference=stdout_preference,
+            stderr_preference=stderr_preference,
+            cwd=cwd,
+            env=env,
+            timeout=timeout,
+        )
         if results_dir is not None:
             _mask_quoted_ignore_entries(
                 Path(results_dir) / f"{self.__class__.__name__}.stderr.log"
@@ -1905,7 +1918,9 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
                 result.properties = PropertyBag(tags=tags)
             else:
                 result.properties.tags = tags
-            setattr(result.properties, "issue_severity", "CRITICAL")  # noqa: B010
+            setattr(  # noqa: B010
+                result.properties, "issue_severity", Severity.CRITICAL.value
+            )
 
             for location in result.locations or []:
                 physical = location.physicalLocation

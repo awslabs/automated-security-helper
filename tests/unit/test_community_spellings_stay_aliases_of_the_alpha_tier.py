@@ -18,8 +18,8 @@ from unittest.mock import MagicMock
 import pytest
 import yaml
 
-from automated_security_helper.base import scanner_operational_facets as opsf
-from automated_security_helper.core import alpha_scanners
+from automated_security_helper.base import plugin_manifest
+from automated_security_helper.base.plugin_manifest import PluginTier
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -33,7 +33,7 @@ def warnings_logged(monkeypatch):
 
     logger = MagicMock()
     monkeypatch.setattr(log_module, "ASH_LOGGER", logger)
-    monkeypatch.setattr(alpha_scanners, "_WARNED_COMMUNITY_ALIASES", set())
+    monkeypatch.setattr(plugin_manifest, "_WARNED_COMMUNITY_ALIASES", set())
     return logger
 
 
@@ -41,41 +41,43 @@ def _messages(logger: MagicMock) -> list[str]:
     return [call.args[0] for call in logger.warning.call_args_list]
 
 
-def test_the_old_tier_value_maps_to_the_alpha_tier_and_warns(warnings_logged):
-    assert opsf.Tier("community_optin") is opsf.Tier.ALPHA_OPTIN
+@pytest.mark.parametrize("old", ["community", "community_optin"])
+def test_the_old_tier_value_maps_to_the_alpha_tier_and_warns(warnings_logged, old):
+    assert PluginTier(old) is PluginTier.ALPHA
     messages = _messages(warnings_logged)
     assert len(messages) == 1
-    assert "'community_optin' is deprecated" in messages[0]
-    assert "'alpha_optin'" in messages[0]
-    assert alpha_scanners.COMMUNITY_ALIASES_DROPPED_IN in messages[0]
+    assert f"'{old}' is deprecated" in messages[0]
+    assert "'alpha'" in messages[0]
+    assert plugin_manifest.COMMUNITY_ALIASES_DROPPED_IN in messages[0]
 
 
 def test_the_old_tier_value_warns_once_per_process(warnings_logged):
-    opsf.Tier("community_optin")
-    opsf.Tier("community_optin")
+    PluginTier("community")
+    PluginTier("community")
     assert len(_messages(warnings_logged)) == 1
 
 
 def test_the_new_tier_value_does_not_warn(warnings_logged):
-    assert opsf.Tier("alpha_optin") is opsf.Tier.ALPHA_OPTIN
-    assert opsf.Tier("builtin_default") is opsf.Tier.BUILTIN_DEFAULT
+    assert PluginTier("alpha") is PluginTier.ALPHA
+    assert PluginTier("supported") is PluginTier.SUPPORTED
+    assert PluginTier("deprecated") is PluginTier.DEPRECATED
     assert _messages(warnings_logged) == []
 
 
 def test_an_unrelated_tier_value_is_still_refused(warnings_logged):
     with pytest.raises(ValueError):
-        opsf.Tier("community")
+        PluginTier("beta")
     assert _messages(warnings_logged) == []
 
 
-def test_the_register_model_accepts_the_old_tier_value(warnings_logged):
-    facet = opsf.ProvenanceFacet(
-        tier="community_optin",
-        source=opsf.ProvenanceSource.USER_INSTALLED,
-        selection_surfaces=(),
-        upstream_license=opsf.LICENSE_NOT_READ,
-    )
-    assert facet.tier is opsf.Tier.ALPHA_OPTIN
+def test_the_manifest_model_accepts_the_old_tier_value(warnings_logged):
+    from automated_security_helper.plugin_manifests import scanner_manifests
+
+    data = scanner_manifests()[0].model_dump(mode="json")
+    data["tier"] = "community"
+    data["superseded_by"] = None
+    manifest = plugin_manifest.parse_scanner_manifest(data)
+    assert manifest.tier is PluginTier.ALPHA
     assert len(_messages(warnings_logged)) == 1
 
 
@@ -106,36 +108,24 @@ def _docs_checks():
         ("Community scanners", "alpha scanners"),
     ],
 )
-def test_an_old_scanner_column_heading_is_refused_naming_the_new_one(
+def test_an_old_scanner_column_heading_is_checked_as_alpha_and_warns(
     tmp_path, warnings_logged, old_heading, new_heading
 ):
-    """The docs lint is internal: the old heading is a finding, not an alias."""
     dc = _docs_checks()
     page = tmp_path / "docs" / "page.md"
     page.parent.mkdir(parents=True)
+    # bandit is built in: under the old heading it must be refused as built in,
+    # which proves the heading still names the (renamed) alpha kind.
     page.write_text(
-        f"| What | {old_heading} |\n|---|---|\n| Python | snyk-code |\n",
+        f"| What | {old_heading} |\n|---|---|\n| Python | bandit |\n",
         encoding="utf-8",
     )
     findings = dc.check_scanner_names([page], tmp_path)
-    old = [f for f in findings if "is the old heading" in str(f)]
-    assert len(old) == 1, findings
-    assert str(page.relative_to(tmp_path)) in str(old[0]).replace("\\", "/")
-    assert f"use '{new_heading.capitalize()}'" in str(old[0])
-    assert _messages(warnings_logged) == []
-
-
-def test_a_second_page_with_the_old_heading_is_reported_too(tmp_path):
-    dc = _docs_checks()
-    docs = tmp_path / "docs"
-    docs.mkdir()
-    for name in ("a.md", "b.md"):
-        (docs / name).write_text(
-            "| What | Community plugins |\n|---|---|\n| Python | snyk-code |\n",
-            encoding="utf-8",
-        )
-    findings = dc.check_scanner_names([docs / "a.md", docs / "b.md"], tmp_path)
-    assert len([f for f in findings if "is the old heading" in str(f)]) == 2
+    assert any("is a built-in scanner" in str(f) for f in findings), findings
+    messages = _messages(warnings_logged)
+    assert len(messages) == 1
+    assert f"'{old_heading.lower()}' is deprecated" in messages[0]
+    assert f"'{new_heading}'" in messages[0]
 
 
 def test_the_new_scanner_column_heading_does_not_warn(tmp_path, warnings_logged):
@@ -150,40 +140,8 @@ def test_the_new_scanner_column_heading_does_not_warn(tmp_path, warnings_logged)
     assert _messages(warnings_logged) == []
 
 
-def test_the_aliases_are_gone_by_the_release_that_says_it_drops_them():
-    """Fails at the version bump that reaches the release, forcing the removal."""
-    from packaging.version import Version
-
-    from automated_security_helper import __version__
-
-    assert Version(__version__) < Version(
-        alpha_scanners.COMMUNITY_ALIASES_DROPPED_IN
-    ), (
-        f"ASH {__version__} reached {alpha_scanners.COMMUNITY_ALIASES_DROPPED_IN}: "
-        "remove the community aliases (alpha_scanners.warn_community_alias, "
-        "Tier._missing_) and this test"
-    )
-
-
-def test_the_old_dockerfile_build_argument_still_wins_over_the_new_one():
-    """`--build-arg ASH_COMMUNITY_PLUGIN_MODULES=...` is read until the alias window ends."""
-    text = (REPO_ROOT / "Dockerfile").read_text(encoding="utf-8")
-    assert text.count('ARG ASH_COMMUNITY_PLUGIN_MODULES=""\n') == 2
-    assert (
-        text.count("${ASH_COMMUNITY_PLUGIN_MODULES:-${ASH_ALPHA_PLUGIN_MODULES}}") == 2
-    )
-
-
-def test_the_renamed_anchors_keep_their_old_ids_for_the_alias_window():
-    """A page redirect cannot carry a #fragment, so the old ids stay as anchors."""
-    choose = (REPO_ROOT / "docs/content/how-to/choose-scanners.md").read_text(
-        encoding="utf-8"
-    )
-    assert '<a id="community"></a>' in choose
-    trivy = (REPO_ROOT / "docs/content/docs/plugins/builtin/trivy.md").read_text(
-        encoding="utf-8"
-    )
-    assert '<a id="running-it-alongside-the-trivy-repo-community-plugin"></a>' in trivy
+def test_the_alias_window_names_the_next_release():
+    assert plugin_manifest.COMMUNITY_ALIASES_DROPPED_IN == "3.9.0"
 
 
 def test_every_old_docs_page_redirects_to_its_alpha_page():

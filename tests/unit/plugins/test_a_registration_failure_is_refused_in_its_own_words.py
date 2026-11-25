@@ -395,10 +395,13 @@ def test_the_scanner_inventory_lists_no_scanner_of_a_refused_package(
         "ASH_SCANNERS = [Zqreg26InvScanner]\n"
         f"ASH_EVENT_HANDLERS = {{'{EVENT}-inv': [5]}}\n",
     )
+    from automated_security_helper.plugins import enablement
+
+    shipped = enablement.modules_needing_naming()
     monkeypatch.setattr(
-        inventory,
-        "_VENDORED_SCANNER_PLUGIN_PACKAGES",
-        (name, *inventory._VENDORED_SCANNER_PLUGIN_PACKAGES),
+        enablement,
+        "modules_needing_naming",
+        lambda: (name, *shipped),
     )
 
     listed = inventory._loaded_scanner_classes()

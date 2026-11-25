@@ -249,7 +249,7 @@ class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
             # other failure leave the dependency unsatisfied here.
             s3_client = session.client("s3")
             try:
-                s3_client.head_bucket(Bucket=self.config.options.bucket_name)
+                s3_client.head_bucket(Bucket=self.config.options.bucket_name or "")
             except botocore.exceptions.ClientError as e:
                 status = e.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
                 code = e.response.get("Error", {}).get("Code")

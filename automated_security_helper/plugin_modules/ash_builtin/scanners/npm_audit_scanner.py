@@ -9,7 +9,17 @@ import secrets
 import shutil
 import tempfile
 from pathlib import Path
-from typing import Annotated, ClassVar, Dict, List, Literal, Any, Sequence, Set
+from typing import (
+    Annotated,
+    ClassVar,
+    Dict,
+    List,
+    Literal,
+    Any,
+    Sequence,
+    Set,
+    TypeGuard,
+)
 
 from pydantic import Field, PrivateAttr, model_validator
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
@@ -20,6 +30,7 @@ from automated_security_helper.base.scanner_facets import (
     FacetState,
     ScannerFacets,
 )
+from automated_security_helper.models.vocab import Severity, TargetType
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.models.core import ToolArgs
@@ -34,6 +45,7 @@ from automated_security_helper.base.uv_tool_mixin import guarded_values_read
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.schemas.sarif_schema_model import (
+    Level,
     MultiformatMessageString,
     SarifReport,
     Run,
@@ -43,8 +55,10 @@ from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactLocation,
     Location,
     PhysicalLocation,
+    PhysicalLocation2,
     Region,
     Message,
+    Message1,
     PropertyBag,
     ReportingDescriptor,
     Invocation,
@@ -108,11 +122,11 @@ def _has_problem_text(problems: List[str]) -> bool:
 
 # Advisory severity to SARIF level, for npm, yarn and pnpm alike.
 _SEVERITY_LEVEL = {
-    "critical": "error",
-    "high": "error",
-    "moderate": "warning",
-    "low": "note",
-    "info": "note",
+    "critical": Level.error.value,
+    "high": Level.error.value,
+    "moderate": Level.warning.value,
+    "low": Level.note.value,
+    "info": Level.note.value,
 }
 
 # Advisory severity to the ASH severity a result declares (``issue_severity``,
@@ -122,11 +136,11 @@ _SEVERITY_LEVEL = {
 # graded CRITICAL and an info one LOW. With a usable score the rule's
 # security_severity is copied onto the result instead (sarif_utils).
 _SEVERITY_GRADE = {
-    "critical": "CRITICAL",
-    "high": "HIGH",
-    "moderate": "MEDIUM",
-    "low": "LOW",
-    "info": "INFO",
+    "critical": Severity.CRITICAL.value,
+    "high": Severity.HIGH.value,
+    "moderate": Severity.MEDIUM.value,
+    "low": Severity.LOW.value,
+    "info": Severity.INFO.value,
 }
 
 # npm's severity words, lowest first.
@@ -169,7 +183,7 @@ def _shown_tool_text(text: Any, values: Sequence[str] | None) -> str:
     reached ScannerError and the persisted results with the user part shown.
     Every tool-text path goes through here.
     """
-    return _URL_USERINFO.sub(r"\1***@", shown_tool_stderr(str(text), values))
+    return _URL_USERINFO.sub(r"\1***@", shown_tool_stderr(str(text), values or ()))
 
 
 # One comparator of an npm advisory range: an operator, a version and an
@@ -636,7 +650,6 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                 semantics="the base default {0, 1}; the adapter owns the audit-failure handling",
             ),
             provenance=opsf.ProvenanceFacet(
-                tier=opsf.Tier.BUILTIN_DEFAULT,
                 source=opsf.ProvenanceSource.USER_INSTALLED,
                 selection_surfaces=(),
                 upstream_license=opsf.LICENSE_NOT_READ,
@@ -746,10 +759,10 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                 self._source_manifests(), "source"
             )
             return False
-        if find_executable(self.command):
+        if find_executable(self._tool_command()):
             self._probe_npm_version()
             return True
-        needed = self._package_managers_needed() or {self.command}
+        needed = self._package_managers_needed() or {self._tool_command()}
         if not any(find_executable(binary) for binary in needed):
             names = ", ".join(sorted(needed))
             self.dependency_unavailable_reason = (
@@ -779,7 +792,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         for manifest in self._source_manifests():
             lock_file = self._lockfile_beside(manifest)
             if lock_file is not None:
-                needed.add(_LOCKFILE_BINARY.get(lock_file.name, self.command))
+                needed.add(_LOCKFILE_BINARY.get(lock_file.name, self._tool_command()))
         return needed
 
     def _probe_npm_version(self) -> None:
@@ -808,7 +821,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             probe_dir = None
         try:
             response = self._run_subprocess(
-                command=[self.command, "--version"],
+                command=[self._tool_command(), "--version"],
                 stderr_preference="return",
                 stdout_preference="return",
                 cwd=probe_dir,
@@ -851,7 +864,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
 
     def _package_manifests(
         self,
-        target_type: str,
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason] | None = None,
     ) -> List[str]:
         """Every package.json in one tree: the scan set, or the work directory.
@@ -901,7 +914,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         )
         workspace_output = getattr(self.context, "workspace_output_dir", None)
         ignored_lockfiles: Set[Path] = set()
-        if target_type == "converted":
+        if target_type == TargetType.CONVERTED:
             tree_root = Path(self.context.work_dir)
             orig_scannable = list(self.context.work_dir.glob("**/*.*"))
         else:
@@ -1000,10 +1013,10 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         list from the config here while scan() used the orchestrator's answered
         from another selection. See the base class.
         """
-        trees = ["source"]
+        trees = [TargetType.SOURCE]
         work_dir = Path(self.context.work_dir)
         if work_dir.is_dir() and any(work_dir.rglob("*.*")):
-            trees.append("converted")
+            trees.append(TargetType.CONVERTED)
         for target_type in trees:
             for package_file in self._package_manifests(
                 target_type, self._handed_ignore_paths
@@ -1063,11 +1076,11 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             ),
         }
 
-    def _shown_path(self, path: Path, target_type: str) -> str:
+    def _shown_path(self, path: Path, target_type: TargetType) -> str:
         """``path`` as recorded in the results: relative to the target, as named."""
         base = Path(
             self.context.work_dir
-            if target_type == "converted"
+            if target_type == TargetType.CONVERTED
             else self.context.source_dir
         ).absolute()
         try:
@@ -1412,7 +1425,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         if not segments:
             return ""
 
-        texts = [piece for _, piece in segments]
+        texts = [piece or "" for _, piece in segments]
         # ONE redaction over the whole decoded text: the only spelling a
         # value spanning two segments has.
         spanning = _shown("".join(texts))
@@ -1836,7 +1849,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         for record, vuln_id in zip(records, rule_ids):
             pkg_name = record["package"]
             severity = str(record["severity"])
-            level = _SEVERITY_LEVEL.get(severity, "warning")
+            level = _SEVERITY_LEVEL.get(severity, Level.warning.value)
             title = record["title"] or f"Vulnerability in {pkg_name}"
             score = _usable_cvss_score(record["cvss"])
             grade = {} if score is not None else _grade_properties(severity)
@@ -1899,13 +1912,17 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                     ruleId=vuln_id,
                     level=level,
                     message=Message(
-                        text=f"{title} in {pkg_name} {record['vulnerable_versions']}. {record['url']}"
+                        root=Message1(
+                            text=f"{title} in {pkg_name} {record['vulnerable_versions']}. {record['url']}"
+                        )
                     ),
                     locations=[
                         Location(
                             physicalLocation=PhysicalLocation(
-                                artifactLocation=ArtifactLocation(uri=uri),
-                                region=Region(startLine=1, startColumn=1),
+                                root=PhysicalLocation2(
+                                    artifactLocation=ArtifactLocation(uri=uri),
+                                    region=Region(startLine=1, startColumn=1),
+                                )
                             )
                         )
                     ],
@@ -2140,7 +2157,9 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         if kept.properties is None:
             kept.properties = PropertyBag()
         setattr(kept.properties, "vulnerable_versions", combined)  # noqa: B010
-        kept.message = Message(text=f"{title} in {pkg_name} {combined}. {url or ''}")
+        kept.message = Message(
+            root=Message1(text=f"{title} in {pkg_name} {combined}. {url or ''}")
+        )
 
     @staticmethod
     def _advisory_id(pkg_name: str, via: Dict[str, Any]) -> str:
@@ -2434,8 +2453,12 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                 report = part
                 continue
             run, part_run = report.runs[0], part.runs[0]
+            if run.results is None:
+                run.results = []
             run.results.extend(part_run.results or [])
-            known = {rule.id: rule for rule in run.tool.driver.rules or []}
+            if run.tool.driver.rules is None:
+                run.tool.driver.rules = []
+            known = {rule.id: rule for rule in run.tool.driver.rules}
             for rule in part_run.tool.driver.rules or []:
                 kept = known.get(rule.id)
                 if kept is None:
@@ -2664,7 +2687,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                     # read an unscored low or moderate advisory as the
                     # package's highest.
                     via_severity = str(via.get("severity") or severity)
-                    via_level = _SEVERITY_LEVEL.get(via_severity, "warning")
+                    via_level = _SEVERITY_LEVEL.get(via_severity, Level.warning.value)
                     via_range = via.get("range") or vuln_info.get("range", "*")
                     cvss = via.get("cvss") if isinstance(via.get("cvss"), dict) else {}
                     score = _usable_cvss_score(cvss)
@@ -2754,13 +2777,17 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                             ruleId=vuln_id,
                             level=via_level,
                             message=Message(
-                                text=f"{title} in {pkg_name} {via_range}. {via.get('url', '')}"
+                                root=Message1(
+                                    text=f"{title} in {pkg_name} {via_range}. {via.get('url', '')}"
+                                )
                             ),
                             locations=[
                                 Location(
                                     physicalLocation=PhysicalLocation(
-                                        artifactLocation=ArtifactLocation(uri=uri),
-                                        region=Region(startLine=1, startColumn=1),
+                                        root=PhysicalLocation2(
+                                            artifactLocation=ArtifactLocation(uri=uri),
+                                            region=Region(startLine=1, startColumn=1),
+                                        )
                                     )
                                 )
                             ],
@@ -2798,7 +2825,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                         if has_dict_via
                         else severity
                     )
-                    level = _SEVERITY_LEVEL.get(severity, "warning")
+                    level = _SEVERITY_LEVEL.get(severity, Level.warning.value)
                     via_refs = ", ".join(via_names)
                     title = f"Transitive vulnerability in {pkg_name} (via {via_refs})"
                     description = title
@@ -2852,15 +2879,19 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                             ruleId=vuln_id,
                             level=level,
                             message=Message(
-                                text=f"{title} {vuln_info.get('range', '*')}"
+                                root=Message1(
+                                    text=f"{title} {vuln_info.get('range', '*')}"
+                                )
                             ),
                             locations=[
                                 Location(
                                     physicalLocation=PhysicalLocation(
-                                        artifactLocation=ArtifactLocation(
-                                            uri=f"node_modules/{pkg_location}/package.json"
-                                        ),
-                                        region=Region(startLine=1, startColumn=1),
+                                        root=PhysicalLocation2(
+                                            artifactLocation=ArtifactLocation(
+                                                uri=f"node_modules/{pkg_location}/package.json"
+                                            ),
+                                            region=Region(startLine=1, startColumn=1),
+                                        )
                                     )
                                 )
                             ],
@@ -3087,7 +3118,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             counts["total"] = sum(counted)
 
     @staticmethod
-    def _is_number(value: Any) -> bool:
+    def _is_number(value: Any) -> TypeGuard[int | float]:
         """An int or a float, and not a bool (a bool adds as 0 or 1)."""
         return isinstance(value, (int, float)) and not isinstance(value, bool)
 
@@ -3182,7 +3213,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
     )
 
     def _offline_skips(
-        self, package_files: List[str], target_type: str
+        self, package_files: List[str], target_type: TargetType
     ) -> List[Dict[str, str]]:
         """The not-scanned entries for every lockfile beside *package_files*.
 
@@ -3199,7 +3230,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         return skipped
 
     def _skip_offline(
-        self, package_files: List[str], target: Path, target_type: str
+        self, package_files: List[str], target: Path, target_type: TargetType
     ) -> None:
         """Record every lockfile as not audited.
 
@@ -3231,7 +3262,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
     def scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason] | None = None,
         config: NpmAuditScannerConfig | None = None,
     ) -> SarifReport | bool:
@@ -3610,11 +3641,10 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                                 yarn_major, result, record_values
                             )
                         else:
-                            if result.get("stdout", None):
+                            stdout_text = result.get("stdout", None)
+                            if stdout_text:
                                 try:
-                                    audit_results = json.loads(
-                                        result.get("stdout", None)
-                                    )
+                                    audit_results = json.loads(stdout_text)
                                 except json.JSONDecodeError:
                                     ASH_LOGGER.warning(
                                         f"Failed to parse npm audit output for {package_dir}",
@@ -3825,9 +3855,11 @@ if __name__ == "__main__":
             output_dir=Path.cwd().joinpath(".ash", "ash_output"),
         )
     )
-    report = scanner.scan(target=scanner.context.source_dir, target_type="source")
+    report = scanner.scan(
+        target=scanner.context.source_dir, target_type=TargetType.SOURCE
+    )
 
-    if report:
+    if isinstance(report, SarifReport):
         from automated_security_helper.utils.command_safe_stream import (
             json_commands_broken,
         )

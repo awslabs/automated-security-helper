@@ -149,7 +149,7 @@ def test_an_unloaded_alpha_scanner_names_its_module(tmp_path, monkeypatch):
 
     output = _plain(result.output)
     assert result.exit_code == EXIT_BAD_SELECTION
-    assert "snyk-code is an alpha plugin scanner" in output
+    assert "snyk-code is provided by a plugin module this run did not load" in output
     # Brackets survive rich: the override is printed as typed (COLUMNS=200).
     assert (
         "ash_plugin_modules+=[automated_security_helper.plugin_modules."
@@ -180,7 +180,10 @@ def test_an_unloaded_alpha_scanner_in_another_spelling_names_its_module(
 
     output = " ".join(_plain(result.output).split())
     assert result.exit_code == EXIT_BAD_SELECTION
-    assert f"{typed.strip()} is an alpha plugin scanner" in output, output
+    assert (
+        f"{typed.strip()} is provided by a plugin module this run did not load"
+        in output
+    ), output
     assert (
         "ash_plugin_modules+=[automated_security_helper.plugin_modules."
         "ash_snyk_plugins]" in output

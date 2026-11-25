@@ -188,6 +188,9 @@ from typing import IO, Any, Callable, Iterable
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PACKAGE_ROOT = REPO_ROOT / "automated_security_helper"
 PINS_FILE = "automated_security_helper/utils/tool_downloads.py"
+# Where each release binary's version is declared (the pin owner's Provisioning block);
+# TOOL_VERSIONS, which PIN_SOURCES reads, is derived from it.
+PROVISIONING_FILE = "automated_security_helper/base/plugin_provisioning.py"
 INSTALLER = PACKAGE_ROOT / "assets" / "install-pinned-tool.py"
 DOCKERFILE = REPO_ROOT / "Dockerfile"
 GEMFILE = "automated_security_helper/assets/Gemfile"
@@ -1109,7 +1112,9 @@ def _release_binary_steps(pins: Any, pin: Pin, latest: str) -> list[str]:
     old_bare = pin.version.lstrip("v")
     table = pins._ASSET_TABLES.get(tool, {})
     filenames = list(table.values())
-    steps = [f'TOOL_VERSIONS["{tool}"] -> {latest}']
+    # The version is declared by the plugin that owns the tool, in its Provisioning block;
+    # TOOL_VERSIONS in tool_downloads.py is derived from it and has no row to edit.
+    steps = [f'ToolPin("{tool}") in {PROVISIONING_FILE} -> {latest}']
     table_name = _global_name(pins, table) or "asset filenames"
     new_bare = latest.lstrip("v")
     # Each name is judged on its own: one that carries no version (an unversioned

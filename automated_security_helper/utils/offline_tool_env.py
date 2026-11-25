@@ -44,39 +44,20 @@ None of them starts a tool with a check of this kind.
 
 import contextvars
 from contextlib import contextmanager
+from types import MappingProxyType
 from typing import Dict, Iterator, Mapping, Optional
 
-#: Variable -> value that turns the check or lookup off.
-OFFLINE_TOOL_ENVIRONMENT: Mapping[str, str] = {
-    # semgrep: version check (scan and --version) and metrics.
-    "SEMGREP_ENABLE_VERSION_CHECK": "0",
-    "SEMGREP_SEND_METRICS": "off",
-    # checkov: the PyPI update check at import.
-    "CKV_SKIP_PACKAGE_UPDATE_CHECK": "true",
-    # npm: the update notifier.
-    "npm_config_update_notifier": "false",
-    # trivy: version check and telemetry (--skip-version-check, --disable-telemetry).
-    "TRIVY_SKIP_VERSION_CHECK": "true",
-    "TRIVY_DISABLE_TELEMETRY": "true",
-    # syft: update check, and the lookups a .syft.yaml or `enrich` can turn on.
-    "SYFT_CHECK_FOR_APP_UPDATE": "false",
-    "SYFT_GOLANG_SEARCH_REMOTE_LICENSES": "false",
-    "SYFT_JAVA_USE_NETWORK": "false",
-    "SYFT_JAVASCRIPT_SEARCH_REMOTE_LICENSES": "false",
-    "SYFT_PYTHON_SEARCH_REMOTE_LICENSES": "false",
-    "SYFT_CPP_VCPKG_ALLOW_GIT_CLONE": "false",
-    "SYFT_GOLANG_USE_PACKAGES_LIB": "false",
-    # grype: update checks, and the external sources a .grype.yaml can turn on.
-    "GRYPE_CHECK_FOR_APP_UPDATE": "false",
-    "GRYPE_DB_AUTO_UPDATE": "false",
-    "GRYPE_EXTERNAL_SOURCES_ENABLE": "false",
-    # The Go toolchain syft or grype may run: no module proxy, no toolchain download.
-    "GOPROXY": "off",
-    "GOTOOLCHAIN": "local",
-    # git run by a tool (trivy's Terraform module sources, syft's vcpkg registries)
-    # reaches no remote; only local paths are allowed.
-    "GIT_ALLOW_PROTOCOL": "file",
-}
+from automated_security_helper.base.plugin_provisioning import (
+    offline_tool_environment as declared_offline_environment,
+)
+
+#: Variable -> value that turns the check or lookup off. DERIVED from the rows each
+#: scanner declares (``Provisioning.offline_env`` in ``base/plugin_provisioning.py``,
+#: readable as ``scanner_manifests()[...].provisioning``), each with the reason it exists;
+#: no variable is listed here. Retiring a scanner retires its rows with it.
+OFFLINE_TOOL_ENVIRONMENT: Mapping[str, str] = MappingProxyType(
+    declared_offline_environment()
+)
 
 
 #: True inside :func:`offline_tool_scope` for a scanner that runs offline.

@@ -33,6 +33,7 @@ from typing import (
 )
 
 import yaml
+from pydantic import BaseModel
 from pydantic_core import core_schema as _core_schema
 
 from automated_security_helper.config.ash_config import (
@@ -2054,7 +2055,8 @@ def _shown_at(
     the path leaves ``data``.
     """
     steps: List[Any] = []
-    node, shown_node = data, shown
+    node: Any = data
+    shown_node: Any = shown
     for step in location:
         if isinstance(node, dict) and step in node:
             index = list(node).index(step)
@@ -2063,9 +2065,13 @@ def _shown_at(
             continue
         if isinstance(node, list) and isinstance(step, int) and 0 <= step < len(node):
             steps.append(step)
-            aligned = isinstance(shown_node, list) and len(shown_node) == len(node)
+            shown_items = (
+                shown_node
+                if isinstance(shown_node, list) and len(shown_node) == len(node)
+                else None
+            )
             node = node[step]
-            shown_node = shown_node[step] if aligned else _ALL_SHOWN
+            shown_node = shown_items[step] if shown_items is not None else _ALL_SHOWN
             continue
         steps.append(step)
     return steps, node, shown_node
@@ -2094,12 +2100,16 @@ def _strings_read_from_the_environment(item: Any, shown: Any) -> List[str]:
             found += _strings_read_from_the_environment(value, shown_value)
         return found
     if isinstance(item, (list, tuple)):
-        aligned = isinstance(shown, (list, tuple)) and len(shown) == len(item)
+        shown_items = (
+            shown
+            if isinstance(shown, (list, tuple)) and len(shown) == len(item)
+            else None
+        )
         return [
             text
             for index, value in enumerate(item)
             for text in _strings_read_from_the_environment(
-                value, shown[index] if aligned else _ALL_SHOWN
+                value, shown_items[index] if shown_items is not None else _ALL_SHOWN
             )
         ]
     if isinstance(item, str) and shown != item:
@@ -3604,7 +3614,7 @@ _MISSING_OPTION: Any = object()
 
 
 @functools.lru_cache(maxsize=None)
-def _built_in_section_classes(segment_name: str) -> Dict[str, type]:
+def _built_in_section_classes(segment_name: str) -> Dict[str, type[BaseModel]]:
     """Each built-in plugin's config class in a segment, by the keys the model reads.
 
     The field name and its alias (``cdk_nag`` and ``cdk-nag``): the spellings the
@@ -3626,7 +3636,7 @@ def _built_in_section_classes(segment_name: str) -> Dict[str, type]:
         PluginKind.CONVERTER.section: ConverterConfigSegment,
     }
     segment_cls = segments[segment_name]
-    classes: Dict[str, type] = {}
+    classes: Dict[str, type[BaseModel]] = {}
     for field_name, info in segment_cls.model_fields.items():
         config_class = next(
             (
