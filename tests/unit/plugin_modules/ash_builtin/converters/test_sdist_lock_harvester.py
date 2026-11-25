@@ -524,3 +524,37 @@ def test_eviction_never_removes_a_directory_outside_the_cache_root(
 
     assert outside.joinpath("keep.txt").is_file(), "never rmtree outside the root"
     assert not inside.exists(), "an entry under the root is still evicted"
+
+
+def test_cache_index_is_written_atomically(
+    harvest_env, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The cache index replaces its file whole, so a reader never sees a torn one.
+
+    A plain ``write_text`` truncates the index before writing it; a concurrent
+    scan that reads the entry in that window finds a file that exists but does
+    not parse, evicts the entry and re-fetches. The index goes through the
+    repo's own ``write_text_atomically``, and a complete, parseable index is the
+    only thing a reader can find.
+    """
+    from automated_security_helper.plugin_modules.ash_builtin.converters import (
+        sdist_lock_harvester,
+    )
+    from automated_security_helper.utils import atomic_write
+
+    written: List[Path] = []
+    real = atomic_write.write_text_atomically
+
+    def spy(path: Path, content: str, *args, **kwargs) -> None:
+        written.append(Path(path))
+        real(path, content, *args, **kwargs)
+
+    monkeypatch.setattr(sdist_lock_harvester, "write_text_atomically", spy)
+    _source, _output, _opener, build = harvest_env
+
+    build().convert()
+
+    assert [p.name for p in written] == ["cached-lockfiles.json"]
+    assert json.loads(written[0].read_text(encoding="utf-8"))["lockfiles"] == [
+        "Cargo.lock"
+    ]
