@@ -9,6 +9,7 @@ from pathlib import Path, PurePath
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from automated_security_helper.utils.severity_ladder import (
+    SEVERITIES,
     SEVERITY_THRESHOLDS,
     normalize_threshold,
 )
@@ -1127,7 +1128,7 @@ KNOWN_SCANNABLE_EXTENSIONS = [
     # "sqlite3db",
     # "sqlite3db",
 ]
-VALID_SEVERITY_VALUES = frozenset({"CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"})
+VALID_SEVERITY_VALUES = frozenset(SEVERITIES)
 
 #: The command line could not be used, so nothing ran: an unknown command, option
 #: or argument, a missing required option, an option value ASH does not accept, or

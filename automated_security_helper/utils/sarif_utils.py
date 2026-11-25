@@ -24,6 +24,7 @@ from automated_security_helper.utils.log import (
     escape_markup,
 )
 from automated_security_helper.utils.severity_ladder import (
+    SEVERITIES,
     component_labels,
     resolve_missing_levels,
     result_scanner_labels,
@@ -528,7 +529,7 @@ def _severity_from_security_score(value: object) -> str | None:
 #: The severity bands _resolve_result_severity honors from ``issue_severity``.
 #: Kept as one constant so the normalizer's skip test and the resolver's read
 #: cannot drift apart.
-_CANONICAL_SEVERITIES = ("CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO")
+_CANONICAL_SEVERITIES = SEVERITIES
 
 
 def _rule_for_result(

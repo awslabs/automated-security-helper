@@ -35,7 +35,11 @@ from automated_security_helper.utils.finding_clusters import (
     provenance_note,
 )
 from automated_security_helper.utils.policy_origin import is_policy_origin
-from automated_security_helper.utils.severity_ladder import severity_fails_threshold
+from automated_security_helper.utils.severity_ladder import (
+    SEVERITY_COUNT_KEYS,
+    SEVERITY_DISPLAY_ORDER,
+    severity_fails_threshold,
+)
 from automated_security_helper.plugin_modules.ash_builtin.reporters._report_frames import (
     active_level_counts,
     flag_total,
@@ -122,7 +126,13 @@ _UTC_OFFSET = re.compile(r"([+-])(\d{2}):(\d{2})$")
 
 #: The place of each severity in a findings list, most severe first. A severity
 #: this table does not name sorts after all of them.
-_SEVERITY_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "INFO": 4}
+_SEVERITY_ORDER = SEVERITY_DISPLAY_ORDER
+
+#: The keys of the summary's two disposition counts that are not severities. The
+#: emitter writes them and the text, markdown and HTML reporters read them back:
+#: spelled once here, so a rename reaches every consumer.
+SUMMARY_BELOW_THRESHOLD = "below_threshold"
+SUMMARY_POLICY_NOT_GATING = "policy_not_gating"
 _UNLISTED_SEVERITY_PLACE = len(_SEVERITY_ORDER)
 
 
@@ -507,7 +517,7 @@ class ReportContentEmitter:
 
         counts = {
             level: sum(result[level] for result in results)
-            for level in ("critical", "high", "medium", "low", "info")
+            for level in SEVERITY_COUNT_KEYS
         }
         actionable = sum(result["actionable"] for result in results)
         suppressed = sum(result["suppressed"] for result in results)
@@ -663,8 +673,8 @@ class ReportContentEmitter:
             "next_step": next_step,
             "actionable": actionable,
             "active": active,
-            "below_threshold": max(0, active - actionable - policy_not_gating),
-            "policy_not_gating": policy_not_gating,
+            SUMMARY_BELOW_THRESHOLD: max(0, active - actionable - policy_not_gating),
+            SUMMARY_POLICY_NOT_GATING: policy_not_gating,
             "suppressed": suppressed,
             "counts": counts,
             "completed": completed,

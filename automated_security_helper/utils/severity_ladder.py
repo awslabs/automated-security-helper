@@ -148,20 +148,33 @@ SEVERITIES: Tuple[str, ...] = ("CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO")
 # Severity rank and the minimum rank each threshold gates on. A finding fails
 # when its rank is at or above its threshold's minimum, which is why the two
 # tables run in opposite directions.
+#
+# Both rank tables are derived from SEVERITIES and SEVERITY_THRESHOLDS above, so
+# the ladder is spelled once: CRITICAL ranks 4 and INFO 0, and a threshold's
+# minimum rank is its own severity's rank (ALL gates on everything, rank 0).
 _SEVERITY_RANK: Dict[str, int] = {
-    "CRITICAL": 4,
-    "HIGH": 3,
-    "MEDIUM": 2,
-    "LOW": 1,
-    "INFO": 0,
+    severity: len(SEVERITIES) - 1 - position
+    for position, severity in enumerate(SEVERITIES)
 }
 
 _THRESHOLD_MIN_RANK: Dict[str, int] = {
-    "ALL": 0,
-    "LOW": 1,
-    "MEDIUM": 2,
-    "HIGH": 3,
-    "CRITICAL": 4,
+    threshold: _SEVERITY_RANK.get(threshold, 0) for threshold in SEVERITY_THRESHOLDS
+}
+
+#: The lower-case count-field names of a severity-count record
+#: (``critical``, ``high``, ``medium``, ``low``, ``info``), most severe first.
+#: Findings counts, statistics rows and the UI palette all key on these; derive
+#: them here instead of re-spelling the five names beside each use.
+SEVERITY_COUNT_KEYS: Tuple[str, ...] = tuple(s.lower() for s in SEVERITIES)
+
+#: The count field of findings a suppression hides. It is a count bucket beside
+#: the five severities, not a sixth severity: it never takes part in the gate.
+SUPPRESSED_COUNT_KEY = "suppressed"
+
+#: Display position of each severity, most severe first (CRITICAL 0 ... INFO 4).
+#: A sort key for listings; the opposite direction to :data:`_SEVERITY_RANK`.
+SEVERITY_DISPLAY_ORDER: Dict[str, int] = {
+    severity: position for position, severity in enumerate(SEVERITIES)
 }
 
 # An unrecognised threshold gates on critical only, preserving the historical
