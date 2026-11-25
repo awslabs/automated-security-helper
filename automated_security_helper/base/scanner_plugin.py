@@ -808,6 +808,23 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         """
         if self.dependency_unavailable_reason:
             return False
+        # A binary the operator forced with `ash dependencies install
+        # --binary-path <scanner>=<path>` satisfies the dependency first: the
+        # record is what that flag's "recorded for dependency validation"
+        # promises, judged afresh here by a file check and the recorded SHA-256
+        # (the file is read, never executed). No record, or one whose file went
+        # stale, falls through to the PATH probe unchanged.
+        from automated_security_helper.utils.install_providers import (
+            recorded_forced_binary,
+        )
+
+        forced = recorded_forced_binary(str(getattr(self.config, "name", "") or ""))
+        if forced is not None:
+            ASH_LOGGER.debug(
+                f"{self.config.name}: satisfied by the forced binary recorded by "
+                f"--binary-path at {forced.path}"
+            )
+            return True
         found = find_executable(self._tool_command())
         if found is None and self.command:
             # A copy inside the scanned tree was refused: say so in the MISSING row,

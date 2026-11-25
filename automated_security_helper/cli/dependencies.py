@@ -85,6 +85,7 @@ from automated_security_helper.plugins.loader import (
 from automated_security_helper.utils.download_utils import (
     NO_BIN_DIRECTORY,
     NO_RECEIPT_STORE,
+    pinned_command_without_system_tools,
     pinned_install_already_satisfied,
 )
 from automated_security_helper.utils.error_text import error_text, text_without_values
@@ -124,12 +125,15 @@ from automated_security_helper.utils.install_providers import (
     RouteContext,
     classify_install_command,
     forced_binary_still_usable,
+    in_tree_path_refusal,
     is_virtualenv,
     joined_runtime_request,
     parse_binary_path_entries,
     parse_providers,
     pyvenv_cfg_version,
+    read_forced_binaries,
     record_forced_binaries,
+    recorded_forced_binary,
     request_satisfied,
     route_install,
     validate_forced_binary,
@@ -509,6 +513,9 @@ class PluginInstallOutcome:
     # binary; ``forced_binary`` is the path it forced.
     commands_forced: int = 0
     forced_binary: Optional[str] = None
+    # The force came from the record an earlier --binary-path run wrote, not from
+    # this run's flags; the status row says which.
+    forced_recorded: bool = False
     errors: List[str] = field(default_factory=list)
     executable: Optional[str] = None
     # Run through `uv tool run`, so present when uv lists it even with uv's tool
@@ -617,6 +624,8 @@ class PluginInstallOutcome:
     def _status(self) -> str:
         if self.commands_forced and not self.commands_succeeded:
             if self.executable:
+                if self.forced_recorded:
+                    return "FORCED (recorded --binary-path)"
                 return "FORCED (--binary-path)"
             return "FORCED (binary not usable)"
         if self.commands_succeeded:
@@ -1124,8 +1133,9 @@ def install_dependencies(
                 "accepted as present. With --no-inherit-system-tools a global copy, "
                 "for example a system checkov, is ignored: the managed install "
                 "still runs and the result counts only what ASH, uv or "
-                "--virtualenv-path put in place. Install time only; a scan finds "
-                "tools as before."
+                "--virtualenv-path put in place. Programs ASH never installs, such "
+                "as Node.js for cdk-nag, are still found on PATH either way. "
+                "Install time only; a scan finds tools as before."
             ),
         ),
     ] = True,
@@ -1178,7 +1188,9 @@ def install_dependencies(
             help=(
                 "Force this binary for the named scanner (repeatable, one per "
                 "scanner): its install commands are skipped, binary detection is "
-                "bypassed, and the path is recorded for dependency validation. The "
+                "bypassed, and the path is recorded for dependency validation -- "
+                "the scanners' dependency checks and later install runs read the "
+                "record, re-checking the file and its SHA-256 each time. The "
                 "path must be absolute, exist, and be an executable regular file "
                 "outside the scanned tree. ASH checks the file and never runs it. "
                 "'<scanner>=' with an empty path removes the recorded entry."
@@ -1882,6 +1894,14 @@ def install_dependencies(
     # before anything is made: a refusal lists every bad entry (exit 2) and installs
     # nothing. The files are read and hashed, never run.
     forced_by_plugin = _resolve_forced_binaries(forced_entries, selected, source_dir)
+    # Erase keys are resolved the way record keys were written, so an alias or a
+    # case variant erases the record it names.
+    forced_erase = _canonical_erase_keys(forced_erase, selected)
+    # The record earlier --binary-path runs wrote is read here, which is what
+    # recording it promises: a plugin not re-forced or erased this run keeps its
+    # recorded force, judged afresh by a file check and the recorded SHA-256.
+    recorded_forces = _recorded_forces(selected, forced_by_plugin, forced_erase)
+    all_forced = {**recorded_forces, **forced_by_plugin}
 
     # The bin directory is made here, after every refusal above (a --config that is
     # not there, a configuration a scan refuses, a plugin module that does not
@@ -1901,7 +1921,7 @@ def install_dependencies(
         inherit_system_tools=inherit_system_tools,
         virtualenv_path=virtualenv_target,
         create_virtualenv=create_virtualenv,
-        forced_binaries={name: f.path for name, f in forced_by_plugin.items()},
+        forced_binaries={name: f.path for name, f in all_forced.items()},
     )
     route_context = RouteContext(
         platform_name=platform_name,
@@ -1941,7 +1961,7 @@ def install_dependencies(
     joined_request: Optional[str] = None
     if virtualenv_target is not None and not is_virtualenv(virtualenv_target):
         joined_request, join_error = joined_runtime_request(
-            _plugin_runtime_requests(selected, platform_name, arch, forced_by_plugin)
+            _plugin_runtime_requests(selected, platform_name, arch, all_forced)
         )
         if join_error is not None:
             _refuse_flags(f"--create-virtualenv: {join_error}")
@@ -2008,15 +2028,22 @@ def install_dependencies(
                 outcome.errors.append(error_text(e, environment_values))
                 continue
 
-            # --binary-path forces this scanner's binary: nothing is installed for
+            # --binary-path forces this scanner's binary -- from this run's flag,
+            # or from the record an earlier run wrote: nothing is installed for
             # it, and the sweep below resolves it to the forced file by a file
             # check. The forced binary is never run.
-            forced = forced_by_plugin.get(plugin_name)
+            forced = all_forced.get(plugin_name)
             if forced is not None:
                 outcome.commands_forced = len(commands) or 1
                 outcome.forced_binary = str(forced.path)
+                outcome.forced_recorded = plugin_name not in forced_by_plugin
+                recorded_note = (
+                    " (recorded by an earlier --binary-path run)"
+                    if outcome.forced_recorded
+                    else ""
+                )
                 print(
-                    f"Forced binary for {escape(plugin_name)}: "
+                    f"Forced binary for {escape(plugin_name)}{recorded_note}: "
                     f"{escape(str(forced.path))}; its {outcome.commands_forced} "
                     "install command(s) are not run"
                 )
@@ -2058,12 +2085,8 @@ def install_dependencies(
                 # stage. Decided by the bytes, never the name: a same-named binary
                 # that does not hash to the pinned executable digest is installed
                 # over as before.
-                present = (
-                    pinned_install_already_satisfied(cmd)
-                    if inherit_system_tools
-                    else pinned_install_already_satisfied(
-                        cmd, inherit_system_tools=False
-                    )
+                present = pinned_install_already_satisfied(
+                    cmd, inherit_system_tools=inherit_system_tools
                 )
                 if present is not None:
                     print(
@@ -2074,6 +2097,14 @@ def install_dependencies(
                     )
                     outcome.commands_satisfied += 1
                     continue
+                if not inherit_system_tools and not shell:
+                    # The parent declined to skip; the pinned install runs in a
+                    # CHILD python whose own already-present re-check
+                    # (install_pinned_tool) would still accept a byte-identical
+                    # PATH copy and install nothing, failing the sweep below. The
+                    # command is retold so the child honors the flag too; any
+                    # other argv comes back unchanged.
+                    cmd = pinned_command_without_system_tools(cmd)
 
                 # An argv routinely carries brackets -- `pip install ash[sarif,toml]`
                 # -- and rich would read `[sarif,toml]` as a tag and drop it from the
@@ -2130,7 +2161,7 @@ def install_dependencies(
             for name in outcome.external_executables
             if not find_executable_for_scan(name, source_dir)
         ]
-        forced = forced_by_plugin.get(outcome.name)
+        forced = all_forced.get(outcome.name)
         if outcome.needs_external_tool and forced is not None:
             # A forced binary is judged by a file check alone: still a regular,
             # executable file. It is never run, and the plugin's own check (which
@@ -2395,6 +2426,13 @@ def _validated_virtualenv(
 
     Everything here reads the filesystem and creates nothing; the virtualenv itself
     is made later, once every other refusal has had its turn.
+
+    A path inside the scanned source tree (the working directory) is refused first,
+    existing or not, with ``--binary-path``'s words and opt-in (exit 3): the
+    virtualenv's interpreter is EXECUTED by the install commands built around it
+    (uv probes ``--python``, pip is run as ``<venv python> -m pip``), so a
+    tree-supplied virtualenv is a tree-supplied program. A relative path resolves
+    against the working directory, which is that tree.
     """
     typed_create = create_virtualenv or _given_on_command_line(ctx, "create_virtualenv")
     if virtualenv_path is None:
@@ -2413,6 +2451,14 @@ def _validated_virtualenv(
             f"--virtualenv-path {virtualenv_path} cannot be expanded: {error_text(e)}",
             EXIT_INVALID_CONFIG,
         )
+    try:
+        scanned_tree: Optional[Path] = Path.cwd()
+    except OSError:
+        # The deleted working directory is refused once, later, as a usage error.
+        scanned_tree = None
+    in_tree = in_tree_path_refusal(f"--virtualenv-path {path}", path, scanned_tree)
+    if in_tree is not None:
+        _refuse_flags(in_tree, EXIT_INVALID_CONFIG)
     exists = os.path.lexists(path)
     if exists and not is_virtualenv(path):
         _refuse_flags(
@@ -2503,6 +2549,62 @@ def _resolve_forced_binaries(
     if errors:
         _refuse_flags("\n".join(errors))
     return resolved
+
+
+def _canonical_erase_keys(erase: List[str], selected: List[tuple]) -> List[str]:
+    """Erase keys resolved the way record keys are written, with the raw keys kept.
+
+    Records are written under the canonical plugin name (aliases resolved, then the
+    scan's selection key), so ``--binary-path Checkov=`` typed raw erased nothing,
+    silently. Erasing is permissive -- an entry that is not there is already erased
+    -- so a key that resolves to no selected plugin, or ambiguously, is kept as
+    typed rather than refused, and the raw spellings stay in the list too, for a
+    record an older run wrote under one.
+    """
+    names = [name for _, name, _ in selected]
+    aliased = _resolve_tool_aliases(list(erase))
+    keys: List[str] = list(erase)
+    for key in erase:
+        try:
+            keys.append(_canonical_tool_name(aliased.get(key, key), names))
+        except AmbiguousToolName:
+            continue
+    return list(dict.fromkeys(keys))
+
+
+def _recorded_forces(
+    selected: List[tuple],
+    forced_by_plugin: Dict[str, ForcedBinary],
+    erase: Iterable[str],
+) -> Dict[str, ForcedBinary]:
+    """The forces an earlier ``--binary-path`` run recorded, for this run's plugins.
+
+    The reader the record exists for: a selected plugin not re-forced or erased by
+    this run's flags keeps its recorded force, judged afresh by the file check and
+    the recorded SHA-256 (``recorded_forced_binary``), so a later flag-less
+    ``ash dependencies install`` resolves the scanner to the forced path instead
+    of PATH or uv. A record whose file is no longer the validated one is named, so
+    the operator learns the force went stale rather than watching detection
+    quietly fall back to PATH.
+    """
+    recorded: Dict[str, ForcedBinary] = {}
+    erased = set(erase)
+    on_record = read_forced_binaries()
+    for _, name, _ in selected:
+        if name in forced_by_plugin or name in erased or name not in on_record:
+            continue
+        binary = recorded_forced_binary(name)
+        if binary is None:
+            print(
+                f"[yellow]Ignoring the recorded forced binary for {escape(name)}: "
+                "the file is no longer the one --binary-path validated (moved, not "
+                "an executable regular file, or its content changed). Re-run "
+                f"--binary-path {escape(name)}=<path>, or erase the record with "
+                f"--binary-path {escape(name)}=.[/yellow]"
+            )
+            continue
+        recorded[name] = binary
+    return recorded
 
 
 def _plugin_runtime_requests(

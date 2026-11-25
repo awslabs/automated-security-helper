@@ -1943,6 +1943,7 @@ def install_pinned_tool(
     arch: str,
     destination: Optional[Path] = None,
     force: bool = False,
+    inherit_system_tools: bool = True,
 ) -> Path:
     """Install one of ASH's pinned scanner binaries, verified against its digest.
 
@@ -1957,6 +1958,13 @@ def install_pinned_tool(
         arch: amd64 or arm64
         destination: Directory to install into; defaults to ASH_BIN_PATH
         force: Re-download even when a matching receipt exists
+        inherit_system_tools: Whether a byte-identical copy found through PATH or
+            a system directory stands in for the install
+            (``find_verified_pinned_executable``). False under
+            ``--no-inherit-system-tools``: this function runs in a child python,
+            so the flag has to reach the child's own already-present re-check,
+            not only the parent's -- otherwise the child accepted a PATH copy and
+            installed nothing, and the run the operator asked for failed.
 
     Returns:
         Path to the installed executable
@@ -1992,7 +2000,13 @@ def install_pinned_tool(
         return target
 
     if not force:
-        present = find_verified_pinned_executable(tool, target_platform, arch, bin_dir)
+        present = find_verified_pinned_executable(
+            tool,
+            target_platform,
+            arch,
+            bin_dir,
+            inherit_system_tools=inherit_system_tools,
+        )
         if present is not None:
             ASH_LOGGER.info(
                 f"{present.tool} {present.version} is already present at "
@@ -2349,12 +2363,23 @@ _PINNED_TOOL_INSTALL_SCRIPT = (
     "install_pinned_tool(sys.argv[1], sys.argv[2], sys.argv[3], Path(sys.argv[4]))"
 )
 
+# The same install, told that no copy found through PATH or a system directory
+# stands in for it (--no-inherit-system-tools). A second constant rather than an
+# extra argument because these commands are recognized by their exact script text.
+_PINNED_TOOL_INSTALL_SCRIPT_NO_INHERIT = (
+    "import sys; from pathlib import Path; "
+    "from automated_security_helper.utils.download_utils import install_pinned_tool; "
+    "install_pinned_tool(sys.argv[1], sys.argv[2], sys.argv[3], Path(sys.argv[4]), "
+    "inherit_system_tools=False)"
+)
+
 
 def create_pinned_tool_install_command(
     tool: str,
     target_platform: str,
     arch: str,
     destination: str | None = None,
+    inherit_system_tools: bool = True,
 ) -> CustomCommand:
     """Build the CustomCommand that installs a pinned tool in a subprocess.
 
@@ -2362,6 +2387,11 @@ def create_pinned_tool_install_command(
     configuration pins itself, so the installer keeps one execution model for every
     tool: plugins declare commands, the CLI runs them and counts them. With no
     destination and no bin directory, the command only refuses.
+
+    ``inherit_system_tools=False`` builds the command around
+    ``_PINNED_TOOL_INSTALL_SCRIPT_NO_INHERIT``, so the CHILD's own already-present
+    re-check honors ``--no-inherit-system-tools`` too; see
+    :func:`pinned_command_without_system_tools` for the declared-command rewrite.
     """
     # Absolute either way: the command runs in an empty directory of its own.
     if destination is None:
@@ -2376,7 +2406,9 @@ def create_pinned_tool_install_command(
         args=[
             sys.executable,
             "-c",
-            _PINNED_TOOL_INSTALL_SCRIPT,
+            _PINNED_TOOL_INSTALL_SCRIPT
+            if inherit_system_tools
+            else _PINNED_TOOL_INSTALL_SCRIPT_NO_INHERIT,
             tool,
             target_platform,
             arch,
@@ -2384,6 +2416,25 @@ def create_pinned_tool_install_command(
         ],
         shell=False,
     )
+
+
+def pinned_command_without_system_tools(args: "list[str]") -> "list[str]":
+    """An argv built by ``create_pinned_tool_install_command``, retold so the child
+    accepts no PATH or system-directory copy; any other argv is returned unchanged.
+
+    Plugins declare the pinned command before the installer knows the run's flags,
+    and the install runs in a child python whose ``install_pinned_tool`` re-checks
+    for an already-present copy before downloading. Under
+    ``--no-inherit-system-tools`` the PARENT's pre-check declines to skip -- and
+    without this rewrite the CHILD still accepted a byte-identical PATH copy and
+    installed nothing, so the post-install sweep, which counts only managed copies
+    under the flag, failed the very run the operator asked for.
+    """
+    if len(args) == 7 and args[1] == "-c" and args[2] == _PINNED_TOOL_INSTALL_SCRIPT:
+        rewritten = list(args)
+        rewritten[2] = _PINNED_TOOL_INSTALL_SCRIPT_NO_INHERIT
+        return rewritten
+    return list(args)
 
 
 def _destination_text(path: "Path | str") -> str:
@@ -2413,9 +2464,15 @@ def pinned_install_already_satisfied(
     Recognized by the exact script text, which only ``create_pinned_tool_install_command``
     produces, rather than by sniffing tool names out of arbitrary commands. Any other
     argv, or one whose tool has no pinned executable digest, returns None and is run
-    as before.
+    as before. A command already retold with the no-inherit script is judged that
+    way whatever the keyword says: the command itself is the stricter record.
     """
-    if len(args) != 7 or args[1] != "-c" or args[2] != _PINNED_TOOL_INSTALL_SCRIPT:
+    if (
+        len(args) != 7
+        or args[1] != "-c"
+        or args[2]
+        not in (_PINNED_TOOL_INSTALL_SCRIPT, _PINNED_TOOL_INSTALL_SCRIPT_NO_INHERIT)
+    ):
         return None
     tool, target_platform, arch, destination = args[3:7]
     try:
@@ -2424,7 +2481,8 @@ def pinned_install_already_satisfied(
             target_platform,
             arch,
             Path(destination),
-            inherit_system_tools=inherit_system_tools,
+            inherit_system_tools=inherit_system_tools
+            and args[2] == _PINNED_TOOL_INSTALL_SCRIPT,
         )
     except ToolNotProvisionableError:
         # Let the install command itself report it, with its own message.

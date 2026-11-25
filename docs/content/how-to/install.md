@@ -241,14 +241,25 @@ Use `--no-create-virtualenv` with a virtualenv your own setup step prepared, and
 `--create-virtualenv` to have ASH vend one. Native tools and system packages are not
 installed into a virtualenv, so the options do not change them.
 
+The virtualenv must sit outside the directory being scanned, existing or created: the
+install commands built around it execute its interpreter (`uv pip install --python
+<venv python>`, `<venv python> -m pip`), so a virtualenv the scanned tree supplies is
+refused (exit 3), with the same opt-in as a forced binary (`ASH_ALLOW_IN_TREE_TOOLS=1`).
+Python-environment installs -- packages ASH's own process imports, such as cdk-nag's CDK
+libraries -- stay in the environment running ASH rather than the virtualenv, so what the
+install reports installed is what the next scan can import.
+
 ### Forcing a binary
 
 `--binary-path scanner=/absolute/path` forces one binary for one scanner and skips that
 scanner's install commands. Repeat it for each scanner. The path must be absolute, name a
 regular executable file rather than a symlink, and sit outside the directory being
 scanned. ASH reads and hashes the file, records the path and its SHA-256 in its install
-records under `~/.ash`, and never runs it. `--binary-path scanner=` with an empty path
-removes the record.
+records under `~/.ash`, and never runs it. The record is read back: the scanners'
+dependency validation and later `ash dependencies install` runs resolve the scanner to
+the forced path before any PATH or uv lookup, re-checking the file and its SHA-256 each
+time, and a record whose file moved or changed is named and set aside rather than
+trusted by its path. `--binary-path scanner=` with an empty path removes the record.
 
 ## Choose a version to pin
 

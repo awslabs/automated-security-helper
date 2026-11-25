@@ -113,6 +113,88 @@ def test_the_sweep_resolves_to_a_forced_path_that_stays_usable(
     assert "FORCED (binary not usable)" in scene.text, scene.text
 
 
+def test_the_record_forces_the_next_flag_less_run(
+    tmp_path, monkeypatch, forced_file, src_tree
+):
+    """The record is READ, which is what recording it promises: the next
+    ``ash dependencies install`` with no flags consults it before PATH or uv,
+    skips the scanner's install commands, and resolves it to the forced path --
+    judged afresh by a file check and the recorded SHA-256, never executed."""
+    binary, marker = forced_file
+    scene = _scene(monkeypatch, tmp_path, src_tree)
+    run_install(scene, monkeypatch, tmp_path, "--binary-path", f"checkov={binary}")
+    assert scene.result.exit_code == 0, scene.text
+
+    scene = _scene(monkeypatch, tmp_path, src_tree, find_on_path=lambda c: None)
+    run_install(scene, monkeypatch, tmp_path)
+
+    assert scene.calls == [], scene.calls
+    assert scene.result.exit_code == 0, scene.text
+    assert "FORCED (recorded --binary-path)" in scene.text, scene.text
+    assert str(binary) in scene.text, scene.text
+    assert not marker.exists(), "the forced binary was executed"
+
+
+def test_a_stale_record_is_named_and_the_install_runs_as_usual(
+    tmp_path, monkeypatch, forced_file, src_tree
+):
+    binary, _ = forced_file
+    scene = _scene(monkeypatch, tmp_path, src_tree)
+    run_install(scene, monkeypatch, tmp_path, "--binary-path", f"checkov={binary}")
+
+    # Same path, same mode, other content: no longer the validated binary.
+    binary.write_text("#!/bin/sh\necho replaced\n")
+    binary.chmod(0o755)
+    scene = _scene(
+        monkeypatch, tmp_path, src_tree, find_on_path=lambda c: f"/usr/bin/{c}"
+    )
+    run_install(scene, monkeypatch, tmp_path)
+
+    text = " ".join(scene.text.split())
+    assert "Ignoring the recorded forced binary for checkov" in text, text
+    assert scene.argvs != [], scene.argvs
+
+
+def test_the_sweep_rejects_a_content_replacement_at_the_forced_path(
+    tmp_path, monkeypatch, forced_file, src_tree
+):
+    """The recorded SHA-256 is re-checked where the decision is made: a regular,
+    executable file at the same path whose bytes changed between validation and
+    the sweep is not the validated binary."""
+    binary, _ = forced_file
+    scene = _scene(monkeypatch, tmp_path, src_tree)
+
+    def replace(*_a, **_k):
+        binary.write_text("#!/bin/sh\necho replaced\n")
+        binary.chmod(0o755)
+
+    from automated_security_helper.cli import dependencies as dependencies_module
+
+    monkeypatch.setattr(dependencies_module, "clear_find_executable_cache", replace)
+
+    run_install(scene, monkeypatch, tmp_path, "--binary-path", f"checkov={binary}")
+
+    assert scene.result.exit_code == 1, scene.text
+    assert "FORCED (binary not usable)" in scene.text, scene.text
+
+
+def test_an_alias_cased_erase_key_erases_the_record(
+    tmp_path, monkeypatch, forced_file, src_tree
+):
+    """Records are written under the canonical plugin name, so an erase key is
+    resolved the same way: ``--binary-path Checkov=`` erases checkov's record
+    rather than popping a key that was never there."""
+    binary, _ = forced_file
+    scene = _scene(monkeypatch, tmp_path, src_tree)
+    run_install(scene, monkeypatch, tmp_path, "--binary-path", f"checkov={binary}")
+    assert "checkov" in read_forced_binaries()
+
+    scene = _scene(monkeypatch, tmp_path, src_tree)
+    run_install(scene, monkeypatch, tmp_path, "--binary-path", "Checkov=")
+
+    assert "checkov" not in read_forced_binaries()
+
+
 @pytest.mark.parametrize(
     "entry, message",
     [

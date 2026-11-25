@@ -498,11 +498,16 @@ class UvProvider(InstallProvider):
                 ]
             ]
         if request.kind == CommandKind.PYTHON_ENV:
-            if venv is None and request.native_provider == self.name:
+            # "Into the environment running ASH" (``PackageManager.PIP``): a
+            # PYTHON_ENV install exists so ASH's own process can import the
+            # packages (cdk-nag's aws-cdk-lib). It is never rerouted into the
+            # --virtualenv-path virtualenv: ASH's interpreter cannot import from
+            # there, so the install would read INSTALLED and the next scan
+            # MISSING, and a uv-vended virtualenv ships no pip for the pip form.
+            if request.native_provider == self.name:
                 return self._identity(request)
-            if venv is None and not context.explicit:
+            if not context.explicit:
                 return self._identity(request)
-            target = str(venv_python(venv)) if venv else request.target_python
             return [
                 [
                     "uv",
@@ -510,7 +515,7 @@ class UvProvider(InstallProvider):
                     "install",
                     UV_NO_CONFIG,
                     "--python",
-                    target or sys.executable,
+                    request.target_python or sys.executable,
                     *request.requirements,
                 ]
             ]
@@ -603,11 +608,13 @@ class PipProvider(InstallProvider):
         venv = env.virtualenv_path
         python = str(venv_python(venv)) if venv else None
         if request.kind == CommandKind.PYTHON_ENV:
-            if venv is None and request.native_provider == self.name:
+            # Stays on ASH's own interpreter, never the --virtualenv-path
+            # virtualenv: see the UvProvider PYTHON_ENV arm for why.
+            if request.native_provider == self.name:
                 return self._identity(request)
             return [
                 [
-                    python or request.target_python or sys.executable,
+                    request.target_python or sys.executable,
                     "-m",
                     "pip",
                     "install",
@@ -1011,6 +1018,9 @@ def route_install(
         caveats: Tuple[str, ...] = ()
         if row is not None and row.caveat and request.native_provider != name:
             caveats = (row.caveat,)
+        dropped = _dropped_by_system_manager(request, provider)
+        if dropped is not None:
+            caveats = (*caveats, dropped)
         key = provider.run_once_key() if isinstance(provider, NixProvider) else None
         return Route(
             provider=name,
@@ -1023,6 +1033,36 @@ def route_install(
         subject=request.subject,
         tried=tuple(tried),
         providers=tuple(providers) if providers is not None else KNOWN_PROVIDERS,
+    )
+
+
+def _dropped_by_system_manager(
+    request: InstallRequest, provider: InstallProvider
+) -> Optional[str]:
+    """What a system package manager cannot honor from the declared install, or None.
+
+    A Python tool routed to a system manager is installed as ``[*install_prefix,
+    row.package]``, which carries neither the declared interpreter request nor the
+    ``--with`` dependencies. The operator chose the manager, so the drop is named
+    on the route rather than made silently; the facet row's own caveat covers only
+    the version range.
+    """
+    if not isinstance(provider, PackageManagerProvider):
+        return None
+    if request.kind != CommandKind.PYTHON_TOOL:
+        return None
+    dropped: List[str] = []
+    if request.runtime_request:
+        dropped.append(f"the interpreter request ('{request.runtime_request}')")
+    if request.with_dependencies:
+        dropped.append(
+            "the --with dependencies (" + ", ".join(request.with_dependencies) + ")"
+        )
+    if not dropped:
+        return None
+    return (
+        f"{provider.name} installs {request.subject} as a system package and does "
+        "not honor " + " or ".join(dropped) + " from the declared install"
     )
 
 
@@ -1094,6 +1134,45 @@ def parse_binary_path_entries(
     return parsed, errors
 
 
+def in_tree_path_refusal(
+    shown: str, path: Path, source_dir: Optional[Path]
+) -> Optional[str]:
+    """The refusal for ``path`` sitting inside the scanned tree, or None.
+
+    None when the path is outside ``source_dir``, when ``source_dir`` is unknown,
+    or when the in-tree opt-in (``ASH_ALLOW_IN_TREE_TOOLS``) admits it. The tree
+    is untrusted: a flag that points the installer at a file the tree can supply
+    (a forced binary, a virtualenv whose interpreter the install commands
+    execute) must refuse it, or the flag becomes the way around that refusal.
+    Judged on realpaths, the way the scan-time in-tree refusal judges a lookup.
+    """
+    from automated_security_helper.utils.subprocess_utils import (
+        ALLOW_IN_TREE_TOOLS_ENV,
+    )
+
+    if source_dir is None:
+        return None
+    try:
+        inside = os.path.commonpath(
+            [os.path.realpath(path), os.path.realpath(source_dir)]
+        ) == os.path.realpath(source_dir)
+    except ValueError:
+        inside = False
+    if not inside:
+        return None
+    if os.environ.get(ALLOW_IN_TREE_TOOLS_ENV, "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    ):
+        return None
+    return (
+        f"{shown}: the path is inside the scanned source tree, which ASH "
+        f"does not trust to supply a binary; move it outside the tree or "
+        f"set {ALLOW_IN_TREE_TOOLS_ENV}=1"
+    )
+
+
 def validate_forced_binary(
     key: str, path_text: str, source_dir: Optional[Path] = None
 ) -> "ForcedBinary | str":
@@ -1107,9 +1186,6 @@ def validate_forced_binary(
     the tree is untrusted, and this flag must not become the way around that.
     """
     from automated_security_helper.utils import download_utils as du
-    from automated_security_helper.utils.subprocess_utils import (
-        ALLOW_IN_TREE_TOOLS_ENV,
-    )
 
     shown = f"--binary-path {key}={path_text}"
     if not path_text:
@@ -1117,25 +1193,9 @@ def validate_forced_binary(
     if not os.path.isabs(path_text) and not Path(path_text).is_absolute():
         return f"{shown}: the path is not absolute"
     path = Path(path_text)
-    if source_dir is not None:
-        try:
-            inside = os.path.commonpath(
-                [os.path.realpath(path), os.path.realpath(source_dir)]
-            ) == os.path.realpath(source_dir)
-        except ValueError:
-            inside = False
-        if inside and os.environ.get(
-            ALLOW_IN_TREE_TOOLS_ENV, ""
-        ).strip().lower() not in (
-            "1",
-            "true",
-            "yes",
-        ):
-            return (
-                f"{shown}: the path is inside the scanned source tree, which ASH "
-                f"does not trust to supply a binary; move it outside the tree or "
-                f"set {ALLOW_IN_TREE_TOOLS_ENV}=1"
-            )
+    refusal = in_tree_path_refusal(shown, path, source_dir)
+    if refusal is not None:
+        return refusal
     try:
         if path.is_symlink():
             return f"{shown}: the path is a symlink; name the file itself"
@@ -1165,7 +1225,14 @@ def validate_forced_binary(
 
 
 def forced_binary_still_usable(binary: ForcedBinary) -> bool:
-    """Whether the forced file is still a regular, executable file (never executed)."""
+    """Whether the forced file is still the file that was validated (never executed).
+
+    A regular, executable, non-symlink file whose bytes still hash to the SHA-256
+    the validation recorded: the one integrity datum ``--binary-path`` collects is
+    re-checked wherever a decision rests on the force, so a content replacement at
+    the same path between validation and that decision does not pass as the
+    validated binary. Judged on one open descriptor, as the validation judged it.
+    """
     from automated_security_helper.utils import download_utils as du
 
     try:
@@ -1184,7 +1251,9 @@ def forced_binary_still_usable(binary: ForcedBinary) -> bool:
         info = os.fstat(fd)
         if not stat.S_ISREG(info.st_mode):
             return False
-        return sys.platform == "win32" or du._executable_by_caller(binary.path, info)
+        if sys.platform != "win32" and not du._executable_by_caller(binary.path, info):
+            return False
+        return du._sha256_of_open_file(fd) == binary.sha256.lower()
     except OSError:
         return False
     finally:
@@ -1206,6 +1275,34 @@ def read_forced_binaries() -> Dict[str, Dict[str, Any]]:
         return {}
     entries = data.get("binaries") if isinstance(data, dict) else None
     return dict(entries) if isinstance(entries, dict) else {}
+
+
+def recorded_forced_binary(scanner_key: str) -> Optional[ForcedBinary]:
+    """The recorded ``--binary-path`` force for ``scanner_key``, still usable.
+
+    The production reader of the record :func:`record_forced_binaries` writes --
+    what "the path is recorded for dependency validation" promises: the scanners'
+    dependency validation and a later ``ash dependencies install`` run consult
+    this before any PATH or uv lookup. None when no entry names the scanner, the
+    entry does not parse, or the file is no longer the one the flag validated
+    (:func:`forced_binary_still_usable`: moved, not a regular executable file, a
+    symlink, or content that no longer hashes to the recorded SHA-256) -- a stale
+    record is set aside, never trusted by its path alone. The file is read and
+    hashed here, never executed.
+    """
+    if not scanner_key:
+        return None
+    entry = read_forced_binaries().get(scanner_key)
+    if not isinstance(entry, dict):
+        return None
+    path_text = entry.get("path")
+    digest = entry.get("sha256")
+    if not isinstance(path_text, str) or not path_text or not isinstance(digest, str):
+        return None
+    binary = ForcedBinary(
+        scanner_key=scanner_key, path=Path(path_text), sha256=digest.lower()
+    )
+    return binary if forced_binary_still_usable(binary) else None
 
 
 def record_forced_binaries(

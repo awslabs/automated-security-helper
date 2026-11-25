@@ -313,7 +313,7 @@ def test_pip_installs_into_the_named_venv_and_refuses_an_interpreter_request_wit
     ]
 
 
-def test_uv_routes_tool_and_env_installs_into_a_venv():
+def test_uv_routes_tool_installs_into_a_venv_and_keeps_env_installs_on_ash():
     venv_env = ip.EnvOptions(virtualenv_path=Path("/v"))
     env_install = ip.classify_install_command(
         [sys.executable, "-m", "pip", "install", "a"], False, None
@@ -335,9 +335,43 @@ def test_uv_routes_tool_and_env_installs_into_a_venv():
             "dep>=1",
         ]
     ]
+    # A PYTHON_ENV install is "into the environment running ASH" (cdk-nag declares
+    # aws-cdk-lib so ASH's own process can import it) and never follows the venv:
+    # rerouted, the install read INSTALLED while the next scan read MISSING, and a
+    # uv-vended venv has no pip at all for the pip form.
     assert _argvs(env) == [
-        ["uv", "pip", "install", "--no-config", "--python", python, "a"]
+        ["uv", "pip", "install", "--no-config", "--python", sys.executable, "a"]
     ]
+
+
+def test_a_python_env_install_never_follows_the_venv():
+    venv_env = ip.EnvOptions(virtualenv_path=Path("/v"))
+    declared = [sys.executable, "-m", "pip", "install", "aws-cdk-lib>=2"]
+    env_install = ip.classify_install_command(list(declared), False, None)
+
+    native = ip.route_install(env_install, venv_env, providers=None, context=DEFAULT)
+    pip_routed = ip.route_install(
+        env_install, venv_env, providers=["pip"], context=EXPLICIT
+    )
+
+    assert _argvs(native) == [declared], _argvs(native)
+    assert _argvs(pip_routed) == [declared], _argvs(pip_routed)
+    assert str(ip.venv_python(Path("/v"))) not in repr(
+        _argvs(native) + _argvs(pip_routed)
+    )
+
+
+def test_a_system_manager_route_names_what_it_drops_from_the_declared_install():
+    route = ip.route_install(
+        _tool(), ip.EnvOptions(), providers=["brew"], context=EXPLICIT
+    )
+
+    assert isinstance(route, ip.Route), route
+    assert _argvs(route) == [["brew", "install", "checkov"]]
+    dropped = [c for c in route.caveats if "does not honor" in c]
+    assert dropped, route.caveats
+    assert "interpreter request ('>=3.10,<3.14')" in dropped[0], dropped
+    assert "dep>=1" in dropped[0], dropped
 
 
 def test_a_stub_provider_refuses_as_not_implemented_and_still_runs_its_own_declaration():
@@ -433,6 +467,21 @@ def test_a_forced_binary_is_hashed_never_executed(executable):
     assert result.sha256 == hashlib.sha256(path.read_bytes()).hexdigest()
     assert not marker.exists()
     assert ip.forced_binary_still_usable(result)
+
+
+def test_a_forced_binary_whose_content_changed_is_no_longer_usable(executable):
+    """The recorded SHA-256 is re-checked where a decision rests on the force: a
+    regular, executable file at the same path whose bytes changed is not the
+    validated binary (and is still never executed)."""
+    path, marker = executable
+    result = ip.validate_forced_binary("checkov", str(path), Path("/no/such/tree"))
+    assert ip.forced_binary_still_usable(result)
+
+    path.write_text("#!/bin/sh\necho other\n")
+    path.chmod(0o755)
+
+    assert not ip.forced_binary_still_usable(result)
+    assert not marker.exists()
 
 
 def test_forced_binary_refusals_name_the_key_and_the_path(tmp_path, executable):
