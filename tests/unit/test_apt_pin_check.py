@@ -250,6 +250,36 @@ class TestAgainstTheRecordedIndexes:
         ] == []
         assert checker.apt_exit_code(results, fail_on_outdated=True) == checker.EXIT_OK
 
+    def test_the_dockerfile_pins_ca_certificates_to_a_glob_in_every_stage(self):
+        # I-824: an exact ca-certificates version rotted at each point release.
+        pin = {p.package: p for p in checker.enumerate_apt_pins(DOCKERFILE)}[
+            "ca-certificates"
+        ]
+        assert pin.version == "20*deb12u*"
+        assert len(pin.lines) == 2
+
+    def _glob_check(self, tmp_path, version: str):
+        dockerfile = _write_dockerfile(
+            tmp_path,
+            f"RUN apt-get install -y 'ca-certificates={version}'\n",
+        )
+        return _check(dockerfile=dockerfile)
+
+    def test_a_version_glob_is_current_when_it_matches_the_newest(self, tmp_path):
+        results = self._glob_check(tmp_path, "20*deb12u*")
+        assert {r.status for r in results} == {"current"}
+
+    def test_negative_control_a_glob_matching_nothing_is_unavailable(self, tmp_path):
+        results = self._glob_check(tmp_path, "99*deb12u*")
+        assert {r.status for r in results} == {"unavailable"}
+        assert checker.apt_exit_code(results, fail_on_outdated=False) != checker.EXIT_OK
+
+    def test_negative_control_a_glob_that_stopped_at_an_old_family_is_outdated(
+        self, tmp_path
+    ):
+        results = self._glob_check(tmp_path, "20230311*")
+        assert {r.status for r in results} == {"outdated"}
+
     def test_negative_control_a_retired_pin_is_unavailable_and_fails(self):
         # A point release: git's pinned version leaves the main suite, and the
         # security suite still carries only the older deb12u2.
