@@ -85,6 +85,12 @@ from automated_security_helper.base.plugin_base import (
     install_story_is_declared,
 )
 from automated_security_helper.base.plugin_context import PluginContext
+from automated_security_helper.base import scanner_operational_facets as opsf
+from automated_security_helper.base.scanner_facets import (
+    FacetDecl,
+    FacetState,
+    ScannerFacets,
+)
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
@@ -183,6 +189,185 @@ class GovulncheckScanner(ScannerPluginBase[GovulncheckScannerConfig]):
 
     #: A native Go binary, so a Python-only scan does not run it.
     python_only: ClassVar[bool | None] = False
+
+    #: The facets register row (base/scanner_facets.py). Declaration only.
+    #: No real govulncheck output is committed (no Go toolchain was available
+    #: where this scanner was built), so every cell the adapter does not itself
+    #: write or the tool's documented SARIF shape does not guarantee is n/a with
+    #: the reason "output not read"; a sample run would settle each one.
+    facets: ClassVar[ScannerFacets] = ScannerFacets(
+        rule_id=FacetDecl(
+            state=FacetState.MAPPED, native_field='result "ruleId" (the OSV id)'
+        ),
+        severity=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result "level" (error/warning/note), rewritten to an '
+            'ASH severity by apply_severity_mapping into properties "issue_severity"',
+        ),
+        file_path=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="locations[].physicalLocation.artifactLocation.uri "
+            "(the module's go.mod, prefixed with the module directory)",
+        ),
+        line_range=FacetDecl(
+            state=FacetState.NA,
+            reason="output not read; a sample run would settle whether the go.mod "
+            "location carries a region",
+        ),
+        column=FacetDecl(
+            state=FacetState.NA,
+            reason="output not read; a sample run would settle it",
+        ),
+        message=FacetDecl(
+            state=FacetState.MAPPED, native_field='result "message.text"'
+        ),
+        resource_id=FacetDecl(
+            state=FacetState.NA,
+            reason="a vulnerable Go module is a package locator, not a deployable "
+            "resource",
+        ),
+        resource_type=FacetDecl(
+            state=FacetState.NA,
+            reason="a vulnerable Go module is a package, not a deployable resource",
+        ),
+        package_name=FacetDecl(
+            state=FacetState.NA,
+            reason="output not read; a sample run would settle whether the module "
+            "path is a structured field or only in the message text",
+        ),
+        package_version=FacetDecl(
+            state=FacetState.NA,
+            reason="output not read; a sample run would settle it",
+        ),
+        package_path=FacetDecl(
+            state=FacetState.NA,
+            reason="output not read; a sample run would settle it",
+        ),
+        taxonomy_cve=FacetDecl(
+            state=FacetState.NA,
+            reason="output not read; the rule id is a Go vulnerability database id "
+            "(GO-yyyy-nnnn), not a CVE id, and aliases were not read",
+        ),
+        taxonomy_cwe=FacetDecl(
+            state=FacetState.NA,
+            reason="output not read; a sample run would settle it",
+        ),
+        fingerprints=FacetDecl(
+            state=FacetState.NA,
+            reason="output not read; a sample run would settle it",
+        ),
+        fix_available=FacetDecl(
+            state=FacetState.NA,
+            reason="output not read; a sample run would settle it",
+        ),
+        remediation_text=FacetDecl(
+            state=FacetState.NA,
+            reason="output not read; a sample run would settle it",
+        ),
+        snippet=FacetDecl(
+            state=FacetState.NA,
+            reason="the finding's location is go.mod metadata, not a source excerpt",
+        ),
+        references=FacetDecl(
+            state=FacetState.NA,
+            reason="output not read; a sample run would settle whether rules carry "
+            "a helpUri",
+        ),
+        tags=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result properties "tags"; the adapter appends '
+            "vulnerability and security",
+        ),
+        extras=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result properties "issue_severity" written by the adapter',
+        ),
+    )
+
+    #: The operational register row (base/scanner_operational_facets.py).
+    operational_facets: ClassVar[opsf.ScannerOperationalFacets] = (
+        opsf.ScannerOperationalFacets(
+            scanner_name="govulncheck",
+            network=opsf.NetworkFacet(
+                fetch_kind=opsf.FetchKind.CONTENT_FETCH,
+                fetches=(opsf.Fetched.VULN_DB, opsf.Fetched.MODULE_SOURCES),
+                prefetch=(),
+                offline_outcome=opsf.OfflineOutcome.NOT_RUN,
+                offline_reason="the Go vulnerability database is read from "
+                "vuln.go.dev at scan time and nothing is bundled",
+                offline_strategy=OfflineStrategy.SKIP_OFFLINE,
+                sandbox_network=opsf.SandboxNetwork.ONLINE,
+                source="govulncheck_scanner.py module header (Offline and sandbox), "
+                "offline_strategy, sandbox_requirements",
+            ),
+            output=opsf.OutputFacet(
+                native_formats=(opsf.OutputFormat.SARIF,),
+                side_reports=(),
+                non_finding_artifacts=(),
+                note="SARIF is read from stdout; the tool has no report-file flag",
+            ),
+            targets=opsf.TargetsFacet(
+                kinds=(opsf.TargetKind.DEPENDENCY_LOCKFILES,),
+                tool_type=ScannerToolType.SCA,
+                selection="one run per directory holding a go.mod "
+                "(GovulncheckScanner._modules)",
+            ),
+            runtime=opsf.RuntimeFacet(
+                kind=opsf.RuntimeKind.USER_INSTALLED_CLI,
+                external_programs=("go",),
+                invocations=opsf.Invocations.PER_TARGET,
+                invocation_note="one govulncheck run per Go module",
+                python_only=False,
+                use_uv_tool=False,
+            ),
+            platforms=opsf.PlatformsFacet(
+                provisionable=(),
+                note="ASH downloads no binary; the install command runs `go install` "
+                "of the pinned module version and needs a Go toolchain on linux or "
+                "darwin",
+            ),
+            severity=opsf.SeverityFacet(
+                severity_class=opsf.SeverityClass.NATIVE,
+                note="the tool's SARIF level (error/warning/note) maps to "
+                "HIGH/MEDIUM/LOW",
+            ),
+            silencing=opsf.SilencingFacet(
+                tool_side=(),
+                none_reason="govulncheck has no ignore file or inline suppression "
+                "that ASH passes or reads; ASH's own suppressions apply",
+            ),
+            identity=opsf.IdentityFacet(
+                fingerprint_class=opsf.FingerprintClass.UNCONFIRMED,
+                note="no real output is committed, so whether the tool emits "
+                "fingerprints is unread; identity reads as positional until it is",
+            ),
+            extensibility=opsf.ExtensibilityFacet(
+                custom_rules=opsf.CustomRules.NONE,
+                env_prefixes=("GO",),
+                options_surface="options.scan_level and options.include_tests; the "
+                "database URL (-db) is never passed",
+            ),
+            exit_codes=opsf.ExitCodesFacet(
+                success_exit_codes=(0,),
+                semantics="with -format sarif the tool exits 0 whatever it finds, so "
+                "any other code is a tool failure",
+            ),
+            provenance=opsf.ProvenanceFacet(
+                tier=opsf.Tier.COMMUNITY_OPTIN,
+                source=opsf.ProvenanceSource.USER_INSTALLED,
+                selection_surfaces=(
+                    "ash_govulncheck_plugins in ash_plugin_modules",
+                    "options.scan_level",
+                    "options.include_tests",
+                ),
+                upstream_license=opsf.LICENSE_NOT_READ,
+            ),
+            prerequisites=opsf.PrerequisitesFacet(
+                kinds=(opsf.Prerequisite.MANIFEST,),
+                note="a go.mod in the scanned tree; a tree with none is skipped",
+            ),
+        )
+    )
 
     # The database is read from vuln.go.dev at scan time; nothing is bundled.
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.SKIP_OFFLINE
