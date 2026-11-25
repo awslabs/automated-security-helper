@@ -18,6 +18,9 @@ that both match `src/a.txt`. The first rule has `meta: severity = "high"` and
 `description = "demo marker"` and the tag `sample`; the second has no metadata and no
 tag. In the positive capture they are `demo_marker` and `no_sev`.
 
+The captures were taken when the scanner was written; they have not been re-captured
+since, so a `yr` upgrade needs a fresh capture before the version above is trusted.
+
 Facts the captures show and the scanner relies on:
 
 - One JSON object per file that matched at least one rule. A file that matched nothing
