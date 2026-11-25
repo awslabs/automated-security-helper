@@ -114,6 +114,58 @@ def test_a_hand_schema_frame_builds_exactly_its_declared_schema(name):
     assert list(dict(build().schema).items()) == list(declared().items())
 
 
+def test_the_graded_readers_read_declared_columns_over_a_real_row():
+    """The schema-equality case above cannot fail for a builder that passes the
+    whole declared dict as ``schema=``; what can drift is a reader naming a
+    column the schema no longer declares. One real row through each reader."""
+    from automated_security_helper.plugin_modules.ash_builtin.reporters._report_frames import (
+        active_level_counts,
+        flag_total,
+    )
+
+    frame = graded_frame(["high"], [False], [True], [True])
+    assert active_level_counts(frame) == [("high", 1)]
+    assert flag_total(frame, "is_suppressed") == 0
+    assert flag_total(frame, "left_out") == 1
+    assert flag_total(frame, "actionable") == 1
+    suppressed = graded_frame(["high"], [True], [False])
+    assert active_level_counts(suppressed) == []
+    assert flag_total(suppressed, "is_suppressed") == 1
+
+
+def test_the_asff_derived_reader_reads_declared_columns_over_real_rows():
+    """``_derived`` is the one consumer of the ASFF derived frame; its four
+    output cells prove each ``pl.col`` it selects is a declared column holding
+    what the schema says."""
+    from automated_security_helper.plugin_modules.ash_builtin.reporters.asff_formatter import (
+        _derived,
+    )
+
+    active = row(0, severity="critical")
+    archived = row(1)
+    archived.__dict__["is_suppressed"] = True
+    derived = _derived(
+        [
+            {"severity": "critical", "flat": active, "is_cve": True},
+            {"severity": "not-on-the-table", "flat": archived, "is_cve": False},
+        ]
+    )
+    assert derived == [
+        {
+            "label": "CRITICAL",
+            "type": "Software and Configuration Checks/Vulnerabilities/CVE",
+            "record_state": "ACTIVE",
+            "suppressed_text": "false",
+        },
+        {
+            "label": "INFORMATIONAL",
+            "type": "Software and Configuration Checks/Vulnerabilities",
+            "record_state": "ARCHIVED",
+            "suppressed_text": "true",
+        },
+    ]
+
+
 @pytest.mark.parametrize("name", sorted(FRAME_SPECS))
 def test_the_derived_schema_is_the_schema_the_builder_constructs(name):
     spec, build = FRAME_SPECS[name]

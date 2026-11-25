@@ -11,6 +11,10 @@ what these pin is that each column holds what its name says:
 - the identity message and the upper-cased severity are not under the bare
   ``message`` and ``severity`` names the model uses for other values;
 - the grading frame always has the same four typed columns.
+
+The no-bare-name-for-transformed-values rule binds ``SIDE_SPEC``, whose columns
+are join inputs; the reporter-local ASFF derived frame and GitLab projection
+keep ``severity`` for their own transformed grades, which nothing joins on.
 """
 
 from __future__ import annotations
@@ -96,6 +100,39 @@ class TestSideFrameColumnNames:
         )
         assert side["line_start"].to_list() == [0, None]
         assert side["line_end"].to_list() == [1, None]
+
+
+class TestSideFrameKeyMemo:
+    def test_the_fallback_key_is_computed_once_per_finding(self, monkeypatch):
+        """Three columns read the key's members; the memo keeps the identity-base
+        copy and the json.dumps to one pass over the findings."""
+        calls = 0
+        real = finding_diff.fallback_key
+
+        def counting(finding):
+            nonlocal calls
+            calls += 1
+            return real(finding)
+
+        monkeypatch.setattr(finding_diff, "fallback_key", counting)
+        findings = [_finding(id="a"), _finding(id="b"), _finding(id="c")]
+        side = finding_diff._side(findings)
+        assert calls == len(findings)
+        assert dict(side.schema) == frame_schema(finding_diff.SIDE_SPEC)
+
+    def test_the_memo_does_not_outlive_the_call(self):
+        finding_diff._side([_finding()])
+        assert finding_diff._SIDE_KEYS.get() is None
+
+    def test_the_key_columns_read_the_same_without_the_memo(self):
+        """``to_frame`` over SIDE_SPEC outside ``_side`` (no memo installed)
+        computes the key per column and fills the same cells."""
+        from automated_security_helper.models.frame_model import to_frame
+
+        findings = [_finding(id="a", severity="High"), _finding(id="b")]
+        direct = to_frame(findings, finding_diff.SIDE_SPEC)
+        through = finding_diff._side(findings)
+        assert direct.to_dicts() == through.to_dicts()
 
 
 class TestGradedFrameSchema:
