@@ -137,8 +137,11 @@ def parse_clamscan_log(text: str) -> Dict[str, Any]:
     """The detections, error count and engine version in a ``clamscan --log`` text.
 
     Raises ``ScannerError`` when the log has no summary block, has no
-    ``Infected files:`` line, or when that count and the ``FOUND`` lines disagree: each
-    is a log that does not describe a finished scan.
+    ``Infected files:`` line, or when the count and the ``FOUND`` lines disagree on
+    whether anything was infected (zero versus nonzero): each is a log that does not
+    describe a finished scan. The two numbers are not required to be equal, because
+    ``Infected files`` counts files while an infected archive can produce several
+    ``FOUND`` lines.
     """
     lines = [line.rstrip("\r") for line in text.split("\n")]
     if SUMMARY_HEADER not in lines:

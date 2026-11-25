@@ -5,8 +5,9 @@
 `clamscan --recursive` over the scan target, with symlinks never followed. clamscan has
 no SARIF or JSON output, so ASH writes the tool's own `--log` text and builds the SARIF
 from it (`parse_clamscan_log`, `detections_to_sarif`). The parser fails closed: a log
-with no SCAN SUMMARY block, or whose `Infected files` count disagrees with the `FOUND`
-lines, fails the scan instead of reading as clean.
+with no SCAN SUMMARY block, or whose `Infected files` count and `FOUND` lines disagree
+on infected versus clean (zero versus nonzero), fails the scan instead of reading as
+clean. The two counts are not compared for equality.
 
 ## Tier and enabling
 
@@ -90,3 +91,19 @@ tests iterate it automatically, so these fail until the edits land:
   guard (item 5).
 - Extract removed, absence read back.
 - ruff format --check and ruff check green; one noreply identity across the range.
+
+## Final-review rows
+
+- Fixtures are documented, not captured (HIGH, open): the log texts under
+  `tests/test_data/scanners/clamav/documented/` are written from ClamAV's source and
+  manual. Replace them with one real EICAR run on a host that already has ClamAV and a
+  signature database; the README in that directory gives the capture recipe. The drift
+  guard (committed SARIF equals the adapter's output for the committed log) stays.
+- Install story (held): ClamAV is a GPL system package. The module keeps it no-install
+  on purpose and is not downloaded, vendored or redistributed here; any change to that
+  posture is a licensing decision for the maintainer.
+- Count parity (SHOULD, fixed in this round as wording): `parse_clamscan_log` checks
+  zero versus nonzero between the `Infected files` count and the `FOUND` lines, not
+  equality. The docstring and the summary above now say so.
+- Central edits owed to the combined PR: `TOOL_TYPE_SERVED_BY[ScannerToolType.CUSTOM]`
+  and a malware target kind in `scanner_operational_facets.py`.
