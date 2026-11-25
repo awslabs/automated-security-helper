@@ -1,0 +1,465 @@
+{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "Snyk Agent Scan",
+          "version": "0.7.1",
+          "informationUri": "https://github.com/snyk/agent-scan",
+          "notifications": [],
+          "rules": [
+            {
+              "id": "malicious_code",
+              "name": "Malicious code",
+              "shortDescription": {
+                "text": "Malicious code"
+              },
+              "fullDescription": {
+                "text": "Snyk Agent Scan risk index malicious_code: Malicious code."
+              },
+              "helpUri": "https://github.com/snyk/agent-scan/blob/main/docs/risks.md#malicious_code",
+              "relationships": [],
+              "properties": {
+                "tags": [
+                  "agent-scan",
+                  "agent-skill",
+                  "supply-chain"
+                ]
+              }
+            },
+            {
+              "id": "prompt_injection_skill_instructions",
+              "name": "Potential prompt injection",
+              "shortDescription": {
+                "text": "Potential prompt injection"
+              },
+              "fullDescription": {
+                "text": "Snyk Agent Scan risk index prompt_injection_skill_instructions: Potential prompt injection."
+              },
+              "helpUri": "https://github.com/snyk/agent-scan/blob/main/docs/risks.md#prompt_injection_skill_instructions",
+              "relationships": [],
+              "properties": {
+                "tags": [
+                  "agent-scan",
+                  "agent-skill",
+                  "supply-chain"
+                ]
+              }
+            },
+            {
+              "id": "secret_detection",
+              "name": "Secret detection",
+              "shortDescription": {
+                "text": "Secret detection"
+              },
+              "fullDescription": {
+                "text": "Snyk Agent Scan risk index secret_detection: Secret detection."
+              },
+              "helpUri": "https://github.com/snyk/agent-scan/blob/main/docs/risks.md#secret_detection",
+              "relationships": [],
+              "properties": {
+                "tags": [
+                  "agent-scan",
+                  "agent-skill",
+                  "supply-chain"
+                ]
+              }
+            },
+            {
+              "id": "suspicious_download_url",
+              "name": "Suspicious download URL",
+              "shortDescription": {
+                "text": "Suspicious download URL"
+              },
+              "fullDescription": {
+                "text": "Snyk Agent Scan risk index suspicious_download_url: Suspicious download URL."
+              },
+              "helpUri": "https://github.com/snyk/agent-scan/blob/main/docs/risks.md#suspicious_download_url",
+              "relationships": [],
+              "properties": {
+                "tags": [
+                  "agent-scan",
+                  "agent-skill",
+                  "supply-chain"
+                ]
+              }
+            },
+            {
+              "id": "third_party_content_exposure",
+              "name": "Third party content exposure",
+              "shortDescription": {
+                "text": "Third party content exposure"
+              },
+              "fullDescription": {
+                "text": "Snyk Agent Scan risk index third_party_content_exposure: Third party content exposure."
+              },
+              "helpUri": "https://github.com/snyk/agent-scan/blob/main/docs/risks.md#third_party_content_exposure",
+              "relationships": [],
+              "properties": {
+                "tags": [
+                  "agent-scan",
+                  "agent-skill",
+                  "supply-chain"
+                ]
+              }
+            },
+            {
+              "id": "unverifiable_dependencies",
+              "name": "Unverifiable dependencies",
+              "shortDescription": {
+                "text": "Unverifiable dependencies"
+              },
+              "fullDescription": {
+                "text": "Snyk Agent Scan risk index unverifiable_dependencies: Unverifiable dependencies."
+              },
+              "helpUri": "https://github.com/snyk/agent-scan/blob/main/docs/risks.md#unverifiable_dependencies",
+              "relationships": [],
+              "properties": {
+                "tags": [
+                  "agent-scan",
+                  "agent-skill",
+                  "supply-chain"
+                ]
+              }
+            }
+          ],
+          "taxa": [],
+          "locations": [],
+          "language": "en-US",
+          "contents": [
+            "localizedData",
+            "nonLocalizedData"
+          ],
+          "isComprehensive": false,
+          "supportedTaxonomies": []
+        },
+        "extensions": []
+      },
+      "invocations": [],
+      "language": "en-US",
+      "versionControlProvenance": [],
+      "logicalLocations": [],
+      "graphs": [],
+      "results": [
+        {
+          "ruleId": "prompt_injection_skill_instructions",
+          "ruleIndex": -1,
+          "kind": "fail",
+          "level": "error",
+          "message": {
+            "text": "Potential prompt injection (score 650/1000): Stub entry, third band: the skill carries the documented marker.",
+            "arguments": []
+          },
+          "locations": [
+            {
+              "id": -1,
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "skills/marked-skill/SKILL.md",
+                  "index": -1
+                },
+                "region": {
+                  "startLine": 10,
+                  "endLine": 10,
+                  "charOffset": -1,
+                  "byteOffset": -1
+                }
+              },
+              "logicalLocations": [],
+              "annotations": [],
+              "relationships": []
+            }
+          ],
+          "partialFingerprints": {
+            "agent-scan/v1": "68707871776020287da63e14384e5e1a197da769d239bbb734de8de0cca3f600"
+          },
+          "stacks": [],
+          "codeFlows": [],
+          "graphs": [],
+          "graphTraversals": [],
+          "relatedLocations": [],
+          "rank": -1.0,
+          "attachments": [],
+          "fixes": [],
+          "taxa": [],
+          "properties": {
+            "tags": [
+              "agent-scan",
+              "agent-skill",
+              "supply-chain"
+            ],
+            "issue_severity": "HIGH",
+            "agent_scan_risk": "prompt_injection_skill_instructions",
+            "agent_scan_score": 650,
+            "skill_name": "marked-skill"
+          }
+        },
+        {
+          "ruleId": "suspicious_download_url",
+          "ruleIndex": -1,
+          "kind": "fail",
+          "level": "error",
+          "message": {
+            "text": "Suspicious download URL (score 800/1000): Stub entry, third band: the skill names a placeholder URL.",
+            "arguments": []
+          },
+          "locations": [
+            {
+              "id": -1,
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "skills/marked-skill/SKILL.md",
+                  "index": -1
+                }
+              },
+              "logicalLocations": [],
+              "annotations": [],
+              "relationships": []
+            }
+          ],
+          "partialFingerprints": {
+            "agent-scan/v1": "df7624ba996502dfae4f39fb7342b8efc07382779bfe6e9551092f7299d06f29"
+          },
+          "stacks": [],
+          "codeFlows": [],
+          "graphs": [],
+          "graphTraversals": [],
+          "relatedLocations": [],
+          "rank": -1.0,
+          "attachments": [],
+          "fixes": [],
+          "taxa": [],
+          "properties": {
+            "tags": [
+              "agent-scan",
+              "agent-skill",
+              "supply-chain"
+            ],
+            "issue_severity": "HIGH",
+            "agent_scan_risk": "suspicious_download_url",
+            "agent_scan_score": 800,
+            "skill_name": "marked-skill",
+            "malicious_urls": [
+              "https://example.invalid/payload"
+            ]
+          }
+        },
+        {
+          "ruleId": "malicious_code",
+          "ruleIndex": -1,
+          "kind": "fail",
+          "level": "error",
+          "message": {
+            "text": "Malicious code (score 1000/1000): Stub entry, top band: the skill carries the documented marker.",
+            "arguments": []
+          },
+          "locations": [
+            {
+              "id": -1,
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "skills/marked-skill/SKILL.md",
+                  "index": -1
+                },
+                "region": {
+                  "startLine": 10,
+                  "charOffset": -1,
+                  "byteOffset": -1
+                }
+              },
+              "logicalLocations": [],
+              "annotations": [],
+              "relationships": []
+            }
+          ],
+          "partialFingerprints": {
+            "agent-scan/v1": "7213ae6ab8ba7197e8e3f81c440fda8e73d36664f6d217ba03c7d97b9f187064"
+          },
+          "stacks": [],
+          "codeFlows": [],
+          "graphs": [],
+          "graphTraversals": [],
+          "relatedLocations": [],
+          "rank": -1.0,
+          "attachments": [],
+          "fixes": [],
+          "taxa": [],
+          "properties": {
+            "tags": [
+              "agent-scan",
+              "agent-skill",
+              "supply-chain"
+            ],
+            "issue_severity": "CRITICAL",
+            "agent_scan_risk": "malicious_code",
+            "agent_scan_score": 1000,
+            "skill_name": "marked-skill"
+          }
+        },
+        {
+          "ruleId": "secret_detection",
+          "ruleIndex": -1,
+          "kind": "fail",
+          "level": "warning",
+          "message": {
+            "text": "Secret detection (score 450/1000): Stub entry, second band: the skill carries the documented marker.",
+            "arguments": []
+          },
+          "locations": [
+            {
+              "id": -1,
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "skills/marked-skill/SKILL.md",
+                  "index": -1
+                }
+              },
+              "logicalLocations": [],
+              "annotations": [],
+              "relationships": []
+            }
+          ],
+          "partialFingerprints": {
+            "agent-scan/v1": "b8a2efb0ceaf021aa70b02b0bdbfb489697fc1b03c6183d1133ab279f80eb04b"
+          },
+          "stacks": [],
+          "codeFlows": [],
+          "graphs": [],
+          "graphTraversals": [],
+          "relatedLocations": [],
+          "rank": -1.0,
+          "attachments": [],
+          "fixes": [],
+          "taxa": [],
+          "properties": {
+            "tags": [
+              "agent-scan",
+              "agent-skill",
+              "supply-chain"
+            ],
+            "issue_severity": "MEDIUM",
+            "agent_scan_risk": "secret_detection",
+            "agent_scan_score": 450,
+            "skill_name": "marked-skill"
+          }
+        },
+        {
+          "ruleId": "third_party_content_exposure",
+          "ruleIndex": -1,
+          "kind": "fail",
+          "level": "note",
+          "message": {
+            "text": "Third party content exposure (score 250/1000): Stub entry, lowest band: the skill carries the documented marker.",
+            "arguments": []
+          },
+          "locations": [
+            {
+              "id": -1,
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "skills/marked-skill/SKILL.md",
+                  "index": -1
+                }
+              },
+              "logicalLocations": [],
+              "annotations": [],
+              "relationships": []
+            }
+          ],
+          "partialFingerprints": {
+            "agent-scan/v1": "abf6ead710cfc5d8b7518e404545d600d02423592f8f3cb818b0ca08478d9b1a"
+          },
+          "stacks": [],
+          "codeFlows": [],
+          "graphs": [],
+          "graphTraversals": [],
+          "relatedLocations": [],
+          "rank": -1.0,
+          "attachments": [],
+          "fixes": [],
+          "taxa": [],
+          "properties": {
+            "tags": [
+              "agent-scan",
+              "agent-skill",
+              "supply-chain"
+            ],
+            "issue_severity": "LOW",
+            "agent_scan_risk": "third_party_content_exposure",
+            "agent_scan_score": 250,
+            "skill_name": "marked-skill"
+          }
+        },
+        {
+          "ruleId": "unverifiable_dependencies",
+          "ruleIndex": -1,
+          "kind": "fail",
+          "level": "note",
+          "message": {
+            "text": "Unverifiable dependencies (score 150/1000): Stub entry, lowest band: the skill names a placeholder dependency.",
+            "arguments": []
+          },
+          "locations": [
+            {
+              "id": -1,
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "skills/marked-skill/SKILL.md",
+                  "index": -1
+                }
+              },
+              "logicalLocations": [],
+              "annotations": [],
+              "relationships": []
+            }
+          ],
+          "partialFingerprints": {
+            "agent-scan/v1": "0c97cd96303ddf299fe5d453ec504cf1e59aa63e50d847c853a93aec7d8f635f"
+          },
+          "stacks": [],
+          "codeFlows": [],
+          "graphs": [],
+          "graphTraversals": [],
+          "relatedLocations": [],
+          "rank": -1.0,
+          "attachments": [],
+          "fixes": [],
+          "taxa": [],
+          "properties": {
+            "tags": [
+              "agent-scan",
+              "agent-skill",
+              "supply-chain"
+            ],
+            "issue_severity": "LOW",
+            "agent_scan_risk": "unverifiable_dependencies",
+            "agent_scan_score": 150,
+            "skill_name": "marked-skill",
+            "unverifiable_urls": [
+              "https://example.invalid/dependency"
+            ]
+          }
+        }
+      ],
+      "runAggregates": [],
+      "redactionTokens": [],
+      "newlineSequences": [
+        "\r\n",
+        "\n"
+      ],
+      "threadFlowLocations": [],
+      "taxonomies": [],
+      "addresses": [],
+      "translations": [],
+      "policies": [],
+      "webRequests": [],
+      "webResponses": []
+    }
+  ],
+  "inlineExternalProperties": [],
+  "properties": {
+    "tags": []
+  }
+}
