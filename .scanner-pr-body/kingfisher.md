@@ -40,3 +40,9 @@ With edits 1-5 applied to the scratch copy only: kingfisher tests, facets vocabu
 ### Not verified
 
 The captured SARIF is the capture recorded by the original build, moved byte-for-byte in content; Kingfisher was not re-run. Fingerprint stability across edits is unmeasured (identity declared unconfirmed).
+
+### Final-review rows (round 2)
+
+- HIGH (carried, central): the plugin-package glob finds `ash_kingfisher_plugins` while the vendored-package list, `SCANNER_TOOL_TYPES`, `PACKAGE_DIRS` and `CORPORA` do not list it. These are the shared-file edits 1-5 above; they belong to the integration commit and are not made on this branch.
+- SHOULD (not completed in round 1): the facets and operational-facets vocabulary cross-check against the register files on main was cut short; the desk run (kingfisher rows 0 failed, collect rc 0) is the only evidence those declarations parse.
+- LOW (optional): a `tool_downloads` pin for Kingfisher would move `runtime`/`platforms` to a pinned binary. It needs release digests and touches the install story next to licensing, so it stays held.
