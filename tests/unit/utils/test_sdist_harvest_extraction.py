@@ -15,6 +15,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from automated_security_helper.utils.sdist_harvest import (
     harvest_lockfiles_from_sdist,
 )
@@ -23,6 +25,8 @@ from tests.utils.sdist_fixture import (
     fixture_sdist_bytes,
     malicious_sdist_bytes,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def _everything_under(root: Path) -> set[str]:

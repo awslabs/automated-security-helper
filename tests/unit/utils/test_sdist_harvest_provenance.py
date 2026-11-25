@@ -16,6 +16,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from automated_security_helper.schemas.cyclonedx_bom_1_6_schema import CycloneDXReport
 from automated_security_helper.utils.sbom_merge import merge_cyclonedx_reports
 from automated_security_helper.utils.sdist_harvest import (
@@ -26,6 +28,8 @@ from automated_security_helper.utils.sdist_harvest import (
     PROPERTY_SOURCE_URL,
     stamp_harvested_components,
 )
+
+pytestmark = pytest.mark.unit
 
 SDIST_SHA256 = "a" * 64
 SDIST_URL = "https://files.test.invalid/fixturepkg-0.1.0.tar.gz"

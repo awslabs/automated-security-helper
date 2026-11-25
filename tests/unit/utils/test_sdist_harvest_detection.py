@@ -23,6 +23,8 @@ from automated_security_helper.utils.sdist_harvest import (
     is_platform_wheel_filename,
 )
 
+pytestmark = pytest.mark.unit
+
 UV_LOCK_WITH_PLATFORM_WHEEL = b"""
 version = 1
 revision = 3

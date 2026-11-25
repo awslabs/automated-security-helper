@@ -41,6 +41,8 @@ from tests.utils.sdist_fixture import (
 SDIST_URL = f"https://files.test.invalid/{FIXTURE_SDIST_NAME}"
 WHEEL_URL = f"https://files.test.invalid/{FIXTURE_WHEEL_NAME}"
 
+pytestmark = pytest.mark.unit
+
 
 class CountingOpener:
     """Serves pinned payloads in ``download_utils._open_url``'s shape, counting."""

@@ -19,6 +19,8 @@ import tarfile
 import zipfile
 from pathlib import Path
 
+import pytest
+
 from tests.utils.sdist_fixture import (
     FIXTURE_DATA_DIR,
     FIXTURE_SDIST_NAME,
@@ -26,6 +28,8 @@ from tests.utils.sdist_fixture import (
     fixture_sdist_bytes,
     fixture_wheel_bytes,
 )
+
+pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
