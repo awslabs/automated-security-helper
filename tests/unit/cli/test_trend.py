@@ -231,6 +231,30 @@ def test_history_and_files_give_the_same_series(tmp_path):
     assert from_history["streaks"] == from_files["streaks"]
 
 
+def test_a_tampered_record_is_skipped_and_the_trend_still_runs(tmp_path):
+    # A record that parses as JSON but lost the shape the trend indexes
+    # (here: an empty coverage dict) is skipped like any corrupt record;
+    # the remaining runs still give a trend instead of a traceback.
+    record(tmp_path, [results(second=1), results(finding("B101"), second=2)])
+    tampered_id = "ASH-20260101000003-0123456789ab"
+    good = json.loads(
+        (tmp_path / "history" / "ASH-20260101000001-0123456789ab.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    (tmp_path / "history" / f"{tampered_id}.json").write_text(
+        json.dumps(dict(good, report_id=tampered_id, coverage={})),
+        encoding="utf-8",
+    )
+    response = CliRunner().invoke(
+        app, ["trend", "--history", str(tmp_path), "--format", "json"]
+    )
+    assert response.exit_code == 0, response.output
+    payload = json.loads(response.stdout)
+    assert [run["findings"] for run in payload["runs"]] == [0, 1]
+    assert tampered_id not in {run["label"] for run in payload["runs"]}
+
+
 def test_an_empty_history_is_refused(tmp_path):
     response = CliRunner().invoke(app, ["trend", "--history", str(tmp_path)])
     assert response.exit_code == 1

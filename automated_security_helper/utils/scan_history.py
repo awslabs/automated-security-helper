@@ -288,14 +288,65 @@ def record_run(
     return path
 
 
+#: Every coverage key the trend indexes without a default
+#: (``finding_trend.coverage_warnings_from_records`` and ``_boundary``). The
+#: writer (:func:`_coverage`) emits them all, so a record this module wrote
+#: always passes; one that lost a key is corrupt and is skipped.
+_COVERAGE_KEYS = (
+    "expected_scanners",
+    "evaluated_scanners",
+    "ignore_file_exclusions",
+    "incomplete",
+    "scanner_results_recorded",
+    "inputs_not_scanned",
+)
+
+
+def _valid_coverage(coverage: Any) -> bool:
+    if not isinstance(coverage, dict):
+        return False
+    if any(key not in coverage for key in _COVERAGE_KEYS):
+        return False
+    # The scanner lists are read into sets, so they must be lists of strings.
+    return all(
+        isinstance(coverage[key], list)
+        and all(isinstance(name, str) for name in coverage[key])
+        for key in ("expected_scanners", "evaluated_scanners")
+    )
+
+
+def _valid_row(row: Any) -> bool:
+    if not isinstance(row, dict):
+        return False
+    if isinstance(row.get("id"), (dict, list)):
+        return False  # finding ids are collected into sets by the trend
+    base = row.get("identity_base")
+    if base is None:
+        return True
+    if not isinstance(base, str):
+        return False
+    try:
+        json.loads(base)  # the trend parses it with no fallback
+    except ValueError:
+        return False
+    return True
+
+
 def _valid_record(data: Any) -> bool:
+    """Whether *data* has the exact shape the trend consumes without guards.
+
+    ``build_trend`` indexes the coverage keys and parses each row's
+    ``identity_base`` with no fallback, so any shape this admits beyond what
+    the consumer handles crashes ``ash trend`` instead of being skipped;
+    keep it as strict as the consumer.
+    """
     return (
         isinstance(data, dict)
         and data.get("record_version") == RECORD_VERSION
         and isinstance(data.get("report_id"), str)
         and isinstance(data.get("findings"), list)
-        and all(isinstance(row, dict) for row in data["findings"])
-        and isinstance(data.get("coverage"), dict)
+        and all(_valid_row(row) for row in data["findings"])
+        and _valid_coverage(data.get("coverage"))
     )
 
 

@@ -229,6 +229,52 @@ def test_reading_skips_corrupt_foreign_and_newer_records(tmp_path):
     assert [r["report_id"] for r in records] == [report_id(1)]
 
 
+def test_reading_skips_records_whose_shape_would_crash_the_trend(tmp_path):
+    # build_trend indexes the coverage keys and parses each row's
+    # identity_base with no fallback, so a record that parses as JSON but
+    # lost that shape must be skipped at read, never handed to the trend.
+    directory = tmp_path / "history"
+    directory.mkdir()
+    scan_history.write_run_record(
+        results(finding("B101"), rid=report_id(1)), tmp_path, keep_runs=50
+    )
+    good = json.loads((directory / f"{report_id(1)}.json").read_text(encoding="utf-8"))
+    # Coverage lost the keys the trend indexes.
+    empty_coverage = dict(good, report_id=report_id(2), coverage={})
+    (directory / f"{report_id(2)}.json").write_text(
+        json.dumps(empty_coverage), encoding="utf-8"
+    )
+    # A row whose identity_base does not parse as JSON.
+    bad_base = dict(
+        good,
+        report_id=report_id(3),
+        findings=[dict(good["findings"][0], identity_base="{")],
+    )
+    (directory / f"{report_id(3)}.json").write_text(
+        json.dumps(bad_base), encoding="utf-8"
+    )
+    # A row whose id cannot join a set.
+    bad_id = dict(
+        good,
+        report_id=report_id(4),
+        findings=[dict(good["findings"][0], id=["a", "list"])],
+    )
+    (directory / f"{report_id(4)}.json").write_text(
+        json.dumps(bad_id), encoding="utf-8"
+    )
+    # Scanner lists holding non-strings cannot join sets either.
+    bad_scanners = dict(
+        good,
+        report_id=report_id(5),
+        coverage=dict(good["coverage"], expected_scanners=[["bandit"]]),
+    )
+    (directory / f"{report_id(5)}.json").write_text(
+        json.dumps(bad_scanners), encoding="utf-8"
+    )
+    records = scan_history.read_history(tmp_path)
+    assert [r["report_id"] for r in records] == [report_id(1)]
+
+
 def test_reading_an_absent_history_is_empty(tmp_path):
     assert scan_history.read_history(tmp_path) == []
     assert scan_history.prune_history(tmp_path) == []
