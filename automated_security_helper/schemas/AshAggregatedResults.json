@@ -9100,14 +9100,9 @@
           "title": "Accepted Reason"
         },
         "kind": {
+          "$ref": "#/$defs/FailureKind",
           "default": "tool",
-          "description": "What failed: 'input' when the file is not one the converter could hand to its tool (for the jupyter converter, not a notebook), 'tool' when the tool could not convert it. The completeness gate's trust in 'accepted' rides on the kind, so any other value is read as 'tool', which is never accepted, rather than as 'input' or as a refusal to load the record.",
-          "enum": [
-            "input",
-            "tool"
-          ],
-          "title": "Kind",
-          "type": "string"
+          "description": "What failed: 'input' when the file is not one the converter could hand to its tool (for the jupyter converter, not a notebook), 'tool' when the tool could not convert it. The completeness gate's trust in 'accepted' rides on the kind, so any other value is read as 'tool', which is never accepted, rather than as 'input' or as a refusal to load the record."
         },
         "path": {
           "description": "The input's path relative to the scanned tree, with '/' separators.",
@@ -9126,6 +9121,15 @@
       ],
       "title": "FailedInputInfo",
       "type": "object"
+    },
+    "FailureKind": {
+      "description": "What failed when a converter could not convert an input.\n\n``INPUT`` is the file not being one the converter could hand to its tool;\n``TOOL`` is the tool, or the run, failing. The kind decides who may waive\nthe completeness gate: only an ``INPUT`` failure can be accepted by an\n``ash-unconverted-input`` suppression. Any value this version does not know\nreads as ``TOOL``, the side that is never accepted.",
+      "enum": [
+        "input",
+        "tool"
+      ],
+      "title": "FailureKind",
+      "type": "string"
     },
     "FairnessAssessment": {
       "additionalProperties": false,

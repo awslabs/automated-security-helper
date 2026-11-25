@@ -993,7 +993,7 @@ def test_a_measurement_is_recorded_under_the_scanner_that_read_it(reader, record
     record = staleness.measure(
         cdb.get("trivy-db"),
         staleness.ProbeContext(env={}),
-        cdb.STALENESS_FAIL,
+        cdb.StalenessPolicy.FAIL,
         scanner=reader,
     )
     assert record.scanner == recorded
@@ -1360,7 +1360,7 @@ def test_an_assessment_that_cannot_ask_trivy_repo_still_records_trivy_db():
             raise AssertionError("not reached")
 
     records = staleness.assess_scanner(
-        Broken(), SarifReport(version="2.1.0", runs=[]), cdb.STALENESS_FAIL
+        Broken(), SarifReport(version="2.1.0", runs=[]), cdb.StalenessPolicy.FAIL
     )
     assert [(r.name, r.scanner, r.stale) for r in records] == [
         ("trivy-db", "trivy-repo", True)

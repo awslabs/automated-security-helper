@@ -30,7 +30,7 @@ Example usage:
 from typing import Dict, Any, Optional, Tuple
 
 from automated_security_helper.core.constants import ASH_DEFAULT_SEVERITY_LEVEL
-from automated_security_helper.core.enums import ScannerStatus
+from automated_security_helper.core.enums import ScannerStatus, ThresholdSource
 from automated_security_helper.models.vocab import SEVERITY_COUNT_FIELDS, Severity
 from automated_security_helper.models.asharp_model import (
     AshAggregatedResults,
@@ -324,7 +324,8 @@ class ScannerStatisticsCalculator:
                 "actionable": actionable,
                 "duration": duration,
                 "threshold": shown_threshold,
-                "threshold_source": threshold_source,
+                # The wire spelling: this dict feeds every report surface.
+                "threshold_source": threshold_source.value,
                 "threshold_from_env": threshold_from_env,
                 "excluded": excluded,
                 "dependencies_missing": dependencies_missing,
@@ -843,7 +844,7 @@ class ScannerStatisticsCalculator:
     @staticmethod
     def get_scanner_threshold_info(
         asharp_model: AshAggregatedResults, scanner_name: str
-    ) -> Tuple[str, str]:
+    ) -> Tuple[str, ThresholdSource]:
         """Get the threshold and threshold source for a scanner.
 
         This method determines the severity threshold that should be used for a specific scanner
@@ -878,7 +879,7 @@ class ScannerStatisticsCalculator:
     @staticmethod
     def get_scanner_threshold_details(
         asharp_model: AshAggregatedResults, scanner_name: str
-    ) -> Tuple[str, str, str, bool]:
+    ) -> Tuple[str, str, ThresholdSource, bool]:
         """``get_scanner_threshold_info`` plus the shown form and the provenance.
 
         ``(grading value, shown form, source, from env)``, as
@@ -895,7 +896,7 @@ class ScannerStatisticsCalculator:
     @staticmethod
     def _threshold_resolution(
         asharp_model: AshAggregatedResults, scanner_name: str
-    ) -> Tuple[str, str, str, bool]:
+    ) -> Tuple[str, str, ThresholdSource, bool]:
         """(grading value, shown form, source, from env) for one scanner's threshold.
 
         The shown form is what report surfaces print: an external section's
@@ -924,7 +925,7 @@ class ScannerStatisticsCalculator:
             return (
                 ASH_DEFAULT_SEVERITY_LEVEL,
                 ASH_DEFAULT_SEVERITY_LEVEL,
-                "unavailable",
+                ThresholdSource.UNAVAILABLE,
                 False,
             )
 
@@ -940,7 +941,7 @@ class ScannerStatisticsCalculator:
 
         # Initialize scanner_threshold to None
         scanner_threshold = None
-        scanner_threshold_def = "global"
+        scanner_threshold_def = ThresholdSource.GLOBAL
         # The form report surfaces show. None until a branch below finds a
         # spelling that differs from the grading value (today: the written
         # ${VARIABLE} reference of an env-read external threshold).
@@ -1022,7 +1023,7 @@ class ScannerStatisticsCalculator:
                     # The record holds only a reference whose variable the
                     # load read, so a recorded reference is an environment read.
                     threshold_from_env = shown_threshold is not None
-                scanner_threshold_def = "config"
+                scanner_threshold_def = ThresholdSource.CONFIG
         elif scanner_config_entry and hasattr(scanner_config_entry, "options"):
             if hasattr(scanner_config_entry.options, "severity_threshold"):
                 scanner_threshold_from_config = (
@@ -1030,7 +1031,7 @@ class ScannerStatisticsCalculator:
                 )
                 if scanner_threshold_from_config is not None:
                     scanner_threshold = scanner_threshold_from_config
-                    scanner_threshold_def = "config"
+                    scanner_threshold_def = ThresholdSource.CONFIG
                     # A typed (builtin) section validates an env-read value to
                     # the plain resolved word, so no marker survives here. The
                     # load recorded the read with its written reference, so
@@ -1046,9 +1047,12 @@ class ScannerStatisticsCalculator:
 
         # The scanner's own threshold when it has one, otherwise the global one: the
         # rule ScannerExecutor grades each target's report by, from the same helper.
-        evaluation_threshold, scanner_threshold_def = resolve_scanner_threshold(
+        evaluation_threshold, resolved_source = resolve_scanner_threshold(
             scanner_threshold, ash_conf, scanner_name=scanner_name
         )
+        # The ingest site: the resolver (utils/severity_ladder.py) answers the
+        # source as its wire word.
+        scanner_threshold_def = ThresholdSource(resolved_source)
         # The kept reference form describes where the scanner's own threshold
         # came from. Keep it while the resolver still sources the graded value
         # from that config entry, and show what is graded, with its source,
@@ -1058,7 +1062,7 @@ class ScannerStatisticsCalculator:
         # printing it would put the environment's value in every report. A
         # literal config value has no kept form to drop and shows the graded
         # value either way.
-        if scanner_threshold_def != "config":
+        if scanner_threshold_def is not ThresholdSource.CONFIG:
             shown_threshold = None
             threshold_from_env = False
         # resolve_scanner_threshold answers source "config" for a scanner
@@ -1067,7 +1071,7 @@ class ScannerStatisticsCalculator:
         # global one to ASH_DEFAULT_SEVERITY_LEVEL. So a kept reference form
         # whose value resolved blank was dropped just above with its source, and
         # a kept form is never paired with another source.
-        if shown_threshold is None and scanner_threshold_def == "global":
+        if shown_threshold is None and scanner_threshold_def is ThresholdSource.GLOBAL:
             # The global threshold is a validated field too; same record read.
             shown_threshold = ScannerStatisticsCalculator._recorded_reference_shown(
                 ash_conf, ("global_settings", "severity_threshold")
@@ -1110,10 +1114,10 @@ class ScannerStatisticsCalculator:
                 # its default, which sent the resolution to the global one.
                 shown_threshold = unreadable
                 evaluation_threshold = recorded_level
-                scanner_threshold_def = "config"
+                scanner_threshold_def = ThresholdSource.CONFIG
                 threshold_from_env = True
             elif (
-                scanner_threshold_def == "global"
+                scanner_threshold_def is ThresholdSource.GLOBAL
                 and (
                     unreadable
                     := ScannerStatisticsCalculator._unreadable_reference_shown(

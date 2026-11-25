@@ -14,6 +14,7 @@ from automated_security_helper.base.reporter_plugin import (
     ReporterWorkspaceBehaviour,
 )
 from automated_security_helper.core.constants import ASH_DEFAULT_SEVERITY_LEVEL
+from automated_security_helper.core.enums import ThresholdSource
 from automated_security_helper.core.scanner_statistics_calculator import (
     ScannerStatisticsCalculator,
 )
@@ -172,7 +173,9 @@ def _scanner_threshold(
             model, scanner_name
         )
         cache[scanner_name] = (
-            _normalized_threshold(threshold) if source == "config" else None
+            _normalized_threshold(threshold)
+            if source == ThresholdSource.CONFIG
+            else None
         )
     return cache[scanner_name]
 

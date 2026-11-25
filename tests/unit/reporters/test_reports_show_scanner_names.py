@@ -46,7 +46,7 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.text_reporte
 )
 from automated_security_helper.schemas.sarif_schema_model import Result
 from automated_security_helper.utils import content_db_staleness as staleness
-from automated_security_helper.utils.content_databases import STALENESS_WARN
+from automated_security_helper.utils.content_databases import StalenessPolicy
 
 pytestmark = pytest.mark.unit
 
@@ -123,7 +123,7 @@ def _stale(name="grype-db", scanner=None):
         measured_by="the cell",
         max_age=timedelta(days=1),
         measured_at=now,
-        policy=STALENESS_WARN,
+        policy=StalenessPolicy.WARN,
         bound_source="the cell",
         bound_is_tool_default=False,
         refresh="refresh it",

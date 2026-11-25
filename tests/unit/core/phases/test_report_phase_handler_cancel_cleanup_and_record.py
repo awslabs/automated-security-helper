@@ -41,7 +41,7 @@ from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.plugins import ash_plugin_manager
 from automated_security_helper.plugins.loader import load_plugins
 from automated_security_helper.utils.inner_run_outcome import (
-    REPORTS_WRITTEN_CHECKPOINT,
+    InnerRunRecordType,
     report_file_written_as,
 )
 
@@ -178,7 +178,7 @@ class TestASecondRunKeepsTheFirstRunsRecord:
 
 def _record_another_run_left(**metadata) -> dict:
     return {
-        "type": REPORTS_WRITTEN_CHECKPOINT,
+        "type": InnerRunRecordType.REPORTS_WRITTEN.value,
         "severity": "info",
         "message": "The report files this run wrote.",
         "metadata": {"files": ["ash.sarif"], "formats": {"ash.sarif": "sarif"}}
@@ -211,7 +211,7 @@ class TestARecordAnotherRunLeftIsNotCarriedIntoThisRunsRecord:
         (record,) = [
             checkpoint
             for checkpoint in results.validation_checkpoints
-            if checkpoint["type"] == REPORTS_WRITTEN_CHECKPOINT
+            if checkpoint["type"] == InnerRunRecordType.REPORTS_WRITTEN.value
         ]
         assert "ash.csv" in record["metadata"]["files"]
         assert "ash.sarif" not in record["metadata"]["files"]
