@@ -31,6 +31,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Dict, Iterable, Tuple
 
+from automated_security_helper.utils.frame_ops import ordered_counts
 from automated_security_helper.utils.frame_text import unwire, wire
 
 if TYPE_CHECKING:
@@ -60,8 +61,6 @@ def tally_severities(
     as ``ScannerSeverityCount.increment`` does; the kinds are read in the order each
     was first seen, so it is the kind of the first such result that is named.
     """
-    import polars as pl
-
     from automated_security_helper.models.asharp_model import (
         _VALID_INCREMENT_FIELDS,
         ScannerSeverityCount,
@@ -69,7 +68,7 @@ def tally_severities(
 
     if counts is None:
         counts = ScannerSeverityCount()
-    grouped = frame.group_by("kind", maintain_order=True).agg(pl.len().alias("n"))
+    grouped = ordered_counts(frame, "kind")
     for wired, number in grouped.iter_rows():
         kind = unwire(wired)
         key = kind.lower()
@@ -96,9 +95,5 @@ def actionable_frame(rows: Iterable[Tuple[str, bool]]) -> "pl.DataFrame":
 def actionable_by_name(frame: "pl.DataFrame") -> Dict[str, int]:
     """The actionable results of each name in *frame*, every name a key, counted or
     not, in the order each was first seen."""
-    import polars as pl
-
-    grouped = frame.group_by("name", maintain_order=True).agg(
-        pl.col("actionable").sum().cast(pl.Int64).alias("n")
-    )
+    grouped = ordered_counts(frame, "name", weight="actionable")
     return {unwire(name): number for name, number in grouped.iter_rows()}

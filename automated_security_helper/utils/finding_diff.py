@@ -156,18 +156,6 @@ def fallback_key(finding: FlatVulnerability) -> tuple[Any, ...] | None:
     )
 
 
-def _wire(text: str | None) -> str | None:
-    """*text* as a string polars can hold, with its equality and its order kept.
-
-    Polars strings are UTF-8, so a lone surrogate (a path ``os.fsdecode`` made
-    from undecodable bytes reaches the key through ``canonical``) cannot enter a
-    frame. The UTF-8 bytes of the text, surrogates passed through, read as Latin-1
-    are one-to-one with the text, and sorting them sorts as the text's code
-    points do.
-    """
-    return wire(text)
-
-
 _SIDE_SCHEMA = {
     "i": pl.Int64,
     "id": pl.String,
@@ -213,13 +201,13 @@ def _side(findings: list[FlatVulnerability]) -> pl.DataFrame:
         key = fallback_key(finding)
         row = (
             index,
-            _wire(finding.id),
+            wire(finding.id),
             finding.identity is not None,
             finding.has_fingerprint_identity,
-            _wire(finding.identity_message),
-            _wire(key[0]) if key else None,
-            _wire(key[1]) if key else None,
-            _wire(key[2]) if key else None,
+            wire(finding.identity_message),
+            wire(key[0]) if key else None,
+            wire(key[1]) if key else None,
+            wire(key[2]) if key else None,
             finding.is_suppressed,
             line_rank[-1 if finding.line_start is None else finding.line_start],
             line_rank[-1 if finding.line_end is None else finding.line_end],
