@@ -1,0 +1,21 @@
+{
+  "scan_path_responses": [
+    {
+      "client": "/tmp/ash-agent-scan-capture/staging/0001",
+      "path": "/tmp/ash-agent-scan-capture/staging",
+      "server_risks": [],
+      "skill_risks": [
+        {
+          "files": [
+            {
+              "name": "SKILL.md",
+              "type": "instruction"
+            }
+          ],
+          "name": "benign-skill",
+          "risk_indexes": {}
+        }
+      ]
+    }
+  ]
+}

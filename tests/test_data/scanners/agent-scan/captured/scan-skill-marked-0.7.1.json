@@ -1,0 +1,75 @@
+{
+  "scan_path_responses": [
+    {
+      "client": "/tmp/ash-agent-scan-capture/staging/0000",
+      "path": "/tmp/ash-agent-scan-capture/staging",
+      "server_risks": [],
+      "skill_risks": [
+        {
+          "files": [
+            {
+              "name": "SKILL.md",
+              "type": "instruction"
+            }
+          ],
+          "name": "marked-skill",
+          "risk_indexes": {
+            "malicious_code": {
+              "evidence": "Stub entry, top band: the skill carries the documented marker.",
+              "locations": [
+                {
+                  "start": {
+                    "line": 10,
+                    "offset": 0,
+                    "path": "SKILL.md"
+                  }
+                }
+              ],
+              "score": 1000
+            },
+            "prompt_injection_skill_instructions": {
+              "evidence": "Stub entry, third band: the skill carries the documented marker.",
+              "locations": [
+                {
+                  "end": {
+                    "line": 10,
+                    "offset": 113,
+                    "path": "SKILL.md"
+                  },
+                  "start": {
+                    "line": 10,
+                    "offset": 0,
+                    "path": "SKILL.md"
+                  }
+                }
+              ],
+              "score": 650
+            },
+            "secret_detection": {
+              "evidence": "Stub entry, second band: the skill carries the documented marker.",
+              "score": 450
+            },
+            "suspicious_download_url": {
+              "evidence": "Stub entry, third band: the skill names a placeholder URL.",
+              "malicious_urls": [
+                "https://example.invalid/payload"
+              ],
+              "score": 800
+            },
+            "third_party_content_exposure": {
+              "evidence": "Stub entry, lowest band: the skill carries the documented marker.",
+              "score": 250
+            },
+            "unverifiable_dependencies": {
+              "evidence": "Stub entry, lowest band: the skill names a placeholder dependency.",
+              "score": 150,
+              "unverifiable_urls": [
+                "https://example.invalid/dependency"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
