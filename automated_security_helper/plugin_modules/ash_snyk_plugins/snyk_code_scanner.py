@@ -473,10 +473,12 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
             "flat reader; UNCONFIRMED against a real tool run",
         ),
         tags=FacetDecl(
-            state=FacetState.NA,
-            reason="UNCONFIRMED: the survey records ASH-added tags, but no tag "
-            "write exists in this adapter at this checkout; a "
-            "`snyk code test --sarif` run through the pipeline settles it",
+            state=FacetState.MAPPED,
+            native_field="tool.driver.rules[].properties.tags, read into the "
+            "flat tags by the shared rule read when the result carries none "
+            "of its own",
+            reason="no tag write exists in this adapter at this checkout; the "
+            "rule-level tags are what the flat row carries",
         ),
         extras=FacetDecl(
             state=FacetState.MAPPED,

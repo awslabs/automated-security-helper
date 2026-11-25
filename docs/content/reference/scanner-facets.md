@@ -23,28 +23,28 @@ The facet vocabulary, in declaration order: `rule_id`, `severity`, `file_path`, 
 
 | Scanner | Mapped | Mappable, dropped | Not applicable |
 |---------|--------|-------------------|----------------|
-| [`actionlint`](#actionlint) | 10 | 1 | 9 |
-| [`bandit`](#bandit) | 9 | 2 | 9 |
-| [`cdk-nag`](#cdk-nag) | 11 | 1 | 8 |
+| [`actionlint`](#actionlint) | 11 | 0 | 9 |
+| [`bandit`](#bandit) | 11 | 0 | 9 |
+| [`cdk-nag`](#cdk-nag) | 12 | 0 | 8 |
 | [`cfn-guard`](#cfn-guard) | 7 | 1 | 12 |
-| [`cfn-lint`](#cfn-lint) | 7 | 1 | 12 |
+| [`cfn-lint`](#cfn-lint) | 8 | 0 | 12 |
 | [`cfn-nag`](#cfn-nag) | 6 | 0 | 14 |
 | [`checkov`](#checkov) | 7 | 0 | 13 |
 | [`detect-secrets`](#detect-secrets) | 8 | 0 | 12 |
 | [`gitleaks`](#gitleaks) | 9 | 1 | 10 |
-| [`grype`](#grype) | 11 | 1 | 8 |
-| [`npm-audit`](#npm-audit) | 11 | 2 | 7 |
-| [`opengrep`](#opengrep) | 10 | 2 | 8 |
-| [`semgrep`](#semgrep) | 9 | 2 | 9 |
+| [`grype`](#grype) | 12 | 0 | 8 |
+| [`npm-audit`](#npm-audit) | 13 | 0 | 7 |
+| [`opengrep`](#opengrep) | 11 | 0 | 9 |
+| [`semgrep`](#semgrep) | 10 | 0 | 10 |
 | [`syft`](#syft) | 0 | 2 | 18 |
-| [`trivy`](#trivy) | 13 | 2 | 5 |
-| [`zizmor`](#zizmor) | 8 | 2 | 10 |
+| [`trivy`](#trivy) | 15 | 0 | 5 |
+| [`zizmor`](#zizmor) | 10 | 0 | 10 |
 | [`betterleaks`](#betterleaks) | 9 | 1 | 10 |
-| [`ferret-scan`](#ferret-scan) | 7 | 0 | 13 |
-| [`guarddog`](#guarddog) | 10 | 2 | 8 |
+| [`ferret-scan`](#ferret-scan) | 8 | 0 | 12 |
+| [`guarddog`](#guarddog) | 12 | 0 | 8 |
 | [`hadolint`](#hadolint) | 7 | 0 | 13 |
-| [`snyk-code`](#snyk-code) | 9 | 2 | 9 |
-| [`trivy-repo`](#trivy-repo) | 13 | 2 | 5 |
+| [`snyk-code`](#snyk-code) | 10 | 2 | 8 |
+| [`trivy-repo`](#trivy-repo) | 15 | 0 | 5 |
 
 ## `actionlint`
 
@@ -69,7 +69,7 @@ The facet vocabulary, in declaration order: `rule_id`, `severity`, `file_path`, 
 | `fix_available` | `n/a` |  | actionlint findings carry no fix data |
 | `remediation_text` | `n/a` |  | actionlint publishes the check message and no separate remediation field |
 | `snippet` | `mapped` | errors[].snippet (dropped on a line with a credentials finding, where it would hold the password) |  |
-| `references` | `mappable-dropped` | errors[].kind (ASH builds the pinned checks.md helpUri; no native URL field) | the helpUri is written at rule level only: the flat reader takes references from result relatedLocations, so the help link is discarded today |
+| `references` | `mapped` | errors[].kind (ASH builds the pinned checks.md helpUri; no native URL field), read into the flat references when the result carries no relatedLocations |  |
 | `tags` | `mapped` | errors[].kind == "credentials" (ASH writes the secret/CWE-798 tags; no native tags field) |  |
 | `extras` | `mapped` | ASH-written result properties (issue_severity and actionlint_kind, from errors[].kind); no native property bag |  |
 
@@ -96,8 +96,8 @@ The facet vocabulary, in declaration order: `rule_id`, `severity`, `file_path`, 
 | `fix_available` | `n/a` |  | bandit findings carry no fix or fixed-version data |
 | `remediation_text` | `n/a` |  | bandit publishes the issue text and a docs link, no remediation field |
 | `snippet` | `mapped` | results[].locations[].physicalLocation.region.snippet.text (settled by the M0 capture) |  |
-| `references` | `mappable-dropped` | tool.driver.rules[].helpUri | rule-level only: the flat reader takes references from result relatedLocations, so the help link is discarded today |
-| `tags` | `mappable-dropped` | tool.driver.rules[].properties.tags | rule-level only: the flat reader takes tags from result properties, so the rule tags are discarded today (they still feed the CWE read) |
+| `references` | `mapped` | tool.driver.rules[].helpUri, read into the flat references when the result carries no relatedLocations |  |
+| `tags` | `mapped` | tool.driver.rules[].properties.tags, read into the flat tags when the result carries none (they also feed the CWE read) |  |
 | `extras` | `mapped` | results[].properties (issue_confidence, issue_severity) |  |
 
 ## `cdk-nag`
@@ -123,7 +123,7 @@ The facet vocabulary, in declaration order: `rule_id`, `severity`, `file_path`, 
 | `fix_available` | `n/a` |  | nag violations carry no fix state or fixed version |
 | `remediation_text` | `n/a` |  | violation "description" states the rule, not a remediation; no remediation field exists |
 | `snippet` | `mapped` | the matched resource's template block, YAML-rendered into Region.snippet |  |
-| `references` | `mappable-dropped` | per-pack rule help URI (\_rule_help_uri, ReportingDescriptor.helpUri) | rule-level only: the flat reader takes references from result relatedLocations, so the help link is discarded today |
+| `references` | `mapped` | per-pack rule help URI (\_rule_help_uri, ReportingDescriptor.helpUri), read into the flat references when the result carries no relatedLocations |  |
 | `tags` | `mapped` | pack name, rule id, logical id and CFN type, written as PropertyBag tags |  |
 | `extras` | `mapped` | "cdk_nag_finding" and "cfn_resource" property bags (the legacy bags extract_resource_identity also reads) |  |
 
@@ -177,7 +177,7 @@ The facet vocabulary, in declaration order: `rule_id`, `severity`, `file_path`, 
 | `fix_available` | `n/a` |  | cfn-lint results carry no fix state or fixed version |
 | `remediation_text` | `n/a` |  | rule descriptions state what a rule checks, not a remediation; no remediation field exists |
 | `snippet` | `n/a` |  | the SARIF regions carry line and column only, no snippet |
-| `references` | `mappable-dropped` | driver rules[].helpUri | rule-level only: the flat reader takes references from result relatedLocations, so the help link is discarded today |
+| `references` | `mapped` | driver rules[].helpUri, read into the flat references when the result carries no relatedLocations |  |
 | `tags` | `n/a` |  | the adapter adds no tags and the SARIF rules carry none |
 | `extras` | `n/a` |  | the native results carry no property bag; the only property written is the ASH-computed issue_severity |
 
@@ -312,7 +312,7 @@ The facet vocabulary, in declaration order: `rule_id`, `severity`, `file_path`, 
 | `fix_available` | `mapped` | the SARIF rule help.text line "Fix Version: &lt;versions&gt;" (grype's rendering of matches[].vulnerability.fix.versions); fix_available=True is written only for a non-empty list on a uniquely named rule whose Package and Version lines match the result's own message |  |
 | `remediation_text` | `n/a` |  | UNCONFIRMED: not classified by the survey; the flat model has no remediation column, and matchDetails[].fix.suggestedVersion is a version, not text |
 | `snippet` | `n/a` |  | a package match has no source code snippet |
-| `references` | `mappable-dropped` | matches[].vulnerability.urls | the native urls (and relatedVulnerabilities[].urls, dataSource) are never read into references |
+| `references` | `mapped` | tool.driver.rules[].helpUri, read into the flat references by the shared rule read when the result carries none of its own | grype writes the advisory dataSource as the rule helpUri; the native match urls (matches[].vulnerability.urls, relatedVulnerabilities[].urls) are still never read |
 | `tags` | `n/a` |  | UNCONFIRMED: the survey reads SARIF rule properties.tags off the conformance tests' presenter shape (rule-level, which the flat reader never takes as the tags column anyway); no grype SARIF fixture from a real run is committed, so a `grype -o sarif` capture settles whether results carry tags |
 | `extras` | `mapped` | SARIF result properties bag (package identity keys this adapter writes) passed through to the flat properties |  |
 
@@ -339,8 +339,8 @@ The facet vocabulary, in declaration order: `rule_id`, `severity`, `file_path`, 
 | `fix_available` | `mapped` | vulnerabilities.&lt;name&gt;."fixAvailable" |  |
 | `remediation_text` | `n/a` |  | UNCONFIRMED: not classified by the survey; the adapter writes a composed "recommendation" property, but the flat model has no remediation column to read it and npm audit's native fixAvailable is a flag or a fix object, not text |
 | `snippet` | `n/a` |  | a package advisory has no source code snippet |
-| `references` | `mappable-dropped` | vulnerabilities.&lt;name&gt;.via[]."url" (rule helpUri) | written at rule level only: the flat reader takes references from result relatedLocations, so the advisory link is discarded today |
-| `tags` | `mappable-dropped` | rule properties.tags (ASH-composed: security, npm-audit, the severity word) | written at rule level only: the flat reader takes tags from result properties, so the rule tags are discarded today |
+| `references` | `mapped` | vulnerabilities.&lt;name&gt;.via[]."url" (rule helpUri), read into the flat references when the result carries no relatedLocations |  |
+| `tags` | `mapped` | rule properties.tags (ASH-composed: security, npm-audit, the severity word), read into the flat tags when the result carries none |  |
 | `extras` | `mapped` | result properties bag (vulnerable_versions, recommendation, severity, cwe, cvss, package identity) passed through to the flat properties |  |
 
 ## `opengrep`
@@ -366,8 +366,8 @@ The facet vocabulary, in declaration order: `rule_id`, `severity`, `file_path`, 
 | `fix_available` | `n/a` |  | opengrep 2.0.0's SARIF has no fixes key even for a rule that carries `fix:` (tests/test_data/scanners/opengrep/captured/opengrep-2.0.0-fix-rule.sarif: result keys are exactly fingerprints, locations, message, properties, ruleId), so there is nothing in the SARIF ASH reads to map |
 | `remediation_text` | `n/a` |  | rule help describes the rule, not a remediation; fixes are recorded under fix_available |
 | `snippet` | `mapped` | results[].locations[].physicalLocation.region.snippet.text |  |
-| `references` | `mappable-dropped` | tool.driver.rules[].help.markdown | rule-level only: the flat reader takes references from result relatedLocations, so the rule help is discarded today |
-| `tags` | `mappable-dropped` | tool.driver.rules[].properties.tags | rule-level only: the flat reader takes tags from result properties, so the rule tags are discarded today (they still feed the CWE read) |
+| `references` | `n/a` |  | UNCONFIRMED: the committed captures' SARIF rules carry no helpUri (the rule help is help.markdown text, not a link). A rule helpUri would be read into the flat references by the shared rule read (FlatVulnerability.from_sarif_result); redeclare MAPPED when a capture carrying one is committed (the corpus gate fails this cell as soon as the observed column is populated) |
+| `tags` | `mapped` | tool.driver.rules[].properties.tags, read into the flat tags when the result carries none (they also feed the CWE read) |  |
 | `extras` | `mapped` | results[].properties (SARIF property bag, passed through unmodified) |  |
 
 ## `semgrep`
@@ -393,8 +393,8 @@ The facet vocabulary, in declaration order: `rule_id`, `severity`, `file_path`, 
 | `fix_available` | `n/a` |  | semgrep 1.187.0's SARIF has no fixes key even for a rule that carries `fix:` (tests/test_data/scanners/semgrep/captured/semgrep-1.187.0-fix-rule.sarif: result keys are exactly fingerprints, locations, message, properties, ruleId), so there is nothing in the SARIF ASH reads to map |
 | `remediation_text` | `n/a` |  | rule help describes the rule, not a remediation; fixes are recorded under fix_available |
 | `snippet` | `mapped` | results[].locations[].physicalLocation.region.snippet.text |  |
-| `references` | `mappable-dropped` | tool.driver.rules[].helpUri (registry rules; a local rule carries none) | rule-level only: the flat reader takes references from result relatedLocations, so the help link is discarded today |
-| `tags` | `mappable-dropped` | tool.driver.rules[].properties.tags | rule-level only: the flat reader takes tags from result properties, so the rule tags are discarded today (they still feed the CWE read) |
+| `references` | `n/a` |  | UNCONFIRMED: the committed captures are local-rule runs, whose SARIF rules carry no helpUri. A registry rule's helpUri is read into the flat references by the shared rule read (FlatVulnerability.from_sarif_result); redeclare MAPPED when a registry-rule capture is committed (the corpus gate fails this cell as soon as the observed column is populated) |
+| `tags` | `mapped` | tool.driver.rules[].properties.tags, read into the flat tags when the result carries none (they also feed the CWE read) |  |
 | `extras` | `mapped` | results[].properties (SARIF property bag, passed through unmodified) |  |
 
 ## `syft`
@@ -447,8 +447,8 @@ The facet vocabulary, in declaration order: `rule_id`, `severity`, `file_path`, 
 | `fix_available` | `mapped` | message line "Fixed Version: &lt;version&gt;", written as fix_available=True when non-empty by TrivyScannerBase.\_fixed_version_from_message (an empty value writes nothing) |  |
 | `remediation_text` | `n/a` |  | UNCONFIRMED: not classified by the survey; the flat model has no remediation column, and the rule help text carries the fixed version already declared under fix_available |
 | `snippet` | `n/a` |  | trivy's SARIF results carry no code snippet |
-| `references` | `mappable-dropped` | SARIF rule helpUri | rule-level only: the flat reader takes references from result relatedLocations, so the help link is discarded today |
-| `tags` | `mappable-dropped` | SARIF rule properties.tags | rule-level only: the flat reader takes tags from result properties, so the rule tags are discarded today (the severity word among them still feeds issue_severity) |
+| `references` | `mapped` | SARIF rule helpUri, read into the flat references by FlatVulnerability.from_sarif_result when the result carries no relatedLocations |  |
+| `tags` | `mapped` | SARIF rule properties.tags, read into the flat tags by FlatVulnerability.from_sarif_result when the result carries none (the severity word among them still feeds issue_severity) |  |
 | `extras` | `mapped` | result properties bag (issue_severity and the package identity keys this adapter writes) passed through to the flat properties |  |
 
 ## `zizmor`
@@ -474,8 +474,8 @@ The facet vocabulary, in declaration order: `rule_id`, `severity`, `file_path`, 
 | `fix_available` | `n/a` |  | zizmor findings carry no fix data in the SARIF |
 | `remediation_text` | `n/a` |  | the rule help describes the audit, not a remediation, and the result message is an annotation of the finding |
 | `snippet` | `mapped` | results[].locations[].physicalLocation.region.snippet.text |  |
-| `references` | `mappable-dropped` | tool.driver.rules[].helpUri | rule-level only: the flat reader takes references from result relatedLocations, so the help link is discarded today |
-| `tags` | `mappable-dropped` | tool.driver.rules[].properties.tags | rule-level only: the flat reader takes tags from result properties, so the rule tags are discarded today |
+| `references` | `mapped` | tool.driver.rules[].helpUri, read into the flat references when the result carries no relatedLocations |  |
+| `tags` | `mapped` | tool.driver.rules[].properties.tags, read into the flat tags when the result carries none |  |
 | `extras` | `mapped` | results[].properties ("zizmor/severity", "zizmor/confidence", "zizmor/persona"), plus the symbolic route in logicalLocations |  |
 
 ## `betterleaks`
@@ -528,7 +528,7 @@ The facet vocabulary, in declaration order: `rule_id`, `severity`, `file_path`, 
 | `fix_available` | `n/a` |  | sensitive-data findings carry no fix state |
 | `remediation_text` | `n/a` |  | ferret-scan results carry no remediation text |
 | `snippet` | `n/a` |  | the captured 2.5.3 SARIF regions carry startLine, startColumn and endColumn and no snippet, and the flat snippet column is empty across all 108 results |
-| `references` | `n/a` |  | ferret-scan results carry no reference URLs |
+| `references` | `mapped` | tool.driver.rules[].helpUri, read into the flat references by the shared rule read when the result carries none of its own | ferret-scan results carry no reference URLs of their own; the rule-level helpUri is what the flat row carries |
 | `tags` | `n/a` |  | ferret-scan results carry no tags; the adapter attaches scanner details, not tags |
 | `extras` | `mapped` | result properties "confidenceLevel" and "validator" |  |
 
@@ -555,8 +555,8 @@ The facet vocabulary, in declaration order: `rule_id`, `severity`, `file_path`, 
 | `fix_available` | `n/a` |  | malicious-package findings carry no fix state |
 | `remediation_text` | `n/a` |  | GuardDog results carry no remediation text |
 | `snippet` | `mapped` | match "code" / risk "threat_code" |  |
-| `references` | `mappable-dropped` | rule helpUri https://github.com/DataDog/guarddog#heuristics (adapter-written, not per-heuristic) | rule-level only: the flat reader takes references from result relatedLocations, so the help link is discarded today |
-| `tags` | `mappable-dropped` | rule-level PropertyBag tags guarddog and malicious-package, written by the adapter | rule-level only: the flat reader takes tags from result properties, so the rule tags are discarded today |
+| `references` | `mapped` | rule helpUri https://github.com/DataDog/guarddog#heuristics (adapter-written, not per-heuristic), read into the flat references when the result carries no relatedLocations |  |
+| `tags` | `mapped` | rule-level PropertyBag tags guarddog and malicious-package, written by the adapter, read into the flat tags when the result carries none |  |
 | `extras` | `mapped` | extra_properties merged into the result PropertyBag (package_name and package_version in verify mode) |  |
 
 ## `hadolint`
@@ -610,7 +610,7 @@ The facet vocabulary, in declaration order: `rule_id`, `severity`, `file_path`, 
 | `remediation_text` | `n/a` |  | UNCONFIRMED: the survey classified rule help.markdown under references only; a `snyk code test --sarif` run settles whether remediation text is separate |
 | `snippet` | `n/a` |  | the survey read no snippet in the native regions; UNCONFIRMED against a real tool run |
 | `references` | `mappable-dropped` | rule "help.markdown" and properties "exampleCommitFixes" | the rule help survives the SARIF model and dies at the flat reader; UNCONFIRMED against a real tool run |
-| `tags` | `n/a` |  | UNCONFIRMED: the survey records ASH-added tags, but no tag write exists in this adapter at this checkout; a `snyk code test --sarif` run through the pipeline settles it |
+| `tags` | `mapped` | tool.driver.rules[].properties.tags, read into the flat tags by the shared rule read when the result carries none of its own | no tag write exists in this adapter at this checkout; the rule-level tags are what the flat row carries |
 | `extras` | `mapped` | result and rule properties bags, passed through the SARIF model untouched |  |
 
 ## `trivy-repo`
@@ -636,6 +636,6 @@ The facet vocabulary, in declaration order: `rule_id`, `severity`, `file_path`, 
 | `fix_available` | `mapped` | message line "Fixed Version: &lt;version&gt;", written as fix_available=True when non-empty by TrivyScannerBase.\_fixed_version_from_message (an empty value writes nothing; ignore_unfixed defaults to true, so the tool pre-filters unfixed findings) |  |
 | `remediation_text` | `n/a` |  | UNCONFIRMED: not classified by the survey; the flat model has no remediation column, and the rule help text carries the fixed version already declared under fix_available |
 | `snippet` | `n/a` |  | trivy's SARIF results carry no code snippet |
-| `references` | `mappable-dropped` | SARIF rule helpUri | rule-level only: the flat reader takes references from result relatedLocations, so the help link is discarded today |
-| `tags` | `mappable-dropped` | SARIF rule properties.tags | rule-level only: the flat reader takes tags from result properties, so the rule tags are discarded today (the severity word among them still feeds issue_severity) |
+| `references` | `mapped` | SARIF rule helpUri, read into the flat references by FlatVulnerability.from_sarif_result when the result carries no relatedLocations |  |
+| `tags` | `mapped` | SARIF rule properties.tags, read into the flat tags by FlatVulnerability.from_sarif_result when the result carries none (the severity word among them still feeds issue_severity) |  |
 | `extras` | `mapped` | result properties bag (issue_severity and the package identity keys this adapter writes) passed through to the flat properties |  |

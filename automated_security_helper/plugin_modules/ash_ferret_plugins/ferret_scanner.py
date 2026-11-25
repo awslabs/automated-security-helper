@@ -1174,8 +1174,12 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
             "snippet column is empty across all 108 results",
         ),
         references=FacetDecl(
-            state=FacetState.NA,
-            reason="ferret-scan results carry no reference URLs",
+            state=FacetState.MAPPED,
+            native_field="tool.driver.rules[].helpUri, read into the flat "
+            "references by the shared rule read when the result carries "
+            "none of its own",
+            reason="ferret-scan results carry no reference URLs of their own; "
+            "the rule-level helpUri is what the flat row carries",
         ),
         tags=FacetDecl(
             state=FacetState.NA,

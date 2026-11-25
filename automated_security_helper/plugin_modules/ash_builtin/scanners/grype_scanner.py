@@ -511,10 +511,13 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
             reason="a package match has no source code snippet",
         ),
         references=FacetDecl(
-            state=FacetState.DROPPED,
-            native_field="matches[].vulnerability.urls",
-            reason="the native urls (and relatedVulnerabilities[].urls, "
-            "dataSource) are never read into references",
+            state=FacetState.MAPPED,
+            native_field="tool.driver.rules[].helpUri, read into the flat "
+            "references by the shared rule read when the result carries "
+            "none of its own",
+            reason="grype writes the advisory dataSource as the rule helpUri; "
+            "the native match urls (matches[].vulnerability.urls, "
+            "relatedVulnerabilities[].urls) are still never read",
         ),
         tags=FacetDecl(
             state=FacetState.NA,
