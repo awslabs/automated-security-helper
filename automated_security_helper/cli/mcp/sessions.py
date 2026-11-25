@@ -425,12 +425,15 @@ def _session_holds_a_binding() -> Callable[[str], bool]:
         session_has_binding,
     )
     from automated_security_helper.cli.mcp.source_delivery import (
+        get_session_image_locator,
         get_session_source_dir,
     )
 
     def holds_binding(session_id: str) -> bool:
-        return get_session_source_dir(session_id) is not None or session_has_binding(
-            session_id
+        return (
+            get_session_source_dir(session_id) is not None
+            or get_session_image_locator(session_id) is not None
+            or session_has_binding(session_id)
         )
 
     return holds_binding

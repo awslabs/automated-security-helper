@@ -329,7 +329,37 @@ def delivered_session_count() -> int:
     diagnostic does not need.
     """
 
-    return len(_SESSION_SOURCE_DIRS)
+    return len(_SESSION_SOURCE_DIRS.keys() | _SESSION_IMAGE_LOCATORS.keys())
+
+
+def _clear_image_dir_except(image_dir: Path, keep: Optional[Path] = None) -> None:
+    """Remove every entry of a session's ``image/`` directory but *keep*.
+
+    The directory holds the session's one delivered archive; anything else in
+    it is scratch from an earlier subject. Best effort, as every scratch
+    removal here is.
+    """
+
+    try:
+        entries = list(image_dir.iterdir())
+    except OSError:
+        return
+    for entry in entries:
+        if keep is not None and entry == keep:
+            continue
+        with contextlib.suppress(OSError):
+            if entry.is_dir() and not entry.is_symlink():
+                shutil.rmtree(entry)
+            else:
+                entry.unlink()
+
+
+def _remove_delivered_image_archive(session_id: str) -> None:
+    """Remove the archive directory of the session's current image binding."""
+
+    previous = _SESSION_IMAGE_LOCATORS.get(session_id)
+    if previous is not None and previous.oci_archive is not None:
+        _clear_image_dir_except(previous.oci_archive.parent)
 
 
 def _set_session_source_dir(session_id: str, source_dir: Path) -> None:
@@ -337,11 +367,20 @@ def _set_session_source_dir(session_id: str, source_dir: Path) -> None:
     # The latest delivery wins: a source tree delivered after an image makes
     # the tree the session's one scan subject, exactly as an image delivered
     # after a tree makes the image it (get_session_image_locator's contract).
+    _remove_delivered_image_archive(session_id)
     _SESSION_IMAGE_LOCATORS.pop(session_id, None)
 
 
 def _drop_session_source_dir(session_id: str) -> None:
+    """End the session's scan subject: the source record and the image binding.
+
+    Every path that ends a session's source record (disconnect, idle sweep,
+    state set aside) comes through here, so the image binding ends with it and
+    cannot outlive its session.
+    """
+
     _SESSION_SOURCE_DIRS.pop(session_id, None)
+    _SESSION_IMAGE_LOCATORS.pop(session_id, None)
 
 
 def ensure_session_workspace(
@@ -358,6 +397,22 @@ def ensure_session_workspace(
 
     root = workspace_root if workspace_root is not None else resolve_workspace_root()
     return _created_session_dir(root, session_id)
+
+
+def ensure_session_image_scan_dir(
+    session_id: str, *, workspace_root: Optional[Path] = None
+) -> Path:
+    """The dedicated, empty directory an image scan is anchored in.
+
+    The scan's anchoring directory is the scan target and the config-confinement
+    boundary, so anchoring at the session workspace itself would put the
+    delivered tree, the uploads, the image archives and the materialized
+    profile inside both. ``<session>/image-scan`` holds only what the scan
+    writes there (its ``.ash`` output tree).
+    """
+
+    session_dir = ensure_session_workspace(session_id, workspace_root=workspace_root)
+    return _ensure_dir(session_dir / "image-scan")
 
 
 def get_session_image_locator(session_id: str) -> Optional["ImageLocator"]:
@@ -2988,6 +3043,12 @@ def _set_aside_for_removal(workspace: Path, session_id: str) -> Optional[Path]:
 #: the shell having tokenized its value already.
 _REF_REFUSED = re.compile(r"[\s\x00-\x1f\x7f]")
 
+#: The longest reference accepted. A hostname is at most 253 characters and a
+#: repository path 255 by the distribution spec, with a tag or digest on top;
+#: 512 admits every real reference and bounds what a client can park in the
+#: session registry and in every log line that shows it.
+_MAX_IMAGE_REF_CHARS = 512
+
 
 def validate_image_ref(image_ref: str) -> str:
     """The ref as stored, or a ValueError naming what cannot be one.
@@ -3002,6 +3063,11 @@ def validate_image_ref(image_ref: str) -> str:
     ref = (image_ref or "").strip()
     if not ref:
         raise ValueError("image_ref names no reference: it is empty or whitespace")
+    if len(ref) > _MAX_IMAGE_REF_CHARS:
+        raise ValueError(
+            f"image_ref is too long: {len(ref)} characters, at most "
+            f"{_MAX_IMAGE_REF_CHARS} (no registry reference is longer)"
+        )
     if ref.startswith("-"):
         raise ValueError(
             "image_ref cannot start with '-': a reference never does, and the "
@@ -3035,6 +3101,9 @@ def set_source_image(
     """
 
     locator = ImageLocator(ref=validate_image_ref(image_ref))
+    # A reference replaces a delivered archive as the subject: the archive is
+    # scratch now and must not stay in the session workspace.
+    _remove_delivered_image_archive(session_id)
     _set_session_image_locator(session_id, locator)
     ASH_LOGGER.info(
         "session %s delivered image ref %s as its scan subject",
@@ -3063,14 +3132,23 @@ def set_source_image_archive_chunk(
     (:func:`set_source_image_archive_finalize`).
     """
 
-    return set_source_zip_chunk(
-        upload_id,
-        sequence,
-        data_b64,
-        last,
-        workspace_root=workspace_root,
-        session_id=session_id,
-    )
+    try:
+        return set_source_zip_chunk(
+            upload_id,
+            sequence,
+            data_b64,
+            last,
+            workspace_root=workspace_root,
+            session_id=session_id,
+        )
+    except ValueError as error:
+        # The zip channel's cap wording names a zip; this is an image archive.
+        text = str(error)
+        if "max zip size" in text:
+            raise ValueError(
+                text.replace("max zip size", "max image archive size")
+            ) from error
+        raise
 
 
 @_while_no_scan_runs(removes_workspace=False)
@@ -3121,24 +3199,34 @@ def set_source_image_archive_finalize(
     def remove_upload() -> None:
         _remove_zip_still_at(final, opened, session_id, upload_id)
 
+    # The refusals below are decided while the file is open and acted on after
+    # it is closed: a file still open cannot be deleted on Windows.
+    refused: Optional[str] = None
     with handle:
         actual_size = opened.st_size
         if actual_size > _MAX_ZIP_BYTES:
-            with contextlib.suppress(OSError):
-                remove_upload()
-            raise ValueError(
-                f"upload too large: {actual_size} > {_MAX_ZIP_BYTES} bytes"
-            )
-        digest = hashlib.sha256()
-        for block in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(block)
-        actual_sha = digest.hexdigest()
-        if actual_sha.lower() != expected_sha256.lower():
-            with contextlib.suppress(OSError):
-                remove_upload()
-            raise ValueError(
-                f"sha256 mismatch: expected {expected_sha256}, got {actual_sha}"
-            )
+            refused = f"upload too large: {actual_size} > {_MAX_ZIP_BYTES} bytes"
+        else:
+            digest = hashlib.sha256()
+            for block in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(block)
+            actual_sha = digest.hexdigest()
+            if actual_sha.lower() != expected_sha256.lower():
+                refused = (
+                    f"sha256 mismatch: expected {expected_sha256}, got {actual_sha}"
+                )
+    if refused is not None:
+        with contextlib.suppress(OSError):
+            remove_upload()
+        raise ValueError(refused)
+
+    # The gate the CLI's --image-archive runs, one wording for both surfaces.
+    # Run on the staged file BEFORE anything is moved, so a refused
+    # re-delivery under an upload id already delivered leaves the delivered
+    # archive and its binding as they were (the zip channel's contract).
+    from automated_security_helper.utils.image_payload_refusals import (
+        image_archive_refusal,
+    )
 
     image_dir = session_dir / "image"
     _ensure_dir(image_dir)
@@ -3158,33 +3246,17 @@ def set_source_image_archive_finalize(
                 f"the upload {upload_id!r} changed while this finalize read "
                 "it; send the finalize again"
             )
+        refusal = image_archive_refusal(final)
+        if refusal is not None:
+            with contextlib.suppress(OSError):
+                final.unlink()
+            raise ValueError(refusal)
         os.replace(final, destination)
 
-    # The gate the CLI's --image-archive runs, one wording for both surfaces.
-    # After the move: the destination is the server's own file now, no chunk
-    # writes there, and a refusal removes it so nothing half-delivered stays.
-    from automated_security_helper.utils.image_payload_refusals import (
-        image_archive_refusal,
-    )
-
-    refusal = image_archive_refusal(destination)
-    if refusal is not None:
-        with contextlib.suppress(OSError):
-            destination.unlink()
-        raise ValueError(refusal)
-
-    # The previous archive, when this one replaces it, is scratch now: the
-    # binding below is the subject of record. Best effort, as every scratch
-    # removal here is.
-    previous = _SESSION_IMAGE_LOCATORS.get(session_id)
-    if (
-        previous is not None
-        and previous.oci_archive is not None
-        and previous.oci_archive != destination
-        and previous.oci_archive.parent == image_dir
-    ):
-        with contextlib.suppress(OSError):
-            previous.oci_archive.unlink()
+    # The archive is the session's one image subject: every other entry in
+    # ``image/`` (the previous archive, a stray from an earlier cycle) is
+    # scratch now. Best effort, as every scratch removal here is.
+    _clear_image_dir_except(image_dir, destination)
 
     locator = ImageLocator(oci_archive=destination)
     _set_session_image_locator(session_id, locator)

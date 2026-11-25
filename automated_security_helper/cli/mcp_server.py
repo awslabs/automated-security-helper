@@ -545,8 +545,8 @@ def _resolve_omitted_source_dir(session_id: str) -> _OmittedSourceResolution:
                     "success": False,
                     "error": raw_controls_on_one_line(
                         "No source has been delivered under this session id, but "
-                        f"{other_sessions} other session(s) currently hold delivered "
-                        "source. This session id is most likely not stable across "
+                        f"{other_sessions} other session(s) currently hold a delivered "
+                        "source or image. This session id is most likely not stable across "
                         "calls, so the upload and this scan resolved to different "
                         "workspaces. Pass the source_dir that set_source_git or "
                         "set_source_zip_finalize returned, rather than omitting it. "
@@ -568,8 +568,10 @@ def _resolve_omitted_source_dir(session_id: str) -> _OmittedSourceResolution:
                 "error": raw_controls_on_one_line(
                     "No source has been delivered under this session id, so there is "
                     "nothing to scan. Deliver a tree first with set_source_git or "
-                    "set_source_zip_chunk/set_source_zip_finalize, or pass source_dir "
-                    "explicitly. Refusing to scan: falling back to the server's "
+                    "set_source_zip_chunk/set_source_zip_finalize, or an image "
+                    "with set_source_image or "
+                    "set_source_image_archive_chunk/set_source_image_archive_finalize, "
+                    "or pass source_dir explicitly. Refusing to scan: falling back to the server's "
                     "working directory holds none of your code, and would complete "
                     "with no findings and no error."
                 ),
@@ -750,9 +752,12 @@ async def run_ash_scan(
             fallback costs warmth, never correctness; the response's
             execution_used says which path ran.
 
-    Refused (error_type source_delivery_busy) while clear_source, set_source_git
-    or set_source_zip_finalize is changing this session's delivered source;
-    call it again once that call has returned.
+    Refused (error_type source_delivery_busy) while clear_source, set_source_git,
+    set_source_zip_finalize, set_source_image or
+    set_source_image_archive_finalize is changing this session's delivered
+    subject; call it again once that call has returned. A delivered image
+    archive that is no longer a readable tar is refused (error_type
+    delivered_image_missing, exit code 4) before anything starts.
 
     Needs a session, because get_scan_progress and cancel_scan do: refused
     (error_type session_identity_required) on a stateless server run without
@@ -839,23 +844,53 @@ async def run_ash_scan(
         scan_asset = None
         if source_dir is None or not source_dir.strip():
             from automated_security_helper.cli.mcp.source_delivery import (
-                ensure_session_workspace,
+                ensure_session_image_scan_dir,
                 get_session_image_locator,
             )
 
             image_locator = get_session_image_locator(session_id)
             if image_locator is not None:
                 # The image is the session's one scan subject (the delivery
-                # setters keep it the latest delivery). The scan anchors in
-                # the session's own workspace: an image has no target
-                # directory, so the output tree goes under the directory the
-                # server already owns for the session (the design's output
-                # placement row), which the sandbox already permits.
+                # setters keep it the latest delivery). A delivered archive
+                # that is no longer a readable tar is refused before anything
+                # starts, as a delivered tree that is gone is: the scanners
+                # would otherwise each fail on it separately.
+                if image_locator.oci_archive is not None:
+                    from automated_security_helper.utils.image_payload_refusals import (
+                        image_archive_refusal,
+                    )
+
+                    archive_refusal = image_archive_refusal(image_locator.oci_archive)
+                    if archive_refusal is not None:
+                        message = raw_controls_on_one_line(
+                            "The image archive this session delivered is no "
+                            f"longer usable ({archive_refusal}). Deliver it "
+                            "again with set_source_image_archive_chunk and "
+                            "set_source_image_archive_finalize, or name a "
+                            "reference with set_source_image. Refusing to "
+                            "scan: nothing else is this session's subject."
+                        )
+                        await _tell_client_error(ctx, message)
+                        return with_exit_code(
+                            {
+                                "success": False,
+                                "error": raw_controls_on_one_line(message),
+                                "error_type": "delivered_image_missing",
+                                "session_id": session_id,
+                            },
+                            REFUSED_TARGET_EXIT_CODE,
+                        )
+                # The scan anchors in a dedicated empty directory under the
+                # session's workspace: the anchor is the scan target and the
+                # config-confinement boundary, so the workspace itself would
+                # put the delivered tree, uploads, archives and the profile
+                # inside both. The sandbox already permits the session its
+                # own workspace.
                 from automated_security_helper.core.asset import Asset
 
                 scan_asset = Asset.for_image(image_locator)
                 try:
-                    source_dir = str(ensure_session_workspace(session_id))
+                    source_dir = str(ensure_session_image_scan_dir(session_id))
                 except Exception as workspace_error:  # noqa: BLE001 - one refusal
                     message = raw_controls_on_one_line(
                         "the session workspace for the delivered image could "
@@ -3176,7 +3211,8 @@ async def set_source_image_archive_chunk(
     the final one with last=True, then set_source_image_archive_finalize
     verifies and records the archive as this session's scan subject. Needs no
     container engine and no network on the server: the scanner tools read the
-    archive directly.
+    archive directly. An archive may be at most 100 MiB; a larger image is
+    named by reference with set_source_image instead.
 
     Args:
         upload_id: Identifier you choose, scoping this one upload.
@@ -3233,11 +3269,12 @@ async def set_source_image_archive_finalize(
     """Verify an uploaded image archive and record it as this session's subject.
 
     The assembled upload must hash to expected_sha256 and be a plain tar (what
-    docker save writes; a gzip-compressed archive is refused with the remedy).
-    Nothing is extracted: the archive is moved whole into the session workspace
-    and the session's image locator points at it. run_ash_scan with no
-    source_dir then scans it, exactly as a set_source_image reference is
-    scanned.
+    docker save writes; a gzip-compressed archive is refused with the remedy)
+    of at most 100 MiB. Nothing is extracted: the archive is moved whole into
+    the session workspace and the session's image locator points at it. A
+    refused archive leaves the previously delivered subject as it was.
+    run_ash_scan with no source_dir then scans it, exactly as a
+    set_source_image reference is scanned.
 
     Args:
         upload_id: Identifier matching the prior chunk calls.

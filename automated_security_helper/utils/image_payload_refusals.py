@@ -57,8 +57,13 @@ _GZIP_MAGIC = b"\x1f\x8b"
 OCI_LAYOUT_MARKER = "oci-layout"
 
 
-def _stat_refusal(path: str, what: str) -> Optional[os.stat_result]:
-    """Stat *path*, or raise a ``_Refused`` carrying the one-line text."""
+def _stat_refusal(path: str, what: str) -> os.stat_result:
+    """Stat *path*, or raise a ``_Refused`` carrying the one-line text.
+
+    A directory is "entered" and a file is "read", the verbs the module
+    docstring lists, so an archive that cannot be statted says it cannot be
+    read.
+    """
     try:
         return os.stat(path)
     except (FileNotFoundError, NotADirectoryError):
@@ -72,7 +77,8 @@ def _stat_refusal(path: str, what: str) -> Optional[os.stat_result]:
         if error.errno == errno.ELOOP:
             # A link that leads back to itself names nothing.
             raise _Refused(f"{what} does not exist: {path}") from None
-        raise _Refused(f"{what} cannot be entered: {path}") from None
+        verb = "entered" if what == "Image layout" else "read"
+        raise _Refused(f"{what} cannot be {verb}: {path}") from None
 
 
 class _Refused(Exception):
