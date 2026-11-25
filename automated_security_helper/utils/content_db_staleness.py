@@ -330,7 +330,7 @@ class ContentDbAgeRecord:
             tail = f"To refresh it, {self.refresh}."
             if self.policy_source == offline_image_policy_source(self.name):
                 tail = (
-                    "To refresh it, rebuild the image (`ash build-image --offline`), "
+                    "To refresh it, rebuild the image (`ash container build --offline`), "
                     f"or {self.refresh}."
                 )
         return f"{head} {consequence} {tail}"

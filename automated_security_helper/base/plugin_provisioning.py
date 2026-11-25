@@ -271,7 +271,7 @@ _GRYPE = Provisioning(
             age_source="`built` in `grype db status -o json`, the database's own build time",
             refresh=(
                 "run `grype db update` with network access, or rebuild the offline image "
-                "(`ash build-image --offline`) so it downloads a current database"
+                "(`ash container build --offline`) so it downloads a current database"
             ),
             bound_env={
                 "GRYPE_DB_MAX_ALLOWED_BUILT_AGE": go_duration(GRYPE_DB_MAX_AGE),
@@ -336,7 +336,7 @@ _OPENGREP = Provisioning(
                 "else the oldest rules file's mtime"
             ),
             refresh=(
-                "rebuild the offline image (`ash build-image --offline`), which downloads the "
+                "rebuild the offline image (`ash container build --offline`), which downloads the "
                 "rulesets again, or download them into $OPENGREP_RULES_CACHE_DIR and record the "
                 f"time in {RULESET_FETCHED_AT_FILE}"
             ),
@@ -363,7 +363,7 @@ _SEMGREP = Provisioning(
                 "else the oldest rules file's mtime"
             ),
             refresh=(
-                "rebuild the offline image (`ash build-image --offline`), which downloads the "
+                "rebuild the offline image (`ash container build --offline`), which downloads the "
                 "rulesets again, or download them into $SEMGREP_RULES_CACHE_DIR and record the "
                 f"time in {RULESET_FETCHED_AT_FILE}"
             ),
