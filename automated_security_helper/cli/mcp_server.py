@@ -865,7 +865,7 @@ async def run_ash_scan(
                     return with_exit_code(
                         {
                             "success": False,
-                            "error": message,
+                            "error": raw_controls_on_one_line(message),
                             "error_type": "session_workspace_unavailable",
                         },
                         REFUSED_INTERNAL_EXIT_CODE,

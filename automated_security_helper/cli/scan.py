@@ -1044,48 +1044,6 @@ def run_ash_scan_cli_command(
             writable=True,
         ),
     ] = None,
-    image: Annotated[
-        str | None,
-        typer.Option(
-            "--image",
-            rich_help_panel="Scan",
-            help=(
-                "Scan a container image named by reference "
-                "(registry/repo[:tag][@sha256:digest]) instead of a source "
-                "directory. ASH fetches nothing itself: the image is prepared "
-                "by a container engine or the scanner tools' own registry "
-                "clients. Exclusive with --source-dir, --image-archive and "
-                "--image-layout; scanners that do not declare container_image "
-                "targets are reported SKIPPED."
-            ),
-        ),
-    ] = None,
-    image_archive: Annotated[
-        str | None,
-        typer.Option(
-            "--image-archive",
-            rich_help_panel="Scan",
-            help=(
-                "Scan a saved container image (an uncompressed docker save / "
-                "OCI archive tarball) instead of a source directory. Needs no "
-                "container engine. Exclusive with --source-dir, --image and "
-                "--image-layout."
-            ),
-        ),
-    ] = None,
-    image_layout: Annotated[
-        str | None,
-        typer.Option(
-            "--image-layout",
-            rich_help_panel="Scan",
-            help=(
-                "Scan a container image from an OCI image-layout directory "
-                "(the directory holding the oci-layout marker file) instead "
-                "of a source directory. Needs no container engine. Exclusive "
-                "with --source-dir, --image and --image-archive."
-            ),
-        ),
-    ] = None,
     scanners: Annotated[
         Optional[List[str]],
         typer.Option(
@@ -1709,6 +1667,50 @@ def run_ash_scan_cli_command(
             envvar="ASH_BASELINE",
             rich_help_panel="CI and sharding",
             help="Leave out findings already present in this saved ash_aggregated_results.json from a full scan (for example the default branch's), so the reports, the summary and the exit code count only new findings. Matching tolerates findings that only moved lines. The file must be outside the scanned checkout and the output directory. Supported with --mode local and precommit only (exit 5 otherwise).",
+        ),
+    ] = None,
+    # The image options come last, so no existing option's position shifts for a
+    # caller that passes them positionally.
+    image: Annotated[
+        str | None,
+        typer.Option(
+            "--image",
+            rich_help_panel="Scan",
+            help=(
+                "Scan a container image named by reference "
+                "(registry/repo[:tag][@sha256:digest]) instead of a source "
+                "directory. ASH fetches nothing itself: the image is prepared "
+                "by a container engine or the scanner tools' own registry "
+                "clients. Exclusive with --source-dir, --image-archive and "
+                "--image-layout; scanners that do not declare container_image "
+                "targets are reported SKIPPED."
+            ),
+        ),
+    ] = None,
+    image_archive: Annotated[
+        str | None,
+        typer.Option(
+            "--image-archive",
+            rich_help_panel="Scan",
+            help=(
+                "Scan a saved container image (an uncompressed docker save / "
+                "OCI archive tarball) instead of a source directory. Needs no "
+                "container engine. Exclusive with --source-dir, --image and "
+                "--image-layout."
+            ),
+        ),
+    ] = None,
+    image_layout: Annotated[
+        str | None,
+        typer.Option(
+            "--image-layout",
+            rich_help_panel="Scan",
+            help=(
+                "Scan a container image from an OCI image-layout directory "
+                "(the directory holding the oci-layout marker file) instead "
+                "of a source directory. Needs no container engine. Exclusive "
+                "with --source-dir, --image and --image-archive."
+            ),
         ),
     ] = None,
 ):

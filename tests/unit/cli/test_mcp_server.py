@@ -352,7 +352,9 @@ class TestRunAshScan:
         ):
             result = await run_ash_scan(ctx=mock_ctx, source_dir=str(tmp_path))
 
-        assert result == mock_result
+        # As given, plus the one key every run_ash_scan answer now carries: which
+        # execution path ran.
+        assert result == {**mock_result, "execution_used": "in_process"}
         mock_ctx.error.assert_called()
 
     @pytest.mark.asyncio
