@@ -696,7 +696,7 @@ ash plugin verify [OPTIONS] [names]...
 |--------|------|---------|----------------------|-------------|
 | <a id="plugin-verify--all"></a>`--all` | flag | off |  | Verify every scanner with a manifest. |
 | <a id="plugin-verify--transcripts-root"></a>`--transcripts-root` | path | not set |  | The directory holding the committed fixture directories (searched for transcripts.json). Defaults to tests/test_data/scanners of a source checkout. |
-| <a id="plugin-verify--live-result"></a>`--live-result` | text, repeatable | not set |  | A live-cell result CI recorded, as PLATFORM=pass or PLATFORM=fail (for example linux/amd64=pass). Without any, row 3 is not-run. |
+| <a id="plugin-verify--live-result"></a>`--live-result` | text, repeatable | not set |  | A live-cell result CI recorded, as SCANNER@PLATFORM=pass or SCANNER@PLATFORM=fail (for example hadolint@linux/amd64=pass). The scanner must be one this run verifies; with exactly one scanner the bare PLATFORM=pass form is accepted. A platform may be given once. Without any, row 3 is not-run. |
 | <a id="plugin-verify--json"></a>`--json` | flag | off |  | Print the reports as JSON. |
 
 ## <a id="report"></a>`ash report`

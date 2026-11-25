@@ -20,8 +20,11 @@
 │ --transcripts-root        <path>  The directory holding the committed fixture directories       │
 │                                   (searched for transcripts.json). Defaults to                  │
 │                                   tests/test_data/scanners of a source checkout.                │
-│ --live-result             <str>   A live-cell result CI recorded, as PLATFORM=pass or           │
-│                                   PLATFORM=fail (for example linux/amd64=pass). Without any,    │
+│ --live-result             <str>   A live-cell result CI recorded, as SCANNER@PLATFORM=pass or   │
+│                                   SCANNER@PLATFORM=fail (for example                            │
+│                                   hadolint@linux/amd64=pass). The scanner must be one this run  │
+│                                   verifies; with exactly one scanner the bare PLATFORM=pass     │
+│                                   form is accepted. A platform may be given once. Without any,  │
 │                                   row 3 is not-run.                                             │
 │ --json                            Print the reports as JSON.                                    │
 │ --help                            Show this message and exit.                                   │

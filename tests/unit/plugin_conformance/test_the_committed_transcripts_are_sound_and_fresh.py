@@ -67,7 +67,6 @@ def test_the_gate_carries_no_waiver() -> None:
     needles = (
         "pytest." + "skip(",
         "pytest." + "xfail(",
-        "pytest." + "importorskip(",
         "importor" + "skip(",
         "mark." + "skip",
         "mark." + "xfail",
