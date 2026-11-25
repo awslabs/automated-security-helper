@@ -2,7 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import json
+import logging
 import os
+from pathlib import Path
 
 import pytest
 
@@ -367,3 +369,108 @@ def test_the_orchestrator_records_only_when_the_config_enables_history(tmp_path)
         orchestrator(AshHistoryConfig(enabled=True)), run
     )
     assert len(scan_history.read_history(tmp_path)) == 1
+
+
+def test_prune_never_removes_a_record_git_tracks(tmp_path, caplog):
+    from tests.unit.workspace.test_execution import _git
+
+    _git(tmp_path, "init")
+    for second in (1, 2, 3):
+        scan_history.write_run_record(
+            results(finding("B101"), rid=report_id(second)), tmp_path, keep_runs=50
+        )
+    _git(tmp_path, "add", f"history/{report_id(1)}.json")
+    _git(
+        tmp_path,
+        "-c",
+        "user.name=t",
+        "-c",
+        "user.email=t@example.com",
+        "commit",
+        "-m",
+        "keep the history",
+    )
+    # ASH_LOGGER does not propagate, so caplog is attached to it by name.
+    with caplog.at_level(logging.INFO, logger="ash"):
+        removed = scan_history.prune_history(tmp_path, keep_runs=1)
+    # The committed record stays, holds its place in the count, and is named at
+    # warning; the disposable one between it and the kept newest goes, logged.
+    assert removed == [f"{report_id(2)}.json"]
+    assert (tmp_path / "history" / f"{report_id(1)}.json").exists()
+    assert (tmp_path / "history" / f"{report_id(3)}.json").exists()
+    assert any(
+        "never pruned" in record.message and record.levelname == "WARNING"
+        for record in caplog.records
+    )
+    assert any("Pruned 1 run record(s)" in record.message for record in caplog.records)
+
+
+def test_prune_removes_nothing_when_git_cannot_list_the_index(tmp_path, monkeypatch):
+    from automated_security_helper.utils import scan_output_dirs
+
+    for second in (1, 2):
+        scan_history.write_run_record(
+            results(finding("B101"), rid=report_id(second)), tmp_path, keep_runs=50
+        )
+
+    def unanswered(directory, *, values=()):
+        return scan_output_dirs.GitIndexAnswer(
+            Path(directory), repository=tmp_path, error="index is corrupt"
+        )
+
+    monkeypatch.setattr(scan_output_dirs, "git_index_below", unanswered)
+    assert scan_history.prune_history(tmp_path, keep_runs=1) == []
+    assert len(list(scan_history.record_names(tmp_path))) == 2
+
+
+def test_writing_never_prunes_the_record_it_just_wrote(tmp_path):
+    # Records under future-dated names sort newer than a fresh run's, so the
+    # write-then-prune step would otherwise delete the record it just made.
+    for second in (7, 8, 9):
+        scan_history.write_run_record(
+            results(finding("B101"), rid=report_id(second)), tmp_path, keep_runs=50
+        )
+    scan_history.write_run_record(
+        results(finding("B101"), rid=report_id(1)), tmp_path, keep_runs=3
+    )
+    names = list(scan_history.record_names(tmp_path))
+    assert f"{report_id(1)}.json" in names
+
+
+def test_a_record_whose_nesting_overflows_the_parser_is_skipped(tmp_path):
+    directory = tmp_path / "history"
+    directory.mkdir()
+    depth = 200_000
+    (directory / f"{report_id(1)}.json").write_text(
+        "[" * depth + "]" * depth, encoding="utf-8"
+    )
+    assert scan_history.read_run_record(directory / f"{report_id(1)}.json") is None
+    assert scan_history.read_history(tmp_path) == []
+
+
+def test_a_record_whose_severity_or_scanner_is_not_text_is_skipped(tmp_path):
+    directory = tmp_path / "history"
+    scan_history.write_run_record(
+        results(finding("B101"), rid=report_id(1)), tmp_path, keep_runs=50
+    )
+    record = json.loads(
+        (directory / f"{report_id(1)}.json").read_text(encoding="utf-8")
+    )
+    for name, value in (("severity", 5), ("scanner", ["bandit"])):
+        broken = {**record, "report_id": report_id(2)}
+        broken["findings"] = [{**record["findings"][0], name: value}]
+        (directory / f"{report_id(2)}.json").write_text(
+            json.dumps(broken), encoding="utf-8"
+        )
+        assert scan_history.read_run_record(directory / f"{report_id(2)}.json") is None
+
+
+def test_a_scan_the_history_leaves_out_is_said_at_warning(tmp_path, caplog):
+    run = results(finding("B101"), changed_files_only=True)
+    with caplog.at_level(logging.WARNING, logger="ash"):
+        assert scan_history.record_run(run, tmp_path) is None
+    assert any(
+        "not recorded in the history" in record.message
+        and record.levelname == "WARNING"
+        for record in caplog.records
+    )

@@ -32,7 +32,15 @@ workspace aggregate, an un-merged shard, a ``--changed-files-only`` run and a
 baseline-filtered run are left out, so a series never contains a point a trend
 would have to refuse. A scan with no usable ``report_id`` is left out too: the
 record is named by it, and the name is what orders the series and what pruning
-reads.
+reads. ``ash merge`` does not record either: the merged results are rebuilt
+from shards after the scans ended, and recording them would need the history
+configuration and output directory of a scan it never ran. So a CI that only
+ever runs shards builds no history, which :func:`record_run` says at warning;
+record from an unsharded, unfiltered scan instead.
+
+Retention never deletes what is not ASH's to delete: a record git tracks, and
+the record a write just made, are kept (:func:`prune_history`), and every
+removal is logged.
 
 Retention and tolerance
 -----------------------
@@ -53,6 +61,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import stat
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Iterable
 
@@ -103,6 +112,23 @@ def record_file_name(report_id: str | None) -> str | None:
         return None
     name = f"{report_id}.json"
     return name if _RECORD_NAME.match(name) else None
+
+
+def _is_link(path: str | os.PathLike[str]) -> bool:
+    """Whether *path* is a link, a Windows junction included.
+
+    ``Path.is_symlink()`` does not name a junction
+    (``utils.scanned_tree._is_link_stat`` does), so a junction was taken for
+    the directory it points at and written or pruned through. A path that
+    cannot be looked up is not a link; what it is instead is the caller's next
+    check to answer.
+    """
+    from automated_security_helper.utils.scanned_tree import _is_link_stat
+
+    try:
+        return _is_link_stat(os.lstat(path))
+    except OSError:
+        return False
 
 
 def _order_key(name: str) -> tuple[str, str, str]:
@@ -192,51 +218,132 @@ def history_dir(output_dir: str | os.PathLike[str]) -> Path:
 def _ensure_history_dir(output_dir: Path) -> Path:
     """``<output dir>/history``, made if missing, never through a link."""
     directory = history_dir(output_dir)
-    if directory.is_symlink():
+    if _is_link(directory):
         raise HistoryRefused(f"{directory} is a link")
     try:
         directory.mkdir(exist_ok=True)
     except FileExistsError:
         pass
-    if directory.is_symlink() or not directory.is_dir():
+    if _is_link(directory) or not directory.is_dir():
         raise HistoryRefused(f"{directory} is not a directory")
     return directory
 
 
 def _record_names(directory: Path) -> list[str]:
     """Names in *directory* that are run records' (regular files, never links)."""
+    from automated_security_helper.utils.scanned_tree import _is_link_stat
+
     names = []
     with os.scandir(directory) as entries:
         for entry in entries:
             if not _RECORD_NAME.match(entry.name):
                 continue
-            if entry.is_symlink() or not entry.is_file(follow_symlinks=False):
+            # lstat, not DirEntry.is_symlink(): a Windows junction is a link
+            # here too (see _is_link). An entry that cannot be read is not a
+            # record.
+            try:
+                info = entry.stat(follow_symlinks=False)
+            except OSError:
+                continue
+            if _is_link_stat(info) or not stat.S_ISREG(info.st_mode):
                 continue
             names.append(entry.name)
     return sorted(names, key=_order_key)
 
 
+def _tracked_record_names(directory: Path) -> set[str] | None:
+    """The run-record names git tracks in *directory*; None when git gave no list.
+
+    An empty set when *directory* is in no repository: nothing a prune could
+    delete there is a committed file. None when it is in a repository whose
+    index git could not list, and when git tracks the directory itself as a
+    link or a submodule: nothing then tells a committed record from a
+    disposable one, so the caller removes nothing, as the committed-output
+    refusal fails closed (core/committed_output).
+    """
+    from automated_security_helper.utils.scan_output_dirs import git_index_below
+
+    answer = git_index_below(directory)
+    if answer.names is None:
+        return None if answer.repository is not None else set()
+    tracked: set[str] = set()
+    for name in answer.names:
+        if name == "":
+            return None
+        head = name.split("/", 1)[0]
+        if _RECORD_NAME.match(head):
+            tracked.add(head)
+    return tracked
+
+
 def prune_history(
-    output_dir: str | os.PathLike[str], keep_runs: int = DEFAULT_KEEP_RUNS
+    output_dir: str | os.PathLike[str],
+    keep_runs: int = DEFAULT_KEEP_RUNS,
+    *,
+    keep_name: str | None = None,
 ) -> list[str]:
     """Remove all but the newest *keep_runs* run records; the names removed.
 
     Only files named as run records are counted or removed. A record that is
-    corrupt still holds its place in the count: pruning reads names, not content.
+    corrupt still holds its place in the count: pruning reads names, not
+    content. Three guards keep a prune from deleting what is not a disposable
+    old record, because this is the one place ASH deletes files it did not
+    write in this run:
+
+    * *keep_name*, when given, is never removed however it sorts: the record
+      the caller just wrote stays even when records under future-dated names
+      would otherwise push it off the end at once.
+    * A record git tracks is never removed. A user who commits ``history/`` to
+      keep it across CI checkouts chose to keep those records, and everywhere
+      else a run that would delete a tracked file refuses to start
+      (core/committed_output); such records still hold their place in the
+      count, and skipping them is said once at warning.
+    * In a repository whose index git could not list, nothing tells a tracked
+      record from a disposable one, so nothing is removed this time, at
+      warning.
+
+    Every removal is logged, so a shrinking history is in the scan's log.
     """
     if keep_runs < 1:
         raise ValueError("keep_runs must be at least 1")
     directory = history_dir(output_dir)
-    if directory.is_symlink() or not directory.is_dir():
+    if _is_link(directory) or not directory.is_dir():
         return []
     names = _record_names(directory)
+    candidates = [
+        name for name in names[: max(0, len(names) - keep_runs)] if name != keep_name
+    ]
+    if not candidates:
+        return []
+    tracked = _tracked_record_names(directory)
+    if tracked is None:
+        ASH_LOGGER.warning(
+            f"Not pruning run records in {directory}: git could not list what it "
+            f"tracks there, so a committed record cannot be told from a "
+            f"disposable one."
+        )
+        return []
+    committed = [name for name in candidates if name in tracked]
+    if committed:
+        ASH_LOGGER.warning(
+            f"Keeping {len(committed)} run record(s) past keep_runs={keep_runs} "
+            f"in {directory}: git tracks them, and a committed file is never "
+            f"pruned."
+        )
     removed = []
-    for name in names[: max(0, len(names) - keep_runs)]:
+    for name in candidates:
+        if name in tracked:
+            continue
         try:
             (directory / name).unlink()
         except FileNotFoundError:
             continue
         removed.append(name)
+    if removed:
+        ASH_LOGGER.info(
+            f"Pruned {len(removed)} run record(s) past keep_runs={keep_runs} "
+            f"from {directory}: {', '.join(removed)}"
+        )
     return removed
 
 
@@ -265,7 +372,9 @@ def write_run_record(
     # turns back into the same text.
     text = json.dumps(record, sort_keys=True, ensure_ascii=True, separators=(",", ":"))
     write_text_atomically(path, text + "\n", root=root)
-    prune_history(root, keep_runs)
+    # Never the record this call just wrote: records under future-dated names
+    # sort newer, so without this the newest real run was the first pruned.
+    prune_history(root, keep_runs, keep_name=path.name)
     return path
 
 
@@ -281,9 +390,13 @@ def record_run(
         ASH_LOGGER.warning(f"Could not record this scan in the history: {exc}")
         return None
     if path is None:
-        ASH_LOGGER.info(
+        # Warning, not info: the operator turned the history on, and a CI whose
+        # every run is a shard or filtered builds no history at all in silence.
+        ASH_LOGGER.warning(
             "This scan is not recorded in the history: it is a shard, a workspace "
-            "aggregate, or filtered by --changed-files-only or --baseline."
+            "aggregate, or filtered by --changed-files-only or --baseline. "
+            "``ash merge`` does not record either, so a sharded CI builds no "
+            "history; record from an unsharded, unfiltered scan."
         )
     return path
 
@@ -320,6 +433,14 @@ def _valid_row(row: Any) -> bool:
         return False
     if isinstance(row.get("id"), (dict, list)):
         return False  # finding ids are collected into sets by the trend
+    # The trend upper-cases the severity and groups by the scanner name
+    # (finding_trend._severity, wire), so a number where a string belongs
+    # crashed ``ash trend`` instead of the record being skipped.
+    if not all(
+        value is None or isinstance(value, str)
+        for value in (row.get("severity"), row.get("scanner"))
+    ):
+        return False
     base = row.get("identity_base")
     if base is None:
         return True
@@ -359,13 +480,16 @@ def read_run_record(path: str | os.PathLike[str]) -> dict[str, Any] | None:
     """
     record_path = Path(path)
     match = _RECORD_NAME.match(record_path.name)
-    if match is None or record_path.is_symlink():
+    if match is None or _is_link(record_path):
         return None
     try:
         if record_path.stat().st_size > _MAX_RECORD_BYTES:
             return None
         data = json.loads(record_path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    # RecursionError too: json.loads raises it for nesting past the interpreter's
+    # limit, and the module's promise is that a bad record is skipped, never an
+    # error into ``ash trend``.
+    except (OSError, ValueError, RecursionError):
         return None
     if not _valid_record(data) or data["report_id"] != match["id"]:
         return None
@@ -378,7 +502,7 @@ def read_history(output_dir: str | os.PathLike[str]) -> list[dict[str, Any]]:
     Skips what :func:`read_run_record` skips, and says how many it skipped at debug.
     """
     directory = history_dir(output_dir)
-    if directory.is_symlink() or not directory.is_dir():
+    if _is_link(directory) or not directory.is_dir():
         return []
     records: list[dict[str, Any]] = []
     skipped = 0
@@ -415,6 +539,6 @@ def record_run_if_enabled(
 def record_names(output_dir: str | os.PathLike[str]) -> Iterable[str]:
     """The names of the run records in the history, oldest first."""
     directory = history_dir(output_dir)
-    if directory.is_symlink() or not directory.is_dir():
+    if _is_link(directory) or not directory.is_dir():
         return []
     return _record_names(directory)
