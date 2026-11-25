@@ -31,7 +31,12 @@ from __future__ import annotations
 import sys
 
 #: The lowest interpreter this shim acts on; the facet row's ``runtime_request``
-#: is ``>=`` this, as a PEP 440 string.
+#: is ``>=`` this, as a PEP 440 string (the test holding the two equal compares
+#: the text, not the predicates). Known divergence at prereleases, benign in
+#: direction: ``sys.version_info[:2]`` reads 3.15.0rc1 as ``(3, 15)`` so the
+#: shim acts there, while PEP 440 ``>=3.15`` excludes prereleases -- and
+#: 3.15.0rc1 already requires ``array_hook``, so acting early is the correct
+#: side, and the signature gate makes the shim a no-op anywhere it is not.
 MINIMUM_RUNTIME = (3, 15)
 
 #: What the stdlib supplied before the argument became required.
@@ -79,4 +84,50 @@ def _apply() -> None:
     _patch(decoder_module)
 
 
+def _import_next_sitecustomize() -> None:
+    """Chain-import the ``sitecustomize`` this shim's directory shadowed.
+
+    Python imports exactly one module named ``sitecustomize`` -- the first on
+    ``sys.path`` -- and the facet injector prepends this directory, so a
+    caller's own ``sitecustomize`` (subprocess coverage via
+    ``COVERAGE_PROCESS_START`` is the canonical rider) would otherwise
+    silently never run. With this directory taken off ``sys.path``, the next
+    ``sitecustomize`` (if any) imports and takes over the module name;
+    everything is restored when there is none. Two deliberate bounds: it runs
+    only when this module IS the interpreter's ``sitecustomize`` (site.py
+    imported it under that name), never when a test loads the file under
+    another name; and it runs whatever the version gate said, because the
+    shadowing is this directory's presence on ``sys.path``, not the patch.
+    """
+    if __name__ != "sitecustomize":
+        return
+    import importlib
+    import os
+
+    own_dir = os.path.dirname(os.path.abspath(__file__))
+    own_real = os.path.realpath(own_dir)
+
+    def _is_own(entry: str) -> bool:
+        resolved = os.path.abspath(entry) if entry else os.getcwd()
+        return resolved == own_dir or os.path.realpath(resolved) == own_real
+
+    removed = [(i, e) for i, e in enumerate(sys.path) if _is_own(e)]
+    if not removed:
+        return
+    own_module = sys.modules.pop("sitecustomize", None)
+    for index, _entry in reversed(removed):
+        del sys.path[index]
+    try:
+        importlib.import_module("sitecustomize")
+    except ImportError:
+        # No further sitecustomize exists; put this one back so a later
+        # ``import sitecustomize`` does not re-execute the file.
+        if own_module is not None:
+            sys.modules["sitecustomize"] = own_module
+    finally:
+        for index, entry in removed:
+            sys.path.insert(index, entry)
+
+
 _apply()
+_import_next_sitecustomize()
