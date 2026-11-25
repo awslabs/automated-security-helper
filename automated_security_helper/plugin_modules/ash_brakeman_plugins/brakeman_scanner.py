@@ -295,9 +295,11 @@ class BrakemanScanner(ScannerPluginBase[BrakemanScannerConfig]):
             "flat reader",
         ),
         tags=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field='rule properties "tags" (the warning family, e.g. SQL); '
-            "the adapter appends security to each result",
+            state=FacetState.DROPPED,
+            native_field='rule properties "tags" (the warning family, e.g. SQL)',
+            reason="the warning family lives on the rule, not the result, and the "
+            "flat reader does not read it; the adapter's own security tag on each "
+            "result is added after the native read",
         ),
         extras=FacetDecl(
             state=FacetState.MAPPED,
