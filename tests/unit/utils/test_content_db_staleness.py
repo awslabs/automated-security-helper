@@ -38,6 +38,7 @@ import platform
 import re
 import stat
 import sys
+import typing
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
@@ -769,8 +770,9 @@ class TestTheFlag:
 
     def test_the_config_field_accepts_exactly_the_declared_policies(self):
         annotation = AshConfig.model_fields["content_db_staleness"].annotation
-        assert annotation is cdb.StalenessPolicy
-        assert {m.value for m in annotation} == {"fail", "warn"}
+        assert set(typing.get_args(annotation)) == {
+            m.value for m in cdb.StalenessPolicy
+        }
 
     def test_config_warn_is_honoured(self):
         config = AshConfig(project_name="x", content_db_staleness="warn")
