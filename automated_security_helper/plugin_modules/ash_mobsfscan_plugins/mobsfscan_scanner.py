@@ -270,11 +270,11 @@ class MobsfscanScanner(ScannerPluginBase[MobsfscanScannerConfig]):
             reason="mobsfscan rules carry no CVE taxonomy",
         ),
         taxonomy_cwe=FacetDecl(
-            state=FacetState.DROPPED,
+            state=FacetState.MAPPED,
             native_field='result properties "cwe" (e.g. "CWE-798: Use of '
-            'Hard-coded Credentials") and rule tags "external/cwe/cwe-798"',
-            reason="the native SARIF carries the CWE; the adapter does not "
-            "write it where the shared pipeline reads a CWE id",
+            'Hard-coded Credentials") and rule tags "external/cwe/cwe-798"; '
+            "the shared SARIF reader fills the CWE id column from them "
+            "(16 of 16 results in captured/positive.sarif and negative.sarif)",
         ),
         fingerprints=FacetDecl(
             state=FacetState.NA,
