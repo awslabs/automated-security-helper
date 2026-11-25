@@ -42,6 +42,7 @@ from automated_security_helper.plugins.loader import (
 )
 from automated_security_helper.utils.console import ash_console, secho
 from automated_security_helper.utils.error_text import error_text, text_without_values
+from automated_security_helper.models.vocab import PluginKind
 from automated_security_helper.utils.log import (
     escape_markup,
     get_logger,
@@ -51,10 +52,9 @@ from automated_security_helper.utils.terminal_text import shown_on_one_line
 from automated_security_helper.utils.uv_tool_runner import checking_only
 
 #: The table titles, by the plugin type the registry and a scan use.
-_PLUGIN_TYPES = (
-    ("scanner", "scanners"),
-    ("converter", "converters"),
-    ("reporter", "reporters"),
+_PLUGIN_TYPES = tuple(
+    (kind, kind.section)
+    for kind in (PluginKind.SCANNER, PluginKind.CONVERTER, PluginKind.REPORTER)
 )
 
 
@@ -289,7 +289,7 @@ def list_plugins(
                 list_scanner_inventory,
             )
 
-            scanner_classes = list(plugin_types["scanners"])
+            scanner_classes = list(plugin_types[PluginKind.SCANNER.section])
             try:
                 inventory = list_scanner_inventory(
                     scanner_classes_provider=lambda: scanner_classes
@@ -404,7 +404,7 @@ def _print_tables(
 ) -> None:
     """Print one table per plugin type, a row per plugin, as list_plugins lays them out."""
     for plugin_type, plugin_list in plugin_types.items():
-        show_version_cols = show_versions and plugin_type == "scanners"
+        show_version_cols = show_versions and plugin_type == PluginKind.SCANNER.section
 
         columns = ["Name", "Enabled", "Class", "Module"]
         if show_version_cols:
@@ -430,8 +430,9 @@ def _print_tables(
 
                 # Build the plugin from its section, as a scan builds it
                 try:
-                    kind = plugin_type.rstrip("s")  # Remove 's' from end
-                    if kind == "reporter":
+                    # ``plugin_type`` is the section key here (the table title).
+                    kind = PluginKind.from_section(plugin_type)
+                    if kind is PluginKind.REPORTER:
                         # The section a scan builds the reporter from: for a
                         # reporter that sends findings off the host, the
                         # operator's when the scanned repository's file wrote
@@ -449,7 +450,7 @@ def _print_tables(
                     # (base/reporter_plugin.off_host_reporter_refused); the
                     # report phase builds a refused one turned off, so the
                     # listing shows it turned off.
-                    refused = kind == "reporter" and off_host_reporter_refused(
+                    refused = kind is PluginKind.REPORTER and off_host_reporter_refused(
                         plugin_class, plugin_config
                     )
                     if refused and isinstance(plugin_config, dict):
