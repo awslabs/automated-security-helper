@@ -1,0 +1,224 @@
+{
+  "files": [
+    {
+      "detected_license_expression": null,
+      "detected_license_expression_spdx": null,
+      "license_clues": [],
+      "license_detections": [],
+      "path": "pos",
+      "percentage_of_license_text": 0,
+      "scan_errors": [],
+      "type": "directory"
+    },
+    {
+      "detected_license_expression": "mit AND warranty-disclaimer",
+      "detected_license_expression_spdx": "MIT AND LicenseRef-scancode-warranty-disclaimer",
+      "license_clues": [],
+      "license_detections": [
+        {
+          "identifier": "mit_and_warranty_disclaimer-d093be6a-eae7-aca9-aa3b-4995752a07a6",
+          "license_expression": "mit AND warranty-disclaimer",
+          "license_expression_spdx": "MIT AND LicenseRef-scancode-warranty-disclaimer",
+          "matches": [
+            {
+              "end_line": 1,
+              "from_file": "pos/LICENSE",
+              "license_expression": "mit",
+              "license_expression_spdx": "MIT",
+              "match_coverage": 100.0,
+              "matched_length": 2,
+              "matcher": "2-aho",
+              "rule_identifier": "mit_14.RULE",
+              "rule_relevance": 100,
+              "rule_url": "https://github.com/nexB/scancode-toolkit/tree/develop/src/licensedcode/data/rules/mit_14.RULE",
+              "score": 100.0,
+              "start_line": 1
+            },
+            {
+              "end_line": 13,
+              "from_file": "pos/LICENSE",
+              "license_expression": "mit",
+              "license_expression_spdx": "MIT",
+              "match_coverage": 100.0,
+              "matched_length": 86,
+              "matcher": "2-aho",
+              "rule_identifier": "mit_17.RULE",
+              "rule_relevance": 80,
+              "rule_url": "https://github.com/nexB/scancode-toolkit/tree/develop/src/licensedcode/data/rules/mit_17.RULE",
+              "score": 80.0,
+              "start_line": 5
+            },
+            {
+              "end_line": 16,
+              "from_file": "pos/LICENSE",
+              "license_expression": "warranty-disclaimer",
+              "license_expression_spdx": "LicenseRef-scancode-warranty-disclaimer",
+              "match_coverage": 83.33,
+              "matched_length": 10,
+              "matcher": "3-seq",
+              "rule_identifier": "warranty-disclaimer_42.RULE",
+              "rule_relevance": 100,
+              "rule_url": "https://github.com/nexB/scancode-toolkit/tree/develop/src/licensedcode/data/rules/warranty-disclaimer_42.RULE",
+              "score": 83.33,
+              "start_line": 15
+            }
+          ]
+        }
+      ],
+      "path": "pos/LICENSE",
+      "percentage_of_license_text": 92.45,
+      "scan_errors": [],
+      "type": "file"
+    },
+    {
+      "detected_license_expression": null,
+      "detected_license_expression_spdx": null,
+      "license_clues": [],
+      "license_detections": [],
+      "path": "pos/src",
+      "percentage_of_license_text": 0,
+      "scan_errors": [],
+      "type": "directory"
+    },
+    {
+      "detected_license_expression": "apache-2.0",
+      "detected_license_expression_spdx": "Apache-2.0",
+      "license_clues": [],
+      "license_detections": [
+        {
+          "identifier": "apache_2_0-f590f40b-411c-1850-b68c-588af90e1dea",
+          "license_expression": "apache-2.0",
+          "license_expression_spdx": "Apache-2.0",
+          "matches": [
+            {
+              "end_line": 1,
+              "from_file": "pos/src/app.py",
+              "license_expression": "apache-2.0",
+              "license_expression_spdx": "Apache-2.0",
+              "match_coverage": 100.0,
+              "matched_length": 6,
+              "matcher": "1-spdx-id",
+              "rule_identifier": "spdx-license-identifier-apache_2_0-5dcda840588b4f07f49f2c0100924ebca7bc0649",
+              "rule_relevance": 100,
+              "rule_url": null,
+              "score": 100.0,
+              "start_line": 1
+            }
+          ]
+        }
+      ],
+      "path": "pos/src/app.py",
+      "percentage_of_license_text": 75.0,
+      "scan_errors": [],
+      "type": "file"
+    }
+  ],
+  "headers": [
+    {
+      "duration": 0,
+      "end_timestamp": "<ts>",
+      "errors": [],
+      "extra_data": {
+        "files_count": 2,
+        "spdx_license_list_version": "3.27",
+        "system_environment": {
+          "cpu_architecture": "64",
+          "operating_system": "linux",
+          "platform": "Linux-6.12.115-140.210.amzn2023.x86_64-x86_64-with-glibc2.34",
+          "platform_version": "#1 SMP PREEMPT_DYNAMIC Wed Nov 11 00:39:58 UTC 2026",
+          "python_version": "3.12.15 (main, Oct 14 2026, 01:05:27) [Clang 23.1.3 ]"
+        }
+      },
+      "message": null,
+      "notice": "Generated with ScanCode and provided on an \"AS IS\" BASIS, WITHOUT WARRANTIES\nOR CONDITIONS OF ANY KIND, either express or implied. No content created from\nScanCode should be considered or used as legal advice. Consult an Attorney\nfor any legal advice.\nScanCode is a free software code scanning tool from nexB Inc. and others.\nVisit https://github.com/nexB/scancode-toolkit/ for support and download.",
+      "options": {
+        "--json": "<lane>/pos.json",
+        "--license": true,
+        "--only-findings": false,
+        "--quiet": true,
+        "input": [
+          "<lane>/pos"
+        ]
+      },
+      "output_format_version": "4.1.0",
+      "start_timestamp": "<ts>",
+      "tool_name": "scancode-toolkit",
+      "tool_version": "32.5.0",
+      "warnings": []
+    }
+  ],
+  "license_detections": [
+    {
+      "detection_count": 1,
+      "identifier": "apache_2_0-f590f40b-411c-1850-b68c-588af90e1dea",
+      "license_expression": "apache-2.0",
+      "license_expression_spdx": "Apache-2.0",
+      "reference_matches": [
+        {
+          "end_line": 1,
+          "from_file": "pos/src/app.py",
+          "license_expression": "apache-2.0",
+          "license_expression_spdx": "Apache-2.0",
+          "match_coverage": 100.0,
+          "matched_length": 6,
+          "matcher": "1-spdx-id",
+          "rule_identifier": "spdx-license-identifier-apache_2_0-d904d6f07f8d33445270a849a3be98d8904d568a",
+          "rule_relevance": 100,
+          "rule_url": null,
+          "score": 100.0,
+          "start_line": 1
+        }
+      ]
+    },
+    {
+      "detection_count": 1,
+      "identifier": "mit_and_warranty_disclaimer-d093be6a-eae7-aca9-aa3b-4995752a07a6",
+      "license_expression": "mit AND warranty-disclaimer",
+      "license_expression_spdx": "MIT AND LicenseRef-scancode-warranty-disclaimer",
+      "reference_matches": [
+        {
+          "end_line": 1,
+          "from_file": "pos/LICENSE",
+          "license_expression": "mit",
+          "license_expression_spdx": "MIT",
+          "match_coverage": 100.0,
+          "matched_length": 2,
+          "matcher": "2-aho",
+          "rule_identifier": "mit_14.RULE",
+          "rule_relevance": 100,
+          "rule_url": "https://github.com/nexB/scancode-toolkit/tree/develop/src/licensedcode/data/rules/mit_14.RULE",
+          "score": 100.0,
+          "start_line": 1
+        },
+        {
+          "end_line": 13,
+          "from_file": "pos/LICENSE",
+          "license_expression": "mit",
+          "license_expression_spdx": "MIT",
+          "match_coverage": 100.0,
+          "matched_length": 86,
+          "matcher": "2-aho",
+          "rule_identifier": "mit_17.RULE",
+          "rule_relevance": 80,
+          "rule_url": "https://github.com/nexB/scancode-toolkit/tree/develop/src/licensedcode/data/rules/mit_17.RULE",
+          "score": 80.0,
+          "start_line": 5
+        },
+        {
+          "end_line": 16,
+          "from_file": "pos/LICENSE",
+          "license_expression": "warranty-disclaimer",
+          "license_expression_spdx": "LicenseRef-scancode-warranty-disclaimer",
+          "match_coverage": 83.33,
+          "matched_length": 10,
+          "matcher": "3-seq",
+          "rule_identifier": "warranty-disclaimer_42.RULE",
+          "rule_relevance": 100,
+          "rule_url": "https://github.com/nexB/scancode-toolkit/tree/develop/src/licensedcode/data/rules/warranty-disclaimer_42.RULE",
+          "score": 83.33,
+          "start_line": 15
+        }
+      ]
+    }
+  ]
+}
