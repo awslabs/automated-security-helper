@@ -27,6 +27,10 @@ The rest are individual fixes: `= None` defaults annotated Optional, Optional re
 
 33 per-line `# ty: ignore[rule]` comments, each with a reason comment beside it. They cover: Windows-only ctypes/winreg attributes, `Future` attributes set by the executor, pydantic fields declared non-optional with a `None` default (`PluginContext.work_dir`, `.config`, `PluginConfigBase.name`; changing them would change the generated JSON schemas), a typeshed gap (`tarfile.EOFHeaderError`), botocore's TypedDict response, `extra="allow"` property bags, rich's `Console(file=...)`, and the `TYPE_CHECKING` constructor defaults on the plugin bases. No file-level or blanket ignores.
 
+### Tests
+
+`tests/unit` on dev-dsk-d14420e2 (env -i, `--basetemp` in the lane, 36 workers, the same desk and flags for both sides): main 642 failed / 65023 passed; branch 625 failed / 65040 passed. Failing ids present only on the branch: one timing-sensitive test (`test_fixture_git_retries_a_runner_timeout`, passes alone on both trees); ids failing only on main: 17 signal-handling tests (load-dependent). Delta 0 regressions. The 600-odd shared failures come from the desk environment and fail identically on main. A first branch run found two real regressions (`safe_scan` called `scan` positionally; the mixin called a method on duck-typed stand-ins), both fixed in the last commit.
+
 ### Measured
 
 ty 0.0.84, `uv run --group dev --with 'ty==0.0.84' ty check automated_security_helper/`, same invocation as CI.
