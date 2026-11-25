@@ -1777,6 +1777,30 @@ def run_ash_scan_cli_command(
         ).value
     )
 
+    # Options that read or filter by the directory the scan starts in are not
+    # an image scan's subject: --staged could exit 0 as "nothing staged"
+    # without the image ever being scanned. Refused first, before the options'
+    # own mode checks, so the operator is told the real conflict.
+    for image_flag, image_value in (
+        ("--image", image),
+        ("--image-archive", image_archive),
+        ("--image-layout", image_layout),
+    ):
+        if image_value is None:
+            continue
+        for other_flag, other_given in (
+            ("--staged", staged),
+            ("--baseline", baseline is not None),
+            ("--use-existing", use_existing),
+            ("--changed-files-only", changed_files_only),
+        ):
+            if other_given:
+                _fail_usage(
+                    f"{image_flag} cannot be combined with {other_flag}: "
+                    f"{other_flag} reads the working directory, which an image "
+                    "scan does not scan. Scan the image on its own."
+                )
+
     if baseline is not None:
         from automated_security_helper.express.runtime import CHILD_ENV
 

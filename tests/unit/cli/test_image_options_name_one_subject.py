@@ -69,6 +69,35 @@ class TestExclusivityIsRefusedBeforeAnyWork:
         assert "--workspace" in result.output
 
 
+class TestOptionsThatReadTheWorkingDirectoryAreRefused:
+    """These flags resolve against the directory a scan starts in, which is not an
+    image scan's subject: ``--staged`` could exit 0 as "nothing staged" without the
+    image ever being scanned, and the others would read or filter by the cwd."""
+
+    @pytest.mark.parametrize(
+        "image_options",
+        [
+            pytest.param(("--image", IMAGE_REF), id="image"),
+            pytest.param(("--image-archive", "image.tar"), id="image-archive"),
+            pytest.param(("--image-layout", "layout"), id="image-layout"),
+        ],
+    )
+    @pytest.mark.parametrize(
+        "other",
+        [
+            pytest.param(("--staged",), id="staged"),
+            pytest.param(("--baseline", "base.json"), id="baseline"),
+            pytest.param(("--use-existing",), id="use-existing"),
+            pytest.param(("--changed-files-only",), id="changed-files-only"),
+        ],
+    )
+    def test_each_is_refused_with_the_flag_named(self, image_options, other):
+        result = _scan(*image_options, *other)
+        assert result.exit_code == ASH_EXIT_USAGE_ERROR
+        assert other[0] in result.output
+        assert image_options[0] in result.output
+
+
 class TestThePayloadGateReachesTheOperator:
     def test_a_missing_archive_shows_the_gate_text(self, tmp_path):
         missing = tmp_path / "absent.tar"
