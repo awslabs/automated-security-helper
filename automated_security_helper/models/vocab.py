@@ -13,7 +13,9 @@ Every member's value is the exact wire spelling, and every enum mixes in ``str``
 so a member serializes, compares and hashes as its value. Compare members by
 identity (``x is Severity.HIGH``) and take ``.value`` at every textual boundary:
 ``str(member)`` and f-string interpolation render the qualified member name on
-some supported interpreters, so ``f"{member}"`` is never a spelling of the value.
+some supported interpreters, so ``f"{member}"`` is never a spelling of the value
+unless the class itself pins the rendering (``PluginKind`` overrides ``__str__``
+and ``__format__`` to the value; the others do not).
 
 Severity stays an OPEN vocabulary for now: a scanner may emit a word that is not
 on the ladder, and the ingest helpers here return ``None`` for it instead of
@@ -22,7 +24,7 @@ column) is a separate, deliberate change.
 """
 
 from enum import Enum
-from typing import Literal, Optional, Tuple
+from typing import Any, Literal, Optional, Tuple
 
 
 class Severity(str, Enum):
@@ -87,6 +89,76 @@ class SeverityThreshold(str, Enum):
             return cls(text.strip().upper())
         except ValueError:
             return None
+
+
+class PluginKind(str, Enum):
+    """The three plugin kinds ASH loads: converter, scanner and reporter.
+
+    The value is the singular spelling (``ash_plugin_type``, ``--plugin-type``,
+    ``get_plugin_config(plugin_type=...)``). The plural config section that holds
+    the kind's plugins (``converters``, ``scanners``, ``reporters``) is derived
+    by :attr:`section`, so the singular and plural spellings are one definition.
+    Member order is the order the three sections are walked in.
+
+    The kinds are a closed set ASH ships; the NAMES of the plugins of a kind
+    (scanner names, reporter names, converter names) are an open set that plugins
+    extend and are never enumerated here.
+    """
+
+    CONVERTER = "converter"
+    SCANNER = "scanner"
+    REPORTER = "reporter"
+
+    def __str__(self) -> str:
+        return self.value
+
+    def __format__(self, format_spec: str) -> str:
+        return format(self.value, format_spec)
+
+    @property
+    def section(self) -> str:
+        """The plural config section key of this kind (``"scanners"`` for SCANNER)."""
+        return f"{self.value}s"
+
+    @classmethod
+    def coerce(cls, value: Any) -> Optional["PluginKind"]:
+        """The member a kind spelling names, or ``None`` for anything else.
+
+        The ingest helper for the singular spelling: a member passes through, a
+        string is looked up by value. An unknown kind is ``None``, which is how
+        the lookups that have always answered "no such kind" with an empty result
+        still do.
+        """
+        if isinstance(value, cls):
+            return value
+        if isinstance(value, str):
+            try:
+                return cls(value)
+            except ValueError:
+                return None
+        return None
+
+    @classmethod
+    def from_section(cls, section: Any) -> Optional["PluginKind"]:
+        """The member whose plural section key is ``section``, or ``None``.
+
+        The ingest helper for the plural spelling (``"scanners"`` gives SCANNER).
+        """
+        if isinstance(section, str):
+            for kind in cls:
+                if kind.section == section:
+                    return kind
+        return None
+
+    @classmethod
+    def sections(cls) -> Tuple[str, ...]:
+        """The plural section keys of every kind, in member order."""
+        return tuple(kind.section for kind in cls)
+
+    @classmethod
+    def values(cls) -> Tuple[str, ...]:
+        """The singular spellings of every kind, in member order."""
+        return tuple(kind.value for kind in cls)
 
 
 #: The gate vocabulary as a static type, for the fields that must stay text.

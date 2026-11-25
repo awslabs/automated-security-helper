@@ -60,6 +60,7 @@ from automated_security_helper.core.constants import (
     is_blank_bin_path,
     usable_home,
 )
+from automated_security_helper.models.vocab import PluginKind
 from automated_security_helper.core.exceptions import (
     ASHConfigFileNotFoundError,
     ASHConfigValidationError,
@@ -183,19 +184,20 @@ DEPRECATED_TOOL_ALIASES: dict[str, str] = {
 
 #: The plugin types --plugin-type selects, each the plugin manager's own name for
 #: that kind of plugin.
-PLUGIN_KINDS = ("converter", "scanner", "reporter")
+PLUGIN_KINDS = PluginKind.values()
 
 
-def _plugin_kind(plugin_type: str) -> str:
+def _plugin_kind(plugin_type: str) -> PluginKind:
     """The registry kind a --plugin-type value selects.
 
     install_dependencies refuses a value that is not one of PLUGIN_KINDS before
     anything is selected, so a value reaching here is one of them; any other is a
     programming error, not a kind to guess.
     """
-    if plugin_type not in PLUGIN_KINDS:
+    kind = PluginKind.coerce(plugin_type)
+    if kind is None:
         raise ValueError(f"not a plugin type: {plugin_type!r}")
-    return plugin_type
+    return kind
 
 
 def _selection_key(name: str) -> str:
@@ -1022,7 +1024,7 @@ def install_dependencies(
         metavar="<path>",
     ),
     plugin_types: List[str] = typer.Option(
-        ["converter", "scanner", "reporter"],
+        list(PluginKind.values()),
         "--plugin-type",
         "-t",
         help="Plugin types to install dependencies for",

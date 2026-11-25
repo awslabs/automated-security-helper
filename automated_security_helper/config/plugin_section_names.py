@@ -27,8 +27,10 @@ from typing import Any, Dict, Optional, Tuple
 
 from pydantic import BaseModel
 
+from automated_security_helper.models.vocab import PluginKind
+
 #: The AshConfig sections whose children are known plugins' sections.
-PLUGIN_SEGMENT_KEYS: Tuple[str, ...] = ("converters", "scanners", "reporters")
+PLUGIN_SEGMENT_KEYS: Tuple[str, ...] = PluginKind.sections()
 
 #: ASCII-only lowering, the table behind ``ascii_lower``, which states the rule.
 _ASCII_LOWER = str.maketrans(string.ascii_uppercase, string.ascii_lowercase)
@@ -83,7 +85,7 @@ def folded_section_name(name: str) -> str:
 #: are ignored (configure.md, Share settings with ``extends``: ``CsvReporter``
 #: names ``csv`` and ``DetectSecretsScanner`` names ``detect-secrets``). Checked
 #: on the FOLDED form, so the word is matched whole and in one case.
-_TYPE_WORDS: Tuple[str, ...] = ("converter", "scanner", "reporter")
+_TYPE_WORDS: Tuple[str, ...] = PluginKind.values()
 
 
 def _without_type_word(folded: str) -> Optional[str]:
@@ -131,9 +133,9 @@ def declared_section_names(segment_key: str) -> Dict[str, str]:
     from automated_security_helper.config import ash_config
 
     segments: Dict[str, type[BaseModel]] = {
-        "converters": ash_config.ConverterConfigSegment,
-        "scanners": ash_config.ScannerConfigSegment,
-        "reporters": ash_config.ReporterConfigSegment,
+        PluginKind.CONVERTER.section: ash_config.ConverterConfigSegment,
+        PluginKind.SCANNER.section: ash_config.ScannerConfigSegment,
+        PluginKind.REPORTER.section: ash_config.ReporterConfigSegment,
     }
     segment_cls = segments[segment_key]
     declared = {info.alias or name for name, info in segment_cls.model_fields.items()}
