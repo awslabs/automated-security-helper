@@ -35,4 +35,9 @@ Microsoft BinSkim (`BinSkim analyze --recurse`) over compiled PE, ELF and Mach-O
 
 ### Desk validation
 
-See the report: module tests plus the facets families on a repository extract; the only failures involving binskim are the central items above.
+Desk cbc4ff77, repository extract at main e0aac6c3aff plus this branch, `uv sync --frozen --all-extras --group dev`, env -i, -n 4:
+- binskim module tests: 44 passed, 1 skipped, 0 failed.
+- ruff format --check and ruff check: green on the module and its tests.
+- Facets families (6 files): 509 passed, 24 failed. The binskim-specific failures are the central items above (universe counts x2, corpus-table agreement, `SCANNER_TOOL_TYPES` KeyError). The other 20 corpus-consistency failures name other scanners; the same file reads 20 failed on an origin/main extract in the same lane (that baseline run may have imported the branch's editable install, so treat it as indicative).
+- Whole-tree collect: 72806 tests, one collection error, the `PACKAGE_DIRS` central item (3 above).
+- Extract removed and absence read back.
