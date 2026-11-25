@@ -108,6 +108,13 @@ VOCABULARIES: tuple[Vocabulary, ...] = (
         ops_register.TargetKind,
         _OPS_HOME,
         ambiguous=frozenset({"source_code", "dockerfiles"}),
+        allowlist={
+            "automated_security_helper/core/asset.py": (
+                "AssetKind is the subject kind of a scan and owns the spelling "
+                "'container_image' on its own wire; TargetKind names what a "
+                "scanner serves"
+            ),
+        },
     ),
     Vocabulary(ops_register.RuntimeKind, _OPS_HOME),
     Vocabulary(
@@ -149,7 +156,6 @@ VOCABULARIES: tuple[Vocabulary, ...] = (
         _OPS_HOME,
         ambiguous=frozenset({"none", "both"}),
     ),
-    Vocabulary(ops_register.Tier, _OPS_HOME),
     Vocabulary(ops_register.ProvenanceSource, _OPS_HOME),
     Vocabulary(
         ops_register.Prerequisite,
