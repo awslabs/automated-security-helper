@@ -18,12 +18,12 @@ import pytest
 
 from automated_security_helper.cli.mcp.scan_target import (
     ASH_MCP_ALLOWED_ROOTS_ENV,
-    _allowed_roots,
     _denied_root_values,
     _denied_roots,
     _is_filesystem_root,
     validate_scan_target,
 )
+from automated_security_helper.config.mcp_sandbox import operator_scan_roots
 
 pytestmark = pytest.mark.unit
 
@@ -177,7 +177,7 @@ class TestDeniedRootSet:
         """
         # The denied-root table lives in config.mcp_sandbox (scan_target
         # re-exports it), and that is the module whose global the policy reads.
-        import automated_security_helper.config.mcp_sandbox as scan_target
+        import automated_security_helper.config.mcp_sandbox as mcp_sandbox
 
         real = tmp_path / "private" / "etc"
         real.mkdir(parents=True)
@@ -185,7 +185,7 @@ class TestDeniedRootSet:
         link.symlink_to(real, target_is_directory=True)
 
         monkeypatch.setattr(platform, "system", lambda: "Linux")
-        monkeypatch.setattr(scan_target, "_POSIX_DENIED_ROOTS", (str(link),))
+        monkeypatch.setattr(mcp_sandbox, "_POSIX_DENIED_ROOTS", (str(link),))
 
         assert _denied_roots() == [real]
 
@@ -199,7 +199,7 @@ class TestDeniedRootSet:
         """
         # The denied-root table lives in config.mcp_sandbox (scan_target
         # re-exports it), and that is the module whose global the policy reads.
-        import automated_security_helper.config.mcp_sandbox as scan_target
+        import automated_security_helper.config.mcp_sandbox as mcp_sandbox
 
         real = tmp_path / "private" / "etc"
         (real / "ssl").mkdir(parents=True)
@@ -207,7 +207,7 @@ class TestDeniedRootSet:
         link.symlink_to(real, target_is_directory=True)
 
         monkeypatch.setattr(platform, "system", lambda: "Linux")
-        monkeypatch.setattr(scan_target, "_POSIX_DENIED_ROOTS", (str(link),))
+        monkeypatch.setattr(mcp_sandbox, "_POSIX_DENIED_ROOTS", (str(link),))
 
         assert validate_scan_target(link) is not None
         assert validate_scan_target(real) is not None
@@ -486,7 +486,9 @@ class TestAllowlistParsing:
         """
         monkeypatch.setenv(ASH_MCP_ALLOWED_ROOTS_ENV, os.pathsep + "  ")
 
-        assert _allowed_roots() == []
+        # The grant the sandbox reads: the function the live check uses, not a
+        # second parser kept in this module.
+        assert operator_scan_roots() == ()
         assert validate_scan_target(tmp_path) is None
         if platform.system() != "Windows":
             assert validate_scan_target("/etc") is not None

@@ -174,7 +174,32 @@ def test_the_exclusion_table_is_what_the_manifests_declare():
         ("trivy-repo", "ignore_file", "trivy-ignore-file", ()),
         ("trivy", "ignore_file", "trivy-ignore-file", ()),
     }
-    assert len(SCANNER_EXCLUSION_OPTIONS) == len(exclusion_options())
+    # A number, not ``len(exclusion_options())``: the table is built one-to-one from
+    # that function, so comparing the two could not fail.
+    assert len(SCANNER_EXCLUSION_OPTIONS) == 9
+
+
+def test_a_manifest_listing_an_exclusion_option_twice_is_refused():
+    manifest = next(m for m in scanner_manifests() if m.name == "bandit")
+    data = manifest.model_dump()
+    data["exclusion_options"] = list(data["exclusion_options"]) * 2
+
+    with pytest.raises(ValidationError, match="lists an option twice"):
+        type(manifest).model_validate(data)
+
+
+def test_a_glob_builder_outside_the_plugin_module_is_refused():
+    manifest = next(m for m in scanner_manifests() if m.name == "bandit")
+    data = manifest.model_dump()
+    data["exclusion_options"] = [
+        {
+            **dict(data["exclusion_options"][0]),
+            "glob_builder": "automated_security_helper.config.ash_config:AshConfig",
+        }
+    ]
+
+    with pytest.raises(ValidationError, match="lies outside plugin_module"):
+        type(manifest).model_validate(data)
 
 
 def test_an_exclusion_option_is_an_option_of_its_scanners_model():
