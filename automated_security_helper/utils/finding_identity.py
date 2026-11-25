@@ -70,6 +70,27 @@ the same scanner and rule that names that file by its relative path and carries
 one of its fingerprint values: the reporter counts that value as shared between
 the two, and the flattened findings do not.
 
+The same secret from more than one scanner
+------------------------------------------
+
+The identity key starts with the scanner and the rule, so two scanners that find
+one secret give two findings with two identities, and nothing in either says they
+are about the same thing. ASH keeps both: it does not deduplicate. What it adds is
+a second key that leaves the scanner and the rule out
+(:func:`secret_location_key`): the file, the start line, the workspace project and,
+for a converted file, the tree. Findings that share it are still separate findings,
+each with its own identity; the key only lets a consumer put them side by side.
+
+Only a secret detection has one, because only there does the place say what the
+problem is: a credential at a line is that credential, whichever scanner read it.
+A SAST or IaC check does not get one (two rules that fire on one line are two
+problems), and neither does a dependency finding (every package of a lockfile sits
+at its line 1). A secret detection with no file or no start line has none either.
+
+Known limitations: two secrets on one line share the key, since the column is not
+in it (few scanners report one, and those that do disagree on where a secret
+starts); and scanners that place one secret on different lines do not share it.
+
 The frame boundary
 ------------------
 
@@ -591,6 +612,35 @@ def key_base(key: Mapping[str, Any]) -> Dict[str, Any]:
     return {
         name: value for name, value in key.items() if name not in _LOCATION_KEY_FIELDS
     }
+
+
+def secret_location_key(
+    identity: FindingIdentity, default_project: Optional[str] = None
+) -> Optional[Dict[str, Any]]:
+    """Where a secret detection is, without the scanner or the rule that found it.
+
+    The file, the start line and the workspace project, plus ``tree`` for a
+    converted file, as the identity key spells them, so that two scanners
+    reporting one secret get equal keys. *default_project* is the project the
+    run's results were written for, folded in as :func:`identity_keys` does.
+    None when the identity names no file or no start line: there is then no
+    place to compare.
+
+    The caller decides that the result is a secret detection; see the module
+    docstring for why no other kind of finding has such a key.
+    """
+    file_path = identity.base.get("file")
+    line = identity.lines[0]
+    if not file_path or not isinstance(line, int) or isinstance(line, bool):
+        return None
+    key: Dict[str, Any] = {
+        "file": file_path,
+        "startLine": line,
+        "project": identity.base.get("project") or default_project or None,
+    }
+    if identity.base.get("tree") is not None:
+        key["tree"] = identity.base["tree"]
+    return key
 
 
 def finding_id(key: Mapping[str, Any]) -> str:
