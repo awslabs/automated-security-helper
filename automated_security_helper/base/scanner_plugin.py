@@ -3111,12 +3111,14 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         if global_ignore_paths is None:
             global_ignore_paths = []
         try:
+            # Passed by keyword: a scan override reads them by name, and an
+            # extra positional would collide with ``target``.
             return self.scan(
-                target,
-                target_type,
-                global_ignore_paths,
-                config,
-                *args,
+                target=target,
+                target_type=target_type,
+                global_ignore_paths=global_ignore_paths,
+                config=config,
+                *args,  # ty: ignore[parameter-already-assigned]
                 **kwargs,
             )
         except Exception as e:
