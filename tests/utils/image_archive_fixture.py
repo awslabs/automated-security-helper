@@ -102,6 +102,42 @@ def build_secret_image_archive(destination: Path, *, compress: bool = True) -> P
     return destination
 
 
+def build_image_archive(
+    destination: Path, files: Dict[str, bytes], tag: str = "ash-fixture/files-image:1"
+) -> Path:
+    """Write a one-layer docker-archive holding *files* (in-image path to bytes).
+
+    For a test that needs an image with chosen content (a package manifest in
+    several directories, say). The same shape as :func:`build_secret_image_archive`:
+    a gzip layer, a config naming its diff id, a ``docker save`` manifest, every
+    mtime 0.
+    """
+    layer = _tar_bytes([(name.lstrip("/"), data) for name, data in files.items()])
+    layer_hex = _sha256(layer)
+    config = json.dumps(
+        {
+            "architecture": "amd64",
+            "os": "linux",
+            "config": {},
+            "rootfs": {"type": "layers", "diff_ids": [f"sha256:{layer_hex}"]},
+        },
+        sort_keys=True,
+    ).encode("utf-8")
+    config_name = f"{_sha256(config)}.json"
+    layer_name = f"{layer_hex}/layer.tar"
+    listing = [{"Config": config_name, "RepoTags": [tag], "Layers": [layer_name]}]
+    destination.write_bytes(
+        _tar_bytes(
+            [
+                (config_name, config),
+                (layer_name, gzip.compress(layer, compresslevel=9, mtime=0)),
+                ("manifest.json", json.dumps(listing).encode("utf-8")),
+            ]
+        )
+    )
+    return destination
+
+
 def archive_to_layout(archive: Path, layout: Path) -> Path:
     """Re-pack a docker-archive as an OCI image-layout directory at *layout*.
 

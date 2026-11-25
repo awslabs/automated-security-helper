@@ -46,7 +46,7 @@ ARCHIVE = (
 )
 
 
-def _scan(tmp_path: Path, image: ImageLocator):
+def _scan(tmp_path: Path, image: ImageLocator, ignore_paths=None):
     source = tmp_path / "anchor"
     source.mkdir()
     output = tmp_path / "out"
@@ -58,7 +58,7 @@ def _scan(tmp_path: Path, image: ImageLocator):
         context=PluginContext(source_dir=source, output_dir=output, config=config),
         config=TrivyScannerConfig(options={"scanners": ["secret"], "offline": True}),
     )
-    report = scanner.scan_image(image)
+    report = scanner.scan_image(image, global_ignore_paths=ignore_paths)
     return report
 
 
@@ -92,6 +92,36 @@ def test_the_findings_name_the_layer_that_holds_them(tmp_path, trivy_on_path):
     assert {getattr(r.properties, "layerDigest", None) for r in results} == {
         "sha256:9fd2968b2b1e3dfa271598db3b56fb431faf5827450d945c04c335b51ae4c077"
     }
+
+
+@pytest.mark.parametrize("path", ["/app/", "/app", "/app/creds.txt", "/*/creds.txt"])
+def test_an_ignore_path_keeps_the_tool_from_reading_the_file(
+    tmp_path, trivy_on_path, path
+):
+    """The ignore path reaches trivy as --skip-files, so the finding never exists.
+
+    ``scan_image`` runs no report filter (the executor does), so the finding's
+    absence is trivy leaving the file unread.
+    """
+    from automated_security_helper.models.core import IgnorePathWithReason
+
+    report = _scan(
+        tmp_path,
+        ImageLocator(oci_archive=ARCHIVE),
+        ignore_paths=[IgnorePathWithReason(path=path, reason="test")],
+    )
+    assert "github-pat" not in _rule_ids(report)
+
+
+def test_an_ignore_path_that_matches_nothing_changes_nothing(tmp_path, trivy_on_path):
+    from automated_security_helper.models.core import IgnorePathWithReason
+
+    report = _scan(
+        tmp_path,
+        ImageLocator(oci_archive=ARCHIVE),
+        ignore_paths=[IgnorePathWithReason(path="/elsewhere/", reason="test")],
+    )
+    assert "github-pat" in _rule_ids(report)
 
 
 def test_the_archive_repacked_as_a_layout_gives_the_same_finding(

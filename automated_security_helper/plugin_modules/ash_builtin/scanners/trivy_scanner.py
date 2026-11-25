@@ -208,6 +208,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners._trivy_scanne
     UNBOUNDED_TRIVY_TIMEOUT,
     TrivyScannerBase,
     skip_dirs_value,
+    skip_files_glob_value,
     trivy_timeout,
 )
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
@@ -529,7 +530,9 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
                     "(_execute_image_scan: a reference by --image-src from the "
                     "detected engine, --input for a saved archive; an OCI layout "
                     "directory is re-packed as a docker-archive first, "
-                    "utils/oci_layout_archive.py, which trivy reads through --input)"
+                    "utils/oci_layout_archive.py, which trivy reads through --input), "
+                    "with the ignore paths as --skip-files globs and the layer "
+                    "of each result read from a second, JSON pass"
                 ),
             ),
             runtime=opsf.RuntimeFacet(
@@ -827,6 +830,14 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         extra.append(f"--module-dir={modules.as_posix()}")
         extra.append(f"--ignorefile={self._ignore_file()}")
         extra.append(f"--secret-config={self._secret_config_file([config_token])}")
+        # The ignore paths the tool can be told to leave unread. --skip-files
+        # carries them all: measured on trivy 0.76.2, --skip-dirs removes
+        # nothing from an image scan, while --skip-files globs do (a directory
+        # is its "/**" glob; utils/image_ignore_paths).
+        extra.extend(
+            f"--skip-files={skip_files_glob_value(glob)}"
+            for glob in self._image_exclude_globs()
+        )
 
         if image.oci_layout is not None:
             # trivy image has no input mode for a layout directory, so the layout
