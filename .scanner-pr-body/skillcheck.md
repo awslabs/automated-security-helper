@@ -76,6 +76,11 @@ says nothing about malice:
   reads 25 agents' directories under the home directory, and the capture `home_leak.json` shows the
   tool reporting a home's `.claude/skills` as a second agent beside the project. Any non-`Project`
   agent in the output is dropped with a warning;
+- the spawn passes the operator's delivery variables through to the tool — the proxy family
+  (`PROXY_ENV_NAMES`; Go's default transport honors them) and the CA-bundle names
+  (`CA_BUNDLE_ENV_NAMES`) read from `snapshot_environ` — so the lookup works behind a proxy or a
+  private CA instead of failing open there. Nothing else of the parent environment reaches the
+  tool: no token, and not the real `HOME`;
 - there are no options that point at a file or switch off a check, so no trust-gated pointers
   (PATTERN 6c) and no denied-path rows are owed.
 
@@ -167,3 +172,58 @@ failure in the families below green.
   planted file read as 3 in the same batch.
 - The desk extract, lane and downloaded release were removed by literal path and the absence read
   back.
+
+### Fix-forward round (post-build review)
+
+The review of the branch tip `f4cd8165b1e` read FIX-NEEDED with one HIGH, fixed here as a
+fix-forward commit on this branch:
+
+- HIGH (fixed): the spawn env was the bare dict `{"HOME": ..., "USERPROFILE": ..., "NO_COLOR": "1"}`
+  on both spawn paths, so `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` and the CA-bundle variables never
+  reached the tool. Behind proxy-only egress every hash lookup then failed open, and a
+  database-known malicious skill read `unknown` — a clean-looking run indistinguishable from a real
+  one. The env now allowlists `PROXY_ENV_NAMES` + `CA_BUNDLE_ENV_NAMES` from `snapshot_environ`,
+  with `HOME`/`USERPROFILE` still overridden and everything else still dropped. Two new tests pin
+  the pass-through and the allowlist bound.
+
+Carried LOW rows from the same review (recorded, not fixed in this round):
+
+1. `test_a_missing_binary_is_reported_with_the_release_page` requests `caplog` and never reads it,
+   so the "reported with the release page" half of its name (the `ASH_LOGGER.warning` naming the
+   releases page and the tested version) cannot fail; the only assertion is
+   `validate_plugin_dependencies()` is False.
+2. On Windows (the tool publishes darwin, linux and windows builds) the tool's backslash paths make
+   `_relative_uri`'s `PurePosixPath(...).relative_to(...)` raise for every skill, so every finding's
+   uri degrades to `.` — findings survive, locations are lost. By the bytes only; no Windows
+   capture exists.
+3. The module docstring's parenthetical "(the tool's own exit gate)" attaches to the whole
+   "affected or critical/high" disjunction, but upstream `reporter.go` `HasCriticalOrHigh` at
+   v0.4.0 reads `topSeverity` only and never `status`; `_is_blocking` correctly mirrors the real
+   gate, so a maintainer "aligning" `_is_blocking` with that sentence would wrongly widen the
+   exit-1 acceptance. Doc imprecision only; the code is correct.
+4. The outbound half of the lookup (each skill's SHA-256 leaves the host as the query) has no
+   `Fetched` member to declare it — `SOURCE_UPLOAD` is validator-paired with `SERVICE_UPLOAD` and a
+   hash is not the source — so that direction lives in prose only (the offline reason, this file's
+   row 10 OFF_HOST recommendation). A facet-vocabulary gap, not a misdeclaration; npm-audit
+   (`CONTENT_FETCH` + `NOT_RUN`) is the precedent.
+5. The namesake install guard (`pip install`/`uvx`/... not in source) scans the module source only;
+   README.md and this file (the install texts an operator reads) are outside it, so a later README
+   edit could introduce `pip install skillcheck` (the PyPI namesake) unguarded. Today both texts are
+   clean and the guard can fail on the module.
+
+### Desk validation of the fix-forward round (dev-dsk-d14420e2)
+
+Same discipline as the build run: repository extract (shallow clone of this branch), `uv sync
+--frozen --all-extras --group dev` (Python 3.12.15), `env -i` with HOME/USER/PATH/CI=1/TMPDIR, lane
+under `/run/user/23503848`, `--basetemp` in the lane.
+
+- Red proof: with the pre-fix module checked out at `f4cd8165b1e` under the new tests, the proxy
+  pass-through test fails (`KeyError: 'HTTPS_PROXY'`); the allowlist-bound test passes there too, as
+  expected (the bare dict is a subset of the allowlist).
+- Green: module family (`ash_skillcheck_plugins` plus `test_skillcheck_sandbox_requirements.py`,
+  the two new tests included) at the fixed tip: 72 passed, 0 failed.
+- `ruff format --check` and `ruff check` over the changed module and test file: clean (also run by
+  the commit hooks).
+- Conflict-marker scan over the changed module, tests and this file: 0, with a planted control file
+  read as 3 in the same batch.
+- The desk lane and extract were removed by literal path and the absence read back.
