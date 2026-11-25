@@ -122,9 +122,14 @@ def _oracle_prepare(
     identity = relative_to_scan_root(
         identity, source_dir, resolve_root=not formatter.offline
     )
-    # The correlation id, as the formatter assigns it: the one deliberate
-    # extension of the oracle since it was frozen, mirrored here the way the
-    # package fields were when they were added.
+    # The correlation id: the one deliberate extension of the oracle since it
+    # was frozen, mirrored here the way the package fields were when they were
+    # added. The formatter now reads the flatten-assigned id off the model
+    # (utils/sarif_utils.shared_correlation_ids); the oracle keeps the
+    # per-result spelling, whose value agrees on the differential's inputs
+    # (no run-tag-only secret classification, no secret stored under an
+    # absolute path with a scan root — the two shapes where the per-result
+    # recomputation diverged, pinned in test_correlation_id_surfaces).
     flat.correlation_id = correlation_id_for(
         flat,
         target=correlation_scope,

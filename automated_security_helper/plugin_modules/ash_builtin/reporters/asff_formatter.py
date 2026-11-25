@@ -59,19 +59,18 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, TYPE_CHECKING
 
-from automated_security_helper.models.flat_vulnerability import (
-    FlatVulnerability,
-    correlation_id_for,
-)
+from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 from automated_security_helper.utils.finding_identity import (
     CORRELATION_ID_PROPERTY,
-    correlation_target,
     identity_keys,
     relative_path,
     relative_to_scan_root,
 )
 from automated_security_helper.utils.frame_text import wire
-from automated_security_helper.utils.sarif_utils import _resolve_result_severity
+from automated_security_helper.utils.sarif_utils import (
+    _resolve_result_severity,
+    shared_correlation_ids,
+)
 
 if TYPE_CHECKING:
     from automated_security_helper.models.asharp_model import AshAggregatedResults
@@ -198,10 +197,6 @@ class AsffFormatter:
         model_project = _model_project(model)
         scope = self.scope
         source_dir = self.source_dir
-        # The correlation target is the model's, not this reporter's findings
-        # scope: every reporter of one run must export one value for one
-        # finding, and only the model-level scope is known to all of them.
-        corr_target = correlation_target(getattr(model.metadata, "project_name", None))
 
         prepared: list[dict[str, Any]] = []
         for run in (model.sarif.runs if model.sarif else None) or []:
@@ -216,13 +211,29 @@ class AsffFormatter:
                         target=target,
                         model_project=model_project,
                         source_dir=source_dir,
-                        correlation_scope=corr_target,
                     )
                 )
 
         keys = identity_keys(
             [entry["identity"] for entry in prepared], default_project=model_project
         )
+        # The cross-scanner correlation id each result's flattened finding was
+        # assigned at flatten time (models/flat_vulnerability
+        # .assign_correlation_ids), read by the same positional pairing every
+        # reporter uses (utils/sarif_utils.shared_correlation_ids): every
+        # reporter of one run must export one value for one finding, so this
+        # formatter never re-derives the key. Re-deriving here diverged from
+        # the model's value twice: the per-result flatten had no run in hand,
+        # so a scanner classified as SECRETS only by its run driver's tags lost
+        # the pair, and the key was computed over the rebased identity while
+        # the flatten keys the raw one. None (the pair omitted) at every
+        # position when the flattening fails, as the other reporters leave it.
+        if prepared:
+            correlation_ids = shared_correlation_ids(
+                model, [entry["result"] for entry in prepared]
+            )
+            for entry, correlation_id in zip(prepared, correlation_ids):
+                entry["flat"].correlation_id = correlation_id
         for entry, derived in zip(prepared, _derived(prepared)):
             entry["derived"] = derived
         return [
@@ -246,7 +257,6 @@ class AsffFormatter:
         target: str,
         model_project: str | None,
         source_dir: str | Path | None,
-        correlation_scope: str,
     ) -> dict[str, Any]:
         flat = FlatVulnerability.from_sarif_result(result, tool_name, "UNKNOWN")
         identity = flat.identity
@@ -259,16 +269,6 @@ class AsffFormatter:
         project = flat.workspace_project or model_project
         identity = relative_to_scan_root(
             identity, source_dir, resolve_root=not self.offline
-        )
-        # Assigned here because this formatter flattens each result itself
-        # rather than reading model.to_flat_vulnerabilities(); the spelling is
-        # the shared one (flat_vulnerability.correlation_id_for), over the
-        # rebased identity, as the finding Id is.
-        flat.correlation_id = correlation_id_for(
-            flat,
-            target=correlation_scope,
-            identity=identity,
-            default_project=model_project,
         )
         return {
             "flat": flat,

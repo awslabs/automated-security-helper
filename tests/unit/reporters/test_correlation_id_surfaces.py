@@ -91,9 +91,12 @@ def _run(tool_name: str, tool_type: str, results) -> Run:
 @pytest.fixture
 def model() -> AshAggregatedResults:
     """Two secrets scanners at one location, one SCA finding, one SAST finding."""
-    # The secret results carry a result-level ``secret`` tag: the ASFF
-    # formatter flattens each result itself with no run in hand, so the
-    # classification must not depend on the run driver's tags.
+    # The secret runs are classified SECRETS only by their run driver's tags:
+    # neither scanner name is in SCANNER_TOOL_TYPES and the results carry no
+    # tag of their own (the third-party-scanner shape scanner_tool_types names
+    # as its limit). Every surface, the ASFF ProductFields pair included, must
+    # still carry the flatten's id: a reporter that re-derived the
+    # classification without the run in hand would silently drop the pair.
     return AshAggregatedResults(
         sarif=SarifReport(
             version="2.1.0",
@@ -101,12 +104,12 @@ def model() -> AshAggregatedResults:
                 _run(
                     "scanner-a",
                     "SECRETS",
-                    [_result("SECRET-1", "src/creds.py", tags=["secret"])],
+                    [_result("SECRET-1", "src/creds.py")],
                 ),
                 _run(
                     "scanner-b",
                     "SECRETS",
-                    [_result("generic.secrets.9", "src/creds.py", tags=["secret"])],
+                    [_result("generic.secrets.9", "src/creds.py")],
                 ),
                 _run(
                     "grype",
@@ -172,6 +175,41 @@ class TestAsff:
         for finding in findings:
             assert finding["Id"].startswith("ash/")
             assert len(finding["Id"]) == 68
+
+    def test_the_pair_is_the_flatten_value_for_a_path_stored_absolute_under_the_root(
+        self,
+    ):
+        """The pair is read off the flatten, never recomputed over the rebased file.
+
+        A stored result whose path stayed absolute under the scan root is the
+        case ``relative_to_scan_root`` exists for: the finding ``Id`` is still
+        derived over the rebased identity, but the correlation key is the
+        flatten's, over the path as the run spelled it, so a consumer joining
+        the ASFF report to the SARIF, OCSF or CSV report of the same run on
+        ``ash/correlationId`` matches.
+        """
+        model = AshAggregatedResults(
+            sarif=SarifReport(
+                version="2.1.0",
+                runs=[
+                    _run(
+                        "scanner-a",
+                        "SECRETS",
+                        [_result("SECRET-1", "/scan/src/creds.py", tags=["secret"])],
+                    )
+                ],
+            )
+        )
+        expected = model.to_flat_vulnerabilities()[0].correlation_id
+        assert expected is not None and expected.startswith("secret/")
+        formatter = AsffFormatter("example", None, "/scan", offline=True)
+        (finding,) = formatter.build_asff_findings(
+            model, account_id="123456789012", region="us-east-1"
+        )
+        assert finding["ProductFields"][CORRELATION_ID_PROPERTY] == expected
+        # The rebase still happened where it belongs: the resource and file
+        # fields carry the path relative to the scan root.
+        assert finding["ProductFields"]["ash/file"] == "src/creds.py"
 
 
 class TestSarif:
