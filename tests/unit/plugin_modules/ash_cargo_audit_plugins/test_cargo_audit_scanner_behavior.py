@@ -7,9 +7,8 @@ The subprocess is replaced by a fake, so these run on every platform without the
 binary. The JSON documents are written by hand from the rustsec ``Report`` types
 (``vulnerabilities.list[]`` and ``warnings.<kind>[]``, each with ``advisory`` and
 ``package``); they are not captures of a real run, and the advisory ids and crate
-names are made up. No real capture exists yet: cargo-audit is on no desk and is
-not installable under the frozen toolchain, so a real-report oracle (checklist
-rows 18, 21, 24) is owed to a run on a host that has it.
+names are made up. The real-report oracle (checklist rows 18, 21, 24) is
+``test_cargo_audit_captured_report.py``, over a capture from cargo-audit 0.23.0.
 """
 
 from __future__ import annotations

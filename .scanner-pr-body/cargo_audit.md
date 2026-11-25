@@ -22,9 +22,15 @@ Both registers are declared on the class (`facets`, `operational_facets`).
 - Added `nothing_to_scan_reason` (a tree without a lockfile reads SKIPPED, not MISSING), a test for each register mirror, and a flat-row conformance test over the converter output.
 - Fixed `test_report_is_written_and_a_stale_one_removed`, which looked in the wrong directory and could not fail.
 
-### Not met
+### Captured report
 
-- Checklist rows 18, 21 and 24 (a real captured report): cargo-audit is on no desk and cannot be installed under the frozen toolchain, so the tests use documents written from the rustsec `Report` types. A capture from a host that has the tool is owed; with it the corpus table below can go in.
+- Checklist rows 18, 21 and 24: `tests/unit/plugin_modules/ash_cargo_audit_plugins/fixtures/cargo-audit-0.23.0-report.json` is the stdout of a real `cargo-audit audit --json --file=<Cargo.lock>` run (cargo-audit 0.23.0 from `cargo install cargo-audit --locked`, RustSec database commit 10db6998b5d7, exit 1) over a lockfile pinning `time 0.1.43` and `atty 0.2.14`: one vulnerability (RUSTSEC-2020-0071, CVSS 5.5) and two warnings (unmaintained, unsound). `test_cargo_audit_captured_report.py` converts it. The behavior tests still use hand-written documents for the other cases.
+- Still owed to the integration lane: the corpus spec in `test_scanner_facets_corpus_consistency.py` (below) can now point at this fixture.
+
+### Final-review rows (SHOULD/LOW)
+
+- The capture covers `unmaintained` and `unsound` warnings; `yanked` and `notice` kinds have no real capture.
+- The capture was made on the build host with a network fetch of the advisory database; the desks have no cargo-audit, so the capture test runs the converter only, never the tool.
 
 ### License posture
 
@@ -37,7 +43,7 @@ No file outside the module and its tests was edited. These shared edits are need
 - Add `ash_cargo_audit_plugins` to `PACKAGE_DIRS` (whole-tree collection fails with `not named in PACKAGE_DIRS`).
 - `utils/scanner_names.py` `SCANNER_TOOL_TYPES`: add `cargo-audit` as SCA (`test_tool_type_is_one_story_across_four_declarations`, and the register-versus-table check in `test_the_universe_is_the_twenty_two_shipped_scanners`).
 - `utils/content_databases.py`: add a `CONTENT_DATABASES` entry for the RustSec advisory database (`~/.cargo/advisory-db`) (`test_content_database_join_agrees_both_ways`).
-- `tests/unit/plugin_modules/test_scanner_facets_corpus_consistency.py`: add a `cargo-audit` corpus spec once a captured fixture exists.
+- `tests/unit/plugin_modules/test_scanner_facets_corpus_consistency.py`: add a `cargo-audit` corpus spec pointing at the captured fixture above.
 - Bump the scanner-count controls from 22 in `test_scanner_facets_registry_totality.py` and `test_scanner_operational_facets_consistency.py`.
 
 ### Desk validation
