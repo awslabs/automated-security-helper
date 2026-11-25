@@ -8,7 +8,8 @@ Every component whose syft location falls under a
 properties read from that directory's harvest manifest, so each harvested
 component is auditable back to the sdist that produced it; components located
 anywhere else are untouched. The merge dedups a component reported by both the
-source pass and the harvest by purl, so a harvested crate appears exactly once.
+source pass and the harvest by purl, whatever their bom-refs are, so a harvested
+crate appears exactly once.
 """
 
 from __future__ import annotations
@@ -56,7 +57,13 @@ def _write_manifest(target: Path) -> None:
     )
 
 
-def _report(location: str) -> CycloneDXReport:
+#: syft's cargo bom-ref: the purl and a package-id hash that differs between runs.
+CRATE_PURL = "pkg:cargo/fixturecrate@0.1.0"
+
+
+def _report(
+    location: str, crate_ref: str = f"{CRATE_PURL}?package-id=bbbb"
+) -> CycloneDXReport:
     return CycloneDXReport.model_validate(
         {
             "bomFormat": "CycloneDX",
@@ -65,7 +72,7 @@ def _report(location: str) -> CycloneDXReport:
             "components": [
                 {
                     "type": "library",
-                    "bom-ref": "pkg:cargo/fixturecrate@0.1.0",
+                    "bom-ref": crate_ref,
                     "name": "fixturecrate",
                     "version": "0.1.0",
                     "purl": "pkg:cargo/fixturecrate@0.1.0",
@@ -152,19 +159,22 @@ def test_a_location_under_no_manifest_is_not_stamped(tmp_path: Path) -> None:
 def test_merged_sbom_carries_a_harvested_component_exactly_once(
     tmp_path: Path,
 ) -> None:
+    """The source pass and the harvest pass name one crate under bom-refs that
+    differ in syft's package-id suffix, as syft writes them; the merge folds the
+    harvested one onto the one already listed."""
     _write_manifest(tmp_path)
     harvested = _report(
-        f"/work/sdist-lock-harvester/{HARVEST_DIR_NAME}/fixturepkg/0.1.0/Cargo.lock"
+        f"/work/sdist-lock-harvester/{HARVEST_DIR_NAME}/fixturepkg/0.1.0/Cargo.lock",
+        f"{CRATE_PURL}?package-id=bbbb",
     )
     stamp_harvested_components(harvested, tmp_path)
-    source_pass = _report("/some/source/Cargo.lock")
+    source_pass = _report("/some/source/Cargo.lock", f"{CRATE_PURL}?package-id=aaaa")
 
     merged = merge_cyclonedx_reports(source_pass, harvested)
 
-    crates = [
-        c for c in merged.components or [] if c.purl == "pkg:cargo/fixturecrate@0.1.0"
-    ]
+    crates = [c for c in merged.components or [] if c.purl == CRATE_PURL]
     assert len(crates) == 1
+    assert crates[0].bom_ref.root == f"{CRATE_PURL}?package-id=aaaa"
 
 
 def test_suppression_glob_matches_the_harvest_layout() -> None:
