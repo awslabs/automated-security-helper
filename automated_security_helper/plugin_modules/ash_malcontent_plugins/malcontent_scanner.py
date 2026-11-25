@@ -212,10 +212,9 @@ def convert_malcontent_report(document: Any, target: Path) -> Dict[str, Any]:
                 },
                 "locations": [
                     {
-                        "physicalLocation": {
-                            "artifactLocation": {"uri": uri},
-                            "region": {"startLine": 1},
-                        }
+                        # A behavior belongs to the file, not to a line: no region is
+                        # written, so no invented line reaches the finding.
+                        "physicalLocation": {"artifactLocation": {"uri": uri}}
                     }
                 ],
                 "partialFingerprints": {"malcontent/v1": fingerprint},
@@ -290,7 +289,7 @@ class MalcontentScanner(ScannerPluginBase[MalcontentScannerConfig]):
         ),
         line_range=FacetDecl(
             state=FacetState.NA,
-            reason="the report is per file and per behavior; the adapter writes startLine 1",
+            reason="the report is per file and per behavior; the adapter writes no region",
         ),
         column=FacetDecl(
             state=FacetState.NA,
@@ -348,9 +347,11 @@ class MalcontentScanner(ScannerPluginBase[MalcontentScannerConfig]):
             "so it is deliberately never copied into SARIF",
         ),
         references=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field='Files.<path>.Behaviors[] "RuleURL" (http and https only), '
-            "written as the SARIF rule helpUri",
+            state=FacetState.DROPPED,
+            native_field='Files.<path>.Behaviors[] "RuleURL" and "ReferenceURL"',
+            reason="RuleURL (http and https only) is written as the SARIF rule "
+            "helpUri, but the flat references column reads result relatedLocations "
+            "only, so no reference reaches it; ReferenceURL is not written at all",
         ),
         tags=FacetDecl(
             state=FacetState.MAPPED,

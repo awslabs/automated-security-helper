@@ -508,6 +508,12 @@ class TestRecordedReports:
             tally[severity] = tally.get(severity, 0) + 1
         assert tally == counts
 
+    def test_a_file_level_behavior_carries_no_invented_line(self, tmp_path):
+        document = json.loads((RECORDED / "ls.json").read_text(encoding="utf-8"))
+        sarif = ms.convert_malcontent_report(document, tmp_path)
+        for result in sarif["runs"][0]["results"]:
+            assert "region" not in result["locations"][0]["physicalLocation"]
+
     def test_only_malcontents_own_rules_are_in_the_recorded_reports(self):
         """The reports carry no ``3P/`` rule, the set ``--third-party=false`` drops."""
         for path in RECORDED.glob("*.json"):

@@ -53,6 +53,13 @@ Enable it by listing `automated_security_helper.plugin_modules.ash_malcontent_pl
   and a recorded negative, once someone can build or run `mal`; the README of the fixture
   directory says so.
 
+- Two register defects the recorded reports exposed through the facets corpus check, both
+  fixed in the module: the adapter wrote `region.startLine 1` for every behavior while the
+  register declares `line_range` n/a, so the invented line is gone (a behavior is file-level);
+  and `references` was declared mapped although the flat references column reads
+  `relatedLocations` only, so it is now declared mappable-dropped with the reason (the rule
+  `helpUri` still carries `RuleURL`).
+
 ### License posture
 
 Malcontent is Apache-2.0 (per its README; the facet states `not read` because no pinned
