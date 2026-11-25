@@ -468,6 +468,11 @@
                 "install_timeout": 300,
                 "tool_version": ">=7.16.0,<8.0.0"
               }
+            },
+            "mcp_config": {
+              "enabled": true,
+              "name": "mcp_config",
+              "options": {}
             }
           },
           "description": "Converter configurations by name."
@@ -3233,6 +3238,15 @@
             }
           },
           "description": "Configure the options for the JupyterConverter"
+        },
+        "mcp_config": {
+          "$ref": "#/$defs/McpConfigConverterConfig",
+          "default": {
+            "enabled": true,
+            "name": "mcp_config",
+            "options": {}
+          },
+          "description": "Configure the options for the McpConfigConverter"
         }
       },
       "title": "ConverterConfigSegment",
@@ -5171,6 +5185,55 @@
         }
       },
       "title": "MarkdownReporterConfigOptions",
+      "type": "object"
+    },
+    "McpConfigConverterConfig": {
+      "additionalProperties": false,
+      "description": "MCP server config (.mcp.json and similar) to shell script converter configuration.",
+      "properties": {
+        "enabled": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
+          "default": true,
+          "title": "Enabled"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "const": "mcp_config",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
+          "default": "mcp_config",
+          "title": "Name"
+        },
+        "options": {
+          "$ref": "#/$defs/McpConfigConverterConfigOptions",
+          "default": {},
+          "description": "Configure MCP server config converter"
+        }
+      },
+      "title": "McpConfigConverterConfig",
+      "type": "object"
+    },
+    "McpConfigConverterConfigOptions": {
+      "additionalProperties": false,
+      "description": "The MCP config converter has no options of its own.",
+      "properties": {},
+      "title": "McpConfigConverterConfigOptions",
       "type": "object"
     },
     "McpConfigScannerConfig": {

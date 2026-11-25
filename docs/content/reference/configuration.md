@@ -335,6 +335,7 @@ The scanners ASH declares a configuration for. Other scanner names are accepted 
 | <a id="scanners.detect-secrets"></a>`detect-secrets` | yes | [`detect-secrets` options](scanners.md#detect-secrets) |
 | <a id="scanners.gitleaks"></a>`gitleaks` | yes | [`gitleaks` options](scanners.md#gitleaks) |
 | <a id="scanners.grype"></a>`grype` | yes | [`grype` options](scanners.md#grype) |
+| <a id="scanners.mcp-config"></a>`mcp-config` | yes | [`mcp-config` options](scanners.md#mcp-config) |
 | <a id="scanners.npm-audit"></a>`npm-audit` | yes | [`npm-audit` options](scanners.md#npm-audit) |
 | <a id="scanners.opengrep"></a>`opengrep` | yes on Linux and macOS; no on Windows | [`opengrep` options](scanners.md#opengrep) |
 | <a id="scanners.semgrep"></a>`semgrep` | yes on Linux and macOS; no on Windows | [`semgrep` options](scanners.md#semgrep) |
@@ -375,6 +376,7 @@ The converters ASH declares a configuration for. Other converter names are accep
 |-----|--------------------|---------------|
 | <a id="converters.archive"></a>`archive` | yes | [`archive` options](converters.md#archive) |
 | <a id="converters.jupyter"></a>`jupyter` | yes | [`jupyter` options](converters.md#jupyter) |
+| <a id="converters.mcp_config"></a>`mcp_config` | yes | [`mcp_config` options](converters.md#mcp_config) |
 
 ## Workspace policy file
 

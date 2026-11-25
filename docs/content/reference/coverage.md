@@ -68,6 +68,7 @@ them to the tool.
 | detect-secrets | Secrets | Selected files: every file in the scan set except generated lockfiles | yes | yes |
 | gitleaks | Secrets | Whole directory: the files on disk, not git history | no | no |
 | grype | SCA | Whole directory: the packages it catalogs from manifests and lockfiles | no | no |
+| mcp-config | SAST | Selected files: the repo-local MCP server config files (`.mcp.json`, `.cursor/mcp.json`, `.vscode/mcp.json`, `.codex/config.toml` and the others the [MCP config page](../docs/plugins/builtin/mcp-config.md) lists), read in process | yes | no |
 | npm-audit | SCA | Selected files: each `package.json` that has a lockfile beside it | no | yes |
 | opengrep | SAST | Whole directory, with ASH's bundled rules and the `p/ci` ruleset | no | no |
 | semgrep | SAST | Whole directory, with ASH's bundled rules and the `p/ci` ruleset | yes | no |

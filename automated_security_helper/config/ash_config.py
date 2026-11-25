@@ -58,6 +58,9 @@ from automated_security_helper.plugin_modules.ash_builtin.converters.archive_con
 from automated_security_helper.plugin_modules.ash_builtin.converters.jupyter_converter import (
     JupyterConverterConfig,
 )
+from automated_security_helper.plugin_modules.ash_builtin.converters.mcp_config_converter import (
+    McpConfigConverterConfig,
+)
 from automated_security_helper.core.constants import (
     ASH_CONFIG_ENV_VAR_ALLOWLIST,
     ASH_CONFIG_ENV_VAR_PREFIX,
@@ -899,6 +902,13 @@ class ConverterConfigSegment(_PluginConfigSegment):
         JupyterConverterConfig,
         Field(description="Configure the options for the JupyterConverter"),
     ] = JupyterConverterConfig()
+    mcp_config: Annotated[
+        McpConfigConverterConfig,
+        Field(
+            description="Configure the options for the McpConfigConverter",
+            alias="mcp_config",
+        ),
+    ] = McpConfigConverterConfig()
 
 
 class ScannerConfigSegment(_PluginConfigSegment):

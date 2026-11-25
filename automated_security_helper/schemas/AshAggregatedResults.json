@@ -1669,6 +1669,11 @@
                 "install_timeout": 300,
                 "tool_version": ">=7.16.0,<8.0.0"
               }
+            },
+            "mcp_config": {
+              "enabled": true,
+              "name": "mcp_config",
+              "options": {}
             }
           },
           "description": "Converter configurations by name."
@@ -6254,6 +6259,15 @@
             }
           },
           "description": "Configure the options for the JupyterConverter"
+        },
+        "mcp_config": {
+          "$ref": "#/$defs/McpConfigConverterConfig",
+          "default": {
+            "enabled": true,
+            "name": "mcp_config",
+            "options": {}
+          },
+          "description": "Configure the options for the McpConfigConverter"
         }
       },
       "title": "ConverterConfigSegment",
@@ -13604,6 +13618,46 @@
         }
       },
       "title": "MarkdownReporterConfigOptions",
+      "type": "object"
+    },
+    "McpConfigConverterConfig": {
+      "additionalProperties": true,
+      "description": "MCP server config (.mcp.json and similar) to shell script converter configuration.",
+      "properties": {
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "const": "mcp_config",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
+          "default": "mcp_config",
+          "title": "Name"
+        },
+        "options": {
+          "$ref": "#/$defs/McpConfigConverterConfigOptions",
+          "default": {},
+          "description": "Configure MCP server config converter"
+        }
+      },
+      "title": "McpConfigConverterConfig",
+      "type": "object"
+    },
+    "McpConfigConverterConfigOptions": {
+      "additionalProperties": true,
+      "description": "The MCP config converter has no options of its own.",
+      "properties": {},
+      "title": "McpConfigConverterConfigOptions",
       "type": "object"
     },
     "McpConfigScannerConfig": {

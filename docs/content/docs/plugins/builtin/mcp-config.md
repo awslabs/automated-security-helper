@@ -47,6 +47,7 @@ scanners:
       allowed_command_prefixes: []
 ```
 
+<!-- doctest: options of=scanners.mcp-config -->
 | Option | Default | Severity | What it flags |
 | --- | --- | --- | --- |
 | `forbid_privilege_escalation` | `true` | HIGH | `sudo`, `doas`, `su` or `pkexec` as the command, or as a whole argument, of a stdio entry. A word of a shell string handed to `-c` counts. `pseudo` does not. |
