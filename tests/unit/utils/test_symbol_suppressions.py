@@ -320,6 +320,20 @@ class TestPythonSpans:
         # A same-named method one level up is a different symbol.
         assert not any(a <= inner_method <= b for a, b in spans["Outer.method"])
 
+    def test_a_class_attribute_line_is_inside_the_class_and_no_method(self):
+        """A line at class-body level, between methods, is covered by the class
+        symbol alone. This is the shape that decides how a class-attribute pin
+        can migrate: the only addressable symbol is the whole class, so a pin
+        whose intent is one attribute line stays line-pinned (see
+        tests/test_data/suppression_symbol_migration.yaml's kept entries)."""
+        spans = _python_spans()
+        attr = _line(PYTHON_SOURCE, "MARK Outer attr")
+        assert any(a <= attr <= b for a, b in spans["Outer"])
+        for name, spanlist in spans.items():
+            if name == "Outer":
+                continue
+            assert not any(a <= attr <= b for a, b in spanlist), name
+
     def test_nested_function_and_conditional_definition(self):
         spans = _python_spans()
         inner = _line(PYTHON_SOURCE, "MARK inner_function body")
@@ -822,7 +836,7 @@ class TestLint:
         self, tmp_path, caplog, monkeypatch
     ):
         """The printed command is pip's; uv tool, pipx and uvx users need the page."""
-        url = f"{ASH_DOCS_URL}/docs/suppressions/#installing-the-extra"
+        url = f"{ASH_DOCS_URL}/how-to/suppress-findings/#installing-the-extra"
         scan_hints = _missing_extra_scan_hints(tmp_path, caplog, monkeypatch)
         lint_issues = _symbol_issues(
             _lint([{"path": "src/app.py", "reason": "r", "symbol": "module_function"}])

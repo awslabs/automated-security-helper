@@ -110,22 +110,15 @@ _RANDOM_CALL = (
 #: The same for the other rules, by rule id and path. A moved pin fails below with the
 #: line to use, and so does a row whose entry is gone. An entry with no row here is not
 #: looked at.
+#: Entries scoped by ``symbol`` instead of a line range have no rows here: the
+#: resolver finds the definition wherever it moves, and
+#: tests/unit/config/test_symbol_migration_record.py holds each one to a symbol
+#: that resolves (the B603/B607 ferret_scanner entries and the docx generator's
+#: SECRET-HEX-HIGH-ENTROPY-STRING entry migrated there).
 _RANGED_PIN_MARKERS: dict[tuple[str, str], list[_Marker]] = {
     ("B404", FERRET_SCANNER): [_Marker((r"^import subprocess\b",))],
-    # One call carries both markers, so both rules pin the same lines.
-    ("B603", FERRET_SCANNER): [_Marker((r"# nosec B603 B607\b",))],
-    ("B607", FERRET_SCANNER): [_Marker((r"# nosec B603 B607\b",))],
     # Every line that draws a value from the random module, as the file was written.
     ("B311", DOCX_SCRIPT): [_Marker((_RANDOM_CALL,), every_line=True)],
-    # The two narrative lines the entry was written for, which the pin takes with the
-    # lines between them. The generator builds the card numbers at run time, and
-    # since the Luhn-valid rewrite the MasterCard line names its last four digits
-    # through a variable too, so neither line holds a number.
-    ("SECRET-HEX-HIGH-ENTROPY-STRING", DOCX_SCRIPT): [
-        _Marker(
-            (r"The MasterCard ending in \{approved_last_four\}", r"Expiration: 12/25")
-        ),
-    ],
     # The two MRZ-style passport lines of the MRZ_LINES tuple, each padded to the TD3
     # length with the "<" filler. The padding call is what no other line of the file
     # has, so the pattern names the two lines without spelling out a passport line.
@@ -148,6 +141,15 @@ _RANGED_PIN_MARKERS: dict[tuple[str, str], list[_Marker]] = {
     # pin against: the commit the v1.10.1 tag points at.
     ("API_KEY_OR_SECRET", BETTERLEAKS_SCANNER_TEST): [
         _Marker((r'^    COMMIT = "',)),
+    ],
+    # The two lines of .ash/.ash.yaml where ferret-scan 2.6.0 reports
+    # API_KEY_OR_SECRET at 100% (measured by running it over the file): a
+    # suppression reason that names a placeholder fixture assignment. This file is
+    # edited often, so the pins move with it; the markers say which line each one is
+    # for. The patterns name the line's wording, not the fixture value.
+    ("API_KEY_OR_SECRET", ".ash/.ash.yaml"): [
+        _Marker((r"^        HEAD = .* and TOKEN =$",)),
+        _Marker((r"^        `secret = .abcdefghij",)),
     ],
 }
 
@@ -603,29 +605,9 @@ def test_an_every_line_pattern_that_matches_nothing_is_reported():
             "# import subprocess happens below",
         ),
         (
-            ("B603", FERRET_SCANNER),
-            "result = spawn_run(  # nosec B603 B607 - list args",
-            "result = spawn_run(  # nosec B603 - list args",
-        ),
-        (
-            ("B607", FERRET_SCANNER),
-            "result = spawn_run(  # nosec B603 B607 - list args",
-            "result = spawn_run(  # nosec B607 - list args",
-        ),
-        (
             ("B311", DOCX_SCRIPT),
             "    area = random.randint(900, 999)  # nosec B311",
             "random.seed(42)",
-        ),
-        (
-            ("SECRET-HEX-HIGH-ENTROPY-STRING", DOCX_SCRIPT),
-            'f"The MasterCard ending in {approved_last_four} ({approved_card}) has "',
-            'f"MasterCard: {approved_card}"',
-        ),
-        (
-            ("SECRET-HEX-HIGH-ENTROPY-STRING", DOCX_SCRIPT),
-            'f"AMEX: {card()} - Expiration: 12/25. "',
-            'f"AMEX: {card()}"',
         ),
         (
             ("PASSPORT", DOCX_SCRIPT),
@@ -635,11 +617,7 @@ def test_an_every_line_pattern_that_matches_nothing_is_reported():
     ],
     ids=[
         "B404",
-        "B603",
-        "B607",
         "B311",
-        "SECRET-HEX first line",
-        "SECRET-HEX second line",
         "PASSPORT",
     ],
 )
