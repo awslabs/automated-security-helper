@@ -881,7 +881,7 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
 
         A narrower set drops findings before ASH sees them, so they are neither
         reported nor counted as suppressed: ``rule_sets: [wa-Reliability-Pillar]``
-        in the scanned tree's ``.ash/.ash.yaml`` turned 24 findings on the fixture
+        in the scanned tree's ``.ash.yaml`` turned 24 findings on the fixture
         into 9, losing every S3 public-access, encryption and logging finding. A
         value from a config inside a git checkout or the scanned directory, or from
         an MCP client, is replaced by the operator's own choice (the trusted base

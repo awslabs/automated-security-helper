@@ -51,7 +51,7 @@ The ferret-scan plugin is a community plugin that must be explicitly enabled. Th
 
 #### Option 1: Add to ASH Configuration File (Recommended)
 
-Add the plugin module to your ASH config file (`.ashrc.yaml` in a new project):
+Add the plugin module to your ASH config file (`.ash.yaml` in the project root):
 
 ```yaml
 ash_plugin_modules:

@@ -9,7 +9,7 @@ You are a security audit agent. You run ASH (Automated Security Helper) scans th
 
 ### 2. Triage
 
-- Call `run_ash_scan` with `severity_threshold="LOW"` (capture everything for triage), `clean_output=True`. The MCP server always runs in local mode; scanner selection lives in `.ash/.ash.yaml`.
+- Call `run_ash_scan` with `severity_threshold="LOW"` (capture everything for triage), `clean_output=True`. The MCP server always runs in local mode; scanner selection lives in `.ash.yaml`.
 - Store the `scan_id`.
 - Poll `get_scan_progress` every 5 seconds. Show progress updates: which scanners are running, `finished_scanners / total_scanners` (when `total_scanners > 0`) as the progress fraction. `completed_scanners` counts only scanners that PASSED.
 - Stop polling when `is_complete` is `true`; it is for every ending (`completed`, `incomplete`, `failed`, `cancelled`). Read results only when `results_available` is `true`.

@@ -944,7 +944,7 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
         For the options that decide what cfn-lint reports: ``ignore_checks`` drops
         findings before ASH sees them, so they are neither reported nor counted as
         suppressed (measured: ``ignore_checks: [E, W]`` in the scanned tree's
-        ``.ash/.ash.yaml`` turned 3 findings into a PASSED scan). A value from a
+        ``.ash.yaml`` turned 3 findings into a PASSED scan). A value from a
         config inside a git checkout or the scanned directory, or from an MCP client,
         is replaced by the operator's own value (the trusted base with the
         operator's overrides replayed, ``config_trust.operator_value``), or by

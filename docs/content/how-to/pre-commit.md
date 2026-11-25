@@ -44,7 +44,7 @@ writes a `.ash/.gitignore` that ignores it, or add the line yourself:
 .ash/ash_output/
 ```
 
-Do not ignore all of `.ash/`: an ASH config file can live there, as `.ash/.ash.yaml`.
+Do not ignore all of `.ash/`: an ASH config file at a legacy location, such as `.ash/.ash.yaml`, can still live there.
 
 ## What the hook runs {#behavior}
 
@@ -357,7 +357,7 @@ global_settings:
       reason: pre-commit autoupdate --freeze pins hooks to commit SHAs
 ```
 
-Put it in your ASH config file, or, if the repository has none, in a new `.ashrc.yaml` at
+Put it in your ASH config file, or, if the repository has none, in a new `.ash.yaml` at
 its root. [Suppress findings](suppress-findings.md) covers expiration dates and narrower
 matches.
 

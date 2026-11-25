@@ -348,7 +348,7 @@ misspelled name among valid ones in `--scanners` is not a usage error: ASH logs
 Symptom:
 
 ```text
-ERROR (3) Invalid configuration: Configuration validation failed for '/home/me/repo/.ashrc.yaml': Invalid value at 'global_settings.fail_on_findings': Extra inputs are not permitted. Run: ash config lint --config /home/me/repo/.ashrc.yaml
+ERROR (3) Invalid configuration: Configuration validation failed for '/home/me/repo/.ash.yaml': Invalid value at 'global_settings.fail_on_findings': Extra inputs are not permitted. Run: ash config lint --config /home/me/repo/.ash.yaml
 ```
 
 Cause: the configuration file has a key ASH does not know below the top level, or a
@@ -360,7 +360,7 @@ the message lists the keys the entry accepts:
 
 <!-- doctest: run expect-exit=3 -->
 ```bash
-cat > .ashrc.yaml <<'EOF'
+cat > .ash.yaml <<'EOF'
 fail_on_unknown_keys: true
 global_settings:
   suppressions:
@@ -405,7 +405,7 @@ counts again here:
 
 <!-- doctest: run expect-exit=2 -->
 ```bash
-cat > .ashrc.yaml <<'EOF'
+cat > .ash.yaml <<'EOF'
 global_settings:
   ignore_paths:
     - path: app.py
@@ -431,7 +431,7 @@ suppressions and ignore paths.
 Symptom: a warning such as:
 
 ```text
-Ignoring sandbox.network_scanners from /home/me/repo/.ash/.ash.yaml: the file is inside the scanned tree, so the repository being scanned wrote it. ...
+Ignoring sandbox.network_scanners from /home/me/repo/.ash.yaml: the file is inside the scanned tree, so the repository being scanned wrote it. ...
 ```
 
 Cause: some settings decide what ASH may run, read, or send, or whether a stale database

@@ -158,7 +158,7 @@ ASH can be run in container mode in any CI/CD environment that supports containe
 <details>
 <summary>How do I exclude files from scanning?</summary>
 
-ASH leaves out of its scan set every file a `.gitignore` or `.ignore` file in the scanned tree matches. You can also configure ignore paths in your `.ash/.ash.yaml` configuration file. The summaries record how many files the ignore files excluded, and `--no-honor-ignore-files` (or `honor_ignore_files: false` in a config file outside the scanned tree) scans those files too. See [Ignore files and the scan set](reference/coverage.md#what-decides-the-files).
+ASH leaves out of its scan set every file a `.gitignore` or `.ignore` file in the scanned tree matches. You can also configure ignore paths in your `.ash.yaml` configuration file. The summaries record how many files the ignore files excluded, and `--no-honor-ignore-files` (or `honor_ignore_files: false` in a config file outside the scanned tree) scans those files too. See [Ignore files and the scan set](reference/coverage.md#what-decides-the-files).
 </details>
 
 <details>
