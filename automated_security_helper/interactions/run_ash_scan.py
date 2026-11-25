@@ -47,6 +47,7 @@ from automated_security_helper.utils.terminal_text import (
     shown_on_one_line,
 )
 
+from automated_security_helper.core.asset import Asset, ImageLocator
 from automated_security_helper.core.cancellation import raise_if_cancelled
 from automated_security_helper.core.previous_results import (
     HELD_DIR_NAME,
@@ -239,6 +240,13 @@ class ScanOptions(BaseModel):
     # Core paths
     source_dir: Path
     output_dir: Path
+
+    # The subject of the scan when it is not source_dir: a CONTAINER_IMAGE
+    # asset carrying the submitted image locator (run_ash_scan builds it from
+    # image / image_archive / image_layout). None, the default, scans
+    # source_dir exactly as today. Local mode only; the image refusals in
+    # run_ash_scan enforce that before any mode runs.
+    asset: Optional[Asset] = None
 
     # Workspace mode. When set, source_dir is the workspace ROOT and each project
     # is scanned with its own source_dir inside it. None means single-directory
@@ -5544,6 +5552,7 @@ def _run_local_mode(
             source_dir=opts.source_dir,
             output_dir=opts.output_dir,
             work_dir=opts.output_dir / ASH_WORK_DIR_NAME,
+            asset=opts.asset,
             staged_files=staged_files,
             enabled_scanners=final_scanners,
             selection_layers=selection_layers,
@@ -7094,6 +7103,113 @@ def _in_a_run_log_scope(scan):
 
 @_in_a_run_log_scope
 @_in_scanned_tree_from_arguments
+def _image_asset_or_refusal(
+    *,
+    image: str | None,
+    image_archive: str | Path | None,
+    image_layout: str | Path | None,
+    source_dir: str | Path | None,
+    mode: RunMode,
+    workspace_plan: "WorkspacePlan | None",
+    existing_results: str | None,
+    changed_files_only: bool,
+) -> Asset | None:
+    """The CONTAINER_IMAGE asset the image options name, or None, or a refusal.
+
+    The submission contract's image side: exactly one of ``image`` (a registry
+    reference), ``image_archive`` (a saved-image tarball) and ``image_layout``
+    (an OCI image-layout directory), never beside an explicit ``source_dir``,
+    and only where the orchestrator that routes by asset kind actually runs --
+    local mode, single-directory. Everything here is checked at the stat level
+    (:mod:`automated_security_helper.utils.image_payload_refusals`); nothing is
+    fetched, which is the whole image contract: ASH passes locators, and the
+    engines and scanner tools do the fetching.
+
+    Each refusal exits with the usage code (5), as the CLI's own early
+    refusals do, so the library caller and the CLI name the same first problem.
+    """
+    given = {
+        name: value
+        for name, value in (
+            ("image", image),
+            ("image_archive", image_archive),
+            ("image_layout", image_layout),
+        )
+        if value is not None
+    }
+    if not given:
+        return None
+    if len(given) > 1:
+        _printed_refusal(
+            ASH_EXIT_USAGE_ERROR,
+            "image, image_archive and image_layout each name the one image to "
+            f"scan, so only one may be given; this call names {len(given)} "
+            f"({', '.join(sorted(given))}). Keep the one that says where the "
+            "image is.",
+            one_line=True,
+        )
+    if source_dir is not None:
+        _printed_refusal(
+            ASH_EXIT_USAGE_ERROR,
+            "an image option cannot be combined with source_dir: one scan has "
+            "one subject. Scan the directory and the image as two runs.",
+            one_line=True,
+        )
+    if workspace_plan is not None:
+        _printed_refusal(
+            ASH_EXIT_USAGE_ERROR,
+            "an image option cannot be combined with a workspace scan: a "
+            "workspace names directories, and one scan has one subject.",
+            one_line=True,
+        )
+    if mode != RunMode.local:
+        _printed_refusal(
+            ASH_EXIT_USAGE_ERROR,
+            f"an image option is supported in local mode only, not mode="
+            f"{mode.value!r}: the scan that routes by asset kind is the local "
+            "orchestrator's.",
+            one_line=True,
+        )
+    if existing_results is not None:
+        _printed_refusal(
+            ASH_EXIT_USAGE_ERROR,
+            "an image option cannot be combined with existing results: saved "
+            "results already name their subject, and nothing would be scanned.",
+            one_line=True,
+        )
+    if changed_files_only:
+        _printed_refusal(
+            ASH_EXIT_USAGE_ERROR,
+            "an image option cannot be combined with changed_files_only, which "
+            "scopes a scan by git history: an image has none.",
+            one_line=True,
+        )
+    if image is not None:
+        if not image.strip():
+            _printed_refusal(
+                ASH_EXIT_USAGE_ERROR,
+                "image names no reference: it is empty or whitespace.",
+                one_line=True,
+            )
+        return Asset.for_image(ImageLocator(ref=image.strip()))
+    # The two payload shapes are gated at the stat level before anything uses
+    # the path, exactly as source_dir is (utils/image_payload_refusals.py).
+    from automated_security_helper.utils.image_payload_refusals import (
+        image_archive_refusal,
+        image_layout_refusal,
+    )
+
+    if image_archive is not None:
+        refusal = image_archive_refusal(image_archive)
+        if refusal is not None:
+            _printed_refusal(ASH_EXIT_USAGE_ERROR, refusal, one_line=True)
+        return Asset.for_image(ImageLocator(oci_archive=Path(image_archive).absolute()))
+    refusal = image_layout_refusal(image_layout)
+    if refusal is not None:
+        _printed_refusal(ASH_EXIT_USAGE_ERROR, refusal, one_line=True)
+    return Asset.for_image(ImageLocator(oci_layout=Path(image_layout).absolute()))
+
+
 def run_ash_scan(
     source_dir: str | Path | None = None,
     output_dir: str | Path | None = None,
@@ -7126,6 +7242,9 @@ def run_ash_scan(
     base_ref: str = "origin/main",
     staged: bool = False,
     staged_files: List[str] | None = None,
+    image: str | None = None,
+    image_archive: str | Path | None = None,
+    image_layout: str | Path | None = None,
     shard_index: int | None = None,
     shard_count: int | None = None,
     mode: RunMode = RunMode.local,
@@ -7179,6 +7298,33 @@ def run_ash_scan(
 
     forget_unverifiable_warnings()
 
+    # The image options, settled before any path default resolves, because
+    # their exclusivity rules read the arguments as given: source_dir=None is
+    # "not named", which an image option may accompany, where an explicit
+    # source_dir beside one leaves which subject was meant to the reader.
+    asset = _image_asset_or_refusal(
+        image=image,
+        image_archive=image_archive,
+        image_layout=image_layout,
+        source_dir=source_dir,
+        mode=mode,
+        workspace_plan=workspace_plan,
+        existing_results=existing_results,
+        changed_files_only=changed_files_only,
+    )
+    if asset is not None:
+        # An image asset runs no convert phase: converters read source files,
+        # which an image asset does not present (the design's C7). The caller's
+        # other phases stand.
+        phases = [
+            phase
+            for phase in (
+                phases
+                or [ExecutionPhase.CONVERT, ExecutionPhase.SCAN, ExecutionPhase.REPORT]
+            )
+            if phase != ExecutionPhase.CONVERT
+        ]
+
     # Resolve cwd-based defaults at call time (not import time).
     _source_dir: Path = (
         Path(source_dir).absolute() if source_dir is not None else Path.cwd()
@@ -7192,6 +7338,7 @@ def run_ash_scan(
     opts = ScanOptions(
         source_dir=_source_dir,
         output_dir=_output_dir,
+        asset=asset,
         config=config,
         config_overrides=config_overrides,
         offline=offline,

@@ -31,6 +31,7 @@ from pydantic import (
 )
 
 from automated_security_helper.base.plugin_context import PluginContext
+from automated_security_helper.core.asset import Asset
 
 from automated_security_helper.config.path_trust import (
     derived_roots_scope,
@@ -249,6 +250,17 @@ class ASHScanOrchestrator(BaseModel):
                 "them, so the scanners, the converters and their candidate "
                 "counts all see the staged files and nothing else. None means "
                 "no staged scope."
+            )
+        ),
+    ] = None
+    asset: Annotated[
+        Asset | None,
+        Field(
+            description=(
+                "The subject of this scan when it is not the source directory: "
+                "a CONTAINER_IMAGE asset carrying the submitted image locator. "
+                "None (the default) scans source_dir exactly as today. Carried "
+                "onto the PluginContext, where the scan phase routes by it."
             )
         ),
     ] = None
@@ -949,6 +961,7 @@ class ASHScanOrchestrator(BaseModel):
                     run_id=self._run_id,
                     workspace_output_dir=self.workspace_output_dir,
                     staged_files=self.staged_files,
+                    asset=self.asset,
                 ),
                 strategy=self.strategy,
                 enabled_scanners=enabled_scanners,
