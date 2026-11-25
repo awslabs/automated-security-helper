@@ -739,7 +739,9 @@ def _print_invalid_config(
     if not messages:
         if isinstance(error, ValidationError):
             # Not one resolve_config raises; formatted without its inputs.
-            messages = [ConfigValidator.format_model_error(e) for e in error.errors()]
+            messages = [
+                ConfigValidator.format_model_error(dict(e)) for e in error.errors()
+            ]
         else:
             messages = [str(error)]
             # The ASH_CONFIG file's parse refusal, printed as the scan prints it.
@@ -1530,8 +1532,17 @@ def update(
     if not _config_name_exists(config_path):
         _refuse_missing_config(config_path)
 
+    _update_config_file(Path(config_path), modifications, dry_run, logger)
+
+
+def _update_config_file(
+    config_path: Path,
+    modifications: List[str],
+    dry_run: bool,
+    logger: logging.Logger,
+) -> None:
+    """Apply --set modifications to the named config file (the update body)."""
     # Load the existing config
-    config_path = Path(config_path)
     _refuse_unless_a_file(config_path)
     # The file's bytes as the refusal checks below are about to read them. The
     # checks (TOML, environment references, extends) and the load each open the
@@ -1855,7 +1866,7 @@ def lint(
         ),
     ] = None,
     output_dir: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--output-dir",
             "-o",

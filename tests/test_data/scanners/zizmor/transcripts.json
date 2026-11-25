@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "transcripts": [
+    {
+      "adapter_prep": null,
+      "also_for": [],
+      "argv": [
+        "zizmor",
+        "--format",
+        "sarif",
+        "--no-exit-codes",
+        "--no-progress",
+        "--color",
+        "never",
+        "--persona",
+        "regular",
+        "--offline",
+        "--",
+        ".github/workflows/clean.yml",
+        ".github/workflows/vulnerable.yml",
+        "actions/clean/action.yaml",
+        "actions/greet/action.yml",
+        "other/action.yml"
+      ],
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": {
+        "paths": [
+          "repo/.github/workflows/clean.yml",
+          "repo/.github/workflows/vulnerable.yml",
+          "repo/actions/clean/action.yaml",
+          "repo/actions/greet/action.yml",
+          "repo/other/action.yml"
+        ],
+        "sha256": "f6ea92aabe593509237a6bef68dbfbbe4aab55f6afc3ca3970a474cdee57b96e"
+      },
+      "id": "zizmor-1.30.1",
+      "live_input": false,
+      "note": "captured from a copy of the fixture root outside any git repository (inside one, zizmor writes URIs relative to the repository root)",
+      "observable": true,
+      "pin_stamp": null,
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "sarif",
+          "path": "zizmor-1.30.1.sarif",
+          "sha256": "3fd98514be305baee917dac1aefcda478fa96fe4621dc6944fe464b8a28e62d4"
+        }
+      ],
+      "retention": "current",
+      "scanner": "zizmor",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "zizmor",
+        "version": "1.30.1"
+      }
+    }
+  ],
+  "unrecorded": []
+}

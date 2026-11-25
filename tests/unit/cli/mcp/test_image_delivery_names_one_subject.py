@@ -1,0 +1,201 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""The MCP image delivery channel: one session, one scan subject.
+
+The C2 rows of the container-targets design on the MCP surface:
+
+- ``set_source_image`` stores an ImageLocator on the session and fetches
+  nothing; refs that can never be references are refused at delivery.
+- ``set_source_image_archive_chunk`` + ``..._finalize`` are the zip channel's
+  shape byte for byte: the same chunk machinery, a sha256 verified at
+  finalize, and -- the image difference -- no extraction, one tar shape
+  sniff, the archive moved whole under ``<session>/image/``.
+- one session has one subject: a source delivery drops the image binding and
+  an image delivery is the newest word, so ``get_session_image_locator`` not
+  None always means "delivered after any tree the session still holds".
+"""
+
+from __future__ import annotations
+
+import base64
+import hashlib
+import io
+import tarfile
+
+import pytest
+
+from automated_security_helper.cli.mcp import source_delivery as sd
+from automated_security_helper.cli.mcp.source_delivery import UploadNotFoundError
+
+pytestmark = pytest.mark.unit
+
+_SESSION = "session-image-delivery"
+IMAGE_REF = "registry.example.com/team/app@sha256:" + "a" * 64
+
+
+@pytest.fixture
+def workspace(tmp_path, monkeypatch):
+    # The default workspace root too, so a call that is given no root cannot touch
+    # the developer's own MCP workspace, and a "nothing was created" check looks
+    # where the call would have created it.
+    monkeypatch.setattr(sd, "resolve_workspace_root", lambda: tmp_path)
+    yield tmp_path
+    sd.clear_source(_SESSION, workspace_root=tmp_path)
+
+
+def _tar_bytes(member: str = "manifest.json", content: bytes = b"[]") -> bytes:
+    """A tar with one member: the ustar magic sits in a member's header, so an
+    EMPTY archive (zero blocks only) carries none and the shape gate refuses
+    it -- which is right, since a saved image always has members."""
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w") as archive:
+        info = tarfile.TarInfo(name=member)
+        info.size = len(content)
+        archive.addfile(info, io.BytesIO(content))
+    return buf.getvalue()
+
+
+def _upload(payload: bytes, upload_id: str, workspace_root) -> str:
+    sd.set_source_image_archive_chunk(
+        upload_id=upload_id,
+        sequence=0,
+        data_b64=base64.b64encode(payload).decode("ascii"),
+        last=True,
+        workspace_root=workspace_root,
+        session_id=_SESSION,
+    )
+    return hashlib.sha256(payload).hexdigest()
+
+
+class TestSetSourceImage:
+    def test_a_ref_is_stored_and_nothing_is_fetched(self, workspace):
+        locator = sd.set_source_image(f"  {IMAGE_REF} ", session_id=_SESSION)
+        assert locator.ref == IMAGE_REF
+        stored = sd.get_session_image_locator(_SESSION)
+        assert stored is not None
+        assert stored.ref == IMAGE_REF
+        # Nothing was fetched: the session has no workspace on disk at all.
+        assert not (workspace / _SESSION).exists()
+
+    def test_an_empty_ref_names_nothing(self, workspace):
+        with pytest.raises(ValueError, match="names no reference"):
+            sd.set_source_image("   ", session_id=_SESSION)
+
+    def test_a_leading_dash_reads_as_an_option(self, workspace):
+        with pytest.raises(ValueError, match="cannot start with '-'"):
+            sd.set_source_image("--rm", session_id=_SESSION)
+
+    def test_a_control_character_is_no_reference(self, workspace):
+        with pytest.raises(ValueError, match="control character"):
+            sd.set_source_image("repo\x1b[31m:tag", session_id=_SESSION)
+
+    def test_an_inner_space_is_no_reference(self, workspace):
+        with pytest.raises(ValueError, match="whitespace"):
+            sd.set_source_image("repo tag", session_id=_SESSION)
+
+
+class TestOneSubjectPerSession:
+    def test_a_source_delivery_drops_the_image_binding(self, workspace):
+        sd.set_source_image(IMAGE_REF, session_id=_SESSION)
+        assert sd.get_session_image_locator(_SESSION) is not None
+        sd._set_session_source_dir(_SESSION, workspace / _SESSION / "source")
+        assert sd.get_session_image_locator(_SESSION) is None
+
+    def test_an_image_after_a_source_is_the_newest_word(self, workspace):
+        sd._set_session_source_dir(_SESSION, workspace / _SESSION / "source")
+        sd.set_source_image(IMAGE_REF, session_id=_SESSION)
+        assert sd.get_session_image_locator(_SESSION) is not None
+
+    def test_removing_the_workspace_forgets_the_binding(self, workspace):
+        sd.set_source_image(IMAGE_REF, session_id=_SESSION)
+        sd.remove_session_workspace(_SESSION, workspace_root=workspace)
+        assert sd.get_session_image_locator(_SESSION) is None
+
+
+class TestImageArchiveFinalize:
+    def test_a_verified_tar_lands_under_image_and_binds(self, workspace):
+        payload = _tar_bytes()
+        sha = _upload(payload, "up-tar", workspace)
+        incoming = workspace / _SESSION / "incoming"
+        assert any(incoming.iterdir()), "the assembled upload exists before finalize"
+
+        archive = sd.set_source_image_archive_finalize(
+            upload_id="up-tar",
+            expected_sha256=sha,
+            workspace_root=workspace,
+            session_id=_SESSION,
+        )
+
+        assert archive == workspace / _SESSION / "image" / "up-tar.tar"
+        assert archive.read_bytes() == payload
+        locator = sd.get_session_image_locator(_SESSION)
+        assert locator is not None
+        assert locator.oci_archive == archive
+        assert locator.ref is None
+        # The assembled upload was consumed by the move.
+        assert not list(incoming.iterdir())
+
+    def test_a_sha_mismatch_is_refused_and_binds_nothing(self, workspace):
+        _upload(_tar_bytes(), "up-bad-sha", workspace)
+        incoming = workspace / _SESSION / "incoming"
+        assert any(incoming.iterdir()), "the assembled upload exists before finalize"
+        with pytest.raises(ValueError, match="sha256 mismatch"):
+            sd.set_source_image_archive_finalize(
+                upload_id="up-bad-sha",
+                expected_sha256="0" * 64,
+                workspace_root=workspace,
+                session_id=_SESSION,
+            )
+        assert sd.get_session_image_locator(_SESSION) is None
+        # The refused upload was removed, as the zip channel removes one.
+        assert not list(incoming.iterdir())
+
+    def test_bytes_that_are_not_a_tar_are_refused_with_the_gate_text(self, workspace):
+        payload = b"not a tar at all" + b"\x00" * 600
+        sha = _upload(payload, "up-not-tar", workspace)
+        with pytest.raises(ValueError, match="is not a tar archive"):
+            sd.set_source_image_archive_finalize(
+                upload_id="up-not-tar",
+                expected_sha256=sha,
+                workspace_root=workspace,
+                session_id=_SESSION,
+            )
+        assert sd.get_session_image_locator(_SESSION) is None
+        # Nothing half-delivered stays under image/.
+        image_dir = workspace / _SESSION / "image"
+        assert not image_dir.exists() or not list(image_dir.iterdir())
+
+    def test_an_upload_without_its_last_chunk_is_not_found(self, workspace):
+        with pytest.raises(UploadNotFoundError):
+            sd.set_source_image_archive_finalize(
+                upload_id="never-finished",
+                expected_sha256="0" * 64,
+                workspace_root=workspace,
+                session_id=_SESSION,
+            )
+
+    def test_a_second_archive_replaces_the_first(self, workspace):
+        first = _tar_bytes()
+        sha_first = _upload(first, "up-one", workspace)
+        sd.set_source_image_archive_finalize(
+            upload_id="up-one",
+            expected_sha256=sha_first,
+            workspace_root=workspace,
+            session_id=_SESSION,
+        )
+        second = _tar_bytes(member="layer.tar", content=b"data")
+        sha_second = _upload(second, "up-two", workspace)
+
+        delivered = sd.set_source_image_archive_finalize(
+            upload_id="up-two",
+            expected_sha256=sha_second,
+            workspace_root=workspace,
+            session_id=_SESSION,
+        )
+
+        locator = sd.get_session_image_locator(_SESSION)
+        assert locator is not None
+        assert locator.oci_archive == delivered
+        # The replaced archive is scratch and was removed.
+        assert not (workspace / _SESSION / "image" / "up-one.tar").exists()

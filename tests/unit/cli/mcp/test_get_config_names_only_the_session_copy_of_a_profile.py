@@ -121,6 +121,17 @@ def test_an_unloadable_bound_profile_names_only_the_session_copy(bound):
     # naming it.
     session_copy.write_text("project_name: [unclosed\n", encoding="utf-8")
     profile.write_text("project_name: [unclosed\n", encoding="utf-8")
+    # The copy that cannot be loaded is the one this server wrote: a binding
+    # records the digest of the bytes it wrote, and a file holding other bytes is
+    # another server's and is written again (test_a_bound_profile_file_another_
+    # server_replaced_is_written_again). The record is brought to the file, so
+    # the cell stays about a copy that is this binding's own and does not load.
+    from automated_security_helper.cli.mcp import profile_registry
+
+    state = profile_registry.get_session_state(SESSION)
+    assert state is not None
+    state.config_sha256 = profile_registry._file_sha256(session_copy)
+    state.trusted_config_sha256 = state.config_sha256
 
     result = _get_config(delivered)
 

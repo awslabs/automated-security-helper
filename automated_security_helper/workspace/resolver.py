@@ -457,9 +457,12 @@ def _extra_scanner_groups(config: AshConfig) -> List[_ExtraScanners]:
         remaining = names
         while remaining:
             claimed = plugin_section_claims(remaining)
-            read = plugin_section_key(remaining, folded, claimed)
-            if read not in remaining:
-                read = remaining[0]
+            chosen = plugin_section_key(remaining, folded, claimed)
+            read = (
+                chosen
+                if isinstance(chosen, str) and chosen in remaining
+                else remaining[0]
+            )
             peers = plugin_section_peers(claimed, read, folded)
             members = [n for n in remaining if n == read or n in peers]
             unresolved = [
@@ -767,7 +770,7 @@ def _validate_containment(
                 f"({type(exc).__name__} from the filesystem layer)"
             )
             continue
-        if not result.ok:
+        if result.error is not None:
             # Parentheses, not brackets: these messages are echoed by callers
             # that may render Rich markup, where '[outside-root]' would be read
             # as a style name and fail at render time.
@@ -781,6 +784,9 @@ def _validate_containment(
             problems.append(f"{result.error.message} ({result.error.violation.value})")
             continue
         resolved = result.resolved
+        if resolved is None:
+            # Exactly one of error and resolved is set, so this is not reached.
+            raise RuntimeError("path containment returned neither a path nor an error")
         relative = resolved.relative_to(definition.root)
         if not relative.parts:
             # The entry names the workspace root. See the module docstring.
@@ -1228,7 +1234,7 @@ def _resolve_project_config(
     resolution search again, so the file the plan reports is definitionally the
     file that was loaded and the two cannot disagree.
 
-    ``permit_base`` is the MCP session's gate (``cli/mcp/sandbox.config_base_gate``),
+    ``permit_base`` is the MCP session's gate (``config.mcp_sandbox.config_base_gate``),
     or None for the CLI. It covers the config discovery finds in the project
     (``find_config_file``) and every base its ``extends`` chain names.
 
@@ -1260,7 +1266,7 @@ def _resolve_project_config(
     project, and they are not trusted either: the patched copy is a project's
     config only when the project has none, and is then checked as a file the
     client delivered, as before. A session's operator copy holds only the fields
-    the profile sets (``profile_registry.materialize_session_config``), so the
+    the profile sets (``session_profiles.materialize_session_config``), so the
     project still fills the rest.
 
     Every file the operator's config is built from must be the operator's.
@@ -1725,7 +1731,7 @@ def _apply_workspace_policy(
         ASHConfigInputNotPermittedError: The policy file is outside what
             ``permit_base`` permits.
     """
-    from automated_security_helper.cli.mcp.sandbox import config_is_client_supplied
+    from automated_security_helper.config.mcp_sandbox import config_is_client_supplied
 
     def client_supplied(path: Path) -> bool:
         return remote_client or config_is_client_supplied(path)
@@ -2000,7 +2006,7 @@ def resolve_workspace(
             project config the operator did not set aside resolves no ``!ENV``
             (``resolve_config``). Must reach ``ProjectScanSettings.remote_client``
             too.
-        permit_base: The MCP session's gate (``cli/mcp/sandbox.config_base_gate``),
+        permit_base: The MCP session's gate (``config.mcp_sandbox.config_base_gate``),
             or None. Every config source in each project's directory, every
             base a project's chain extends, and the workspace policy file must
             resolve to a file it permits; one that is a link out is refused

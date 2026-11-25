@@ -36,8 +36,10 @@ from automated_security_helper.models.core import IgnoreFileExclusions
 from automated_security_helper.models.vocab import FailureKind
 from automated_security_helper.models.flat_vulnerability import (
     FlatVulnerability,
+    assign_correlation_ids,
     assign_identity_ids,
 )
+from automated_security_helper.utils.finding_identity import correlation_target
 from automated_security_helper.models.workspace import WorkspaceResults
 from automated_security_helper.schemas.cyclonedx_bom_1_6_schema import CycloneDXReport
 from typing import (
@@ -1314,7 +1316,7 @@ class AshAggregatedResults(RecordModel):
     # marks its own two pass-through inits the same way (main.py, root_model.py).
     # Private attribute, so a Pydantic release could change what it means; the
     # guard test's positive control is what would catch that.
-    __init__.__pydantic_base_init__ = True  # type: ignore[attr-defined]
+    setattr(__init__, "__pydantic_base_init__", True)
 
     @classmethod
     def model_validate(cls, *args: Any, **kwargs: Any) -> "AshAggregatedResults":
@@ -1724,11 +1726,18 @@ class AshAggregatedResults(RecordModel):
                     flat_vulns.append(flat_vuln)
 
         project = getattr(self.metadata, "workspace_project", None)
-        assign_identity_ids(
+        default_project = (
+            project if isinstance(project, str) and project.strip() else None
+        )
+        assign_identity_ids(flat_vulns, default_project=default_project)
+        # The cross-scanner correlation ids, computed once here so every
+        # reporter reads one value off the field (utils/finding_identity,
+        # "Correlation ids"). The target is the metadata's project name, the
+        # one scope the model itself records.
+        assign_correlation_ids(
             flat_vulns,
-            default_project=project
-            if isinstance(project, str) and project.strip()
-            else None,
+            target=correlation_target(getattr(self.metadata, "project_name", None)),
+            default_project=default_project,
         )
         self._flat_cache = flat_vulns
         self._flat_cache_source = source

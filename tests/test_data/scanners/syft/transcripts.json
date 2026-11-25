@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "transcripts": [
+    {
+      "adapter_prep": null,
+      "also_for": [],
+      "argv": null,
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": null,
+      "id": "syft-1.22.0-src",
+      "live_input": false,
+      "note": "the version is read from the file's descriptor; the work file is ASH's own copy of the same run",
+      "observable": true,
+      "pin_stamp": {
+        "tool": "syft",
+        "version": "1.22.0"
+      },
+      "provenance": "attested",
+      "reason": "recorded with syft 1.22.0, before the pin moved to v1.57.2; the native shape is still read by the adapter, so the recording stays until it is re-recorded at the pin",
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "json",
+          "path": "syft.src.json",
+          "sha256": "62ca1028f8e5bdb3fc45a9f6450e28c73394d6e2a6f1def2c2e6c8b1fb4785f5"
+        }
+      ],
+      "retention": "historical",
+      "scanner": "syft",
+      "side_reports": [
+        {
+          "format": "json",
+          "path": "syft.src.ash_output.work.json",
+          "sha256": "963032089f4d30eaf7d9d3e208ab1974c8a1041c79b3ce0db4a12978de85a477"
+        }
+      ],
+      "stderr_tail": null,
+      "tool": {
+        "name": "syft",
+        "version": "1.22.0"
+      }
+    }
+  ],
+  "unrecorded": []
+}

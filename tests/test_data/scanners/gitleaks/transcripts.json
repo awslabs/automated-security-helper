@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "transcripts": [
+    {
+      "adapter_prep": "gitleaks",
+      "also_for": [],
+      "argv": null,
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": null,
+      "id": "gitleaks-8.30.1",
+      "live_input": false,
+      "note": "the inputs are repo_template and fabricated_tokens.reversed.json beside it; the argv and the exact tree it ran over are not recorded",
+      "observable": true,
+      "pin_stamp": {
+        "tool": "gitleaks",
+        "version": "8.30.1"
+      },
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "sarif",
+          "path": "gitleaks-8.30.1.sarif",
+          "sha256": "1ca4259f677cc84dbd73c45f51f085b8f5987e336f7c4a8ada977e0c4eadd60d"
+        }
+      ],
+      "retention": "current",
+      "scanner": "gitleaks",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "gitleaks",
+        "version": "8.30.1"
+      }
+    }
+  ],
+  "unrecorded": []
+}

@@ -1,0 +1,228 @@
+# serializer version: 1
+# name: test_image_archive_upload_and_finalize[chunk_0]
+  dict({
+    'client_messages': list([
+    ]),
+    'result': dict({
+      'last': False,
+      'next_sequence': 1,
+      'received': 5120,
+      'session_id': 'session-image',
+      'success': True,
+    }),
+    'tool': 'set_source_image_archive_chunk',
+  })
+# ---
+# name: test_image_archive_upload_and_finalize[chunk_1_last]
+  dict({
+    'client_messages': list([
+    ]),
+    'result': dict({
+      'last': True,
+      'next_sequence': 2,
+      'received': 10240,
+      'session_id': 'session-image',
+      'success': True,
+    }),
+    'tool': 'set_source_image_archive_chunk',
+  })
+# ---
+# name: test_image_archive_upload_and_finalize[chunk_invalid_base64]
+  dict({
+    'client_messages': list([
+    ]),
+    'result': dict({
+      'error': 'invalid base64 payload: Incorrect padding',
+      'session_id': 'session-image',
+      'success': False,
+    }),
+    'tool': 'set_source_image_archive_chunk',
+  })
+# ---
+# name: test_image_archive_upload_and_finalize[chunk_out_of_order]
+  dict({
+    'client_messages': list([
+    ]),
+    'result': dict({
+      'error': 'out-of-order chunk: expected sequence 1, got 5',
+      'session_id': 'session-image',
+      'success': False,
+    }),
+    'tool': 'set_source_image_archive_chunk',
+  })
+# ---
+# name: test_image_archive_upload_and_finalize[clear_source_forgets_the_image]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        'Source cleared for session session-image',
+      ]),
+    ]),
+    'result': dict({
+      'session_id': 'session-image',
+      'success': True,
+    }),
+    'tool': 'clear_source',
+  })
+# ---
+# name: test_image_archive_upload_and_finalize[finalize]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        'Image archive delivered for session session-image',
+      ]),
+    ]),
+    'result': dict({
+      'image_archive': '<TMP>/workspaces/session-image/image/image-1.tar',
+      'session_id': 'session-image',
+      'success': True,
+    }),
+    'tool': 'set_source_image_archive_finalize',
+  })
+# ---
+# name: test_image_archive_upload_and_finalize[finalize_not_a_tar]
+  dict({
+    'client_messages': list([
+    ]),
+    'result': dict({
+      'error': 'Image archive is not a tar archive: <TMP>/workspaces/session-image/image/image-4.tar',
+      'session_id': 'session-image',
+      'success': False,
+    }),
+    'tool': 'set_source_image_archive_finalize',
+  })
+# ---
+# name: test_image_archive_upload_and_finalize[finalize_sha256_mismatch]
+  dict({
+    'client_messages': list([
+    ]),
+    'result': dict({
+      'error': 'sha256 mismatch: expected 0000000000000000000000000000000000000000000000000000000000000000, got 22752a9225b4f72a6d8a24bcfd88c9995bf2d549184632954d75a0de15b7e718',
+      'session_id': 'session-image',
+      'success': False,
+    }),
+    'tool': 'set_source_image_archive_finalize',
+  })
+# ---
+# name: test_image_archive_upload_and_finalize[finalize_unknown_upload]
+  dict({
+    'client_messages': list([
+    ]),
+    'result': dict({
+      'error': "no finalized upload for upload_id='never-uploaded' (did the last chunk arrive with last=True?)",
+      'session_id': 'session-image',
+      'success': False,
+    }),
+    'tool': 'set_source_image_archive_finalize',
+  })
+# ---
+# name: test_image_archive_upload_and_finalize[set_source_image_archive_chunk_invalid_session_id]
+  dict({
+    'client_messages': list([
+      list([
+        'error',
+        "mcp-session-id must not contain path separators: '../escape'",
+      ]),
+    ]),
+    'result': dict({
+      'error': "mcp-session-id must not contain path separators: '../escape'",
+      'error_type': 'invalid_session_id',
+      'success': False,
+    }),
+    'tool': 'set_source_image_archive_chunk',
+  })
+# ---
+# name: test_image_archive_upload_and_finalize[set_source_image_archive_finalize_invalid_session_id]
+  dict({
+    'client_messages': list([
+      list([
+        'error',
+        "mcp-session-id must not contain path separators: '../escape'",
+      ]),
+    ]),
+    'result': dict({
+      'error': "mcp-session-id must not contain path separators: '../escape'",
+      'error_type': 'invalid_session_id',
+      'success': False,
+    }),
+    'tool': 'set_source_image_archive_finalize',
+  })
+# ---
+# name: test_set_source_image[empty_ref]
+  dict({
+    'client_messages': list([
+    ]),
+    'result': dict({
+      'error': 'image_ref names no reference: it is empty or whitespace',
+      'session_id': 'session-image',
+      'success': False,
+    }),
+    'tool': 'set_source_image',
+  })
+# ---
+# name: test_set_source_image[invalid_session_id]
+  dict({
+    'client_messages': list([
+      list([
+        'error',
+        "mcp-session-id must not contain path separators: '../escape'",
+      ]),
+    ]),
+    'result': dict({
+      'error': "mcp-session-id must not contain path separators: '../escape'",
+      'error_type': 'invalid_session_id',
+      'success': False,
+    }),
+    'tool': 'set_source_image',
+  })
+# ---
+# name: test_set_source_image[option_like_ref]
+  dict({
+    'client_messages': list([
+    ]),
+    'result': dict({
+      'error': "image_ref cannot start with '-': a reference never does, and the value would read as an option where the ref is used",
+      'session_id': 'session-image',
+      'success': False,
+    }),
+    'tool': 'set_source_image',
+  })
+# ---
+# name: test_set_source_image[ref_with_whitespace]
+  dict({
+    'client_messages': list([
+    ]),
+    'result': dict({
+      'error': 'image_ref carries whitespace or a control character, which no registry reference grammar allows',
+      'session_id': 'session-image',
+      'success': False,
+    }),
+    'tool': 'set_source_image',
+  })
+# ---
+# name: test_set_source_image[stored]
+  dict({
+    'client_messages': list([
+    ]),
+    'result': dict({
+      'image_ref': 'registry.example.com/team/app@sha256:abababababababababababababababababababababababababababababababab',
+      'session_id': 'session-image',
+      'success': True,
+    }),
+    'tool': 'set_source_image',
+  })
+# ---
+# name: test_set_source_image[tag_only_replaces_the_subject]
+  dict({
+    'client_messages': list([
+    ]),
+    'result': dict({
+      'image_ref': 'alpine:3.20',
+      'session_id': 'session-image',
+      'success': True,
+    }),
+    'tool': 'set_source_image',
+  })
+# ---

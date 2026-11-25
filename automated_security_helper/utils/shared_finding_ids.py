@@ -25,14 +25,18 @@ sits at and no other, instead of the whole report falling back to its legacy ids
 """
 
 from bisect import bisect_left
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
 
 from automated_security_helper.utils.frame_text import ranks, wire
 
 if TYPE_CHECKING:
     import polars as pl
 
-__all__ = ["shared_ids_by_position", "flat_describes_result"]
+__all__ = [
+    "shared_ids_by_position",
+    "shared_correlation_ids_by_position",
+    "flat_describes_result",
+]
 
 
 def shared_ids_by_position(flat: List[Any], results: List[Any]) -> List[Optional[str]]:
@@ -48,6 +52,27 @@ def shared_ids_by_position(flat: List[Any], results: List[Any]) -> List[Optional
     one taken (rows and results in different orders) gets None as well. None
     at a position whose row carries no usable id or describes another result.
     """
+    return _shared_values_by_position(flat, results, _usable_id)
+
+
+def shared_correlation_ids_by_position(
+    flat: List[Any], results: List[Any]
+) -> List[Optional[str]]:
+    """The correlation id of each result, or None where there is none to vouch for.
+
+    The same pairing as :func:`shared_ids_by_position`, reading the flattened
+    finding's ``correlation_id`` instead of its ``id``, so a reporter that
+    carries both reads them off one row. None where the paired row carries none
+    (most findings: only the ``secret/`` and ``dep/`` families have one, see
+    ``utils/finding_identity``) and where no row can vouch for the result.
+    """
+    return _shared_values_by_position(flat, results, _usable_correlation_id)
+
+
+def _shared_values_by_position(
+    flat: List[Any], results: List[Any], value_of: Callable[[Any], Optional[str]]
+) -> List[Optional[str]]:
+    """What *value_of* gives for each result's paired row; see the public wrappers."""
     rows = [item for item in flat if getattr(item, "source_report", None) is None]
     pairs = _describing_pairs(rows, results)
     ids: List[Optional[str]] = []
@@ -55,7 +80,7 @@ def shared_ids_by_position(flat: List[Any], results: List[Any]) -> List[Optional
         # By position: result ``i`` takes row ``i`` when that pair describes it.
         agreed = {result for result, row in pairs if result == row}
         for position, item in enumerate(rows):
-            ids.append(_usable_id(item) if position in agreed else None)
+            ids.append(value_of(item) if position in agreed else None)
         return ids
     # Walked: each result takes the first row, at or after the last one taken,
     # that describes it. The frame says which rows describe each result; the
@@ -69,7 +94,7 @@ def shared_ids_by_position(flat: List[Any], results: List[Any]) -> List[Optional
         at = bisect_left(listed, cursor)
         if at < len(listed):
             cursor = listed[at] + 1
-            ids.append(_usable_id(rows[listed[at]]))
+            ids.append(value_of(rows[listed[at]]))
         else:
             ids.append(None)
     return ids
@@ -205,6 +230,14 @@ def _usable_id(item: Any) -> Optional[str]:
     identifier = getattr(item, "id", None)
     if isinstance(identifier, str) and identifier:
         return identifier
+    return None
+
+
+def _usable_correlation_id(item: Any) -> Optional[str]:
+    """*item*'s correlation id when it is a non-empty string, else None."""
+    value = getattr(item, "correlation_id", None)
+    if isinstance(value, str) and value:
+        return value
     return None
 
 

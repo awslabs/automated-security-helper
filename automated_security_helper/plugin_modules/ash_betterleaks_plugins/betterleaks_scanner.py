@@ -183,7 +183,10 @@ from automated_security_helper.utils.process_env import snapshot_environ
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.utils.sandbox.scope import active_scope
-from automated_security_helper.utils.subprocess_utils import find_executable
+from automated_security_helper.utils.subprocess_utils import (
+    OutputPreference,
+    find_executable,
+)
 
 #: The text Betterleaks writes in place of a secret under ``--redact``.
 REDACTED = "REDACTED"
@@ -504,7 +507,6 @@ class BetterleaksScanner(ScannerPluginBase[BetterleaksScannerConfig]):
                 semantics="ASH passes --exit-code=2 because the tool's default 1 means both leaks and some errors",
             ),
             provenance=opsf.ProvenanceFacet(
-                tier=opsf.Tier.ALPHA_OPTIN,
                 source=opsf.ProvenanceSource.PINNED_RELEASE_BINARY,
                 selection_surfaces=(
                     "ash_betterleaks_plugins in ash_plugin_modules",
@@ -825,14 +827,26 @@ class BetterleaksScanner(ScannerPluginBase[BetterleaksScannerConfig]):
             )
         return super()._read_results_file(results_file)
 
-    def _run_subprocess(  # type: ignore[override]
+    def _run_subprocess(
         self,
         command: List[str],
         results_dir: str | Path | None = None,
-        **kwargs: Any,
-    ) -> Dict[str, str]:
+        stdout_preference: OutputPreference = "write",
+        stderr_preference: OutputPreference = "write",
+        cwd: Path | str | None = None,
+        env: Dict[str, str] | None = None,
+        timeout: float | None = None,
+    ) -> Dict[str, Any]:
         """Run Betterleaks, then mask what its log quotes from an ignore file."""
-        response = super()._run_subprocess(command, results_dir=results_dir, **kwargs)
+        response = super()._run_subprocess(
+            command,
+            results_dir=results_dir,
+            stdout_preference=stdout_preference,
+            stderr_preference=stderr_preference,
+            cwd=cwd,
+            env=env,
+            timeout=timeout,
+        )
         if results_dir is not None:
             _mask_quoted_ignore_entries(
                 Path(results_dir) / f"{self.__class__.__name__}.stderr.log"

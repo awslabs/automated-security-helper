@@ -447,7 +447,6 @@ class HadolintScanner(ScannerPluginBase[HadolintScannerConfig]):
                 semantics="with --no-fail, 0 is the only status a completed run gives; DL1000 unparseable files become target failures",
             ),
             provenance=opsf.ProvenanceFacet(
-                tier=opsf.Tier.ALPHA_OPTIN,
                 source=opsf.ProvenanceSource.PINNED_RELEASE_BINARY,
                 selection_surfaces=("ash_hadolint_plugins in ash_plugin_modules",),
                 upstream_license=(

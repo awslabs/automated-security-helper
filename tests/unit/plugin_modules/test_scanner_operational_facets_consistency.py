@@ -17,7 +17,7 @@ The sweep is pure construction and static reads: scanner instances are built
 with a mock context (no tool is run, no network is touched) and the fixtures
 are parsed, never scanned.
 
-Planted controls guard the enumerations: a count of 22, the exact set of
+Planted controls guard the enumerations: a count of 23, the exact set of
 scanner names against ``SCANNER_TOOL_TYPES``, and a classifier control for
 the output-format reader, because a sweep over a silently shrunken or
 mis-parsed universe would pass vacuously.
@@ -108,9 +108,9 @@ def _instances(_context) -> dict[type, ScannerPluginBase]:
 # ---------------------------------------------------------------------------
 
 
-def test_the_universe_is_the_twenty_two_shipped_scanners() -> None:
+def test_the_universe_is_the_twenty_three_shipped_scanners() -> None:
     assert not _REMAINING_LOAD_ERRORS, _REMAINING_LOAD_ERRORS
-    assert len(SCANNER_CLASSES) == 22, sorted(c.__name__ for c in SCANNER_CLASSES)
+    assert len(SCANNER_CLASSES) == 23, sorted(c.__name__ for c in SCANNER_CLASSES)
     names = [_ops(cls).scanner_name for cls in SCANNER_CLASSES]
     assert len(set(names)) == len(names), f"duplicate scanner_name in {names}"
     assert set(names) == set(SCANNER_TOOL_TYPES), (
@@ -493,17 +493,13 @@ _SOURCE_FOR_RUNTIME = {
 
 
 @pytest.mark.parametrize("cls", SCANNER_CLASSES, ids=lambda c: c.__name__)
-def test_provenance_and_tier_agree_with_the_runtime_and_the_package(cls) -> None:
+def test_provenance_agrees_with_the_runtime(cls) -> None:
+    """The tier is the manifest's (tests/unit/plugin_manifests binds it to the
+    package); the provenance source must still fit the runtime kind."""
     facets = _ops(cls)
     assert facets.provenance.source in _SOURCE_FOR_RUNTIME[facets.runtime.kind], (
         f"{facets.scanner_name}: a {facets.runtime.kind.value} runtime cannot "
         f"have provenance {facets.provenance.source.value}"
-    )
-    builtin = ".plugin_modules.ash_builtin." in f".{cls.__module__}."
-    expected = opsf.Tier.BUILTIN_DEFAULT if builtin else opsf.Tier.ALPHA_OPTIN
-    assert facets.provenance.tier is expected, (
-        f"{cls.__module__} implies {expected.value}, the register says "
-        f"{facets.provenance.tier.value}"
     )
 
 
@@ -527,3 +523,35 @@ def test_prerequisites_agree_with_the_scanners_own_selection(cls, _instances) ->
             f"{facets.scanner_name} needs a token but its sandbox declaration "
             "passes neither an env name nor a token file"
         )
+
+
+@pytest.mark.parametrize("cls", SCANNER_CLASSES, ids=lambda c: c.__name__)
+def test_a_container_image_claim_and_the_image_dispatch_travel_together(cls) -> None:
+    """The C5 iff-rule: claims CONTAINER_IMAGE ⇔ overrides the image dispatch.
+
+    The register row is the one place capability lives, and the dispatch
+    (``_execute_image_scan`` for a template scanner, a whole ``scan_image``
+    override for a bespoke one such as syft) is the wiring the claim promises.
+    A claim without the wiring would hand a scanner an image it cannot scan,
+    which the base hook reports as ASH's own drift; wiring without the claim
+    would be dead code the routing never reaches. Read from the class's own
+    ``vars()``, as every register reading is, so an inherited override never
+    answers for a subclass.
+    """
+    claims = opsf.TargetKind.CONTAINER_IMAGE in _ops(cls).targets.kinds
+    wires = "_execute_image_scan" in vars(cls) or "scan_image" in vars(cls)
+    assert claims == wires, (
+        f"{_ops(cls).scanner_name}: claims container_image={claims} but "
+        f"overrides the image dispatch={wires}; the register row and the "
+        "wiring must travel together"
+    )
+
+
+def test_the_wired_image_scanners_are_grype_syft_and_trivy() -> None:
+    """The first wave by name, so an accidental claim is a red row, not a drift."""
+    wired = sorted(
+        _ops(cls).scanner_name
+        for cls in SCANNER_CLASSES
+        if opsf.TargetKind.CONTAINER_IMAGE in _ops(cls).targets.kinds
+    )
+    assert wired == ["grype", "syft", "trivy"]

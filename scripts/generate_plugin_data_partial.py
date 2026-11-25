@@ -131,6 +131,7 @@ HOME_GRID_OMITTED = (
     "cfn-guard",
     "cfn-lint",
     "gitleaks",
+    "mcp-config",
     "trivy",
     "zizmor",
 )
@@ -152,6 +153,7 @@ NOT_MANAGED = (
     "cfn-lint",
     "checkov",
     "detect-secrets",
+    "mcp-config",
     "npm-audit",
     "semgrep",
     "zizmor",

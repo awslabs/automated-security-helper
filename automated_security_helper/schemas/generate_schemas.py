@@ -597,7 +597,9 @@ def _write_if_changed(path: Path, content: str) -> bool:
 OUTPUTS = ("file", "json", "dict")
 
 
-def generate_schemas(output: Literal["file", "json", "dict"] = "file"):
+def generate_schemas(
+    output: Literal["file", "json", "dict"] = "file",
+) -> dict[str, Any] | None:
     """Generate JSON schemas for the models.
 
     ``output`` is one of :data:`OUTPUTS`. Any other value is a ``ValueError``:
@@ -619,7 +621,7 @@ def generate_schemas(output: Literal["file", "json", "dict"] = "file"):
     cur_file_path = Path(__file__)
     # create schemas dir if not existing
     schemas_dir = cur_file_path.parent
-    resp = {}
+    resp: dict[str, Any] = {}
     # AshWorkspaceConfig is the workspace policy file's schema. It is a separate
     # model, not a block of AshConfig, because it lives in a separate file -- see
     # config/ash_workspace_config.py for why policy must not be readable from a
@@ -644,7 +646,6 @@ def generate_schemas(output: Literal["file", "json", "dict"] = "file"):
                 sort_keys=True,
             )
         else:
-            resp = None
             new_content = (
                 json.dumps(
                     schema,
@@ -655,7 +656,8 @@ def generate_schemas(output: Literal["file", "json", "dict"] = "file"):
                 + "\n"
             )
             _write_if_changed(json_schema_path, new_content)
-    return resp
+    # The file mode writes the schemas and answers None, as it always has.
+    return None if output == "file" else resp
 
 
 def main():

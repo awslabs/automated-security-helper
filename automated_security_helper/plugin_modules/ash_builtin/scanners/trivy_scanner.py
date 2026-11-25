@@ -517,11 +517,18 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
                 non_finding_artifacts=(),
             ),
             targets=opsf.TargetsFacet(
-                kinds=(opsf.TargetKind.DEPENDENCY_LOCKFILES,),
+                kinds=(
+                    opsf.TargetKind.DEPENDENCY_LOCKFILES,
+                    opsf.TargetKind.CONTAINER_IMAGE,
+                ),
                 tool_type=ScannerToolType.SCA,
                 selection=(
                     "`trivy fs` over the target; the default scanner is vuln only, and "
-                    "secret, misconfig and license are opt-in (options.scanners)"
+                    "secret, misconfig and license are opt-in (options.scanners); a "
+                    "container-image asset through `trivy image` "
+                    "(_execute_image_scan: a reference by --image-src from the "
+                    "detected engine, --input for a saved archive; an OCI layout "
+                    "directory is a reported clean skip, which trivy cannot read)"
                 ),
             ),
             runtime=opsf.RuntimeFacet(
@@ -576,7 +583,6 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
                 semantics="trivy reports findings in the file, not through its exit code",
             ),
             provenance=opsf.ProvenanceFacet(
-                tier=opsf.Tier.BUILTIN_DEFAULT,
                 source=opsf.ProvenanceSource.PINNED_RELEASE_BINARY,
                 selection_surfaces=("options.scanners (non-vuln scanners are opt-in)",),
                 upstream_license=(
@@ -775,6 +781,85 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
             # Only with misconfig, which the operator has to add: trivy's Terraform
             # checks download module sources (TrivyScannerBase._offline_misconfig_args).
             final_args = self._offline_misconfig_args(final_args)
+
+        subprocess_env = (
+            {**snapshot_environ(), **self.extra_env} if self.extra_env else None
+        )
+        return final_args, results_file, subprocess_env
+
+    def _unsupported_image_shape_reason(self, image) -> Optional[str]:
+        """trivy reads a reference or a saved archive; an OCI layout is neither.
+
+        ``trivy image`` takes a reference (resolved through its --image-src
+        order) or ``--input`` with a saved tarball; it has no input mode for an
+        image-layout directory. The scan is then a reported clean skip, and
+        grype and syft, whose stereoscope reads ``oci-dir:``, still scan it.
+        """
+        if image.oci_layout is not None:
+            return (
+                f"container image at {image.shown()} was not scanned by trivy: "
+                "trivy image reads a reference or a saved archive (--input), "
+                "not an OCI image-layout directory"
+            )
+        return None
+
+    def _execute_image_scan(
+        self, image
+    ) -> Tuple[List[str], Path, Optional[Dict[str, str]]]:
+        """Resolve the argv, results path and environment for one image run.
+
+        The fs scan's resolution with the image differences and nothing else:
+        the subcommand token is ``image`` for this resolution only, the target
+        slot carries the reference (with ``--image-src`` naming the detected
+        engine, else ``remote``) or ``--input=<tar>`` for a saved archive, and
+        none of the fs-shaped plumbing applies -- no skip-dirs budget (nothing
+        of the source tree is walked), while ASH's own trivy.yaml, module-dir,
+        ignorefile and secret-config neutralizations carry over, because they
+        exist to keep repository-written files from silencing findings and an
+        image scan still runs from a working directory that may hold them.
+        """
+        from automated_security_helper.core.container_engine import (
+            ContainerEngine,
+            detect_container_engine,
+        )
+
+        if self.results_dir is None:
+            raise ScannerError("TrivyScanner has no results directory")
+        results_file = self.results_dir.joinpath("image", "results_sarif.sarif")
+        results_file.parent.mkdir(exist_ok=True, parents=True)
+        results_file.unlink(missing_ok=True)
+
+        extra: List[str] = []
+        extra.append(f"--timeout={trivy_timeout(self._effective_scan_timeout())}")
+        config_token = f"--config={self._trivy_config_file()}"
+        extra.append(config_token)
+        modules = empty_tool_directory("trivy-modules", context=self.context)
+        extra.append(f"--module-dir={modules.as_posix()}")
+        extra.append(f"--ignorefile={self._ignore_file()}")
+        extra.append(f"--secret-config={self._secret_config_file([config_token])}")
+
+        if image.oci_archive is not None:
+            target_token = f"--input={Path(image.oci_archive).absolute().as_posix()}"
+        else:
+            engine = detect_container_engine()
+            if engine == ContainerEngine.NONE:
+                extra.append("--image-src=remote")
+            else:
+                extra.append(f"--image-src={engine.value}")
+            target_token = image.ref
+
+        original_subcommands = self.subcommands
+        try:
+            # For this resolution only, exactly as the extra-args swaps are
+            # scoped: the next fs target must not inherit the image subcommand.
+            self.subcommands = ["image"]
+            final_args = self._resolve_arguments(
+                target=target_token, results_file=results_file
+            )
+        finally:
+            self.subcommands = original_subcommands
+        target_index = len(final_args) - 1 - final_args[::-1].index(target_token)
+        final_args[target_index:target_index] = extra
 
         subprocess_env = (
             {**snapshot_environ(), **self.extra_env} if self.extra_env else None

@@ -80,7 +80,9 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Level,
     Location,
     Message,
+    Message1,
     PhysicalLocation,
+    PhysicalLocation2,
     PropertyBag,
     Region,
     Result,
@@ -106,7 +108,7 @@ from automated_security_helper.utils.error_text import (
     text_without_values,
     timeout_limit_token,
 )
-from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
+from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP, VERBOSE_LEVEL
 from automated_security_helper.utils.sandbox.fs_guard import (
     OutputLinkRefused,
     open_for_write,
@@ -541,7 +543,6 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 semantics="the base default {0, 1}; the scan is in-process, so there is no tool exit",
             ),
             provenance=opsf.ProvenanceFacet(
-                tier=opsf.Tier.BUILTIN_DEFAULT,
                 source=opsf.ProvenanceSource.PYPI_PINNED_DEPENDENCY,
                 selection_surfaces=("verification (baseline-driven)",),
                 upstream_license=(
@@ -1157,7 +1158,9 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             # path checked here is the one _read_baseline opens and binds to;
             # the named path is what an MCP client's delivered-tree test sees.
             real_baseline = Path(os.path.realpath(chosen))
-            refusal = self._baseline_refusal(Path(chosen_named), real_baseline)
+            refusal = self._baseline_refusal(
+                Path(chosen_named or chosen), real_baseline
+            )
             if refusal is not None:
                 ASH_LOGGER.warning(
                     text_without_values(
@@ -1174,7 +1177,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 # the operator wrote, as it does for a missing or refused file.
                 self._chosen_baseline = chosen
                 self._baseline_real = real_baseline
-                self._baseline_named = Path(chosen_named)
+                self._baseline_named = Path(chosen_named or chosen)
                 self._baseline_from_option = chosen_from_option
         elif option_missing is not None:
             # The configured file is not on disk, and no checkout candidate
@@ -2296,6 +2299,11 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         )
 
         secrets_collection_cls, _, _ = _detect_secrets_api()
+        if self._secrets_collection is None:
+            raise ScannerError(
+                "detect-secrets has no secrets collection to scan into; "
+                "the scanner was not set up before the scan."
+            )
         root = self._secrets_collection.root
         # Absolute, because the worker runs in a different working directory and
         # output_dir may be relative for a library caller.
@@ -2604,24 +2612,28 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             level=Level.error,
             kind=Kind.fail,
             message=Message(
-                text=f"Secret of type '{finding_type}' detected in file "
-                f"'{uri}' at line {line_number}"
+                root=Message1(
+                    text=f"Secret of type '{finding_type}' detected in file "
+                    f"'{uri}' at line {line_number}"
+                )
             ),
             locations=[
                 Location(
                     id=1,
                     physicalLocation=PhysicalLocation(
-                        artifactLocation=ArtifactLocation(
-                            uri=uri,
-                        ),
-                        region=Region(
-                            startLine=line_number,
-                            endLine=line_number,
-                            startColumn=start_column,
-                            snippet=ArtifactContent(
-                                text=f"Secret of type {finding_type} detected"
+                        root=PhysicalLocation2(
+                            artifactLocation=ArtifactLocation(
+                                uri=uri,
                             ),
-                        ),
+                            region=Region(
+                                startLine=line_number,
+                                endLine=line_number,
+                                startColumn=start_column,
+                                snippet=ArtifactContent(
+                                    text=f"Secret of type {finding_type} detected"
+                                ),
+                            ),
+                        )
                     ),
                 )
             ],
@@ -3251,7 +3263,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                         self._plugin_log(
                             f"Excluded {excluded_count} files from detect-secrets "
                             f"scan based on {origin}",
-                            level=logging.VERBOSE,
+                            level=VERBOSE_LEVEL,
                             target_type=target_type,
                         )
             if "filters_used" in scan_settings_dict:
@@ -3299,7 +3311,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                         "baseline or a file the scanned repository controls, "
                         "not from the operator's own settings, and it would "
                         "skip files by name",
-                        level=logging.VERBOSE,
+                        level=VERBOSE_LEVEL,
                         target_type=target_type,
                     )
                 scan_settings_dict["filters_used"] = kept_filters
@@ -3356,7 +3368,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
 
             self._plugin_log(
                 f"Found {len(scannable)} files in scan set to scan with detect-secrets",
-                level=logging.VERBOSE,
+                level=VERBOSE_LEVEL,
                 target_type=target_type,
             )
 

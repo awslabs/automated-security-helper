@@ -28,7 +28,10 @@ import polars as pl
 from automated_security_helper.utils.frame_text import ranks, unwire, wire
 
 
-#: The columns of :func:`graded_frame`, always all four, in this order.
+#: The graded frame's declared shape. The rows are per-finding gradings computed
+#: on the host (no model to derive a spec from), so the one schema dict here is
+#: the record, and the drift gate pins the frame against it. The columns of
+#: :func:`graded_frame`, always all four, in this order.
 #:
 #: - ``level`` is the severity BUCKET (``_severity_level`` of the finding's
 #:   severity, ``unknown`` for none), not ``FlatVulnerability.severity``.
@@ -54,7 +57,8 @@ def graded_frame(
 ) -> pl.DataFrame:
     """One row per finding: its severity bucket and its three yes/no gradings.
 
-    ``actionable`` is optional because deciding it costs a threshold lookup per
+    ``is_suppressed`` bears the model field's name it carries
+    (``FlatVulnerability.is_suppressed``). ``actionable`` is optional because deciding it costs a threshold lookup per
     finding, and some summaries never need it. The frame has the same four
     columns either way (:data:`GRADED_SCHEMA`); without ``actionable`` that
     column is null.

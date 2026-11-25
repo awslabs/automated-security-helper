@@ -732,6 +732,10 @@ _POINTED_DENIALS: Dict[str, Tuple[str, Any]] = {
         "/scanners/npm-audit/options/offline",
         True,
     ),
+    "/scanners/syft/options/sdist_harvest/**": (
+        "/scanners/syft/options/sdist_harvest/enabled",
+        False,
+    ),
     "/scanners/bandit/options/config_file": (
         "/scanners/bandit/options/config_file",
         "/etc/other.ini",

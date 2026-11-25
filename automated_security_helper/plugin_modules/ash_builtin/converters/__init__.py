@@ -7,5 +7,16 @@ from automated_security_helper.plugin_modules.ash_builtin.converters.archive_con
 from automated_security_helper.plugin_modules.ash_builtin.converters.jupyter_converter import (
     JupyterConverter,
 )
+from automated_security_helper.plugin_modules.ash_builtin.converters.mcp_config_converter import (
+    McpConfigConverter,
+)
+from automated_security_helper.plugin_modules.ash_builtin.converters.sdist_lock_harvester import (
+    SdistLockHarvester,
+)
 
-__all__ = ["ArchiveConverter", "JupyterConverter"]
+__all__ = [
+    "ArchiveConverter",
+    "JupyterConverter",
+    "McpConfigConverter",
+    "SdistLockHarvester",
+]

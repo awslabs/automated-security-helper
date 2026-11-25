@@ -1,0 +1,21 @@
+{
+  "mcpServers": {
+    "docs": {
+      "headers": {
+        "X-Client": "ash-fixture"
+      },
+      "url": "https://mcp.example.com/docs"
+    },
+    "files": {
+      "args": [
+        "--root",
+        "/srv/data"
+      ],
+      "autoApprove": [],
+      "command": "/usr/local/bin/mcp-files",
+      "env": {
+        "LOG_LEVEL": "info"
+      }
+    }
+  }
+}

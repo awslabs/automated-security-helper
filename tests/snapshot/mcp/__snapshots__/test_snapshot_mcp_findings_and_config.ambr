@@ -185,6 +185,7 @@
       'new': list([
         dict({
           'code_snippet': None,
+          'correlation_id': None,
           'cve_id': None,
           'cwe_id': None,
           'description': "Possible hardcoded password: 'h******'",
@@ -217,6 +218,7 @@
       'resolved': list([
         dict({
           'code_snippet': None,
+          'correlation_id': None,
           'cve_id': None,
           'cwe_id': None,
           'description': 'Use of assert detected.',
@@ -247,6 +249,7 @@
         }),
         dict({
           'code_snippet': None,
+          'correlation_id': 'secret/4f4cdfe58f92875d7e4b19f6a3adfba84a428f83de43dc923549b4a6590cea16',
           'cve_id': None,
           'cwe_id': None,
           'description': 'AWS Access Key detected in configuration file.',
@@ -752,6 +755,7 @@
               '/scanners/ferret-scan/options/config_file',
               '/scanners/grype/options/config_file',
               '/scanners/syft/options/config_file',
+              '/scanners/syft/options/sdist_harvest/**',
               '/scanners/trivy-repo/options/secret_config_file',
               '/scanners/trivy-repo/options/config_file',
               '/scanners/trivy-repo/options/module_dir',
@@ -1403,6 +1407,7 @@
               '/scanners/ferret-scan/options/config_file',
               '/scanners/grype/options/config_file',
               '/scanners/syft/options/config_file',
+              '/scanners/syft/options/sdist_harvest/**',
               '/scanners/trivy-repo/options/secret_config_file',
               '/scanners/trivy-repo/options/config_file',
               '/scanners/trivy-repo/options/module_dir',

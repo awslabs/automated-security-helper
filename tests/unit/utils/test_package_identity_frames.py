@@ -131,6 +131,24 @@ class TestFramesAgreeWithTheRecordFunctions:
             extract_package_identity(record) for record in _RECORDS
         ]
 
+    def test_the_columns_bear_the_model_field_names_they_fill(self):
+        # One vocabulary: the frame columns are the SARIF property keys, which
+        # are the FlatVulnerability fields these values fill. A rename on either
+        # side fails here until the other follows.
+        from automated_security_helper.models.flat_vulnerability import (
+            FlatVulnerability,
+        )
+
+        for column in (
+            package_identity_frame([]).columns + resource_identity_frame([]).columns
+        ):
+            assert column in FlatVulnerability.model_fields, column
+        assert package_identity_frame([]).columns == [
+            PACKAGE_NAME_KEY,
+            PACKAGE_VERSION_KEY,
+            PACKAGE_PATH_KEY,
+        ]
+
     def test_resource_frame_rows_are_the_extracted_tuples_in_order(self):
         frame = resource_identity_frame(_RECORDS)
         assert frame.columns == ["resource_id", "resource_type"]

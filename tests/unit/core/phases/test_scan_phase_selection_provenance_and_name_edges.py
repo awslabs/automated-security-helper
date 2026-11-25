@@ -688,7 +688,7 @@ class TestSelectionRefusals:
             return "ash_alpha.fake_module" if name == "comm-scanner" else None
 
         with patch(
-            "automated_security_helper.core.alpha_scanners.alpha_module_for",
+            "automated_security_helper.plugins.enablement.opt_in_module_for",
             module_for,
         ):
             with pytest.raises(ScannerSelectionError) as raised:

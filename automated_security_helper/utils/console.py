@@ -153,7 +153,8 @@ def ash_console(
         target = lambda: sys.stderr  # noqa: E731
     else:
         target = lambda: sys.stdout  # noqa: E731
-    return _AshConsole(file=CommandSafeStream(target), stderr=stderr, **kwargs)  # type: ignore[arg-type]
+    # CommandSafeStream is the file-like Console writes through, not an IO[str].
+    return _AshConsole(file=CommandSafeStream(target), stderr=stderr, **kwargs)  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
 
 
 def check_commands_of(console: Console) -> None:
@@ -174,7 +175,8 @@ def check_commands_of(console: Console) -> None:
         stream = lambda: sys.stdout  # noqa: E731
     else:
         stream = lambda: target  # noqa: E731
-    console.file = CommandSafeStream(stream)  # type: ignore[assignment]
+    # CommandSafeStream is the file-like Console writes through, not an IO[str].
+    console.file = CommandSafeStream(stream)  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
 
 
 def typer_console(*, stderr: bool = True) -> Console:

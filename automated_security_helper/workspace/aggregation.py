@@ -136,7 +136,16 @@ import re
 import shutil
 import stat
 from pathlib import Path, PurePosixPath
-from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+)
 from urllib.parse import quote, unquote
 
 from automated_security_helper.core.committed_output import WORKSPACE_SPOOL_DIR_NAME

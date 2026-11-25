@@ -43,7 +43,7 @@ def describe_parse_error(exc: BaseException) -> str:
         line = mark.line + 1
     elif isinstance(getattr(exc, "lineno", None), int):
         # json.JSONDecodeError
-        line = exc.lineno  # type: ignore[attr-defined]
+        line = getattr(exc, "lineno")  # noqa: B009
     if line is None:
         return type(exc).__name__
     return f"{type(exc).__name__} at line {line}"

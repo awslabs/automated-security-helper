@@ -1552,7 +1552,7 @@ def _archive_record(stored: dict[str, Any], timestamp: str) -> dict[str, Any] | 
         "Description",
     )
     if not resources or not all(
-        isinstance(record[key], str) and record[key].strip() for key in required
+        isinstance(value := record[key], str) and value.strip() for key in required
     ):
         return None
     return record
