@@ -866,6 +866,7 @@ class McpConfigScanner(ScannerPluginBase[McpConfigScannerConfig]):
                 python_only=True,
                 use_uv_tool=False,
             ),
+            runtime_compat=opsf.RuntimeCompatFacet(rows=()),
             platforms=opsf.PlatformsFacet(
                 provisionable=(),
                 note="first-party Python; no tool is provisioned",

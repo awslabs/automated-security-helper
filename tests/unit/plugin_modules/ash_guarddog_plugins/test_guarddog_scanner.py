@@ -66,7 +66,6 @@ from automated_security_helper.plugin_modules.ash_guarddog_plugins import (
 )
 from automated_security_helper.plugin_modules.ash_guarddog_plugins.guarddog_scanner import (
     GUARDDOG_DEFAULT_VERSION_CONSTRAINT,
-    GUARDDOG_PYTHON_REQUEST,
     GuardDogScanner,
     GuardDogScannerConfig,
     GuardDogScannerConfigOptions,
@@ -1108,8 +1107,10 @@ def test_install_command_pins_version_and_interpreter(tmp_path):
     repo = tmp_path / "src"
     repo.mkdir()
     scanner = _scanner(repo, tmp_path)
+    # The interpreter request is derived from the runtime_compat facet row, so
+    # the expected string is stated here, not read back from the scanner.
     assert scanner.uv_tool_install_commands == [
-        f"uv tool install --python {GUARDDOG_PYTHON_REQUEST} guarddog{GUARDDOG_DEFAULT_VERSION_CONSTRAINT}"
+        f"uv tool install --python >=3.10,<3.14 guarddog{GUARDDOG_DEFAULT_VERSION_CONSTRAINT}"
     ]
     # get_installation_commands splits on whitespace: each piece must stay whole.
     commands = scanner.get_installation_commands("linux", "amd64")
@@ -1118,7 +1119,7 @@ def test_install_command_pins_version_and_interpreter(tmp_path):
         "tool",
         "install",
         "--python",
-        GUARDDOG_PYTHON_REQUEST,
+        ">=3.10,<3.14",
         "guarddog==3.2.0",
     ] in commands
 
@@ -1144,7 +1145,9 @@ def test_missing_offline_names_the_remedy(tmp_path, monkeypatch):
     assert scanner.validate_plugin_dependencies() is False
     reason = scanner.dependency_unavailable_reason
     assert "offline mode" in reason and "nixpkgs" in reason
-    assert f"--python '{GUARDDOG_PYTHON_REQUEST}'" in reason
+    # The request is derived from the runtime_compat row, so the remedy cannot
+    # name a range the install does not use.
+    assert "--python '>=3.10,<3.14'" in reason
 
 
 @pytest.mark.unit
@@ -2099,7 +2102,7 @@ def test_max_hits_runs_guarddogs_own_cli_in_its_own_python_through_uv(
         "tool",
         "run",
         "--python",
-        GUARDDOG_PYTHON_REQUEST,
+        ">=3.10,<3.14",
         "--from",
         f"guarddog{GUARDDOG_DEFAULT_VERSION_CONSTRAINT}",
         "python",

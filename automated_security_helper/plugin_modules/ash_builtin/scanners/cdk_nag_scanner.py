@@ -1288,6 +1288,7 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                 python_only=False,
                 use_uv_tool=False,
             ),
+            runtime_compat=opsf.RuntimeCompatFacet(rows=()),
             platforms=opsf.PlatformsFacet(
                 provisionable=(),
                 note="runs in ASH's own interpreter plus a jsii child that needs node on PATH; ASH installs neither",
