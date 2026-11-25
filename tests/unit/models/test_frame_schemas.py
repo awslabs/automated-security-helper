@@ -12,7 +12,7 @@ is loud, and the mechanism tests pin what a marker does.
 
 from __future__ import annotations
 
-from typing import Annotated, Callable, Dict, Optional, Tuple
+from typing import Annotated, Any, Callable, Dict, Optional, Tuple
 
 import polars as pl
 import pytest
@@ -43,6 +43,10 @@ from automated_security_helper.models.frame_model import (
     unaccounted,
 )
 from automated_security_helper.models.core import AshSuppression
+from automated_security_helper.plugin_modules.ash_builtin.reporters._report_frames import (
+    GRADED_SCHEMA,
+    graded_frame,
+)
 from automated_security_helper.utils.finding_diff import SIDE_SPEC, _side
 from automated_security_helper.utils.finding_identity import identity_frame_spec
 from automated_security_helper.utils.frame_text import unwire, wire
@@ -75,6 +79,29 @@ ALL_SPECS: Dict[str, FrameSpec] = {
     **{name: spec for name, (spec, _build) in FRAME_SPECS.items()},
     **ACCOUNTED_SPECS,
 }
+
+# Population-B frames: the rows are gradings, drafts or prepared values computed
+# on the host, so there is no model to derive a spec from (design section 7).
+# The registry pins each one's declared schema dict against the frame its
+# builder constructs, so the schema has one record beyond the builder itself.
+HAND_SCHEMAS: Dict[
+    str, Tuple[Callable[[], Dict[str, Any]], Callable[[], pl.DataFrame]]
+] = {
+    "graded_frame": (
+        lambda: {k: v for k, v in GRADED_SCHEMA.items() if k != "actionable"},
+        lambda: graded_frame([], [], []),
+    ),
+    "graded_frame_actionable": (
+        lambda: dict(GRADED_SCHEMA),
+        lambda: graded_frame([], [], [], []),
+    ),
+}
+
+
+@pytest.mark.parametrize("name", sorted(HAND_SCHEMAS))
+def test_a_hand_schema_frame_builds_exactly_its_declared_schema(name):
+    declared, build = HAND_SCHEMAS[name]
+    assert list(dict(build().schema).items()) == list(declared().items())
 
 
 @pytest.mark.parametrize("name", sorted(FRAME_SPECS))
@@ -187,6 +214,16 @@ def test_the_flat_spec_declares_what_the_model_cannot_show():
     assert [c.name for c in frame_columns(FLAT_SPEC)].index("line_overflow") == (
         [c.name for c in frame_columns(FLAT_SPEC)].index("line_end") + 1
     )
+
+
+def test_the_emitters_severity_order_is_the_models_vocabulary():
+    from automated_security_helper.plugin_modules.ash_builtin.reporters.report_content_emitter import (
+        _SEVERITY_ORDER,
+    )
+
+    vocabulary = column_vocabularies(FLAT_SPEC)["severity"]
+    assert list(_SEVERITY_ORDER) == list(vocabulary)
+    assert list(_SEVERITY_ORDER.values()) == list(range(len(vocabulary)))
 
 
 def test_severity_records_its_vocabulary_and_stays_a_string():

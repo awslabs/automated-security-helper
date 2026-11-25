@@ -21,6 +21,8 @@ from automated_security_helper.core.scanner_statistics_calculator import (
 if TYPE_CHECKING:
     from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.core.constants import ASH_DEFAULT_SEVERITY_LEVEL
+from automated_security_helper.models.flat_frame import FLAT_SPEC
+from automated_security_helper.models.frame_model import column_vocabularies
 from automated_security_helper.models.workspace import is_workspace_scan
 from automated_security_helper.plugin_modules.ash_builtin.reporters.workspace_section import (
     workspace_policy_gates,
@@ -120,9 +122,12 @@ _SCAN_TIME_FORMATS = (
 #: A trailing ``+HH:MM`` or ``-HH:MM`` UTC offset.
 _UTC_OFFSET = re.compile(r"([+-])(\d{2}):(\d{2})$")
 
-#: The place of each severity in a findings list, most severe first. A severity
-#: this table does not name sorts after all of them.
-_SEVERITY_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "INFO": 4}
+#: The place of each severity in a findings list, most severe first: the
+#: vocabulary the EnumColumn marker records on ``FlatVulnerability.severity``,
+#: not a local ladder copy. A severity it does not name sorts after all of them.
+_SEVERITY_ORDER = {
+    name: place for place, name in enumerate(column_vocabularies(FLAT_SPEC)["severity"])
+}
 _UNLISTED_SEVERITY_PLACE = len(_SEVERITY_ORDER)
 
 

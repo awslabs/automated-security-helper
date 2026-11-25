@@ -28,6 +28,18 @@ import polars as pl
 from automated_security_helper.utils.frame_text import ranks, unwire, wire
 
 
+#: The graded frame's declared shape. The rows are per-finding gradings computed
+#: on the host (no model to derive a spec from), so the one schema dict here is
+#: the record; ``actionable`` is present only when the caller asked for it, and
+#: the drift gate pins both shapes against this dict.
+GRADED_SCHEMA: dict[str, Any] = {
+    "level": pl.String,
+    "is_suppressed": pl.Boolean,
+    "left_out": pl.Boolean,
+    "actionable": pl.Boolean,
+}
+
+
 def graded_frame(
     levels: Sequence[str],
     is_suppressed: Sequence[bool],
@@ -42,17 +54,13 @@ def graded_frame(
     need it.
     """
     columns: dict[str, Any] = {
-        "level": pl.Series("level", list(levels), dtype=pl.String),
-        "is_suppressed": pl.Series(
-            "is_suppressed", list(is_suppressed), dtype=pl.Boolean
-        ),
-        "left_out": pl.Series("left_out", list(left_out), dtype=pl.Boolean),
+        "level": list(levels),
+        "is_suppressed": list(is_suppressed),
+        "left_out": list(left_out),
     }
     if actionable is not None:
-        columns["actionable"] = pl.Series(
-            "actionable", list(actionable), dtype=pl.Boolean
-        )
-    return pl.DataFrame(columns)
+        columns["actionable"] = list(actionable)
+    return pl.DataFrame(columns, schema={name: GRADED_SCHEMA[name] for name in columns})
 
 
 def flag_total(frame: pl.DataFrame, flag: str) -> int:
