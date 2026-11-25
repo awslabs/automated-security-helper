@@ -54,7 +54,7 @@ The buildspec collects everything in `.ash/ash_output` as the build artifact, wi
 
 - AWS CodeBuild environment with Docker support
 - **Privileged mode enabled** in the CodeBuild project settings (required for container operations)
-- Python 3.10 or later
+- Python 3.11 or later
 - Internet access to download ASH and its dependencies
 
 ## Customization
