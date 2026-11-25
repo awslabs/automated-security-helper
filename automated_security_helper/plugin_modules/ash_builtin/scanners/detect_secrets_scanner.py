@@ -3512,7 +3512,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                                 else None
                             ),
                             config_name=self.config.name,
-                            tool_type=str(self.tool_type or "UNKNOWN"),
+                            tool_type=(self.tool_type or ScannerToolType.UNKNOWN).value,
                         )
                     )
             if kept_known:
