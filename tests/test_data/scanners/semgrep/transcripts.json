@@ -68,6 +68,37 @@
         "name": "semgrep",
         "version": "1.187.0"
       }
+    },
+    {
+      "adapter_prep": null,
+      "also_for": [],
+      "argv": null,
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": null,
+      "id": "semgrep-1.187.0-fix-rule",
+      "live_input": false,
+      "note": "one result from a rule that carries an autofix, so the SARIF result holds a fix; the rule file is the side file beside it; semgrep is deprecated in favor of opengrep, so this recording is kept for the alias dispatch row, not for promotion",
+      "observable": true,
+      "pin_stamp": null,
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "sarif",
+          "path": "captured/semgrep-1.187.0-fix-rule.sarif",
+          "sha256": "c83131cf63ee87242677d21eaf74ede0a8fe3406c51c01c35c6e10b752b3e3c1"
+        }
+      ],
+      "retention": "current",
+      "scanner": "semgrep",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "semgrep",
+        "version": "1.187.0"
+      }
     }
   ],
   "unrecorded": []

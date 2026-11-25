@@ -291,11 +291,31 @@ def _prep_cfn_guard(
 def _prep_cfn_lint(
     transcript: ToolTranscript, base: Path, file: Path
 ) -> Iterator[tuple[SarifReport, list[Result]]]:
-    cls = resolve_ref(f"{_BUILTIN_SCANNERS}.cfn_lint_scanner:CfnLintScanner")
+    module = f"{_BUILTIN_SCANNERS}.cfn_lint_scanner"
+    cls = resolve_ref(f"{module}:CfnLintScanner")
     report = _load_sarif(file)
+    # The resource comes from the JSON run beside the SARIF, when one is
+    # committed. The scanner attaches it as each batch is read, before
+    # normalize_report relocates the results, so the keys still match.
+    companion = file.with_suffix(".json")
+    if companion.is_file():
+        resolve_ref(f"{module}:attach_cfn_lint_resources")(
+            report,
+            resolve_ref(f"{module}:cfn_lint_resources")(
+                json.loads(companion.read_text(encoding="utf-8"))
+            ),
+        )
     # normalize_report reads no instance state: it locates results, maps
     # severities and sorts rules in place.
     cls.normalize_report(None, report)
+    yield report, [r for run in report.runs or [] for r in run.results or []]
+
+
+def _prep_cfn_nag(
+    transcript: ToolTranscript, base: Path, file: Path
+) -> Iterator[tuple[SarifReport, list[Result]]]:
+    report = _load_sarif(file)
+    resolve_ref(f"{_BUILTIN_SCANNERS}.cfn_nag_scanner:attach_cfn_nag_resources")(report)
     yield report, [r for run in report.runs or [] for r in run.results or []]
 
 
@@ -434,6 +454,17 @@ def _prep_trivy(
     with tempfile.TemporaryDirectory(prefix="conformance-trivy-") as scratch:
         target = _materialized(base / "fixture_repo", Path(scratch))
         report = cls._attach_package_identity(_load_sarif(file), target)
+        # A misconfiguration's resource comes from the JSON capture beside its
+        # SARIF, when there is one.
+        companion = file.with_suffix(".json")
+        if companion.is_file():
+            base_module = f"{_BUILTIN_SCANNERS}._trivy_scanner_base"
+            resolve_ref(f"{base_module}:attach_trivy_resources")(
+                report,
+                resolve_ref(f"{base_module}:trivy_misconfig_resources")(
+                    json.loads(companion.read_text(encoding="utf-8"))
+                ),
+            )
         yield report, [r for run in report.runs or [] for r in run.results or []]
 
 
@@ -518,6 +549,7 @@ PREPS: Mapping[str, Prep] = {
     "cdk-nag": _prep_cdk_nag,
     "cfn-guard": _prep_cfn_guard,
     "cfn-lint": _prep_cfn_lint,
+    "cfn-nag": _prep_cfn_nag,
     "checkov": _prep_checkov,
     "detect-secrets": _prep_detect_secrets,
     "gitleaks": _prep_gitleaks,

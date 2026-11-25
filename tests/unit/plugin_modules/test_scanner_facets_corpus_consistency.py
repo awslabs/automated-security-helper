@@ -842,14 +842,26 @@ def test_the_transcripts_observe_exactly_what_the_corpus_table_observes(
 #: verify`` reads each as red until the scanner is re-recorded at its pin with a
 #: recording that carries it; the entry is then deleted (the test below fails when a gap
 #: closes, so the table cannot go stale). Trivy's current recording is the terraform
-#: misconfiguration run, which has no package; its package-bearing runs are 0.69.3 and
-#: 0.75.0.
+#: misconfiguration run, which has no package and no fixed version; its
+#: package-bearing runs are 0.69.3 and 0.75.0.
 _ONLY_A_HISTORICAL_RECORDING_FILLS: dict[str, frozenset[str]] = {
     "trivy": frozenset(
-        {"package_name", "package_version", "package_path", "taxonomy_cve"}
+        {
+            "fix_available",
+            "package_name",
+            "package_version",
+            "package_path",
+            "taxonomy_cve",
+        }
     ),
     "trivy-repo": frozenset(
-        {"package_name", "package_version", "package_path", "taxonomy_cve"}
+        {
+            "fix_available",
+            "package_name",
+            "package_version",
+            "package_path",
+            "taxonomy_cve",
+        }
     ),
 }
 

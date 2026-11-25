@@ -273,6 +273,43 @@
         "name": "cfn-lint",
         "version": "1.61.0"
       }
+    },
+    {
+      "adapter_prep": "cfn-lint",
+      "also_for": [],
+      "argv": null,
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": null,
+      "id": "cfn-lint-1.57.2-m0-two-bad-properties",
+      "live_input": false,
+      "note": "two bad-property results; the JSON run beside the SARIF carries each result's resource, which the adapter attaches",
+      "observable": true,
+      "pin_stamp": null,
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "sarif",
+          "path": "captured/cfn-lint-1.57.2-m0-two-bad-properties.sarif",
+          "sha256": "9ae07af4f81f1cf292005deec47e1337035695eb7576456592c5face27880bf2"
+        }
+      ],
+      "retention": "current",
+      "scanner": "cfn-lint",
+      "side_reports": [
+        {
+          "format": "json",
+          "path": "captured/cfn-lint-1.57.2-m0-two-bad-properties.json",
+          "sha256": "f1dc25358e7664e179645e92b1adc07b18fbb27a9de1e4e85a540481488cc8d1"
+        }
+      ],
+      "stderr_tail": null,
+      "tool": {
+        "name": "cfn-lint",
+        "version": "1.57.2"
+      }
     }
   ],
   "unrecorded": []
