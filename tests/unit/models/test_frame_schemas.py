@@ -263,18 +263,18 @@ def test_every_string_column_of_the_flat_frame_is_wired():
     # would opt a column out without any sign at the use site
     assert not any(column.raw for column in frame_columns(FLAT_SPEC))
     finding = row(0)
-    finding.__dict__["severity"] = "SÄVERE\udcff"
-    assert unwire(flat_frame([finding])["severity"][0]) == "SÄVERE\udcff"
+    finding.__dict__["scanner"] = "SÄVERE\udcff"
+    assert unwire(flat_frame([finding])["scanner"][0]) == "SÄVERE\udcff"
 
 
-def test_severity_records_its_vocabulary_and_stays_a_string():
-    assert column_vocabularies(FLAT_SPEC) == {
-        "severity": ("CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO")
-    }
-    assert frame_schema(FLAT_SPEC)["severity"] == pl.String
+def test_severity_is_a_polars_enum_of_its_vocabulary():
+    ladder = ("CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO")
+    assert column_vocabularies(FLAT_SPEC) == {"severity": ladder}
+    assert frame_schema(FLAT_SPEC)["severity"] == pl.Enum(list(ladder))
     off_ladder = row(0)
     off_ladder.__dict__["severity"] = "WEIRD"  # built around the model's validation
-    assert flat_frame([off_ladder])["severity"].to_list() == ["WEIRD"]
+    with pytest.raises(FrameSpecError, match="severity"):
+        flat_frame([off_ladder])
 
 
 def test_the_markers_leave_validation_and_the_json_schema_alone():
@@ -352,7 +352,7 @@ def test_a_toy_spec_derives_columns_dtypes_and_order():
         ("over", pl.Boolean),
         ("lo", pl.Int64),
         ("hi", pl.Int64),
-        ("level", pl.String),
+        ("level", pl.Enum(["A", "B"])),
         ("n_chars", pl.Int64),
     ]
     assert unaccounted(TOY_SPEC) == []

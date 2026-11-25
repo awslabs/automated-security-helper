@@ -20,9 +20,9 @@ the field, as ``Annotated`` markers pydantic ignores:
   the group's values over the collection given to :func:`to_frame`. A rank is
   relative to that one build: it joins and sorts only against columns of the same
   build, never across frames.
-* :class:`EnumColumn`: records the field's vocabulary. The column stays String;
-  moving it to a polars ``Enum`` is a behavior change (an off-ladder value would
-  raise at frame build) that has its own unit.
+* :class:`EnumColumn`: the field's closed vocabulary. The column is a polars
+  ``Enum`` of it, so a value outside the vocabulary raises
+  :class:`FrameSpecError` at frame build.
 * :class:`NotInFrame`: the field never becomes a column.
 
 A frame is never wholly derivable (a private attribute, a property, a position
@@ -55,6 +55,7 @@ from __future__ import annotations
 import types
 import typing
 from dataclasses import dataclass, field
+from enum import Enum
 from functools import lru_cache
 from typing import (
     TYPE_CHECKING,
@@ -127,7 +128,11 @@ class RankEncoded:
 
 @dataclass(frozen=True)
 class EnumColumn:
-    """The field's closed vocabulary, in order. The dtype stays String."""
+    """The field's closed vocabulary, in order. The dtype is a polars ``Enum`` of it.
+
+    The field is a ``str`` or a ``str``-mixin enum (the cell is the member's value).
+    A cell outside the vocabulary raises :class:`FrameSpecError` at frame build.
+    """
 
     values: Tuple[str, ...]
 
@@ -231,6 +236,14 @@ def _marker(metadata: Iterable[Any], kind: type) -> Optional[Any]:
     return found[0] if found else None
 
 
+def _is_str_enum(annotation: Any) -> bool:
+    return (
+        isinstance(annotation, type)
+        and issubclass(annotation, str)
+        and issubclass(annotation, Enum)
+    )
+
+
 def _field_column(model: type[BaseModel], name: str) -> ColumnInfo:
     info = model.model_fields.get(name)
     if info is None:
@@ -258,7 +271,7 @@ def _field_column(model: type[BaseModel], name: str) -> ColumnInfo:
         if overflow is not None and rank is not None:
             raise FrameSpecError(f"{where} is both OverflowNullable and RankEncoded")
         dtype = "Int64"
-    elif base is str:
+    elif base is str or _is_str_enum(base):
         dtype = "String"
     else:
         raise FrameSpecError(
@@ -380,8 +393,17 @@ def _dtypes() -> Dict[str, Any]:
 
 def frame_schema(spec: FrameSpec) -> Dict[str, "pl.DataType"]:
     """The frame's polars schema, names and dtypes in column order."""
+    import polars as pl
+
     dtypes = _dtypes()
-    return {info.name: dtypes[info.dtype] for info in _resolve(spec)}
+    return {
+        info.name: (
+            pl.Enum(list(info.vocabulary))
+            if info.vocabulary is not None
+            else dtypes[info.dtype]
+        )
+        for info in _resolve(spec)
+    }
 
 
 def column_vocabularies(spec: FrameSpec) -> Dict[str, Tuple[str, ...]]:
@@ -398,6 +420,27 @@ def _text(value: Any, raw: bool) -> Optional[str]:
         return None
     text = value if isinstance(value, str) else str(value)
     return text if raw else wire(text)
+
+
+def _vocabulary_cell(value: Any, info: ColumnInfo) -> Optional[str]:
+    """The cell of an :class:`EnumColumn` column: a vocabulary word, or an error.
+
+    A member of a ``str`` enum is read as its value. Nothing is wired: the cell is
+    one of the vocabulary's own ASCII words or the build stops, and the refused
+    value is shown by ``repr`` cut to 40 characters, never as a cell.
+    """
+    if value is None:
+        return None
+    word = value.value if isinstance(value, Enum) else value
+    if isinstance(word, str) and word in (info.vocabulary or ()):
+        return word
+    shown = repr(word)
+    if len(shown) > 40:
+        shown = shown[:37] + "..."
+    raise FrameSpecError(
+        f"column {info.name!r} holds {shown}, which is not in its vocabulary "
+        f"{info.vocabulary!r}"
+    )
 
 
 def _int64(value: Optional[int]) -> Tuple[Optional[int], bool]:
@@ -449,7 +492,9 @@ def to_frame(models: Sequence[Any], spec: FrameSpec) -> "pl.DataFrame":
             values = [fn(item) for item in items]
         else:
             values = [getattr(item, info.name) for item in items]
-        if info.dtype == "String":
+        if info.vocabulary is not None:
+            data[info.name] = [_vocabulary_cell(v, info) for v in values]
+        elif info.dtype == "String":
             data[info.name] = [_text(v, info.raw) for v in values]
         elif info.dtype == "Boolean":
             if info.nullable:
