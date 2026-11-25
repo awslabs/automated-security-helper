@@ -3371,11 +3371,7 @@ global_settings:
     - rule_id: threat-filesystem-read
       path: automated_security_helper/plugin_modules/ash_builtin/scanners/npm_audit_scanner.py
       symbol: NpmAuditScanner._probe_npm_version
-      reason: "A docstring naming .npmrc to say why the version probe's directory holds its own package.json; nothing here reads the file."
-    - rule_id: threat-filesystem-read
-      path: automated_security_helper/plugin_modules/ash_builtin/scanners/npm_audit_scanner.py
-      symbol: NpmAuditScanner._probe_npm_version
-      reason: "A docstring naming .npmrc to say why the version probe's directory holds its own package.json; nothing here reads the file."
+      reason: "A docstring naming .npmrc, on two of its lines, to say why the version probe's directory holds its own package.json; nothing here reads the file. One entry: the definition covers both records, which two line pins used to."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/utils/package_manager_child.py
       line_start: 62
@@ -3396,11 +3392,7 @@ global_settings:
     - rule_id: threat-filesystem-read
       path: automated_security_helper/utils/package_manager_child.py
       symbol: _yarn_copy_parent
-      reason: "Module prose naming .npmrc to document which configuration the package managers would read and why the scan copy avoids it; nothing here reads the file."
-    - rule_id: threat-filesystem-read
-      path: automated_security_helper/utils/package_manager_child.py
-      symbol: _yarn_copy_parent
-      reason: "Module prose naming .npmrc to document which configuration the package managers would read and why the scan copy avoids it; nothing here reads the file."
+      reason: "Function prose naming .npmrc, on two of its lines, to document which configuration the package managers would read and why the scan copy avoids it; nothing here reads the file. One entry: the definition covers both records, which two line pins used to."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/utils/package_manager_child.py
       symbol: _pnpm_workspace_copy

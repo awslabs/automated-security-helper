@@ -72,12 +72,14 @@ def _guarddog_pins(path: Path) -> List[Dict[str, Any]]:
 
 
 def _key(entry: Dict[str, Any]) -> Tuple[Any, ...]:
+    # None values are replaced with sortable stand-ins so a list mixing line
+    # pins and symbol entries still sorts (None and int do not compare).
     return (
         entry["rule_id"],
         entry["path"],
-        entry.get("line_start"),
-        entry.get("line_end"),
-        entry.get("symbol"),
+        entry.get("line_start") or 0,
+        entry.get("line_end") or 0,
+        entry.get("symbol") or "",
     )
 
 

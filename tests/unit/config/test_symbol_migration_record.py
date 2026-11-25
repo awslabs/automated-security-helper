@@ -136,7 +136,9 @@ def test_every_symbol_scoped_entry_in_our_configs_resolves():
                 f"{config}: symbol {symbol!r} resolves to nothing in {entry['path']}"
             )
             checked += 1
-    assert checked >= 61, f"only {checked} symbol entries; the migration wrote 61"
+    # 61 line pins converted; two same-definition pairs merged into one entry
+    # each per config, so the configs carry 57 symbol-scoped entries.
+    assert checked >= 57, f"only {checked} symbol entries; the migration wrote 57"
 
 
 def test_the_record_and_the_configs_agree_entry_for_entry():
@@ -187,6 +189,11 @@ def test_old_pinned_lines_lie_inside_the_chosen_symbols_span():
             continue
         spans = _spans(row["path"]).get(row["symbol"], ())
         assert spans, f"{row['path']}: {row['symbol']} gone"
+        if row.get("old_pin_stale_at_migration"):
+            # The old pin was already pointing at the wrong line when it was
+            # converted (the record row says where the flagged code really is),
+            # so old-line-in-span is exactly what must NOT hold for it.
+            continue
         recorded = tuple(row["span_at_migration"])
         if recorded not in {tuple(s) for s in spans}:
             continue  # the file moved on; the resolution check above still holds

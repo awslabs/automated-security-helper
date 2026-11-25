@@ -6,9 +6,12 @@
 # .ash/.ash.yaml and .ash/.ash_community_plugins.yaml carried 108 line-pinned
 # suppression entries. 61 sat inside named Python definitions and were converted
 # to `symbol:` references (resolved by tree-sitter at scan time,
-# automated_security_helper/utils/symbol_spans.py); 5 CloudFormation-template
-# pins were converted to `resource_id:` scopes (the resource identity cdk-nag
-# findings carry); 42 stay line-pinned, each with its reason under `kept`.
+# automated_security_helper/utils/symbol_spans.py); two pairs per config that
+# named two lines of ONE definition folded into one entry each, so the configs
+# carry 57 symbol-scoped entries (this record keeps a row per OLD pin, so two
+# rows can share one entry); 5 CloudFormation-template pins were converted to
+# `resource_id:` scopes (the resource identity cdk-nag findings carry); 42 stay
+# line-pinned, each with its reason under `kept`.
 #
 # What reads it
 # -------------
@@ -399,19 +402,25 @@ entries:
   path: automated_security_helper/plugin_modules/ash_ferret_plugins/ferret_scanner.py
   old_line_start: 1455
   old_line_end: 1455
-  symbol: FerretScanScanner.get_installation_commands
+  # The old pin was already stale at the migration tip: the spawn_run call it was
+  # written for sits at line 1474, inside _get_installed_version, and the ferret
+  # pin test's own marker check read it red on main. The symbol names the
+  # definition that HOLDS the flagged call, so the stale old line lies outside it.
+  old_pin_stale_at_migration: true
+  symbol: FerretScanScanner._get_installed_version
   span_at_migration:
-  - 1422
-  - 1461
+  - 1463
+  - 1514
 - config: .ash/.ash_community_plugins.yaml
   rule_id: B607
   path: automated_security_helper/plugin_modules/ash_ferret_plugins/ferret_scanner.py
   old_line_start: 1455
   old_line_end: 1455
-  symbol: FerretScanScanner.get_installation_commands
+  old_pin_stale_at_migration: true
+  symbol: FerretScanScanner._get_installed_version
   span_at_migration:
-  - 1422
-  - 1461
+  - 1463
+  - 1514
 - config: .ash/.ash_community_plugins.yaml
   rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
   path: scripts/generate_test_docx.py
