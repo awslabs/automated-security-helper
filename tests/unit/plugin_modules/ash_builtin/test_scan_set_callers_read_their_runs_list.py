@@ -5,7 +5,7 @@
 
 The orchestrator writes the scan set under the run's ID before any plugin runs,
 and a plugin that calls ``scan_set`` with ``run_id=context.run_id`` reads that list
-back instead of walking the tree again (``get_scan_set``). Nine places call it for
+back instead of walking the tree again (``get_scan_set``). Twelve places call it for
 the plugins: the archive and Jupyter converters, detect-secrets, npm-audit,
 actionlint, zizmor, snyk-code's copy of the tree, ``utils/cfn_template_model``,
 which picks the candidate templates for cdk-nag and cfn-nag, and
@@ -181,6 +181,16 @@ def _mcp_config_converter(context: PluginContext) -> Callable[[], object]:
     return converter.convert
 
 
+def _sdist_lock_harvester(context: PluginContext) -> Callable[[], object]:
+    from automated_security_helper.plugin_modules.ash_builtin.converters.sdist_lock_harvester import (
+        SdistLockHarvester,
+        SdistLockHarvesterConfig,
+    )
+
+    harvester = SdistLockHarvester(context=context, config=SdistLockHarvesterConfig())
+    return lambda: harvester._lockfiles_in_scan_set(["uv.lock"])
+
+
 def _mcp_config_scanner(context: PluginContext) -> Callable[[], object]:
     from automated_security_helper.plugin_modules.ash_builtin.scanners.mcp_config_scanner import (
         McpConfigScanner,
@@ -203,6 +213,9 @@ CALL_SITES = {
     "plugin_modules/ash_builtin/converters/jupyter_converter.py": (_jupyter,),
     "plugin_modules/ash_builtin/converters/mcp_config_converter.py": (
         _mcp_config_converter,
+    ),
+    "plugin_modules/ash_builtin/converters/sdist_lock_harvester.py": (
+        _sdist_lock_harvester,
     ),
     "plugin_modules/ash_builtin/scanners/actionlint_scanner.py": (_actionlint,),
     "plugin_modules/ash_builtin/scanners/mcp_config_scanner.py": (_mcp_config_scanner,),
