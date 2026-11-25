@@ -36,6 +36,7 @@ from typing import (
 )
 
 from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
+from automated_security_helper.models.vocab import Severity
 from automated_security_helper.core.resource_management.scan_registry import (
     get_scan_registry,
     MCScanStatus,
@@ -4464,11 +4465,11 @@ async def mcp_check_installation(session_id: Optional[str] = None) -> Dict[str, 
 
 
 _SEVERITY_RATIONALE: Dict[str, str] = {
-    "CRITICAL": "CRITICAL severity — above any threshold",
-    "HIGH": "HIGH severity — above MEDIUM threshold",
-    "MEDIUM": "MEDIUM severity — above LOW threshold",
-    "LOW": "LOW severity — below MEDIUM threshold",
-    "INFO": "INFO severity — below default threshold",
+    Severity.CRITICAL.value: "CRITICAL severity — above any threshold",
+    Severity.HIGH.value: "HIGH severity — above MEDIUM threshold",
+    Severity.MEDIUM.value: "MEDIUM severity — above LOW threshold",
+    Severity.LOW.value: "LOW severity — below MEDIUM threshold",
+    Severity.INFO.value: "INFO severity — below default threshold",
 }
 
 

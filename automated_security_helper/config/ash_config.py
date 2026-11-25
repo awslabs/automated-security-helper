@@ -79,6 +79,7 @@ from automated_security_helper.utils.unknown_keys import (
 from automated_security_helper.core.exceptions import ASHConfigUnsetVariableError
 from automated_security_helper.core.enums import ExportFormat
 from automated_security_helper.models.asharp_model import AshAggregatedResults
+from automated_security_helper.models.vocab import SeverityThresholdText
 from automated_security_helper.models.core import (
     AshSuppression,
     IgnorePathWithReason,
@@ -1991,7 +1992,7 @@ class AshConfigGlobalSettingsSection(RedactedSection):
     )
 
     severity_threshold: Annotated[
-        Literal["ALL", "LOW", "MEDIUM", "HIGH", "CRITICAL"],
+        SeverityThresholdText,
         Field(
             description="Global minimum severity level to consider findings as failures across all scanners",
             # The default below is the process environment's. The schema says the

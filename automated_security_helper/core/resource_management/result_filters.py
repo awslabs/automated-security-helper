@@ -10,6 +10,8 @@ mcp_get_scan_results into smaller, purpose-specific views.
 
 import copy
 from typing import Any, Dict, List, Optional, TypeGuard
+
+from automated_security_helper.models.vocab import SEVERITY_BUCKETS
 from automated_security_helper.utils.severity_ladder import (
     SEVERITY_THRESHOLDS,
     result_severity,
@@ -23,7 +25,7 @@ ARTIFACT_PATH_PROPERTY = "workspace_artifact_path"
 
 #: The per-severity buckets a summary carries, in the order the summary lists
 #: them. ``suppressed`` is a bucket of its own, as it is in SummaryStats.
-_SEVERITY_KEYS = ("critical", "high", "medium", "low", "info", "suppressed")
+_SEVERITY_KEYS = SEVERITY_BUCKETS + ("suppressed",)
 
 #: The buckets ``total`` counts. SummaryStats.total is "the sum of all
 #: non-suppressed severity counts" (models/asharp_model.py), and the per-scanner
@@ -33,7 +35,7 @@ _SEVERITY_KEYS = ("critical", "high", "medium", "low", "info", "suppressed")
 #: ``finding_count``, the other every bucket including suppressed, so the same
 #: scanner read as 5 findings under a scanners filter and 6 under a severities
 #: filter that selected all six buckets.
-_COUNTED_SEVERITY_KEYS = ("critical", "high", "medium", "low", "info")
+_COUNTED_SEVERITY_KEYS = SEVERITY_BUCKETS
 
 #: ``scanner_results[*].status`` -> the SummaryStats outcome counter it lands in.
 _OUTCOME_COUNTERS = {
