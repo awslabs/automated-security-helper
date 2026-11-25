@@ -290,7 +290,8 @@ class TestSeverity:
             ({"severity": ""}, None, ("MEDIUM", "warning")),
             # A severity this scanner does not know errs to the severe side.
             ({"severity": "SEVERE"}, "note", ("HIGH", "error")),
-            ({"severity": 7}, "note", ("MEDIUM", "warning")),
+            # A non-string severity is no severity: the level decides.
+            ({"severity": 7}, "note", ("LOW", "note")),
         ],
     )
     def test_mapping(self, properties, level, expected):
