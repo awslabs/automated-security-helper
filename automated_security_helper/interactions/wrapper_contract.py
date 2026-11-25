@@ -69,7 +69,12 @@ WRAPPER_FORWARDED_OPTIONS: tuple[str, ...] = (
 #: The subcommands whose own ``-o`` is not the container runtime's. ``scan`` and
 #: ``build-image`` are the container-mode commands, where the wrapper reads ``-o`` as
 #: the runner; every other command's ``-o`` is its own and is forwarded.
-CONTAINER_MODE_SUBCOMMANDS: tuple[str, ...] = ("scan", "build-image")
+CONTAINER_MODE_SUBCOMMANDS: tuple[str, ...] = ("scan", "build-image", "container")
+
+#: The subcommands that are groups handing the options typed before them to one of
+#: their commands (AshTyperGroup._options_for_subcommand), so `./ash --quiet container
+#: build` passes `--quiet` on to `build`: such a group takes what that command takes.
+OPTION_ROUTING_GROUPS: dict[str, str] = {"container": "build"}
 
 #: Where container mode mounts the source and the output directory.
 SOURCE_MOUNT = "/src"
@@ -95,6 +100,15 @@ def _options(command: Any) -> set[str]:
         found.update(getattr(param, "opts", None) or [])
         found.update(getattr(param, "secondary_opts", None) or [])
     return found
+
+
+def _taken_options(name: str, command: Any) -> set[str]:
+    """The options the subcommand *name* takes when the wrapper hands it one: its own,
+    or for a group in OPTION_ROUTING_GROUPS those of the command the options go to."""
+    leaf = OPTION_ROUTING_GROUPS.get(name)
+    if leaf is not None:
+        return _options(command.commands[leaf])
+    return _options(command)
 
 
 def _tree_options(command: Any) -> set[str]:
@@ -159,7 +173,9 @@ def contract() -> WrapperContract:
     forwarded = []
     for option in WRAPPER_FORWARDED_OPTIONS:
         takers = tuple(
-            name for name, command in commands.items() if option in _options(command)
+            name
+            for name, command in commands.items()
+            if option in _taken_options(name, command)
         )
         forwarded.append((option, takers))
 

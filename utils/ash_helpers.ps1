@@ -852,7 +852,7 @@ function Invoke-ASH {
         # tests/unit/test_sandbox_refused_by_every_container_entrypoint.py checks these
         # lists against ./ash's and the real commands and options.
         # BEGIN generated: ps1-subcommands (scripts/generate_wrapper_tables.py)
-        $ashSubcommands = @('scan', 'build-image', 'report', 'diff', 'trend', 'merge', 'mcp', 'get-genai-guide', 'config', 'dependencies', 'inspect', 'plugin', 'suppress', 'express')
+        $ashSubcommands = @('scan', 'build-image', 'report', 'diff', 'trend', 'merge', 'mcp', 'get-genai-guide', 'container', 'config', 'dependencies', 'inspect', 'plugin', 'suppress', 'express')
         $ashTakesSandbox = @('scan')
         # END generated: ps1-subcommands
         # The root ash options that take a value, ASH_ROOT_VALUE_OPTIONS in ./ash. A value
@@ -863,18 +863,18 @@ function Invoke-ASH {
         # END generated: ps1-root-value-options
         # BEGIN generated: ps1-option-subcommands (scripts/generate_wrapper_tables.py)
         $ashOptionSubcommands = @{
-            '--quiet'                = 'scan build-image mcp'
-            '--no-color'             = 'scan build-image report merge mcp'
+            '--quiet'                = 'scan build-image mcp container'
+            '--no-color'             = 'scan build-image report merge mcp container'
             '--progress'             = 'scan'
             '--no-progress'          = 'scan'
             '--show-summary'         = 'scan'
             '--no-show-summary'      = 'scan'
             '--fail-on-findings'     = 'scan merge'
             '--no-fail-on-findings'  = 'scan merge'
-            '--verbose'              = 'scan build-image report merge mcp'
-            '--debug'                = 'scan build-image report merge mcp'
-            '--offline'              = 'scan build-image'
-            '--config'               = 'scan build-image report merge'
+            '--verbose'              = 'scan build-image report merge mcp container'
+            '--debug'                = 'scan build-image report merge mcp container'
+            '--offline'              = 'scan build-image container'
+            '--config'               = 'scan build-image report merge container'
             '--scanners'             = 'scan'
             '--exclude-scanners'     = 'scan'
             '--ignore-suppressions'  = 'scan merge'

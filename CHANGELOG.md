@@ -653,6 +653,14 @@ The commits below also carry breaking-change notes, listed under BREAKING CHANGE
 
 ### Breaking changes
 
+- **`ash container build` is the command that builds the ASH container image;
+  `ash build-image` is its deprecated spelling, removed in ASH v4.** Both take the
+  same options and start the same build. `ash build-image` prints one warning on
+  stderr per run, naming `ash container build`, and then runs. `./ash` and
+  `Invoke-ASH` accept `container` as a command word and pass `--quiet`,
+  `--no-color`, `--verbose`, `--debug`, `--offline` and `--config` given before it
+  on to `build`, as they did for `build-image`. Move scripts and CI jobs to the new
+  spelling in this release; the old one stops working in v4.
 - **`expires` is the canonical spelling of a suppression's or ignore path's
   expiration date; `expiration` is a deprecated alias, removed in ASH v4.** The
   swap reverses the earlier shape, where `expiration` was the field and

@@ -263,6 +263,7 @@ _COMMANDS = frozenset(
     {
         "build-image",
         "config",
+        "container",
         "dependencies",
         "diff",
         "express",
