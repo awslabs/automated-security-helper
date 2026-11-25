@@ -803,7 +803,7 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
                     "error(s)), so its SBOM could not be recorded"
                 )
 
-            if target_type == "converted":
+            if target_type == TargetType.CONVERTED:
                 # Components the sdist-lock-harvester materialized carry their
                 # provenance (the sdist's sha256 pin, the parent package's purl,
                 # the source URL) as CycloneDX properties, read from the harvest

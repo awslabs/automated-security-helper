@@ -691,7 +691,10 @@ The commits below also carry breaking-change notes, listed under BREAKING CHANGE
 - **`ash container build` is the command that builds the ASH container image;
   `ash build-image` is its deprecated spelling, removed in ASH v4.** Both take the
   same options and start the same build. `ash build-image` prints one warning on
-  stderr per run, naming `ash container build`, and then runs. `./ash` and
+  stderr per run, naming `ash container build`, and then runs; it is hidden from the
+  root `--help`, as the other spellings that moved in 3.9 are. The interrupted and
+  SIGTERM messages of the command read `ASH container build ...`, and the offline
+  hints in scan messages name `ash container build --offline`. `./ash` and
   `Invoke-ASH` accept `container` as a command word and pass `--quiet`,
   `--no-color`, `--verbose`, `--debug`, `--offline` and `--config` given before it
   on to `build`, as they did for `build-image`. Move scripts and CI jobs to the new

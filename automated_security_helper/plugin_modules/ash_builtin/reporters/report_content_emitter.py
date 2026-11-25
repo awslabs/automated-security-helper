@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from enum import Enum
 import json
 import re
-from typing import Dict, List, Any, Self, TYPE_CHECKING
+from typing import Dict, List, Any, TYPE_CHECKING
 
 import polars as pl
 
@@ -148,24 +148,33 @@ class OutcomeTone(str, Enum):
     """How serious the scan outcome reads, and how each report draws it.
 
     The value is the summary's ``tone`` text and the report stylesheet's
-    ``outcome--<tone>`` class. Each member also carries its HTML masthead
-    symbol and its Markdown alert type, so a report looks both up on the member
-    and a new tone cannot reach a table that lacks a row for it.
+    ``outcome--<tone>`` class. Each member also answers its HTML masthead
+    symbol and its Markdown alert type, read from one table keyed by the member
+    (a module-level check refuses a member the table has no row for), so a
+    report looks both up on the member and a new tone cannot reach a table that
+    lacks a row for it.
     """
 
-    symbol: str
-    alert: str
+    DANGER = "danger"
+    WARNING = "warning"
+    SUCCESS = "success"
 
-    def __new__(cls, value: str, symbol: str, alert: str) -> Self:
-        member = str.__new__(cls, value)
-        member._value_ = value
-        member.symbol = symbol
-        member.alert = alert
-        return member
+    @property
+    def symbol(self) -> str:
+        return _TONE_PRESENTATION[self][0]
 
-    DANGER = ("danger", "!", "CAUTION")
-    WARNING = ("warning", "!", "WARNING")
-    SUCCESS = ("success", "\u2713", "TIP")
+    @property
+    def alert(self) -> str:
+        return _TONE_PRESENTATION[self][1]
+
+
+_TONE_PRESENTATION: Dict[OutcomeTone, tuple[str, str]] = {
+    OutcomeTone.DANGER: ("!", "CAUTION"),
+    OutcomeTone.WARNING: ("!", "WARNING"),
+    OutcomeTone.SUCCESS: ("\u2713", "TIP"),
+}
+if set(_TONE_PRESENTATION) != set(OutcomeTone):
+    raise RuntimeError("an OutcomeTone has no presentation row")
 
 
 _UNLISTED_SEVERITY_PLACE = len(_SEVERITY_ORDER)

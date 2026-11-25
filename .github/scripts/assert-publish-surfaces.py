@@ -1468,7 +1468,7 @@ def self_test() -> int:
       - name: Build the image and export every layer
         env:
           ASH_GHA_BUILD_CACHE_EXPORT: max
-        run: ash build-image --no-run
+        run: ash container build --no-run
 """
     )
     credentials_export = dict(baseline)

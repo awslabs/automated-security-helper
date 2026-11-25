@@ -1070,7 +1070,7 @@ class TestTheOfflineImageDefault:
         assert record.policy == cdb.StalenessPolicy.WARN
         assert "OFFLINE=YES" in (record.policy_source or "")
         assert "OFFLINE=YES" in record.message()
-        assert "ash build-image --offline" in record.message()
+        assert "ash container build --offline" in record.message()
 
         model = _model(sarif)
         assert _exit_code(tmp_path, model) == 0

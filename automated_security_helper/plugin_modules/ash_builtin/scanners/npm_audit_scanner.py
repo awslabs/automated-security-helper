@@ -1,6 +1,7 @@
 """Module containing the NPM Audit security scanner implementation."""
 
 import copy
+import hashlib
 import json
 import logging
 import os
@@ -358,6 +359,86 @@ def _shown_lockfile(lock_file: Path | None, target_path: Path | str) -> str | No
         return None
 
 
+#: The ``partialFingerprints`` key an npm-audit result carries when it is located
+#: at its lockfile. See :func:`_identity_fingerprints`.
+IDENTITY_FINGERPRINT_KEY = "ashNpmAuditFinding/v1"
+
+
+def _synthetic_uri(package_location: str) -> str:
+    """The install-location URI an advisory was reported at before lockfile
+    locations: ``node_modules/<package>/package.json``.
+
+    Kept as the place a result is deduplicated under (one result per advisory
+    and package copy) and as the location when no lockfile is known.
+    """
+    return f"node_modules/{package_location}/package.json"
+
+
+def _advisory_location(
+    lockfile: str | None, package_location: str, line: int | None = None
+) -> Location:
+    """Where an advisory is reported: the lockfile it was audited from.
+
+    The lockfile exists in the checkout, is first-party content that a
+    ``node_modules`` ignore path never matches, and is the file a fix edits.
+    ``line`` is the 1-based line of the vulnerable package's entry when the
+    lockfile format lets the scanner read it cheaply (an npm lockfile's
+    ``packages`` key); without one the location has no region, never a made-up
+    line. With no lockfile known (a report converted on its own) the install
+    location the scanner always wrote is kept.
+    """
+    if lockfile is None:
+        uri = _synthetic_uri(package_location)
+        region = Region(startLine=1, startColumn=1)
+    else:
+        uri = lockfile
+        region = Region(startLine=line) if line else None
+    return Location(
+        physicalLocation=PhysicalLocation(
+            root=PhysicalLocation2(
+                artifactLocation=ArtifactLocation(uri=uri),
+                region=region,
+            )
+        )
+    )
+
+
+def _identity_fingerprints(
+    lockfile: str | None,
+    rule_id: str,
+    package_name: str,
+    version: Any,
+    install_location: Any,
+    chain: Any = None,
+) -> Dict[str, str]:
+    """``partialFingerprints`` that keep findings in one lockfile apart.
+
+    Located at the lockfile, two advisories (or two copies of one package) share
+    a file and often a line, so the location no longer tells them apart. This
+    hash is built from what does: the rule id, the package name, the installed
+    version, where that copy is installed (an npm lockfile key, which is the
+    dependency chain of a nested copy) and the dependency paths a yarn or pnpm
+    report lists. Empty when the result keeps its install-location URI, which
+    already carries the package.
+    """
+    if lockfile is None:
+        return {}
+    chain_text = (
+        "\x1e".join(sorted(str(item) for item in chain))
+        if isinstance(chain, (list, tuple, set))
+        else ""
+    )
+    parts = (
+        rule_id,
+        package_name,
+        "" if version is None else str(version),
+        "" if install_location is None else str(install_location),
+        chain_text,
+    )
+    digest = hashlib.sha256("\x1f".join(parts).encode("utf-8", "surrogatepass"))
+    return {IDENTITY_FINGERPRINT_KEY: digest.hexdigest()[:32]}
+
+
 # Where a yarn audit's advisories sit in the per-lockfile document, after
 # _parse_yarn_audit has put all three yarn output formats into one shape.
 _YARN_ADVISORIES_KEY = "yarn_advisories"
@@ -459,12 +540,12 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.SKIP_OFFLINE
 
     #: The facets register row (base/scanner_facets.py). Declaration only.
-    #: npm audit reports vulnerable packages. The SARIF location is INVENTED
-    #: by this adapter (``node_modules/<location>/package.json`` at 1:1, built
-    #: from the native ``nodes``), a locator and not a resource, so
-    #: resource_id is n/a and the register's must-not row holds the adapter to
-    #: never writing ``ash_resource_id``. Native fields are quoted from the
-    #: committed native report (tests/test_data/scanners/npmaudit/npm.json).
+    #: npm audit reports vulnerable packages. The SARIF location is the
+    #: lockfile the audit ran against, set by this adapter (npm audit's output
+    #: names no file), a locator and not a resource, so resource_id is n/a and
+    #: the register's must-not row holds the adapter to never writing
+    #: ``ash_resource_id``. Native fields are quoted from the committed native
+    #: report (tests/test_data/scanners/npmaudit/npm.json).
     facets: ClassVar[ScannerFacets] = ScannerFacets(
         rule_id=FacetDecl(
             state=FacetState.MAPPED,
@@ -483,22 +564,28 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         ),
         file_path=FacetDecl(
             state=FacetState.MAPPED,
-            native_field='vulnerabilities.<name>."nodes" (the install '
-            "location, synthesized as node_modules/<location>/package.json)",
-            reason="npm 7+ path; yarn and pnpm (v1 advisories) carry no install "
-            "location, so the adapter writes node_modules/<package>/package.json "
-            "from the advisory's package name",
+            native_field="(no native file) the lockfile the audit ran against "
+            "(package-lock.json, npm-shrinkwrap.json, pnpm-lock.yaml or "
+            "yarn.lock), relative to the scan root",
+            reason="npm audit, yarn audit and pnpm audit name no file, and the "
+            "node_modules/<package>/package.json install location they imply "
+            "usually is not in the checkout and matches a node_modules ignore "
+            "path, so the adapter reports the lockfile; the install location "
+            "is kept in the package_path property. A report converted with no "
+            "lockfile known keeps the install-location URI",
         ),
         line_range=FacetDecl(
             state=FacetState.MAPPED,
-            native_field="(no native line) the adapter writes line 1 of the "
-            "synthesized manifest location on every result",
+            native_field="(no native line) the 1-based line of the package's "
+            "entry in an npm lockfile's packages map, read by the adapter",
+            reason="a result with no readable entry (yarn.lock, pnpm-lock.yaml, "
+            "a lockfile v1, a node npm names no entry for) carries no region; "
+            "a line is never invented",
         ),
         column=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="(no native column) the adapter writes column 1 of "
-            "the synthesized manifest location on every result, beside the "
-            "line_range cell's line 1",
+            state=FacetState.NA,
+            reason="npm audit output carries no column and the lockfile "
+            "location is a line, so the adapter writes none",
         ),
         message=FacetDecl(
             state=FacetState.MAPPED,
@@ -507,9 +594,9 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         ),
         resource_id=FacetDecl(
             state=FacetState.NA,
-            reason="LOCATOR-ONLY (synthesized): the URI node_modules/<loc>/"
-            'package.json is built from the native "nodes", an install '
-            "locator; the findings are packages, not resources",
+            reason="LOCATOR-ONLY (set by the adapter): the URI is the lockfile "
+            "the audit ran against, a locator; the findings are packages, "
+            "not resources",
         ),
         resource_type=FacetDecl(
             state=FacetState.NA,
@@ -546,9 +633,13 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             'kept in the result property "cwe"',
         ),
         fingerprints=FacetDecl(
-            state=FacetState.NA,
-            reason="npm audit output carries no fingerprint; finding "
-            "identity keys on scanner, rule and package",
+            state=FacetState.MAPPED,
+            native_field="(no native fingerprint) result "
+            "partialFingerprints.ashNpmAuditFinding/v1, ASH-composed: a hash of "
+            "the rule id, package name, installed version, install path and "
+            "dependency paths",
+            reason="written when the result is located at its lockfile, where "
+            "findings of one lockfile share a file and often a line",
         ),
         fix_available=FacetDecl(
             state=FacetState.MAPPED,
@@ -654,8 +745,11 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                 none_reason="no tool-side silencing surface was surveyed for npm audit; ASH suppressions are the surface this register records",
             ),
             identity=opsf.IdentityFacet(
-                fingerprint_class=opsf.FingerprintClass.POSITIONAL_ONLY,
-                note="identity is the synthesized lockfile location through the shared floor",
+                fingerprint_class=opsf.FingerprintClass.STABLE_COMPUTED,
+                note="each result carries partialFingerprints.ashNpmAuditFinding/v1, "
+                "a hash ASH computes from the rule id, package name, installed "
+                "version, install path and dependency paths, so findings in one "
+                "lockfile stay distinct although they share its location",
             ),
             extensibility=opsf.ExtensibilityFacet(
                 custom_rules=opsf.CustomRules.NONE,
@@ -1152,6 +1246,22 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             install_path(lock_rel, str(node_path)),
         )
 
+    @staticmethod
+    def _node_line(
+        node_path: str | None,
+        lock_rel: str | None,
+        lock_index: NpmLockIndex | None,
+    ) -> int | None:
+        """The lockfile line of one node's ``packages`` entry, or None.
+
+        None when there is no npm lockfile, the node names none, or the entry
+        or its line was not found: the result then has no region.
+        """
+        if node_path is None or lock_rel is None or lock_index is None:
+            return None
+        entry = lock_index.entry(lock_rel, str(node_path))
+        return entry.line if entry is not None else None
+
     def _node_place(
         self,
         pkg_name: str,
@@ -1159,11 +1269,13 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         lock_rel: str | None,
         lock_index: NpmLockIndex | None,
     ) -> tuple[str, Dict[str, str]]:
-        """The result URI's package location and the identity of one node.
+        """The package location (the dedupe key) and the identity of one node.
 
         For a vulnerability entry that lists no node, the package by name alone:
-        npm counted the advisory, so it is reported against
-        ``node_modules/<name>/package.json`` with no installed version or path.
+        npm counted the advisory, so it is reported with no installed version
+        or path. The result is located at the audited lockfile
+        (``_advisory_location``); the package location is the
+        ``node_modules/<location>/package.json`` place it is deduplicated under.
         """
         if node_path is None:
             return pkg_name, identity_properties(pkg_name, None, None)
@@ -1844,13 +1956,15 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
 
         One result per installed version of the advisory's package, and one for
         the package by name when the record lists no version (the tool counted
-        the advisory, so it is a finding, not a rule with no result). The URI is
-        the one the npm path gives a hoisted package, so path-based
-        suppressions read the same; neither yarn nor pnpm says where a copy is
-        installed, so ``package_path`` is left out, and ``lockfile`` (the
-        audited lockfile, relative to the scanned target) says which project
-        the finding is from, where two projects' findings for one package,
-        version and advisory were otherwise identical. A record with no
+        the advisory, so it is a finding, not a rule with no result). The location
+        is the audited lockfile (``lockfile``, relative to the scanned target),
+        with no region: neither yarn nor pnpm says where a copy is installed
+        and the scanner does not read their lockfile formats for a line, so
+        ``package_path`` is left out. The package, version and dependency paths
+        are in the result's properties and its ``partialFingerprints``, which
+        keep two advisories of one lockfile apart, and ``lockfile`` says which
+        project the finding is from, where two projects' findings for one
+        package, version and advisory were otherwise identical. A record with no
         installed version gets no ``installed_version``: the advisory's range
         stood in for it, and a range is not a version.
 
@@ -1909,7 +2023,9 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                 # the tool lists once per vulnerable range) are one result
                 # naming both ranges, as the npm path makes them; they were
                 # two identical rows.
-                uri = f"node_modules/{pkg_name}/package.json"
+                # ``uri`` stays the per-package place the dedupe keys on; the
+                # reported location is the lockfile (_advisory_location).
+                uri = _synthetic_uri(pkg_name)
                 kept_result = emitted.get((vuln_id, uri, version))
                 if kept_result is not None:
                     self._widen_result(
@@ -1933,16 +2049,16 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                             text=f"{title} in {pkg_name} {record['vulnerable_versions']}. {record['url']}"
                         )
                     ),
-                    locations=[
-                        Location(
-                            physicalLocation=PhysicalLocation(
-                                root=PhysicalLocation2(
-                                    artifactLocation=ArtifactLocation(uri=uri),
-                                    region=Region(startLine=1, startColumn=1),
-                                )
-                            )
-                        )
-                    ],
+                    locations=[_advisory_location(lockfile, pkg_name)],
+                    partialFingerprints=_identity_fingerprints(
+                        lockfile,
+                        vuln_id,
+                        pkg_name,
+                        version,
+                        None,
+                        paths,
+                    )
+                    or None,
                     properties=PropertyBag(
                         **identity_properties(pkg_name, version, None),
                         vulnerable_versions=record["vulnerable_versions"],
@@ -2342,8 +2458,14 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         lock_rel: str | None,
         lock_index: NpmLockIndex | None,
         titles: Dict[str, Set[str]] | None = None,
+        lockfile: str | None = None,
     ) -> List[Dict[str, str]]:
         """The direct findings a transitive package's ``via`` chain leads to.
+
+        ``lockfile`` is the audited lockfile as the results report it
+        (``_shown_lockfile``); each reference carries it as its ``uri``, the
+        location of the root result it names. Left out, the install-location
+        URI of a result with no lockfile is used.
 
         The chain is the packages named in ``pkg_name``'s own ``via``, and
         theirs in turn; ``pkg_name``'s own advisories are not part of it.
@@ -2423,8 +2545,16 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                     ref = {"rule_id": rule_id}
                     if identity.get(PACKAGE_PATH_KEY):
                         ref["package_path"] = identity[PACKAGE_PATH_KEY]
-                    ref["uri"] = f"node_modules/{pkg_location}/package.json"
-                    roots[(rule_id, ref.get("package_path", ""), ref["uri"])] = ref
+                    # The root result's own reported location (the lockfile
+                    # when one is known), so the ref and the result share it.
+                    ref["uri"] = lockfile or _synthetic_uri(pkg_location)
+                    roots[
+                        (
+                            rule_id,
+                            ref.get("package_path", ""),
+                            _synthetic_uri(pkg_location),
+                        )
+                    ] = ref
         return [roots[key] for key in sorted(roots)]
 
     def _convert_per_lockfile(
@@ -2750,9 +2880,8 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                     # advisory is counted in the report's metadata, so a rule
                     # with no result silently dropped a finding.
                     for node_path in entry_nodes:
-                        # The URI keeps its historical shape, which existing
-                        # path-based suppressions match; package_path holds
-                        # the real install path.
+                        # package_path holds the real install path; the result
+                        # is located at the lockfile (below).
                         pkg_location, identity = self._node_place(
                             pkg_name, node_path, lock_rel, lock_index
                         )
@@ -2771,7 +2900,9 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                             disagreeing,
                         ):
                             continue
-                        uri = f"node_modules/{pkg_location}/package.json"
+                        # The place the dedupe keys on (one result per rule and
+                        # package copy); the reported location is the lockfile.
+                        uri = _synthetic_uri(pkg_location)
                         kept_result = emitted.get((vuln_id, uri))
                         if kept_result is not None:
                             self._widen_result(
@@ -2799,15 +2930,20 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                                 )
                             ),
                             locations=[
-                                Location(
-                                    physicalLocation=PhysicalLocation(
-                                        root=PhysicalLocation2(
-                                            artifactLocation=ArtifactLocation(uri=uri),
-                                            region=Region(startLine=1, startColumn=1),
-                                        )
-                                    )
+                                _advisory_location(
+                                    lock_shown,
+                                    pkg_location,
+                                    self._node_line(node_path, lock_rel, lock_index),
                                 )
                             ],
+                            partialFingerprints=_identity_fingerprints(
+                                lock_shown,
+                                vuln_id,
+                                pkg_name,
+                                identity.get(PACKAGE_VERSION_KEY),
+                                identity.get(PACKAGE_PATH_KEY) or node_path,
+                            )
+                            or None,
                             properties=PropertyBag(
                                 **identity,
                                 **known_version,
@@ -2877,6 +3013,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                         lock_rel,
                         lock_index,
                         titles,
+                        lockfile=lock_shown,
                     )
                     transitive_copies = dependency_only if has_dict_via else entry_nodes
                     for node_path in transitive_copies:
@@ -2901,17 +3038,21 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                                 )
                             ),
                             locations=[
-                                Location(
-                                    physicalLocation=PhysicalLocation(
-                                        root=PhysicalLocation2(
-                                            artifactLocation=ArtifactLocation(
-                                                uri=f"node_modules/{pkg_location}/package.json"
-                                            ),
-                                            region=Region(startLine=1, startColumn=1),
-                                        )
-                                    )
+                                _advisory_location(
+                                    lock_shown,
+                                    pkg_location,
+                                    self._node_line(node_path, lock_rel, lock_index),
                                 )
                             ],
+                            partialFingerprints=_identity_fingerprints(
+                                lock_shown,
+                                vuln_id,
+                                pkg_name,
+                                identity.get(PACKAGE_VERSION_KEY),
+                                identity.get(PACKAGE_PATH_KEY) or node_path,
+                                via_names,
+                            )
+                            or None,
                             properties=PropertyBag(
                                 **identity_fields,
                                 vulnerable_versions=vuln_info.get("range", "*"),

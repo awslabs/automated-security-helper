@@ -79,6 +79,7 @@ class McpErrorType(str, Enum):
     COMMITTED_OUTPUT_FILES = "committed_output_files"
     NO_SOURCE_DELIVERED = "no_source_delivered"
     DELIVERED_SOURCE_MISSING = "delivered_source_missing"
+    DELIVERED_IMAGE_MISSING = "delivered_image_missing"
     SESSION_SOURCE_MISMATCH = "session_source_mismatch"
     SCAN_START_FAILURE = "scan_start_failure"
     SCAN_NOT_FOUND = "scan_not_found"

@@ -658,7 +658,6 @@
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
 │ scan             Scan code, infrastructure, secrets, and dependencies.                           │
-│ build-image      Deprecated: use `ash container build`, which takes the same options.            │
 │ results          Read, compare and combine the results of saved ASH scans: report, diff, trend,  │
 │                  merge and inspect. None of them runs a scan.                                    │
 │ mcp              Start the ASH MCP server (Model Context Protocol)                               │

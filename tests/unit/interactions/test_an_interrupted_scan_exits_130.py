@@ -447,7 +447,7 @@ def test_build_image_says_it_was_interrupted_and_exits_130(tmp_path, isolated):
 
     assert returncode == 130, stdout + stderr
     assert log.read_text(encoding="utf-8").split()[-2:] == ["INT", "CLEAN"]
-    assert "ASH build-image interrupted before it finished." in stderr, stderr
+    assert "ASH container build interrupted before it finished." in stderr, stderr
     assert "verdict" not in stderr, stderr
     assert "Traceback" not in stdout + stderr
 
@@ -1236,12 +1236,12 @@ def test_the_runtime_is_started_off_the_main_thread(monkeypatch):
     [
         pytest.param(
             ["--no-run"],
-            "ASH build-image interrupted before it finished.",
+            "ASH container build interrupted before it finished.",
             id="build-only",
         ),
         pytest.param(
             [],
-            "ASH build-image interrupted before it finished: there is no verdict",
+            "ASH container build interrupted before it finished: there is no verdict",
             id="build-and-scan",
         ),
     ],

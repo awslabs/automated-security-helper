@@ -57,7 +57,10 @@ def _build_target(words: List[str]) -> str | None:
 
 def _builds_the_default_stage(step: Dict[str, Any]) -> bool:
     words = _words(step)
-    return "build-image" in words and _build_target(words) in (None, "non-root")
+    builds = "build-image" in words or any(
+        pair == ("container", "build") for pair in zip(words, words[1:])
+    )
+    return builds and _build_target(words) in (None, "non-root")
 
 
 def _probes_the_default_tag(step: Dict[str, Any]) -> bool:
@@ -114,7 +117,12 @@ def test_the_scan_legs_probe_the_ci_stage_too():
 def test_a_ci_build_is_not_mistaken_for_the_default_stage():
     """Control for the matcher: the scan legs' explicit ci builds do not count."""
     assert not _builds_the_default_stage(
-        {"run": "ash build-image --build-target ci --no-run"}
+        {"run": "ash container build --build-target ci --no-run"}
     )
-    assert not _builds_the_default_stage({"run": "ash build-image --build-target=ci"})
+    assert not _builds_the_default_stage(
+        {"run": "ash container build --build-target=ci"}
+    )
+    assert _builds_the_default_stage({"run": "ash container build --no-run"})
+    # The 3.8 spelling still counts, so a step that has not moved is still read.
+    assert not _builds_the_default_stage({"run": "ash build-image --build-target ci"})
     assert _builds_the_default_stage({"run": "ash build-image --no-run"})

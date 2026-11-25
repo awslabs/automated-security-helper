@@ -1541,7 +1541,7 @@ jobs:
           ASH_BASE_IMAGE_OVERRIDE: ${{ steps.prepull.outputs.base-image-override }}
         run: |
           start=$(date +%s)
-          ash build-image --oci-runner docker --build-target ci --ash-revision-to-install LOCAL --no-run --verbose 2>&1 | tee "${RUNNER_TEMP}/ash-container-build.log"
+          ash container build --oci-runner docker --build-target ci --ash-revision-to-install LOCAL --no-run --verbose 2>&1 | tee "${RUNNER_TEMP}/ash-container-build.log"
           echo "image build took $(( $(date +%s) - start ))s" | tee -a "$GITHUB_STEP_SUMMARY"
       - name: "Cache report: image-layers"
         if: ${{ !cancelled() }}
@@ -1704,7 +1704,7 @@ jobs:
   # ---------------------------------------------------------------------------
   # The default image stage's permissions.
   #
-  # `ash build-image` and `ash --mode container` build the `non-root` stage when no
+  # `ash container build` and `ash --mode container` build the `non-root` stage when no
   # --build-target is given, and that is the image an operator runs. Every scan leg
   # above builds `ci` (validate-container and run-scan-test pass --build-target ci),
   # so the steps only `non-root` has -- its user's home, the grype cache handed to
@@ -1742,7 +1742,7 @@ jobs:
         env:
           ASH_BASE_OCI_LAYOUT: ${{ steps.prepull.outputs.oci-layout }}
           ASH_BASE_IMAGE_OVERRIDE: ${{ steps.prepull.outputs.base-image-override }}
-        run: ash build-image --oci-runner docker --ash-revision-to-install LOCAL --no-run --verbose
+        run: ash container build --oci-runner docker --ash-revision-to-install LOCAL --no-run --verbose
       - name: Check who can write to the image
         shell: bash
         env:
@@ -2689,6 +2689,14 @@ jobs:
         run: uv sync
       - name: Build the documentation site
         run: uv run mkdocs build --clean --strict
+      # Every URL the site ever served must keep landing on the right page:
+      # scripts/validate_url_history.py holds docs/url-history/ (the historical URL
+      # ledger and the dead-URL map) and docs/redirects.yml in agreement, with no
+      # redirect chains or loops, and resolves each URL in the tree the step above
+      # just built. The docs deploy workflow runs the same validation again on every
+      # publish, main and release tags alike.
+      - name: Validate the URL history mapping
+        run: uv run python -I -B scripts/validate_url_history.py --site-dir public
       - name: Check the versioned site
         run: uv run python scripts/docs_versions.py check
 

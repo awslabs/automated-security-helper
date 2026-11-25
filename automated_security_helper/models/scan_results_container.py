@@ -52,7 +52,9 @@ class ScanResultsContainer(BaseModel):
         ),
     ] = None
     target: Path | None = None
-    target_type: TargetType | None = None
+    # ``image`` is the third wire spelling an image scan stamps; it is not a tree
+    # a scanner is pointed at, so it is not a TargetType member.
+    target_type: TargetType | Literal["image"] | None = None
     # The tool's own exit code, or None for a scanner whose tool never ran: a
     # MISSING row, or one whose scan started no tool. The executor assigns it
     # only for a tool that did start, so a default of 0 would make every row

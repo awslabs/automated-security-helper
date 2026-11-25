@@ -97,48 +97,48 @@ entries:
 - config: .ash.yaml
   rule_id: threat-process-download-exec
   path: automated_security_helper/assets/install-pinned-tool.py
-  old_line_start: 1030
-  old_line_end: 1030
+  old_line_start: 1041
+  old_line_end: 1041
   symbol: uv_tool_dir
   span_at_migration:
-  - 1017
-  - 1045
+  - 1028
+  - 1056
 - config: .ash.yaml
   rule_id: threat-process-download-exec
   path: automated_security_helper/assets/install-pinned-tool.py
-  old_line_start: 1518
-  old_line_end: 1518
+  old_line_start: 1529
+  old_line_end: 1529
   symbol: version_output
   span_at_migration:
-  - 1500
-  - 1528
+  - 1511
+  - 1539
 - config: .ash.yaml
   rule_id: threat-filesystem-read
   path: automated_security_helper/cli/mcp/source_delivery.py
-  old_line_start: 2501
-  old_line_end: 2501
+  old_line_start: 2573
+  old_line_end: 2573
   symbol: _validate_zip_member
   span_at_migration:
-  - 2496
-  - 2524
+  - 2568
+  - 2596
 - config: .ash.yaml
   rule_id: threat-filesystem-read
   path: automated_security_helper/utils/path_matching.py
-  old_line_start: 268
-  old_line_end: 268
+  old_line_start: 317
+  old_line_end: 317
   symbol: ignore_path_pattern
   span_at_migration:
-  - 255
-  - 288
+  - 304
+  - 339
 - config: .ash.yaml
   rule_id: threat-process-download-exec
   path: automated_security_helper/assets/install-pinned-tool.py
-  old_line_start: 1612
-  old_line_end: 1612
+  old_line_start: 1623
+  old_line_end: 1623
   symbol: _uv_tool_dir
   span_at_migration:
-  - 1606
-  - 1622
+  - 1617
+  - 1633
 - config: .ash.yaml
   rule_id: threat-process-download-exec
   path: automated_security_helper/utils/python_installer.py
@@ -160,21 +160,21 @@ entries:
 - config: .ash.yaml
   rule_id: threat-filesystem-destruction
   path: tests/snapshot/test_snapshot_normalizer.py
-  old_line_start: 266
-  old_line_end: 266
+  old_line_start: 294
+  old_line_end: 294
   symbol: TestSurvives.test_panel_width_on_a_masked_line
   span_at_migration:
-  - 262
-  - 270
+  - 290
+  - 298
 - config: .ash.yaml
   rule_id: threat-filesystem-destruction
   path: tests/snapshot/test_snapshot_normalizer.py
-  old_line_start: 274
-  old_line_end: 274
+  old_line_start: 302
+  old_line_end: 302
   symbol: TestSurvives.test_markdown_table_padding_after_a_masked_value
   span_at_migration:
-  - 272
-  - 275
+  - 300
+  - 303
 - config: .ash.yaml
   rule_id: threat-filesystem-read
   path: tests/unit/test_artifact_contents_gate.py
@@ -187,12 +187,12 @@ entries:
 - config: .ash.yaml
   rule_id: threat-filesystem-read
   path: tests/unit/test_artifact_contents_gate.py
-  old_line_start: 1471
-  old_line_end: 1471
+  old_line_start: 1477
+  old_line_end: 1477
   symbol: TestArchiveReading.test_an_escaping_symlink_in_a_real_tar_fails_the_gate
   span_at_migration:
-  - 1451
-  - 1476
+  - 1457
+  - 1482
 - config: .ash.yaml
   rule_id: threat-filesystem-read
   path: tests/unit/test_defense_in_depth.py
@@ -205,12 +205,12 @@ entries:
 - config: .ash.yaml
   rule_id: threat-filesystem-read
   path: tests/unit/test_pinned_tool_version_check.py
-  old_line_start: 1175
-  old_line_end: 1175
+  old_line_start: 1178
+  old_line_end: 1178
   symbol: TestOnlyAllowlistedHttpsUrlsAreFetched.test_a_url_outside_the_allowlist_is_refused_unopened
   span_at_migration:
-  - 1172
-  - 1194
+  - 1175
+  - 1197
 - config: .ash.yaml
   rule_id: threat-runtime-obfuscation-base64exec
   path: tests/unit/utils/test_opengrep_pinned_download.py
@@ -223,21 +223,21 @@ entries:
 - config: .ash.yaml
   rule_id: threat-filesystem-read
   path: automated_security_helper/plugin_modules/ash_builtin/scanners/npm_audit_scanner.py
-  old_line_start: 787
-  old_line_end: 787
+  old_line_start: 816
+  old_line_end: 816
   symbol: NpmAuditScanner._probe_npm_version
   span_at_migration:
-  - 786
-  - 824
+  - 815
+  - 853
 - config: .ash.yaml
   rule_id: threat-filesystem-read
   path: automated_security_helper/plugin_modules/ash_builtin/scanners/npm_audit_scanner.py
-  old_line_start: 789
-  old_line_end: 789
+  old_line_start: 818
+  old_line_end: 818
   symbol: NpmAuditScanner._probe_npm_version
   span_at_migration:
-  - 786
-  - 824
+  - 815
+  - 853
 - config: .ash.yaml
   rule_id: threat-filesystem-read
   path: automated_security_helper/utils/package_manager_child.py
@@ -319,12 +319,12 @@ entries:
 - config: .ash.yaml
   rule_id: SECRET-BASIC-AUTH-CREDENTIALS
   path: automated_security_helper/interactions/run_ash_nix.py
-  old_line_start: 198
-  old_line_end: 198
+  old_line_start: 199
+  old_line_end: 199
   symbol: shown_flake_ref
   span_at_migration:
-  - 197
-  - 209
+  - 198
+  - 210
 - config: .ash.yaml
   rule_id: SECRET-BASIC-AUTH-CREDENTIALS
   path: automated_security_helper/utils/secret_masking.py
@@ -355,30 +355,30 @@ entries:
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: B104
   path: automated_security_helper/cli/mcp/__init__.py
-  old_line_start: 930
-  old_line_end: 930
+  old_line_start: 940
+  old_line_end: 940
   symbol: _log_where_the_server_listens
   span_at_migration:
-  - 924
-  - 955
+  - 934
+  - 965
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: threat-filesystem-read
   path: automated_security_helper/cli/mcp/source_delivery.py
-  old_line_start: 2501
-  old_line_end: 2501
+  old_line_start: 2573
+  old_line_end: 2573
   symbol: _validate_zip_member
   span_at_migration:
-  - 2496
-  - 2524
+  - 2568
+  - 2596
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: threat-filesystem-read
   path: automated_security_helper/utils/path_matching.py
-  old_line_start: 268
-  old_line_end: 268
+  old_line_start: 317
+  old_line_end: 317
   symbol: ignore_path_pattern
   span_at_migration:
-  - 255
-  - 288
+  - 304
+  - 339
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: API_KEY_OR_SECRET
   path: tests/unit/utils/test_secret_masking_shapes_in_text.py
@@ -409,30 +409,30 @@ entries:
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: threat-process-download-exec
   path: automated_security_helper/assets/install-pinned-tool.py
-  old_line_start: 1030
-  old_line_end: 1030
+  old_line_start: 1041
+  old_line_end: 1041
   symbol: uv_tool_dir
   span_at_migration:
-  - 1017
-  - 1045
+  - 1028
+  - 1056
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: threat-process-download-exec
   path: automated_security_helper/assets/install-pinned-tool.py
-  old_line_start: 1518
-  old_line_end: 1518
+  old_line_start: 1529
+  old_line_end: 1529
   symbol: version_output
   span_at_migration:
-  - 1500
-  - 1528
+  - 1511
+  - 1539
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: threat-process-download-exec
   path: automated_security_helper/assets/install-pinned-tool.py
-  old_line_start: 1612
-  old_line_end: 1612
+  old_line_start: 1623
+  old_line_end: 1623
   symbol: _uv_tool_dir
   span_at_migration:
-  - 1606
-  - 1622
+  - 1617
+  - 1633
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: threat-process-download-exec
   path: automated_security_helper/utils/python_installer.py
@@ -454,21 +454,21 @@ entries:
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: threat-filesystem-read
   path: automated_security_helper/plugin_modules/ash_builtin/scanners/npm_audit_scanner.py
-  old_line_start: 787
-  old_line_end: 787
+  old_line_start: 816
+  old_line_end: 816
   symbol: NpmAuditScanner._probe_npm_version
   span_at_migration:
-  - 786
-  - 824
+  - 815
+  - 853
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: threat-filesystem-read
   path: automated_security_helper/plugin_modules/ash_builtin/scanners/npm_audit_scanner.py
-  old_line_start: 789
-  old_line_end: 789
+  old_line_start: 818
+  old_line_end: 818
   symbol: NpmAuditScanner._probe_npm_version
   span_at_migration:
-  - 786
-  - 824
+  - 815
+  - 853
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: threat-filesystem-read
   path: automated_security_helper/utils/package_manager_child.py

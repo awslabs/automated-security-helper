@@ -845,21 +845,21 @@ else:
         "ConverterConfigSegment",
         _ConverterConfigSegmentBase,
         ConverterPluginConfigBase,
-        "converters",
+        PluginKind.CONVERTER.section,
         __name__,
     )
     ScannerConfigSegment = build_segment(
         "ScannerConfigSegment",
         _ScannerConfigSegmentBase,
         ScannerPluginConfigBase,
-        "scanners",
+        PluginKind.SCANNER.section,
         __name__,
     )
     ReporterConfigSegment = build_segment(
         "ReporterConfigSegment",
         _ReporterConfigSegmentBase,
         ReporterPluginConfigBase,
-        "reporters",
+        PluginKind.REPORTER.section,
         __name__,
     )
 
@@ -1863,10 +1863,7 @@ class AshConfigGlobalSettingsSection(RedactedSection):
         ),
         # _resolve_default_severity_level returns one of the threshold names, or the
         # fallback, so the str it is typed as is one of the field's literals.
-    ] = cast(
-        Literal["ALL", "LOW", "MEDIUM", "HIGH", "CRITICAL"],
-        ASH_DEFAULT_SEVERITY_LEVEL,
-    )
+    ] = cast(SeverityThresholdText, ASH_DEFAULT_SEVERITY_LEVEL)
 
     ignore_paths: Annotated[
         List[IgnorePathWithReason],

@@ -98,6 +98,9 @@ def _findings(
     model = AshAggregatedResults()
     model.ash_config = get_default_config()
     model.metadata.generated_at = "2026-01-15T12:00:00.000Z"
+    # The value is read off the model's flattened finding, whose scope is the
+    # metadata's project name, so the run's target is recorded there.
+    model.metadata.project_name = target
     if project is not None:
         model.metadata.workspace_project = project
     model.sarif = SarifReport(
