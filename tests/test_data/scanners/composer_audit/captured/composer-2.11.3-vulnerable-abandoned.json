@@ -1,0 +1,128 @@
+{
+  "abandoned": {
+    "fzaninotto/faker": null,
+    "zendframework/zend-stdlib": "laminas/laminas-stdlib"
+  },
+  "advisories": {
+    "guzzlehttp/psr7": [
+      {
+        "advisoryId": "PKSA-vznr-tgp9-fd7d",
+        "affectedVersions": "<2.12.3",
+        "cve": "CVE-2026-59882",
+        "link": "https://github.com/advisories/GHSA-c2w2-prh8-qm98",
+        "packageName": "guzzlehttp/psr7",
+        "reportedAt": "2026-07-21T18:35:25+00:00",
+        "severity": "medium",
+        "sources": [
+          {
+            "name": "GitHub",
+            "remoteId": "GHSA-c2w2-prh8-qm98"
+          }
+        ],
+        "title": "guzzlehttp/psr7: Host Confusion via Weak URI Host Validation"
+      },
+      {
+        "advisoryId": "PKSA-7qs6-zvnz-h66r",
+        "affectedVersions": "<2.12.1",
+        "cve": "CVE-2026-55766",
+        "link": "https://github.com/guzzle/psr7/security/advisories/GHSA-vm85-hxw5-5432",
+        "packageName": "guzzlehttp/psr7",
+        "reportedAt": "2026-06-18T09:49:37+00:00",
+        "severity": "medium",
+        "sources": [
+          {
+            "name": "GitHub",
+            "remoteId": "GHSA-vm85-hxw5-5432"
+          },
+          {
+            "name": "FriendsOfPHP/security-advisories",
+            "remoteId": "guzzlehttp/psr7/CVE-2026-55766.yaml"
+          }
+        ],
+        "title": "CRLF injection in HTTP start-line serialization"
+      },
+      {
+        "advisoryId": "PKSA-gm5x-j3mz-71n9",
+        "affectedVersions": "<2.10.2",
+        "cve": "CVE-2026-49214",
+        "link": "https://github.com/guzzle/psr7/security/advisories/GHSA-hq7v-mx3g-29hw",
+        "packageName": "guzzlehttp/psr7",
+        "reportedAt": "2026-05-25T22:58:15+00:00",
+        "severity": "medium",
+        "sources": [
+          {
+            "name": "GitHub",
+            "remoteId": "GHSA-hq7v-mx3g-29hw"
+          },
+          {
+            "name": "FriendsOfPHP/security-advisories",
+            "remoteId": "guzzlehttp/psr7/CVE-2026-49214.yaml"
+          }
+        ],
+        "title": "CRLF injection via URI host component"
+      },
+      {
+        "advisoryId": "PKSA-jj5t-2zs1-dcfm",
+        "affectedVersions": "<2.10.2",
+        "cve": "CVE-2026-48998",
+        "link": "https://github.com/guzzle/psr7/security/advisories/GHSA-34xg-wgjx-8xph",
+        "packageName": "guzzlehttp/psr7",
+        "reportedAt": "2026-05-25T22:58:15+00:00",
+        "severity": "medium",
+        "sources": [
+          {
+            "name": "GitHub",
+            "remoteId": "GHSA-34xg-wgjx-8xph"
+          },
+          {
+            "name": "FriendsOfPHP/security-advisories",
+            "remoteId": "guzzlehttp/psr7/CVE-2026-48998.yaml"
+          }
+        ],
+        "title": "Host confusion via authority reinterpretation"
+      },
+      {
+        "advisoryId": "PKSA-hn62-zkx4-1y5q",
+        "affectedVersions": ">=2,<2.4.5|<1.9.1",
+        "cve": "CVE-2023-29197",
+        "link": "https://github.com/guzzle/psr7/security/advisories/GHSA-wxmh-65f7-jcvw",
+        "packageName": "guzzlehttp/psr7",
+        "reportedAt": "2023-04-17T16:00:37+00:00",
+        "severity": "medium",
+        "sources": [
+          {
+            "name": "GitHub",
+            "remoteId": "GHSA-wxmh-65f7-jcvw"
+          },
+          {
+            "name": "FriendsOfPHP/security-advisories",
+            "remoteId": "guzzlehttp/psr7/CVE-2023-29197.yaml"
+          }
+        ],
+        "title": "Improper header validation"
+      },
+      {
+        "advisoryId": "PKSA-gvzg-s447-b5b5",
+        "affectedVersions": ">=2,<2.1.1|<1.8.4",
+        "cve": "CVE-2022-24775",
+        "link": "https://github.com/guzzle/psr7/security/advisories/GHSA-q7rv-6hp3-vh96",
+        "packageName": "guzzlehttp/psr7",
+        "reportedAt": "2022-03-20T13:44:44+00:00",
+        "severity": "medium",
+        "sources": [
+          {
+            "name": "GitHub",
+            "remoteId": "GHSA-q7rv-6hp3-vh96"
+          },
+          {
+            "name": "FriendsOfPHP/security-advisories",
+            "remoteId": "guzzlehttp/psr7/CVE-2022-24775.yaml"
+          }
+        ],
+        "title": "Inproper parsing of HTTP headers"
+      }
+    ]
+  },
+  "cooldown": [],
+  "filter": []
+}

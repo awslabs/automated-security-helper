@@ -1,0 +1,19 @@
+{
+  "config": {
+    "platform": {
+      "php": "7.4.0"
+    },
+    "policy": {
+      "advisories": {
+        "block": false
+      }
+    }
+  },
+  "description": "Input project for the captured composer_audit fixtures. Never installed: it is resolved to a lock (composer update --no-install) and audited. One required package version carries long-published Packagist advisories; the other two are abandoned, one with a suggested replacement and one without. The policy config line disables Composer 2.11's resolution-time advisory block so the known-vulnerable version can be locked at all; it changes nothing about what composer audit reports.",
+  "name": "ash-fixtures/composer-audit-capture",
+  "require": {
+    "fzaninotto/faker": "1.9.2",
+    "guzzlehttp/psr7": "1.8.3",
+    "zendframework/zend-stdlib": "3.2.1"
+  }
+}

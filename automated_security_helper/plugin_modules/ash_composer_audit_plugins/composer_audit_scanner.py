@@ -428,8 +428,8 @@ class ComposerAuditScanner(ScannerPluginBase[ComposerAuditScannerConfig]):
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.SKIP_OFFLINE
     #: The facets register row (base/scanner_facets.py). Declaration only: no
     #: behavior changes. Native fields name the ``composer audit --format=json``
-    #: document (modeled fixture tests/test_data/scanners/composer_audit/modeled/;
-    #: not a Composer capture, see the fixture test's docstring).
+    #: document (captured fixture tests/test_data/scanners/composer_audit/captured/,
+    #: written by Composer 2.11.3; see that directory's README for the capture run).
     facets: ClassVar[ScannerFacets] = ScannerFacets(
         rule_id=FacetDecl(
             state=FacetState.MAPPED,

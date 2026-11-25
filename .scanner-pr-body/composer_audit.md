@@ -18,7 +18,7 @@ Adds `composer_audit`, an opt-in (alpha) scanner plugin module, `ash_composer_au
 ### Findings from the build review fixed here
 
 - HIGH: documented minimum Composer version corrected from 2.4 to 2.8 (docstring, README, docs page).
-- HIGH: no fixture coverage. Added `tests/test_data/scanners/composer_audit/modeled/` (audit document, lock file, and the SARIF the adapter produces from them) with a severity-mapping test over it. These are modeled on Composer's `Auditor::audit` key list, NOT captured from a Composer run: neither Composer nor PHP was available on the validation desk. Replacing them with a real capture is a drop-in change.
+- HIGH: no fixture coverage. First landed as `tests/test_data/scanners/composer_audit/modeled/` (modeled on Composer's `Auditor::audit` key list; neither Composer nor PHP was available on the validation desk), now REPLACED by `tests/test_data/scanners/composer_audit/captured/`: a real `composer audit --locked --format=json --abandoned=report` capture (Composer 2.11.3, PHP 8.5.13, Amazon Linux 2023 aarch64) over a committed `composer.json`/`composer.lock` holding guzzlehttp/psr7 1.8.3 (six Packagist advisories, among them CVE-2022-24775 and CVE-2023-29197) and two abandoned packages covering both message shapes (zendframework/zend-stdlib with a suggested replacement, fzaninotto/faker without). The capture also shows two Composer 2.11 document keys the model lacked (`cooldown`, `filter`, tolerated as unknown keys) and that Composer 2.11's default resolution policy must be relaxed (`config.policy.advisories.block = false`) to lock a vulnerable version at all; the captured README documents the run. The fixture test is re-pinned to the capture; `audit.sarif` is regenerated from it.
 - HIGH: no sandbox-requirements test. Added `tests/unit/plugin_modules/test_composer_audit_sandbox_requirements.py`.
 - Facets register and operational register rows added (the registry totality test is fail-closed).
 
@@ -28,7 +28,7 @@ None of these is made on this branch (shared files). Each is a one-line edit:
 
 1. `automated_security_helper/core/scanner_inventory.py`: add `"automated_security_helper.plugin_modules.ash_composer_audit_plugins",` to `_VENDORED_SCANNER_PLUGIN_PACKAGES`.
 2. `automated_security_helper/utils/scanner_names.py`: add `"composer_audit": "SCA",` to `SCANNER_TOOL_TYPES`.
-3. `tests/unit/plugin_modules/test_scanner_facets_corpus_consistency.py`: add `"composer_audit": CorpusSpec("composer_audit", sarif=("modeled/*.sarif",)),` to the corpus table.
+3. `tests/unit/plugin_modules/test_scanner_facets_corpus_consistency.py`: add `"composer_audit": CorpusSpec("composer_audit", sarif=("captured/*.sarif",)),` to the corpus table.
 4. The hard-coded universe count of 22 shipped scanners in `test_scanner_facets_registry_totality.py` and `test_scanner_operational_facets_consistency.py` (each +1 per added scanner), and the `["npm-audit", "snyk-code"]` SKIP_OFFLINE list in `test_the_service_upload_scanner_is_the_one_that_skips_offline` (add `composer_audit`).
 
 ### Desk validation (dev-dsk-cbc4ff77, Python 3.12.15, `uv sync --frozen --all-extras --group dev`, `env -i`, `-n 4`)
@@ -39,5 +39,5 @@ None of these is made on this branch (shared files). Each is a one-line edit:
 
 ### Final-review rows (round 2)
 
-- HIGH, held (venue): the fixtures under `tests/test_data/scanners/composer_audit/modeled/` are modeled, not captured. Replacing them needs one `composer audit --format=json` run on a host that already has PHP and Composer 2.8 or later; none of the three dev desktops has either, and installing a PHP toolchain there is outside their frozen toolchain. The fixture test's expectations are hand-written from the severity table, so the real capture drops in without test edits.
+- CLOSED (was: HIGH, held on a venue): the modeled fixtures are replaced by a real capture under `tests/test_data/scanners/composer_audit/captured/`, taken on a throwaway EC2 validation venue (Amazon Linux 2023 aarch64, PHP 8.5.13, Composer 2.11.3, phar sha256-verified) and torn down after. The fixture test did need re-pinning after all: the real advisory ids, counts (six advisories on one package, eight results) and severities (Packagist rates all six medium) differ from the modeled guesses, which is itself part of what the capture buys.
 - Owed: whole-tree collect smoke has not been run on this branch; it belongs to the integration commit together with the central registrations listed above.
