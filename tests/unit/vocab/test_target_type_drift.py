@@ -33,9 +33,10 @@ PKG = REPO / "automated_security_helper"
 
 # Files cured for TargetType. Not yet in scope (named so nobody reads the gate as
 # whole-tree): the scanner modules under plugin_modules/ (they spell the Literal
-# 36 times), utils/finding_identity.py (CONVERTED_TREE), core/phases/scan_phase.py
-# (task dicts) and core/resource_management/scan_tracking.py.
+# 36 times), core/phases/scan_phase.py (task dicts) and
+# core/resource_management/scan_tracking.py.
 SCOPE = (
+    "utils/finding_identity.py",
     "base/scanner_plugin.py",
     "base/plugin_base.py",
     "models/scan_results_container.py",
