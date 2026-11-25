@@ -324,7 +324,8 @@ jobs:
           uv run --group dev --extra cdk mypy --version
           uv run --group dev --extra cdk mypy automated_security_helper/
 
-      # INFORMATIONAL ONLY. THIS STEP CANNOT BLOCK A MERGE, AND THAT IS ON PURPOSE.
+      # THIS STEP GATES (zero diagnostics). It was informational while ty reported
+      # 1308; the history below is why it was, and why its version is pinned.
       #
       # ty is Astral's type checker: 4-5x faster than mypy here, with native pydantic
       # support rather than a plugin, and its findings on this tree look substantive
@@ -341,22 +342,32 @@ jobs:
       # a real gate once ty reaches a stable release; until then the value is the
       # signal in the log, not a verdict.
       #
-      # THE ONE REMAINING continue-on-error IN THIS WORKFLOW. The version is pinned
-      # exactly, so an upstream release cannot move the result; the reason it stays is
-      # that `ty check automated_security_helper/` exits 1 today (1304 diagnostics at
-      # ty 0.0.84) and `lint` is in required-checks' `needs`, so dropping the flag turns
-      # the required lint check red on every PR until those diagnostics are fixed in
-      # the source. The way to remove it is to clear the diagnostics, then delete it.
+      # This step is now a gate: the ty cure branches cleared every diagnostic, so
+      # `continue-on-error` is gone. The version is pinned exactly, so an upstream
+      # release cannot move the result. THIS CHANGE LANDS ONLY FOLDED WITH THE THREE
+      # CURES: before them `ty check automated_security_helper/` exits 1 (1308
+      # diagnostics at ty 0.0.84) and `lint` is in required-checks' `needs`.
       #
-      # The step name says informational so nobody reads this job's green tick as ty
-      # having passed -- it exits 1 today. It runs through the project environment,
+      # It runs through the project environment,
       # not standalone, so ty resolves first- and third-party imports the way mypy
       # does; standalone it cannot see pydantic and the diagnostics change meaning.
-      - name: "ty (informational only -- does not gate)"
-        continue-on-error: true
+      - name: "ty (gate: zero diagnostics)"
         run: |
           uv run --group dev --with 'ty==0.0.84' ty --version
           uv run --group dev --with 'ty==0.0.84' ty check automated_security_helper/
+
+      # COUNT RATCHET for the step above. No continue-on-error here: this step can
+      # always pass at the ceiling, and it fails when ty's total exceeds the integer
+      # in scripts/ty_ceiling.txt, so new diagnostics cannot land while the old ones
+      # wait for cure PRs, which lower the ceiling. ty's own exit status is ignored
+      # (it is 1 today); a run that prints no total fails the script, not passes it.
+      # Flag-delete condition: at a count of 0, delete the informational step's
+      # continue-on-error and this step.
+      - name: "ty count ratchet (fails above scripts/ty_ceiling.txt)"
+        run: |
+          uv run --group dev --with 'ty==0.0.84' ty check automated_security_helper/ \
+            > "${RUNNER_TEMP}/ty-output.txt" 2>&1 || true
+          python3 scripts/check_ty_ratchet.py "${RUNNER_TEMP}/ty-output.txt"
 
       # scripts/verify_workspace_policy.py runs four real scans of a generated
       # workspace and asserts that a workspace policy's severity ceiling and its
