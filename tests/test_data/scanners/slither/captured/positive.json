@@ -1,0 +1,496 @@
+{
+  "error": null,
+  "results": {
+    "detectors": [
+      {
+        "check": "reentrancy-eth",
+        "confidence": "Medium",
+        "description": "Reentrancy in Vault.withdraw() (contracts/Vault.sol#11-16):\n\tExternal calls:\n\t- (ok,None) = msg.sender.call{value: amount}() (contracts/Vault.sol#13)\n\tState variables written after the call(s):\n\t- balances[msg.sender] = 0 (contracts/Vault.sol#15)\n\tVault.balances (contracts/Vault.sol#5) can be used in cross function reentrancies:\n\t- Vault.balances (contracts/Vault.sol#5)\n\t- Vault.deposit() (contracts/Vault.sol#7-9)\n\t- Vault.withdraw() (contracts/Vault.sol#11-16)\n",
+        "elements": [
+          {
+            "name": "withdraw",
+            "source_mapping": {
+              "ending_column": 6,
+              "filename_absolute": "/work/contracts/Vault.sol",
+              "filename_relative": "contracts/Vault.sol",
+              "filename_short": "contracts/Vault.sol",
+              "is_dependency": false,
+              "length": 211,
+              "lines": [
+                11,
+                12,
+                13,
+                14,
+                15,
+                16
+              ],
+              "start": 221,
+              "starting_column": 5
+            },
+            "type": "function",
+            "type_specific_fields": {
+              "parent": {
+                "name": "Vault",
+                "source_mapping": {
+                  "ending_column": 2,
+                  "filename_absolute": "/work/contracts/Vault.sol",
+                  "filename_relative": "contracts/Vault.sol",
+                  "filename_short": "contracts/Vault.sol",
+                  "is_dependency": false,
+                  "length": 457,
+                  "lines": [
+                    4,
+                    5,
+                    6,
+                    7,
+                    8,
+                    9,
+                    10,
+                    11,
+                    12,
+                    13,
+                    14,
+                    15,
+                    16,
+                    17,
+                    18,
+                    19,
+                    20,
+                    21
+                  ],
+                  "start": 58,
+                  "starting_column": 1
+                },
+                "type": "contract"
+              },
+              "signature": "withdraw()"
+            }
+          },
+          {
+            "additional_fields": {
+              "underlying_type": "external_calls"
+            },
+            "name": "(ok,None) = msg.sender.call{value: amount}()",
+            "source_mapping": {
+              "ending_column": 57,
+              "filename_absolute": "/work/contracts/Vault.sol",
+              "filename_relative": "contracts/Vault.sol",
+              "filename_short": "contracts/Vault.sol",
+              "is_dependency": false,
+              "length": 48,
+              "lines": [
+                13
+              ],
+              "start": 307,
+              "starting_column": 9
+            },
+            "type": "node",
+            "type_specific_fields": {
+              "parent": {
+                "name": "withdraw",
+                "source_mapping": {
+                  "ending_column": 6,
+                  "filename_absolute": "/work/contracts/Vault.sol",
+                  "filename_relative": "contracts/Vault.sol",
+                  "filename_short": "contracts/Vault.sol",
+                  "is_dependency": false,
+                  "length": 211,
+                  "lines": [
+                    11,
+                    12,
+                    13,
+                    14,
+                    15,
+                    16
+                  ],
+                  "start": 221,
+                  "starting_column": 5
+                },
+                "type": "function",
+                "type_specific_fields": {
+                  "parent": {
+                    "name": "Vault",
+                    "source_mapping": {
+                      "ending_column": 2,
+                      "filename_absolute": "/work/contracts/Vault.sol",
+                      "filename_relative": "contracts/Vault.sol",
+                      "filename_short": "contracts/Vault.sol",
+                      "is_dependency": false,
+                      "length": 457,
+                      "lines": [
+                        4,
+                        5,
+                        6,
+                        7,
+                        8,
+                        9,
+                        10,
+                        11,
+                        12,
+                        13,
+                        14,
+                        15,
+                        16,
+                        17,
+                        18,
+                        19,
+                        20,
+                        21
+                      ],
+                      "start": 58,
+                      "starting_column": 1
+                    },
+                    "type": "contract"
+                  },
+                  "signature": "withdraw()"
+                }
+              }
+            }
+          },
+          {
+            "additional_fields": {
+              "underlying_type": "variables_written",
+              "variable_name": "balances"
+            },
+            "name": "balances[msg.sender] = 0",
+            "source_mapping": {
+              "ending_column": 33,
+              "filename_absolute": "/work/contracts/Vault.sol",
+              "filename_relative": "contracts/Vault.sol",
+              "filename_short": "contracts/Vault.sol",
+              "is_dependency": false,
+              "length": 24,
+              "lines": [
+                15
+              ],
+              "start": 401,
+              "starting_column": 9
+            },
+            "type": "node",
+            "type_specific_fields": {
+              "parent": {
+                "name": "withdraw",
+                "source_mapping": {
+                  "ending_column": 6,
+                  "filename_absolute": "/work/contracts/Vault.sol",
+                  "filename_relative": "contracts/Vault.sol",
+                  "filename_short": "contracts/Vault.sol",
+                  "is_dependency": false,
+                  "length": 211,
+                  "lines": [
+                    11,
+                    12,
+                    13,
+                    14,
+                    15,
+                    16
+                  ],
+                  "start": 221,
+                  "starting_column": 5
+                },
+                "type": "function",
+                "type_specific_fields": {
+                  "parent": {
+                    "name": "Vault",
+                    "source_mapping": {
+                      "ending_column": 2,
+                      "filename_absolute": "/work/contracts/Vault.sol",
+                      "filename_relative": "contracts/Vault.sol",
+                      "filename_short": "contracts/Vault.sol",
+                      "is_dependency": false,
+                      "length": 457,
+                      "lines": [
+                        4,
+                        5,
+                        6,
+                        7,
+                        8,
+                        9,
+                        10,
+                        11,
+                        12,
+                        13,
+                        14,
+                        15,
+                        16,
+                        17,
+                        18,
+                        19,
+                        20,
+                        21
+                      ],
+                      "start": 58,
+                      "starting_column": 1
+                    },
+                    "type": "contract"
+                  },
+                  "signature": "withdraw()"
+                }
+              }
+            }
+          }
+        ],
+        "first_markdown_element": "contracts/Vault.sol#L11-L16",
+        "id": "24e197f478ab4508cc00195e9822b9b0a69feac863aa961e2c4c1d8630deb507",
+        "impact": "High",
+        "markdown": "Reentrancy in [Vault.withdraw()](contracts/Vault.sol#L11-L16):\n\tExternal calls:\n\t- [(ok,None) = msg.sender.call{value: amount}()](contracts/Vault.sol#L13)\n\tState variables written after the call(s):\n\t- [balances[msg.sender] = 0](contracts/Vault.sol#L15)\n\t[Vault.balances](contracts/Vault.sol#L5) can be used in cross function reentrancies:\n\t- [Vault.balances](contracts/Vault.sol#L5)\n\t- [Vault.deposit()](contracts/Vault.sol#L7-L9)\n\t- [Vault.withdraw()](contracts/Vault.sol#L11-L16)\n",
+        "reference": "https://github.com/crytic/slither/wiki/Detector-Documentation#reentrancy-vulnerabilities-1"
+      },
+      {
+        "check": "suicidal",
+        "confidence": "High",
+        "description": "Vault.kill() (contracts/Vault.sol#18-20) allows anyone to destruct the contract\n",
+        "elements": [
+          {
+            "name": "kill",
+            "source_mapping": {
+              "ending_column": 6,
+              "filename_absolute": "/work/contracts/Vault.sol",
+              "filename_relative": "contracts/Vault.sol",
+              "filename_short": "contracts/Vault.sol",
+              "is_dependency": false,
+              "length": 75,
+              "lines": [
+                18,
+                19,
+                20
+              ],
+              "start": 438,
+              "starting_column": 5
+            },
+            "type": "function",
+            "type_specific_fields": {
+              "parent": {
+                "name": "Vault",
+                "source_mapping": {
+                  "ending_column": 2,
+                  "filename_absolute": "/work/contracts/Vault.sol",
+                  "filename_relative": "contracts/Vault.sol",
+                  "filename_short": "contracts/Vault.sol",
+                  "is_dependency": false,
+                  "length": 457,
+                  "lines": [
+                    4,
+                    5,
+                    6,
+                    7,
+                    8,
+                    9,
+                    10,
+                    11,
+                    12,
+                    13,
+                    14,
+                    15,
+                    16,
+                    17,
+                    18,
+                    19,
+                    20,
+                    21
+                  ],
+                  "start": 58,
+                  "starting_column": 1
+                },
+                "type": "contract"
+              },
+              "signature": "kill()"
+            }
+          }
+        ],
+        "first_markdown_element": "contracts/Vault.sol#L18-L20",
+        "id": "fdf84eb5e078be56730816a39ae8b9cf20ce90edc05477a606e880b4c42edea8",
+        "impact": "High",
+        "markdown": "[Vault.kill()](contracts/Vault.sol#L18-L20) allows anyone to destruct the contract\n",
+        "reference": "https://github.com/crytic/slither/wiki/Detector-Documentation#suicidal"
+      },
+      {
+        "check": "solc-version",
+        "confidence": "High",
+        "description": "Version constraint ^0.8.20 contains known severe issues (https://solidity.readthedocs.io/en/latest/bugs.html)\n\t- VerbatimInvalidDeduplication\n\t- FullInlinerNonExpressionSplitArgumentEvaluationOrder\n\t- MissingSideEffectsOnSelectorAccess.\nIt is used by:\n\t- ^0.8.20 (contracts/Vault.sol#2)\n",
+        "elements": [
+          {
+            "name": "^0.8.20",
+            "source_mapping": {
+              "ending_column": 25,
+              "filename_absolute": "/work/contracts/Vault.sol",
+              "filename_relative": "contracts/Vault.sol",
+              "filename_short": "contracts/Vault.sol",
+              "is_dependency": false,
+              "length": 24,
+              "lines": [
+                2
+              ],
+              "start": 32,
+              "starting_column": 1
+            },
+            "type": "pragma",
+            "type_specific_fields": {
+              "directive": [
+                "solidity",
+                "^",
+                "0.8",
+                ".20"
+              ]
+            }
+          }
+        ],
+        "first_markdown_element": "contracts/Vault.sol#L2",
+        "id": "32406affb8fccc09f5ca416ce0e1ed002fb38d888dbc1a52363f012863ad0269",
+        "impact": "Informational",
+        "markdown": "Version constraint ^0.8.20 contains known severe issues (https://solidity.readthedocs.io/en/latest/bugs.html)\n\t- VerbatimInvalidDeduplication\n\t- FullInlinerNonExpressionSplitArgumentEvaluationOrder\n\t- MissingSideEffectsOnSelectorAccess.\nIt is used by:\n\t- [^0.8.20](contracts/Vault.sol#L2)\n",
+        "reference": "https://github.com/crytic/slither/wiki/Detector-Documentation#incorrect-versions-of-solidity"
+      },
+      {
+        "check": "low-level-calls",
+        "confidence": "High",
+        "description": "Low level call in Vault.withdraw() (contracts/Vault.sol#11-16):\n\t- (ok,None) = msg.sender.call{value: amount}() (contracts/Vault.sol#13)\n",
+        "elements": [
+          {
+            "name": "withdraw",
+            "source_mapping": {
+              "ending_column": 6,
+              "filename_absolute": "/work/contracts/Vault.sol",
+              "filename_relative": "contracts/Vault.sol",
+              "filename_short": "contracts/Vault.sol",
+              "is_dependency": false,
+              "length": 211,
+              "lines": [
+                11,
+                12,
+                13,
+                14,
+                15,
+                16
+              ],
+              "start": 221,
+              "starting_column": 5
+            },
+            "type": "function",
+            "type_specific_fields": {
+              "parent": {
+                "name": "Vault",
+                "source_mapping": {
+                  "ending_column": 2,
+                  "filename_absolute": "/work/contracts/Vault.sol",
+                  "filename_relative": "contracts/Vault.sol",
+                  "filename_short": "contracts/Vault.sol",
+                  "is_dependency": false,
+                  "length": 457,
+                  "lines": [
+                    4,
+                    5,
+                    6,
+                    7,
+                    8,
+                    9,
+                    10,
+                    11,
+                    12,
+                    13,
+                    14,
+                    15,
+                    16,
+                    17,
+                    18,
+                    19,
+                    20,
+                    21
+                  ],
+                  "start": 58,
+                  "starting_column": 1
+                },
+                "type": "contract"
+              },
+              "signature": "withdraw()"
+            }
+          },
+          {
+            "name": "(ok,None) = msg.sender.call{value: amount}()",
+            "source_mapping": {
+              "ending_column": 57,
+              "filename_absolute": "/work/contracts/Vault.sol",
+              "filename_relative": "contracts/Vault.sol",
+              "filename_short": "contracts/Vault.sol",
+              "is_dependency": false,
+              "length": 48,
+              "lines": [
+                13
+              ],
+              "start": 307,
+              "starting_column": 9
+            },
+            "type": "node",
+            "type_specific_fields": {
+              "parent": {
+                "name": "withdraw",
+                "source_mapping": {
+                  "ending_column": 6,
+                  "filename_absolute": "/work/contracts/Vault.sol",
+                  "filename_relative": "contracts/Vault.sol",
+                  "filename_short": "contracts/Vault.sol",
+                  "is_dependency": false,
+                  "length": 211,
+                  "lines": [
+                    11,
+                    12,
+                    13,
+                    14,
+                    15,
+                    16
+                  ],
+                  "start": 221,
+                  "starting_column": 5
+                },
+                "type": "function",
+                "type_specific_fields": {
+                  "parent": {
+                    "name": "Vault",
+                    "source_mapping": {
+                      "ending_column": 2,
+                      "filename_absolute": "/work/contracts/Vault.sol",
+                      "filename_relative": "contracts/Vault.sol",
+                      "filename_short": "contracts/Vault.sol",
+                      "is_dependency": false,
+                      "length": 457,
+                      "lines": [
+                        4,
+                        5,
+                        6,
+                        7,
+                        8,
+                        9,
+                        10,
+                        11,
+                        12,
+                        13,
+                        14,
+                        15,
+                        16,
+                        17,
+                        18,
+                        19,
+                        20,
+                        21
+                      ],
+                      "start": 58,
+                      "starting_column": 1
+                    },
+                    "type": "contract"
+                  },
+                  "signature": "withdraw()"
+                }
+              }
+            }
+          }
+        ],
+        "first_markdown_element": "contracts/Vault.sol#L11-L16",
+        "id": "b816a17493b3166b1acb4313eefb7f69030925c4ec494d694bfd92714be68518",
+        "impact": "Informational",
+        "markdown": "Low level call in [Vault.withdraw()](contracts/Vault.sol#L11-L16):\n\t- [(ok,None) = msg.sender.call{value: amount}()](contracts/Vault.sol#L13)\n",
+        "reference": "https://github.com/crytic/slither/wiki/Detector-Documentation#low-level-calls"
+      }
+    ]
+  },
+  "success": true
+}
