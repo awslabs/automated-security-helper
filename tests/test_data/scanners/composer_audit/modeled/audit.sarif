@@ -1,0 +1,177 @@
+{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "runs": [
+    {
+      "results": [
+        {
+          "level": "error",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "composer.lock"
+                },
+                "region": {
+                  "startLine": 4
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "acme/alpha 1.1.0: Fictional header injection (CVE-2099-0001). Affected versions: >=1.0.0,<1.2.0. https://example.invalid/advisories/alpha-1"
+          },
+          "partialFingerprints": {
+            "composer-audit/v1": "5905e05f89d90f6716a88aed3748d39e"
+          },
+          "properties": {
+            "advisory_id": "PKSA-aaaa-bbbb-cccc",
+            "advisory_link": "https://example.invalid/advisories/alpha-1",
+            "affected_versions": ">=1.0.0,<1.2.0",
+            "composer_package": "acme/alpha",
+            "composer_package_version": "1.1.0",
+            "composer_severity": "high",
+            "cve": "CVE-2099-0001",
+            "issue_severity": "HIGH",
+            "tags": [
+              "sca",
+              "dependency",
+              "php"
+            ]
+          },
+          "ruleId": "PKSA-aaaa-bbbb-cccc"
+        },
+        {
+          "level": "warning",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "composer.lock"
+                },
+                "region": {
+                  "startLine": 8
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "acme/gamma 3.4.5: Fictional unrated issue. Affected versions: <4.0.0. https://example.invalid/advisories/gamma-1"
+          },
+          "partialFingerprints": {
+            "composer-audit/v1": "0c41460cf9e3aa7ecae5334770b8a659"
+          },
+          "properties": {
+            "advisory_id": "PKSA-dddd-eeee-ffff",
+            "advisory_link": "https://example.invalid/advisories/gamma-1",
+            "affected_versions": "<4.0.0",
+            "composer_package": "acme/gamma",
+            "composer_package_version": "3.4.5",
+            "issue_severity": "MEDIUM",
+            "tags": [
+              "sca",
+              "dependency",
+              "php"
+            ]
+          },
+          "ruleId": "PKSA-dddd-eeee-ffff"
+        },
+        {
+          "level": "note",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "composer.lock"
+                },
+                "region": {
+                  "startLine": 18
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "acme/dead 0.1.0 is abandoned; its maintainers suggest acme/alive instead"
+          },
+          "partialFingerprints": {
+            "composer-audit/v1": "f3246379e1b159fd0022d916b048fba3"
+          },
+          "properties": {
+            "composer_package": "acme/dead",
+            "composer_package_version": "0.1.0",
+            "issue_severity": "LOW",
+            "replacement_package": "acme/alive",
+            "tags": [
+              "sca",
+              "dependency",
+              "php",
+              "abandoned"
+            ]
+          },
+          "ruleId": "COMPOSER-ABANDONED"
+        },
+        {
+          "level": "note",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "composer.lock"
+                },
+                "region": {
+                  "startLine": 14
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "acme/old 0.9.0 is abandoned and no replacement is suggested"
+          },
+          "partialFingerprints": {
+            "composer-audit/v1": "5df34af0d814bcb14a24a47a2f8a8b6c"
+          },
+          "properties": {
+            "composer_package": "acme/old",
+            "composer_package_version": "0.9.0",
+            "issue_severity": "LOW",
+            "tags": [
+              "sca",
+              "dependency",
+              "php",
+              "abandoned"
+            ]
+          },
+          "ruleId": "COMPOSER-ABANDONED"
+        }
+      ],
+      "tool": {
+        "driver": {
+          "name": "Composer Audit",
+          "rules": [
+            {
+              "id": "COMPOSER-ABANDONED",
+              "name": "COMPOSER-ABANDONED",
+              "shortDescription": {
+                "text": "A locked package is abandoned"
+              }
+            },
+            {
+              "id": "PKSA-aaaa-bbbb-cccc",
+              "name": "PKSA-aaaa-bbbb-cccc",
+              "shortDescription": {
+                "text": "Fictional header injection"
+              }
+            },
+            {
+              "id": "PKSA-dddd-eeee-ffff",
+              "name": "PKSA-dddd-eeee-ffff",
+              "shortDescription": {
+                "text": "Fictional unrated issue"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "version": "2.1.0"
+}

@@ -1,0 +1,22 @@
+{
+    "packages": [
+        {
+            "name": "acme/alpha",
+            "version": "1.1.0"
+        },
+        {
+            "name": "acme/gamma",
+            "version": "3.4.5"
+        }
+    ],
+    "packages-dev": [
+        {
+            "name": "acme/old",
+            "version": "0.9.0"
+        },
+        {
+            "name": "acme/dead",
+            "version": "0.1.0"
+        }
+    ]
+}

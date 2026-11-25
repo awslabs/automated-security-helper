@@ -561,6 +561,38 @@ class TestDependencyCheck:
             assert scanner.get_installation_commands(platform, arch) == []
 
 
+class TestNothingToScan:
+    def test_a_lock_file_means_something_to_scan(self, tree, tmp_path):
+        assert _scanner(tree, tmp_path).nothing_to_scan_reason() is None
+
+    def test_no_lock_file_is_a_reason(self, tmp_path):
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "composer.json").write_text("{}\n")
+        reason = _scanner(src, tmp_path).nothing_to_scan_reason()
+        assert reason and "composer.lock" in reason
+
+    def test_a_vendored_lock_file_is_not_something_to_scan(self, tmp_path):
+        src = tmp_path / "src"
+        (src / "vendor" / "acme").mkdir(parents=True)
+        (src / "vendor" / "acme" / "composer.lock").write_text(LOCK_TEXT)
+        assert _scanner(src, tmp_path).nothing_to_scan_reason() is not None
+
+    def test_a_lock_file_the_last_scan_ignored_is_not_something_to_scan(
+        self, tree, tmp_path, on_path, monkeypatch
+    ):
+        scanner = _scanner(tree, tmp_path)
+        _run(
+            scanner,
+            FakeComposer(NEGATIVE),
+            monkeypatch,
+            global_ignore_paths=[
+                IgnorePathWithReason(path="composer.lock", reason="test")
+            ],
+        )
+        assert scanner.nothing_to_scan_reason() is not None
+
+
 class TestHelpers:
     def test_parse_accepts_php_empty_arrays(self):
         assert parse_audit_document('{"advisories": [], "abandoned": []}')

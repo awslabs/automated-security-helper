@@ -104,7 +104,7 @@ import time
 from pathlib import Path, PurePosixPath
 from typing import Annotated, Any, ClassVar, Dict, List, Literal, Optional, Set, Tuple
 
-from pydantic import AnyUrl, Field, model_validator
+from pydantic import AnyUrl, Field, PrivateAttr, model_validator
 
 from automated_security_helper.base import scanner_operational_facets as opsf
 from automated_security_helper.base.options import ScannerOptionsBase
@@ -560,6 +560,7 @@ class ComposerAuditScanner(ScannerPluginBase[ComposerAuditScannerConfig]):
                 selection="every composer.lock under the target (vendor, "
                 "node_modules and .git skipped), one composer audit per lock "
                 "(_lock_files)",
+                covers_note="a community scanner; it declares no covers display string",
             ),
             runtime=opsf.RuntimeFacet(
                 kind=opsf.RuntimeKind.USER_INSTALLED_CLI,
@@ -621,6 +622,10 @@ class ComposerAuditScanner(ScannerPluginBase[ComposerAuditScannerConfig]):
     sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements(
         network=True,
     )
+
+    #: The ignore list the last ``scan()`` call was handed, so
+    #: ``nothing_to_scan_reason`` answers from the selection that scan made.
+    _handed_ignore_paths: List[IgnorePathWithReason] = PrivateAttr(default_factory=list)
 
     def model_post_init(self, context: Any) -> None:
         if self.config is None:
@@ -749,6 +754,7 @@ class ComposerAuditScanner(ScannerPluginBase[ComposerAuditScannerConfig]):
         """Audit every ``composer.lock`` under *target*."""
         if global_ignore_paths is None:
             global_ignore_paths = []
+        self._handed_ignore_paths = global_ignore_paths
 
         # Reset above every early return so a second target never inherits counts.
         self.targets_attempted = 0
@@ -896,6 +902,23 @@ class ComposerAuditScanner(ScannerPluginBase[ComposerAuditScannerConfig]):
         except ValueError as exc:
             return f"{uri}: composer audit exited {code} but {exc}"
         return None
+
+    def nothing_to_scan_reason(self) -> str | None:
+        """None when a tree holds a composer.lock with a composer.json beside it.
+
+        The same selection ``scan()`` makes (``_lock_files``), over the source tree
+        and the converted tree, with the ignore list the last ``scan()`` call was
+        handed. A lock file with no composer.json is not None: scan() reports it as
+        a failed target, so it must not read as "nothing to scan".
+        """
+        trees = [Path(self._ctx.source_dir)]
+        work_dir = self._ctx.work_dir
+        if work_dir is not None and Path(work_dir).is_dir():
+            trees.append(Path(work_dir))
+        for tree in trees:
+            if tree.is_dir() and self._lock_files(tree, self._handed_ignore_paths):
+                return None
+        return f"no {LOCK_FILE_NAME} in the scanned files"
 
     def validate_plugin_dependencies(self) -> bool:
         if self.dependency_unavailable_reason:
