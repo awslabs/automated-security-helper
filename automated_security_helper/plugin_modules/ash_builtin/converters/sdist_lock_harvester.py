@@ -31,6 +31,7 @@ from automated_security_helper.utils.sdist_harvest import (
     HARVEST_SKIPPED_RULE,
     FlaggedPackage,
     HarvestManifest,
+    default_harvest_cache_root,
     flagged_packages_in_uv_lock,
     harvest_lockfiles_from_sdist,
     harvest_options_of,
@@ -75,9 +76,10 @@ class SdistLockHarvester(ConverterPluginBase[SdistLockHarvesterConfig]):
     converted-target pass: syft indexes the packages into the SBOM, and grype and
     trivy match advisories against them. Offline, or on any refused fetch, the
     affected packages are skipped and recorded as one visible
-    ``ash-sbom-harvest-skipped`` fact per cause, never a silent gap; a cache
-    under the scan workspace, keyed by the sdist's sha256, serves warmed entries
-    without network even offline.
+    ``ash-sbom-harvest-skipped`` fact per cause, never a silent gap; a cache in
+    the user-level cache directory -- outside the scanned tree, keyed by the
+    sdist's sha256, each file re-verified against its recorded digest before it
+    is served -- serves warmed entries without network even offline.
     """
 
     display_name = "Sdist lock harvester"
@@ -164,49 +166,87 @@ class SdistLockHarvester(ConverterPluginBase[SdistLockHarvesterConfig]):
     # Cache
     # ------------------------------------------------------------------
 
-    def _cache_root(self, configured: object) -> Path:
-        """Where verified harvests are cached, keyed by sdist sha256.
+    def _cache_root(self, configured: object) -> Optional[Path]:
+        """Where verified harvests are cached, keyed by sdist sha256; None for none.
 
-        The default sits under the scan's output directory, which ASH already
-        owns and excludes from scanning. An operator may point it at a
-        persistent location (a CI cache volume); the configured value goes
-        through the same operator-trust gate the syft ``config_file`` option
-        uses, and a refused value falls back to the default rather than being
-        honored.
+        The default is the user-level cache directory
+        (``sdist_harvest.default_harvest_cache_root``), never a directory under
+        the scanned tree or the scan's output directory: the default output
+        layout sits INSIDE the scanned tree, where a repository could commit a
+        pre-warmed entry and have its own bytes served as a verified harvest.
+        An operator may point ``cache_dir`` at a persistent location (a CI
+        cache volume); the configured value goes through the same
+        operator-trust gate the syft ``config_file`` option uses -- which
+        refuses a path inside the scanned tree whoever named it -- and a
+        refused value falls back to the default rather than being honored.
+        Whatever root results is held to the same line once more below, and
+        None (no usable root at all) makes the caller cache in a private
+        per-run directory that no repository content can pre-fill.
         """
-        default = Path(self.context.output_dir).joinpath("sdist-harvest")
-        if configured is None:
-            return default
-        from automated_security_helper.config.operator_only_options import (
-            operator_wrote_value,
-        )
-        from automated_security_helper.config.path_trust import honored_path
-
-        context_config = getattr(self.context, "config", None)
-        honored = honored_path(
-            configured,  # type: ignore[arg-type]
-            source_dir=Path(self.context.source_dir),
-            config=context_config,
-            key="scanners.syft.options.sdist_harvest.cache_dir",
-            operator_written=operator_wrote_value(
-                context_config,
-                "scanner",
-                "syft",
-                ("options", "sdist_harvest", "cache_dir"),
-                configured,
-                config_from_context=self._config_from_context,
-            ),
-        )
-        if honored is None:
-            ASH_LOGGER.warning(
-                "Configured sdist-harvest cache directory was not used "
-                "(scanners.syft.options.sdist_harvest.cache_dir): it is inside "
-                "the scanned tree, was delivered by an MCP client, or was "
-                "derived from the repository. The cache falls back to the scan "
-                "workspace default."
+        root: Optional[Path] = None
+        if configured is not None:
+            from automated_security_helper.config.operator_only_options import (
+                operator_wrote_value,
             )
-            return default
-        return honored
+            from automated_security_helper.config.path_trust import honored_path
+
+            context_config = getattr(self.context, "config", None)
+            root = honored_path(
+                configured,  # type: ignore[arg-type]
+                source_dir=Path(self.context.source_dir),
+                config=context_config,
+                key="scanners.syft.options.sdist_harvest.cache_dir",
+                operator_written=operator_wrote_value(
+                    context_config,
+                    "scanner",
+                    "syft",
+                    ("options", "sdist_harvest", "cache_dir"),
+                    configured,
+                    config_from_context=self._config_from_context,
+                ),
+            )
+            if root is None:
+                ASH_LOGGER.warning(
+                    "Configured sdist-harvest cache directory was not used "
+                    "(scanners.syft.options.sdist_harvest.cache_dir): it is inside "
+                    "the scanned tree, was delivered by an MCP client, or was "
+                    "derived from the repository. The cache falls back to the "
+                    "user-level default."
+                )
+        if root is None:
+            root = default_harvest_cache_root()
+            if root is None:
+                ASH_LOGGER.warning(
+                    "There is no usable home directory and no absolute "
+                    "XDG_CACHE_HOME, so the sdist-harvest cache is a private "
+                    "directory of this run alone: warmed entries will not "
+                    "persist to the next run."
+                )
+                return None
+        # Belt and suspenders over the two sources above: a cache inside the
+        # scanned tree is a way for the repository to serve its own bytes as a
+        # verified harvest, so such a root is never used, whoever named it
+        # (scanning a directory that encloses the user cache included).
+        from automated_security_helper.config.sandbox_grants import (
+            UNFINISHED_WALK_REASON,
+            in_tree_reason,
+        )
+
+        scan_root = (
+            getattr(getattr(self.context, "config", None), "_scanned_root", None)
+            or self.context.source_dir
+        )
+        try:
+            reason = in_tree_reason(Path(root), Path(scan_root))
+        except (OSError, RuntimeError):
+            reason = UNFINISHED_WALK_REASON
+        if reason is not None:
+            ASH_LOGGER.warning(
+                f"The sdist-harvest cache directory was not used: {reason}. "
+                "The cache is a private directory of this run alone instead."
+            )
+            return None
+        return root
 
     # ------------------------------------------------------------------
     # Harvest
@@ -256,32 +296,79 @@ class SdistLockHarvester(ConverterPluginBase[SdistLockHarvesterConfig]):
 
         The cache key is the lock's sha256, so an entry can never serve a
         different sdist than the lock pins; the key being the verification is
-        what makes a warmed cache usable offline. Only the basenames the
-        configured ecosystems name are served, so narrowing the option narrows
-        a warmed cache too.
+        what makes a warmed cache usable offline. The KEY authorizes the entry,
+        and the digests recorded when the entry was written tie the served
+        BYTES to it: every file about to be served is hashed again here, and
+        one that does not match -- or an entry recorded without digests -- is
+        not served: the entry is evicted and the package reads as a cold miss,
+        so tampered or unverifiable cache bytes never reach the converted
+        target. Only the basenames the configured ecosystems name are served,
+        so narrowing the option narrows a warmed cache too.
         """
         if package.sdist_sha256 is None:
             return None
         entry = cache_root.joinpath(package.sdist_sha256)
-        if not entry.joinpath("cached-lockfiles.json").is_file():
+        index = entry.joinpath("cached-lockfiles.json")
+        if not index.is_file():
             return None
         try:
-            cached = json.loads(
-                entry.joinpath("cached-lockfiles.json").read_text(encoding="utf-8")
-            )
+            cached = json.loads(index.read_text(encoding="utf-8"))
             names = list(cached.get("lockfiles", []))
-        except Exception:
-            return None
+            digests = cached.get("digests")
+        except Exception as error:
+            return self._evict_cache_entry(
+                entry, f"its index could not be read ({type(error).__name__})"
+            )
+        if not isinstance(digests, dict):
+            return self._evict_cache_entry(
+                entry, "its index records no content digests"
+            )
+        from automated_security_helper.utils.download_utils import sha256_file
+
         wanted = {
             ECOSYSTEM_LOCKFILES[eco] for eco in ecosystems if eco in ECOSYSTEM_LOCKFILES
         }
-        served = [
-            name for name in names if name in wanted and entry.joinpath(name).is_file()
-        ]
+        served = [name for name in names if name in wanted]
+        for name in served:
+            recorded = digests.get(name)
+            candidate = entry.joinpath(name)
+            try:
+                matches = (
+                    isinstance(recorded, str)
+                    and candidate.is_file()
+                    and sha256_file(candidate).lower() == recorded.lower()
+                )
+            except OSError:
+                matches = False
+            if not matches:
+                return self._evict_cache_entry(
+                    entry,
+                    f"'{name}' does not match the digest recorded when the "
+                    "entry was written",
+                )
         return served
 
+    def _evict_cache_entry(self, entry: Path, why: str) -> None:
+        """Remove a cache entry that cannot be served, so the miss is honest.
+
+        Serving is refused on ANY doubt; eviction then makes the next online
+        run re-fetch and re-verify against the lock's pin instead of meeting
+        the same unverifiable bytes again. Returns None, the caller's cold-miss
+        answer.
+        """
+        ASH_LOGGER.warning(
+            f"Evicting the sdist-harvest cache entry {entry.name[:12]}...: {why}. "
+            "The package reads as a cold cache miss."
+        )
+        shutil.rmtree(entry, ignore_errors=True)
+        return None
+
     def _fetch_and_harvest(
-        self, cache_root: Path, package: FlaggedPackage, ecosystems: List[str]
+        self,
+        cache_root: Path,
+        package: FlaggedPackage,
+        ecosystems: List[str],
+        max_sdist_bytes: int,
     ) -> List[str]:
         """Download the pinned sdist, verify, harvest, and fill the cache entry.
 
@@ -289,14 +376,21 @@ class SdistLockHarvester(ConverterPluginBase[SdistLockHarvesterConfig]):
         against the lock's sha256 before any extraction: ``download_file`` is
         given ``expected_sha256`` and hashes the bytes while they are still in
         its temporary file, so a mismatch raises ``ToolDownloadIntegrityError``
-        and leaves nothing on disk for the extractor to open. The verified
-        archive is read for the recognized lockfile basenames only and then
-        deleted; the cache keeps the extracted lockfiles, keyed by the pin.
+        and leaves nothing on disk for the extractor to open. The transfer is
+        bounded on the wire too: ``max_bytes`` aborts it past the configured
+        ``max_sdist_mb`` (``DownloadTooLargeError``), so the lock's own size
+        claim -- the scanned repository's claim -- cannot buy an unbounded
+        download. The verified archive is read for the recognized lockfile
+        basenames only and then deleted; the cache keeps the extracted
+        lockfiles, keyed by the pin, beside the sha256 of each written file,
+        which every later read re-verifies before serving.
         """
         if package.sdist_url is None or package.sdist_sha256 is None:
             # _harvest_one skips such a package before calling here; this guard
             # keeps the invariant local instead of trusting the caller.
             raise RuntimeError("a fetch needs the lock's sdist URL and sha256 pin")
+        from automated_security_helper.utils.download_utils import sha256_file
+
         wanted = [
             ECOSYSTEM_LOCKFILES[eco] for eco in ecosystems if eco in ECOSYSTEM_LOCKFILES
         ]
@@ -311,10 +405,20 @@ class SdistLockHarvester(ConverterPluginBase[SdistLockHarvesterConfig]):
                 package.sdist_url,
                 Path(staging),
                 expected_sha256=package.sdist_sha256,
+                max_bytes=max_sdist_bytes,
             )
             harvested = harvest_lockfiles_from_sdist(archive, wanted, entry)
         entry.joinpath("cached-lockfiles.json").write_text(
-            json.dumps({"sha256": package.sdist_sha256, "lockfiles": harvested}) + "\n",
+            json.dumps(
+                {
+                    "sha256": package.sdist_sha256,
+                    "lockfiles": harvested,
+                    "digests": {
+                        name: sha256_file(entry.joinpath(name)) for name in harvested
+                    },
+                }
+            )
+            + "\n",
             encoding="utf-8",
         )
         return harvested
@@ -357,6 +461,13 @@ class SdistLockHarvester(ConverterPluginBase[SdistLockHarvesterConfig]):
         max_sdist_bytes = int(options["max_sdist_mb"]) * 1024 * 1024  # type: ignore[call-overload]
         offline = is_offline_mode() or bool(options["syft_offline"])
         cache_root = self._cache_root(options["cache_dir"])
+        run_private_cache: Optional[tempfile.TemporaryDirectory] = None
+        if cache_root is None:
+            # No usable persistent root (_cache_root said why): cache in a
+            # private directory of this run alone, which no repository content
+            # can pre-fill, and remove it with the run.
+            run_private_cache = tempfile.TemporaryDirectory(prefix="ash-sdist-harvest-")
+            cache_root = Path(run_private_cache.name)
         ignore_paths = self._ignore_paths_skipping_harvest()
 
         self.results_dir.mkdir(parents=True, exist_ok=True)
@@ -376,57 +487,63 @@ class SdistLockHarvester(ConverterPluginBase[SdistLockHarvesterConfig]):
                 (package.lock_display, f"{package.name} {package.version} ({prefix})")
             )
 
-        for lock_file in lock_files:
-            if Path(lock_file).is_dir():
-                continue
-            ignored_by = self._ignored_by(lock_file, ignore_paths)
-            if ignored_by is not None:
-                ASH_LOGGER.debug(
-                    f"Skipping harvest of ignored path: {lock_file} due to global "
-                    f"ignore_path '{ignored_by.path}' with reason "
-                    f"'{ignored_by.reason}'",
-                    extra=NO_MARKUP,
-                )
-                continue
-            try:
-                handle = self.open_source_file(lock_file)
-            except TreeInputRefused as refused:
-                self.record_refused_input(refused)
-                continue
-            from automated_security_helper.utils.scanned_tree import relative_display
-
-            display = relative_display(lock_file, self.context.source_dir)
-            with handle:
-                lock_bytes = handle.read()
-            try:
-                flagged = flagged_packages_in_uv_lock(lock_bytes, display)
-            except ValueError as error:
-                self.record_failed_input(lock_file, str(error), kind="input")
-                continue
-            if not flagged:
-                ASH_LOGGER.debug(
-                    f"{display}: no resolved package names a platform wheel; "
-                    "nothing to harvest",
-                    extra=NO_MARKUP,
-                )
-                continue
-            for package in flagged:
-                try:
-                    self._harvest_one(
-                        package,
-                        cache_root=cache_root,
-                        ecosystems=ecosystems,
-                        max_sdist_bytes=max_sdist_bytes,
-                        offline=offline,
-                        results=results,
-                        sources=sources,
-                        skip=skip,
+        try:
+            for lock_file in lock_files:
+                if Path(lock_file).is_dir():
+                    continue
+                ignored_by = self._ignored_by(lock_file, ignore_paths)
+                if ignored_by is not None:
+                    ASH_LOGGER.debug(
+                        f"Skipping harvest of ignored path: {lock_file} due to "
+                        f"global ignore_path '{ignored_by.path}' with reason "
+                        f"'{ignored_by.reason}'",
+                        extra=NO_MARKUP,
                     )
-                except Exception as error:
-                    # The type only: a fetch error's text can quote a URL the
-                    # configuration read from the environment, and a skip's
-                    # reason is recorded without it.
-                    skip(package, f"the harvest raised {type(error).__name__}")
+                    continue
+                try:
+                    handle = self.open_source_file(lock_file)
+                except TreeInputRefused as refused:
+                    self.record_refused_input(refused)
+                    continue
+                from automated_security_helper.utils.scanned_tree import (
+                    relative_display,
+                )
+
+                display = relative_display(lock_file, self.context.source_dir)
+                with handle:
+                    lock_bytes = handle.read()
+                try:
+                    flagged = flagged_packages_in_uv_lock(lock_bytes, display)
+                except ValueError as error:
+                    self.record_failed_input(lock_file, str(error), kind="input")
+                    continue
+                if not flagged:
+                    ASH_LOGGER.debug(
+                        f"{display}: no resolved package names a platform wheel; "
+                        "nothing to harvest",
+                        extra=NO_MARKUP,
+                    )
+                    continue
+                for package in flagged:
+                    try:
+                        self._harvest_one(
+                            package,
+                            cache_root=cache_root,
+                            ecosystems=ecosystems,
+                            max_sdist_bytes=max_sdist_bytes,
+                            offline=offline,
+                            results=results,
+                            sources=sources,
+                            skip=skip,
+                        )
+                    except Exception as error:
+                        # The type only: a fetch error's text can quote a URL the
+                        # configuration read from the environment, and a skip's
+                        # reason is recorded without it.
+                        skip(package, f"the harvest raised {type(error).__name__}")
+        finally:
+            if run_private_cache is not None:
+                run_private_cache.cleanup()
 
         for cause, entries in sorted(skips.items()):
             lock_display = entries[0][0]
@@ -494,11 +611,25 @@ class SdistLockHarvester(ConverterPluginBase[SdistLockHarvesterConfig]):
             )
             return
         from automated_security_helper.core.exceptions import (
+            DownloadTooLargeError,
             ToolDownloadIntegrityError,
         )
 
         try:
-            harvested = self._fetch_and_harvest(cache_root, package, ecosystems)
+            harvested = self._fetch_and_harvest(
+                cache_root, package, ecosystems, max_sdist_bytes
+            )
+        except DownloadTooLargeError:
+            # The size-claim check above reads the LOCK's claim; this one read
+            # the wire. The transfer was aborted at the bound, so a lying claim
+            # cannot buy an unbounded download, and nothing was extracted.
+            skip(
+                package,
+                "its sdist exceeded the configured bound on the wire "
+                "(scanners.syft.options.sdist_harvest.max_sdist_mb); the "
+                "transfer was aborted at the bound and nothing was extracted",
+            )
+            return
         except ToolDownloadIntegrityError:
             # The lock pins the digest the fetch was verified against; a
             # mismatch means the index served different bytes than the project

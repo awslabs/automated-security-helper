@@ -84,13 +84,13 @@ class SdistHarvestOptions(BaseModel):
         int,
         Field(
             gt=0,
-            description="The largest sdist, in megabytes by the lockfile's own recorded size, the harvest will fetch. A larger one is skipped with an informational record rather than stalling the scan.",
+            description="The largest sdist, in megabytes, the harvest will fetch. Checked against the lockfile's own recorded size before any fetch, and enforced on the bytes actually streamed during it: a transfer that passes the bound is aborted on the wire, so a lying size claim cannot buy an unbounded download. Either way the package is skipped with an informational record rather than stalling the scan.",
         ),
     ] = 100
     cache_dir: Annotated[
         Path | str | None,
         Field(
-            description="Where verified harvests are cached, keyed by each sdist's sha256 so an entry can never serve different bytes than the lock pins; a warmed cache serves entries offline with no network. Defaults to sdist-harvest under the scan's output directory."
+            description="Where verified harvests are cached, keyed by each sdist's sha256 and with each cached file's digest recorded and re-verified before it is served, so an entry can never serve different bytes than the lock pins; a warmed cache serves entries offline with no network. Defaults to ash/sdist-harvest under the user-level cache directory (XDG_CACHE_HOME, or ~/.cache), never a directory under the scanned tree, whose content the scanned repository could ship."
             f" {SET_BY_THE_OPERATOR}",
         ),
     ] = None

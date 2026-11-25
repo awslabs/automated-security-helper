@@ -110,7 +110,9 @@ def _harvest_dir(converter: SdistLockHarvester) -> Path:
     return converter.results_dir.joinpath(HARVEST_DIR_NAME, "fixturepkg", "0.1.0")
 
 
-def test_harvest_materializes_lockfile_and_manifest(harvest_env) -> None:
+def test_harvest_materializes_lockfile_and_manifest(
+    harvest_env, tmp_path: Path
+) -> None:
     _source, output, opener, build = harvest_env
     converter = build()
 
@@ -130,9 +132,20 @@ def test_harvest_materializes_lockfile_and_manifest(harvest_env) -> None:
     assert sorted(p.name for p in results) == ["Cargo.lock", HARVEST_MANIFEST_NAME]
     # One fetch for the one flagged package; the pure-Python entry fetched nothing.
     assert opener.calls == [SDIST_URL]
-    # The verified harvest is cached under the scan workspace, keyed by the pin.
-    cache_entry = output.joinpath("sdist-harvest", manifest["sdist_sha256"])
+    # The verified harvest is cached at the user-level cache root, keyed by the
+    # pin, beside the digest every later read re-verifies -- and never under the
+    # scan's output directory, which the default layout puts in the scanned tree.
+    cache_entry = (
+        tmp_path / "xdg-cache" / "ash" / "sdist-harvest" / manifest["sdist_sha256"]
+    )
     assert cache_entry.joinpath("Cargo.lock").is_file()
+    index = json.loads(
+        cache_entry.joinpath("cached-lockfiles.json").read_text(encoding="utf-8")
+    )
+    assert index["digests"]["Cargo.lock"] == (
+        hashlib.sha256(cache_entry.joinpath("Cargo.lock").read_bytes()).hexdigest()
+    )
+    assert not output.joinpath("sdist-harvest").exists()
     assert converter.failed_inputs == [] and converter.refused_inputs == []
 
 
@@ -172,7 +185,9 @@ def test_offline_cold_cache_skips_with_one_visible_record(
     assert "purepkg" not in record.reason
 
 
-def test_hash_mismatch_refuses_the_bytes_before_any_extraction(harvest_env) -> None:
+def test_hash_mismatch_refuses_the_bytes_before_any_extraction(
+    harvest_env, tmp_path: Path
+) -> None:
     _source, output, opener, build = harvest_env
     honest = fixture_sdist_bytes()
     tampered = bytes([honest[0] ^ 0x01]) + honest[1:]
@@ -184,10 +199,10 @@ def test_hash_mismatch_refuses_the_bytes_before_any_extraction(harvest_env) -> N
 
     assert results == []
     assert not _harvest_dir(converter).exists(), "nothing may be extracted"
-    cache_root = output.joinpath("sdist-harvest")
-    assert not list(cache_root.glob("*/cached-lockfiles.json")), (
-        "a refused fetch must cache nothing"
-    )
+    for cache_root in (output.joinpath("sdist-harvest"), tmp_path / "xdg-cache"):
+        assert not list(cache_root.glob("**/cached-lockfiles.json")), (
+            "a refused fetch must cache nothing"
+        )
     (record,) = converter.refused_inputs
     assert HARVEST_SKIPPED_RULE in record.reason
     assert "did not match the lock's sha256 pin" in record.reason

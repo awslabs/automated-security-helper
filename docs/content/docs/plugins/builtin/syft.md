@@ -33,14 +33,21 @@ ASH closes that gap in two rules, mature tools first:
 Where both rules report a package, the SBOM merge deduplicates by purl.
 
 The network statement, in one sentence: online mode only; a GET of the sdist
-your own lockfile pins by sha256, verified before extraction; nothing fetched is
-executed. Offline (or on any refused fetch: a hash mismatch, an oversize
-archive, an sdist with no recognized lockfile), the affected packages are
-skipped and recorded as one informational `ash-sbom-harvest-skipped` entry per
-cause in the converter's results, so the SBOM's incompleteness is a visible
-fact. Verified harvests are cached under `sdist-harvest/` in the scan's output
-directory, keyed by each sdist's sha256, and a warmed cache serves entries
-offline with no network.
+your own lockfile pins by sha256, bounded by `max_sdist_mb` on the bytes
+actually streamed (not only on the lockfile's own size claim) and verified
+before extraction; nothing fetched is executed. Offline (or on any refused
+fetch: a hash mismatch, an oversize archive or transfer, an sdist with no
+recognized lockfile), the affected packages are skipped and recorded as one
+informational `ash-sbom-harvest-skipped` entry per cause in the converter's
+results, so the SBOM's incompleteness is a visible fact. Verified harvests are
+cached under `ash/sdist-harvest/` in the user-level cache directory
+(`XDG_CACHE_HOME`, or `~/.cache`), keyed by each sdist's sha256 and with each
+cached file's digest recorded beside it; a warmed cache serves entries offline
+with no network, re-verifying every file against its recorded digest first and
+evicting an entry that does not match. The cache never lives under the scanned
+tree -- a directory the scanned repository could commit content into is not
+used, whoever named it -- so a tree-shipped "cache" can never be served as a
+verified harvest.
 
 ```yaml
 scanners:
@@ -52,10 +59,12 @@ scanners:
         enabled: true
         # Which embedded lockfiles are harvested.
         ecosystems: ["cargo", "gomod", "npm"]
-        # The largest sdist fetched, by the lockfile's own recorded size.
+        # The largest sdist fetched: checked against the lockfile's recorded
+        # size before the fetch, enforced on the streamed bytes during it.
         max_sdist_mb: 100
         # A persistent cache location (a CI cache volume). Defaults to
-        # sdist-harvest under the scan's output directory. Operator-set only.
+        # ash/sdist-harvest under the user-level cache directory; a directory
+        # inside the scanned tree is never used. Operator-set only.
         cache_dir: null
         # The Python lockfiles walked. uv.lock pins each sdist by URL and
         # sha256, which is what authorizes a fetch.

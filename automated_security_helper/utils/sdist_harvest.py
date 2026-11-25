@@ -38,6 +38,15 @@ Safety properties, stated once here and relied on by both halves:
 * A fetch happens only for a URL the project's own lockfile pins by sha256, and
   ``utils.download_utils`` verifies that digest while the bytes are still in a
   temporary file -- a mismatch leaves nothing on disk and nothing is extracted.
+  The transfer itself is bounded: ``max_sdist_mb`` is enforced on the streamed
+  bytes (the download aborts past the bound), not only on the lock's own size
+  claim, which is the scanned repository's claim.
+* The harvest cache lives OUTSIDE the scanned tree (the user-level cache
+  directory, :func:`default_harvest_cache_root`), every cached lockfile is
+  re-verified against the digest recorded when its entry was written before it
+  is served (a mismatch evicts the entry and reads as a cold miss), and a cache
+  root inside the scanned tree is never used -- so a repository cannot ship a
+  pre-warmed entry and have its own bytes stamped as verified provenance.
 * Extraction never trusts member paths: only regular-file members whose BASE
   NAME is a recognized lockfile are read, member content is written under a path
   this module builds (never a path from the archive), and members with absolute
@@ -102,6 +111,33 @@ ECOSYSTEM_LOCKFILES: Dict[str, str] = {
 #: refuses a decompression bomb wearing a lockfile's name without reading it
 #: whole.
 MAX_LOCKFILE_MEMBER_BYTES = 50 * 1024 * 1024
+
+
+def default_harvest_cache_root() -> Optional[Path]:
+    """Where verified harvests are cached when no ``cache_dir`` is configured.
+
+    ``$XDG_CACHE_HOME/ash/sdist-harvest``, else ``~/.cache/ash/sdist-harvest``:
+    the user-level placement ASH's other caches already use (the MCP source
+    cache under ``~/.cache/ash-mcp``, tools under ``~/.ash/bin``), and never a
+    directory the scanned repository can ship content into. The cache used to
+    default to ``sdist-harvest`` under the scan's output directory, which the
+    default layout puts INSIDE the scanned tree (``.ash/ash_output``): a
+    repository could commit a pre-warmed entry there -- a directory that is
+    neither wiped at scan start nor covered by the committed-output refusal --
+    and have its own bytes served to every scanner as a verified harvest,
+    provenance stamps included.
+
+    None when there is no usable home directory and no absolute
+    ``XDG_CACHE_HOME`` (``core.constants.xdg_directory``): the harvester then
+    caches in a private per-run directory instead, which no repository content
+    can pre-fill, at the price of no persistence between runs.
+    """
+    from automated_security_helper.core.constants import xdg_directory
+
+    base = xdg_directory("XDG_CACHE_HOME", ".cache")
+    if base is None:
+        return None
+    return base.joinpath("ash", "sdist-harvest")
 
 
 @dataclass(frozen=True)
