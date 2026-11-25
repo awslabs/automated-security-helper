@@ -38,6 +38,10 @@ from automated_security_helper.plugin_modules.ash_skillcheck_plugins.skillcheck_
     parse_report,
 )
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
+from automated_security_helper.utils.sandbox.policy import (
+    CA_BUNDLE_ENV_NAMES,
+    PROXY_ENV_NAMES,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -231,6 +235,47 @@ class TestInvocation:
         assert home != real_home
         assert tree not in home.parents and home != tree
         assert fake.env["USERPROFILE"] == fake.env["HOME"]
+
+    def test_the_hosts_proxy_and_ca_bundle_settings_reach_the_tool(
+        self, tree, tmp_path, monkeypatch
+    ):
+        """The lookup must work behind a proxy or a private CA.
+
+        The tool fails open when the lookup cannot be made, so an env that drops
+        the proxy variables turns a database-known malicious skill into a clean
+        run on a proxy-only host. Go's default transport honors these names.
+        """
+        bundle = tmp_path / "corp-ca.pem"
+        bundle.write_text("not a real bundle", encoding="utf-8")
+        monkeypatch.setenv("HTTPS_PROXY", "http://proxy.example:3128")
+        monkeypatch.setenv("NO_PROXY", "localhost,.example.internal")
+        monkeypatch.setenv("SSL_CERT_FILE", str(bundle))
+        fake = FakeSkillcheck(_affected(tree), exit_code=1)
+        _run(_scanner(tree, tmp_path), fake, monkeypatch)
+        assert fake.env["HTTPS_PROXY"] == "http://proxy.example:3128"
+        assert fake.env["NO_PROXY"] == "localhost,.example.internal"
+        assert fake.env["SSL_CERT_FILE"] == str(bundle)
+        # The hardening overrides still win over the parent environment.
+        assert fake.env["HOME"] != str(tmp_path) and fake.env["NO_COLOR"] == "1"
+
+    def test_nothing_else_of_the_parent_environment_reaches_the_tool(
+        self, tree, tmp_path, monkeypatch
+    ):
+        """Only the delivery allowlist passes: no token, no credential, no HOME."""
+        monkeypatch.setenv("SKILLCHECK_TOKEN", "token-must-not-pass")
+        monkeypatch.setenv("MONDOO_CONFIG_BASE64", "config-must-not-pass")
+        monkeypatch.setenv("GITHUB_TOKEN", "token-must-not-pass")
+        monkeypatch.setenv("HTTPS_PROXY", "http://proxy.example:3128")
+        fake = FakeSkillcheck(_affected(tree), exit_code=1)
+        _run(_scanner(tree, tmp_path), fake, monkeypatch)
+        allowed = (
+            {"HOME", "USERPROFILE", "NO_COLOR"}
+            | set(PROXY_ENV_NAMES)
+            | set(CA_BUNDLE_ENV_NAMES)
+        )
+        assert set(fake.env) <= allowed
+        assert "token-must-not-pass" not in fake.env.values()
+        assert "config-must-not-pass" not in fake.env.values()
 
     def test_a_converted_target_is_scanned_by_its_own_path(
         self, tree, tmp_path, monkeypatch

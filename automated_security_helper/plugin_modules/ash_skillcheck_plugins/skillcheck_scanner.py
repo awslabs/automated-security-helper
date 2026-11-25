@@ -71,6 +71,13 @@ a run without the lookup says nothing about malice, ``offline`` skips the scanne
 (``OfflineStrategy.SKIP_OFFLINE``); the specification checks alone are not run in its
 place. The sandbox grants a network for this scanner and nothing else.
 
+Because the lookup must also work where egress goes through a proxy or a private
+CA, the spawn passes the operator's delivery variables through to the tool: the
+proxy family (``HTTPS_PROXY``, ``NO_PROXY`` and the rest of ``PROXY_ENV_NAMES``,
+which Go's default transport honors) and the CA-bundle names
+(``CA_BUNDLE_ENV_NAMES``, ``SSL_CERT_FILE`` among them). Nothing else of the
+parent environment reaches the tool: no token, and not the real ``HOME``.
+
 Install
 -------
 ASH does not provision the binary. Install the release for your platform from the
@@ -117,7 +124,12 @@ from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason, ToolArgs
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.utils.log import ASH_LOGGER
-from automated_security_helper.utils.sandbox.policy import SandboxRequirements
+from automated_security_helper.utils.process_env import snapshot_environ
+from automated_security_helper.utils.sandbox.policy import (
+    CA_BUNDLE_ENV_NAMES,
+    PROXY_ENV_NAMES,
+    SandboxRequirements,
+)
 from automated_security_helper.utils.subprocess_utils import find_executable
 
 #: The release the scanner was built and measured against.
@@ -634,9 +646,20 @@ class SkillcheckScanner(ScannerPluginBase[SkillcheckScannerConfig]):
         )
         results_file.parent.mkdir(exist_ok=True, parents=True)
         home = self._empty_home().as_posix()
-        # The machine's agent directories live under the home directory; an empty
-        # one leaves only the --project scan. NO_COLOR is belt and braces.
-        env = {"HOME": home, "USERPROFILE": home, "NO_COLOR": "1"}
+        # The operator's delivery variables pass through so the database lookup
+        # works behind a proxy or a private CA (the sandbox's filter keeps only
+        # what the env GIVEN holds, and the unsandboxed spawn uses it as-is).
+        # Nothing else of the parent environment reaches the tool: no token, and
+        # not the real HOME. The machine's agent directories live under the home
+        # directory; an empty one leaves only the --project scan. NO_COLOR is
+        # belt and braces.
+        parent = snapshot_environ()
+        env = {
+            name: parent[name]
+            for name in (*sorted(PROXY_ENV_NAMES), *CA_BUNDLE_ENV_NAMES)
+            if name in parent
+        }
+        env.update({"HOME": home, "USERPROFILE": home, "NO_COLOR": "1"})
         final_args = self._build_arguments(target)
         self._plugin_log(
             f"Running: {' '.join(final_args)}",
