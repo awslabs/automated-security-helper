@@ -58,7 +58,10 @@ from automated_security_helper.utils.package_identity import (
 )
 from automated_security_helper.models.asharp_model import ScannerSeverityCount
 from automated_security_helper.utils.secret_masking import mask_secret_in_text
-from automated_security_helper.utils.shared_finding_ids import shared_ids_by_position
+from automated_security_helper.utils.shared_finding_ids import (
+    shared_correlation_ids_by_position,
+    shared_ids_by_position,
+)
 from automated_security_helper.utils.symbol_spans import SymbolResolver
 from automated_security_helper.utils.suppression_frame import (
     first_ignore_path,
@@ -900,6 +903,25 @@ def shared_finding_ids(model: Any, all_results: List[Any]) -> List[str | None]:
         return shared_ids_by_position(flat, all_results)
     except Exception as e:  # noqa: BLE001 -- a fallback, see the docstring
         ASH_LOGGER.debug(f"Could not derive shared finding ids: {str(e)}")
+        return [None] * len(all_results)
+
+
+def shared_correlation_ids(model: Any, all_results: List[Any]) -> List[str | None]:
+    """The cross-scanner correlation id of each result, by position, else None.
+
+    The same pairing as :func:`shared_finding_ids`, reading the flattened
+    finding's ``correlation_id`` (assigned once at flatten time,
+    ``models/flat_vulnerability.assign_correlation_ids``), so every reporter
+    exports the one value the model computed rather than re-deriving the key.
+    None at a position whose finding carries none (only the ``secret/`` and
+    ``dep/`` families have one, ``utils/finding_identity``), and at every
+    position when the flattening fails.
+    """
+    try:
+        flat = list(model.to_flat_vulnerabilities())
+        return shared_correlation_ids_by_position(flat, all_results)
+    except Exception as e:  # noqa: BLE001 -- a fallback, see the docstring
+        ASH_LOGGER.debug(f"Could not derive shared correlation ids: {str(e)}")
         return [None] * len(all_results)
 
 
