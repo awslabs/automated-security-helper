@@ -5420,6 +5420,30 @@ def _staged_findings_filter_set(source_dir: Path, staged_files: List[str]) -> Se
     return resolved
 
 
+def _scan_source_for(opts: "ScanOptions", find_root: Any, environ: Any) -> str | None:
+    """The ``scan_source`` this run records: the image for an image scan, else
+    the scanned directory as ``utils/scan_source.recorded_scan_source`` words it.
+
+    An image scan is anchored at a directory (the working directory unless the
+    caller named one) that is not its subject. Recording that directory would let
+    a reporter that treats "not reported" as "fixed" (aws-security-hub's archive
+    of resolved findings, which compares the scope of the stored findings with
+    this scan's) read an empty image scan as a clean scan of whatever repository
+    the scan was started in. The ``image:`` prefix keeps an image reference from
+    reading as a directory called the same thing.
+    """
+    from automated_security_helper.utils.scan_source import recorded_scan_source
+
+    asset = getattr(opts, "asset", None)
+    if (
+        isinstance(asset, Asset)
+        and asset.kind == AssetKind.CONTAINER_IMAGE
+        and asset.image is not None
+    ):
+        return f"image:{asset.image.shown()}"
+    return recorded_scan_source(opts.source_dir, find_root, environ)
+
+
 def _run_local_mode(
     opts: ScanOptions, logger
 ) -> tuple[AshAggregatedResults, Optional[bool]]:
@@ -5462,7 +5486,6 @@ def _run_local_mode(
     # would leave ASH_OFFLINE held with no release. Nothing but the flag assignment
     # sits between the hold and its try, as in _run_workspace_mode.
     from automated_security_helper.utils.get_scan_set import git_repository_root
-    from automated_security_helper.utils.scan_source import recorded_scan_source
 
     _offline_held = False
     if opts.offline:
@@ -5533,8 +5556,8 @@ def _run_local_mode(
 
         def validate_baseline_scope(orchestrator):
             model = orchestrator.execution_engine._asharp_model
-            scan_source = recorded_scan_source(
-                opts.source_dir, git_repository_root, snapshot_environ()
+            scan_source = _scan_source_for(
+                opts, git_repository_root, snapshot_environ()
             )
             for warning in check_baseline_scope(
                 opts.baseline_data,
@@ -5682,9 +5705,7 @@ def _run_local_mode(
             # looked at, recorded at scan time while it exists
             # (utils/scan_source.py; a report made on another host cannot work it
             # out, and inside the container the launcher's label is used).
-            scan_source=recorded_scan_source(
-                opts.source_dir, git_repository_root, snapshot_environ()
-            ),
+            scan_source=_scan_source_for(opts, git_repository_root, snapshot_environ()),
         )
         _config_fail_on_findings: Optional[bool] = getattr(
             getattr(orchestrator, "config", None), "fail_on_findings", None
@@ -7101,14 +7122,14 @@ def _in_a_run_log_scope(scan):
     return scoped
 
 
-@_in_a_run_log_scope
-@_in_scanned_tree_from_arguments
 def _refuse_an_image_scan_scope(
     *,
     mode: RunMode,
     workspace_plan: "WorkspacePlan | None",
     existing_results: str | None,
     changed_files_only: bool,
+    shard_index: int | None = None,
+    shard_count: int | None = None,
 ) -> None:
     """The scope rules every image scan obeys, whichever form submitted it.
 
@@ -7130,6 +7151,14 @@ def _refuse_an_image_scan_scope(
             f"an image option is supported in local mode only, not mode="
             f"{mode.value!r}: the scan that routes by asset kind is the local "
             "orchestrator's.",
+            one_line=True,
+        )
+    if shard_index is not None or shard_count is not None:
+        _printed_refusal(
+            ASH_EXIT_USAGE_ERROR,
+            "an image option cannot be combined with a shard: a scan has one "
+            "subject, and one shard would report the image as not scanned "
+            "while another scanned it. Run the image scan unsharded.",
             one_line=True,
         )
     if existing_results is not None:
@@ -7158,6 +7187,8 @@ def _image_asset_or_refusal(
     workspace_plan: "WorkspacePlan | None",
     existing_results: str | None,
     changed_files_only: bool,
+    shard_index: int | None = None,
+    shard_count: int | None = None,
 ) -> Asset | None:
     """The CONTAINER_IMAGE asset the image options name, or None, or a refusal.
 
@@ -7205,6 +7236,8 @@ def _image_asset_or_refusal(
         workspace_plan=workspace_plan,
         existing_results=existing_results,
         changed_files_only=changed_files_only,
+        shard_index=shard_index,
+        shard_count=shard_count,
     )
     if image is not None:
         if not image.strip():
@@ -7232,6 +7265,8 @@ def _image_asset_or_refusal(
     return Asset.for_image(ImageLocator(oci_layout=Path(image_layout).absolute()))
 
 
+@_in_a_run_log_scope
+@_in_scanned_tree_from_arguments
 def run_ash_scan(
     source_dir: str | Path | None = None,
     output_dir: str | Path | None = None,
@@ -7348,6 +7383,8 @@ def run_ash_scan(
                 workspace_plan=workspace_plan,
                 existing_results=existing_results,
                 changed_files_only=changed_files_only,
+                shard_index=shard_index,
+                shard_count=shard_count,
             )
     else:
         asset = _image_asset_or_refusal(
@@ -7359,6 +7396,8 @@ def run_ash_scan(
             workspace_plan=workspace_plan,
             existing_results=existing_results,
             changed_files_only=changed_files_only,
+            shard_index=shard_index,
+            shard_count=shard_count,
         )
     if asset is not None and asset.kind == AssetKind.CONTAINER_IMAGE:
         # An image asset runs no convert phase: converters read source files,
@@ -7372,6 +7411,16 @@ def run_ash_scan(
             )
             if phase != ExecutionPhase.CONVERT
         ]
+        if not phases:
+            # An empty list reads as "no phases given" further down, where the
+            # local mode runs convert, scan and report: a request for the
+            # convert phase alone would run the one phase an image never has.
+            _printed_refusal(
+                ASH_EXIT_USAGE_ERROR,
+                "an image scan has no convert phase, and no other phase was "
+                "asked for: nothing is left to run.",
+                one_line=True,
+            )
 
     # Resolve cwd-based defaults at call time (not import time).
     _source_dir: Path = (
