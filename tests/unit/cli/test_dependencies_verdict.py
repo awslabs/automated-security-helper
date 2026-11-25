@@ -349,9 +349,9 @@ class TestToolSelectionScopesFailures:
     The discovery loop records a failure for every plugin whose constructor raises,
     and that happens before the --tool filter. Folding those into the verdict
     unconditionally meant
-    `ash dependencies install --config .ash/.ash_community_plugins.yaml --tool
+    `ash dependencies install --config .ash/.ash_alpha_plugins.yaml --tool
     trivy-repo` -- the command this change adds to CI -- exited 1 whenever any other
-    community plugin failed to import, and named that other plugin in the panel.
+    alpha plugin failed to import, and named that other plugin in the panel.
     """
 
     def _invoke(self, tmp_path, monkeypatch, args):

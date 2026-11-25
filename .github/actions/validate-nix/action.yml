@@ -70,7 +70,7 @@ runs:
         YAML
         printf '{ "name": "ash-nix-selftest", "version": "1.0.0", "dependencies": {} }\n' \
           > /tmp/ash-nix-selftest/package.json
-        # For hadolint, a community scanner whose module the scan below lists. Unpinned base
+        # For hadolint, an alpha scanner whose module the scan below lists. Unpinned base
         # image tag, so DL3007 fires and the scanner has something to report.
         printf 'FROM ubuntu:latest\nRUN echo fixture\n' > /tmp/ash-nix-selftest/Dockerfile
 
@@ -154,7 +154,7 @@ runs:
         # Rules Registry seeded by the shellHook; trivy's vulnerability database is
         # seeded the same way. Without the seeding both would be MISSING here.
         #
-        # hadolint and betterleaks are community scanners, so the scan above lists their
+        # hadolint and betterleaks are alpha scanners, so the scan above lists their
         # modules with --ash-plugin-modules; otherwise they would be absent from the
         # report and this list could not check that the flake supplies them. The GuardDog
         # module is not listed: nixpkgs has no GuardDog package, so the flake does not

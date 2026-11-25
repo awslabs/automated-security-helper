@@ -172,7 +172,7 @@ UNKNOWN_TOOLS_SETTING = "ASH_DEPENDENCIES_UNKNOWN_TOOLS"
 # the only bundled plugin in the second group, so it was selected as
 # `ArchiveConverter`; it is now `archive`, like its config key. Every other bundled
 # converter, scanner and reporter, including those in ash_aws_plugins and the
-# community modules, kept its name: the two commits' `Available:` lists were
+# alpha modules, kept its name: the two commits' `Available:` lists were
 # compared for each plugin type with every bundled plugin module loaded.
 #
 # The old spelling keeps working so that scripts and docs written against it do not
@@ -1242,7 +1242,7 @@ def install_dependencies(
     work_dir = output_dir.joinpath(ASH_WORK_DIR_NAME)
     # config_path is what makes --config/ASH_CONFIG mean anything here. Omitting it
     # made the option accept a path and then quietly ignore it, so
-    # `ash dependencies install --config .ash/.ash_community_plugins.yaml` resolved
+    # `ash dependencies install --config .ash/.ash_alpha_plugins.yaml` resolved
     # the default config instead and installed dependencies for the wrong set of
     # plugins.
     try:
@@ -1262,7 +1262,7 @@ def install_dependencies(
     # `--config` previously resolved the config's *values* and stopped there. The
     # scanners a config adds through `ash_plugin_modules` were never imported, so
     # their plugin classes never registered, so
-    # `ash dependencies install --config .ash/.ash_community_plugins.yaml` installed
+    # `ash dependencies install --config .ash/.ash_alpha_plugins.yaml` installed
     # dependencies for the built-in set and reported success -- and trivy, snyk and
     # ferret had to be installed by hand in CI before the scan.
     #
@@ -1509,7 +1509,7 @@ def install_dependencies(
             # construct is unrelated to a `--tool` request for a different one --
             # so folding it in unconditionally made
             # `ash dependencies install --tool trivy-repo` exit 1 because some
-            # other community plugin would not import, and name that other plugin
+            # other alpha plugin would not import, and name that other plugin
             # in the failure panel.
             # A plugin its configuration disables is one a scan never runs, so
             # its error does not decide a full run's exit code (the documented
@@ -1678,31 +1678,29 @@ def install_dependencies(
                     + escape(", ".join(sorted(o.name for o in failed_to_load)))
                 )
             )
-            # A community scanner that ships with ASH is not a typo when its module
+            # An alpha scanner that ships with ASH is not a typo when its module
             # is simply not loaded: say which module to add.
-            from automated_security_helper.core.community_scanners import (
-                community_module_for,
+            from automated_security_helper.core.alpha_scanners import (
+                alpha_module_for,
             )
 
-            community = {
-                name: module
-                for name in unknown
-                if (module := community_module_for(name))
+            alpha = {
+                name: module for name in unknown if (module := alpha_module_for(name))
             }
-            community_note = "".join(
-                f"\n[yellow]{escape(name)}[/yellow] is a community plugin scanner: "
+            alpha_note = "".join(
+                f"\n[yellow]{escape(name)}[/yellow] is an alpha plugin scanner: "
                 + escape(
                     f"load {module} with --config (ash_plugin_modules) or "
                     f'--config-overrides "ash_plugin_modules+=[{module}]".'
                 )
-                for name, module in sorted(community.items())
+                for name, module in sorted(alpha.items())
             )
             console.print(
                 Panel(
                     f"[bold red]Unknown tool(s): "
                     f"{escape(', '.join(sorted(unknown)))}[/bold red]\n"
                     f"[cyan]Available:[/cyan] {escape(', '.join(available))}"
-                    f"{community_note}{broken_note}",
+                    f"{alpha_note}{broken_note}",
                     title="Nothing installed",
                     expand=False,
                 )

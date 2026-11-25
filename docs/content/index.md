@@ -86,7 +86,7 @@ ash --mode precommit
 - Secrets: detect-secrets
 - Dependencies and software inventory: Grype, npm audit, Syft
 
-Six more scanners ship with ASH as community plugins: [Betterleaks](docs/plugins/community/betterleaks-plugin.md) and [Ferret Scan](docs/plugins/community/ferret-scan-plugin.md) for secrets, [GuardDog](docs/plugins/community/guarddog-plugin.md) for malicious packages, [hadolint](docs/plugins/community/hadolint-plugin.md) for Dockerfiles, [Snyk Code](docs/plugins/community/snyk-plugin.md) for SAST, and [Trivy](docs/plugins/community/trivy-plugin.md) for repository scanning. A scan runs one only when its module is named in `ash_plugin_modules` or `--ash-plugin-modules`. See the [community plugins](docs/plugins/community/index.md) and the [scanners reference](reference/scanners.md) for all 22 scanners.
+Six more scanners ship with ASH as alpha plugins: [Betterleaks](docs/plugins/alpha/betterleaks-plugin.md) and [Ferret Scan](docs/plugins/alpha/ferret-scan-plugin.md) for secrets, [GuardDog](docs/plugins/alpha/guarddog-plugin.md) for malicious packages, [hadolint](docs/plugins/alpha/hadolint-plugin.md) for Dockerfiles, [Snyk Code](docs/plugins/alpha/snyk-plugin.md) for SAST, and [Trivy](docs/plugins/alpha/trivy-plugin.md) for repository scanning. A scan runs one only when its module is named in `ash_plugin_modules` or `--ash-plugin-modules`. See the [alpha plugins](docs/plugins/alpha/index.md) and the [scanners reference](reference/scanners.md) for all 22 scanners.
 
 A scan ends by printing the exit codes and the one it exits with:
 

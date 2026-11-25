@@ -219,7 +219,7 @@ remote source delivery, session handling, and deployment configuration.
 | `suggest_suppression` | Draft a suppression for review |
 | `resolve_ash_workspace` | Preview a workspace scan plan |
 | `run_ash_workspace_scan` | Scan workspace projects with their configurations |
-| `list_scanners` | List the built-in and community scanners ASH ships, with metadata |
+| `list_scanners` | List the built-in and alpha scanners ASH ships, with metadata |
 | `validate_config` | Check a configuration against the schema |
 | `list_profiles` | List registered configuration profiles |
 | `select_profile` | Apply a profile to the session |
@@ -309,10 +309,11 @@ for new capabilities.
 | [actionlint](https://github.com/rhysd/actionlint) | GitHub Actions workflows | `ash dependencies install` (pinned release binary) |
 | [zizmor](https://github.com/zizmorcore/zizmor) | GitHub Actions workflows and composite actions | Managed through uv tool isolation |
 
-Six more scanners ship as community plugin modules (Betterleaks, Ferret Scan,
-GuardDog, hadolint, Snyk Code, and Trivy repository scanning). A scan runs one only
+Six more scanners ship as alpha plugin modules (Betterleaks, Ferret Scan,
+GuardDog, hadolint, Snyk Code, and Trivy repository scanning). Alpha scanners are
+opt-in: ASH ships them but does not yet promote them as supported. A scan runs one only
 when `ash_plugin_modules` or `--ash-plugin-modules` names its module; see the
-[community plugins](docs/content/docs/plugins/community/index.md).
+[alpha plugins](docs/content/docs/plugins/alpha/index.md).
 
 Enabled scanners depend on your execution mode and configuration. Check the
 [scanner catalog](docs/content/reference/scanners.md) for capabilities

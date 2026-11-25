@@ -61,6 +61,21 @@
   test fail when a block is stale. The generated text is the text the wrappers already
   held, so no option, exit code or message changes.
 
+### Deprecations
+
+- **The "community" scanner tier is now called "alpha".** The opt-in scanners ASH ships
+  but does not yet promote as supported (Betterleaks, Ferret Scan, GuardDog, hadolint,
+  Snyk Code, Trivy and the rest of the `ash_*_plugins` modules) are alpha scanners:
+  the name says maturity, not provenance. Behavior is unchanged. The plugin pages moved
+  from `docs/plugins/community/` to `docs/plugins/alpha/` (the old URLs redirect), the
+  repository's own scan config is now `.ash/.ash_alpha_plugins.yaml`, the register's
+  tier value is `alpha_optin`, and the CI config variant is `alpha`. Two old spellings
+  are accepted for one release: the register tier value `community_optin` (it warns)
+  and the Dockerfile build argument `ASH_COMMUNITY_PLUGIN_MODULES`, now
+  `ASH_ALPHA_PLUGIN_MODULES` (a value given for the old name wins). The docs checks
+  refuse the old `Community plugins` / `Community scanners` column headings and name
+  the new one. ASH 3.9.0 stops accepting the old spellings.
+
 ### Fixes
 
 - **`Invoke-ASH` now matches `./ash` and the `ash` CLI on two container-run details.**
@@ -143,7 +158,7 @@
   `scanners.betterleaks.options.honor_tree_ignore_files`. The container image ships
   Betterleaks, pinned and digest-verified; `ash dependencies install --tool betterleaks`,
   with the module loaded, installs the same build locally. See
-  [Betterleaks Plugin](docs/content/docs/plugins/community/betterleaks-plugin.md).
+  [Betterleaks Plugin](docs/content/docs/plugins/alpha/betterleaks-plugin.md).
 - **Engine-scoped suppressions for ferret-scan** (`scope.engines.ferret-scan`): a
   suppression entry can now be narrowed to the confidence band ferret-scan reported
   (`confidence_level: low|medium|high`, or a list) and/or the detector that produced
@@ -560,7 +575,7 @@ The commits below also carry breaking-change notes, listed under BREAKING CHANGE
   gets an explicit `--config`, the operator's `config_file` (from
   `--config-overrides` or a config outside the scanned tree, for a file outside
   it) or an empty one, so a `.hadolint.yaml` in the scanned repository is not read.
-  See [hadolint Plugin](docs/content/docs/plugins/community/hadolint-plugin.md).
+  See [hadolint Plugin](docs/content/docs/plugins/alpha/hadolint-plugin.md).
 - **A GuardDog community plugin, `ash_guarddog_plugins`, pending licensing review.** It
   runs GuardDog 3.2.0
   over every PyPI, npm, Go, GitHub Action, RubyGems and crates package root,
@@ -578,7 +593,7 @@ The commits below also carry breaking-change notes, listed under BREAKING CHANGE
   GuardDog's own CLI in its interpreter with the limit set; from a config in the
   scanned tree it can only raise a rule's limit, since a lower one hides matches.
   See
-  [GuardDog Plugin](docs/content/docs/plugins/community/guarddog-plugin.md).
+  [GuardDog Plugin](docs/content/docs/plugins/alpha/guarddog-plugin.md).
 - **`--scanners` names the module to add for a community scanner that is not loaded.**
   `--scanners snyk-code` without `ash_snyk_plugins` listed is refused with a message
   naming the module, rather than reading as a typo; a selection in which other names
@@ -3296,7 +3311,7 @@ The commits below also carry breaking-change notes, listed under BREAKING CHANGE
   copy cannot be written, or when `TMPDIR` is inside the scanned or the output
   directory (a CI job that points `TMPDIR` into its workspace hits this on
   upgrade), snyk-code reports ERROR and the scan exits 1 as incomplete. See
-  [What ASH sends to Snyk](docs/content/docs/plugins/community/snyk-plugin.md#what-ash-sends-to-snyk).
+  [What ASH sends to Snyk](docs/content/docs/plugins/alpha/snyk-plugin.md#what-ash-sends-to-snyk).
 
 - **An ignore path names an archive member in the scanned tree's terms.** A
   member was extracted to `archive/<the archive's folded name>/<member>`, and

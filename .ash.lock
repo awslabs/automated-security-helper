@@ -26,7 +26,7 @@
           "symbol": "_run_declared_install_command"
         }
       ],
-      "sha256": "4304c6481848ec465eca9e8e65ffa38f07d0db56aaf9f164e3db19515756af90"
+      "sha256": "8c559cb89d06c065564ceddbe9fe27e0fd70c087d9cf82ed1f65c68b217a1cf9"
     },
     "automated_security_helper/cli/mcp/__init__.py": {
       "created": "2026-11-25T17:03:33Z",
@@ -77,20 +77,6 @@
         }
       ],
       "sha256": "a10c3e78bb1dbcc51631fdcdef05022d646c1b661fee28ffd2a9581ae90c1f5e"
-    },
-    "automated_security_helper/plugin_modules/ash_ferret_plugins/ferret_scanner.py": {
-      "created": "2026-11-25T17:03:42Z",
-      "scopes": [
-        {
-          "rule_id": "B603",
-          "symbol": "FerretScanScanner._get_installed_version"
-        },
-        {
-          "rule_id": "B607",
-          "symbol": "FerretScanScanner._get_installed_version"
-        }
-      ],
-      "sha256": "52ba825f3fe7cf49f4217bda910821fe9ed1326213664cace65bef12997ce9d6"
     },
     "automated_security_helper/utils/content_db_refresh.py": {
       "created": "2026-11-25T17:03:23Z",
@@ -156,7 +142,7 @@
           "symbol": "python_package_install_command"
         }
       ],
-      "sha256": "3462432df315c7efe90494af2c87007d16708a1f2b03842ec4734c54d8713f97"
+      "sha256": "60b5652df7eadb240141fcd97924d6ac1c45ca83c260027762924c0262cffd0d"
     },
     "automated_security_helper/utils/secret_masking.py": {
       "created": "2026-11-25T17:03:26Z",
@@ -171,16 +157,6 @@
         }
       ],
       "sha256": "6585f8d5439168a9f1c6d8535979c75cbce83dbf8c142290d9c5843bc9a071e9"
-    },
-    "scripts/generate_test_docx.py": {
-      "created": "2026-11-25T17:03:45Z",
-      "scopes": [
-        {
-          "rule_id": "SECRET-HEX-HIGH-ENTROPY-STRING",
-          "symbol": "main"
-        }
-      ],
-      "sha256": "b3dde42e39948ee977cb381a905025ecd4cb394959c621c8269d4cafb6380468"
     },
     "tests/integration/scanners/test_trivy_real_binary.py": {
       "created": "2026-11-25T17:02:48Z",
@@ -238,7 +214,7 @@
           "symbol": "TestOnlyAllowlistedHttpsUrlsAreFetched.test_a_url_outside_the_allowlist_is_refused_unopened"
         }
       ],
-      "sha256": "98e65c62a55bde547e40428532832e4be8fdc687e03bebbb58d0189ea13395dd"
+      "sha256": "c13114210299af954f008ba55d0e2ea439dfcfe30562bfeac2bf829461e858f6"
     },
     "tests/unit/utils/test_opengrep_pinned_download.py": {
       "created": "2026-11-25T17:03:10Z",

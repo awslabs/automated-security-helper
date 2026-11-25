@@ -210,8 +210,8 @@ class TestWizardCommand:
         raw = config_path.read_text()
         assert "ASH_OFFLINE" not in raw
 
-    def test_wizard_adds_community_plugin_modules(self, cli_runner, config_path):
-        """New community plugin modules are written to the config.
+    def test_wizard_adds_alpha_plugin_modules(self, cli_runner, config_path):
+        """New alpha plugin modules are written to the config.
 
         The typed module's top-level package ends in ``_ash_plugins``, which puts
         it inside ASH's plugin namespace (plugins/loader.py's rule): the wizard

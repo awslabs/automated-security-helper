@@ -968,7 +968,7 @@ class ScannerStatisticsCalculator:
         if (
             scanner_config_entry
             and isinstance(scanner_config_entry, dict)
-            # Only a mapping holds options. A community plugin's section can
+            # Only a mapping holds options. An out-of-tree plugin's section can
             # write ``options: null`` (or a scalar); read as a mapping it raised
             # TypeError here and aborted the metrics after the scan had run.
             and isinstance(scanner_config_entry.get("options"), dict)

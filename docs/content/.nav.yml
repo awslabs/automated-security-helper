@@ -67,9 +67,9 @@ nav:
       - Plugins: plugins/index.md
       - Built-in scanner pages:
           - "docs/plugins/builtin/*.md"
-      - Community plugins:
-          - Community plugins: docs/plugins/community/index.md
-          - "docs/plugins/community/*.md"
+      - Alpha plugins:
+          - Alpha plugins: docs/plugins/alpha/index.md
+          - "docs/plugins/alpha/*.md"
       - AWS reporters: plugins/aws.md
       - Write a scanner plugin: plugins/write-a-scanner.md
       - Write a reporter plugin: plugins/write-a-reporter.md

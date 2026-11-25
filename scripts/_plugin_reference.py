@@ -29,13 +29,13 @@ directory, the way ``core/scanner_inventory.py`` builds them for ``ash plugin
 list``; nothing reads the working tree and no scan runs. A plugin that cannot be
 built is still listed, with the instance-only columns marked as not determined.
 
-Built-in and community
-----------------------
+Built-in and alpha
+------------------
 ``ash_builtin`` is the built-in package. A scanner from any other package under
-``plugin_modules/`` is a community scanner, which is how
-``core/community_scanners.py`` decides which module to suggest for a scanner
+``plugin_modules/`` is an alpha scanner, which is how
+``core/alpha_scanners.py`` decides which module to suggest for a scanner
 that was not loaded. Reporters and converters outside ``ash_builtin`` (the AWS
-reporters) are not called community plugins; the pages name their module.
+reporters) are not called alpha plugins; the pages name their module.
 
 Options tables
 --------------
@@ -304,7 +304,7 @@ def module_name(plugin: Plugin) -> str:
 
 
 def _origin(plugin: Plugin) -> str:
-    return "community module" if plugin.kind == "scanner" else "plugin module"
+    return "alpha module" if plugin.kind == "scanner" else "plugin module"
 
 
 def package_short(plugin: Plugin) -> str:
@@ -319,7 +319,7 @@ def package_note(plugin: Plugin) -> str:
     if plugin.builtin:
         return "built in, loaded on every scan"
     if plugin.kind == "scanner":
-        # Said of `ash scan` only: in the long-running `ash mcp` process a community
+        # Said of `ash scan` only: in the long-running `ash mcp` process an alpha
         # scanner one call registered stays registered for the scans after it, as
         # the plugins page explains. The AWS reporters are not affected.
         return (

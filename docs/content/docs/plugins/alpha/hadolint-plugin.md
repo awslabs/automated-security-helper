@@ -1,4 +1,4 @@
-# hadolint (community plugin)
+# hadolint (alpha plugin)
 
 > **Pending licensing review.** The hadolint plugin, and the hadolint binary (GPL-3.0) the ASH container image ships for it, are pending licensing review.
 
@@ -10,7 +10,7 @@ so on) and runs [ShellCheck](https://www.shellcheck.net/) over the shell in ever
 
 ## Enabling it
 
-hadolint is a community plugin that ships with ASH. Its plugin module is loaded only when you list it, so an `ash scan` that does not list it is unchanged: no row in the results, the summary, the reports or the SARIF.
+hadolint is an alpha plugin that ships with ASH. Its plugin module is loaded only when you list it, so an `ash scan` that does not list it is unchanged: no row in the results, the summary, the reports or the SARIF.
 
 ```yaml
 # .ash/.ash.yaml

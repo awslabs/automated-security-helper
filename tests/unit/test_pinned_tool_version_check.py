@@ -1227,7 +1227,7 @@ class TestBundledLibrariesAreListedButNotLookedUp:
     wheel's), so comparing it with its project's latest release would make the
     scheduled check red with a bump nobody can make. It is listed as held instead.
 
-    The shipped inventory carries these entries again with the GuardDog community
+    The shipped inventory carries these entries again with the GuardDog alpha
     plugin: pygit2 and the libraries its wheel bundles (libgit2, libssh2, OpenSSL
     and PCRE), and the yara yara-python bundles. Each test still plants an entry
     of the shape it checks into its own copy of the pins module, and reads the

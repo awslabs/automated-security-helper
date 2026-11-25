@@ -21,12 +21,12 @@ from automated_security_helper.core.enums import ExecutionPhase, ScannerStatus
 from automated_security_helper.core.exceptions import ScannerSelectionError
 from automated_security_helper.core.scanner_selection import (
     SelectionOrigin,
-    community_scanner_refusal,
+    alpha_scanner_refusal,
     exclusions_matching_no_scanner,
     refuse_selection_matching_no_scanner,
     selection_after_exclusions,
-    unloaded_community_hint,
-    unloaded_community_scanners,
+    unloaded_alpha_hint,
+    unloaded_alpha_scanners,
     selection_names,
 )
 from automated_security_helper.models.asharp_model import (
@@ -1365,7 +1365,7 @@ class ScanPhase(EnginePhase):
             # resolve, so it is not the silent-zero case, and a CI matrix whose
             # runners load different plugin modules can produce that shape
             # legitimately. The unresolved name is named either way, and a name
-            # that belongs to a community module ASH ships but that this run did
+            # that belongs to an alpha module ASH ships but that this run did
             # not import is named with the module to add, in the warning and in
             # the refusal alike.
             #
@@ -1385,10 +1385,8 @@ class ScanPhase(EnginePhase):
                 # (core.scanner_selection): one text for the construction-time
                 # check and this backstop. "Not loaded" is judged from the
                 # classes handed to this phase, not sys.modules.
-                hint = unloaded_community_hint(
-                    unloaded_community_scanners(
-                        unresolved, known_names, scanner_classes
-                    )
+                hint = unloaded_alpha_hint(
+                    unloaded_alpha_scanners(unresolved, known_names, scanner_classes)
                 )
                 if unresolved:
                     ASH_LOGGER.warning(
@@ -1398,9 +1396,9 @@ class ScanPhase(EnginePhase):
                         + (f". {hint}" if hint else "")
                     )
                 # A refusal whose requested names are all unresolved and at least one
-                # is a community scanner from an unloaded module names the module to
+                # is an alpha scanner from an unloaded module names the module to
                 # add, not spelling, and the misspelled names beside it.
-                refusal = community_scanner_refusal(
+                refusal = alpha_scanner_refusal(
                     list(enabled_scanners), known_names, scanner_classes
                 )
                 if refusal:

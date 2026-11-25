@@ -174,12 +174,12 @@ _SCAN = [
     "LOCAL",
 ]
 _OFFLINE = ["--offline", "--exclude-scanners", "npm-audit"]
-#: The community legs read .ash/.ash_community_plugins.yaml, a config inside the
+#: The alpha legs read .ash/.ash_alpha_plugins.yaml, a config inside the
 #: scanned tree, which cannot load ash_snyk_plugins itself, so the step names the
 #: module on the command line.
-_COMMUNITY = [
+_ALPHA = [
     "--config",
-    ".ash/.ash_community_plugins.yaml",
+    ".ash/.ash_alpha_plugins.yaml",
     "--ash-plugin-modules",
     "automated_security_helper.plugin_modules.ash_snyk_plugins",
 ]
@@ -192,9 +192,9 @@ _OVERRIDES = [
     "--config-overrides",
     "scanners.grype.options.config_file=.ash/.grype.yaml",
 ]
-#: The community config's own `use_default_config: false` is ignored for the same
-#: reason, so the community legs set it the same way.
-_COMMUNITY_OVERRIDES = [
+#: The alpha config's own `use_default_config: false` is ignored for the same
+#: reason, so the alpha legs set it the same way.
+_ALPHA_OVERRIDES = [
     "--config-overrides",
     "scanners.ferret-scan.options.use_default_config=false",
 ]
@@ -207,11 +207,11 @@ def _expected_scan(offline: bool, config_file: str) -> list[str]:
     argv = list(_SCAN)
     if offline:
         argv += _OFFLINE
-    if config_file == "community":
-        argv += _COMMUNITY
+    if config_file == "alpha":
+        argv += _ALPHA
     argv += _OVERRIDES
-    if config_file == "community":
-        argv += _COMMUNITY_OVERRIDES
+    if config_file == "alpha":
+        argv += _ALPHA_OVERRIDES
     return argv + _NO_ASH_ENV
 
 
@@ -930,7 +930,7 @@ def test_the_stand_in_records_ash_variables_and_skips_the_test_inputs(tmp_path):
 
 @pytest.mark.integration
 @posix_only
-@pytest.mark.parametrize("config_file", ["default", "community"])
+@pytest.mark.parametrize("config_file", ["default", "alpha"])
 def test_the_offline_leg_leaves_npm_audit_out(tmp_path, config_file):
     """Exactly npm-audit: no other scanner left out, by argument or environment."""
     (scan,) = _scans(_scan_argv(tmp_path, "true", config_file))
@@ -940,7 +940,7 @@ def test_the_offline_leg_leaves_npm_audit_out(tmp_path, config_file):
 
 @pytest.mark.integration
 @posix_only
-@pytest.mark.parametrize("config_file", ["default", "community"])
+@pytest.mark.parametrize("config_file", ["default", "alpha"])
 def test_an_online_leg_runs_npm_audit(tmp_path, config_file):
     (scan,) = _scans(_scan_argv(tmp_path, "false", config_file))
 
