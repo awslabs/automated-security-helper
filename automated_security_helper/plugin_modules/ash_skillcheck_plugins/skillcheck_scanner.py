@@ -442,10 +442,11 @@ class SkillcheckScanner(ScannerPluginBase[SkillcheckScannerConfig]):
             reason="the database verdict carries no CWE",
         ),
         fingerprints=FacetDecl(
-            state=FacetState.NA,
-            reason="the report carries no fingerprint; the adapter computes one "
-            "from rule, path and skill name (the content hash is left out so an "
-            "edit does not break a suppression)",
+            state=FacetState.MAPPED,
+            native_field='(none native) result "partialFingerprints" '
+            '"skillcheck/v1", computed by the adapter from rule, path and skill '
+            "name (the content hash is left out so an edit does not break a "
+            "suppression)",
         ),
         fix_available=FacetDecl(
             state=FacetState.NA,

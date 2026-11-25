@@ -154,7 +154,7 @@ def tree(tmp_path) -> Path:
     return src
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def on_path(monkeypatch):
     monkeypatch.setattr(sc, "find_executable", lambda cmd: f"/fake/bin/{cmd}")
 
@@ -550,10 +550,8 @@ class TestNetworkAndOfflinePosture:
 
 
 class TestInstallStory:
-    def test_ash_provisions_nothing_and_never_the_pypi_namesake(self):
-        scanner = SkillcheckScanner(
-            context=None, config=SkillcheckScannerConfig(enabled=True)
-        )
+    def test_ash_provisions_nothing_and_never_the_pypi_namesake(self, tree, tmp_path):
+        scanner = _scanner(tree, tmp_path)
         assert scanner.use_uv_tool is False
         assert not scanner.custom_install_commands
         assert not scanner.uv_tool_install_commands
@@ -572,7 +570,7 @@ class TestInstallStory:
         scanner = _scanner(tree, tmp_path)
         assert scanner.validate_plugin_dependencies() is False
 
-    def test_a_present_binary_passes(self, tree, tmp_path, on_path):
+    def test_a_present_binary_passes(self, tree, tmp_path):
         assert _scanner(tree, tmp_path).validate_plugin_dependencies() is True
 
 
