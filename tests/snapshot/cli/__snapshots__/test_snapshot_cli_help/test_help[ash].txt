@@ -106,20 +106,23 @@
 │                                                              By default, ASH looks for the       │
 │                                                              following config file names in the  │
 │                                                              source directory of a scan:         │
-│                                                              ['.ash.yml', '.ash.yaml',           │
-│                                                              '.ash.json', 'ash.yml', 'ash.yaml', │
-│                                                              'ash.json'] (each at the root, then │
-│                                                              in .ash/), then ['.ashrc.toml',     │
-│                                                              '.ashrc.yaml', '.ashrc.yml',        │
-│                                                              '.ashrc.json', 'ashrc.toml',        │
-│                                                              'ashrc.yaml', 'ashrc.yml',          │
-│                                                              'ashrc.json'] at the root, then the │
-│                                                              tool.ash table of pyproject.toml at │
-│                                                              the root; the first found is used.  │
-│                                                              Alternatively, the full path to a   │
-│                                                              config file can be provided by      │
-│                                                              setting the ASH_CONFIG environment  │
-│                                                              variable before running ASH.        │
+│                                                              .ash.yaml at the root, then the     │
+│                                                              deprecated ['.ash.yml',             │
+│                                                              '.ash.yaml', '.ash.json',           │
+│                                                              'ash.yml', 'ash.yaml', 'ash.json']  │
+│                                                              (each at the root, then in .ash/;   │
+│                                                              .ash.yaml only in .ash/), then      │
+│                                                              ['.ashrc.toml', '.ashrc.yaml',      │
+│                                                              '.ashrc.yml', '.ashrc.json',        │
+│                                                              'ashrc.toml', 'ashrc.yaml',         │
+│                                                              'ashrc.yml', 'ashrc.json'] at the   │
+│                                                              root, then the tool.ash table of    │
+│                                                              pyproject.toml at the root; the     │
+│                                                              first found is used. Alternatively, │
+│                                                              the full path to a config file can  │
+│                                                              be provided by setting the          │
+│                                                              ASH_CONFIG environment variable     │
+│                                                              before running ASH.                 │
 │                                                              [env var: ASH_CONFIG]               │
 │ --staged                                                     With --mode precommit only: scan    │
 │                                                              the staged files (git diff          │
@@ -151,13 +154,7 @@
 │                                                              fetches nothing itself: the image   │
 │                                                              is prepared by a container engine   │
 │                                                              or the scanner tools' own registry  │
-│                                                              clients. Repeat it, or give a comma │
-│                                                              list, to scan several images: each  │
-│                                                              is its own scan, with its own       │
-│                                                              reports under                       │
-│                                                              <output-dir>/<NN>-<image>-<hash>/,  │
-│                                                              and the exit code is the worst of   │
-│                                                              theirs. Exclusive with              │
+│                                                              clients. Exclusive with             │
 │                                                              --source-dir, --image-archive and   │
 │                                                              --image-layout; scanners that do    │
 │                                                              not declare container_image targets │
@@ -177,28 +174,6 @@
 │                                                              engine. Exclusive with              │
 │                                                              --source-dir, --image and           │
 │                                                              --image-archive.                    │
-│ --source-git                URL                              Scan a remote git repository        │
-│                                                              instead of a source directory: ASH  │
-│                                                              clones it (https or ssh URL, or     │
-│                                                              user@host:path; never a local path) │
-│                                                              into a temporary directory, scans   │
-│                                                              that, and removes it. git runs      │
-│                                                              without your configuration or       │
-│                                                              credentials, so the repository must │
-│                                                              be readable anonymously or by a key │
-│                                                              a non-interactive ssh finds. Same   │
-│                                                              request rules as the MCP            │
-│                                                              set_source_git tool. Exclusive with │
-│                                                              --source-dir, --workspace, the      │
-│                                                              image options, --staged,            │
-│                                                              --use-existing and                  │
-│                                                              --changed-files-only.               │
-│ --git-ref                   REF                              Branch, tag or commit of            │
-│                                                              --source-git to scan. Default: the  │
-│                                                              remote's default branch.            │
-│ --git-depth                 N                                How many commits of history         │
-│                                                              --source-git fetches, 1 to 1000     │
-│                                                              (default 1).                        │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Reports ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --output-dir                                              <str>  The directory to output results │
@@ -683,17 +658,14 @@
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
 │ scan             Scan code, infrastructure, secrets, and dependencies.                           │
-│ build-image      Builds the ASH container image, then scans the current directory with it unless │
-│                  --no-run is given.                                                              │
-│ report           Generate a report from ASH scan results using the specified reporter plugin.    │
-│ diff             Compare the findings in two saved ASH scans without running a scan.             │
-│ trend            Show new, carried and fixed findings over a series of saved ASH scans.          │
-│ merge            Merges the results of a sharded scan into one unified report.                   │
+│ build-image      Deprecated: use `ash container build`, which takes the same options.            │
+│ results          Read, compare and combine the results of saved ASH scans: report, diff, trend,  │
+│                  merge and inspect. None of them runs a scan.                                    │
 │ mcp              Start the ASH MCP server (Model Context Protocol)                               │
 │ get-genai-guide  Write the ASH GenAI Integration Guide for AI assistants and LLMs to a file.     │
+│ container        Work with the ASH container image.                                              │
 │ config           ASH configuration management                                                    │
 │ dependencies     Check or install dependencies for ASH plugins                                   │
-│ inspect          Inspect and analyze ASH outputs and reports                                     │
 │ plugin           Manage ASH plugins                                                              │
 │ suppress         Create symbol suppressions and keep their content-hash lock (.ash.lock)         │
 │                  current.                                                                        │

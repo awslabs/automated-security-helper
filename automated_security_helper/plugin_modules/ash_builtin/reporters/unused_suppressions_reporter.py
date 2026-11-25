@@ -388,7 +388,7 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
                         f"{project.output_path}/reports/ash.{self.config.extension}"
                     ),
                 }
-                for project in workspace_results.projects
+                for project in (workspace_results.projects if workspace_results else ())
                 if project.status == ProjectRunStatus.COMPLETED
             ]
 

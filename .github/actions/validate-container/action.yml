@@ -635,13 +635,13 @@ runs:
         # The stderr log paths below come from find, so they are printed through
         # one_line.
         . "${RUNNER_TEMP}/ash-one-line.sh"
-        # The community modules this image ships, read from the Dockerfile's own list
-        # and the plugins' declarations (.github/scripts/community-scanner-legs.py),
-        # not named here: a community scanner added to the image is then loaded and
+        # The alpha modules this image ships, read from the Dockerfile's own list
+        # and the plugins' declarations (.github/scripts/alpha-scanner-legs.py),
+        # not named here: an alpha scanner added to the image is then loaded and
         # checked by this leg without an edit to it. Read before `set +e`, so a
         # metadata the script cannot read fails the step instead of scanning with none.
-        mapfile -t community_args < <(python3 .github/scripts/community-scanner-legs.py args)
-        test "${#community_args[@]}" -gt 0
+        mapfile -t alpha_args < <(python3 .github/scripts/alpha-scanner-legs.py args)
+        test "${#alpha_args[@]}" -gt 0
         set +e
         ash scan \
           --mode container \
@@ -651,7 +651,7 @@ runs:
           --output-dir /tmp/ash-selftest/output \
           --simple \
           --fail-on-incomplete-scanners \
-          "${community_args[@]}" \
+          "${alpha_args[@]}" \
           --phases scan \
           --phases report
         rc=$?
@@ -780,18 +780,18 @@ runs:
             "trivy",
             "zizmor",
         ]
-        # The community scanners (betterleaks, GuardDog and hadolint today) come from the
+        # The alpha scanners (betterleaks, GuardDog and hadolint today) come from the
         # image's own module list through the plugins' declarations, the same source the
         # scan above loaded them from, so this list cannot drift from what was loaded.
-        # An empty answer fails: a leg with no community scanner to check is a leg that
+        # An empty answer fails: a leg with no alpha scanner to check is a leg that
         # lost its metadata, not a pass.
-        community = subprocess.run(
-            [sys.executable, ".github/scripts/community-scanner-legs.py", "scanners"],
+        alpha = subprocess.run(
+            [sys.executable, ".github/scripts/alpha-scanner-legs.py", "scanners"],
             check=True, capture_output=True, text=True,
         ).stdout.split()
-        if not community:
-            sys.exit("FAIL: community-scanner-legs.py named no community scanner")
-        image_supplied = sorted(builtin_supplied + community)
+        if not alpha:
+            sys.exit("FAIL: alpha-scanner-legs.py named no alpha scanner")
+        image_supplied = sorted(builtin_supplied + alpha)
 
         for name in sorted(statuses):
             print(f"  {name:<18} {statuses[name]}")
@@ -961,7 +961,7 @@ runs:
     #
     # Whether this leg runs is not decided by where the plugin came from. It is
     # decided by the image listing the module and the plugin declaring a scanner of
-    # that name (.github/scripts/community-scanner-legs.py), so the same leg covers a
+    # that name (.github/scripts/alpha-scanner-legs.py), so the same leg covers a
     # plugin served by any registry, or shipped inside the SDK.
     #
     # The secret is assembled when the step runs and never written in this file, so
@@ -969,15 +969,15 @@ runs:
     # GitHub personal access token shape that the pinned betterleaks (1.10.1) reports
     # as github-pat. An AWS key id in a quoted assignment was measured not to be
     # reported by that build, so the fixture is not one.
-    - name: "Scan with the image's betterleaks (community plugin)"
+    - name: "Scan with the image's betterleaks (alpha plugin)"
       shell: bash
       env:
         ASH_BASE_OCI_LAYOUT: ${{ steps.prepull-podman.outputs.oci-layout || steps.prepull-finch.outputs.oci-layout || steps.prepull-nerdctl.outputs.oci-layout }}
         ASH_BASE_IMAGE_OVERRIDE: ${{ steps.prepull-podman.outputs.base-image-override || steps.prepull-finch.outputs.base-image-override || steps.prepull-nerdctl.outputs.base-image-override }}
         RUNTIME: ${{ inputs.runtime }}
       run: |
-        python3 .github/scripts/community-scanner-legs.py scanners | grep -x -F betterleaks
-        mapfile -t community_args < <(python3 .github/scripts/community-scanner-legs.py args)
+        python3 .github/scripts/alpha-scanner-legs.py scanners | grep -x -F betterleaks
+        mapfile -t alpha_args < <(python3 .github/scripts/alpha-scanner-legs.py args)
         rm -rf /tmp/ash-selftest-betterleaks
         mkdir -p /tmp/ash-selftest-betterleaks
         printf 'token = "%s%s"\n' ghp_ x7Kq9ZmP2vLw4RtYb8NcD3sFh6JgA1eUoW5i > /tmp/ash-selftest-betterleaks/settings.py
@@ -988,7 +988,7 @@ runs:
           --build-target ci \
           --source-dir /tmp/ash-selftest-betterleaks \
           --output-dir /tmp/ash-selftest-betterleaks/output \
-          "${community_args[@]}" \
+          "${alpha_args[@]}" \
           --scanners betterleaks \
           --simple \
           --phases scan \

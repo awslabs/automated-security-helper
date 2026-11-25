@@ -202,7 +202,7 @@
     },
     "ArchiveConverterConfigOptions": {
       "additionalProperties": false,
-      "description": "Limits on what extracting one archive may write.\n\nEach is an inclusive maximum, checked against what the archive declares, for\nevery member, before anything is written. An archive over any of them is not\nextracted at all. The defaults are far above an ordinary source archive. Set\ninside the scanned tree (``.ash/.ash.yaml``), by a config an MCP client\nsupplied, or by a workspace project's own config, a value can only lower a\nlimit; raise one with ``--config-overrides`` or a config file outside the tree.",
+      "description": "Limits on what extracting one archive may write.\n\nEach is an inclusive maximum, checked against what the archive declares, for\nevery member, before anything is written. An archive over any of them is not\nextracted at all. The defaults are far above an ordinary source archive. Set\ninside the scanned tree (``.ash.yaml``), by a config an MCP client\nsupplied, or by a workspace project's own config, a value can only lower a\nlimit; raise one with ``--config-overrides`` or a config file outside the tree.",
       "properties": {
         "max_compression_ratio": {
           "anyOf": [
@@ -630,6 +630,7 @@
                   "/scanners/ferret-scan/options/config_file",
                   "/scanners/grype/options/config_file",
                   "/scanners/syft/options/config_file",
+                  "/scanners/syft/options/sdist_harvest/**",
                   "/scanners/trivy-repo/options/secret_config_file",
                   "/scanners/trivy-repo/options/config_file",
                   "/scanners/trivy-repo/options/module_dir",
@@ -1310,6 +1311,7 @@
                 "/scanners/ferret-scan/options/config_file",
                 "/scanners/grype/options/config_file",
                 "/scanners/syft/options/config_file",
+                "/scanners/syft/options/sdist_harvest/**",
                 "/scanners/trivy-repo/options/secret_config_file",
                 "/scanners/trivy-repo/options/config_file",
                 "/scanners/trivy-repo/options/module_dir",
@@ -1636,6 +1638,7 @@
               "/scanners/ferret-scan/options/config_file",
               "/scanners/grype/options/config_file",
               "/scanners/syft/options/config_file",
+              "/scanners/syft/options/sdist_harvest/**",
               "/scanners/trivy-repo/options/secret_config_file",
               "/scanners/trivy-repo/options/config_file",
               "/scanners/trivy-repo/options/module_dir",
@@ -2027,7 +2030,12 @@
         "confidence_level": {
           "anyOf": [
             {
-              "pattern": "^(all|low|medium|high)$",
+              "enum": [
+                "all",
+                "low",
+                "medium",
+                "high"
+              ],
               "type": "string"
             },
             {
@@ -6331,6 +6339,7 @@
             "/scanners/ferret-scan/options/config_file",
             "/scanners/grype/options/config_file",
             "/scanners/syft/options/config_file",
+            "/scanners/syft/options/sdist_harvest/**",
             "/scanners/trivy-repo/options/secret_config_file",
             "/scanners/trivy-repo/options/config_file",
             "/scanners/trivy-repo/options/module_dir",

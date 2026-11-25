@@ -50,6 +50,35 @@ ash --source-dir . --scanners detect-secrets --offline --no-progress \
 
 With `rule_id` misspelled, the entry suppresses nothing instead of suppressing every rule in `app.py`: the run warns, naming the key, and fails on the finding the entry was meant to suppress (exit 2). Set `fail_on_unknown_keys: true` to refuse the config outright (exit 3); ASH v4 makes that the default.
 
+### Suppress a finding in a harvested lockfile {#harvested}
+
+A finding can sit in a file the scan materialized rather than one in your tree:
+the [sdist lockfile harvest](../docs/plugins/builtin/syft.md#the-sdist-lockfile-harvest)
+writes a compiled dependency's embedded lockfiles into the converted target at
+`sdist-locks/<package>/<version>/<lockfile>`, and grype and trivy report
+advisories against them. Such a finding is fixed by upgrading the parent
+package, never by an edit, so while no fixed release exists the honest
+disposition is a time-boxed suppression whose `path` globs over the harvest
+layout -- the version segment is a `*` so the entry survives a version bump,
+and `expires` plus the pinned package version force the revisit:
+
+```yaml
+global_settings:
+  suppressions:
+    - rule_id: "GHSA-2mjx-qc3c-rqvc"
+      path: "**/sdist-locks/polars-runtime-32/*/Cargo.lock"
+      package_name: "rustls"
+      package_version: "0.23.43"
+      expires: "2026-12-27"
+      reason: >-
+        rustls 0.23.43 is statically linked into the polars-runtime-32 wheel;
+        only a polars release built against rustls 0.23.45 or later removes it.
+```
+
+ASH's own `.ash.yaml` carries the worked set of these entries (the rustls
+advisories in polars' harvested `Cargo.lock`), one per scanner spelling of the
+same GHSA id, each with the evidence in its reason.
+
 <!-- doctest: run expect-exit=2 -->
 ```bash
 ash --source-dir . --scanners detect-secrets --offline --no-progress \
@@ -120,7 +149,7 @@ ash suppress refresh src/deploy.py   # or no path, for every locked file
 
 Commit `.ash.lock` with the change it belongs to, so a reviewer sees the new hash beside the edit it covers. The commands are the supported way to write the file; its keys are sorted, so the same tree always produces the same bytes.
 
-The lock was first written to `.ash/ash.lock`. ASH still reads that path when `.ash.lock` does not exist, with a deprecation warning, and `ash suppress add` or `refresh` writes `.ash.lock`; remove the old file with `git rm .ash/ash.lock`. Reading it is deprecated since v3.9 and ends in v4.0.
+The lock was first written inside the `.ash/` directory. ASH still reads that older file when `.ash.lock` does not exist, with a deprecation warning, and `ash suppress add` or `refresh` writes `.ash.lock` at the repository root; remove the old file with `git rm` on its path. Reading it is deprecated since v3.9 and ends in v4.0.
 
 ### Installing the extra {#installing-the-extra}
 
@@ -241,7 +270,7 @@ After a scan, `ash config lint --fix-unused` comments out the entries that the r
 
 ## Add a suppression while you review findings {#inspect}
 
-`ash inspect findings` opens the last scan's findings in your terminal. Select a finding and press `x` to suppress it: ASH asks for a reason and an optional expiration, and adds an entry with the finding's path and rule ID, and its line as `line_start` and `line_end`, to the config file (the `--config` file, else the config ASH discovers, else a new `.ashrc.yaml` in the current directory). It keeps the comments of a YAML file, except one whose `global_settings` is written inline (`global_settings: {...}`), which it rewrites in full, and it writes a JSON config back as JSON. If the file already has an identical entry, nothing is added, and the status bar says so; an entry for another line, reason, or expiration with the same rule ID and path is added. It does not edit TOML files, or a file that uses `extends` but has no suppressions list of its own.
+`ash inspect findings` opens the last scan's findings in your terminal. Select a finding and press `x` to suppress it: ASH asks for a reason and an optional expiration, and adds an entry with the finding's path and rule ID, and its line as `line_start` and `line_end`, to the config file (the `--config` file, else the config ASH discovers, else a new `.ash.yaml` in the current directory). It keeps the comments of a YAML file, except one whose `global_settings` is written inline (`global_settings: {...}`), which it rewrites in full, and it writes a JSON config back as JSON. If the file already has an identical entry, nothing is added, and the status bar says so; an entry for another line, reason, or expiration with the same rule ID and path is added. It does not edit TOML files, or a file that uses `extends` but has no suppressions list of its own.
 
 ## See every finding {#ignore-suppressions}
 

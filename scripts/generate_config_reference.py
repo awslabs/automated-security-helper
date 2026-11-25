@@ -569,12 +569,25 @@ def _env_chain(expr: ast.AST) -> list[str]:
     return chain
 
 
+def _unwrap_cast(expr: ast.AST) -> ast.AST:
+    """``X`` for ``cast(T, X)``: a cast changes what a type checker believes about a
+    default, never where the default comes from."""
+    while (
+        isinstance(expr, ast.Call)
+        and ast.unparse(expr.func).split(".")[-1] == "cast"
+        and len(expr.args) == 2
+    ):
+        expr = expr.args[1]
+    return expr
+
+
 def _default_expressions(stmt: ast.AnnAssign) -> list[ast.AST]:
     """The expressions a field's default comes from, in the class body's syntax.
 
     The assigned value, or the ``default``/``default_factory`` of a ``Field(...)``
     that is assigned or sits in an ``Annotated[...]`` annotation. Nothing else in
-    a ``Field`` call (a description that mentions a variable) counts.
+    a ``Field`` call (a description that mentions a variable) counts. A ``cast``
+    around the default is looked through.
     """
     found: list[ast.AST] = []
     for part in (stmt.value, stmt.annotation):
@@ -596,7 +609,7 @@ def _default_expressions(stmt: ast.AnnAssign) -> list[ast.AST]:
         isinstance(value, ast.Call) and ast.unparse(value.func).endswith("Field")
     ):
         found.append(value)
-    return found
+    return [_unwrap_cast(expr) for expr in found]
 
 
 def _module_env_constants(module) -> dict[str, list[str]]:
@@ -1200,6 +1213,18 @@ def generate() -> tuple[str, dict]:
     # against the constants, so a note inside an item would hide that item from it.
     lines += [f"{index}. {code(path)}" for index, path in enumerate(order, start=1)]
     lines += [""]
+    lines += [
+        (
+            f"The first, {code(order[0])} in the source directory, is the canonical "
+            "config file: `ash config init` and `ash config wizard` write it, and it "
+            "wins over every other file. Every other file name above is a deprecated "
+            "location. ASH still reads it, says so in a warning that names the file and "
+            "the path to move it to, and stops reading it in ASH 4.0. "
+            f"{code(ASH_PYPROJECT_FILE_NAME)} is a different kind of source and is not "
+            "deprecated."
+        ),
+        "",
+    ]
     if pyproject_needs_table():
         lines += [
             (

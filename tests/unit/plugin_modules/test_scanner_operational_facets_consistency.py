@@ -17,7 +17,7 @@ The sweep is pure construction and static reads: scanner instances are built
 with a mock context (no tool is run, no network is touched) and the fixtures
 are parsed, never scanned.
 
-Planted controls guard the enumerations: a count of 22, the exact set of
+Planted controls guard the enumerations: a count of 23, the exact set of
 scanner names against ``SCANNER_TOOL_TYPES``, and a classifier control for
 the output-format reader, because a sweep over a silently shrunken or
 mis-parsed universe would pass vacuously.
@@ -25,15 +25,12 @@ mis-parsed universe would pass vacuously.
 
 from __future__ import annotations
 
-import importlib
 import json
-import pkgutil
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 
-from automated_security_helper import plugin_modules
 from automated_security_helper.base import scanner_operational_facets as opsf
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.base.scanner_facets import (
@@ -43,10 +40,10 @@ from automated_security_helper.base.scanner_facets import (
 from automated_security_helper.base.scanner_plugin import ScannerPluginBase
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
-from automated_security_helper.plugin_modules import ash_builtin
 from automated_security_helper.utils import content_databases as cdb
 from automated_security_helper.utils import tool_downloads
 from automated_security_helper.utils.scanner_names import SCANNER_TOOL_TYPES
+from tests.utils.scanner_enumeration import load_scanner_universe
 
 pytestmark = pytest.mark.unit
 
@@ -54,29 +51,9 @@ pytestmark = pytest.mark.unit
 # tests do.
 AshConfig.model_rebuild()
 
-_REMAINING_LOAD_ERRORS = ash_builtin.retry_failed_plugin_groups()
+SCANNER_CLASSES, _REMAINING_LOAD_ERRORS = load_scanner_universe()
 
 _FIXTURE_ROOT = Path(__file__).resolve().parents[2] / "test_data" / "scanners"
-
-
-def _registered_scanner_classes() -> list[type]:
-    classes: list[type] = []
-    seen: set[type] = set()
-    modules = sorted(
-        pkgutil.iter_modules(plugin_modules.__path__), key=lambda m: m.name
-    )
-    for info in modules:
-        if not info.ispkg:
-            continue
-        package = importlib.import_module(f"{plugin_modules.__name__}.{info.name}")
-        for cls in getattr(package, "ASH_SCANNERS", []):
-            if cls not in seen:
-                seen.add(cls)
-                classes.append(cls)
-    return classes
-
-
-SCANNER_CLASSES = _registered_scanner_classes()
 
 
 def _ops(cls: type) -> opsf.ScannerOperationalFacets:
@@ -108,9 +85,9 @@ def _instances(_context) -> dict[type, ScannerPluginBase]:
 # ---------------------------------------------------------------------------
 
 
-def test_the_universe_is_the_twenty_two_shipped_scanners() -> None:
+def test_the_universe_is_the_twenty_three_shipped_scanners() -> None:
     assert not _REMAINING_LOAD_ERRORS, _REMAINING_LOAD_ERRORS
-    assert len(SCANNER_CLASSES) == 22, sorted(c.__name__ for c in SCANNER_CLASSES)
+    assert len(SCANNER_CLASSES) == 23, sorted(c.__name__ for c in SCANNER_CLASSES)
     names = [_ops(cls).scanner_name for cls in SCANNER_CLASSES]
     assert len(set(names)) == len(names), f"duplicate scanner_name in {names}"
     assert set(names) == set(SCANNER_TOOL_TYPES), (
@@ -495,17 +472,13 @@ _SOURCE_FOR_RUNTIME = {
 
 
 @pytest.mark.parametrize("cls", SCANNER_CLASSES, ids=lambda c: c.__name__)
-def test_provenance_and_tier_agree_with_the_runtime_and_the_package(cls) -> None:
+def test_provenance_agrees_with_the_runtime(cls) -> None:
+    """The tier is the manifest's (tests/unit/plugin_manifests binds it to the
+    package); the provenance source must still fit the runtime kind."""
     facets = _ops(cls)
     assert facets.provenance.source in _SOURCE_FOR_RUNTIME[facets.runtime.kind], (
         f"{facets.scanner_name}: a {facets.runtime.kind.value} runtime cannot "
         f"have provenance {facets.provenance.source.value}"
-    )
-    builtin = ".plugin_modules.ash_builtin." in f".{cls.__module__}."
-    expected = opsf.Tier.BUILTIN_DEFAULT if builtin else opsf.Tier.ALPHA_OPTIN
-    assert facets.provenance.tier is expected, (
-        f"{cls.__module__} implies {expected.value}, the register says "
-        f"{facets.provenance.tier.value}"
     )
 
 

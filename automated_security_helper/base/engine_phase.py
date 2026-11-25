@@ -55,7 +55,9 @@ class EnginePhase(ABC):
         self.plugin_context = plugin_context
         self.plugins = plugins
         self.plugin_filter = plugin_filter
-        self.progress_display = progress_display
+        # Typed Any: the phases drive it unconditionally (add_task, update_task)
+        # and ScanPhase hands the base a no-op display when it got none.
+        self.progress_display: Any = progress_display
         self.asharp_model = asharp_model or AshAggregatedResults()
         if plugin_filter is not None:
             self.plugin_scope = plugin_filter
@@ -82,7 +84,7 @@ class EnginePhase(ABC):
             List: Results from all event handlers
         """
         # Include the plugin context in all notifications
-        event_data = {
+        event_data: dict[str, Any] = {
             "phase": self.phase_name.value,
             "plugin_context": self.plugin_context,
             **kwargs,
@@ -209,13 +211,12 @@ class EnginePhase(ABC):
             aggregated_results = results
 
         # Update summary statistics if the method exists
-        if hasattr(self, "_update_summary_stats") and callable(
-            getattr(self, "_update_summary_stats")
-        ):
+        update_summary_stats = getattr(self, "_update_summary_stats", None)
+        if callable(update_summary_stats):
             ASH_LOGGER.debug(
                 f"EnginePhase.execute: Updating summary statistics for {self.phase_name.value}"
             )
-            self._update_summary_stats()
+            update_summary_stats()
 
         # Notify phase complete
         complete_event_name = f"{self.phase_name.value.upper()}_PHASE_COMPLETE"
@@ -235,15 +236,17 @@ class EnginePhase(ABC):
     def _execute_phase(
         self,
         aggregated_results: AshAggregatedResults,
-        python_based_plugins_only: bool = False,
         **kwargs,
     ) -> AshAggregatedResults:
         """Execute the phase-specific logic.
 
         Subclasses must implement this method instead of overriding execute().
+        ``execute`` passes every argument by keyword, and each phase names the
+        ones it takes (``python_based_plugins_only``: if True, only execute
+        plugins that are Python-only).
 
         Args:
-            python_based_plugins_only: If True, only execute plugins that are Python-only
+            aggregated_results: The results the phase adds to
             **kwargs: Additional arguments for the phase
 
         Returns:

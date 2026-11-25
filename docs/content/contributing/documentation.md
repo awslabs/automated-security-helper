@@ -216,7 +216,7 @@ print(hello())
 | `<!-- doctest: save-as=my_plugins/greeting.py -->` | saves the block and does not run it |
 | `<!-- doctest: run save-as=tools/check.py -->` | saves the block, then runs it; a Python block runs from the saved file, so `__file__` is that path |
 | `<!-- doctest: config kind=github-actions save-as=.github/workflows/ash.yml -->` | saves the block, which is still validated as its kind |
-| `<!-- doctest: save-as=.ash/.ash.yaml -->` on a YAML block | saves the block, which is still validated as a complete ASH config |
+| `<!-- doctest: save-as=.ash.yaml -->` on a YAML block | saves the block, which is still validated as a complete ASH config |
 
 The path is relative to the root of the page's fixture project, whatever directory
 earlier blocks changed to. An absolute path, a path containing `..`, and a path that

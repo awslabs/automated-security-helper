@@ -8,7 +8,8 @@ native output can map into the shared pipeline. This module is its companion
 for the operational side: network behavior, output types, scan-target types,
 runtime dependency, platform support, severity fidelity, suppression surfaces,
 finding-identity stability, rules extensibility, exit-code semantics,
-provenance and tier, and input prerequisites. Every scanner class declares a
+provenance, and input prerequisites (the tier is the manifest's, not this
+register's). Every scanner class declares a
 :class:`ScannerOperationalFacets` under :data:`OPERATIONAL_FACETS_ATTR`, read
 from the class's own ``vars()`` exactly as the mapping register is.
 
@@ -660,26 +661,14 @@ class ExitCodesFacet(_Frozen):
 
 
 # --------------------------------------------------------------------------
-# M. Tool provenance and default tier
+# M. Tool provenance
 # --------------------------------------------------------------------------
 
 
-class Tier(str, Enum):
-    BUILTIN_DEFAULT = "builtin_default"
-    ALPHA_OPTIN = "alpha_optin"
-
-    @classmethod
-    def _missing_(cls, value: object) -> "Tier | None":
-        """``"community_optin"``, this tier's spelling before the rename, is an
-        alias of ``alpha_optin`` for one release and warns when it is read."""
-        if value == "community_optin":
-            from automated_security_helper.core.alpha_scanners import (
-                warn_community_alias,
-            )
-
-            warn_community_alias("community_optin", cls.ALPHA_OPTIN.value)
-            return cls.ALPHA_OPTIN
-        return None
+#: The maturity tier and the default-enablement of a scanner are NOT declared
+#: here: they are the ``tier`` and ``default_enabled`` fields of its manifest
+#: (``base/plugin_manifest.py``, data in ``plugin_manifests/``), the one place
+#: they are declared, readable without importing the scanner.
 
 
 class ProvenanceSource(str, Enum):
@@ -691,7 +680,6 @@ class ProvenanceSource(str, Enum):
 
 
 class ProvenanceFacet(_Frozen):
-    tier: Tier
     source: ProvenanceSource
     #: Switches below the tier: sub-scanners, opt-in modes.
     selection_surfaces: tuple[str, ...]

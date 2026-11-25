@@ -375,7 +375,7 @@ def confine_off_host_reporters_to_overrides(
     scanned: ``ash report`` and ``ash merge``. ``resolve_config`` holds a config
     file to the repository's rules when the file is inside a git checkout or the
     working directory, but a ``--config`` (or, for ``ash report``, ``ASH_CONFIG``)
-    file outside both may still be the scanned tree's own ``.ash/.ash.yaml``, as
+    file outside both may still be the scanned tree's own ``.ash.yaml``, as
     when CI scans a directory and reports or merges from another. Here ``files`` are held to those rules for the
     reporters ``REPORTER_DESTINATION_OPTIONS`` and ``REPORTER_ENABLED_DEFAULTS``
     list, with ``source`` naming why and the fix in the warning. The trusted base

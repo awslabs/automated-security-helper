@@ -46,6 +46,23 @@
 
 ## Unreleased
 
+### Behavior changes
+
+- **`.ash.yaml` at the project root is the canonical config file.** A scan reads it
+  before any other config source, and `ash config init`, `ash config wizard` and
+  `ash inspect findings` create it when no config exists (they wrote `.ashrc.yaml`
+  before). Every location that worked before still loads: `.ash/.ash.yaml`, `.ash.yml`,
+  `ash.yaml` and the other names of the old list, each also under `.ash/`, and the
+  `ashrc` names. A scan that reads one of them prints one warning that names the file
+  as deprecated and gives the path to move it to, and ASH 4.0 stops reading them. When
+  `.ash.yaml` and an older file both exist, `.ash.yaml` is read and the warning names the
+  file it shadowed; for a project that has `.ash.yml` beside `.ash.yaml`, this reverses
+  which of the two is read. `--config` and `ASH_CONFIG` are unchanged and print no
+  warning, and a `pyproject.toml` with a `[tool.ash]` table is still read, after the file
+  names, with no warning. To move a config, run `git mv .ash/.ash.yaml .ash.yaml`
+  (or the same with the file's own name). This repository's own config moved the same
+  way.
+
 ### Maintenance
 
 - Removed the ASH v2 in-container scanner scripts `utils/common.sh`,
@@ -56,10 +73,15 @@
   `utils/ash_helpers.ps1` (`Invoke-ASH`) are unchanged.
 - The subcommand and option tables that `./ash` and `utils/ash_helpers.ps1` carry
   (subcommand names, the root options that take a value, which subcommands take the
-  options a wrapper adds, the OCI runner order) are now generated from the `ash` CLI by
+  options a wrapper adds, the OCI runner order, the CI runner variables passed into the
+  container, the exit codes, and in `Invoke-ASH` the image build targets and the
+  image-name pattern) are now generated from the `ash` CLI by
   `scripts/generate_wrapper_tables.py` into marked blocks, and the lint job and a unit
-  test fail when a block is stale. The generated text is the text the wrappers already
-  held, so no option, exit code or message changes.
+  test fail when a block is stale. `./ash` reads the runner order and the CI variable
+  list from its generated blocks rather than from a second written-out copy. The
+  generated text is the text the wrappers already held, so no option, exit code or
+  message changes. The generator now writes each wrapper back with the line endings it
+  was read with.
 - Module-level string constants that spelled a wire vocabulary are replaced by enum
   members, so a caller that imported one of them by name must import the member
   instead. The `error_type` spellings of the MCP tools (`CONFIG_INPUT_NOT_PERMITTED`,
@@ -653,6 +675,14 @@ The commits below also carry breaking-change notes, listed under BREAKING CHANGE
 
 ### Breaking changes
 
+- **`ash container build` is the command that builds the ASH container image;
+  `ash build-image` is its deprecated spelling, removed in ASH v4.** Both take the
+  same options and start the same build. `ash build-image` prints one warning on
+  stderr per run, naming `ash container build`, and then runs. `./ash` and
+  `Invoke-ASH` accept `container` as a command word and pass `--quiet`,
+  `--no-color`, `--verbose`, `--debug`, `--offline` and `--config` given before it
+  on to `build`, as they did for `build-image`. Move scripts and CI jobs to the new
+  spelling in this release; the old one stops working in v4.
 - **`expires` is the canonical spelling of a suppression's or ignore path's
   expiration date; `expiration` is a deprecated alias, removed in ASH v4.** The
   swap reverses the earlier shape, where `expiration` was the field and

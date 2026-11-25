@@ -114,7 +114,7 @@ config:
 
 <!-- doctest: run fixture=empty expect-exit=0 -->
 ```bash
-printf 'fail_on_findings: false\n' > .ashrc.yaml
+printf 'fail_on_findings: false\n' > .ash.yaml
 ash scan --scanners detect-secrets
 ```
 
@@ -123,7 +123,7 @@ path, with every symbolic link followed, so the check uses `pwd -P`:
 
 <!-- doctest: run fixture=empty -->
 ```bash
-grep -F "Using ASH configuration from $(pwd -P)/.ashrc.yaml" .ash/ash_output/ash.log
+grep -F "Using ASH configuration from $(pwd -P)/.ash.yaml" .ash/ash_output/ash.log
 ```
 
 The scan exits 0 although the finding is still there. Scan again with your config:

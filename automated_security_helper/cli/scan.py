@@ -1198,7 +1198,7 @@ def run_ash_scan_cli_command(
             rich_help_panel="Execution",
             help="Whether to run scanners in parallel or sequential",
         ),
-    ] = ExecutionStrategy.PARALLEL.value,
+    ] = ExecutionStrategy.PARALLEL,
     progress: Annotated[
         bool,
         typer.Option(
@@ -1748,43 +1748,6 @@ def run_ash_scan_cli_command(
             ),
         ),
     ] = None,
-    source_git: Annotated[
-        str | None,
-        typer.Option(
-            "--source-git",
-            metavar="URL",
-            rich_help_panel="Scan",
-            help=(
-                "Scan a remote git repository instead of a source directory: "
-                "ASH clones it (https or ssh URL, or user@host:path; never a "
-                "local path) into a temporary directory, scans that, and "
-                "removes it. git runs without your configuration or "
-                "credentials, so the repository must be readable anonymously "
-                "or by a key a non-interactive ssh finds. Same request rules "
-                "as the MCP set_source_git tool. Exclusive with --source-dir, "
-                "--workspace, the image options, --staged, --use-existing and "
-                "--changed-files-only."
-            ),
-        ),
-    ] = None,
-    git_ref: Annotated[
-        str | None,
-        typer.Option(
-            "--git-ref",
-            metavar="REF",
-            rich_help_panel="Scan",
-            help="Branch, tag or commit of --source-git to scan. Default: the remote's default branch.",
-        ),
-    ] = None,
-    git_depth: Annotated[
-        int | None,
-        typer.Option(
-            "--git-depth",
-            metavar="N",
-            rich_help_panel="Scan",
-            help="How many commits of history --source-git fetches, 1 to 1000 (default 1).",
-        ),
-    ] = None,
 ):
     """Scan code, infrastructure, secrets, and dependencies.
 
@@ -1872,6 +1835,7 @@ def run_ash_scan_cli_command(
             ("--staged", staged),
             ("--baseline", baseline is not None),
             ("--use-existing", use_existing),
+            ("--changed-files-only", changed_files_only),
         ):
             if other_given:
                 reason = (
@@ -2225,46 +2189,6 @@ def run_ash_scan_cli_command(
             if payload_refusal is not None:
                 _fail_usage(shown_on_one_line(payload_refusal))
 
-    # A remote git repository as the subject (--source-git): its own rules first,
-    # before any work, so a conflicting or refused request does nothing. The
-    # request rules are the MCP set_source_git tool's, run by the same function.
-    if (git_ref is not None or git_depth is not None) and source_git is None:
-        _fail_usage(
-            "--git-ref and --git-depth apply to --source-git only; "
-            "they name which part of the remote repository to scan."
-        )
-    if source_git is not None:
-        for other_flag, other_given in (
-            (
-                "--source-dir",
-                source_dir is not None,
-            ),
-            ("--workspace", workspace is not None),
-            ("--image", bool(images)),
-            ("--image-archive", image_archive is not None),
-            ("--image-layout", image_layout is not None),
-            ("--staged", staged),
-            ("--use-existing", use_existing),
-            ("--changed-files-only", changed_files_only),
-        ):
-            if other_given:
-                _fail_usage(
-                    f"--source-git cannot be combined with {other_flag}: one scan "
-                    "has one subject, and the clone has no working-tree state to "
-                    "read. Scan the repository on its own."
-                )
-        from automated_security_helper.cli.mcp.source_delivery import (
-            CloneRequestRefused,
-            validated_remote_clone_request,
-        )
-
-        try:
-            validated_remote_clone_request(
-                source_git, git_ref, 1 if git_depth is None else git_depth
-            )
-        except CloneRequestRefused as refusal:
-            _fail_usage(shown_on_one_line(f"--source-git: {refusal}"))
-
     workspace_plan: WorkspacePlan | None = None
     if workspace is not None:
         workspace_plan = _handle_workspace_mode(
@@ -2348,17 +2272,6 @@ def run_ash_scan_cli_command(
         custom_build_arg = []
 
     # Resolve cwd-based defaults at call time (not import time).
-    if source_git is not None:
-        # The subject is a clone of the remote repository, made here into a
-        # temporary directory that is removed when the command ends however it
-        # ends (the click context's close callback runs on every exit). The
-        # output directory then defaults beside the working directory, not
-        # inside the clone, which would take the results with it.
-        source_dir = _clone_git_source(
-            ctx, source_git, git_ref, 1 if git_depth is None else git_depth
-        )
-        if output_dir is None:
-            output_dir = Path.cwd().joinpath(".ash", "ash_output").as_posix()
     if source_dir is None:
         source_dir = Path.cwd().as_posix()
     # Refused before anything else uses it. A missing --source-dir used to run a
@@ -2372,7 +2285,7 @@ def run_ash_scan_cli_command(
         _fail_usage(shown_on_one_line(source_refusal))
     # The output directory's default, the collision adjustment, its refusals and
     # --use-existing, in one place for the real run and the workspace dry run.
-    output_dir, existing_results = _settle_output_dir(
+    settled_output_dir, existing_results = _settle_output_dir(
         source_dir,
         output_dir,
         use_existing,
@@ -2380,6 +2293,7 @@ def run_ash_scan_cli_command(
         mode=mode,
         workspace=workspace_plan is not None,
     )
+    output_dir = os.fspath(settled_output_dir)
     baseline_data = None
     if baseline is not None:
         from automated_security_helper.utils.scan_baseline import (

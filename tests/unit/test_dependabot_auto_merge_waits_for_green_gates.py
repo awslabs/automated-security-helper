@@ -48,6 +48,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from tests.utils.github_actions import git_for_windows_bash
+
 pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -246,10 +248,13 @@ def _run(
 
     output = tmp_path / "github_output"
     output.write_text("")
+    # The decision step runs under bash. On a Windows runner a bare "bash" is the WSL
+    # launcher, which has no distribution installed, so Git for Windows' bash is used,
+    # with its paths written the way that bash reads them.
     env = {
-        "PATH": f"{bin_dir}:/usr/local/bin:/usr/bin:/bin",
-        "HOME": str(tmp_path),
-        "STUB_DIR": str(stub_dir),
+        "PATH": f"{bin_dir.as_posix()}:/usr/local/bin:/usr/bin:/bin",
+        "HOME": tmp_path.as_posix(),
+        "STUB_DIR": stub_dir.as_posix(),
         "GH_TOKEN": "not-a-token",
         "REPO": REPO,
         "HEAD_SHA": head_sha,
@@ -257,10 +262,12 @@ def _run(
             [{"number": 1104}] if pull_requests is None else pull_requests
         ),
         "SELF_CHECK": "auto-merge",
-        "GITHUB_OUTPUT": str(output),
+        "GITHUB_OUTPUT": output.as_posix(),
     }
+    if os.name == "nt":
+        env["SYSTEMROOT"] = os.environ.get("SYSTEMROOT", "")
     result = subprocess.run(
-        ["bash", "-c", _decide_script()],
+        [git_for_windows_bash() or "bash", "-c", _decide_script()],
         env=env,
         capture_output=True,
         text=True,

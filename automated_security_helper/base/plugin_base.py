@@ -11,6 +11,7 @@ import re
 import threading
 from pathlib import Path
 from typing import (
+    TYPE_CHECKING,
     Annotated,
     Any,
     Callable,
@@ -963,7 +964,16 @@ class PluginBase(UVToolMixin, BaseModel):
         # environment, and an error's text goes wherever the error is shown.
         hide_input_in_errors=True,
     )
-    context: PluginContext | None = None
+    if TYPE_CHECKING:
+        # A phase hands every plugin its context before any method that reads
+        # a directory from it runs; the few that can be reached without one
+        # check ``is None`` first. The runtime field below accepts None so a
+        # plugin can still be built on its own.
+        # The ``= None`` keeps it optional in the constructor the checker
+        # sees; this branch is never evaluated.
+        context: PluginContext = None  # ty: ignore[invalid-assignment]
+    else:
+        context: PluginContext | None = None
     config: PluginConfigBase | None = None
 
     output: List[str] = []
@@ -1572,7 +1582,7 @@ class PluginBase(UVToolMixin, BaseModel):
                         stderr_text,
                         values,
                         plugin_inputs=plugin_inputs,
-                        tool_name=self.command,
+                        tool_name=self._tool_command(),
                         limit=None,
                     )
                 else:
@@ -2235,7 +2245,7 @@ class PluginBase(UVToolMixin, BaseModel):
 
         # Set once a run returned a response, so the handler below can tell an
         # exception from before the command ran from one while reading its result.
-        response: Dict | None = None
+        response: Optional[Dict] = None
         # The recorders already run for this response (_record_response), so none
         # runs twice, in the handler below included.
         invoked: Set[str] = set()
@@ -2250,7 +2260,7 @@ class PluginBase(UVToolMixin, BaseModel):
         stderr_log_before = _log_identity(stderr_log)
         try:
             # Use provided cwd or fall back to context.source_dir
-            working_dir = cwd if cwd is not None else Path(self.context.source_dir)
+            working_dir = Path(cwd if cwd is not None else self.context.source_dir)
 
             # Offline, the tool's own update, version and telemetry checks are
             # turned off in the environment it gets (utils/offline_tool_env.py).

@@ -424,7 +424,7 @@ export class AshCodeCommitGateStack extends Stack {
     const cfnVpcAccess = vpcAccess.node.defaultChild as iam.CfnPolicy;
     cfnVpcAccess.cfnOptions.condition = scanInVpc;
     // cfn-nag W12 (Resource "*"), suppressed on this one policy rather than by
-    // widening the file-level entry in .ash/.ash.yaml, which covers only the image
+    // widening the file-level entry in .ash.yaml, which covers only the image
     // build role's DefaultPolicy.
     cfnVpcAccess.addMetadata('cfn_nag', {
       rules_to_suppress: [

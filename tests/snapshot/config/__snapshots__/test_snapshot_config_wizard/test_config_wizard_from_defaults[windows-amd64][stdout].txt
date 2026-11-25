@@ -19,6 +19,7 @@ Scanner configuration
 │ detect-secrets │        yes        │
 │ gitleaks       │        yes        │
 │ grype          │        yes        │
+│ mcp-config     │        yes        │
 │ npm-audit      │        yes        │
 │ opengrep       │        no         │
 │ semgrep        │        no         │
@@ -36,6 +37,7 @@ Scanner configuration
   Enable detect-secrets? [Y/n]:
   Enable gitleaks? [Y/n]:
   Enable grype? [Y/n]: n
+  Enable mcp-config? [Y/n]:
   Enable npm-audit? [Y/n]:
   Enable opengrep? [y/N]:
   Enable semgrep? [y/N]:
@@ -91,6 +93,6 @@ Alpha plugin modules
   Add a plugin module (blank to finish): my_org_ash_plugins
   Add a plugin module (blank to finish):
 ╭────────────────────────────────────────────── Done ──────────────────────────────────────────────╮
-│ Config written to <WORKSPACE>/.ashrc.yaml                                                        │
+│ Config written to <WORKSPACE>/.ash.yaml                                                          │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 [exit code: 0]

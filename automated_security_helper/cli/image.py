@@ -20,6 +20,7 @@ from automated_security_helper.core.constants import (
     ASH_EXIT_INTERRUPTED,
     ASH_EXIT_TERMINATED,
 )
+from automated_security_helper.cli.deprecation import deprecated_alias
 from automated_security_helper.cli.params import from_environment
 from automated_security_helper.core.enums import AshLogLevel, BuildTarget, RunMode
 from automated_security_helper.interactions.run_ash_container import (
@@ -157,7 +158,7 @@ def build_ash_image_cli_command(
         ),
     ] = AshLogLevel.INFO,
     config: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--config",
             "-c",
@@ -320,3 +321,10 @@ def build_ash_image_cli_command(
         # process that goes on living (a test running the command in-process)
         # must not keep a stale word for a later interrupt.
         discard_die_now_message()
+
+
+#: ``ash build-image``, the 3.8 spelling of ``ash container build``: the same command
+#: and options, one warning on stderr per run, removed in 4.0.
+build_image_deprecated_cli_command = deprecated_alias(
+    build_ash_image_cli_command, "build-image", "container build"
+)

@@ -32,6 +32,7 @@ from pydantic import (
 )
 from datetime import datetime, date
 
+from automated_security_helper.models.frame_model import RankEncoded
 from automated_security_helper.utils.path_matching import (
     _path_pattern_matches,
     ignore_path_pattern,
@@ -1032,11 +1033,20 @@ class AshSuppression(IgnorePathWithReason):
     rule_id: Annotated[str | None, Field(None, description="Rule ID to suppress")] = (
         None
     )
+    # The line numbers are unbounded Python ints; a frame column is 64-bit. The
+    # markers record how the suppression frames carry them (utils/
+    # suppression_frame.py): as dense ranks over one build's collection, which
+    # the overlap expression compares by order alone. Pydantic ignores the
+    # markers, so validation and the JSON schema are unchanged.
     line_start: Annotated[
-        int | None, Field(None, description="(Optional) Starting line number")
+        int | None,
+        Field(None, description="(Optional) Starting line number"),
+        RankEncoded("lines"),
     ] = None
     line_end: Annotated[
-        int | None, Field(None, description="(Optional) Ending line number")
+        int | None,
+        Field(None, description="(Optional) Ending line number"),
+        RankEncoded("lines"),
     ] = None
     package_name: Annotated[
         str | None,

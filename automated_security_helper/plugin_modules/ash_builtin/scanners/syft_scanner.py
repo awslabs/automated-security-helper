@@ -16,6 +16,7 @@ from automated_security_helper.base.scanner_facets import (
     FacetState,
     ScannerFacets,
 )
+from automated_security_helper.models.vocab import TargetType
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.config.confinement_remedy import SET_BY_THE_OPERATOR
@@ -48,6 +49,7 @@ from automated_security_helper.utils.error_text import (
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.process_env import snapshot_environ
+from automated_security_helper.utils.redacted_model import RedactedSection
 from automated_security_helper.utils.suppression_matcher import active_ignore_paths
 
 #: The CycloneDX version syft is asked to write. Without ``@<version>`` syft writes
@@ -56,6 +58,50 @@ from automated_security_helper.utils.suppression_matcher import active_ignore_pa
 #: a syft that moved on would have every SBOM refused whole. See
 #: ``schemas/cyclonedx_bom_1_6_schema``.
 CYCLONEDX_SPEC_VERSION = "1.6"
+
+
+class SdistHarvestOptions(RedactedSection):
+    """Options for the cross-toolchain sdist lockfile harvest.
+
+    The harvest itself runs in the convert phase (the ``sdist-lock-harvester``
+    converter), because the syft subprocess's declared sandbox allows it no
+    network and the harvested lockfiles must sit where grype and trivy also
+    read; the OPTIONS live here because this is the surface where the operator
+    configures SBOM behavior. See ``utils/sdist_harvest.py`` for the mechanism.
+    """
+
+    enabled: Annotated[
+        bool,
+        Field(
+            description="Harvest embedded lockfiles from the hash-pinned sdists of resolved dependencies whose wheels carry a platform tag (compiled native extensions with no artifact audit data), so the SBOM covers cross-toolchain packages such as a compiled wheel's statically linked Rust crates. On by default in online mode; inert in offline mode, where each skipped package is a visible informational record. The only network it adds is a GET of bytes the project's own lockfile already pins by sha256, verified before extraction; nothing fetched is executed.",
+        ),
+    ] = True
+    ecosystems: Annotated[
+        List[Literal["cargo", "gomod", "npm"]],
+        Field(
+            description="Which embedded lockfiles are harvested from a pinned sdist: cargo reads Cargo.lock, gomod reads go.sum, npm reads package-lock.json. The vocabulary is the GitLab CycloneDX reporter's existing ecosystem mapping.",
+        ),
+    ] = ["cargo", "gomod", "npm"]
+    max_sdist_mb: Annotated[
+        int,
+        Field(
+            gt=0,
+            description="The largest sdist, in megabytes, the harvest will fetch. Checked against the lockfile's own recorded size before any fetch, and enforced on the bytes actually streamed during it: a transfer that passes the bound is aborted on the wire, so a lying size claim cannot buy an unbounded download. Either way the package is skipped with an informational record rather than stalling the scan.",
+        ),
+    ] = 100
+    cache_dir: Annotated[
+        Path | str | None,
+        Field(
+            description="Where verified harvests are cached, keyed by each sdist's sha256 and with each cached file's digest recorded and re-verified before it is served, so an entry can never serve different bytes than the lock pins; a warmed cache serves entries offline with no network. Defaults to ash/sdist-harvest under the user-level cache directory (XDG_CACHE_HOME, or ~/.cache), never a directory under the scanned tree, whose content the scanned repository could ship."
+            f" {SET_BY_THE_OPERATOR}",
+        ),
+    ] = None
+    lockfiles: Annotated[
+        List[Literal["uv.lock"]],
+        Field(
+            description="The Python lockfiles walked for resolved packages to flag. uv.lock only today: it pins each sdist by URL and sha256, which is what authorizes a fetch. The list exists so other hash-and-URL-pinned formats can be added without a schema change.",
+        ),
+    ] = ["uv.lock"]
 
 
 class SyftScannerConfigOptions(ScannerOptionsBase):
@@ -98,6 +144,12 @@ class SyftScannerConfigOptions(ScannerOptionsBase):
             default=False,
         ),
     ]
+    sdist_harvest: Annotated[
+        SdistHarvestOptions,
+        Field(
+            description="Configure the cross-toolchain sdist lockfile harvest, which completes the SBOM for compiled dependencies whose artifacts carry no audit data. The harvest runs in the convert phase; offline mode disables its fetches whatever these options say.",
+        ),
+    ] = SdistHarvestOptions()
 
 
 class SyftScannerConfig(ScannerPluginConfigBase):
@@ -304,7 +356,6 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
                 semantics="a completed run exits 0; syft installs no findings-found exit",
             ),
             provenance=opsf.ProvenanceFacet(
-                tier=opsf.Tier.BUILTIN_DEFAULT,
                 source=opsf.ProvenanceSource.PINNED_RELEASE_BINARY,
                 selection_surfaces=(),
                 upstream_license=(
@@ -573,7 +624,7 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
     def scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason] | None = None,
         config: SyftScannerConfig | None = None,
     ) -> CycloneDXReport | bool:
@@ -751,6 +802,29 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
                     f"CycloneDX ASH can read ({e.error_count()} validation "
                     "error(s)), so its SBOM could not be recorded"
                 )
+
+            if target_type == "converted":
+                # Components the sdist-lock-harvester materialized carry their
+                # provenance (the sdist's sha256 pin, the parent package's purl,
+                # the source URL) as CycloneDX properties, read from the harvest
+                # manifests beside the lockfiles. An enrichment, never a gate: a
+                # failure here costs the properties, not the SBOM.
+                from automated_security_helper.utils.sdist_harvest import (
+                    stamp_harvested_components,
+                )
+
+                try:
+                    stamped = stamp_harvested_components(sbom_report, target)
+                    if stamped:
+                        ASH_LOGGER.debug(
+                            f"stamped harvest provenance onto {stamped} "
+                            "component(s) under sdist-locks/"
+                        )
+                except Exception as stamp_error:
+                    ASH_LOGGER.debug(
+                        "could not stamp harvest provenance properties: "
+                        f"{type(stamp_error).__name__}"
+                    )
 
             return sbom_report
 
@@ -988,7 +1062,7 @@ def _demo_main(source_dir: Path, output_dir: Path) -> Path:
         source_dir=source_dir, output_dir=output_dir, config=get_default_config()
     )
     scanner = SyftScanner(context=context)
-    report: Any = scanner.scan(target=source_dir, target_type="source")
+    report: Any = scanner.scan(target=source_dir, target_type=TargetType.SOURCE)
     if hasattr(report, "model_dump_json"):
         report_json = report.model_dump_json(
             indent=2, by_alias=True, exclude_unset=True

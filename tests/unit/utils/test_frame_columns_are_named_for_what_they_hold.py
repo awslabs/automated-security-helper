@@ -20,6 +20,7 @@ import pytest
 
 from automated_security_helper.models.flat_frame import flat_frame
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
+from automated_security_helper.models.frame_model import frame_schema
 from automated_security_helper.plugin_modules.ash_builtin.reporters._report_frames import (
     GRADED_SCHEMA,
     active_level_counts,
@@ -27,6 +28,7 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters._report_fram
     graded_frame,
 )
 from automated_security_helper.utils import finding_diff
+from tests.unit.models._flat_vulnerability_helpers import flat_with_severity
 
 pytestmark = pytest.mark.unit
 
@@ -36,7 +38,7 @@ def _finding(**overrides) -> FlatVulnerability:
         "id": "f-1",
         "title": "t",
         "description": "d",
-        "severity": "High",
+        "severity": "HIGH",
         "scanner": "bandit",
         "scanner_type": "SAST",
         "rule_id": "B101",
@@ -46,19 +48,22 @@ def _finding(**overrides) -> FlatVulnerability:
         "is_suppressed": False,
     }
     fields.update(overrides)
-    return FlatVulnerability(**fields)
+    severity = fields.pop("severity")
+    return flat_with_severity(severity, **fields)
 
 
 class TestSideFrameColumnNames:
     def test_suppression_is_named_as_the_model_and_the_flat_frame_name_it(self):
-        assert "is_suppressed" in finding_diff._SIDE_SCHEMA
-        assert "suppressed" not in finding_diff._SIDE_SCHEMA
+        schema = frame_schema(finding_diff.SIDE_SPEC)
+        assert "is_suppressed" in schema
+        assert "suppressed" not in schema
         assert "is_suppressed" in flat_frame([_finding()]).columns
 
     def test_transformed_values_do_not_sit_under_bare_model_field_names(self):
-        assert "message" not in finding_diff._SIDE_SCHEMA
-        assert "severity" not in finding_diff._SIDE_SCHEMA
-        assert {"identity_message", "severity_upper"} <= set(finding_diff._SIDE_SCHEMA)
+        schema = frame_schema(finding_diff.SIDE_SPEC)
+        assert "message" not in schema
+        assert "severity" not in schema
+        assert {"identity_message", "severity_uc"} <= set(schema)
 
     def test_the_severity_column_holds_the_upper_cased_severity(self):
         # A finding the fallback key covers needs an identity base; read the cell
@@ -67,10 +72,10 @@ class TestSideFrameColumnNames:
         side = finding_diff._side([finding])
         key = finding_diff.fallback_key(finding)
         if key is None:
-            assert side["severity_upper"].to_list() == [None]
+            assert side["severity_uc"].to_list() == [None]
         else:
-            assert side["severity_upper"].to_list() == ["HIGH"]
-        assert side.schema == finding_diff._SIDE_SCHEMA
+            assert side["severity_uc"].to_list() == ["HIGH"]
+        assert dict(side.schema) == frame_schema(finding_diff.SIDE_SPEC)
 
     def test_the_suppression_cell_is_the_findings_flag(self):
         side = finding_diff._side(
@@ -80,7 +85,7 @@ class TestSideFrameColumnNames:
         assert side["i"].to_list() == [0, 1]
 
     def test_line_columns_are_dense_ranks_not_lines(self):
-        """The side frame holds ranks (no line is rank of -1), so an enormous line
+        """The side frame holds ranks (no line is a null rank), so an enormous line
         needs no overflow flag: its rank is small, and the order is kept."""
         huge = 10**30
         side = finding_diff._side(
@@ -89,8 +94,8 @@ class TestSideFrameColumnNames:
                 _finding(id="b", line_start=None, line_end=None),
             ]
         )
-        assert side["line_start"].to_list() == [1, 0]
-        assert side["line_end"].to_list() == [2, 0]
+        assert side["line_start"].to_list() == [0, None]
+        assert side["line_end"].to_list() == [1, None]
 
 
 class TestGradedFrameSchema:

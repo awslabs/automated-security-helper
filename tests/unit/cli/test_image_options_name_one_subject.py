@@ -88,6 +88,7 @@ class TestOptionsThatReadTheWorkingDirectoryAreRefused:
             pytest.param(("--staged",), id="staged"),
             pytest.param(("--baseline", "base.json"), id="baseline"),
             pytest.param(("--use-existing",), id="use-existing"),
+            pytest.param(("--changed-files-only",), id="changed-files-only"),
         ],
     )
     def test_each_is_refused_with_the_flag_named(self, image_options, other):
@@ -95,26 +96,6 @@ class TestOptionsThatReadTheWorkingDirectoryAreRefused:
         assert result.exit_code == ASH_EXIT_USAGE_ERROR
         assert other[0] in result.output
         assert image_options[0] in result.output
-
-
-class TestChangedFilesOnlyHasNoMeaningForAnImage:
-    """An image has no diff base: the flag is not refused and not silently inert.
-
-    One warning says it has no meaning, and the scan is handed ``False`` so no
-    git process starts for it."""
-
-    def test_it_warns_once_and_the_run_is_not_asked_for_it(self):
-        with patch("automated_security_helper.cli.scan.run_ash_scan") as run:
-            result = _scan("--image", IMAGE_REF, "--changed-files-only")
-        assert result.exit_code == 0, result.output
-        assert result.output.count("--changed-files-only has no meaning") == 1
-        assert run.call_args.kwargs["changed_files_only"] is False
-
-    def test_a_directory_scan_keeps_the_flag_without_a_warning(self, tmp_path):
-        with patch("automated_security_helper.cli.scan.run_ash_scan") as run:
-            result = _scan("--source-dir", str(tmp_path), "--changed-files-only")
-        assert "has no meaning" not in result.output
-        assert run.call_args.kwargs["changed_files_only"] is True
 
 
 class TestThePayloadGateReachesTheOperator:

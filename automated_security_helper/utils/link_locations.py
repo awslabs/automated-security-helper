@@ -7,7 +7,7 @@ came from a client, and one inside the scanned tree from the repository. A
 symlink's location says the same about the file it reaches, because whoever
 wrote the link chose that file. ``Path.resolve`` returns only the last
 location, so a check of who chose a file judges each link on the way as well
-(``cli/mcp/sandbox.config_is_client_supplied``,
+(``config.mcp_sandbox.config_is_client_supplied``,
 ``config/sandbox_grants.files_inside``).
 """
 

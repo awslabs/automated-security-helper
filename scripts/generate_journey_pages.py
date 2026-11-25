@@ -53,7 +53,18 @@ A journey is a mapping with exactly these keys::
       - sample: |           # <!-- doctest: output --> followed by a ``text`` block
 
 Segments render in order, joined by one blank line, and every segment's text is
-copied byte for byte. The renderer never reflows, rewraps or rewrites anything.
+copied byte for byte. The renderer never reflows, rewraps or rewrites anything. The
+one thing it adds is the comment block ``scripts/_reference_docs.py`` writes at the top
+of every generated page, naming this script and the journey, so a reader of the
+template or the published page knows to edit the journey.
+
+A block's ``marker`` is a run marker (``run``, ``illustrative``) or a config marker.
+``{mode: config, kind: github-actions, save-as: <path>}`` is a pipeline file the page
+tells the reader to create, and ``{mode: config, kind: github-actions, extends: <path>}``
+is a fragment the docs runner merges into it, the way ``ci.md`` adds a second job to
+the workflow of its first step. A config marker takes the keys the docs checks read for
+its kind; ``extends`` must name a file an earlier block of the journey saved, as the
+same kind.
 
 ``twin`` kinds, the steps the twin test runs in page order:
 
@@ -101,7 +112,11 @@ from typing import Any
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _reference_docs import add_docs_root_argument, write_or_check  # noqa: E402
+from _reference_docs import (  # noqa: E402
+    add_docs_root_argument,
+    banner,
+    write_or_check,
+)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 GENERATOR = "scripts/generate_journey_pages.py"
@@ -244,6 +259,25 @@ def replace_function(source: str, replacement: str) -> str:
     return pattern.sub(replacement.strip("\n") + "\n", source, count=1)
 
 
+def _config_kinds(checks) -> frozenset[str]:
+    """The ``kind=`` values of a ``config`` marker the docs checks read."""
+    return frozenset(
+        set(checks.ASH_CONFIG_KINDS) | set(checks.OTHER_CONFIG_KINDS) | checks.CI_KINDS
+    )
+
+
+def _config_keys(checks, kind: str) -> set[str]:
+    """The marker keys a ``config kind=<kind>`` block may carry besides ``mode``."""
+    keys = {"kind", "save-as", "reason"}
+    keys |= set(checks.ASH_CONFIG_KINDS.get(kind, ()))
+    keys |= set(checks.OTHER_KIND_KEYS.get(kind, ()))
+    if kind == checks.MCP_RESPONSE_KIND:
+        keys.add("of")
+    if kind in checks.CI_RUNNERS:
+        keys |= set(checks.CI_RUNNER_KEYS)
+    return keys
+
+
 def _check_marker(marker: Any, where: str) -> None:
     checks = load_docs_checks()
     if not isinstance(marker, dict):
@@ -259,7 +293,25 @@ def _check_marker(marker: Any, where: str) -> None:
         raise JourneyError(
             f"{where}: options markers belong to tables, not journey blocks"
         )
-    allowed = set(checks.RUN_KEYS) | {"reason"}
+    if mode == "config":
+        kind = marker.get("kind")
+        if not isinstance(kind, str) or not kind:
+            raise JourneyError(
+                f"{where}: a config marker needs kind=<kind>, such as github-actions"
+            )
+        if kind not in _config_kinds(checks):
+            raise JourneyError(
+                f"{where}: config kind {kind} is not one the docs checks read "
+                f"({sorted(_config_kinds(checks))})"
+            )
+        allowed = _config_keys(checks, kind)
+    else:
+        allowed = set(checks.RUN_KEYS) | {"reason"}
+    if mode == "config":
+        given = {k: v for k, v in marker.items() if isinstance(v, str)}
+        problems = checks._ci_key_problems(marker["kind"], given)
+        if problems:
+            raise JourneyError(f"{where}: {problems[0]}")
     for key, value in marker.items():
         if key == "mode":
             continue
@@ -462,6 +514,38 @@ def _check_twin_steps(body: list[dict]) -> None:
         _check_agreement(body, index)
 
 
+def _check_ci_fragments(body: list[dict]) -> None:
+    """A fragment step (``config kind=<ci> extends=<path>``) extends a pipeline file an
+    earlier step of the same journey saved with ``save-as=<path>``, of the same kind.
+
+    The docs runner merges the fragment into that saved file and runs the result, so a
+    fragment with nothing to extend would only fail there, on a CI runner, long after the
+    page was written.
+    """
+    saved: dict[str, str] = {}
+    for index, segment in enumerate(body):
+        marker = segment.get("block", {}).get("marker")
+        if not marker or marker.get("mode") != "config":
+            continue
+        where = _where(index, segment)
+        target = marker.get("extends")
+        if target is not None:
+            if target not in saved:
+                raise JourneyError(
+                    f"{where}: extends {target}, which no earlier block of this "
+                    "journey saves; add save-as=<path> to the block that writes "
+                    "the file, before this one"
+                )
+            if saved[target] != marker["kind"]:
+                raise JourneyError(
+                    f"{where}: extends {target}, which is saved as config "
+                    f"kind={saved[target]}, not kind={marker['kind']}"
+                )
+        path = marker.get("save-as")
+        if path is not None:
+            saved[path] = marker["kind"]
+
+
 def load_journey(path: Path) -> dict:
     """Parse and validate a journey file; raises JourneyError naming what is wrong."""
     path = Path(path)
@@ -535,6 +619,7 @@ def load_journey(path: Path) -> dict:
             _check_twin_fields(value["twin"], value, where)
     try:
         _check_twin_steps(body)
+        _check_ci_fragments(body)
     except JourneyError as exc:
         raise JourneyError(f"{path}: {exc}") from exc
     return journey
@@ -556,9 +641,21 @@ def _marker_line(marker: dict) -> str:
     return f"<!-- doctest: {' '.join(words)} -->"
 
 
-def render(journey: dict) -> str:
-    """The template text: each segment verbatim, one blank line between segments."""
-    pieces: list[str] = []
+def _banner(source: str) -> str:
+    """The comment block every journey render opens with, so a reader of the template
+    or the page knows the journey is the file to edit."""
+    extra = [
+        "The page is rendered from this template by",
+        "scripts/version_template_manager.py generate,",
+        "so edit the journey, not the template or the page.",
+    ]
+    return "\n".join(banner(GENERATOR, source, extra))
+
+
+def render(journey: dict, source: str) -> str:
+    """The template text: the banner naming ``source``, then each segment verbatim, one
+    blank line between segments."""
+    pieces: list[str] = [_banner(source)]
     for segment in journey["body"]:
         if "prose" in segment:
             pieces.append(segment["prose"])
@@ -624,7 +721,7 @@ def round_trip_problems(journey: dict, text: str, docs_root: Path) -> list[str]:
 def render_checked(journey_path: Path, docs_root: Path) -> tuple[dict, str]:
     """Load, render and verify the render parses back to the journey."""
     journey = load_journey(journey_path)
-    text = render(journey)
+    text = render(journey, _rel(journey_path, docs_root))
     problems = round_trip_problems(journey, text, docs_root)
     if problems:
         raise JourneyError(

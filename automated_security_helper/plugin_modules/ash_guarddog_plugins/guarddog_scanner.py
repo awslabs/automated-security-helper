@@ -112,7 +112,6 @@ from typing import (
     List,
     Literal,
     Tuple,
-    cast,
 )
 
 from pydantic import AnyUrl, Field, field_validator, model_validator
@@ -129,6 +128,7 @@ from automated_security_helper.base.scanner_facets import (
     FacetState,
     ScannerFacets,
 )
+from automated_security_helper.models.vocab import Severity, TargetType
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
@@ -141,6 +141,7 @@ from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactLocation,
     Invocation,
+    Level,
     MultiformatMessageString,
     PropertyBag,
     ReportingDescriptor,
@@ -271,10 +272,10 @@ def _inside_seatbelt_sandbox() -> bool:
 _GUARDDOG_ERROR_LINE = re.compile(r"^ERROR:", re.MULTILINE)
 
 _SEVERITY_LEVELS = {
-    "HIGH": "error",
-    "MEDIUM": "warning",
-    "LOW": "note",
-    "INFO": "none",
+    Severity.HIGH.value: Level.error.value,
+    Severity.MEDIUM.value: Level.warning.value,
+    Severity.LOW.value: Level.note.value,
+    Severity.INFO.value: Level.none.value,
 }
 
 #: Run as ``python -c _HIT_LIMIT_BOOTSTRAP <limit> <set|raise> <guarddog args>`` in
@@ -319,7 +320,11 @@ def _risk_severity(value: Any) -> str:
     and reporting it below the default threshold would hide it.
     """
     text = str(value or "").strip().lower()
-    return {"high": "HIGH", "medium": "MEDIUM", "low": "LOW"}.get(text, "MEDIUM")
+    return {
+        "high": Severity.HIGH.value,
+        "medium": Severity.MEDIUM.value,
+        "low": Severity.LOW.value,
+    }.get(text, Severity.MEDIUM.value)
 
 
 def _is_package_manifest(ecosystem: str, filename: str) -> bool:
@@ -714,7 +719,7 @@ def convert_guarddog_scan_result(
             out.take(
                 _make_result(
                     rule_id=rule_id,
-                    severity="MEDIUM",
+                    severity=Severity.MEDIUM.value,
                     message=f"{dep_text}{hits}",
                     uri=uri,
                     line=out_line,
@@ -738,11 +743,11 @@ def convert_guarddog_scan_result(
             if is_capability:
                 if not include_capabilities:
                     continue
-                severity = "INFO"
+                severity = Severity.INFO.value
             else:
                 if (rule_id, hit.get("location"), hit.get("code")) in consumed:
                     continue
-                severity = "LOW"
+                severity = Severity.LOW.value
             message = hit.get("message") or rule_id
             out.rules.setdefault(rule_id, _rule_descriptor(rule_id, message))
             qualifier = (
@@ -815,21 +820,27 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
     facets: ClassVar[ScannerFacets] = ScannerFacets(
         rule_id=FacetDecl(
             state=FacetState.MAPPED,
-            native_field='"results" key (the heuristic name, e.g. '
-            "capability-network-lolbas)",
+            native_field='risks[] "threat_rule" for a correlated risk, else the '
+            '"results" key (the heuristic name, e.g. '
+            "threat-process-download-exec)",
         ),
         severity=FacetDecl(
             state=FacetState.MAPPED,
-            native_field="(no native severity) the adapter's risk ladder over "
-            "the heuristic's category",
+            native_field='risks[] "severity" (high/medium/low), mapped one to '
+            "one by _risk_severity",
+            reason="the results that GuardDog's risk engine did not correlate "
+            "carry no native severity, so the adapter fixes them by class: "
+            "LOW for an uncorrelated threat match, MEDIUM for a metadata "
+            "rule, INFO for a capability match",
         ),
         file_path=FacetDecl(
             state=FacetState.MAPPED,
-            native_field='match "location" file part (e.g. setup.py:16)',
+            native_field='risks[] "threat_location" or match "location" file '
+            "part (e.g. setup.py:16)",
         ),
         line_range=FacetDecl(
             state=FacetState.MAPPED,
-            native_field='match "location" line part',
+            native_field='risks[] "threat_location" or match "location" line part',
         ),
         column=FacetDecl(
             state=FacetState.NA,
@@ -837,8 +848,9 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
         ),
         message=FacetDecl(
             state=FacetState.MAPPED,
-            native_field='match "message", assembled with the rule and match '
-            "into the result text by the adapter",
+            native_field='risks[] "threat_description" or match "message", '
+            "assembled with the rule, the location and the correlated "
+            "capability into the result text by the adapter",
         ),
         resource_id=FacetDecl(
             state=FacetState.NA,
@@ -896,7 +908,7 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
         ),
         snippet=FacetDecl(
             state=FacetState.MAPPED,
-            native_field='match "code" / risk "threat_code"',
+            native_field='match "code" / risks[] "threat_code"',
         ),
         references=FacetDecl(
             state=FacetState.MAPPED,
@@ -912,8 +924,11 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
         ),
         extras=FacetDecl(
             state=FacetState.MAPPED,
-            native_field="extra_properties merged into the result PropertyBag "
-            "(package_name and package_version in verify mode)",
+            native_field="extra_properties merged into the result PropertyBag: "
+            "issue_severity and guarddog_ecosystem on every result, "
+            "guarddog_match on matches, guarddog_risk, guarddog_risk_severity, "
+            "guarddog_capability_rule and mitre_tactics on correlated risks, "
+            "and package_name and package_version in verify mode",
         ),
     )
 
@@ -994,7 +1009,6 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
                 semantics="the base default {0, 1}; the adapter notes a registry-lookup-failure exit",
             ),
             provenance=opsf.ProvenanceFacet(
-                tier=opsf.Tier.ALPHA_OPTIN,
                 source=opsf.ProvenanceSource.PYPI_VIA_UV,
                 selection_surfaces=(
                     "ash_guarddog_plugins in ash_plugin_modules",
@@ -1022,12 +1036,12 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
     @property
     def _opts(self) -> GuardDogScannerConfigOptions:
         """The options, typed. ``config`` is set in ``model_post_init``."""
-        return cast(GuardDogScannerConfig, self.config).options
+        return self.config.options
 
     @property
     def _ctx(self) -> PluginContext:
         """The plugin context, typed. ScannerPluginBase refuses to construct without one."""
-        return cast(PluginContext, self.context)
+        return self.context
 
     def model_post_init(self, context: Any) -> None:
         if self.config is None:
@@ -1237,7 +1251,7 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
     def _candidate_files(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason],
     ) -> List[Path]:
         """Every file under ``target`` ASH would scan, as absolute paths.
@@ -1254,7 +1268,7 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
         )
 
         target = Path(target).absolute()
-        if target_type == "converted":
+        if target_type == TargetType.CONVERTED:
             listed = [
                 Path(root, name)
                 for root, _dirs, files in os.walk(target)
@@ -1270,7 +1284,7 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
         # excluded_paths. Read as config.options.excluded_paths, the shape
         # tests/unit/utils/test_ignore_path_expiration.py looks for.
         option_entries = active_ignore_paths(
-            cast(GuardDogScannerConfig, self.config).options.excluded_paths,
+            self.config.options.excluded_paths,
             where="scanners.guarddog.options.excluded_paths",
         )
         patterns = [p.path for p in global_ignore_paths or []] + [
@@ -1283,7 +1297,7 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
             absolute = Path(os.path.abspath(absolute))
             if not absolute.is_relative_to(target):
                 continue
-            if target_type == "source" and absolute.is_relative_to(output_dir):
+            if target_type == TargetType.SOURCE and absolute.is_relative_to(output_dir):
                 continue
             if absolute.is_symlink() or not absolute.is_file():
                 continue
@@ -1754,7 +1768,7 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
     def _execute_scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason],
     ) -> Tuple[List[str], Path, Dict[Any, Any] | None]:
         """Abstract stub: GuardDog overrides scan() directly; this is unreachable."""
@@ -1765,7 +1779,7 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
     def scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason] | None = None,
         config: GuardDogScannerConfig | ScannerPluginConfigBase | None = None,
         *args: Any,
@@ -1804,10 +1818,10 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
     def _scan_target(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason],
     ) -> SarifReport:
-        results_dir = Path(cast(Path, self.results_dir)).joinpath(target_type)
+        results_dir = Path(self.results_dir).joinpath(target_type)
         results_dir.mkdir(parents=True, exist_ok=True)
         files = self._candidate_files(target, target_type, global_ignore_paths)
         owned, verify_targets = self._discover_targets(target, files)
@@ -1817,7 +1831,12 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
         failures: List[str] = []
         seen: Dict[Tuple[Any, ...], int] = {}
         kept_severity: List[str] = []
-        severity_rank = {"INFO": 0, "LOW": 1, "MEDIUM": 2, "HIGH": 3}
+        severity_rank = {
+            Severity.INFO.value: 0,
+            Severity.LOW.value: 1,
+            Severity.MEDIUM.value: 2,
+            Severity.HIGH.value: 3,
+        }
 
         def add(converted: _Converted) -> None:
             for rule_id, descriptor in converted.rules.items():

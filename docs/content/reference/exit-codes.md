@@ -255,7 +255,7 @@ The named config path is the one `--config`, `ASH_CONFIG`, or the path argument 
 
 <!-- doctest: run expect-exit=1 -->
 ```bash
-mkdir -p .ash && printf 'project_name: payments-api\n' > .ash/.ash.yaml
+printf 'project_name: payments-api\n' > .ashrc.yaml
 ash config init
 ```
 

@@ -5,8 +5,7 @@
 
 Exactly one of ``image``, ``image_archive`` and ``image_layout``; never beside
 an explicit ``source_dir``, a workspace, saved results, a git-history scope or
-a non-local mode (a git-history scope is not refused: it is dropped with one
-warning, an image having no diff base); the two payload shapes stat-gated before anything uses the
+a non-local mode; the two payload shapes stat-gated before anything uses the
 path. Each refusal is the usage exit (5) with the text every surface shares,
 checked here through the library entry point so the CLI's early copy and this
 one cannot drift apart silently. The accepting rows pin what the helper builds:
@@ -16,7 +15,6 @@ CONVERT dropped, because an image asset presents no source files to convert.
 
 from __future__ import annotations
 
-import logging
 import tarfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -112,39 +110,9 @@ class TestExclusivityRefusals:
         text = _refusal_of(image=IMAGE_REF, existing_results="/results")
         assert "existing results" in text
 
-    def test_an_image_beside_changed_files_only_is_not_refused(self):
-        asset = _helper(image=IMAGE_REF, changed_files_only=True)
-        assert asset is not None and asset.kind == AssetKind.CONTAINER_IMAGE
-
-    def test_the_flag_is_dropped_with_one_warning_on_an_image_scan(self):
-        from automated_security_helper.core.asset import Asset, ImageLocator
-        from automated_security_helper.interactions.run_ash_scan import (
-            _drop_changed_files_only_for_an_image,
-        )
-        from automated_security_helper.utils.log import ASH_LOGGER
-
-        records = []
-
-        class Collect(logging.Handler):
-            def emit(self, record):
-                records.append(record.getMessage())
-
-        handler = Collect(level=1)
-        level = ASH_LOGGER.level
-        ASH_LOGGER.setLevel(1)
-        ASH_LOGGER.addHandler(handler)
-        try:
-            image = Asset.for_image(ImageLocator(ref=IMAGE_REF))
-            assert _drop_changed_files_only_for_an_image(image, True) is False
-            assert _drop_changed_files_only_for_an_image(image, False) is False
-            filesystem = Asset.for_filesystem(".")
-            assert _drop_changed_files_only_for_an_image(filesystem, True) is True
-            assert _drop_changed_files_only_for_an_image(None, True) is True
-        finally:
-            ASH_LOGGER.removeHandler(handler)
-            ASH_LOGGER.setLevel(level)
-        meaning = [m for m in records if "no meaning for a container image" in m]
-        assert len(meaning) == 1
+    def test_an_image_beside_changed_files_only_is_refused(self):
+        text = _refusal_of(image=IMAGE_REF, changed_files_only=True)
+        assert "changed_files_only" in text
 
     def test_a_whitespace_ref_names_nothing(self):
         text = _refusal_of(image="   ")

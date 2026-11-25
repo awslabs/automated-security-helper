@@ -36,7 +36,7 @@ SCHEMA = {
     "scanner_key": pl.String,
     "scanner_type": pl.String,
     "rule_id": pl.String,
-    "severity": pl.String,
+    "severity": pl.Enum(["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"]),
     "file_path": pl.String,
     "line_start": pl.Int64,
     "line_end": pl.Int64,
@@ -46,6 +46,7 @@ SCHEMA = {
     "has_identity": pl.Boolean,
     "fingerprinted": pl.Boolean,
     "base": pl.String,
+    "correlation_id": pl.String,
 }
 
 

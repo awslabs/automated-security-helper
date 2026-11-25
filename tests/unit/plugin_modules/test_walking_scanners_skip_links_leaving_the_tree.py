@@ -90,6 +90,8 @@ LINK_HANDLING = {
     # resolves outside the target (hadolint_scanner.py _dockerfiles).
     "guarddog": READS_THE_SCAN_SET,
     "hadolint": READS_THE_SCAN_SET,
+    # Reads the scan set, then opens each config file under the scanned-tree rule.
+    "mcp-config": READS_THE_SCAN_SET,
     "bandit": EXCLUDES_THE_LINK,
     "checkov": EXCLUDES_THE_LINK,
     "ferret-scan": EXCLUDES_THE_LINK,
@@ -161,6 +163,11 @@ SCANNER_CLASSES = {
         "Actionlint",
     ),
     "zizmor": ("ash_builtin.scanners.zizmor_scanner", "ZizmorScanner", "Zizmor"),
+    "mcp-config": (
+        "ash_builtin.scanners.mcp_config_scanner",
+        "McpConfigScanner",
+        "McpConfig",
+    ),
     "cfn-lint": (
         "ash_builtin.scanners.cfn_lint_scanner",
         "CfnLintScanner",

@@ -40,10 +40,10 @@ from automated_security_helper.core.enums import (
 )
 from automated_security_helper.core.exceptions import ScannerSelectionError
 from automated_security_helper.core.scanner_selection import (
-    alpha_scanner_refusal,
     refuse_selection_matching_no_scanner,
     selection_after_exclusions,
 )
+from automated_security_helper.plugins.enablement import unloaded_opt_in_refusal
 from automated_security_helper.core.metrics_table import display_metrics_table
 from automated_security_helper.core.phases.convert_phase import ConvertPhase
 from automated_security_helper.core.phases.report_phase import ReportPhase
@@ -247,12 +247,12 @@ class ScanExecutionEngine:
         self._selection_origin: SelectionOrigin = selection_origin
 
         # Get debug and verbose flags from environment or config
-        debug_flag = debug or os.environ.get("ASH_DEBUG", "").lower() in [
+        debug_flag = bool(debug) or os.environ.get("ASH_DEBUG", "").lower() in [
             "true",
             "1",
             "yes",
         ]
-        verbose_flag = verbose or os.environ.get("ASH_VERBOSE", "").lower() in [
+        verbose_flag = bool(verbose) or os.environ.get("ASH_VERBOSE", "").lower() in [
             "true",
             "1",
             "yes",
@@ -380,12 +380,12 @@ class ScanExecutionEngine:
                 hasattr(self._context.config, "debug")
                 and self._context.config.debug is not None
             ):
-                debug_flag = self._context.config.debug
+                debug_flag = bool(self._context.config.debug)
             if (
                 hasattr(self._context.config, "verbose")
                 and self._context.config.verbose is not None
             ):
-                verbose_flag = self._context.config.verbose
+                verbose_flag = bool(self._context.config.verbose)
 
         # Initialize progress display with debug/verbose flags
         self.progress_display = LiveProgressDisplay(
@@ -409,9 +409,8 @@ class ScanExecutionEngine:
         # Initialize basic configuration
 
         # Convert and set up paths
-        self._context.source_dir = (
-            Path(self._context.source_dir) if self._context.source_dir else None
-        )
+        if self._context.source_dir:
+            self._context.source_dir = Path(self._context.source_dir)
         try:
             # Log directory setup
             ASH_LOGGER.debug(f"Source directory: {self._context.source_dir}")
@@ -810,11 +809,11 @@ class ScanExecutionEngine:
             # check keyed on the lowercased class name would refuse the configured
             # name the phase accepts; the workspace pre-check
             # (workspace.execution.refuse_unresolvable_scanner_selection) defers
-            # the same way. A request naming an alpha scanner whose module
+            # the same way. A request naming a shipped scanner whose module
             # this run did not load is refused HERE, before anything is cleared,
             # with the module to add rather than spelling advice, in the one
             # text ScanPhase's backstop also raises
-            # (core.scanner_selection.alpha_scanner_refusal), which names
+            # (plugins.enablement.unloaded_opt_in_refusal), which names
             # any misspelled name beside the module. Nothing registered means
             # nothing to judge against: deferred, as every selection refusal
             # defers that case.
@@ -826,7 +825,7 @@ class ScanExecutionEngine:
                 ]
                 declared_names = [name for name in selectable if name is not None]
                 if scanner_classes and len(declared_names) == len(selectable):
-                    refusal = alpha_scanner_refusal(
+                    refusal = unloaded_opt_in_refusal(
                         self._init_enabled_scanners, declared_names, scanner_classes
                     )
                     if refusal:

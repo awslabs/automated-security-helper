@@ -97,7 +97,7 @@ from automated_security_helper.utils.log import (
 
 if TYPE_CHECKING:
     # Typing only: the runtime import stays local to the tools that need it.
-    from automated_security_helper.cli.mcp.sandbox import ConfigInputCheck
+    from automated_security_helper.config.mcp_sandbox import ConfigInputCheck
     from automated_security_helper.core.asset import Asset
     from automated_security_helper.config.ash_config import (
         AshConfig,
@@ -210,7 +210,7 @@ async def stop_running_scans(
     # This loop's: a task of a loop that is gone can never finish, and waiting
     # on it would only run out the timeout.
     loop = asyncio.get_running_loop()
-    running = {
+    running: dict[asyncio.Future, str] = {
         task: scan_id
         for task, scan_id in _scan_tasks.items()
         if task.get_loop() is loop and not task.done()
@@ -1028,7 +1028,7 @@ def _config_pre_check(
     """
     import yaml
 
-    from automated_security_helper.cli.mcp.sandbox import (
+    from automated_security_helper.config.mcp_sandbox import (
         client_named_config_is_untrusted,
         config_base_gate,
     )
@@ -1395,7 +1395,7 @@ def _discovered_config_refusal(
 
     A check of the candidates that fails for any other reason is a refusal too.
     """
-    from automated_security_helper.cli.mcp.sandbox import (
+    from automated_security_helper.config.mcp_sandbox import (
         config_base_gate,
         config_chain_refusal,
         validate_config_input,
@@ -1527,7 +1527,7 @@ def _session_client_rules(
     ASH_CONFIG chain uses, so the server's default config is read as that load
     reads it.
     """
-    from automated_security_helper.cli.mcp.profile_registry import (
+    from automated_security_helper.config.session_profiles import (
         session_client_rules,
     )
 
@@ -1579,7 +1579,7 @@ def _client_config_denial(
     always has. The scan's own check is the one that decides; this one only
     reports early.
     """
-    from automated_security_helper.cli.mcp.sandbox import (
+    from automated_security_helper.config.mcp_sandbox import (
         caller_is_remote,
         client_named_config_is_untrusted,
         config_base_gate,
@@ -1928,7 +1928,7 @@ async def mcp_scan_directory(
     # The chain the check below read, which the denial check reads from.
     chain_document: Optional[Any] = None
     if config_path is not None:
-        from automated_security_helper.cli.mcp.sandbox import check_config_input
+        from automated_security_helper.config.mcp_sandbox import check_config_input
 
         if not config_path.strip():
             # A parameter that names nothing is the request's own fault, as an
@@ -1980,7 +1980,7 @@ async def mcp_scan_directory(
     else:
         # The config the scan discovers in the target is checked as a named one
         # is, before anything reads it: it can be a link out of the roots.
-        from automated_security_helper.cli.mcp.sandbox import (
+        from automated_security_helper.config.mcp_sandbox import (
             validate_discovered_config,
         )
 
@@ -2046,7 +2046,7 @@ async def mcp_scan_directory(
         # The file the scan will discover, checked as a named one is, in one
         # read: a delivered one that uses !ENV, and one that does not load or
         # validate, are refused before the scan starts, naming the file.
-        from automated_security_helper.cli.mcp.sandbox import config_base_gate
+        from automated_security_helper.config.mcp_sandbox import config_base_gate
 
         discovered, not_discovered = _discovered_config_path(
             resolved_target, permit=config_base_gate(session_id)
@@ -2069,7 +2069,7 @@ async def mcp_scan_directory(
                 REFUSED_CONFIG_EXIT_CODE,
             )
         if discovered is not None:
-            from automated_security_helper.cli.mcp.sandbox import check_config_input
+            from automated_security_helper.config.mcp_sandbox import check_config_input
 
             checked = check_config_input(
                 discovered, session_id=session_id, source_dir=resolved_target
@@ -2554,12 +2554,13 @@ async def _release_what_the_scan_held_off_the_loop(
     if not _holds_a_session(session_id):
         return
     import anyio
+    from anyio import to_thread
 
     from automated_security_helper.cli.mcp.sessions import finish_ended_session
 
     try:
         with anyio.CancelScope(shield=True):
-            await anyio.to_thread.run_sync(finish_ended_session, session_id)
+            await to_thread.run_sync(finish_ended_session, session_id)
     except Exception as release_error:  # noqa: BLE001 -- the tool's own reply wins
         _logger.error(
             f"Scan {scan_id or '(not started)'}: could not complete the end of "
@@ -2806,13 +2807,14 @@ async def _run_scan_async(
             # a cancelled task too, and the removal has to complete anyway
             # (http_sessions ends its own sessions the same way).
             import anyio
+            from anyio import to_thread
 
             from automated_security_helper.cli.mcp.sessions import (
                 finish_ended_session,
             )
 
             with anyio.CancelScope(shield=True):
-                await anyio.to_thread.run_sync(finish_ended_session, session_id)
+                await to_thread.run_sync(finish_ended_session, session_id)
 
 
 async def _run_scan(
@@ -2884,11 +2886,11 @@ async def _run_scan(
         run_ash_scan,
     )
 
-    from automated_security_helper.cli.mcp.profile_registry import (
+    from automated_security_helper.config.session_profiles import (
         resolve_session_config_path,
         resolve_session_trusted_config_path,
     )
-    from automated_security_helper.cli.mcp.sandbox import (
+    from automated_security_helper.config.mcp_sandbox import (
         caller_is_remote,
         config_base_gate,
         client_named_config_is_untrusted,
@@ -3951,7 +3953,7 @@ async def mcp_get_scan_progress(
     Returns:
         Dictionary with scan progress information
     """
-    from automated_security_helper.cli.mcp.sandbox import caller_is_remote
+    from automated_security_helper.config.mcp_sandbox import caller_is_remote
     from automated_security_helper.core.resource_management.error_handling import (
         validate_scan_id,
     )
@@ -4340,7 +4342,7 @@ async def mcp_check_installation(session_id: Optional[str] = None) -> Dict[str, 
     """
     import shutil
 
-    from automated_security_helper.cli.mcp.sandbox import caller_is_remote
+    from automated_security_helper.config.mcp_sandbox import caller_is_remote
 
     try:
         version = get_ash_version()
@@ -4828,7 +4830,6 @@ def mcp_diff_scan_results(
 # ---------------------------------------------------------------------------
 from automated_security_helper.core.scanner_inventory import (  # noqa: E402
     _ABSENT_VERSION_MARKERS,
-    _VENDORED_SCANNER_PLUGIN_PACKAGES,
     _declared_config_class,
     _discover_external_scanner_plugin_packages,
     _loaded_scanner_classes,
@@ -4842,7 +4843,6 @@ from automated_security_helper.core.scanner_inventory import (  # noqa: E402
 # unused" for the ones this module does not itself reference.
 __all_scanner_inventory_reexports__ = (
     _ABSENT_VERSION_MARKERS,
-    _VENDORED_SCANNER_PLUGIN_PACKAGES,
     _declared_config_class,
     _discover_external_scanner_plugin_packages,
     _normalized_version,
@@ -4926,7 +4926,7 @@ def _check_and_identify_config(
     approved it. A check that records no identity (only a stand-in for the real
     check does not) is judged by the identity before and after it.
     """
-    from automated_security_helper.cli.mcp.sandbox import validate_config_input
+    from automated_security_helper.config.mcp_sandbox import validate_config_input
     from automated_security_helper.config.config_sources import (
         ABSENT_FILE,
         identity_to_hold,
@@ -5199,11 +5199,11 @@ def _answer_get_config(
         plugin_module_refusal_message,
         refuse_plugin_modules_a_scan_refuses,
     )
-    from automated_security_helper.cli.mcp.profile_registry import (
+    from automated_security_helper.config.session_profiles import (
         DEFAULT_SESSION_ID,
         resolve_session_trusted_config_path,
     )
-    from automated_security_helper.cli.mcp.sandbox import (
+    from automated_security_helper.config.mcp_sandbox import (
         caller_is_remote,
         config_base_gate,
         config_chain_refusal,
@@ -5721,7 +5721,7 @@ def _answer_get_config(
     # load's try it was caught as one.
     trusted_config_path: Optional[str] = None
     if untrusted_config:
-        from automated_security_helper.cli.mcp.profile_registry import (
+        from automated_security_helper.config.session_profiles import (
             ProfileRegistryError,
         )
         from automated_security_helper.cli.mcp.sessions import (
@@ -6067,7 +6067,7 @@ def mcp_validate_config(
     """
     import tempfile
 
-    from automated_security_helper.cli.mcp.sandbox import (
+    from automated_security_helper.config.mcp_sandbox import (
         caller_is_remote,
         client_named_config_is_untrusted,
         config_base_gate,
@@ -6297,7 +6297,7 @@ def _validated_document_denials(
     policy unjudged and the config is not valid. Every refusal of this check is
     returned: a caller reports them beside the validator's errors.
     """
-    from automated_security_helper.cli.mcp.sandbox import (
+    from automated_security_helper.config.mcp_sandbox import (
         caller_is_remote,
         client_named_config_is_untrusted,
     )
@@ -6700,7 +6700,7 @@ def mcp_list_profiles() -> Dict[str, Any]:
     profiles with sensitive filesystem paths, and the SHA is sufficient for
     a client to detect "is this the same profile as before".
     """
-    from automated_security_helper.cli.mcp.profile_registry import (
+    from automated_security_helper.config.session_profiles import (
         get_profile_registry,
     )
 
@@ -6761,7 +6761,7 @@ def mcp_select_profile(
     the hold ends. A ``set_source_git`` or ``set_source_zip_finalize`` in
     progress does not refuse it.
     """
-    from automated_security_helper.cli.mcp.profile_registry import binding_writes
+    from automated_security_helper.config.session_profiles import binding_writes
     from automated_security_helper.cli.mcp.sessions import (
         SessionWorkspaceBusyError,
         writing_session_state,
@@ -6796,7 +6796,7 @@ def _select_profile(
     session_id: Optional[str],
 ) -> Dict[str, Any]:
     """:func:`mcp_select_profile`, once the session is held against the sweep."""
-    from automated_security_helper.cli.mcp.profile_registry import (
+    from automated_security_helper.config.session_profiles import (
         bind_session_config,
         client_values_present,
         get_profile_registry,
@@ -7059,7 +7059,7 @@ def _materialize_or_error(
     missing file and fail with a config error naming a path the client never
     supplied.
     """
-    from automated_security_helper.cli.mcp.profile_registry import (
+    from automated_security_helper.config.session_profiles import (
         materialize_session_binding,
     )
     from automated_security_helper.config.environment_record import (
@@ -7264,7 +7264,7 @@ def _sweep_stale_scan_snapshots(profile: Path) -> None:
 
 def _default_session_id() -> str:
     """Return the profile_registry DEFAULT_SESSION_ID without circular import."""
-    from automated_security_helper.cli.mcp.profile_registry import (
+    from automated_security_helper.config.session_profiles import (
         DEFAULT_SESSION_ID,
     )
 

@@ -26,7 +26,7 @@
           "symbol": "_run_declared_install_command"
         }
       ],
-      "sha256": "8c559cb89d06c065564ceddbe9fe27e0fd70c087d9cf82ed1f65c68b217a1cf9"
+      "sha256": "5ee3a90f7cab8895bdabf03e112ad43b7c20ab6a8d6914dcf873af112ff3de1c"
     },
     "automated_security_helper/cli/mcp/__init__.py": {
       "created": "2026-11-25T17:03:33Z",
@@ -36,7 +36,7 @@
           "symbol": "_log_where_the_server_listens"
         }
       ],
-      "sha256": "aa3e3a371dc248f498901f043e733509713849459c0c33bb95ea983986861009"
+      "sha256": "72af24e86d4aa77dffeab8fab43903b08f4b0783a9322a11269a0b958a2aeb06"
     },
     "automated_security_helper/cli/mcp/source_delivery.py": {
       "created": "2026-11-25T17:02:52Z",
@@ -46,7 +46,7 @@
           "symbol": "_validate_zip_member"
         }
       ],
-      "sha256": "f2ae6642d8c22a7d9502a99c0b0e0c2c3742c1f086fc6529b9d6b3610b2d4a51"
+      "sha256": "874142bf8993ba09962828cd1a76d474e49ba00407f8d0c172592f1939da0be3"
     },
     "automated_security_helper/interactions/run_ash_container.py": {
       "created": "2026-11-25T17:02:59Z",
@@ -66,7 +66,7 @@
           "symbol": "shown_flake_ref"
         }
       ],
-      "sha256": "b9fbbf74a2f2a04e512d3897016229c01ba113edbcdc46865d0aa623800f5198"
+      "sha256": "60acdaf18deb0a27bad439a016e1d23fecb5704c98354a92ee3b6185ae719ec9"
     },
     "automated_security_helper/plugin_modules/ash_builtin/scanners/npm_audit_scanner.py": {
       "created": "2026-11-25T17:03:12Z",
@@ -76,7 +76,7 @@
           "symbol": "NpmAuditScanner._probe_npm_version"
         }
       ],
-      "sha256": "a10c3e78bb1dbcc51631fdcdef05022d646c1b661fee28ffd2a9581ae90c1f5e"
+      "sha256": "34cbe7bb90fb992220fb33ef1856727406f5990527137e6be2e3aac2f66e62cb"
     },
     "automated_security_helper/utils/content_db_refresh.py": {
       "created": "2026-11-25T17:03:23Z",

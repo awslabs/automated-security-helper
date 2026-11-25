@@ -35,9 +35,9 @@ What this checks
   at least one of the markers for its rule id. A rule id with no row in
   ``_RULE_LINE_MARKERS`` fails, so the first entry for a new rule adds its row.
 * The two configs agree on their GuardDog suppressions: every entry in the alpha
-  config is also in ``.ash/.ash.yaml``, and every entry only ``.ash/.ash.yaml``
+  config is also in ``.ash.yaml``, and every entry only ``.ash.yaml``
   holds sits under a path the alpha config excludes from GuardDog, where an entry
-  could never match. The self-scan reads only the alpha config; ``.ash/.ash.yaml``
+  could never match. The self-scan reads only the alpha config; ``.ash.yaml``
   keeps the full set for a scan that lists the GuardDog module there without the
   exclusion.
 
@@ -59,7 +59,7 @@ pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SELF_SCAN = REPO_ROOT / ".ash" / ".ash_alpha_plugins.yaml"
-DEFAULT = REPO_ROOT / ".ash" / ".ash.yaml"
+DEFAULT = REPO_ROOT / ".ash.yaml"
 GLOB_CHARACTERS = set("*?[")
 
 
@@ -273,7 +273,7 @@ def test_the_two_configs_agree_on_their_guarddog_suppressions() -> None:
     assert len(set(self_scan)) == len(self_scan), "a GuardDog pin is listed twice"
     assert len(set(default)) == len(default), "a GuardDog pin is listed twice"
     assert set(self_scan) <= set(default), (
-        "the alpha config has a GuardDog pin that .ash/.ash.yaml lacks: "
+        "the alpha config has a GuardDog pin that .ash.yaml lacks: "
         f"{sorted(set(self_scan) - set(default), key=str)}"
     )
     excluded = _excluded_globs()
@@ -285,7 +285,7 @@ def test_the_two_configs_agree_on_their_guarddog_suppressions() -> None:
         if not any(file_path_matches(key[1], glob) for glob in excluded)
     ]
     assert uncovered == [], (
-        "these pins are only in .ash/.ash.yaml and sit under no excluded path of the "
+        "these pins are only in .ash.yaml and sit under no excluded path of the "
         f"alpha config, so the self-scan would report them unpinned: {uncovered}"
     )
 

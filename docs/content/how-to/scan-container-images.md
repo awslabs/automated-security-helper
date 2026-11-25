@@ -26,14 +26,12 @@ ash scan --image-layout ./app-layout/
 
 Prefer a digest-pinned reference (`repo@sha256:...`): two scans of the same pinned
 image then agree across machines. A tag-only reference is accepted and handed to the
-tool as written, and ASH asks the registry which digest the tag points at (see
-[Tag-only references](#tag-only-references-and-their-digest)) so its finding ids key on
-that digest; where that lookup cannot run, the ids key on the reference text.
+tool as written; ASH does not resolve it to a digest.
 
 **Current status.** grype, syft and trivy are the scanners that read images; every other
 scanner is filesystem-only and is reported SKIPPED. ASH detects an engine (below) to pick
-how the tools reach the image, and an image scan is only as complete as those three
-tools' own coverage.
+how the tools reach the image, but it does not ask the engine for a digest, and an image
+scan is only as complete as those three tools' own coverage.
 
 The two payload shapes are checked at the stat level before anything uses them, the way
 a source directory is: the archive must exist, be readable and carry tar magic (a
@@ -44,7 +42,7 @@ malformed images themselves.
 
 Image options run in local mode, single-directory, on a fresh scan: they cannot be
 combined with any other `--mode` (container, nix and precommit are refused), a workspace
-scan, `--use-existing`, `--staged`, `--baseline` or a shard (`--shard-index`,
+scan, `--use-existing`, `--changed-files-only` or a shard (`--shard-index`,
 `--shard-count`). The convert phase does not run (converters read source files, which an
 image presents none of), so asking for the convert phase alone is refused. The scan
 records the image, not the directory it was started from, as its scan source, and does
@@ -172,8 +170,8 @@ as written. Three attribution columns say which image it came from:
 | `layer_digest` | The digest of the layer the finding comes from, for trivy findings. trivy's SARIF carries no layer data, so ASH runs trivy once more with JSON output, joins each result to the SARIF by finding (vulnerability: CVE and package; secret: rule, target and start line; misconfiguration: check ID and target), and writes the layer's `Digest`, else its `DiffID`. A finding two layers both report, or one the JSON pass cannot match, stays empty. If the second pass fails the scan still succeeds with the column empty. syft reports no findings and grype's output has no layer data, so their findings carry none. Attribution only. |
 
 A finding's id keys on the in-image path and the image's digest, or on the submitted
-reference when there is no digest. Pin the reference by digest when ids must survive
-without a registry lookup. Two scans of one pinned image therefore agree
+reference when there is no digest. Pin the reference by digest when ids must survive a
+tag moving. Two scans of one pinned image therefore agree
 across machines and output directories, a re-tagged image that resolves to the same
 digest keeps its ids, and an image finding never shares an id with a source finding at
 the same path. The layer digest is not part of the id: a rebuilt layer that still
@@ -203,7 +201,7 @@ skip the path, ASH passes it as well, so the tool does less work:
 
 | Tool | What ASH passes | Notes |
 |---|---|---|
-| trivy | `--skip-files <glob>` per entry | Measured on trivy 0.76.2: `--skip-dirs` removed nothing from an image scan in any spelling, so it is not used. A path with no glob becomes the path and `<path>/**`. |
+| trivy | `trivy --skip-files <glob>` per entry | Measured on trivy 0.76.2: `trivy --skip-dirs` removed nothing from an image scan in any spelling, so it is not used. A path with no glob becomes the path and `<path>/**`. |
 | grype | `--exclude <glob>` per entry | Absolute in-image globs only; the `./` spelling matches nothing. |
 | syft | `--exclude <glob>` per entry | Same rule as grype. |
 
@@ -237,7 +235,7 @@ registry rung).
 - `--baseline`, shards, `--staged` and convert-only are refused with an image, as above.
 - Ignore paths reach the tools as absolute in-image globs only; relative patterns and
   globs ending in `/` are applied by the report filter after the scan, and trivy gets
-  `--skip-files` only because `--skip-dirs` has no effect on images.
+  `trivy --skip-files` only because `trivy --skip-dirs` has no effect on images.
 - The engine rung needs a docker or podman daemon socket; containerd is never probed.
 - The live-engine CI job exercises docker on a Linux runner; podman and other platforms
   rely on unit tests and the unix-socket fake daemon.

@@ -39,9 +39,9 @@ import csv
 import importlib
 import inspect
 import json
-import pkgutil
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Iterator
 
 import pytest
@@ -51,43 +51,51 @@ from automated_security_helper.base.scanner_facets import (
     SCANNER_FACETS_ATTR,
     FacetState,
 )
-from automated_security_helper.plugin_modules import ash_builtin
 from automated_security_helper.utils.package_identity import ASH_RESOURCE_ID_KEY
+from tests.utils.scanner_enumeration import load_scanner_universe
 
 pytestmark = pytest.mark.unit
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _FIXTURES = _REPO_ROOT / "tests" / "test_data" / "scanners"
 
-_REMAINING_LOAD_ERRORS = ash_builtin.retry_failed_plugin_groups()
+#: The shared enumeration (tests/utils/scanner_enumeration.py).
+SCANNER_CLASSES, _REMAINING_LOAD_ERRORS = load_scanner_universe()
 
 
-def _registered_scanner_classes() -> list[type]:
-    classes: list[type] = []
-    seen: set[type] = set()
-    modules = sorted(
-        pkgutil.iter_modules(plugin_modules.__path__), key=lambda m: m.name
-    )
-    for info in modules:
-        if not info.ispkg:
-            continue
-        package = importlib.import_module(f"{plugin_modules.__name__}.{info.name}")
-        for cls in getattr(package, "ASH_SCANNERS", []):
-            if cls not in seen:
-                seen.add(cls)
-                classes.append(cls)
-    return classes
+def _declaration(cls: type) -> Any:
+    """The class's own register row, or None for a scanner that declares none.
+
+    Read with ``.get`` so that ONE undeclared scanner is not an unnamed
+    KeyError at collection time that silences every control in this module:
+    the registry totality test owns that failure and names the scanner.
+    """
+    return vars(cls).get(SCANNER_FACETS_ATTR)
 
 
-SCANNER_CLASSES = _registered_scanner_classes()
+def _resource_id_state(cls: type) -> FacetState | None:
+    declaration = _declaration(cls)
+    return None if declaration is None else declaration.resource_id.state
 
 
-def _resource_id_state(cls: type) -> FacetState:
-    return vars(cls)[SCANNER_FACETS_ATTR].resource_id.state
+def _classes_in(state: FacetState, classes: list[type] | None = None) -> list[type]:
+    pool = SCANNER_CLASSES if classes is None else classes
+    return [c for c in pool if _resource_id_state(c) is state]
 
 
-def _classes_in(state: FacetState) -> list[type]:
-    return [c for c in SCANNER_CLASSES if _resource_id_state(c) is state]
+def test_an_undeclared_scanner_is_skipped_not_a_collection_error() -> None:
+    """Planted: the totality test names a missing row; this module must not die."""
+
+    class Undeclared:
+        pass
+
+    class Declared:
+        facets = SimpleNamespace(
+            resource_id=SimpleNamespace(state=FacetState.NA, example=None)
+        )
+
+    assert _resource_id_state(Undeclared) is None
+    assert _classes_in(FacetState.NA, [Undeclared, Declared]) == [Declared]
 
 
 # --------------------------------------------------------------------------
@@ -100,9 +108,13 @@ def _key_writes(source: str) -> list[int]:
 
     A write is any of: a subscript whose index is the key (``bag["k"] = v``),
     a dict display with the key, a call keyword named for the key
-    (``PropertyBag(ash_resource_id=...)``), or any use of the
-    ``ASH_RESOURCE_ID_KEY`` constant by name. A string that merely mentions the
-    key (a docstring, a ``reason=`` text) is not a write.
+    (``PropertyBag(ash_resource_id=...)``), the key as a string-literal call
+    argument (``props.setdefault("k", v)``, ``props.update(...)`` through a
+    helper that takes the key), an import that renames the constant
+    (``from ... import ASH_RESOURCE_ID_KEY as RID``, after which ``RID`` is a
+    different Name), or any use of the ``ASH_RESOURCE_ID_KEY`` constant by
+    name. A string that merely mentions the key (a docstring, a ``reason=``
+    text) is not a write.
     """
     lines: list[int] = []
     for node in ast.walk(ast.parse(source)):
@@ -117,6 +129,17 @@ def _key_writes(source: str) -> list[int]:
         elif isinstance(node, ast.keyword):
             if node.arg == ASH_RESOURCE_ID_KEY:
                 lines.append(node.value.lineno)
+        elif isinstance(node, ast.Call):
+            for argument in node.args:
+                if (
+                    isinstance(argument, ast.Constant)
+                    and argument.value == ASH_RESOURCE_ID_KEY
+                ):
+                    lines.append(argument.lineno)
+        elif isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                if alias.name == "ASH_RESOURCE_ID_KEY" and alias.asname:
+                    lines.append(node.lineno)
         elif isinstance(node, ast.Name) and node.id == "ASH_RESOURCE_ID_KEY":
             lines.append(node.lineno)
         elif isinstance(node, ast.Attribute) and node.attr == "ASH_RESOURCE_ID_KEY":
@@ -132,8 +155,24 @@ def _key_writes(source: str) -> list[int]:
         "PropertyBag(ash_resource_id=h)\n",
         "props[ASH_RESOURCE_ID_KEY] = h\n",
         "props[package_identity.ASH_RESOURCE_ID_KEY] = h\n",
+        'props.setdefault("ash_resource_id", h)\n',
+        'props.pop("ash_resource_id", None)\n',
+        (
+            "from automated_security_helper.utils.package_identity import (\n"
+            "    ASH_RESOURCE_ID_KEY as RID,\n"
+            ")\n"
+        ),
     ],
-    ids=["subscript", "dict", "keyword", "constant", "attribute"],
+    ids=[
+        "subscript",
+        "dict",
+        "keyword",
+        "constant",
+        "attribute",
+        "call-argument-setdefault",
+        "call-argument-pop",
+        "aliased-import",
+    ],
 )
 def test_the_writer_detector_flags_every_spelling(source: str) -> None:
     """Planted must-flag: a detector that sees nothing proves nothing."""
@@ -146,6 +185,9 @@ def test_the_writer_detector_ignores_prose_mentions() -> None:
         '"""Never writes ash_resource_id."""\n'
         "# ash_resource_id stays unset\n"
         'x = FacetDecl(reason="writes no ash_resource_id")\n'
+        'log("the ash_resource_id key is never written")\n'
+        "from automated_security_helper.utils.package_identity import "
+        "ASH_RESOURCE_ID_KEY\n"
     )
     assert _key_writes(source) == []
 
@@ -162,15 +204,93 @@ def test_the_enumeration_is_not_vacuous() -> None:
 # --------------------------------------------------------------------------
 
 
-def _plugin_sources(cls: type) -> Iterator[tuple[str, str]]:
-    """The module sources of the class and its bases inside plugin_modules."""
+def _imported_names(source: str) -> set[str]:
+    """Every dotted module name a source's import statements could name.
+
+    ``from pkg.mod import helper`` names ``pkg.mod`` and, for the ``from pkg
+    import mod`` form, ``pkg.mod.helper`` too; the caller keeps only the names
+    that are real loaded modules, so a function or a class is not mistaken for
+    one.
+    """
+    names: set[str] = set()
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+            names.add(node.module)
+            names.update(f"{node.module}.{alias.name}" for alias in node.names)
+        elif isinstance(node, ast.Import):
+            names.update(alias.name for alias in node.names)
+    return names
+
+
+def _loaded_module_source(module: str) -> str | None:
+    """The source of a loaded, non-package module, else None.
+
+    A package ``__init__`` is skipped: it re-exports its siblings (ash_builtin
+    imports every builtin scanner), so following it would charge one scanner
+    with every other scanner's writes.
+    """
+    loaded = sys.modules.get(module)
+    if loaded is None or getattr(loaded, "__path__", None) is not None:
+        return None
+    return inspect.getsource(loaded)
+
+
+def _reachable_sources(
+    roots: list[str], read_source: Any = _loaded_module_source
+) -> Iterator[tuple[str, str]]:
+    """The sources of ``roots`` and of the plugin_modules modules they import.
+
+    Followed to a fixed point, breadth first. ``read_source`` maps a dotted name
+    to its source, or None for a name that is not a readable module.
+    """
     seen: set[str] = set()
-    for base in cls.__mro__:
-        module = base.__module__
+    pending = list(roots)
+    while pending:
+        module = pending.pop(0)
         if not module.startswith(plugin_modules.__name__) or module in seen:
             continue
         seen.add(module)
-        yield module, inspect.getsource(sys.modules[module])
+        source = read_source(module)
+        if source is None:
+            continue
+        yield module, source
+        pending.extend(sorted(_imported_names(source)))
+
+
+def _plugin_sources(cls: type) -> Iterator[tuple[str, str]]:
+    """The module sources the class can reach inside plugin_modules.
+
+    The modules of the class and of every base in its MRO, and the plugin_modules
+    modules those import: a helper module the class calls but does not inherit
+    from is a route to the key too. Scope, said plainly: bases and helpers
+    OUTSIDE plugin_modules (base/scanner_plugin.py, utils/) are not read here; a
+    value they attach arrives through the result's property bag and is closed at
+    the flatten boundary by the passthrough rows below.
+    """
+    yield from _reachable_sources([base.__module__ for base in cls.__mro__])
+
+
+def test_the_source_walk_follows_a_helper_the_class_only_imports() -> None:
+    """Planted: a write in a module the scanner imports but does not inherit."""
+    root = f"{plugin_modules.__name__}.planted_scanner"
+    helper = f"{plugin_modules.__name__}.planted_helper"
+    package = f"{plugin_modules.__name__}.planted_pkg"
+    sources = {
+        root: f"from {helper} import attach\nfrom {package} import everything\n",
+        helper: 'def attach(bag, v):\n    bag.setdefault("ash_resource_id", v)\n',
+        package: "from x import y\n",
+    }
+
+    def read(name: str) -> str | None:
+        # the package __init__ answers None, as _loaded_module_source does
+        return None if name == package else sources.get(name)
+
+    reached = dict(_reachable_sources([root], read))
+    assert set(reached) == {root, helper}
+    assert _key_writes(reached[helper]) and not _key_writes(reached[root])
+    # outside plugin_modules, and a name that is not a module, are not followed
+    assert dict(_reachable_sources(["json"], read)) == {}
+    assert dict(_reachable_sources([f"{plugin_modules.__name__}.nope"], read)) == {}
 
 
 @pytest.mark.parametrize(
@@ -340,11 +460,17 @@ def _values_under_key(node: Any, key: str) -> Iterator[Any]:
             yield from _values_under_key(item, key)
 
 
-def _flatten(value: Any) -> Iterator[Any]:
+def _flatten(value: Any) -> Iterator[str]:
+    """The string leaves under a value; a dict or a number is not a candidate.
+
+    A nested dict yielded whole made the caller's set comprehension raise
+    TypeError (an unhashable dict), and a number can never equal the declared
+    string example.
+    """
     if isinstance(value, list):
         for item in value:
             yield from _flatten(item)
-    else:
+    elif isinstance(value, str):
         yield value
 
 
@@ -354,6 +480,42 @@ def test_the_rot_guard_finds_a_planted_value_and_misses_an_absent_one() -> None:
     assert "Bucket" in found
     assert "Missing" not in found
     assert not list(_values_under_key(document, "Absent"))
+
+
+def test_the_rot_guard_survives_a_dict_under_the_key() -> None:
+    """Planted: a dict value under the key must not crash the set build."""
+    document = {"Path": {"nested": "Bucket"}, "other": {"Path": ["Bucket", 3]}}
+    found = {v for hit in _values_under_key(document, "Path") for v in _flatten(hit)}
+    assert found == {"Bucket"}
+
+
+def _declared_names_key(native_field: str | None, key: str | None) -> bool:
+    """True when a declaration's native_field names the fixture key it rests on.
+
+    A row of ``_DROPPED_FIXTURES`` reads the committed fixture under ``key``;
+    nothing else ties that key to the cell, so a row for the wrong key would
+    keep the rot guard green while guarding a field the cell does not claim.
+    A ``None`` key means the id lives in message prose and has no key to name.
+    """
+    return key is None or key in (native_field or "")
+
+
+def test_the_key_tie_flags_a_row_whose_key_is_not_in_the_declaration() -> None:
+    assert _declared_names_key('Results[].CauseMetadata."Resource"', "Resource")
+    assert not _declared_names_key('Results[].CauseMetadata."Resource"', "Path")
+    assert not _declared_names_key(None, "Resource")
+    assert _declared_names_key(None, None)
+
+
+@pytest.mark.parametrize("name", sorted(_DROPPED_FIXTURES))
+def test_a_dropped_row_names_a_key_its_declaration_names(name: str) -> None:
+    cls = next(c for c in SCANNER_CLASSES if c.__name__ == name)
+    _fixture, key, _value = _DROPPED_FIXTURES[name]
+    native_field = vars(cls)[SCANNER_FACETS_ATTR].resource_id.native_field
+    assert _declared_names_key(native_field, key), (
+        f"{name}: the rot-guard row reads key {key!r} but the declared "
+        f"native_field {native_field!r} does not name it"
+    )
 
 
 def test_every_dropped_resource_id_has_a_fixture_row() -> None:

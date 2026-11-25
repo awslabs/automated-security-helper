@@ -31,10 +31,8 @@ from automated_security_helper.cli.mcp_tools import (
     mcp_suggest_suppression,
     mcp_validate_config,
 )
-from automated_security_helper.core.scanner_inventory import (
-    _VENDORED_SCANNER_PLUGIN_PACKAGES,
-)
-from automated_security_helper.models.flat_vulnerability import FlatVulnerability
+from automated_security_helper.plugins.enablement import modules_needing_naming
+from tests.unit.models._flat_vulnerability_helpers import flat_with_severity
 
 pytestmark = pytest.mark.unit
 
@@ -52,7 +50,8 @@ def _vuln(**overrides):
         "scanner_type": "SAST",
     }
     fields.update(overrides)
-    return FlatVulnerability(**fields)
+    severity = fields.pop("severity")
+    return flat_with_severity(severity, **fields)
 
 
 class TestLoadFlatVulnsForExplain:
@@ -644,7 +643,7 @@ class TestListScanners:
             call([package])
             for package in (
                 "automated_security_helper.plugin_modules.acme_scan",
-                *_VENDORED_SCANNER_PLUGIN_PACKAGES,
+                *modules_needing_naming(),
             )
         ]
 

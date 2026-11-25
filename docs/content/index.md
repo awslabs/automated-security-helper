@@ -86,7 +86,7 @@ ash --mode precommit
 - Secrets: detect-secrets
 - Dependencies and software inventory: Grype, npm audit, Syft
 
-Six more scanners ship with ASH as alpha plugins: [Betterleaks](docs/plugins/alpha/betterleaks-plugin.md) and [Ferret Scan](docs/plugins/alpha/ferret-scan-plugin.md) for secrets, [GuardDog](docs/plugins/alpha/guarddog-plugin.md) for malicious packages, [hadolint](docs/plugins/alpha/hadolint-plugin.md) for Dockerfiles, [Snyk Code](docs/plugins/alpha/snyk-plugin.md) for SAST, and [Trivy](docs/plugins/alpha/trivy-plugin.md) for repository scanning. A scan runs one only when its module is named in `ash_plugin_modules` or `--ash-plugin-modules`. See the [alpha plugins](docs/plugins/alpha/index.md) and the [scanners reference](reference/scanners.md) for all 22 scanners.
+Six more scanners ship with ASH as alpha plugins: [Betterleaks](docs/plugins/alpha/betterleaks-plugin.md) and [Ferret Scan](docs/plugins/alpha/ferret-scan-plugin.md) for secrets, [GuardDog](docs/plugins/alpha/guarddog-plugin.md) for malicious packages, [hadolint](docs/plugins/alpha/hadolint-plugin.md) for Dockerfiles, [Snyk Code](docs/plugins/alpha/snyk-plugin.md) for SAST, and [Trivy](docs/plugins/alpha/trivy-plugin.md) for repository scanning. A scan runs one only when its module is named in `ash_plugin_modules` or `--ash-plugin-modules`. See the [alpha plugins](docs/plugins/alpha/index.md) and the [scanners reference](reference/scanners.md) for all 23 scanners.
 
 A scan ends by printing the exit codes and the one it exits with:
 
@@ -158,7 +158,7 @@ ASH can be run in container mode in any CI/CD environment that supports containe
 <details>
 <summary>How do I exclude files from scanning?</summary>
 
-ASH leaves out of its scan set every file a `.gitignore` or `.ignore` file in the scanned tree matches. You can also configure ignore paths in your `.ash/.ash.yaml` configuration file. The summaries record how many files the ignore files excluded, and `--no-honor-ignore-files` (or `honor_ignore_files: false` in a config file outside the scanned tree) scans those files too. See [Ignore files and the scan set](reference/coverage.md#what-decides-the-files).
+ASH leaves out of its scan set every file a `.gitignore` or `.ignore` file in the scanned tree matches. You can also configure ignore paths in your `.ash.yaml` configuration file. The summaries record how many files the ignore files excluded, and `--no-honor-ignore-files` (or `honor_ignore_files: false` in a config file outside the scanned tree) scans those files too. See [Ignore files and the scan set](reference/coverage.md#what-decides-the-files).
 </details>
 
 <details>

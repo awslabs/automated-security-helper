@@ -20,7 +20,7 @@ The single SARIF run that every scanner's results are merged into, written as `r
 
 ## Alpha plugin
 
-One of the opt-in scanner packages (`ash_*_plugins`) that ships with ASH but is not built in, such as the trivy-repo, snyk-code, and ferret-scan scanners. Alpha is a maturity label: ASH ships these scanners but does not yet promote them as supported. The `ash_aws_plugins` reporters load the same opt-in way but are not alpha plugins. `ash scan` loads one only when a plugin module list names it; for the MCP server, see [What a plugin can do](../plugins/index.md#what-a-plugin-can-do). See [Alpha plugins](../docs/plugins/alpha/index.md).
+A plugin package that ships with ASH but is not built in, such as the trivy-repo, snyk-code, and ferret-scan scanners. Alpha is a maturity label: ASH ships these scanners but does not yet promote them as supported. `ash scan` loads one only when a plugin module list names it; for the MCP server, see [What a plugin can do](../plugins/index.md#what-a-plugin-can-do). See [Alpha plugins](../docs/plugins/alpha/index.md).
 
 ## AWS plugins
 
@@ -112,7 +112,7 @@ A plugin that renders the aggregated results in one format and writes it to the 
 
 ## Repository config
 
-An ASH config file inside a git checkout or inside the scanned directory, such as the `.ash/.ash.yaml` ASH discovers in the repository, or a config kept in an ops repository of its own. It cannot grant sandbox access, load ASH's off-host plugin packages, or choose where ASH's AWS reporters send results. See [Configuration trust model](trust-model.md).
+An ASH config file inside a git checkout or inside the scanned directory, such as the `.ash.yaml` ASH discovers in the repository, or a config kept in an ops repository of its own. It cannot grant sandbox access, load ASH's off-host plugin packages, or choose where ASH's AWS reporters send results. See [Configuration trust model](trust-model.md).
 
 ## Run mode
 

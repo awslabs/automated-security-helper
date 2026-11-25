@@ -110,14 +110,14 @@ from automated_security_helper.core.resource_management.result_filters import (
     apply_content_filters,
     add_findings_list,
 )
-from automated_security_helper.cli.mcp.profile_registry import (
+from automated_security_helper.config.session_profiles import (
     ProfileRegistryError,
     resolve_session_config_path,
 )
 from automated_security_helper.cli.mcp.error_types import McpErrorType
 from automated_security_helper.cli.mcp.sessions import SessionWorkspaceBusyError
 from automated_security_helper.cli.mcp.progress_monitor import monitor_scan_progress
-from automated_security_helper.cli.mcp.sandbox import (
+from automated_security_helper.config.mcp_sandbox import (
     caller_is_remote,
     check_config_input,
 )
@@ -486,7 +486,7 @@ def _resolve_omitted_source_dir(session_id: str) -> _OmittedSourceResolution:
         structured refusal.
     """
 
-    from automated_security_helper.cli.mcp.profile_registry import (
+    from automated_security_helper.config.session_profiles import (
         DEFAULT_SESSION_ID,
     )
 
@@ -667,6 +667,10 @@ async def _profile_needs_a_session(
         return None
     await _tell_client_error(ctx, raw_controls_on_one_line(refusal["error"]))
     return with_exit_code(refusal, REFUSED_USAGE_EXIT_CODE)
+
+
+# The scans' progress-monitor tasks, held here so none is collected while it runs.
+_monitor_tasks: set[asyncio.Task] = set()
 
 
 @mcp.tool()
@@ -863,6 +867,11 @@ async def run_ash_scan(
                         ctx, raw_controls_on_one_line(resolved.error["error"])
                     )
                     return resolved.error
+                if resolved.source_dir is None:
+                    raise RuntimeError(
+                        "_resolve_omitted_source_dir returned neither a directory "
+                        "nor an error"
+                    )
                 source_dir = resolved.source_dir
         # The working directory is the server's filesystem layout, which this
         # module withholds from a network caller (_resolve_omitted_source_dir):
@@ -1142,10 +1151,8 @@ async def run_ash_scan(
         monitor_task = asyncio.create_task(
             monitor_scan_progress(ctx, scan_id, session_id=session_id)
         )
-        if not hasattr(run_ash_scan, "_monitor_tasks"):
-            run_ash_scan._monitor_tasks = set()
-        run_ash_scan._monitor_tasks.add(monitor_task)
-        monitor_task.add_done_callback(lambda t: run_ash_scan._monitor_tasks.discard(t))
+        _monitor_tasks.add(monitor_task)
+        monitor_task.add_done_callback(_monitor_tasks.discard)
 
         return {
             "success": True,
@@ -2521,11 +2528,11 @@ async def list_scanners() -> list:
     still fail on a given target, and a scan may skip a scanner for reasons of
     configuration rather than dependencies.
 
-    The list covers the built-in scanners and the alpha scanners ASH ships
-    (ferret-scan, snyk-code, trivy-repo). Listing an alpha scanner does not add
+    The list covers the built-in scanners and the opt-in scanners ASH ships
+    (ferret-scan, snyk-code, trivy-repo). Listing an opt-in scanner does not add
     it to any scan: a scan runs the built-in scanners plus those of the plugin
-    modules its own ash_plugin_modules names, so an alpha scanner runs only in a
-    scan whose config or --ash-plugin-modules names its module.
+    modules its own ash_plugin_modules names, so an opt-in scanner runs only in
+    a scan whose config or --ash-plugin-modules names its module.
     """
     try:
         # Off the event loop, as check_installation runs the same inventory: the
@@ -3681,7 +3688,7 @@ async def _stop_on_signal(signals: Optional[Iterable[int]] = None) -> None:
     """
     if signals is None:
         signals = _watched_stop_signals()
-    with anyio.open_signal_receiver(*signals) as received:
+    with anyio.open_signal_receiver(*(signal.Signals(s) for s in signals)) as received:
         async for signum in received:
             name = signal.Signals(signum).name
             logger.warning(f"{name} received: stopping the scans and the server")

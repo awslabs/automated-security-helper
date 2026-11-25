@@ -424,6 +424,13 @@ WRITES_OUTSIDE_THE_OUTPUT_DIRECTORY: Dict[Site, Tuple[int, str]] = {
         1,
         _PROJECT_ASH_DIR,
     ),
+    (f"{_ASH}/core/plugin_conformance.py", "_materialized", "shutil.copytree"): (
+        1,
+        (
+            "a fixture template copied into the conformance run's own scratch "
+            "directory, which is empty and outside every output directory"
+        ),
+    ),
     (f"{_ASH}/config/ash_config.py", "AshConfig.save", "open"): (1, _CONFIG),
     (f"{_ASH}/config/ash_config.py", "AshConfig.save", "write_text"): (1, _CONFIG),
     (f"{_ASH}/config/ash_config.py", "_staged_beside", "os.open"): (
@@ -490,7 +497,7 @@ WRITES_OUTSIDE_THE_OUTPUT_DIRECTORY: Dict[Site, Tuple[int, str]] = {
         1,
         "the MCP upload workspace, where a client's source is assembled",
     ),
-    (f"{_ASH}/cli/mcp/session_paths.py", "mark_session_workspace", "touch"): (
+    (f"{_ASH}/config/session_paths.py", "mark_session_workspace", "touch"): (
         1,
         _MCP_SESSIONS,
     ),
@@ -518,7 +525,7 @@ WRITES_OUTSIDE_THE_OUTPUT_DIRECTORY: Dict[Site, Tuple[int, str]] = {
     ): (1, _MCP_SESSIONS),
     (f"{_ASH}/cli/mcp/sessions.py", "_a_scan_holds", "open"): (1, _MCP_SESSIONS),
     (
-        f"{_ASH}/cli/mcp/profile_registry.py",
+        f"{_ASH}/config/session_profiles.py",
         "_replace_staged",
         "os.replace",
     ): (1, _MCP_PROFILE_COPY),

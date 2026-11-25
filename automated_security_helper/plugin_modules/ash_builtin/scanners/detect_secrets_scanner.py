@@ -60,6 +60,7 @@ from automated_security_helper.base.scanner_facets import (
     FacetState,
     ScannerFacets,
 )
+from automated_security_helper.models.vocab import TargetType
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
@@ -79,7 +80,9 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Level,
     Location,
     Message,
+    Message1,
     PhysicalLocation,
+    PhysicalLocation2,
     PropertyBag,
     Region,
     Result,
@@ -105,7 +108,7 @@ from automated_security_helper.utils.error_text import (
     text_without_values,
     timeout_limit_token,
 )
-from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
+from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP, VERBOSE_LEVEL
 from automated_security_helper.utils.sandbox.fs_guard import (
     OutputLinkRefused,
     open_for_write,
@@ -540,7 +543,6 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 semantics="the base default {0, 1}; the scan is in-process, so there is no tool exit",
             ),
             provenance=opsf.ProvenanceFacet(
-                tier=opsf.Tier.BUILTIN_DEFAULT,
                 source=opsf.ProvenanceSource.PYPI_PINNED_DEPENDENCY,
                 selection_surfaces=("verification (baseline-driven)",),
                 upstream_license=(
@@ -713,7 +715,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
     def _pre_scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         config: Optional[ScannerPluginConfigBase] = None,
         *args,
         **kwargs,
@@ -1156,7 +1158,9 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             # path checked here is the one _read_baseline opens and binds to;
             # the named path is what an MCP client's delivered-tree test sees.
             real_baseline = Path(os.path.realpath(chosen))
-            refusal = self._baseline_refusal(Path(chosen_named), real_baseline)
+            refusal = self._baseline_refusal(
+                Path(chosen_named or chosen), real_baseline
+            )
             if refusal is not None:
                 ASH_LOGGER.warning(
                     text_without_values(
@@ -1173,7 +1177,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 # the operator wrote, as it does for a missing or refused file.
                 self._chosen_baseline = chosen
                 self._baseline_real = real_baseline
-                self._baseline_named = Path(chosen_named)
+                self._baseline_named = Path(chosen_named or chosen)
                 self._baseline_from_option = chosen_from_option
         elif option_missing is not None:
             # The configured file is not on disk, and no checkout candidate
@@ -2295,6 +2299,11 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         )
 
         secrets_collection_cls, _, _ = _detect_secrets_api()
+        if self._secrets_collection is None:
+            raise ScannerError(
+                "detect-secrets has no secrets collection to scan into; "
+                "the scanner was not set up before the scan."
+            )
         root = self._secrets_collection.root
         # Absolute, because the worker runs in a different working directory and
         # output_dir may be relative for a library caller.
@@ -2575,7 +2584,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         start_column: Optional[int] = None,
         suppressions: Optional[List[Any]] = None,
         config_name: str = "detect-secrets",
-        tool_type: str = "SECRETS",
+        tool_type: str = ScannerToolType.SECRETS.value,
     ) -> Result:
         """One SARIF result for one detect-secrets finding, value-free.
 
@@ -2603,24 +2612,28 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             level=Level.error,
             kind=Kind.fail,
             message=Message(
-                text=f"Secret of type '{finding_type}' detected in file "
-                f"'{uri}' at line {line_number}"
+                root=Message1(
+                    text=f"Secret of type '{finding_type}' detected in file "
+                    f"'{uri}' at line {line_number}"
+                )
             ),
             locations=[
                 Location(
                     id=1,
                     physicalLocation=PhysicalLocation(
-                        artifactLocation=ArtifactLocation(
-                            uri=uri,
-                        ),
-                        region=Region(
-                            startLine=line_number,
-                            endLine=line_number,
-                            startColumn=start_column,
-                            snippet=ArtifactContent(
-                                text=f"Secret of type {finding_type} detected"
+                        root=PhysicalLocation2(
+                            artifactLocation=ArtifactLocation(
+                                uri=uri,
                             ),
-                        ),
+                            region=Region(
+                                startLine=line_number,
+                                endLine=line_number,
+                                startColumn=start_column,
+                                snippet=ArtifactContent(
+                                    text=f"Secret of type {finding_type} detected"
+                                ),
+                            ),
+                        )
                     ),
                 )
             ],
@@ -2647,7 +2660,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             return path.relative_to(source).as_posix()
         return path.as_posix()
 
-    def _baseline_anchor(self, scan_root: Path, target_type: str) -> Path:
+    def _baseline_anchor(self, scan_root: Path, target_type: TargetType) -> Path:
         """The directory the baseline's paths are relative to.
 
         ``detect-secrets scan`` writes a baseline from the directory it runs in,
@@ -2694,7 +2707,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         this rule, and a debug line says so.
         """
         if (
-            target_type != "source"
+            target_type != TargetType.SOURCE
             or self._baseline_real is None
             or self._baseline_document is None
             or self._baseline_from_option
@@ -2838,7 +2851,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
     def scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason] | None = None,
         config: DetectSecretsScannerConfig | None = None,
     ) -> SarifReport | bool:
@@ -2984,7 +2997,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             # a baseline outside the source tree.
             baseline_document = None
             if (
-                target_type == "source"
+                target_type == TargetType.SOURCE
                 and self._baseline_in_use()
                 and self._baseline_document is not None
             ):
@@ -3026,7 +3039,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             # turn every key into a chain of '..' segments.
             scan_root = (
                 self.context.work_dir
-                if target_type == "converted"
+                if target_type == TargetType.CONVERTED
                 else self.context.source_dir
             )
             self._secrets_collection.root = Path(scan_root).absolute()
@@ -3066,7 +3079,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             # handed to detect-secrets.
             candidates = (
                 [item for item in self.context.work_dir.rglob("*") if item.is_file()]
-                if target_type == "converted"
+                if target_type == TargetType.CONVERTED
                 else scan_set(
                     source=self.context.source_dir,
                     output=self.context.output_dir,
@@ -3102,7 +3115,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             # (_process_config_options fell back to the default settings), so
             # it is scanned like any other file.
             baseline_names: Set[str] = set()
-            if target_type == "source" and self._baseline_document is not None:
+            if target_type == TargetType.SOURCE and self._baseline_document is not None:
                 baseline_names = {
                     self._root_relative(str(path), scan_root)
                     for path in (self._baseline_named, self._baseline_real)
@@ -3250,7 +3263,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                         self._plugin_log(
                             f"Excluded {excluded_count} files from detect-secrets "
                             f"scan based on {origin}",
-                            level=logging.VERBOSE,
+                            level=VERBOSE_LEVEL,
                             target_type=target_type,
                         )
             if "filters_used" in scan_settings_dict:
@@ -3298,7 +3311,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                         "baseline or a file the scanned repository controls, "
                         "not from the operator's own settings, and it would "
                         "skip files by name",
-                        level=logging.VERBOSE,
+                        level=VERBOSE_LEVEL,
                         target_type=target_type,
                     )
                 scan_settings_dict["filters_used"] = kept_filters
@@ -3355,7 +3368,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
 
             self._plugin_log(
                 f"Found {len(scannable)} files in scan set to scan with detect-secrets",
-                level=logging.VERBOSE,
+                level=VERBOSE_LEVEL,
                 target_type=target_type,
             )
 
@@ -3518,7 +3531,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                             # value on 3.10 and 3.11 (the project supports 3.10).
                             tool_type=str(
                                 getattr(self.tool_type, "value", self.tool_type)
-                                or "UNKNOWN"
+                                or ScannerToolType.UNKNOWN.value
                             ),
                         )
                     )
@@ -3630,7 +3643,7 @@ def _main(cwd: Path) -> SarifReport | bool:
         config=get_default_config(),
     )
     scanner = DetectSecretsScanner(context=context)
-    return scanner.scan(target=cwd, target_type="source")
+    return scanner.scan(target=cwd, target_type=TargetType.SOURCE)
 
 
 if __name__ == "__main__":

@@ -84,8 +84,10 @@ def test_severity_name_sites_read_the_ladders_names():
     assert flat_vulnerability._SEVERITY_ORDER == names
     assert sarif_utils._CANONICAL_SEVERITIES == names
     assert constants.VALID_SEVERITY_VALUES == frozenset(names)
+    # The emitter derives its places from the vocabulary the severity column's
+    # EnumColumn marker records, so it is the ladder's table by value, not by identity.
     assert (
-        report_content_emitter._SEVERITY_ORDER is severity_ladder.SEVERITY_DISPLAY_ORDER
+        report_content_emitter._SEVERITY_ORDER == severity_ladder.SEVERITY_DISPLAY_ORDER
     )
     assert html_reporter._SEVERITY_ORDER == severity_ladder.SEVERITY_DISPLAY_ORDER
 

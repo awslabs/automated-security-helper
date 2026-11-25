@@ -26,6 +26,7 @@ from automated_security_helper.base.scanner_facets import (
     FacetState,
     ScannerFacets,
 )
+from automated_security_helper.models.vocab import SeverityThresholdText, TargetType
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.core.constants import SHIPPED_SEVERITY_LEVEL
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
@@ -278,7 +279,7 @@ class GrypeScannerConfigOptions(ScannerOptionsBase):
         ),
     ] = None
     severity_threshold: Annotated[
-        Literal["ALL", "LOW", "MEDIUM", "HIGH", "CRITICAL"] | None,
+        SeverityThresholdText | None,
         Field(
             description=f"Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of {SHIPPED_SEVERITY_LEVEL}."
         ),
@@ -542,7 +543,7 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
             scanner_name="grype",
             network=opsf.NetworkFacet(
                 fetch_kind=opsf.FetchKind.CONTENT_FETCH,
-                fetches=(opsf.Fetched.VULN_DB, opsf.Fetched.IMAGE_DIGEST),
+                fetches=(opsf.Fetched.VULN_DB,),
                 prefetch=(
                     opsf.Prefetch.CONTENT_DB_REFRESH,
                     opsf.Prefetch.CI_CACHE,
@@ -637,7 +638,6 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
                 semantics="per the adapter's own comment at the success_exit_codes declaration",
             ),
             provenance=opsf.ProvenanceFacet(
-                tier=opsf.Tier.BUILTIN_DEFAULT,
                 source=opsf.ProvenanceSource.PINNED_RELEASE_BINARY,
                 selection_surfaces=(),
                 upstream_license=(
@@ -1102,7 +1102,7 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
     def _execute_scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason],
     ):
         """Resolve final argv, results path, and subprocess env for Grype."""

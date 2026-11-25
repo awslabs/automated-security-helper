@@ -35,14 +35,12 @@ from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
-from automated_security_helper.base.scanner_operational_facets import TargetKind
-
 
 class AssetKind(str, Enum):
     """What kind of subject a scan is about."""
 
     FILESYSTEM = "filesystem"
-    CONTAINER_IMAGE = TargetKind.CONTAINER_IMAGE.value
+    CONTAINER_IMAGE = "container_image"
 
 
 class _Frozen(BaseModel):
@@ -101,7 +99,9 @@ class ImageLocator(_Frozen):
         if self.oci_layout is not None:
             return self.oci_layout.as_posix()
         # The validator leaves exactly one shape set, so this is the archive.
-        return self.oci_archive.as_posix()  # type: ignore[union-attr]
+        if self.oci_archive is None:
+            raise ValueError("an ImageLocator names exactly one of its three shapes")
+        return self.oci_archive.as_posix()
 
 
 class Asset(_Frozen):

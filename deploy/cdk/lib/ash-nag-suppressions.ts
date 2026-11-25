@@ -736,7 +736,7 @@ export function suppressPipelineActionRoleWildcards(scope: IConstruct): void {
  * NO REASON IN THIS FILE IS ENCODED ANY MORE. `suppressTaskDefinitionEnvironment`
  * and `suppressParameterizedIngressRule` were the last two holding an em dash, and
  * both are now ASCII, so the app synthesizes zero `"is_reason_encoded": true`
- * entries. `.ash/.ash.yaml` describes that population from the other side, as one of
+ * entries. `.ash.yaml` describes that population from the other side, as one of
  * the mechanisms behind its SECRET-BASE64-HIGH-ENTROPY-STRING entries on these
  * templates; it is updated to say the set is empty rather than left describing a
  * population that no longer exists.

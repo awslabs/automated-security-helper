@@ -5,10 +5,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Any, Optional, Set, Tuple
 
-from automated_security_helper.base.converter_plugin import ConverterPluginBase
 from automated_security_helper.base.engine_phase import EnginePhase
 from automated_security_helper.base.plugin_context import PluginContext
-from automated_security_helper.base.reporter_plugin import ReporterPluginBase
 from automated_security_helper.base.plugin_config import (
     plugin_config_key,
     section_enabled,
@@ -25,13 +23,15 @@ from automated_security_helper.core.enums import ExecutionPhase, ScannerStatus
 from automated_security_helper.core.exceptions import ScannerSelectionError
 from automated_security_helper.core.scanner_selection import (
     SelectionOrigin,
-    alpha_scanner_refusal,
     exclusions_matching_no_scanner,
     refuse_selection_matching_no_scanner,
     selection_after_exclusions,
-    unloaded_alpha_hint,
-    unloaded_alpha_scanners,
     selection_names,
+)
+from automated_security_helper.plugins.enablement import (
+    unloaded_opt_in_hint,
+    unloaded_opt_in_refusal,
+    unloaded_opt_in_scanners,
 )
 from automated_security_helper.models.asharp_model import (
     AshAggregatedResults,
@@ -542,8 +542,7 @@ class ScanPhase(EnginePhase):
     def __init__(
         self,
         plugin_context: PluginContext,
-        plugins: List[ConverterPluginBase | ScannerPluginBase | ReporterPluginBase]
-        | None = None,
+        plugins: List[type] | None = None,
         progress_display: Optional[Any] = None,
         asharp_model: Optional[AshAggregatedResults] = None,
         plugin_filter: Optional[Callable[[Any], bool]] = None,
@@ -988,9 +987,10 @@ class ScanPhase(EnginePhase):
             rows = [
                 aggregated_results.scanner_results.get(name) for name in image_capable
             ]
-            if any(row is None for row in rows):
+            present = [row for row in rows if row is not None]
+            if len(present) != len(rows):
                 return
-            if any(row.status != ScannerStatus.SKIPPED for row in rows):
+            if any(row.status != ScannerStatus.SKIPPED for row in present):
                 return
             reason = (
                 "every image-capable scanner declined it cleanly (typically "
@@ -1598,7 +1598,7 @@ class ScanPhase(EnginePhase):
             # resolve, so it is not the silent-zero case, and a CI matrix whose
             # runners load different plugin modules can produce that shape
             # legitimately. The unresolved name is named either way, and a name
-            # that belongs to an alpha module ASH ships but that this run did
+            # that belongs to a plugin module ASH ships but that this run did
             # not import is named with the module to add, in the warning and in
             # the refusal alike.
             #
@@ -1615,11 +1615,11 @@ class ScanPhase(EnginePhase):
                 requested = [(name, name.lower().strip()) for name in enabled_scanners]
                 unresolved = [name for name, key in requested if key not in known_names]
                 # The module hint and the refusal text are the engine's too
-                # (core.scanner_selection): one text for the construction-time
+                # (plugins.enablement): one text for the construction-time
                 # check and this backstop. "Not loaded" is judged from the
                 # classes handed to this phase, not sys.modules.
-                hint = unloaded_alpha_hint(
-                    unloaded_alpha_scanners(unresolved, known_names, scanner_classes)
+                hint = unloaded_opt_in_hint(
+                    unloaded_opt_in_scanners(unresolved, known_names, scanner_classes)
                 )
                 if unresolved:
                     ASH_LOGGER.warning(
@@ -1628,10 +1628,10 @@ class ScanPhase(EnginePhase):
                         f"{', '.join(sorted(registered_names))}"
                         + (f". {hint}" if hint else "")
                     )
-                # A refusal whose requested names are all unresolved and at least one
-                # is an alpha scanner from an unloaded module names the module to
-                # add, not spelling, and the misspelled names beside it.
-                refusal = alpha_scanner_refusal(
+                # A refusal whose requested names are all unresolved and at least
+                # one is a shipped scanner from an unloaded module names the
+                # module to add, not spelling, and the misspelled names beside it.
+                refusal = unloaded_opt_in_refusal(
                     list(enabled_scanners), known_names, scanner_classes
                 )
                 if refusal:
@@ -1740,7 +1740,7 @@ class ScanPhase(EnginePhase):
             # nothing still ran as shard i of n, and with no record of that its
             # results read as an unsharded scan, which `ash merge` would not hold
             # to the split the other shards made.
-            if shard_count is not None:
+            if shard_count is not None and shard_index is not None:
                 all_scanner_names = [
                     _scanner_display_name(instance) for instance in scanner_instances
                 ]

@@ -146,7 +146,7 @@ Set `extension` in the config class. It is the end of the file name, so it must 
 `model` is an `AshAggregatedResults`, the same data as `.ash/ash_output/ash_aggregated_results.json` ([Output files](../reference/output-files.md)). The parts a reporter usually needs:
 
 - `model.metadata.summary_stats`: `actionable`, `total` (findings not suppressed), and `severity_counts` with `critical`, `high`, `medium`, `low`, `info`, and `suppressed`;
-- `model.to_flat_vulnerabilities()`: one flat record per finding, with `scanner`, `rule_id`, `severity`, `file_path`, `line_start`, `line_end`, `description`, and `is_suppressed`. The flat `severity` is the severity the summary and the gate use ([Set the severity](write-a-scanner.md#set-the-severity));
+- `model.to_flat_vulnerabilities()`: one flat record per finding, with `scanner`, `rule_id`, `severity`, `file_path`, `line_start`, `line_end`, `description`, and `is_suppressed`. The flat `severity` is the severity the summary and the gate use ([Set the severity](write-a-scanner.md#set-the-severity)). Each record also carries `correlation_id`, the cross-scanner correlation id ([Correlate one observation across scanners](../how-to/export-reports.md#correlation)) — often `None`, since only secret and dependency findings have one, so read it as optional;
 - `model.sarif`: the aggregated SARIF, one run with every scanner's results;
 - `model.scanner_results`: the outcome of each scanner, with `status` (PASSED, FAILED, MISSING, SKIPPED, or ERROR) and `finding_count`.
 
@@ -278,7 +278,7 @@ class FindingsBucketReporter(ReporterPluginBase[FindingsBucketConfig]):
 
 A reporter that sends findings somewhere, or writes them to a path its options name, declares those options in `destination_options`, as `FindingsBucketReporter` does. List every option that chooses where findings are sent or written, or which credentials send them: an endpoint, a region, an account, a bucket, a profile, a token, an output path. Name each as its field in the options model. An alias of the field is covered as well. The default is `()`.
 
-When the config was built from a file inside the scanned tree (a discovered `.ash/.ash.yaml`, a `--config` inside the tree, an `extends` base, or `ASH_CONFIG`), or from a file an MCP client delivered, ASH takes these options from the trusted base instead: the defaults, an operator config outside the tree, and `--config-overrides`. A value such a file set is replaced, under any spelling of the reporter's section that ASH reads as this reporter's, and one warning names each option it ignored. The reporter's other options still apply from the file. ASH does this once it has imported your plugin module and before it builds any reporter, in a scan and in `ash report`. The built-in AWS reporters declare theirs the same way ([Configuration trust model](../concepts/trust-model.md#what-each-tier-may-set)).
+When the config was built from a file inside the scanned tree (a discovered `.ash.yaml`, a `--config` inside the tree, an `extends` base, or `ASH_CONFIG`), or from a file an MCP client delivered, ASH takes these options from the trusted base instead: the defaults, an operator config outside the tree, and `--config-overrides`. A value such a file set is replaced, under any spelling of the reporter's section that ASH reads as this reporter's, and one warning names each option it ignored. The reporter's other options still apply from the file. ASH does this once it has imported your plugin module and before it builds any reporter, in a scan and in `ash report`. The built-in AWS reporters declare theirs the same way ([Configuration trust model](../concepts/trust-model.md#what-each-tier-may-set)).
 
 A reporter that declares any destination option sends findings somewhere, so whether it runs is the operator's choice too, in both directions. Its `enabled` comes from the trusted base, or from the default of your config model's `enabled` when the trusted base sets none: such a file's `enabled: true` or `enabled: false` is replaced with a warning where it differs, and leaving the section out leaves the reporter as the trusted base has it. That is why `FindingsBucketConfig` sets `enabled` to `False`. A reporter that declares no destination options writes only local files, and its `enabled` applies from the file.
 
@@ -297,7 +297,7 @@ def endpoint_from_operator():
     return os.environ.get("ACME_FINDINGS_ENDPOINT") or None
 ```
 
-A repository that names an endpoint in its `.ash/.ash.yaml` then changes nothing. A reporter that makes network calls also runs in the ASH process, outside the scanner sandbox, so it can reach any host ASH can.
+A repository that names an endpoint in its `.ash.yaml` then changes nothing. A reporter that makes network calls also runs in the ASH process, outside the scanner sandbox, so it can reach any host ASH can.
 
 ## Workspace scans
 
