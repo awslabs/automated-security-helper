@@ -269,7 +269,10 @@ class ConverterPluginBase(PluginBase, Generic[T]):
         construction.
         """
         if config:
-            self.config = config
+            # The converter's own config model (or the generic base, which the
+            # isinstance check below tells apart); the field is typed as the
+            # model for the methods that read it.
+            self.config = cast(T, config)
             if self._config_fallback_reason is not None:
                 declared = self._declared_config_model()
                 if declared is not None and isinstance(self.config, declared):

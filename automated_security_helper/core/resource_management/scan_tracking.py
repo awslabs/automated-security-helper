@@ -1317,9 +1317,10 @@ def assess_coverage(results: AshAggregatedResults) -> Tuple[bool, Dict[str, Any]
         scan_incompleteness,
     )
 
-    gate = _resolve_fail_on_incomplete_scanners(
-        results, SimpleNamespace(fail_on_incomplete_scanners=None), None
-    )
+    # The resolver reads one attribute of its options argument, so a bare
+    # namespace stands in for the CLI's ScanOptions here.
+    no_options: Any = SimpleNamespace(fail_on_incomplete_scanners=None)
+    gate = _resolve_fail_on_incomplete_scanners(results, no_options, None)
     gated = scan_incompleteness(results, gate=gate)
     facts = scan_incompleteness(results, gate=True)
     return bool(gated), facts.to_payload()
@@ -2181,7 +2182,9 @@ def get_scan_results(
         # Validating first also means a structurally wrong document is reported
         # as invalid_format with the field named, rather than as the
         # unexpected_error that model construction would raise.
-        is_valid, validation_error = validate_result_structure(int_results_dict)
+        # No parsed document reads as an empty one, which fails the check below
+        # with the missing fields named.
+        is_valid, validation_error = validate_result_structure(int_results_dict or {})
         if not is_valid:
             raise MCPResourceError(
                 f"Invalid result structure: {validation_error}",

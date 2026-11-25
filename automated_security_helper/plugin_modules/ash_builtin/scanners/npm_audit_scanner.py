@@ -43,8 +43,10 @@ from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactLocation,
     Location,
     PhysicalLocation,
+    PhysicalLocation2,
     Region,
     Message,
+    Message1,
     PropertyBag,
     ReportingDescriptor,
     Invocation,
@@ -1900,13 +1902,17 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                     ruleId=vuln_id,
                     level=level,
                     message=Message(
-                        text=f"{title} in {pkg_name} {record['vulnerable_versions']}. {record['url']}"
+                        root=Message1(
+                            text=f"{title} in {pkg_name} {record['vulnerable_versions']}. {record['url']}"
+                        )
                     ),
                     locations=[
                         Location(
                             physicalLocation=PhysicalLocation(
-                                artifactLocation=ArtifactLocation(uri=uri),
-                                region=Region(startLine=1, startColumn=1),
+                                root=PhysicalLocation2(
+                                    artifactLocation=ArtifactLocation(uri=uri),
+                                    region=Region(startLine=1, startColumn=1),
+                                )
                             )
                         )
                     ],
@@ -2141,7 +2147,9 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         if kept.properties is None:
             kept.properties = PropertyBag()
         setattr(kept.properties, "vulnerable_versions", combined)  # noqa: B010
-        kept.message = Message(text=f"{title} in {pkg_name} {combined}. {url or ''}")
+        kept.message = Message(
+            root=Message1(text=f"{title} in {pkg_name} {combined}. {url or ''}")
+        )
 
     @staticmethod
     def _advisory_id(pkg_name: str, via: Dict[str, Any]) -> str:
@@ -2750,13 +2758,17 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                             ruleId=vuln_id,
                             level=via_level,
                             message=Message(
-                                text=f"{title} in {pkg_name} {via_range}. {via.get('url', '')}"
+                                root=Message1(
+                                    text=f"{title} in {pkg_name} {via_range}. {via.get('url', '')}"
+                                )
                             ),
                             locations=[
                                 Location(
                                     physicalLocation=PhysicalLocation(
-                                        artifactLocation=ArtifactLocation(uri=uri),
-                                        region=Region(startLine=1, startColumn=1),
+                                        root=PhysicalLocation2(
+                                            artifactLocation=ArtifactLocation(uri=uri),
+                                            region=Region(startLine=1, startColumn=1),
+                                        )
                                     )
                                 )
                             ],
@@ -2848,15 +2860,19 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                             ruleId=vuln_id,
                             level=level,
                             message=Message(
-                                text=f"{title} {vuln_info.get('range', '*')}"
+                                root=Message1(
+                                    text=f"{title} {vuln_info.get('range', '*')}"
+                                )
                             ),
                             locations=[
                                 Location(
                                     physicalLocation=PhysicalLocation(
-                                        artifactLocation=ArtifactLocation(
-                                            uri=f"node_modules/{pkg_location}/package.json"
-                                        ),
-                                        region=Region(startLine=1, startColumn=1),
+                                        root=PhysicalLocation2(
+                                            artifactLocation=ArtifactLocation(
+                                                uri=f"node_modules/{pkg_location}/package.json"
+                                            ),
+                                            region=Region(startLine=1, startColumn=1),
+                                        )
                                     )
                                 )
                             ],

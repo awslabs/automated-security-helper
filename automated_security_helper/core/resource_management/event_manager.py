@@ -637,9 +637,9 @@ class EventSubscriptionManager:
         """
         subscription_ids = self._subscriptions_by_scan.get(scan_id, set())
         return [
-            self.get_subscription_info(sub_id)
+            info
             for sub_id in subscription_ids
-            if self.get_subscription_info(sub_id) is not None
+            if (info := self.get_subscription_info(sub_id)) is not None
         ]
 
     def get_subscriptions_by_type(self, event_type: str) -> List[Dict[str, Any]]:
@@ -653,9 +653,9 @@ class EventSubscriptionManager:
         """
         subscription_ids = self._subscriptions_by_type.get(event_type, set())
         return [
-            self.get_subscription_info(sub_id)
+            info
             for sub_id in subscription_ids
-            if self.get_subscription_info(sub_id) is not None
+            if (info := self.get_subscription_info(sub_id)) is not None
         ]
 
     def get_all_subscriptions(self) -> List[Dict[str, Any]]:
@@ -665,7 +665,9 @@ class EventSubscriptionManager:
             List of subscription information dictionaries
         """
         return [
-            self.get_subscription_info(sub_id) for sub_id in self._subscriptions.keys()
+            info
+            for sub_id in self._subscriptions.keys()
+            if (info := self.get_subscription_info(sub_id)) is not None
         ]
 
     def get_subscription_statistics(self) -> Dict[str, Any]:
@@ -775,14 +777,12 @@ class EventSubscriptionManager:
                 "is_healthy": is_healthy,
                 "details": {
                     "oldest_subscription": min(
-                        (sub.created_at for sub in self._subscriptions.values()),
-                        default=None,
+                        sub.created_at for sub in self._subscriptions.values()
                     ).isoformat()
                     if self._subscriptions
                     else None,
                     "newest_subscription": max(
-                        (sub.created_at for sub in self._subscriptions.values()),
-                        default=None,
+                        sub.created_at for sub in self._subscriptions.values()
                     ).isoformat()
                     if self._subscriptions
                     else None,

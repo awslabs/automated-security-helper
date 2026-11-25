@@ -964,7 +964,9 @@ class ASHScanOrchestrator(BaseModel):
                     active_ignore_paths(config.global_settings.ignore_paths),
                     ignore_suppressions=self.ignore_suppressions,
                 ),
-                color_system=self.color_system,  # type: ignore[arg-type]
+                # The field is a free string for the CLI; the engine takes rich's
+                # literal names and rich rejects any other.
+                color_system=self.color_system,  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
                 verbose=self.verbose,
                 debug=self.debug,
                 python_based_plugins_only=self.python_based_plugins_only,
@@ -1538,17 +1540,24 @@ class ASHScanOrchestrator(BaseModel):
                 dangling one.
         """
         self._refuse_linked_output_dir()
-        refuse_a_linked_reports_dir(self.output_dir.joinpath("reports"))
+        # initialize() resolves the output directory (the source directory's
+        # ``.ash/ash_output`` by default) before this runs.
+        if self.output_dir is None:
+            raise ASHValidationError(
+                "The output directory is not set; initialize() sets it first."
+            )
+        output_dir: Path = self.output_dir
+        refuse_a_linked_reports_dir(output_dir.joinpath("reports"))
         try:
             # Create output directory if it doesn't exist
             ASH_LOGGER.debug(
-                f"Creating output directory if it does not exist: {self.output_dir}"
+                f"Creating output directory if it does not exist: {output_dir}"
             )
-            self.output_dir.mkdir(parents=True, exist_ok=True)
+            output_dir.mkdir(parents=True, exist_ok=True)
             # Inside the scanned tree, a .gitignore keeps ASH's output from a tool
             # that reads the tree and honors one, such as snyk code test, which
             # uploads what it reads. Before any scanner starts.
-            ignore_output_dir_in_git(self.source_dir, self.output_dir)
+            ignore_output_dir_in_git(self.source_dir, output_dir)
 
             # If we're using existing results, only ensure the reports directory
             # exists. A plain mkdir: a link there was refused at the top of this
@@ -1559,12 +1568,12 @@ class ASHScanOrchestrator(BaseModel):
             # falling through to the branch that clears the working directories
             # and then reporting a scan that never ran.
             if self.existing_results_path is not None:
-                self.output_dir.joinpath("reports").mkdir(parents=True, exist_ok=True)
+                output_dir.joinpath("reports").mkdir(parents=True, exist_ok=True)
             else:
                 # Otherwise, set up all working directories. initialize has made
                 # sure git tracks nothing in them (_refuse_committed_results_paths).
                 for working_dir in OUTPUT_WORKING_DIRS:
-                    path_working_dir = self.output_dir.joinpath(working_dir)
+                    path_working_dir = output_dir.joinpath(working_dir)
                     if path_working_dir.exists() and self.existing_results_path is None:
                         ASH_LOGGER.verbose(
                             f"Cleaning up working directory from previous run: {path_working_dir.as_posix()}"

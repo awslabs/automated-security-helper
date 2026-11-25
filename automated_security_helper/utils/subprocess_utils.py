@@ -91,7 +91,7 @@ from typing import (
     Union,
 )
 
-from typing_extensions import Self
+from typing_extensions import Self, TypeGuard
 
 from automated_security_helper.core.cancellation import (
     CancelEvent,
@@ -665,7 +665,7 @@ def flagged_returncode(response: Any) -> Optional[int]:
     return None
 
 
-def is_exit_code(value: Any) -> bool:
+def is_exit_code(value: Any) -> TypeGuard[int]:
     """Whether *value* is a code a process returned: an int, and not a bool.
 
     bool is an int subclass, so a response whose returncode is False reads

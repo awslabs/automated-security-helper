@@ -788,7 +788,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         """
         if self.dependency_unavailable_reason:
             return False
-        found = find_executable(self.command)
+        found = find_executable(self._tool_command())
         if found is None and self.command:
             # A copy inside the scanned tree was refused: say so in the MISSING row,
             # with the path and how to allow it, rather than "not installed".
@@ -1303,7 +1303,8 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             options: Optional scanner-specific options
         """
         self.start_time = datetime.now(timezone.utc)
-        self.results_dir.mkdir(parents=True, exist_ok=True)
+        if self.results_dir is not None:
+            self.results_dir.mkdir(parents=True, exist_ok=True)
 
         # The config swap FIRST, before the dependency check reads anything the
         # config decides (tool_version builds the requirement). It used to sit
@@ -1697,7 +1698,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         sarif_report: SarifReport,
         final_args: List[str],
         target: "Path",
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Return additional Invocation kwargs (e.g. ``properties``).
 
         Default returns an empty dict. Override to attach scanner-specific
@@ -1810,7 +1811,10 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             exitCode=self.exit_code,
             exitCodeDescription="\n".join(self.errors) if self.errors else "",
             workingDirectory=working_dir,
-            **extras,
+            # A scanner's extras name Invocation fields by key (properties,
+            # toolExecutionNotifications, ...); a dict unpack is checked against
+            # every typed field at once, which no value type satisfies.
+            **extras,  # ty: ignore[invalid-argument-type]
         )
         ash_record._tool_said_unsuccessful = tool_said_unsuccessful
         sarif_report.runs[0].invocations = [
@@ -2619,7 +2623,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                     text,
                     read.values,
                     plugin_inputs=self._uv_run_inputs_for_records(),
-                    tool_name=self.command,
+                    tool_name=self._tool_command(),
                     limit=None,
                 )
             except Exception:  # noqa: BLE001 -- the error being reported outranks it
@@ -2887,7 +2891,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                             raw,
                             values,
                             plugin_inputs=inputs,
-                            tool_name=self.command,
+                            tool_name=self._tool_command(),
                             limit=None,
                         )
                 else:
@@ -3103,10 +3107,10 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             global_ignore_paths = []
         try:
             return self.scan(
-                target=target,
-                target_type=target_type,
-                global_ignore_paths=global_ignore_paths,
-                config=config,
+                target,
+                target_type,
+                global_ignore_paths,
+                config,
                 *args,
                 **kwargs,
             )

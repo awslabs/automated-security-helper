@@ -1569,7 +1569,7 @@ class PluginBase(UVToolMixin, BaseModel):
                         stderr_text,
                         values,
                         plugin_inputs=plugin_inputs,
-                        tool_name=self.command,
+                        tool_name=self._tool_command(),
                         limit=None,
                     )
                 else:
@@ -2212,7 +2212,7 @@ class PluginBase(UVToolMixin, BaseModel):
 
         # Set once a run returned a response, so the handler below can tell an
         # exception from before the command ran from one while reading its result.
-        response: Dict | None = None
+        response: Optional[Dict] = None
         # The recorders already run for this response (_record_response), so none
         # runs twice, in the handler below included.
         invoked: Set[str] = set()
@@ -2227,7 +2227,7 @@ class PluginBase(UVToolMixin, BaseModel):
         stderr_log_before = _log_identity(stderr_log)
         try:
             # Use provided cwd or fall back to context.source_dir
-            working_dir = cwd if cwd is not None else Path(self.context.source_dir)
+            working_dir = Path(cwd if cwd is not None else self.context.source_dir)
 
             # Offline, the tool's own update, version and telemetry checks are
             # turned off in the environment it gets (utils/offline_tool_env.py).
