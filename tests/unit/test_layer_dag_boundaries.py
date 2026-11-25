@@ -76,7 +76,11 @@ PLUGIN_IMPORTER = "cli"
 
 KNOWN_VIOLATIONS: Dict[Tuple[str, str], int] = {
     ("base", "config"): 10,
-    ("base", "core"): 11,
+    # 11 -> 16: the container-image asset targets read core.asset (Asset, AssetKind,
+    # ImageLocator) and core.container_engine from plugin_context, the scanner
+    # operational facets and the scanner base. The types live in core; moving them
+    # to the contract layer is the way to retire these rows.
+    ("base", "core"): 16,
     ("base", "models"): 5,
     ("base", "plugins"): 5,
     ("base", "utils"): 90,
@@ -90,15 +94,23 @@ KNOWN_VIOLATIONS: Dict[Tuple[str, str], int] = {
     # config file is client-supplied) now reads the rule where it moved to, in config.
     # 69 -> 70: npm_audit_scanner reads config.default_config (landed on main with
     # the flat-frame/facets work this branch was rebased onto).
-    ("plugin_modules", "config"): 70,
-    ("plugin_modules", "core"): 70,
+    # 70 -> 73: the sdist lock harvester reads config.path_trust,
+    # config.operator_only_options and config.sandbox_grants (the same trust checks
+    # the other converters take), and the grep scanner base reads config.mcp_sandbox.
+    ("plugin_modules", "config"): 73,
+    # 70 -> 75: the sdist lock harvester (core.constants, core.exceptions), the MCP
+    # config scanner (core.enums), cdk-nag (core.exceptions) and trivy
+    # (core.container_engine) read core types the way the other plugins do.
+    ("plugin_modules", "core"): 75,
     ("plugin_modules", "interactions"): 2,
     ("plugin_modules", "workspace"): 1,
     ("schemas", "config"): 2,
     ("schemas", "models"): 2,
     ("schemas", "utils"): 8,
     ("utils", "config"): 27,
-    ("utils", "core"): 35,
+    # 35 -> 39: image_attribution and image_tool_targets read core.asset and
+    # core.container_engine, and sdist_harvest reads core.constants.xdg_directory.
+    ("utils", "core"): 39,
     # 2 -> 3: utils/scan_history reads interactions.run_ash_scan (landed on main
     # with the scan trend/history work this branch was rebased onto).
     ("utils", "interactions"): 3,
