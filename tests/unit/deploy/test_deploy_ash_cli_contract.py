@@ -273,6 +273,7 @@ _COMMANDS = frozenset(
         "plugin",
         "report",
         "scan",
+        "trend",
     }
 )
 

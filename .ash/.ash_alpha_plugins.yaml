@@ -303,8 +303,8 @@ global_settings:
       reason: "A docstring bullet naming /etc/passwd as an example of the absolute archive paths delivery REJECTS; prose, not a read."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/utils/path_matching.py
-      line_start: 268
-      line_end: 268
+      line_start: 317
+      line_end: 317
       reason: "A docstring naming .env and .npmrc as dotfiles the detect-secrets scan set must keep; prose, not a read."
     # === ferret-scan API_KEY_OR_SECRET, unquoted-assignment false positives ===
     # ferret-scan v2.3.3 added unquoted keyword-assignment detection to the SECRETS
@@ -1488,13 +1488,13 @@ global_settings:
       reason: "'.env' is the dotfile stem whose stage-suffixed variants (.env.local) the converter admits for scanning; a name in a table, not a read."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/plugin_modules/ash_builtin/scanners/npm_audit_scanner.py
-      line_start: 793
-      line_end: 793
+      line_start: 792
+      line_end: 792
       reason: "A docstring naming .npmrc to say why the version probe's directory holds its own package.json; nothing here reads the file."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/plugin_modules/ash_builtin/scanners/npm_audit_scanner.py
-      line_start: 795
-      line_end: 795
+      line_start: 794
+      line_end: 794
       reason: "A docstring naming .npmrc to say why the version probe's directory holds its own package.json; nothing here reads the file."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/utils/package_manager_child.py

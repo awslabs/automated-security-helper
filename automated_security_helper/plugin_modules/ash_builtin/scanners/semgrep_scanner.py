@@ -232,10 +232,12 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
             "opengrep fork is the build that emits one",
         ),
         fix_available=FacetDecl(
-            state=FacetState.DROPPED,
-            native_field="results[].fixes",
-            reason="SARIF fixes survive the report model and die at the flat "
-            "reader, which reads only fix_available",
+            state=FacetState.NA,
+            reason="semgrep 1.187.0's SARIF has no fixes key even for a rule "
+            "that carries `fix:` (tests/test_data/scanners/semgrep/captured/"
+            "semgrep-1.187.0-fix-rule.sarif: result keys are exactly "
+            "fingerprints, locations, message, properties, ruleId), so there "
+            "is nothing in the SARIF ASH reads to map",
         ),
         remediation_text=FacetDecl(
             state=FacetState.NA,
@@ -247,18 +249,19 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
             native_field="results[].locations[].physicalLocation.region.snippet.text",
         ),
         references=FacetDecl(
-            state=FacetState.DROPPED,
-            native_field="tool.driver.rules[].helpUri (registry rules; a "
-            "local rule carries none)",
-            reason="rule-level only: the flat reader takes references from "
-            "result relatedLocations, so the help link is discarded today",
+            state=FacetState.UNCONFIRMED,
+            reason="UNCONFIRMED: the committed captures are local-rule runs, "
+            "whose SARIF rules carry no helpUri. A registry rule's helpUri "
+            "is read into the flat references by the shared rule read "
+            "(FlatVulnerability.from_sarif_result); redeclare MAPPED when a "
+            "registry-rule capture is committed (the corpus gate lists this "
+            "cell as a fixture owed until then)",
         ),
         tags=FacetDecl(
-            state=FacetState.DROPPED,
-            native_field="tool.driver.rules[].properties.tags",
-            reason="rule-level only: the flat reader takes tags from result "
-            "properties, so the rule tags are discarded today (they still "
-            "feed the CWE read)",
+            state=FacetState.MAPPED,
+            native_field="tool.driver.rules[].properties.tags, read into the "
+            "flat tags when the result carries none (they also feed the CWE "
+            "read)",
         ),
         extras=FacetDecl(
             state=FacetState.MAPPED,

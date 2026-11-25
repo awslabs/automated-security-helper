@@ -47,10 +47,16 @@ from automated_security_helper.utils.redacted_model import (
 )
 from automated_security_helper.utils.scanner_names import SCANNER_TAG_NAMES
 from automated_security_helper.utils.severity_ladder import (
+    SEVERITY_COUNT_KEYS,
     SEVERITY_THRESHOLDS,
+    SUPPRESSED_COUNT_KEY,
     resolve_scanner_threshold,
     severity_fails_threshold,
 )
+
+#: Every field of a ``ScannerSeverityCount``: the suppressed bucket, then the five
+#: severities. Spelled once from the ladder; the dict-result sums below walk it.
+_COUNT_FIELDS = (SUPPRESSED_COUNT_KEY, *SEVERITY_COUNT_KEYS)
 
 #: The levels a target report can record it was graded against
 #: (``ScanResultsContainer.scanner_severity_threshold``, written by the executor).
@@ -562,7 +568,7 @@ class ScannerStatisticsCalculator:
         dict_counts = ScannerStatisticsCalculator._dict_result_counts(
             asharp_model, scanner_name
         )
-        for field in ("suppressed", "critical", "high", "medium", "low", "info"):
+        for field in _COUNT_FIELDS:
             setattr(counts, field, getattr(counts, field) + getattr(dict_counts, field))
 
         return (
@@ -623,7 +629,7 @@ class ScannerStatisticsCalculator:
                 counts = ScannerSeverityCount.model_validate(report["severity_counts"])
             except ValueError:
                 continue
-            for field in ("suppressed", "critical", "high", "medium", "low", "info"):
+            for field in _COUNT_FIELDS:
                 setattr(total, field, getattr(total, field) + getattr(counts, field))
         return total
 
@@ -2164,8 +2170,7 @@ class ScannerStatisticsCalculator:
                 asharp_model, scanner_name
             )
             dict_finding_count += sum(
-                getattr(dict_counts, field)
-                for field in ("suppressed", "critical", "high", "medium", "low", "info")
+                getattr(dict_counts, field) for field in _COUNT_FIELDS
             )
 
         # Compare counts

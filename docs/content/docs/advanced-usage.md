@@ -255,7 +255,11 @@ scanners need more:
 - npm-audit needs Node.js and npm, and yarn or pnpm to audit a `yarn.lock` or a
   `pnpm-lock.yaml`. ASH installs none of them.
 - cfn-nag is a Ruby gem. It needs RubyGems and a C compiler (on Windows, a Ruby
-  DevKit) before `ash dependencies install --tool cfn-nag` can install it.
+  DevKit) before `ash dependencies install --tool cfn-nag` can install it. Run it
+  on a Ruby built from source or from your distribution's package (3.1, 3.3 and
+  3.4 were tried). On a Homebrew portable-ruby build (3.3.8 and 3.4.5 were tried)
+  cfn-nag 0.8.10 cannot load its YAML parser, so every template is reported as one
+  ASH could not evaluate.
 
 If you do not need a scanner, leave it out, as in `ash --exclude-scanners npm-audit`.
 It is then recorded SKIPPED, which does not make the scan incomplete.

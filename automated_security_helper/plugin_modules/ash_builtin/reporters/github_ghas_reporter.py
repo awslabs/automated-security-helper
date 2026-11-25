@@ -83,7 +83,8 @@ from automated_security_helper.base.reporter_plugin import (
     ReporterWorkspaceBehaviour,
 )
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
-from automated_security_helper.utils.frame_text import unwire, wire
+from automated_security_helper.utils.frame_ops import stable_top
+from automated_security_helper.utils.frame_text import unwire, wire, wire_cell
 from automated_security_helper.utils.get_ash_version import get_ash_version
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.sarif_utils import (
@@ -252,7 +253,7 @@ def _wire_id(rule_id: Optional[str]) -> Optional[str]:
     """A rule id as a frame cell: null for none or empty, else the id through
     :func:`wire` (a scanner's rule id can hold a lone surrogate, which a UTF-8
     string column refuses)."""
-    return wire(str(rule_id)) if rule_id else None
+    return wire_cell(rule_id or None)
 
 
 def _min_severity_by_rule(pairs: Iterable[Tuple[Optional[str], str]]) -> Dict[str, str]:
@@ -301,7 +302,7 @@ def _most_severe(
         },
         schema={"i": pl.Int64, "rank": pl.Int64},
     )
-    kept = frame.sort("rank", maintain_order=True).head(count)["i"].to_list()
+    kept = stable_top(frame, "rank", count)["i"].to_list()
     return [graded[index] for index in kept]
 
 
@@ -347,7 +348,7 @@ def _named_first(
         {"i": list(range(len(rule_ids))), "rule_id": [wire(r) for r in rule_ids]},
         schema={"i": pl.Int64, "rule_id": pl.String},
     ).with_columns(named=pl.col("rule_id").is_in(named_ids))
-    ordered = frame.sort("named", descending=True, maintain_order=True)
+    ordered = stable_top(frame, "named", None, descending=True)
     return ordered["i"].to_list(), int(frame["named"].sum())
 
 

@@ -24,6 +24,7 @@ from automated_security_helper.plugin_modules.ash_aws_plugins.aws_utils import (
 from automated_security_helper.utils.error_text import text_without_values
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.redacted_model import value_tuple
+from automated_security_helper.utils.severity_ladder import SEVERITY_COUNT_KEYS
 
 # Bedrock reports a rejected inference parameter by name, e.g.
 # "The model returned the following errors: `temperature` is deprecated for this
@@ -537,8 +538,7 @@ class BedrockPromptBuilder:
 
     #: The severities from the most severe down, the order a sample is cut in.
     _SEVERITY_ORDER = {
-        severity: rank
-        for rank, severity in enumerate(("critical", "high", "medium", "low", "info"))
+        severity: rank for rank, severity in enumerate(SEVERITY_COUNT_KEYS)
     }
 
     def most_severe_first(self, findings: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -931,7 +931,7 @@ class BedrockPromptBuilder:
         from automated_security_helper.utils.sarif_utils import _resolve_result_severity
 
         severity = str(finding.get("severity") or "").lower()
-        if severity in ("critical", "high", "medium", "low", "info"):
+        if severity in SEVERITY_COUNT_KEYS:
             return severity
         return _resolve_result_severity(
             SimpleNamespace(

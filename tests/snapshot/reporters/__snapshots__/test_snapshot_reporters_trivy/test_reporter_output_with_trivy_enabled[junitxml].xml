@@ -2,6 +2,7 @@
 package_name: lodash
 package_version: 4.17.20
 package_path: node_modules/lodash
+fix_available: True
 issue_severity: HIGH
 scanner_name: trivy
 scanner_version: 0.69.3
@@ -10,6 +11,7 @@ ash_occurrence_context: {'version': 1, 'locations': [{'bases': {'entries': [{'id
 package_name: lodash
 package_version: 4.17.20
 package_path: node_modules/lodash
+fix_available: True
 issue_severity: HIGH
 scanner_name: trivy
 scanner_version: 0.69.3
@@ -18,6 +20,7 @@ ash_occurrence_context: {'version': 1, 'locations': [{'bases': {'entries': [{'id
 package_name: lodash
 package_version: 4.17.20
 package_path: node_modules/lodash
+fix_available: True
 issue_severity: MEDIUM
 scanner_name: trivy
 scanner_version: 0.69.3
@@ -26,6 +29,7 @@ ash_occurrence_context: {'version': 1, 'locations': [{'bases': {'entries': [{'id
 package_name: lodash
 package_version: 4.17.20
 package_path: node_modules/lodash
+fix_available: True
 issue_severity: MEDIUM
 scanner_name: trivy
 scanner_version: 0.69.3
@@ -34,6 +38,7 @@ ash_occurrence_context: {'version': 1, 'locations': [{'bases': {'entries': [{'id
 package_name: lodash
 package_version: 4.17.20
 package_path: node_modules/lodash
+fix_available: True
 issue_severity: MEDIUM
 scanner_name: trivy
 scanner_version: 0.69.3
@@ -41,6 +46,7 @@ scanner_details: {'tool_name': 'trivy', 'tool_version': '0.69.3', 'tool_invocati
 ash_occurrence_context: {'version': 1, 'locations': [{'bases': {'entries': [{'id': 'ROOTPATH', 'location': {'uri': 'file:///src/'}}], 'stop': 'end'}, 'location': {'artifact': {'uri': 'package-lock.json', 'uriBaseId': 'ROOTPATH'}, 'region': {'startLine': 13, 'startColumn': 1, 'endLine': 17, 'endColumn': 1}}}], 'rule_index': 4, 'component': {'name': 'trivy'}, 'resolved_rule': {'id': 'CVE-2026-2950'}, 'message': {'state': 'resolved', 'text': 'Package: lodash\nInstalled Version: 4.17.20\nVulnerability CVE-2026-2950\nSeverity: MEDIUM\nFixed Version: 4.18.0\nLink: [CVE-2026-2950](https://avd.aquasec.com/nvd/cve-2026-2950)'}}</system-out></testcase><testcase name="Package: requests&#10;Installed Version: 2.19.1&#10;Vulnerability CVE-2018-18074&#10;Severity: HIGH&#10;Fixed Version: 2.20.0&#10;Link: [CVE-2018-18074](https://avd.aquasec.com/nvd/cve-2018-18074) [CVE-2018-18074]" classname="CVE-2018-18074"><error message="Package: requests&#10;Installed Version: 2.19.1&#10;Vulnerability CVE-2018-18074&#10;Severity: HIGH&#10;Fixed Version: 2.20.0&#10;Link: [CVE-2018-18074](https://avd.aquasec.com/nvd/cve-2018-18074)" type="error" /><system-out>tags: ['trivy']
 package_name: requests
 package_version: 2.19.1
+fix_available: True
 issue_severity: HIGH
 scanner_name: trivy
 scanner_version: 0.69.3
@@ -48,6 +54,7 @@ scanner_details: {'tool_name': 'trivy', 'tool_version': '0.69.3', 'tool_invocati
 ash_occurrence_context: {'version': 1, 'locations': [{'bases': {'entries': [{'id': 'ROOTPATH', 'location': {'uri': 'file:///src/'}}], 'stop': 'end'}, 'location': {'artifact': {'uri': 'requirements.txt', 'uriBaseId': 'ROOTPATH'}, 'region': {'startLine': 2, 'startColumn': 1, 'endLine': 2, 'endColumn': 1}}}], 'rule_index': 5, 'component': {'name': 'trivy'}, 'resolved_rule': {'id': 'CVE-2018-18074'}, 'message': {'state': 'resolved', 'text': 'Package: requests\nInstalled Version: 2.19.1\nVulnerability CVE-2018-18074\nSeverity: HIGH\nFixed Version: 2.20.0\nLink: [CVE-2018-18074](https://avd.aquasec.com/nvd/cve-2018-18074)'}}</system-out></testcase><testcase name="Package: requests&#10;Installed Version: 2.19.1&#10;Vulnerability CVE-2023-32681&#10;Severity: MEDIUM&#10;Fixed Version: 2.31.0&#10;Link: [CVE-2023-32681](https://avd.aquasec.com/nvd/cve-2023-32681) [CVE-2023-32681]" classname="CVE-2023-32681"><error message="Package: requests&#10;Installed Version: 2.19.1&#10;Vulnerability CVE-2023-32681&#10;Severity: MEDIUM&#10;Fixed Version: 2.31.0&#10;Link: [CVE-2023-32681](https://avd.aquasec.com/nvd/cve-2023-32681)" type="warning" /><system-out>tags: ['trivy']
 package_name: requests
 package_version: 2.19.1
+fix_available: True
 issue_severity: MEDIUM
 scanner_name: trivy
 scanner_version: 0.69.3
@@ -55,6 +62,7 @@ scanner_details: {'tool_name': 'trivy', 'tool_version': '0.69.3', 'tool_invocati
 ash_occurrence_context: {'version': 1, 'locations': [{'bases': {'entries': [{'id': 'ROOTPATH', 'location': {'uri': 'file:///src/'}}], 'stop': 'end'}, 'location': {'artifact': {'uri': 'requirements.txt', 'uriBaseId': 'ROOTPATH'}, 'region': {'startLine': 2, 'startColumn': 1, 'endLine': 2, 'endColumn': 1}}}], 'rule_index': 6, 'component': {'name': 'trivy'}, 'resolved_rule': {'id': 'CVE-2023-32681'}, 'message': {'state': 'resolved', 'text': 'Package: requests\nInstalled Version: 2.19.1\nVulnerability CVE-2023-32681\nSeverity: MEDIUM\nFixed Version: 2.31.0\nLink: [CVE-2023-32681](https://avd.aquasec.com/nvd/cve-2023-32681)'}}</system-out></testcase><testcase name="Package: requests&#10;Installed Version: 2.19.1&#10;Vulnerability CVE-2024-35195&#10;Severity: MEDIUM&#10;Fixed Version: 2.32.0&#10;Link: [CVE-2024-35195](https://avd.aquasec.com/nvd/cve-2024-35195) [CVE-2024-35195]" classname="CVE-2024-35195"><error message="Package: requests&#10;Installed Version: 2.19.1&#10;Vulnerability CVE-2024-35195&#10;Severity: MEDIUM&#10;Fixed Version: 2.32.0&#10;Link: [CVE-2024-35195](https://avd.aquasec.com/nvd/cve-2024-35195)" type="warning" /><system-out>tags: ['trivy']
 package_name: requests
 package_version: 2.19.1
+fix_available: True
 issue_severity: MEDIUM
 scanner_name: trivy
 scanner_version: 0.69.3
@@ -62,6 +70,7 @@ scanner_details: {'tool_name': 'trivy', 'tool_version': '0.69.3', 'tool_invocati
 ash_occurrence_context: {'version': 1, 'locations': [{'bases': {'entries': [{'id': 'ROOTPATH', 'location': {'uri': 'file:///src/'}}], 'stop': 'end'}, 'location': {'artifact': {'uri': 'requirements.txt', 'uriBaseId': 'ROOTPATH'}, 'region': {'startLine': 2, 'startColumn': 1, 'endLine': 2, 'endColumn': 1}}}], 'rule_index': 7, 'component': {'name': 'trivy'}, 'resolved_rule': {'id': 'CVE-2024-35195'}, 'message': {'state': 'resolved', 'text': 'Package: requests\nInstalled Version: 2.19.1\nVulnerability CVE-2024-35195\nSeverity: MEDIUM\nFixed Version: 2.32.0\nLink: [CVE-2024-35195](https://avd.aquasec.com/nvd/cve-2024-35195)'}}</system-out></testcase><testcase name="Package: requests&#10;Installed Version: 2.19.1&#10;Vulnerability CVE-2024-47081&#10;Severity: MEDIUM&#10;Fixed Version: 2.32.4&#10;Link: [CVE-2024-47081](https://avd.aquasec.com/nvd/cve-2024-47081) [CVE-2024-47081]" classname="CVE-2024-47081"><error message="Package: requests&#10;Installed Version: 2.19.1&#10;Vulnerability CVE-2024-47081&#10;Severity: MEDIUM&#10;Fixed Version: 2.32.4&#10;Link: [CVE-2024-47081](https://avd.aquasec.com/nvd/cve-2024-47081)" type="warning" /><system-out>tags: ['trivy']
 package_name: requests
 package_version: 2.19.1
+fix_available: True
 issue_severity: MEDIUM
 scanner_name: trivy
 scanner_version: 0.69.3
@@ -69,6 +78,7 @@ scanner_details: {'tool_name': 'trivy', 'tool_version': '0.69.3', 'tool_invocati
 ash_occurrence_context: {'version': 1, 'locations': [{'bases': {'entries': [{'id': 'ROOTPATH', 'location': {'uri': 'file:///src/'}}], 'stop': 'end'}, 'location': {'artifact': {'uri': 'requirements.txt', 'uriBaseId': 'ROOTPATH'}, 'region': {'startLine': 2, 'startColumn': 1, 'endLine': 2, 'endColumn': 1}}}], 'rule_index': 8, 'component': {'name': 'trivy'}, 'resolved_rule': {'id': 'CVE-2024-47081'}, 'message': {'state': 'resolved', 'text': 'Package: requests\nInstalled Version: 2.19.1\nVulnerability CVE-2024-47081\nSeverity: MEDIUM\nFixed Version: 2.32.4\nLink: [CVE-2024-47081](https://avd.aquasec.com/nvd/cve-2024-47081)'}}</system-out></testcase><testcase name="Package: requests&#10;Installed Version: 2.19.1&#10;Vulnerability CVE-2026-25645&#10;Severity: MEDIUM&#10;Fixed Version: 2.33.0&#10;Link: [CVE-2026-25645](https://avd.aquasec.com/nvd/cve-2026-25645) [CVE-2026-25645]" classname="CVE-2026-25645"><error message="Package: requests&#10;Installed Version: 2.19.1&#10;Vulnerability CVE-2026-25645&#10;Severity: MEDIUM&#10;Fixed Version: 2.33.0&#10;Link: [CVE-2026-25645](https://avd.aquasec.com/nvd/cve-2026-25645)" type="warning" /><system-out>tags: ['trivy']
 package_name: requests
 package_version: 2.19.1
+fix_available: True
 issue_severity: MEDIUM
 scanner_name: trivy
 scanner_version: 0.69.3

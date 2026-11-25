@@ -1092,52 +1092,36 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
 
     #: The facets register row (base/scanner_facets.py). Declaration only: no
-    #: behavior changes. No tool SARIF fixture is committed
-    #: (tests/test_data/scanners/ferret-scan holds only the inputs) and the
-    #: tests synthesize the SARIF shape by hand, so every cell the survey
-    #: could only read off ferret-scan's own output is declared n/a with the
-    #: run that would settle it, per the register's unread-source rule.
+    #: behavior changes. The cells below are observed by the facets corpus
+    #: gate over tests/test_data/scanners/ferret-scan/captured, a
+    #: `ferret-scan --format sarif` run (2.5.3) over the committed sample.txt,
+    #: through the adapter's own base-relative URI resolution.
     facets: ClassVar[ScannerFacets] = ScannerFacets(
         rule_id=FacetDecl(
-            state=FacetState.NA,
-            reason='output not read: the survey reads result "ruleId" off '
-            "the tests' hand-written SARIF shape, and no ferret-scan SARIF "
-            "from a real run is committed; one `ferret-scan --format sarif` "
-            "run over the committed samples would settle it",
+            state=FacetState.MAPPED,
+            native_field='result "ruleId" (the detected data type, e.g. CREDIT_CARD)',
         ),
         severity=FacetDecl(
-            state=FacetState.NA,
-            reason='output not read: the survey reads result "level" (the '
-            "tool's own rating) off the tests' hand-written SARIF shape, and "
-            "no ferret-scan SARIF from a real run is committed; one "
-            "`ferret-scan --format sarif` run would settle it",
+            state=FacetState.MAPPED,
+            native_field='result "level" (the tool\'s own rating)',
         ),
         file_path=FacetDecl(
-            state=FacetState.NA,
-            reason="output not read: the survey reads locations[]."
-            "physicalLocation.artifactLocation.uri (uriBaseId resolved by "
-            "the adapter) off the tests' hand-written SARIF shape, and no "
-            "ferret-scan SARIF from a real run is committed; one "
-            "`ferret-scan --format sarif` run would settle it",
+            state=FacetState.MAPPED,
+            native_field="locations[].physicalLocation.artifactLocation.uri "
+            "(uriBaseId resolved by the adapter)",
         ),
         line_range=FacetDecl(
-            state=FacetState.NA,
-            reason="output not read: the survey reads region.startLine / "
-            "region.endLine off the tests' hand-written SARIF shape, and no "
-            "ferret-scan SARIF from a real run is committed; one "
-            "`ferret-scan --format sarif` run would settle it",
+            state=FacetState.MAPPED,
+            native_field="region.startLine",
         ),
         column=FacetDecl(
             state=FacetState.MAPPED,
             native_field="region.startColumn / region.endColumn",
         ),
         message=FacetDecl(
-            state=FacetState.NA,
-            reason='output not read: the survey reads result "message.text" '
-            "(matched values masked by the shared secret-masking pass "
-            "downstream) off the tests' hand-written SARIF shape, and no "
-            "ferret-scan SARIF from a real run is committed; one "
-            "`ferret-scan --format sarif` run would settle it",
+            state=FacetState.MAPPED,
+            native_field='result "message.text" (matched values masked by the '
+            "shared secret-masking pass downstream)",
         ),
         resource_id=FacetDecl(
             state=FacetState.NA,
@@ -1172,9 +1156,8 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
         ),
         fingerprints=FacetDecl(
             state=FacetState.NA,
-            reason="UNCONFIRMED: no ferret-scan SARIF fixture is committed; "
-            "one `ferret-scan --format sarif` run over a sample with a "
-            "finding settles whether partialFingerprints is emitted",
+            reason="the captured 2.5.3 SARIF (108 results over sample.txt) "
+            "carries no fingerprints or partialFingerprints on any result",
         ),
         fix_available=FacetDecl(
             state=FacetState.NA,
@@ -1186,15 +1169,17 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
         ),
         snippet=FacetDecl(
             state=FacetState.NA,
-            reason="output not read: the survey reads region.snippet.text "
-            "(matched values masked by the shared secret-masking pass "
-            "downstream) off the tests' hand-written SARIF shape, and no "
-            "ferret-scan SARIF from a real run is committed; one "
-            "`ferret-scan --format sarif` run would settle it",
+            reason="the captured 2.5.3 SARIF regions carry startLine, "
+            "startColumn and endColumn and no snippet, and the flat "
+            "snippet column is empty across all 108 results",
         ),
         references=FacetDecl(
-            state=FacetState.NA,
-            reason="ferret-scan results carry no reference URLs",
+            state=FacetState.MAPPED,
+            native_field="tool.driver.rules[].helpUri, read into the flat "
+            "references by the shared rule read when the result carries "
+            "none of its own",
+            reason="ferret-scan results carry no reference URLs of their own; "
+            "the rule-level helpUri is what the flat row carries",
         ),
         tags=FacetDecl(
             state=FacetState.NA,
@@ -1259,8 +1244,10 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
                 none_reason="no tool-side silencing surface was surveyed; the adapter drafts a suppression reason into the finding's details for the ASH-side suppression",
             ),
             identity=opsf.IdentityFacet(
-                fingerprint_class=opsf.FingerprintClass.UNCONFIRMED,
-                note="no fixture read classifies ferret's fingerprints; reads as positional-only until one does",
+                fingerprint_class=opsf.FingerprintClass.POSITIONAL_ONLY,
+                note="read at tests/test_data/scanners/ferret-scan/captured/ferret-scan-2.5.3-sample-txt.sarif: "
+                "no result carries fingerprints or partialFingerprints, so identity is file and line "
+                "through the shared floor",
             ),
             extensibility=opsf.ExtensibilityFacet(
                 custom_rules=opsf.CustomRules.NONE,

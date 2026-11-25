@@ -1258,13 +1258,23 @@ def _wire(gate, monkeypatch, tmp_path, planted_label=None, raises=False):
     return planted_line, calls, expected_args
 
 
+# The three wiring tests below run the gate with --serial. They assert HOW main()
+# invokes each check -- once, in this process, with the gate's corpus and root --
+# through a spy dict the stubs append to, and the default mode runs the checks in
+# forked workers, where the stubs run but their appends never reach this process's
+# dict. The wiring they pin is the registry's, identical in both modes; that the
+# parallel mode reports the same labels, findings and exit codes as --serial is
+# pinned on the real tree and on synthetic registries by
+# tests/unit/test_verify_docs_freshness_parallel.py.
+
+
 @pytest.mark.unit
 def test_the_gate_passes_when_every_check_is_silent(
     gate, monkeypatch, tmp_path, capsys
 ):
     """Control: with nothing to report, every label passes and the gate exits 0."""
     _planted, calls, expected_args = _wire(gate, monkeypatch, tmp_path)
-    assert gate.main([]) == 0
+    assert gate.main(["--serial"]) == 0
     output = capsys.readouterr().out
     report = _gate_report(output)
     registered = _registered_check_names()
@@ -1285,7 +1295,9 @@ def test_a_finding_fails_the_gate_under_its_own_label(
     layer, name = GATE_WIRING[label]
     planted_line, calls, expected_args = _wire(gate, monkeypatch, tmp_path, label)
 
-    assert gate.main([]) == 1, f"a finding from {layer}.{name} did not fail the gate"
+    assert gate.main(["--serial"]) == 1, (
+        f"a finding from {layer}.{name} did not fail the gate"
+    )
     output = capsys.readouterr().out
     report = _gate_report(output)
     assert report.get(label) == ("FAIL", [planted_line]), (
@@ -1323,7 +1335,7 @@ def test_a_check_that_raises_fails_the_gate_under_its_own_label(
         gate, monkeypatch, tmp_path, label, raises=True
     )
 
-    assert gate.main([]) == 2, (
+    assert gate.main(["--serial"]) == 2, (
         f"{layer}.{name} raising did not fail the gate as not run"
     )
     output = capsys.readouterr().out

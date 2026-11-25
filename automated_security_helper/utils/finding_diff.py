@@ -156,33 +156,35 @@ def fallback_key(finding: FlatVulnerability) -> tuple[Any, ...] | None:
     )
 
 
-def _wire(text: str | None) -> str | None:
-    """*text* as a string polars can hold, with its equality and its order kept.
-
-    Polars strings are UTF-8, so a lone surrogate (a path ``os.fsdecode`` made
-    from undecodable bytes reaches the key through ``canonical``) cannot enter a
-    frame. The UTF-8 bytes of the text, surrogates passed through, read as Latin-1
-    are one-to-one with the text, and sorting them sorts as the text's code
-    points do.
-    """
-    return wire(text)
-
-
+#: One scan's side of the match, a column per name. Where a column is not the
+#: bare model field of the same name, it says so in its name, so a reader of a
+#: join key is not misled:
+#:
+#: - ``identity_message`` is ``FlatVulnerability.identity_message``, not ``message``.
+#: - ``severity_upper`` is the severity upper-cased (``None`` read as ``""``), the
+#:   form :func:`fallback_key` keys on, not ``FlatVulnerability.severity``.
+#: - ``is_suppressed`` is ``FlatVulnerability.is_suppressed``, the name
+#:   ``flat_frame`` gives it.
+#: - ``line_start`` and ``line_end`` are dense ranks of the lines (see
+#:   :func:`_side`), not the lines.
+#: - ``i`` is the finding's position in the list given.
+#: - ``base`` and ``key_message`` are the parts of :func:`fallback_key` that are
+#:   text; they are null for a finding it does not key.
 _SIDE_SCHEMA = {
     "i": pl.Int64,
     "id": pl.String,
     "has_identity": pl.Boolean,
     "fingerprinted": pl.Boolean,
-    "message": pl.String,
+    "identity_message": pl.String,
     "base": pl.String,
     "key_message": pl.String,
-    "severity": pl.String,
-    "suppressed": pl.Boolean,
+    "severity_upper": pl.String,
+    "is_suppressed": pl.Boolean,
     "line_start": pl.Int64,
     "line_end": pl.Int64,
 }
 _LOOSE = ["base", "key_message"]
-_FULL = [*_LOOSE, "severity"]
+_FULL = [*_LOOSE, "severity_upper"]
 #: How findings of one place are put in order: lines (-1 for none), then id, then
 #: where the scan listed them (the stable tie-break the old ``sorted`` gave).
 _PLACE = [
@@ -201,9 +203,12 @@ def _side(findings: list[FlatVulnerability]) -> pl.DataFrame:
     null for a finding :func:`fallback_key` does not key.
     """
     columns: dict[str, list[Any]] = {name: [] for name in _SIDE_SCHEMA}
-    # Lines are unbounded ints and the frame column is 64-bit, so the column
-    # holds each line's rank (no line is -1, as the old sort key had it). Only
-    # the order of lines is ever used.
+    # Lines are unbounded ints and the frame column is 64-bit. This frame holds
+    # each line's DENSE RANK (no line is -1, as the old sort key had it), because
+    # only the order of lines is ever used here and every line has a rank. That
+    # differs from ``models.flat_frame``, which holds the line itself and a null
+    # with ``line_overflow`` set for one that does not fit, because its consumers
+    # need the value. A column from one frame is not a column of the other.
     line_rank = ranks(
         -1 if line is None else line
         for finding in findings
@@ -211,21 +216,25 @@ def _side(findings: list[FlatVulnerability]) -> pl.DataFrame:
     )
     for index, finding in enumerate(findings):
         key = fallback_key(finding)
-        row = (
-            index,
-            _wire(finding.id),
-            finding.identity is not None,
-            finding.has_fingerprint_identity,
-            _wire(finding.identity_message),
-            _wire(key[0]) if key else None,
-            _wire(key[1]) if key else None,
-            _wire(key[2]) if key else None,
-            finding.is_suppressed,
-            line_rank[-1 if finding.line_start is None else finding.line_start],
-            line_rank[-1 if finding.line_end is None else finding.line_end],
-        )
-        for name, value in zip(columns, row):
-            columns[name].append(value)
+        row = {
+            "i": index,
+            "id": wire(finding.id),
+            "has_identity": finding.identity is not None,
+            "fingerprinted": finding.has_fingerprint_identity,
+            "identity_message": wire(finding.identity_message),
+            "base": wire(key[0]) if key else None,
+            "key_message": wire(key[1]) if key else None,
+            "severity_upper": wire(key[2]) if key else None,
+            "is_suppressed": finding.is_suppressed,
+            "line_start": line_rank[
+                -1 if finding.line_start is None else finding.line_start
+            ],
+            "line_end": line_rank[-1 if finding.line_end is None else finding.line_end],
+        }
+        # Named, not positional: a column added to the schema without its value
+        # here is a KeyError, not every later value in the wrong column.
+        for name in columns:
+            columns[name].append(row[name])
     return pl.DataFrame(columns, schema=_SIDE_SCHEMA)
 
 
@@ -255,7 +264,7 @@ def match_findings(
                 pl.col("has_identity")
                 & pl.col("has_identity_a")
                 & ~(pl.col("fingerprinted") & pl.col("fingerprinted_a"))
-                & pl.col("message").ne_missing(pl.col("message_a"))
+                & pl.col("identity_message").ne_missing(pl.col("identity_message_a"))
             )
         )
     )
@@ -266,7 +275,9 @@ def match_findings(
     before_places = (
         old.filter(pl.col("base").is_not_null())
         .group_by(_LOOSE)
-        .agg(pl.len().alias("n"), (pl.col("suppressed").n_unique() > 1).alias("mixed"))
+        .agg(
+            pl.len().alias("n"), (pl.col("is_suppressed").n_unique() > 1).alias("mixed")
+        )
     )
     after_places = (
         new.filter(pl.col("base").is_not_null())
@@ -317,7 +328,9 @@ def match_findings(
     left_new = unmatched(new, exact["i_a"])
     moving = (
         left_old.group_by(_FULL)
-        .agg(pl.len().alias("n"), (pl.col("suppressed").n_unique() > 1).alias("mixed"))
+        .agg(
+            pl.len().alias("n"), (pl.col("is_suppressed").n_unique() > 1).alias("mixed")
+        )
         .join(left_new.group_by(_FULL).agg(pl.len().alias("n_a")), on=_FULL)
         .join(ambiguous, on=_LOOSE, how="anti")
         .filter(~pl.col("mixed") & (pl.col("n_a") <= pl.col("n")))

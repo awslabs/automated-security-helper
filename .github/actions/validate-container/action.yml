@@ -635,6 +635,13 @@ runs:
         # The stderr log paths below come from find, so they are printed through
         # one_line.
         . "${RUNNER_TEMP}/ash-one-line.sh"
+        # The community modules this image ships, read from the Dockerfile's own list
+        # and the plugins' declarations (.github/scripts/community-scanner-legs.py),
+        # not named here: a community scanner added to the image is then loaded and
+        # checked by this leg without an edit to it. Read before `set +e`, so a
+        # metadata the script cannot read fails the step instead of scanning with none.
+        mapfile -t community_args < <(python3 .github/scripts/community-scanner-legs.py args)
+        test "${#community_args[@]}" -gt 0
         set +e
         ash scan \
           --mode container \
@@ -644,8 +651,7 @@ runs:
           --output-dir /tmp/ash-selftest/output \
           --simple \
           --fail-on-incomplete-scanners \
-          --ash-plugin-modules automated_security_helper.plugin_modules.ash_guarddog_plugins \
-          --ash-plugin-modules automated_security_helper.plugin_modules.ash_hadolint_plugins \
+          "${community_args[@]}" \
           --phases scan \
           --phases report
         rc=$?
@@ -711,6 +717,7 @@ runs:
         python3 <<'PY'
         import json
         import pathlib
+        import subprocess
         import sys
 
         results = pathlib.Path("/tmp/ash-selftest/output/ash_aggregated_results.json")
@@ -752,10 +759,10 @@ runs:
         # by default, so the scan above runs the image's copy of each, and each is listed
         # here so a missing binary fails this check.
         #
-        # GuardDog and hadolint are alpha scanners, so the scan above lists their
-        # modules with --ash-plugin-modules; otherwise they would be absent from the
-        # report and this list could not check that the image ships them.
-        image_supplied = [
+        # The alpha scanners are plugins, so the scan above lists their modules with
+        # --ash-plugin-modules; otherwise they would be absent from the report and this
+        # list could not check that the image ships them.
+        builtin_supplied = [
             "actionlint",
             "bandit",
             "cdk-nag",
@@ -766,8 +773,6 @@ runs:
             "detect-secrets",
             "gitleaks",
             "grype",
-            "guarddog",
-            "hadolint",
             "npm-audit",
             "opengrep",
             "semgrep",
@@ -775,6 +780,18 @@ runs:
             "trivy",
             "zizmor",
         ]
+        # The community scanners (betterleaks, GuardDog and hadolint today) come from the
+        # image's own module list through the plugins' declarations, the same source the
+        # scan above loaded them from, so this list cannot drift from what was loaded.
+        # An empty answer fails: a leg with no community scanner to check is a leg that
+        # lost its metadata, not a pass.
+        community = subprocess.run(
+            [sys.executable, ".github/scripts/community-scanner-legs.py", "scanners"],
+            check=True, capture_output=True, text=True,
+        ).stdout.split()
+        if not community:
+            sys.exit("FAIL: community-scanner-legs.py named no community scanner")
+        image_supplied = sorted(builtin_supplied + community)
 
         for name in sorted(statuses):
             print(f"  {name:<18} {statuses[name]}")
@@ -935,6 +952,65 @@ runs:
             sys.exit("FAIL: the image's hadolint did not run")
         if not row.get("finding_count"):
             sys.exit("FAIL: hadolint reported nothing for a Dockerfile with a known finding")
+        PY
+
+    # betterleaks also runs in the scan above, whose participation check says only that
+    # it was not MISSING. This scans a one-file tree holding a secret with only
+    # betterleaks selected, and requires it to run and report that secret, so a binary
+    # the image lacks, or a pin the scanner cannot run, fails here by name.
+    #
+    # Whether this leg runs is not decided by where the plugin came from. It is
+    # decided by the image listing the module and the plugin declaring a scanner of
+    # that name (.github/scripts/community-scanner-legs.py), so the same leg covers a
+    # plugin served by any registry, or shipped inside the SDK.
+    #
+    # The secret is assembled when the step runs and never written in this file, so
+    # this repository's own secret scans have nothing to report. It is a well-formed
+    # GitHub personal access token shape that the pinned betterleaks (1.10.1) reports
+    # as github-pat. An AWS key id in a quoted assignment was measured not to be
+    # reported by that build, so the fixture is not one.
+    - name: "Scan with the image's betterleaks (community plugin)"
+      shell: bash
+      env:
+        ASH_BASE_OCI_LAYOUT: ${{ steps.prepull-podman.outputs.oci-layout || steps.prepull-finch.outputs.oci-layout || steps.prepull-nerdctl.outputs.oci-layout }}
+        ASH_BASE_IMAGE_OVERRIDE: ${{ steps.prepull-podman.outputs.base-image-override || steps.prepull-finch.outputs.base-image-override || steps.prepull-nerdctl.outputs.base-image-override }}
+        RUNTIME: ${{ inputs.runtime }}
+      run: |
+        python3 .github/scripts/community-scanner-legs.py scanners | grep -x -F betterleaks
+        mapfile -t community_args < <(python3 .github/scripts/community-scanner-legs.py args)
+        rm -rf /tmp/ash-selftest-betterleaks
+        mkdir -p /tmp/ash-selftest-betterleaks
+        printf 'token = "%s%s"\n' ghp_ x7Kq9ZmP2vLw4RtYb8NcD3sFh6JgA1eUoW5i > /tmp/ash-selftest-betterleaks/settings.py
+        set +e
+        ash scan \
+          --mode container \
+          --oci-runner "${RUNTIME}" \
+          --build-target ci \
+          --source-dir /tmp/ash-selftest-betterleaks \
+          --output-dir /tmp/ash-selftest-betterleaks/output \
+          "${community_args[@]}" \
+          --scanners betterleaks \
+          --simple \
+          --phases scan \
+          --phases report
+        rc=$?
+        set -e
+        if [ "$rc" -ne 2 ]; then
+          echo "::error::expected exit 2 (the fixture's token); got $rc"
+          exit 1
+        fi
+        python3 - <<'PY'
+        import json, pathlib, sys
+        data = json.loads(pathlib.Path(
+            "/tmp/ash-selftest-betterleaks/output/ash_aggregated_results.json").read_text())
+        row = (data.get("scanner_results") or {}).get("betterleaks")
+        if not isinstance(row, dict):
+            sys.exit("FAIL: betterleaks is absent from the report")
+        print(f"betterleaks: {row.get('status')} with {row.get('finding_count')} finding(s)")
+        if str(row.get("status")).upper() in ("MISSING", "ERROR"):
+            sys.exit("FAIL: the image's betterleaks did not run")
+        if not row.get("finding_count"):
+            sys.exit("FAIL: betterleaks reported nothing for a tree holding a token")
         PY
 
     # cfn-lint and cfn-guard also run in the scan above, whose participation check

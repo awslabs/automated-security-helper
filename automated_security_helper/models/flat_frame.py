@@ -63,6 +63,7 @@ from automated_security_helper.models.frame_model import (
     to_frame,
 )
 from automated_security_helper.utils.finding_identity import canonical
+from automated_security_helper.utils.frame_ops import ordered_counts
 from automated_security_helper.utils.frame_text import unwire
 
 if TYPE_CHECKING:
@@ -125,7 +126,7 @@ FLAT_SPEC = FrameSpec(
         "identity_base",
         "_identity_message": "the identity message is a join input of the diff "
         "side, not a column of the flat frame",
-        "_secret_detection": "a baseline-gate policy flag, not a column of the "
+        "_secret_detection": "a baseline-gate policy flag, not a column of the "  # pragma: allowlist secret
         "flat frame",
         "_source_report": "read through the source_report property",
         "identity_message": "the identity message is a join input of the diff "
@@ -150,9 +151,5 @@ def suppressed_by_scanner(frame: "pl.DataFrame") -> Dict[str, int]:
     appears. A scanner with none has no entry."""
     import polars as pl
 
-    counted = (
-        frame.filter(pl.col("is_suppressed"))
-        .group_by("scanner_key", maintain_order=True)
-        .agg(pl.len().alias("n"))
-    )
+    counted = ordered_counts(frame.filter(pl.col("is_suppressed")), "scanner_key")
     return {unwire(scanner): count for scanner, count in counted.iter_rows()}

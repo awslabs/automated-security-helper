@@ -1,0 +1,12 @@
+# The rule behind semgrep-1.187.0-fix-rule.sarif: it carries a `fix:` key, so a
+# semgrep that wrote `fixes` into its SARIF would have written one for this rule.
+# Run over a one-function Python file (`if x == None:`) with
+#   semgrep --config <this file> --sarif --metrics=off --disable-version-check <file>
+# (semgrep 1.187.0, dev desktop, 2026-11-25).
+rules:
+  - id: m0-eq-none
+    languages: [python]
+    severity: WARNING
+    message: compare to None with is
+    pattern: $X == None
+    fix: $X is None

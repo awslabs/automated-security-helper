@@ -80,6 +80,7 @@ from automated_security_helper.core.exceptions import ASHConfigUnsetVariableErro
 from automated_security_helper.core.enums import ExportFormat
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.models.core import (
+    AshExclusion,
     AshSuppression,
     IgnorePathWithReason,
     expiration_date_problem,
@@ -1391,9 +1392,10 @@ class RuntimeOverridesConfig(RedactedSection):
         "/scanners/detect-secrets/options/scan_settings/plugins_used",
         "/scanners/detect-secrets/options/scan_settings/plugins_used/**",
         "/scanners/detect-secrets/options/baseline_file",
-        # Suppressions and ignore paths can hide findings outright.
+        # Suppressions, ignore paths and exclusions can hide findings outright.
         "/global_settings/ignore_paths",
         "/global_settings/suppressions",
+        "/global_settings/exclusions",
         # The runtime-override policy itself: a client that could rewrite it
         # through patch_ops could then lift every other entry here.
         "/global_settings/mcp",
@@ -2013,6 +2015,20 @@ class AshConfigGlobalSettingsSection(RedactedSection):
         List[AshSuppression],
         Field(
             description="Global list of suppression rules. Each rule specifies findings to suppress based on rule ID, file path, and optional line numbers."
+        ),
+    ] = []
+
+    exclusions: Annotated[
+        List[AshExclusion],
+        Field(
+            description=(
+                "Global list of rule+path exclusions. Each entry names a rule ID "
+                "(glob allowed), a path (matched like a suppression's), an "
+                "optional scanner and a required reason, and DROPS the matching "
+                "results from SARIF instead of keeping them marked suppressed: "
+                "for finding classes that are always benign in a known place, "
+                "such as bandit B101 under tests/."
+            )
         ),
     ] = []
 
