@@ -35,10 +35,17 @@ Enable it by listing `automated_security_helper.plugin_modules.ash_malcontent_pl
 - HIGH, sandbox-requirements test missing (PATTERN row 25): added
   `tests/unit/plugin_modules/test_malcontent_sandbox_requirements.py` (strict default, no
   network, baseline environment only), after the Betterleaks test.
-- HIGH, no captured fixtures (rows 18, 21, 24): NOT fixed. There is no Malcontent binary or
-  release asset to capture from (the tool publishes no release binaries, and running its
-  container image needs a separate approval). The converter tests keep their hand-written
-  oracle, and the corpus register row records the absence.
+- HIGH, no captured fixtures (rows 18, 21, 24): HELD, not closable at root cause. There is
+  no Malcontent binary or release asset to capture from (GitHub releases v1.28.2 and earlier
+  carry no assets; building needs Go, Rust and YARA-X; running the container image needs a
+  separate approval). What was done instead: the invocation was re-read against the v1.28.2
+  source (`cmd/mal/mal.go` flags, defaults and exit codes; `pkg/malcontent` structs;
+  `pkg/render/json.go`), and the converter was run over the 12 `--format=json` outputs that
+  upstream keeps under `tests/` (440 behaviors; risk levels LOW 267, MEDIUM 144, HIGH 15,
+  CRITICAL 14, upper-case, which `severity_for` lower-cases). `TestUpstreamShape` pins that
+  member set. Those files are upstream's own, so they are not vendored here (no licensing
+  edit). A captured positive and negative still wait for someone who can build or run `mal`;
+  the corpus register row records the absence.
 
 ### License posture
 
@@ -62,9 +69,16 @@ them:
 4. `test_scanner_facets_corpus_consistency.py`: a `CORPORA` row `"malcontent": None,` and a
    `_NO_FIXTURE_DIRECTORY` entry (no captured Malcontent output).
 5. `tests/unit/plugin_modules/test_walking_scanners_skip_links_leaving_the_tree.py`: a
-   `LINK_HANDLING` and `SCANNER_CLASSES` entry for `malcontent`. Its symlink behavior was not
-   measured (no binary), so the right `LinkHandling` value needs one run of `mal analyze` over
-   a tree holding a link leaving it.
+   `LINK_HANDLING` row `"malcontent": FOLLOWS_NO_LINK` and a `SCANNER_CLASSES` row
+   `"malcontent": ("ash_malcontent_plugins.malcontent_scanner", "MalcontentScanner", "Malcontent")`
+   (use the module path form the other community rows use). The value is read from
+   Malcontent v1.28.2 source, not measured on a binary (none exists to run):
+   `pkg/action/path.go` `scanWalk.walk` skips every walked entry whose type is a symlink
+   (`d.Type()&fs.ModeSymlink != 0` then `continue`, comment "Ignore symlinked directories
+   like regular directories"), and `pkg/file/walk.go` documents a walker that does not follow
+   symlinks below its start. ASH hands it a directory, so a link leaving the target is never
+   read, and the command passes no exclusion. The module tests pin the argv half
+   (`TestLinks`).
 
 ### Desk validation
 

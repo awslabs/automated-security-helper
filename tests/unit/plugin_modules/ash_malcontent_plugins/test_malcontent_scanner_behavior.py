@@ -415,3 +415,70 @@ class TestDependencyCheck:
         self, tree, tmp_path
     ):
         assert not _scanner(tree, tmp_path).custom_install_commands
+
+
+#: One file report with the members upstream's own ``--format=json`` outputs carry
+#: (Malcontent v1.28.2 ``tests/**/*.json``: Pledge, Syscalls, SHA256, Size, and per
+#: behavior ID, RuleName, RiskScore, RuleURL, ReferenceURL, RuleAuthor, RuleLicense,
+#: MatchStringsOmitted), with the upstream key spellings and upper-case risk levels.
+UPSTREAM_SHAPE = {
+    "Files": {
+        "npm/pkg/postinstall.js": {
+            "Path": "npm/pkg/postinstall.js",
+            "SHA256": "1" * 64,
+            "Size": 115064,
+            "Pledge": ["inet", "wpath"],
+            "Syscalls": ["openat"],
+            "RiskScore": 3,
+            "RiskLevel": "HIGH",
+            "Behaviors": [
+                {
+                    "Description": "name mangling used by obfuscation tools",
+                    "MatchStrings": ["function _0x10e175(", "token=SECRET-IN-TREE"],
+                    "MatchStringsOmitted": 12,
+                    "RiskScore": 3,
+                    "RiskLevel": "HIGH",
+                    "RuleURL": "https://github.com/chainguard-dev/malcontent/blob/main/rules/anti-static/obfuscation/js.yara#L1",
+                    "ReferenceURL": "https://example.test/ref",
+                    "RuleAuthor": "someone",
+                    "RuleLicense": "Apache-2.0",
+                    "ID": "anti-static/obfuscation/js",
+                    "RuleName": "js_mangle",
+                }
+            ],
+        }
+    }
+}
+
+
+class TestUpstreamShape:
+    def test_a_report_with_the_members_upstream_writes_converts(
+        self, tree, tmp_path, on_path, monkeypatch
+    ):
+        scanner = _scanner(tree, tmp_path)
+        report = _run(scanner, FakeMalcontent(document=UPSTREAM_SHAPE), monkeypatch)
+        assert _findings(report) == [
+            ("anti-static/obfuscation/js", "error", "HIGH", "npm/pkg/postinstall.js")
+        ]
+
+    def test_no_matched_text_reaches_the_report(
+        self, tree, tmp_path, on_path, monkeypatch
+    ):
+        scanner = _scanner(tree, tmp_path)
+        report = _run(scanner, FakeMalcontent(document=UPSTREAM_SHAPE), monkeypatch)
+        dumped = report.model_dump_json()
+        assert "SECRET-IN-TREE" not in dumped
+        assert "_0x10e175" not in dumped
+
+
+class TestLinks:
+    def test_the_command_names_no_link_and_follows_none(
+        self, tree, tmp_path, on_path, monkeypatch
+    ):
+        """Malcontent's walk skips symlinks itself, so nothing is excluded or followed."""
+        scanner = _scanner(tree, tmp_path)
+        fake = FakeMalcontent()
+        _run(scanner, fake, monkeypatch)
+        assert not [a for a in fake.argv if "exclude" in a or "follow" in a]
+        # The scan path is a directory, which is what makes the walk skip links.
+        assert fake.argv[-2:] == ["--", "."]

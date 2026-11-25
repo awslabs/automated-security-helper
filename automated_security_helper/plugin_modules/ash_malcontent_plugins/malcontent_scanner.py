@@ -23,8 +23,11 @@ tool does not write SARIF, so the conversion is this module's.
 
 Invocation
 ----------
-Read from the Malcontent README (flags) and ``cmd/mal`` (exit codes), not measured on a
-binary: see the plugin README for what was and was not verified.
+Read from Malcontent's source at v1.28.2 (``cmd/mal/mal.go`` for the flags, defaults
+and exit codes, ``pkg/malcontent`` for the report structs, ``pkg/render/json.go`` for
+the document) and checked against the ``--format=json`` outputs that upstream keeps
+under its ``tests/`` directory. No ``mal`` binary was run: it publishes none and
+building it needs Go, Rust and YARA-X (see the plugin README).
 
 * ``--format=json`` and ``--output=<file>``: the report is one JSON document,
   ``{"Files": {"<path>": <FileReport>}}``, written to a file under ASH's results
@@ -41,6 +44,16 @@ binary: see the plugin README for what was and was not verified.
 * Never passed: ``--image``/``--processes`` (reach registries or the host),
   ``--oci-auth`` (reads credentials), ``--exit-first-hit`` and ``--exit-first-miss``
   (turn findings into exit status 1).
+
+Links
+-----
+Malcontent reads no link below the directory it is given: its walk
+(``pkg/action/path.go``, ``scanWalk.walk``) skips every entry whose type is a symlink,
+file or directory ("Ignore symlinked directories like regular directories"), and its
+walker does not follow links below the start (``pkg/file/walk.go``). ASH hands it a
+directory (``.`` for the source), so a link leaving the target is never read and the
+command names none in an exclusion option. This was read from source, not measured
+on a binary.
 
 Severity
 --------
