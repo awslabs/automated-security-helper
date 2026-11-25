@@ -1865,6 +1865,115 @@ def set_source_git(
     )
 
 
+class CloneRequestRefused(ValueError):
+    """A remote-git source request refused before anything was cloned.
+
+    ``error_type`` is the name the MCP tool answers with for the same refusal, so
+    the CLI and the MCP server agree on which rule refused a request.
+    """
+
+    def __init__(self, message: str, error_type: str) -> None:
+        super().__init__(message)
+        self.error_type = error_type
+
+
+def validated_remote_clone_request(
+    url: str,
+    ref: Optional[str] = None,
+    depth: object = 1,
+    ssh_key_id: Optional[str] = None,
+) -> Tuple[str, Optional[str], int, Tuple[str, str, int]]:
+    """The rules every remote-git source request obeys, whichever surface took it.
+
+    The MCP ``set_source_git`` tool and ``ash scan --source-git`` both run this,
+    in this order, so a request one refuses for these reasons the other refuses
+    with the same ``error_type``: an option-like, command-executing or
+    control-character URL; an option-like ref; a depth that is not a whole number
+    from 1 to ``MAX_CLONE_DEPTH``; a local path or ``file://`` URL; a URL whose
+    host or scheme git cannot be said to reach unambiguously (only https and ssh,
+    and the scp-like ``host:path`` form); and any ssh key id. What this does NOT
+    decide is which hosts may be cloned from: the MCP tool acts for a remote
+    client, so its operator's ``ASH_MCP_GIT_ALLOWED_HOSTS`` list applies there
+    (``clone_endpoint_allowed``), while on the command line the person typing the
+    URL is the operator.
+
+    Returns:
+        ``(url, ref, depth, (scheme, host, port))``, each checked.
+
+    Raises:
+        CloneRequestRefused: the first rule the request breaks.
+    """
+    try:
+        url = _validate_clone_url(url)
+    except ValueError as error:
+        raise CloneRequestRefused(
+            str(error), McpErrorType.CLONE_URL_NOT_PERMITTED.value
+        ) from error
+    if ref:
+        try:
+            ref = _reject_option_like(ref, "ref")
+        except ValueError as error:
+            raise CloneRequestRefused(
+                str(error), McpErrorType.CLONE_REF_NOT_PERMITTED.value
+            ) from error
+    try:
+        depth = _validated_clone_depth(depth)
+    except ValueError as error:
+        raise CloneRequestRefused(
+            str(error), McpErrorType.INVALID_CLONE_DEPTH.value
+        ) from error
+    if local_clone_path(url) is not None:
+        raise CloneRequestRefused(
+            "a clone source must be a remote https or ssh url; a local path or "
+            "file:// url would read this machine's own filesystem",
+            McpErrorType.LOCAL_CLONE_SOURCE_REFUSED.value,
+        )
+    try:
+        endpoint = remote_clone_endpoint(url)
+    except ValueError as error:
+        raise CloneRequestRefused(
+            str(error), McpErrorType.CLONE_URL_NOT_PERMITTED.value
+        ) from error
+    try:
+        _refuse_ssh_key_id(ssh_key_id)
+    except ValueError as error:
+        raise CloneRequestRefused(
+            str(error), McpErrorType.SSH_KEY_NOT_REGISTERED.value
+        ) from error
+    return url, ref or None, depth, endpoint
+
+
+def clone_remote_source(
+    url: str,
+    ref: Optional[str] = None,
+    *,
+    depth: int = 1,
+    destination: Path,
+) -> Path:
+    """Clone a remote repository for the command line, under *destination*.
+
+    The same request rules as the MCP tool (:func:`validated_remote_clone_request`)
+    and the same git: the allowlisted environment (:func:`_git_environment`), no
+    system or global configuration, no credentials or helpers of the caller's,
+    redirects not followed, a bounded time. The clone goes to
+    ``<destination>/source`` and ``HOME`` for git is ``<destination>/home``; the
+    caller owns *destination* and removes it.
+
+    Raises:
+        CloneRequestRefused: the request broke a rule; nothing was run.
+        RuntimeError: git is not on PATH.
+        GitCommandError, GitTimeoutError: git ran and failed or ran too long.
+    """
+    url, ref, depth, _endpoint = validated_remote_clone_request(url, ref, depth)
+    git = _git_executable()
+    home = Path(destination) / "home"
+    target = Path(destination) / "source"
+    _ensure_dir(home)
+    _ensure_dir(target)
+    _clone(url, ref, git=git, depth=depth, target=target, env=_git_environment(home))
+    return target
+
+
 @_while_no_scan_runs(removes_workspace=False)
 def _clone_into_session(
     url: str,

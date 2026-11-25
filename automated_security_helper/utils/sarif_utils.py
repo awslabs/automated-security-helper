@@ -1841,6 +1841,17 @@ class _OutputDirExclusion:
             work_dir = plugin_context.output_dir.joinpath(ASH_WORK_DIR_NAME)
         self.work_dir = Path(work_dir).resolve()
         self.source_dir = plugin_context.source_dir.resolve()
+        # A container-image scan: every location is an in-image path, as the tool
+        # wrote it (``/usr/lib/libssl.so.3``). The source directory only anchors
+        # such a scan, so no path is read relative to it (``normalize``), none is
+        # ASH's own output, and an ignore path or suppression names the in-image
+        # path as written.
+        from automated_security_helper.core.asset import Asset, AssetKind
+
+        asset = getattr(plugin_context, "asset", None)
+        self.in_image = (
+            isinstance(asset, Asset) and asset.kind == AssetKind.CONTAINER_IMAGE
+        )
         # Spelled with "/" only where a backslash separates (uri_separators):
         # a bare replace turned a POSIX source directory named a\b into a/b,
         # which no URI under it starts with.
@@ -1908,7 +1919,12 @@ class _OutputDirExclusion:
 
         *decode* False keeps a relative URI's percent escapes, the spelling the
         report records (:func:`_normalize_sarif_uri`).
+
+        An image scan's URI is an in-image path and is never made relative to the
+        source directory: it is put in the one matching spelling and returned.
         """
+        if self.in_image:
+            return _matched_path_text(raw_uri, self.source_dir_prefix, decode)
         return _normalize_sarif_uri(
             raw_uri,
             self.source_dir_prefix,
@@ -1946,7 +1962,7 @@ class _OutputDirExclusion:
 
     def holds(self, uri: str) -> bool:
         """Whether the normalized ``uri`` is ASH's output, outside the work directory."""
-        if self.output_dir_contains_source:
+        if self.output_dir_contains_source or self.in_image:
             return False
         if uri not in self._resolve_cache:
             # Anchored on the source directory, NOT on the process's working

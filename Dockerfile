@@ -451,6 +451,12 @@ ARG GRYPE_VERSION="v0.122.1"
 RUN with-retry 'install-pinned-tool grype -b /usr/local/bin'
 RUN grype --version
 
+# crane resolves a tag-only image reference to its digest at scan time, without a
+# container engine (utils/image_digest_resolver.py). Same pinned-asset path as grype.
+ARG CRANE_VERSION="v0.22.1"
+RUN with-retry 'install-pinned-tool crane -b /usr/local/bin'
+RUN crane version
+
 # actionlint backs the builtin actionlint scanner. Same pinned-asset path as syft and
 # grype.
 ARG ACTIONLINT_VERSION="v1.7.12"

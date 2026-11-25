@@ -404,13 +404,15 @@ def test_platforms_are_derived_from_the_download_table(cls) -> None:
 
 def test_every_pinned_binary_is_claimed_by_a_scanner() -> None:
     """A pin in TOOL_VERSIONS with no register row is a scanner binary the
-    register cannot see (uv is the installer, not a scanner)."""
+    register cannot see (uv is the installer, not a scanner; crane is the registry
+    client the scan phase asks for an image tag's digest, utils/image_digest_resolver.py,
+    and the grype and trivy rows declare the registry read it makes)."""
     claimed = {
         _ops(c).runtime.tool_versions_key
         for c in SCANNER_CLASSES
         if _ops(c).runtime.tool_versions_key
     }
-    unclaimed = set(tool_downloads.TOOL_VERSIONS) - claimed - {"uv"}
+    unclaimed = set(tool_downloads.TOOL_VERSIONS) - claimed - {"uv", "crane"}
     assert not unclaimed, f"pinned tools no scanner row names: {sorted(unclaimed)}"
 
 

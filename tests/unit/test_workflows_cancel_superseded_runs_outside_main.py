@@ -57,6 +57,7 @@ SUPERSEDING = {
     "ash-cdk-extra-drift.yml",
     "ash-docs-ci-runners.yml",
     "ash-iac-drift.yml",
+    "ash-image-scan-live-engine.yml",
     "ash-install-methods.yml",
     "ash-offline-scanners.yml",
     "ash-package.yml",

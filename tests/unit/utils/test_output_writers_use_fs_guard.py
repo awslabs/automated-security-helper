@@ -813,6 +813,12 @@ NOT_WRITES: Dict[Site, Tuple[int, str]] = {
         1,
         "nothing: it reads a member of the uploaded zip",
     ),
+    # `tarfile.open(archive, "r:")` reads a saved image's member names to pick the
+    # stereoscope scheme; the detector cannot read the mode of a tarfile.open().
+    (f"{_ASH}/utils/image_tool_targets.py", "archive_scheme", "Path.open"): (
+        1,
+        "nothing: it reads the member names of the saved image",
+    ),
     (f"{_ASH}/cli/mcp_server.py", "_keep_stdout_off_the_wire", "os.open"): (
         1,
         _STDOUT_DIVERSION,

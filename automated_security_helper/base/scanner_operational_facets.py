@@ -115,6 +115,11 @@ class Fetched(str, Enum):
     MODULE_SOURCES = "module_sources"
     ISSUER_VERIFICATION = "issuer_verification"
     SOURCE_UPLOAD = "source_upload"
+    #: A registry read for the digest a tag-only image reference points at
+    #: (``crane digest``, ``utils/image_digest_resolver.py``): the manifest's
+    #: digest, no layer. Declared by the scanners that read images, whose scan
+    #: it keys the finding ids of.
+    IMAGE_DIGEST = "image_digest"
 
 
 class Prefetch(str, Enum):

@@ -1147,6 +1147,30 @@ class ScanPhase(EnginePhase):
         image_subject = (
             isinstance(subject, Asset) and subject.kind == AssetKind.CONTAINER_IMAGE
         )
+        if image_subject and subject.image is not None:
+            # A tag-only reference gets the digest the registry says it points
+            # at, so its finding ids key on that digest (utils/image_digest_resolver).
+            # Once per scan, before any scanner is built; a failure or offline
+            # mode leaves the locator as submitted and logs one notice.
+            from automated_security_helper.core.constants import is_offline_mode
+            from automated_security_helper.utils.image_digest_resolver import (
+                resolve_image_locator,
+            )
+
+            resolved = resolve_image_locator(subject.image, offline=is_offline_mode())
+            if resolved is not subject.image:
+                self.plugin_context.asset = Asset.for_image(resolved)
+                # The scope a reporter that archives resolved findings compares
+                # now names the image by this digest, not by the tag it was
+                # asked for (utils/image_attribution.image_scan_source).
+                from automated_security_helper.utils.image_attribution import (
+                    image_scan_source,
+                )
+
+                metadata = getattr(aggregated_results, "metadata", None)
+                recorded = getattr(metadata, "scan_source", None)
+                if isinstance(recorded, str) and recorded.startswith("image:"):
+                    metadata.scan_source = image_scan_source(resolved)
         source_files = (
             []
             if image_subject
@@ -1317,12 +1341,18 @@ class ScanPhase(EnginePhase):
                                 excluded_scanner_names,
                             )
                             continue
-                        # Asset routing, as the filter loop does it: a scanner
-                        # that does not scan this asset's kind was never going to
-                        # look at the image, so its constructor raising is not a
-                        # failure of this scan either. The class is in hand and
-                        # needs no instance to be asked.
+                        # No asset routing here. A scanner that does not scan
+                        # the image's kind was once recorded SKIPPED for a
+                        # constructor that raised, while a module that failed to
+                        # import was an ERROR row on the same scan, so one kind
+                        # of loss was visible to the completeness gate and its
+                        # sibling was not. Both are a scanner ASH could not
+                        # bring up, on any scan kind, and both are ERROR rows
+                        # with the reason; the text says when the scanner would
+                        # not have read the image anyway, so an operator is not
+                        # sent looking for lost image coverage.
                         constructing_for = getattr(self.plugin_context, "asset", None)
+                        image_note = ""
                         if (
                             isinstance(constructing_for, Asset)
                             and constructing_for.kind == AssetKind.CONTAINER_IMAGE
@@ -1330,25 +1360,17 @@ class ScanPhase(EnginePhase):
                                 plugin_class, AssetKind.CONTAINER_IMAGE
                             )
                         ):
-                            ASH_LOGGER.debug(
-                                f"Scanner {failed_name} could not be constructed "
-                                f"({type(e).__name__}), and does not scan this "
-                                "asset's kind"
+                            image_note = (
+                                " (it does not scan container images, so this "
+                                "image scan lost none of its image coverage)"
                             )
-                            aggregated_results = self._record_asset_kind_not_served(
-                                failed_name,
-                                constructing_for,
-                                nothing_to_scan_names,
-                                aggregated_results,
-                            )
-                            continue
                         # With the config's environment values: a constructor's
                         # error can name an option the config read from the
                         # environment, and this text goes to the report, ash.log,
                         # the results files and scanner_reasons.
                         construction_error = (
                             f"Scanner {failed_name} could not be constructed, so it "
-                            f"did not run: {type(e).__name__}: "
+                            f"did not run{image_note}: {type(e).__name__}: "
                             + error_text(
                                 e,
                                 config_environment_values(
