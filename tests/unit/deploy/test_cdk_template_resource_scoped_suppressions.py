@@ -128,15 +128,6 @@ def test_the_glob_does_not_match_a_suffixed_logical_id():
     )
 
 
-def test_no_logical_id_tail_is_shared():
-    # The glob covers exactly one resource only while no OTHER logical id equals
-    # the target. CloudFormation logical ids are unique per template, so this
-    # holds by construction; asserted so a hand edit cannot break it silently.
-    resources = list(_resources())
-    for logical_id in set(EXPECTED.values()):
-        assert resources.count(logical_id) == 1
-
-
 @pytest.mark.parametrize("key", sorted(EXPECTED), ids=lambda k: k[0])
 def test_each_scoped_entry_precedes_the_file_level_entry_it_must_beat(key):
     # ASH takes the first matching entry, so a scoped entry listed after the

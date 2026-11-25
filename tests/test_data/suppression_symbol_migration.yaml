@@ -48,9 +48,11 @@
 # Maintenance
 # -----------
 # A converted entry that is later removed from a config on purpose drops its
-# row here in the same change. New symbol-scoped entries written after the
-# migration do not need rows: the tests assert every symbol in the configs
-# still resolves, record or no record.
+# row here in the same change. A new symbol-scoped entry (or resource scope)
+# written after the migration needs its row here in the same change: the
+# agreement test compares the configs and this record as sets, both ways, and
+# the CI control reads only this record. Give it `old_line_start` and
+# `old_line_end` (the line of the finding it covers) and `span_at_migration`.
 entries:
 - config: .ash/.ash.yaml
   rule_id: threat-filesystem-read

@@ -184,6 +184,7 @@ def test_old_pinned_lines_lie_inside_the_chosen_symbols_span():
     instead of failing on lines that no longer exist.
     """
     oracle_rows = 0
+    skipped = 0
     for row in _record()["entries"]:
         if "symbol" not in row:
             continue
@@ -196,7 +197,8 @@ def test_old_pinned_lines_lie_inside_the_chosen_symbols_span():
             continue
         recorded = tuple(row["span_at_migration"])
         if recorded not in {tuple(s) for s in spans}:
-            continue  # the file moved on; the resolution check above still holds
+            skipped += 1  # the file moved on; the resolution check above still holds
+            continue
         assert any(
             start <= row["old_line_start"] and row["old_line_end"] <= end
             for start, end in spans
@@ -204,6 +206,13 @@ def test_old_pinned_lines_lie_inside_the_chosen_symbols_span():
         oracle_rows += 1
     assert oracle_rows > 0, (
         "no row was checkable; the record no longer matches any file"
+    )
+    # Edits relax a row instead of failing it, so without a bound the oracle could
+    # erode to one checkable row unnoticed. Past a quarter of the rows skipped, the
+    # record's spans need refreshing against the tree (span_at_migration).
+    assert skipped * 4 <= oracle_rows + skipped, (
+        f"{skipped} of {oracle_rows + skipped} rows skipped because their recorded "
+        "span moved; refresh span_at_migration in the record"
     )
 
 
@@ -354,9 +363,10 @@ def test_a_gone_symbol_on_a_real_migrated_entry_fails_closed(caplog):
 
 def test_config_lints_clean_on_both_migrated_configs():
     """Design row T7-7: ``ash config lint``'s suppression checks accept both
-    migrated configs; an invalid symbol would make its entry inert
-    (suppression_frame reads it as matching nothing), and lint is what surfaces
-    that before a scan does."""
+    migrated configs. The symbol lint classes it guards are the no-grammar path
+    and the missing extra (an entry on either is inert, and lint says so before a
+    scan does); a malformed symbol name is refused earlier, at model
+    validation, and by the resolution tests above."""
     for config in CONFIGS:
         raw = yaml.safe_load((REPO / config).read_text(encoding="utf-8"))
         result = LintResult(config_path=REPO / config)
