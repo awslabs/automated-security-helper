@@ -1981,6 +1981,11 @@ global_settings:
         Build-generated copy of automated_security_helper/core/exceptions.py, which
         is scanned at its tracked path. Staged into assets/ by hatch_build.py
         because tool_downloads.py imports it.
+    - path: "automated_security_helper/assets/plugin_provisioning.py"
+      reason: >-
+        Build-generated copy of automated_security_helper/base/plugin_provisioning.py,
+        which is scanned at its tracked path. Staged into assets/ by hatch_build.py
+        because tool_downloads.py derives its pins from it.
     # `/**` is load-bearing: without it this pattern matches the directory entry
     # and nothing inside it, so the ignore did nothing. `ash config validate`
     # rejects it, but only where the directory exists -- tests/pytest-temp/ is
