@@ -23,7 +23,7 @@ With the module listed, `clamav` runs by default. `scanners.clamav.enabled: fals
 
 ## Installing the tool
 
-ClamAV is a system package. ASH does not download it. Install it and fetch the signature database once:
+ClamAV is a system package. ASH does not download or redistribute it, and does not run `freshclam`; this is deliberate (the engine and its signature database are distributed by the ClamAV project and installed by your package manager). Install it and fetch the signature database once:
 
 <!-- doctest: illustrative reason="installs a system package; the command depends on the platform" -->
 ```bash

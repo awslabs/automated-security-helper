@@ -56,8 +56,8 @@ FIXTURES = (
     / "documented"
 )
 # Two detections, one of them in a path that itself contains ": ".
-POSITIVE = (FIXTURES / "positive.log").read_text(encoding="utf-8")
-NEGATIVE = (FIXTURES / "negative.log").read_text(encoding="utf-8")
+POSITIVE = (FIXTURES / "positive.txt").read_text(encoding="utf-8")
+NEGATIVE = (FIXTURES / "negative.txt").read_text(encoding="utf-8")
 
 POSITIVE_EXPECTED = [
     ("Win.Test.EICAR_HDB-1", "error", "HIGH", "dropper/eicar.com", 1),
@@ -477,3 +477,16 @@ class TestRegisterRows:
 
     def test_the_instance_matches_the_declared_tool_type(self):
         assert ClamAVScanner().tool_type is ScannerToolType.CUSTOM
+
+
+class TestCorpusFixtures:
+    def test_the_committed_sarif_is_what_the_adapter_builds_from_the_log(self):
+        import json
+
+        committed = json.loads((FIXTURES / "positive.sarif").read_text("utf-8"))
+        built = cs.detections_to_sarif(cs.parse_clamscan_log(POSITIVE))
+        assert committed == built
+
+    def test_the_negative_log_builds_no_results(self):
+        built = cs.detections_to_sarif(cs.parse_clamscan_log(NEGATIVE))
+        assert built["runs"][0]["results"] == []

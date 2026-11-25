@@ -1,0 +1,14 @@
+./app.py: OK
+./dropper/eicar.com: Win.Test.EICAR_HDB-1 FOUND
+./odd: name/payload.bin: Unix.Trojan.Agent-123 FOUND
+
+----------- SCAN SUMMARY -----------
+Known viruses: 8700000
+Engine version: 1.4.2
+Scanned directories: 2
+Scanned files: 3
+Infected files: 2
+Data scanned: 0.00 MB
+Time: 12.345 sec (0 m 12 s)
+Start Date: 2026:11:18 10:00:00
+End Date:   2026:11:18 10:00:12
