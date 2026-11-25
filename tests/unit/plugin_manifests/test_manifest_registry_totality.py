@@ -79,7 +79,7 @@ def _ref(cls: type) -> str:
 
 
 def _config_class(scanner_cls: type) -> type:
-    return scanner_cls.model_fields["config"].annotation
+    return _unwrapped(scanner_cls.model_fields["config"].annotation)
 
 
 def _unwrapped(annotation: typing.Any) -> typing.Any:
