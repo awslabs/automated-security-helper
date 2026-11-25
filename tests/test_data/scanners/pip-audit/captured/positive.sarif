@@ -1,0 +1,191 @@
+{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "pip-audit",
+          "version": "2.10.1",
+          "rules": [
+            {
+              "id": "PYSEC-2020-96",
+              "name": "PYSEC-2020-96",
+              "shortDescription": {
+                "text": "A vulnerability was discovered in the PyYAML library in versions before 5.3.1, where it is susceptible to arbitrary code execution when it processes untrusted YAML files through the full_load method o"
+              },
+              "fullDescription": {
+                "text": "A vulnerability was discovered in the PyYAML library in versions before 5.3.1, where it is susceptible to arbitrary code execution when it processes untrusted YAML files through the full_load method or with the FullLoader loader. Applications that use the library to process untrusted input may be vulnerable to this flaw. An attacker could use this flaw to execute arbitrary code on the system by abusing the python/object/new constructor."
+              },
+              "helpUri": "https://osv.dev/vulnerability/PYSEC-2020-96",
+              "properties": {
+                "tags": [
+                  "pip-audit",
+                  "vulnerability",
+                  "dependency"
+                ]
+              }
+            },
+            {
+              "id": "PYSEC-2021-142",
+              "name": "PYSEC-2021-142",
+              "shortDescription": {
+                "text": "A vulnerability was discovered in the PyYAML library in versions before 5.4, where it is susceptible to arbitrary code execution when it processes untrusted YAML files through the full_load method or "
+              },
+              "fullDescription": {
+                "text": "A vulnerability was discovered in the PyYAML library in versions before 5.4, where it is susceptible to arbitrary code execution when it processes untrusted YAML files through the full_load method or with the FullLoader loader. Applications that use the library to process untrusted input may be vulnerable to this flaw. This flaw allows an attacker to execute arbitrary code on the system by abusing the python/object/new constructor. This flaw is due to an incomplete fix for CVE-2020-1747."
+              },
+              "helpUri": "https://osv.dev/vulnerability/PYSEC-2021-142",
+              "properties": {
+                "tags": [
+                  "pip-audit",
+                  "vulnerability",
+                  "dependency"
+                ]
+              }
+            },
+            {
+              "id": "PYSEC-2026-215",
+              "name": "PYSEC-2026-215",
+              "shortDescription": {
+                "text": "This is the same issue as CVE-2024-3651, however the original remediation in 2024 was not a complete fix. Payloads such as `\"\\u0660\" * N` or `\"\\u30fb\" * N + \"\\u6f22\"` utilize the `valid_contexto` func"
+              },
+              "fullDescription": {
+                "text": "This is the same issue as CVE-2024-3651, however the original remediation in 2024 was not a complete fix. Payloads such as `\"\\u0660\" * N` or `\"\\u30fb\" * N + \"\\u6f22\"` utilize the `valid_contexto` function prior to length rejection, and for high values of `N` will take a long time to process.  ### Impact A specially crafted argument to the `idna.encode()` function could consume significant resources. This may lead to a denial-of-service.  ### Patches Starting in version 3.14, the function rejects long inputs as soon as practicable prior to any further processing to minimize resource consumption. In version 3.15, this approach was extended to lesser used alternate functions (i.e. per-label conversions and codec support).  ### Workarounds Domain names cannot exceed 253 characters in length, if this length limit is enforced prior to passing the domain to the `idna.encode()` function it should no longer consume significant resources. This is triggered by arbitrarily large inputs that would not occur in normal usage, but may be passed to the library assuming there is no preliminary input validation by the higher-level application."
+              },
+              "helpUri": "https://osv.dev/vulnerability/PYSEC-2026-215",
+              "properties": {
+                "tags": [
+                  "pip-audit",
+                  "vulnerability",
+                  "dependency"
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "PYSEC-2020-96",
+          "level": "error",
+          "message": {
+            "text": "pyyaml 5.3 is affected by PYSEC-2020-96 (CVE-2025-50460, GHSA-fm6c-f59h-7mmg, GHSA-6757-jp84-gxfx, CVE-2020-1747). Fixed in: 5.3.1."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "requirements.txt"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "pip-audit/v1": "0357ad274e901b197743ce7a5b9c59f086359a9b1987cb48508f44c568bd59a2"
+          },
+          "properties": {
+            "tags": [
+              "pip-audit",
+              "vulnerability",
+              "dependency"
+            ],
+            "issue_severity": "HIGH",
+            "package_name": "pyyaml",
+            "package_version": "5.3",
+            "fix_versions": [
+              "5.3.1"
+            ],
+            "aliases": [
+              "CVE-2025-50460",
+              "GHSA-fm6c-f59h-7mmg",
+              "GHSA-6757-jp84-gxfx",
+              "CVE-2020-1747"
+            ]
+          }
+        },
+        {
+          "ruleId": "PYSEC-2021-142",
+          "level": "error",
+          "message": {
+            "text": "pyyaml 5.3 is affected by PYSEC-2021-142 (CVE-2020-14343, GHSA-8q59-q68h-6hv4). Fixed in: 5.4."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "requirements.txt"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "pip-audit/v1": "e0ef373581540812f178b059e4c788dbc3a81de8bc3366266188aa2626944a85"
+          },
+          "properties": {
+            "tags": [
+              "pip-audit",
+              "vulnerability",
+              "dependency"
+            ],
+            "issue_severity": "HIGH",
+            "package_name": "pyyaml",
+            "package_version": "5.3",
+            "fix_versions": [
+              "5.4"
+            ],
+            "aliases": [
+              "CVE-2020-14343",
+              "GHSA-8q59-q68h-6hv4"
+            ]
+          }
+        },
+        {
+          "ruleId": "PYSEC-2026-215",
+          "level": "error",
+          "message": {
+            "text": "idna 3.7 is affected by PYSEC-2026-215 (GHSA-65pc-fj4g-8rjx, CVE-2026-45409). Fixed in: 3.15."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "requirements.txt"
+                },
+                "region": {
+                  "startLine": 2
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "pip-audit/v1": "2b678e9de1e659c2fa5e3bf0b82d99a1196fd513ec95ee3d1f00111609ef478b"
+          },
+          "properties": {
+            "tags": [
+              "pip-audit",
+              "vulnerability",
+              "dependency"
+            ],
+            "issue_severity": "HIGH",
+            "package_name": "idna",
+            "package_version": "3.7",
+            "fix_versions": [
+              "3.15"
+            ],
+            "aliases": [
+              "GHSA-65pc-fj4g-8rjx",
+              "CVE-2026-45409"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}
