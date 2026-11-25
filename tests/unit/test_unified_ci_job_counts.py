@@ -259,10 +259,11 @@ class TestTheExpansion:
 
 
 #: What a pull request keeps of each pool: the arm64 Linux image, the pinned macOS
-#: image, the one Windows image, and the lowest, the coverage-gated and the highest
-#: Python. The saturated hosted labels (ubuntu-latest, macos-latest) and Python 3.11 and
-#: 3.13 run on the merge-queue entry and on the push to main instead. When GitHub retires
-#: macos-15, the workflow's five entries and this set move to macos-latest together.
+#: image, the one Windows image, and the lowest, the middle and the highest Python. The
+#: saturated hosted labels (ubuntu-latest, macos-latest) and Python 3.11 and 3.13 run on
+#: the merge-queue entry and on the push to main instead. When GitHub retires macos-15,
+#: the workflow's four `exclude` entries, its unit-coverage env lists and this set move
+#: to macos-latest together.
 PR_COVER_IMAGES = {"ubuntu-24.04-arm", "macos-15", "windows-latest"}
 #: The shape of the two env lists of the unit-coverage combine step: one quoted list on a
 #: pull request, another on every other event.
@@ -397,8 +398,9 @@ class TestThePullRequestCover:
         """The combine reads every unit leg, so its expected sets are the tier's cells.
 
         A set the lists named and the tier did not run would fail the gate for missing
-        artifacts; a set the tier ran and the lists left out would be combined without
-        being required, and a whole missing OS or Python version would pass unseen. The
+        artifacts; a set the tier ran and the lists left out is never read at all (the
+        combine globs only the listed sets), so a whole missing OS or Python version
+        would pass unseen and its coverage would be left out of the figure. The
         lists are derived by hand from the three unit-test matrices and the pull-request
         cover, so this holds them to the matrices' own expansion for every event.
         """
