@@ -1,6 +1,6 @@
 # Choose scanners
 
-ASH runs every enabled scanner it has, and all 16 built-in scanners are enabled by default (on Windows, semgrep and opengrep are off by default). This page shows how to see which scanners a scan will run, turn some off, add alpha scanners, and set a scanner's options. The [scanner reference](../reference/scanners.md) lists each scanner with its tool and options.
+ASH runs every enabled scanner it has, and all 17 built-in scanners are enabled by default (on Windows, semgrep and opengrep are off by default). This page shows how to see which scanners a scan will run, turn some off, add alpha scanners, and set a scanner's options. The [scanner reference](../reference/scanners.md) lists each scanner with its tool and options.
 
 ## See which scanners will run
 

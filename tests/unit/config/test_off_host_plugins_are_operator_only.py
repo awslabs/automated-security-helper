@@ -168,6 +168,14 @@ LOCAL: Dict[Plugin, str] = {
     ("reporters", "unused-suppressions"): "writes a file",
     ("reporters", "yaml"): "writes a file",
     ("converters", "archive"): "extracts archives in the work directory",
+    ("converters", "mcp_config"): (
+        "writes shell scripts and span sidecars in the work directory; starts no "
+        "process and fetches nothing"
+    ),
+    ("scanners", "mcp-config"): (
+        "reads the MCP config files in the scan set in process; declares no "
+        "network and fetches nothing (mcp_config_scanner.py)"
+    ),
     ("converters", "jupyter"): (
         "converts notebooks with nbconvert, which it installs from the package "
         "index when missing"

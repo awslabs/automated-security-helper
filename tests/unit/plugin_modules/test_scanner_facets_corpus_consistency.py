@@ -221,6 +221,7 @@ CORPORA: Mapping[str, Optional[CorpusSpec]] = {
     ),
     "guarddog": CorpusSpec("guarddog", prep="guarddog"),
     "hadolint": CorpusSpec("hadolint", sarif=("captured/*.sarif",)),
+    "mcp-config": CorpusSpec("mcp_config", sarif=("captured/*.sarif",)),
     "npm-audit": CorpusSpec("npmaudit", prep="npm-audit"),
     "opengrep": CorpusSpec("opengrep", sarif=("captured/*.sarif",)),
     "semgrep": CorpusSpec("semgrep", sarif=("captured/*.sarif",)),
@@ -641,7 +642,7 @@ def test_the_gate_carries_no_waiver_but_the_register() -> None:
 def test_the_registry_and_the_corpus_table_agree() -> None:
     assert not _REMAINING_LOAD_ERRORS, _REMAINING_LOAD_ERRORS
     names = {_name(cls) for cls in SCANNER_CLASSES}
-    assert len(SCANNER_CLASSES) == 22, sorted(c.__name__ for c in SCANNER_CLASSES)
+    assert len(SCANNER_CLASSES) == 23, sorted(c.__name__ for c in SCANNER_CLASSES)
     assert names == set(CORPORA) == set(SCANNER_TOOL_TYPES), (
         f"registry {sorted(names)} / corpus table {sorted(CORPORA)}: a scanner "
         "needs a CORPORA row (a corpus, or None with the fixture to author)"

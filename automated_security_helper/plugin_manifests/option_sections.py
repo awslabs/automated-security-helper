@@ -170,4 +170,13 @@ CONVERTER_SECTIONS = (
             "the JupyterConverter",
         ),
     ),
+    (
+        "mcp_config",
+        _section(
+            _CONVERTERS,
+            "mcp_config_converter",
+            "McpConfigConverterConfig",
+            "the McpConfigConverter",
+        ),
+    ),
 )

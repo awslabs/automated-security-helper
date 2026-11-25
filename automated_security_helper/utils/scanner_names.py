@@ -138,6 +138,7 @@ SCANNER_TOOL_TYPES: Mapping[str, str] = {
     "grype": "SCA",
     "guarddog": "SCA",
     "hadolint": "IAC",
+    "mcp-config": "SAST",
     "npm-audit": "SCA",
     "opengrep": "SAST",
     "semgrep": "SAST",

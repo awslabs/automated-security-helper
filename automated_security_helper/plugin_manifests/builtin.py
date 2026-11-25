@@ -41,6 +41,7 @@ _SECTION_DESCRIPTIONS = {
     "detect-secrets": "Configure the options for DetectSecrets",
     "gitleaks": "Configure the options for Gitleaks",
     "grype": "Configure the options for Grype",
+    "mcp-config": "Configure the options for the MCP server config scanner",
     "npm-audit": "Configure the options for NpmAudit",
     "opengrep": "Configure the options for Opengrep",
     "semgrep": "Configure the options for Semgrep",
@@ -195,6 +196,13 @@ MANIFESTS = (
         "GrypeScanner",
         "GrypeScannerConfigOptions",
         fixtures="grype",
+    ),
+    _builtin(
+        "mcp-config",
+        "mcp_config_scanner",
+        "McpConfigScanner",
+        "McpConfigScannerConfigOptions",
+        fixtures="mcp_config",
     ),
     _builtin(
         "npm-audit",

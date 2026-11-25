@@ -22680,7 +22680,7 @@ _HOMEPAGE_ALPHA_SENTENCE = (
     "A scan runs one only when its module is named in `ash_plugin_modules` or "
     "`--ash-plugin-modules`. See the "
     "[alpha plugins](docs/plugins/alpha/index.md) and the "
-    "[scanners reference](reference/scanners.md) for all 22 scanners."
+    "[scanners reference](reference/scanners.md) for all 23 scanners."
 )
 
 
@@ -22703,7 +22703,7 @@ def test_the_homepage_says_asha_ships_six_alpha_scanners_and_links_each(
 
     The sentence is on the page. Its count of six is the number of scanners the
     vendored alpha plugin packages declare, which is every in-tree alpha
-    module; its 22 is built in plus alpha; and each link it carries resolves to
+    module; its 23 is built in plus alpha; and each link it carries resolves to
     a page under docs/content, the alpha index and the scanners reference
     included.
     """
@@ -22717,7 +22717,7 @@ def test_the_homepage_says_asha_ships_six_alpha_scanners_and_links_each(
         len(_VENDORED_SCANNER_PLUGIN_PACKAGES),
         sorted(alpha),
     )
-    assert len(builtin) + len(alpha) == 22, (len(builtin), len(alpha))
+    assert len(builtin) + len(alpha) == 23, (len(builtin), len(alpha))
     links = re.findall(r"\]\(([^)#]+\.md)", _HOMEPAGE_ALPHA_SENTENCE)
     assert len(links) == 8, links
     for link in links:

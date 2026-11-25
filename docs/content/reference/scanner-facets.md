@@ -11,7 +11,7 @@
 
 This page is generated from the scanner facets register in the ASH source code by `scripts/generate_facets_reference.py`. Edits made to this file by hand are overwritten the next time it is generated.
 
-ASH ships 22 scanners, and every one declares, per facet of the shared vocabulary, whether its native output maps into the shared pipeline. The register is production code (`automated_security_helper/base/scanner_facets.py`): the declaration has runtime consumers, and a scanner without one is refused by the registry totality test. The three states:
+ASH ships 23 scanners, and every one declares, per facet of the shared vocabulary, whether its native output maps into the shared pipeline. The register is production code (`automated_security_helper/base/scanner_facets.py`): the declaration has runtime consumers, and a scanner without one is refused by the registry totality test. The three states:
 
 - `mapped`: the facet lands where the shared pipeline reads it, and the cell names the native field it comes from. The corpus-consistency gate (`tests/unit/plugin_modules/test_scanner_facets_corpus_consistency.py`) holds these cells against the committed fixtures.
 - `mappable-dropped`: the native output carries the value and ASH discards it today: a roadmap record, not a promise. The cell names the native field and why it is dropped.
@@ -33,6 +33,7 @@ The facet vocabulary, in declaration order: `rule_id`, `severity`, `file_path`, 
 | [`detect-secrets`](#detect-secrets) | 8 | 0 | 12 |
 | [`gitleaks`](#gitleaks) | 9 | 1 | 10 |
 | [`grype`](#grype) | 1 | 1 | 18 |
+| [`mcp-config`](#mcp-config) | 8 | 0 | 12 |
 | [`npm-audit`](#npm-audit) | 11 | 2 | 7 |
 | [`opengrep`](#opengrep) | 10 | 2 | 8 |
 | [`semgrep`](#semgrep) | 9 | 2 | 9 |
@@ -315,6 +316,33 @@ The facet vocabulary, in declaration order: `rule_id`, `severity`, `file_path`, 
 | `references` | `mappable-dropped` | matches[].vulnerability.urls | the native urls (and relatedVulnerabilities[].urls, dataSource) are never read into references |
 | `tags` | `n/a` |  | UNCONFIRMED: the survey reads SARIF rule properties.tags off the conformance tests' presenter shape (rule-level, which the flat reader never takes as the tags column anyway); no grype SARIF fixture from a real run is committed, so a `grype -o sarif` capture settles whether results carry tags |
 | `extras` | `mapped` | SARIF result properties bag (package identity keys this adapter writes) passed through to the flat properties |  |
+
+## `mcp-config`
+
+- Class: `automated_security_helper.plugin_modules.ash_builtin.scanners.mcp_config_scanner.McpConfigScanner`
+
+| Facet | State | Native field | Reason |
+|-------|-------|--------------|--------|
+| `rule_id` | `mapped` | PolicyFinding.rule_id (MCP-PRIVILEGE-ESCALATION, MCP-AUTO-APPROVAL, MCP-UNPINNED-RUNNER, MCP-REMOTE-NOT-LOCAL, MCP-REMOTE-URL-PREFIX, MCP-REMOTE-URL-INSECURE, MCP-COMMAND-PREFIX, MCP-ENV-SECRET) |  |
+| `severity` | `mapped` | RULE_SEVERITY[rule_id] (HIGH, MEDIUM, LOW), written as result level and properties issue_severity |  |
+| `file_path` | `mapped` | McpServerEntry.source_file |  |
+| `line_range` | `mapped` | McpServerEntry.spans[pointer] line / end_line |  |
+| `column` | `mapped` | McpServerEntry.spans[pointer] col / end_col (JSON); a TOML key is located by its line only |  |
+| `message` | `mapped` | PolicyFinding.message, built from McpServerEntry.server_name |  |
+| `resource_id` | `n/a` |  | the finding names a field of a config file; the server entry's JSON pointer rides in the result property mcp_server_pointer, and ash_resource_id is not written, so a suppression binds on file and line |
+| `resource_type` | `n/a` |  | an MCP server entry is not a deployable resource type |
+| `package_name` | `n/a` |  | the finding names a launcher argument, not a package inventory row |
+| `package_version` | `n/a` |  | the finding carries no package version |
+| `package_path` | `n/a` |  | the finding carries no package path |
+| `taxonomy_cve` | `n/a` |  | policy findings carry no CVE taxonomy |
+| `taxonomy_cwe` | `n/a` |  | the rules carry no CWE taxonomy |
+| `fingerprints` | `n/a` |  | the scanner writes no partialFingerprints; identity is file and line |
+| `fix_available` | `n/a` |  | policy findings carry no fix state |
+| `remediation_text` | `n/a` |  | the remedy is the last sentence of the message; there is no separate remediation field |
+| `snippet` | `n/a` |  | the config text is never quoted into a finding, because an env value can be a credential |
+| `references` | `n/a` |  | the rules carry no reference URLs |
+| `tags` | `mapped` | adapter-written PropertyBag tags (mcp-config, security, tool_name, tool_type) |  |
+| `extras` | `mapped` | result properties issue_severity, mcp_server_pointer and mcp_config_format written by the adapter |  |
 
 ## `npm-audit`
 
