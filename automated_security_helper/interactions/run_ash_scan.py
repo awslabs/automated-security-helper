@@ -5442,7 +5442,10 @@ def _scan_source_for(opts: "ScanOptions", find_root: Any, environ: Any) -> str |
     of resolved findings, which compares the scope of the stored findings with
     this scan's) read an empty image scan as a clean scan of whatever repository
     the scan was started in. The ``image:`` prefix keeps an image reference from
-    reading as a directory called the same thing.
+    reading as a directory called the same thing, and a digest, where the scan
+    knows one, names the image rather than the tag
+    (``utils/image_attribution.image_scan_source``; the scan phase refines the
+    record once a tag's digest is resolved).
     """
     from automated_security_helper.utils.scan_source import recorded_scan_source
 
@@ -5452,7 +5455,11 @@ def _scan_source_for(opts: "ScanOptions", find_root: Any, environ: Any) -> str |
         and asset.kind == AssetKind.CONTAINER_IMAGE
         and asset.image is not None
     ):
-        return f"image:{asset.image.shown()}"
+        from automated_security_helper.utils.image_attribution import (
+            image_scan_source,
+        )
+
+        return image_scan_source(asset.image)
     return recorded_scan_source(opts.source_dir, find_root, environ)
 
 

@@ -75,6 +75,7 @@ WIRE_SPELLINGS = frozenset(
         "config_field_denied",
         "config_input_not_permitted",
         "config_policy_unreadable",
+        "delivered_image_missing",
         "delivered_source_missing",
         "delivered_image_missing",
         "DirectoryNotFound",

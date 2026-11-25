@@ -570,6 +570,16 @@ def skip_dirs_value(path: str) -> str:
     return _csv_field(escaped)
 
 
+def skip_files_glob_value(glob: str) -> str:
+    """*glob* as one ``--skip-files`` value, its glob characters left to trivy.
+
+    The CSV quoting of :func:`_csv_field` only: unlike :func:`skip_dirs_value`,
+    which escapes glob characters to name one directory literally, an image
+    exclude glob (``/opt/dir/**``) is meant to be read as a glob.
+    """
+    return _csv_field(glob)
+
+
 def _csv_field(value: str) -> str:
     """``value`` as one field of the CSV trivy reads a list flag as.
 
@@ -1064,6 +1074,10 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
     # trivy (_trivy_config_file) is kept for the same reason: a trivy.yaml can name
     # the cache (``cache.dir``).
     _scan_config_file: Optional[str] = PrivateAttr(default=None)
+
+    # Where the image scan's second, JSON pass writes its report (trivy's SARIF
+    # names no layer, its JSON does; see utils/image_layer_digests).
+    _image_layers_json: Optional[Path] = PrivateAttr(default=None)
 
     def _environment_values(self) -> Tuple[str, ...]:
         """The configuration's environment values, plus the two input-file variables

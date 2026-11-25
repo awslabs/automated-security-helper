@@ -905,6 +905,7 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
                 python_only=True,
                 use_uv_tool=True,
             ),
+            runtime_compat=opsf.RuntimeCompatFacet(rows=()),
             platforms=opsf.PlatformsFacet(
                 provisionable=(),
                 note="a PyPI package run through uv; platform support is the package's and was not read here",

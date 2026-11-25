@@ -28,7 +28,10 @@ from automated_security_helper.core.container_engine import (
     ContainerEngine,
     detect_container_engine,
 )
-from automated_security_helper.utils.image_tool_targets import stereoscope_target
+from automated_security_helper.utils.image_tool_targets import (
+    archive_scheme,
+    stereoscope_target,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -123,12 +126,51 @@ class TestEngineDetection:
 
 
 class TestStereoscopeTargets:
-    def test_an_archive_needs_no_engine(self, tmp_path):
+    def test_a_docker_save_archive_needs_no_engine(self, tmp_path):
+        # The submitted shape is a `docker save` tarball: it holds manifest.json
+        # and stereoscope reads it as docker-archive (measured: syft and grype
+        # refuse it as oci-archive).
         archive = _archive(tmp_path)
         locator = ImageLocator(oci_archive=archive)
         assert stereoscope_target(locator, ContainerEngine.NONE) == (
-            f"oci-archive:{archive.absolute().as_posix()}"
+            f"docker-archive:{archive.absolute().as_posix()}"
         )
+
+    def test_an_oci_layout_tarball_is_an_oci_archive(self, tmp_path):
+        archive = tmp_path / "layout.tar"
+        with tarfile.open(archive, "w") as saved:
+            for name, data in (("oci-layout", b"{}"), ("index.json", b"{}")):
+                info = tarfile.TarInfo(name=name)
+                info.size = len(data)
+                saved.addfile(info, io.BytesIO(data))
+        assert archive_scheme(archive) == "oci-archive"
+        assert stereoscope_target(
+            ImageLocator(oci_archive=archive), ContainerEngine.NONE
+        ) == (f"oci-archive:{archive.absolute().as_posix()}")
+
+    def test_a_save_that_holds_both_listings_is_docker_archive(self, tmp_path):
+        # A recent `docker save` writes manifest.json and an OCI index.
+        archive = tmp_path / "both.tar"
+        with tarfile.open(archive, "w") as saved:
+            for name in ("index.json", "oci-layout", "manifest.json"):
+                info = tarfile.TarInfo(name=name)
+                info.size = 2
+                saved.addfile(info, io.BytesIO(b"{}"))
+        assert archive_scheme(archive) == "docker-archive"
+
+    def test_a_dot_slash_member_name_is_read(self, tmp_path):
+        archive = tmp_path / "dot.tar"
+        with tarfile.open(archive, "w") as saved:
+            info = tarfile.TarInfo(name="./manifest.json")
+            info.size = 2
+            saved.addfile(info, io.BytesIO(b"[]"))
+        assert archive_scheme(archive) == "docker-archive"
+
+    def test_an_archive_that_cannot_be_walked_is_the_documented_shape(self, tmp_path):
+        broken = tmp_path / "broken.tar"
+        broken.write_bytes(b"not a tar" * 100)
+        assert archive_scheme(broken) == "docker-archive"
+        assert archive_scheme(tmp_path / "absent.tar") == "docker-archive"
 
     def test_a_layout_needs_no_engine(self, tmp_path):
         layout = _layout(tmp_path)
@@ -183,14 +225,16 @@ class TestGrypeImageArgv:
             server.close()
         assert f"docker:{IMAGE_REF}" in argv
 
-    def test_an_archive_is_an_oci_archive_target(self, monkeypatch, tmp_path):
+    def test_a_docker_save_archive_is_a_docker_archive_target(
+        self, monkeypatch, tmp_path
+    ):
         _no_engine(monkeypatch, tmp_path)
         archive = _archive(tmp_path)
         scanner = self._scanner(tmp_path)
         argv, _results, _env = scanner._execute_image_scan(
             ImageLocator(oci_archive=archive)
         )
-        assert f"oci-archive:{archive.absolute().as_posix()}" in argv
+        assert f"docker-archive:{archive.absolute().as_posix()}" in argv
 
     def test_a_layout_is_an_oci_dir_target(self, monkeypatch, tmp_path):
         _no_engine(monkeypatch, tmp_path)

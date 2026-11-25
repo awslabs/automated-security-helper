@@ -1232,6 +1232,7 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
                 python_only=False,
                 use_uv_tool=False,
             ),
+            runtime_compat=opsf.RuntimeCompatFacet(rows=()),
             platforms=opsf.PlatformsFacet(
                 provisionable=(),
                 note="a PyPI package under a version constraint (a bare install resolves differently); platform support was not read here",

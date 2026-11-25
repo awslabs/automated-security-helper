@@ -241,18 +241,19 @@ def test_every_scanner_method_takes_the_enum():
 
 
 def test_the_scan_reads_a_real_scope_file():
-    # A control that the scan sees real files: the enum module itself spells both.
+    # A control that the scan sees real files: the enum module itself spells all three.
     lines = stray_spellings((PKG / "models/vocab.py").read_text(encoding="utf-8"))
-    assert len(lines) == 2
+    assert len(lines) == 3
 
 
 # --- the vocabulary and its wire spellings -------------------------------------
 
 
 def test_members_and_order_are_the_wire_spellings():
-    assert [m.value for m in TargetType] == ["source", "converted"]
+    assert [m.value for m in TargetType] == ["source", "converted", "image"]
     assert TargetType("source") is TargetType.SOURCE
     assert TargetType.SOURCE == "source" and TargetType.CONVERTED == "converted"
+    assert TargetType("image") is TargetType.IMAGE
 
 
 def test_a_member_renders_as_its_value_in_text():

@@ -25,7 +25,7 @@ from __future__ import annotations
 import os
 import stat
 from enum import Enum
-from typing import Mapping, Optional
+from typing import Mapping, Optional, Tuple
 
 from automated_security_helper.utils.process_env import snapshot_environ
 
@@ -67,6 +67,35 @@ def _docker_host_socket(value: str) -> Optional[str]:
     return None
 
 
+def detect_engine_socket(
+    environment: Optional[Mapping[str, str]] = None,
+) -> Tuple[ContainerEngine, Optional[str]]:
+    """The engine available to this scan and the unix socket that reaches it.
+
+    ``(ContainerEngine.NONE, None)`` when no candidate is a socket. The probe is
+    the one stat per candidate described in the module docstring.
+    """
+    env = snapshot_environ() if environment is None else environment
+
+    docker_host = env.get("DOCKER_HOST", "").strip()
+    if docker_host:
+        socket_path = _docker_host_socket(docker_host)
+        if socket_path is not None and _is_unix_socket(socket_path):
+            return ContainerEngine.DOCKER, socket_path
+    elif _is_unix_socket(DOCKER_DEFAULT_SOCKET):
+        return ContainerEngine.DOCKER, DOCKER_DEFAULT_SOCKET
+
+    runtime_dir = env.get("XDG_RUNTIME_DIR", "").strip()
+    if runtime_dir:
+        user_socket = os.path.join(runtime_dir, "podman", "podman.sock")
+        if _is_unix_socket(user_socket):
+            return ContainerEngine.PODMAN, user_socket
+    if _is_unix_socket(PODMAN_SYSTEM_SOCKET):
+        return ContainerEngine.PODMAN, PODMAN_SYSTEM_SOCKET
+
+    return ContainerEngine.NONE, None
+
+
 def detect_container_engine(
     environment: Optional[Mapping[str, str]] = None,
 ) -> ContainerEngine:
@@ -75,22 +104,4 @@ def detect_container_engine(
     *environment* defaults to ``os.environ``; tests pass their own mapping so
     no probe ever depends on the suite's host.
     """
-    env = snapshot_environ() if environment is None else environment
-
-    docker_host = env.get("DOCKER_HOST", "").strip()
-    if docker_host:
-        socket_path = _docker_host_socket(docker_host)
-        if socket_path is not None and _is_unix_socket(socket_path):
-            return ContainerEngine.DOCKER
-    elif _is_unix_socket(DOCKER_DEFAULT_SOCKET):
-        return ContainerEngine.DOCKER
-
-    runtime_dir = env.get("XDG_RUNTIME_DIR", "").strip()
-    if runtime_dir and _is_unix_socket(
-        os.path.join(runtime_dir, "podman", "podman.sock")
-    ):
-        return ContainerEngine.PODMAN
-    if _is_unix_socket(PODMAN_SYSTEM_SOCKET):
-        return ContainerEngine.PODMAN
-
-    return ContainerEngine.NONE
+    return detect_engine_socket(environment)[0]

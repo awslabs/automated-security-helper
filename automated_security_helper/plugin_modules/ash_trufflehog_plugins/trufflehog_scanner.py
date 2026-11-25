@@ -424,6 +424,7 @@ class TruffleHogScanner(ScannerPluginBase[TruffleHogScannerConfig]):
                 python_only=False,
                 use_uv_tool=False,
             ),
+            runtime_compat=opsf.RuntimeCompatFacet(rows=()),
             platforms=opsf.PlatformsFacet(
                 provisionable=(),
                 note="the user's installed TruffleHog, absent from TOOL_VERSIONS, so "

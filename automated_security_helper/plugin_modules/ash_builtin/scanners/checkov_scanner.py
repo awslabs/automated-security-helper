@@ -1047,6 +1047,43 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
                 python_only=True,
                 use_uv_tool=True,
             ),
+            runtime_compat=opsf.RuntimeCompatFacet(
+                rows=(
+                    opsf.RuntimeCompatRow(
+                        runtime=opsf.RuntimeName.PYTHON,
+                        # No checkov release is known to fix this, so the tool
+                        # side is open: the row applies at every checkov
+                        # version until an upstream release passes array_hook.
+                        tool_versions="",
+                        # >=3.10 is checkov's own floor; <3.15 is the proved
+                        # upper bound (3.14.9 parses, 3.15.0 raises).
+                        runtime_request=">=3.10,<3.15",
+                        resolution=opsf.CompatResolution.PIN,
+                        reason=(
+                            "CPython 3.15 made array_hook a required argument "
+                            "of json.decoder.JSONArray (signature 3.14.9: "
+                            "(s_and_end, scan_once, _w, _ws); 3.15.0: "
+                            "(s_and_end, scan_once, array_hook, _w, _ws)); "
+                            "checkov's Decoder.json_array "
+                            "(checkov/common/parsers/json/decoder.py) calls it "
+                            "without one, so every JSON document that holds an "
+                            "array fails to parse, and on a large tree the "
+                            "parallel runner can wait indefinitely on the worker "
+                            "error; reported against checkov 3.4.3 and 3.4.0 on "
+                            "3.15.0; a fix is proposed upstream in "
+                            "bridgecrewio/checkov#7778 and not merged"
+                        ),
+                        upstream_issue=(
+                            "https://github.com/bridgecrewio/checkov/issues/7777"
+                        ),
+                        # Unsolved upstream: re-read whenever the checkov
+                        # version constraint moves (the consistency gate holds
+                        # this row to covering the default constraint), and
+                        # drop the upper bound once a release passes array_hook.
+                        open_ended=True,
+                    ),
+                ),
+            ),
             platforms=opsf.PlatformsFacet(
                 provisionable=(),
                 note="a PyPI package run through uv; platform support is the package's and was not read here",

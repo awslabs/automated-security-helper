@@ -53,8 +53,8 @@ global_settings:
         hold words, not a credential.
     - rule_id: API_KEY_OR_SECRET
       path: Dockerfile
-      line_start: 817
-      line_end: 819
+      line_start: 823
+      line_end: 825
       reason: >-
         False positive. The adduser command in the non-root-user block passes the
         --disabled-password flag, which the netrc_password detector in ferret-scan 2.6.1
@@ -63,8 +63,8 @@ global_settings:
         moves out of this range.
     - rule_id: API_KEY_OR_SECRET
       path: automated_security_helper/assets/Dockerfile
-      line_start: 817
-      line_end: 819
+      line_start: 823
+      line_end: 825
       reason: >-
         False positive. This is the build-context copy of the Dockerfile entry above, with
         the same adduser --disabled-password flag that ferret-scan 2.6.1 reads as a
@@ -576,8 +576,8 @@ global_settings:
     # self-scan runs it. Each was read at the reported line and is pinned to it.
     - path: automated_security_helper/base/scanner_operational_facets.py
       rule_id: API_KEY_OR_SECRET
-      line_start: 708
-      line_end: 708
+      line_start: 713
+      line_end: 713
       reason: >-
         False positive. An enum member whose name is a token word and whose value is a
         lowercase label of the same word; no credential is held.

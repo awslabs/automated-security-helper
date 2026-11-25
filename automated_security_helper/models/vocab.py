@@ -180,8 +180,10 @@ class TargetType(str, Enum):
     """Which tree a scanner is asked to scan: the source tree or the converted one.
 
     ``SOURCE`` is the directory the user pointed ASH at. ``CONVERTED`` is the work
-    directory holding what converters produced from archives and notebooks. The
-    wire spellings (``"source"`` / ``"converted"``) are in result files, identity
+    directory holding what converters produced from archives and notebooks.
+    ``IMAGE`` labels the results of a scan whose subject is a container image, not
+    a tree. The wire spellings (``"source"`` / ``"converted"`` / ``"image"``) are in
+    result files, identity
     keys and log lines and never change.
 
     ``__str__`` returns the value so ``f"{target_type}"`` and ``str(target_type)``
@@ -193,6 +195,7 @@ class TargetType(str, Enum):
 
     SOURCE = "source"
     CONVERTED = "converted"
+    IMAGE = "image"
 
     def __str__(self) -> str:
         return self.value

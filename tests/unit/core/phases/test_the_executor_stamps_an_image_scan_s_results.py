@@ -151,3 +151,31 @@ def test_a_source_task_stamps_nothing(tmp_path):
     row = _row(_context(tmp_path, image=False), "source")
     properties = _properties(row)
     assert properties is None or getattr(properties, IMAGE_REF_PROPERTY, None) is None
+
+
+def test_an_image_task_hands_the_scanner_the_global_ignore_paths(tmp_path):
+    """The ignore paths reach scan_image, which turns them into tool excludes."""
+    from automated_security_helper.models.core import IgnorePathWithReason
+
+    seen = {}
+
+    class Recording(ImageShapeScanner):
+        def scan_image(
+            self, image, config=None, *args, global_ignore_paths=None, **kwargs
+        ):
+            seen["paths"] = global_ignore_paths
+            return super().scan_image(image, config)
+
+    context = _context(tmp_path, image=True)
+    scanner = Recording(config=_Config(), context=context)
+    executor = ScannerExecutor(
+        plugin_context=context, progress_display=MagicMock(), scanner_tasks=[]
+    )
+    ignored = [IgnorePathWithReason(path="/usr/share/doc/", reason="docs")]
+    executor._global_ignore_paths = ignored
+    executor._execute_scanner(
+        "image-shape-tool",
+        scanner,
+        [{"path": Path(context.source_dir), "type": "image"}],
+    )
+    assert seen["paths"] == ignored

@@ -732,6 +732,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                 python_only=False,
                 use_uv_tool=False,
             ),
+            runtime_compat=opsf.RuntimeCompatFacet(rows=()),
             platforms=opsf.PlatformsFacet(
                 provisionable=(),
                 note="the Node.js toolchain is the user's; ASH installs none of it",

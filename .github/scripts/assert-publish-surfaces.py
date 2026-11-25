@@ -496,6 +496,25 @@ ALLOWLIST: tuple[Entry, ...] = (
         ),
     ),
     Entry(
+        file=".github/workflows/ash-image-scan-live-engine.yml",
+        kind=KIND_UPLOAD,
+        action=_UPLOAD,
+        publishes=(
+            "name=live-engine-image-scan "
+            "path=${{ runner.temp }}/scan-engine"
+            "|${{ runner.temp }}/scan-registry"
+            "|${{ runner.temp }}/scan-engine.log"
+            "|${{ runner.temp }}/scan-registry.log"
+        ),
+        reason=(
+            "Debugging evidence from a failed run of the live-engine image scan "
+            "check (`if: failure()`, 7-day retention): the scan output and logs of "
+            "scanning a busybox-based fixture image built from this repository's "
+            "own public Dockerfile. Findings and logs about a public fixture, not a "
+            "wheel, image, binary or bundle this project distributes."
+        ),
+    ),
+    Entry(
         file=".github/workflows/ash-docs-ci-runners.yml",
         kind=KIND_UPLOAD,
         action=_UPLOAD,

@@ -579,9 +579,10 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
                 selection=(
                     "a dir: scan of the source tree, with a lockfile join for "
                     "locations; a container-image asset through a stereoscope "
-                    "target (_execute_image_scan: oci-archive:/oci-dir: for a "
-                    "payload, docker:/podman:/registry: for a reference by the "
-                    "detected engine)"
+                    "target (_execute_image_scan: docker-archive:/oci-archive:/"
+                    "oci-dir: for a payload, docker:/podman:/registry: for a "
+                    "reference by the detected engine), with the ignore paths "
+                    "as --exclude globs"
                 ),
                 covers_note=(
                     "the display string reads 'Packages and dependency files'; "
@@ -597,6 +598,7 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
                 python_only=False,
                 use_uv_tool=False,
             ),
+            runtime_compat=opsf.RuntimeCompatFacet(rows=()),
             platforms=opsf.PlatformsFacet(
                 provisionable=opsf.PLATFORMS_NO_WINDOWS_ARM64,
                 note="no windows/arm64 asset (tool_downloads.py docstring)",
@@ -1210,6 +1212,13 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
                 self.args.extra_args.append(
                     ToolExtraArg(key="--config", value=empty.as_posix())
                 )
+            # The ignore paths grype can be told to leave uncataloged (measured
+            # on grype 0.122.1: an absolute in-image glob is honored on an
+            # image source; utils/image_ignore_paths).
+            self.args.extra_args.extend(
+                ToolExtraArg(key="--exclude", value=glob)
+                for glob in self._image_exclude_globs()
+            )
             final_args = self._resolve_arguments(
                 target=stereoscope_target(image),
                 results_file=results_file,
