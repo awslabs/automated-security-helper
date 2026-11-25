@@ -1,0 +1,63 @@
+polars-runtime-32 Cargo.lock record
+
+What this directory is
+ASH depends on polars at runtime (pyproject.toml: polars>=1.33,<2.0), and polars
+ships as a pure-Python shim plus polars-runtime-32, a compiled wheel whose one abi3
+extension module statically links hundreds of Rust crates. The wheel carries no
+machine-readable record of those crates: the manylinux x86-64 wheel's shared library
+has no cargo-auditable .dep-v0 ELF section (read with readelf -S against all 76
+sections of _polars_runtime.abi3.so from the wheel below), so no SBOM tool can read
+the crate list from the artifact itself -- syft 1.57.2 and trivy 0.76.2 (ASH's pinned
+versions) each report exactly one component for the installed wheel, the PyPI package,
+and zero cargo components.
+
+Cargo.lock beside this file is the upstream lockfile for exactly the polars release
+uv.lock resolves, placed in the repository tree so that the SBOM and vulnerability
+scanners that already run over this repository index the Rust dependency tree with no
+extra tooling: syft's rust-cargo-lock cataloger puts every crate into the CycloneDX
+SBOM the self-scan's cyclonedx reporter emits, and grype and trivy match advisories
+against it (rustls advisories against this file were the first finding; see the
+suppression block in .ash/.ash.yaml that names this path).
+
+Provenance
+The file is extracted unmodified from the polars-runtime-32 source distribution that
+uv.lock pins by hash, and is byte-identical to Cargo.lock at the upstream release tag.
+polars-runtime-32: 1.44.2
+Sdist: polars_runtime_32-1.44.2.tar.gz
+Sdist SHA-256: b84842f7d621aaca7a52e165e19a24f89db45f8aa13744941430218419a14a67
+Cargo.lock SHA-256: a30ca86b2545a349a064dee6e99f604b7cbf30952919a2e76ed156debcf2e43f
+Packages in the lockfile: 581
+Registry crates: 542
+Workspace crates: 39
+Upstream tag copy: https://github.com/pola-rs/polars/blob/py-1.44.2/Cargo.lock
+
+A test (tests/unit/utils/test_polars_cargo_lock_record.py) holds this record to
+uv.lock and the committed Cargo.lock to this record, so a polars bump that does not
+refresh the lockfile fails there rather than leaving the SBOM describing a release
+the lock no longer resolves.
+
+What the lockfile does and does not say
+The lockfile covers polars' whole Cargo workspace, dev- and build-dependencies and
+all target platforms included, so it is an upper bound on what any one wheel links.
+A crate's presence here does not alone prove it is compiled into the shipped library;
+the embedded crate source paths in the manylinux x86-64 wheel
+(polars_runtime_32-1.44.2-cp310-abi3-manylinux_2_17_x86_64, SHA-256
+a1bafb441e99199a62c63bf1bbdc0ea09ee9776dbac2bf31452b5000fb1df2f7) name a subset of
+these crates and nothing outside them. Treat findings against this file as
+findings against polars' dependency tree, to be fixed by a polars upgrade, never by
+editing this file.
+
+How to refresh after a polars bump
+1. Read the new polars-runtime-32 sdist URL and SHA-256 from uv.lock.
+2. Download the sdist into an empty scratch directory and verify the SHA-256.
+3. Extract it (python3 -I, tarfile with filter="data") and copy the top-level
+   Cargo.lock over the one here, unmodified.
+4. Update every field above (sha256sum for the digests; the package counts are
+   grep -c '^\[\[package\]\]' for the total, and the workspace members are the
+   entries with no "source" line).
+5. Re-run the record test, and re-triage the suppression entries in .ash/.ash.yaml
+   that name this path: drop the ones the new tree fixes, re-justify the rest.
+
+The license assessment of these crates (holders, SPDX expressions, copyleft sweep)
+is separate OSPO work; when it is in the tree it lives at
+docs/content/assets/licenses/polars-license-record.txt.
