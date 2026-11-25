@@ -1,0 +1,233 @@
+{
+  "AuditTime": "2026-11-25T00:18:38Z",
+  "ClusterInfo": {
+    "Controllers": 1,
+    "Namespaces": 0,
+    "Nodes": 0,
+    "Pods": 0,
+    "Version": "unknown"
+  },
+  "DisplayName": "in/pos",
+  "PolarisOutputVersion": "1.0",
+  "Results": [
+    {
+      "CreatedTime": "0001-01-01T00:00:00Z",
+      "Kind": "Deployment",
+      "Name": "web",
+      "Namespace": "demo",
+      "PodResult": {
+        "ContainerResults": [
+          {
+            "Name": "nginx",
+            "Results": {
+              "cpuLimitsMissing": {
+                "Category": "Efficiency",
+                "Details": null,
+                "ID": "cpuLimitsMissing",
+                "Message": "CPU limits should be set",
+                "Mutations": null,
+                "Severity": "warning",
+                "Success": false
+              },
+              "cpuRequestsMissing": {
+                "Category": "Efficiency",
+                "Details": null,
+                "ID": "cpuRequestsMissing",
+                "Message": "CPU requests should be set",
+                "Mutations": null,
+                "Severity": "warning",
+                "Success": false
+              },
+              "insecureCapabilities": {
+                "Category": "Security",
+                "Details": null,
+                "ID": "insecureCapabilities",
+                "Message": "Container should not have insecure capabilities",
+                "Mutations": null,
+                "Severity": "warning",
+                "Success": false
+              },
+              "linuxHardening": {
+                "Category": "Security",
+                "Details": null,
+                "ID": "linuxHardening",
+                "Message": "Use one of AppArmor, Seccomp, SELinux, or dropping Linux Capabilities to restrict containers using unwanted privileges",
+                "Mutations": null,
+                "Severity": "warning",
+                "Success": false
+              },
+              "livenessProbeMissing": {
+                "Category": "Reliability",
+                "Details": null,
+                "ID": "livenessProbeMissing",
+                "Message": "Liveness probe should be configured",
+                "Mutations": null,
+                "Severity": "warning",
+                "Success": false
+              },
+              "memoryLimitsMissing": {
+                "Category": "Efficiency",
+                "Details": null,
+                "ID": "memoryLimitsMissing",
+                "Message": "Memory limits should be set",
+                "Mutations": null,
+                "Severity": "warning",
+                "Success": false
+              },
+              "memoryRequestsMissing": {
+                "Category": "Efficiency",
+                "Details": null,
+                "ID": "memoryRequestsMissing",
+                "Message": "Memory requests should be set",
+                "Mutations": null,
+                "Severity": "warning",
+                "Success": false
+              },
+              "notReadOnlyRootFilesystem": {
+                "Category": "Security",
+                "Details": null,
+                "ID": "notReadOnlyRootFilesystem",
+                "Message": "Filesystem should be read only",
+                "Mutations": null,
+                "Severity": "warning",
+                "Success": false
+              },
+              "privilegeEscalationAllowed": {
+                "Category": "Security",
+                "Details": null,
+                "ID": "privilegeEscalationAllowed",
+                "Message": "Privilege escalation should not be allowed",
+                "Mutations": null,
+                "Severity": "danger",
+                "Success": false
+              },
+              "pullPolicyNotAlways": {
+                "Category": "Reliability",
+                "Details": null,
+                "ID": "pullPolicyNotAlways",
+                "Message": "Image pull policy should be \"Always\"",
+                "Mutations": [
+                  {
+                    "Comment": "",
+                    "Op": "add",
+                    "Path": "/spec/template/spec/containers/0/imagePullPolicy",
+                    "Value": "Always"
+                  }
+                ],
+                "Severity": "warning",
+                "Success": false
+              },
+              "readinessProbeMissing": {
+                "Category": "Reliability",
+                "Details": null,
+                "ID": "readinessProbeMissing",
+                "Message": "Readiness probe should be configured",
+                "Mutations": null,
+                "Severity": "warning",
+                "Success": false
+              },
+              "runAsPrivileged": {
+                "Category": "Security",
+                "Details": null,
+                "ID": "runAsPrivileged",
+                "Message": "Should not be running as privileged",
+                "Mutations": null,
+                "Severity": "danger",
+                "Success": false
+              },
+              "runAsRootAllowed": {
+                "Category": "Security",
+                "Details": null,
+                "ID": "runAsRootAllowed",
+                "Message": "Should not be allowed to run as root",
+                "Mutations": null,
+                "Severity": "danger",
+                "Success": false
+              },
+              "tagNotSpecified": {
+                "Category": "Reliability",
+                "Details": null,
+                "ID": "tagNotSpecified",
+                "Message": "Image tag should be specified",
+                "Mutations": null,
+                "Severity": "danger",
+                "Success": false
+              }
+            }
+          }
+        ],
+        "Name": "",
+        "Results": {
+          "automountServiceAccountToken": {
+            "Category": "Security",
+            "Details": null,
+            "ID": "automountServiceAccountToken",
+            "Message": "The ServiceAccount will be automounted",
+            "Mutations": null,
+            "Severity": "warning",
+            "Success": false
+          },
+          "missingNetworkPolicy": {
+            "Category": "Security",
+            "Details": null,
+            "ID": "missingNetworkPolicy",
+            "Message": "A NetworkPolicy should match pod labels and contain applied egress and ingress rules",
+            "Mutations": null,
+            "Severity": "warning",
+            "Success": false
+          },
+          "priorityClassNotSet": {
+            "Category": "Reliability",
+            "Details": null,
+            "ID": "priorityClassNotSet",
+            "Message": "Priority class should be set",
+            "Mutations": null,
+            "Severity": "warning",
+            "Success": false
+          },
+          "topologySpreadConstraint": {
+            "Category": "Reliability",
+            "Details": null,
+            "ID": "topologySpreadConstraint",
+            "Message": "Pod should be configured with a valid topology spread constraint",
+            "Mutations": null,
+            "Severity": "warning",
+            "Success": false
+          }
+        }
+      },
+      "Results": {
+        "deploymentMissingReplicas": {
+          "Category": "Reliability",
+          "Details": null,
+          "ID": "deploymentMissingReplicas",
+          "Message": "Only one replica is scheduled",
+          "Mutations": null,
+          "Severity": "warning",
+          "Success": false
+        },
+        "metadataAndInstanceMismatched": {
+          "Category": "Reliability",
+          "Details": null,
+          "ID": "metadataAndInstanceMismatched",
+          "Message": "Label app.kubernetes.io/instance must match metadata.name",
+          "Mutations": null,
+          "Severity": "warning",
+          "Success": false
+        },
+        "missingPodDisruptionBudget": {
+          "Category": "Reliability",
+          "Details": null,
+          "ID": "missingPodDisruptionBudget",
+          "Message": "Should have a PodDisruptionBudget",
+          "Mutations": null,
+          "Severity": "warning",
+          "Success": false
+        }
+      }
+    }
+  ],
+  "Score": 44,
+  "SourceName": "in/pos",
+  "SourceType": "Path"
+}

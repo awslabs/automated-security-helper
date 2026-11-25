@@ -478,7 +478,13 @@ class TestExitStatusAndFailures:
     ):
         scanner = _scanner(tree, tmp_path, scan_timeout=5)
         fake = FakePolaris(timed_out=True)
-        with pytest.raises(ScannerError, match="timed out after 5"):
+        # The shared template flow words it "<Name> timed out after '<n>' s and was
+        # killed, so it produced no results file" (timeout_limit_token).
+        with pytest.raises(
+            ScannerError,
+            match=r"PolarisScanner timed out after '5' s and was killed, so it "
+            r"produced no results file",
+        ):
             _run(scanner, fake, monkeypatch)
         assert 0 < fake.calls[0]["timeout"] <= 5
 

@@ -82,7 +82,13 @@ from typing import Any, ClassVar, Dict, List, Literal, Optional, Set, Tuple
 import yaml
 from pydantic import PrivateAttr, model_validator
 
+from automated_security_helper.base import scanner_operational_facets as opsf
 from automated_security_helper.base.options import ScannerOptionsBase
+from automated_security_helper.base.scanner_facets import (
+    FacetDecl,
+    FacetState,
+    ScannerFacets,
+)
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
@@ -92,8 +98,8 @@ from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason, ToolArgs
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
-from automated_security_helper.utils.download_utils import (
-    pinned_tool_install_commands,
+from automated_security_helper.plugin_modules.ash_polaris_plugins.polaris_install import (
+    polaris_install_commands,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.sandbox.fs_guard import read_bytes_at_most
@@ -189,6 +195,197 @@ class PolarisScanner(ScannerPluginBase[PolarisScannerConfig]):
 
     # The checks are compiled in and ``audit --audit-path`` makes no network call.
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
+    #: The facets register row (base/scanner_facets.py). Declaration only. Native
+    #: fields name Polaris's own JSON; the corpus is the captured run in
+    #: tests/test_data/scanners/polaris/captured/ and the SARIF the converter writes
+    #: from it.
+    facets: ClassVar[ScannerFacets] = ScannerFacets(
+        rule_id=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='check "ID" (the key of the Results map)',
+        ),
+        severity=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='check "Severity" (danger, warning, ignore) through '
+            "POLARIS_SEVERITY_MAP onto issue_severity and the SARIF level",
+        ),
+        file_path=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="(none in Polaris's JSON) the YAML file found by the "
+            "object's Kind, Name and Namespace under the scanned tree",
+        ),
+        line_range=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field="(none in Polaris's JSON) the line of metadata.name in "
+            "the located document; a start line only",
+        ),
+        column=FacetDecl(
+            state=FacetState.NA,
+            reason="Polaris reports an object and a check, never a column; the "
+            "converter writes a start line only",
+        ),
+        message=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='check "Message", with "Details" when present, prefixed '
+            "with Kind/Name and the container name",
+        ),
+        resource_id=FacetDecl(
+            state=FacetState.DROPPED,
+            native_field="entry Kind, Name and Namespace (Deployment web in demo)",
+            reason="the object is a Kubernetes resource, but the adapter folds it "
+            "into the message text and never writes ash_resource_id; binding "
+            "resource-scoped suppressions is its own decision",
+        ),
+        resource_type=FacetDecl(
+            state=FacetState.DROPPED,
+            native_field='entry "Kind"',
+            reason="carried in the message prefix only; the adapter writes no "
+            "ash_resource_type",
+        ),
+        package_name=FacetDecl(
+            state=FacetState.NA,
+            reason="manifest checks carry no package",
+        ),
+        package_version=FacetDecl(
+            state=FacetState.NA,
+            reason="manifest checks carry no package",
+        ),
+        package_path=FacetDecl(
+            state=FacetState.NA,
+            reason="manifest checks carry no package",
+        ),
+        taxonomy_cve=FacetDecl(
+            state=FacetState.NA,
+            reason="best-practice checks carry no CVE taxonomy",
+        ),
+        taxonomy_cwe=FacetDecl(
+            state=FacetState.NA,
+            reason="the check records carry no CWE taxonomy",
+        ),
+        fingerprints=FacetDecl(
+            state=FacetState.NA,
+            reason="Polaris emits no fingerprint or hash for a check result",
+        ),
+        fix_available=FacetDecl(
+            state=FacetState.NA,
+            reason="Polaris's Mutations list a patch for some checks, but the "
+            "adapter reads no fix state from it",
+        ),
+        remediation_text=FacetDecl(
+            state=FacetState.NA,
+            reason="the check record's Message states the problem; the only "
+            "fix-shaped field is Mutations (a JSON patch), which is not read",
+        ),
+        snippet=FacetDecl(
+            state=FacetState.NA,
+            reason="the JSON carries no source text of the object",
+        ),
+        references=FacetDecl(
+            state=FacetState.NA,
+            reason="the check records carry no reference URLs",
+        ),
+        tags=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='check "Category" (Security, Reliability, Efficiency), '
+            "lowercased, after the constant kubernetes tag",
+        ),
+        extras=FacetDecl(
+            state=FacetState.MAPPED,
+            native_field='result properties "issue_severity" written by the converter',
+        ),
+    )
+
+    #: The operational register row (base/scanner_operational_facets.py).
+    operational_facets: ClassVar[opsf.ScannerOperationalFacets] = (
+        opsf.ScannerOperationalFacets(
+            scanner_name="polaris",
+            network=opsf.NetworkFacet(
+                fetch_kind=opsf.FetchKind.NONE,
+                fetches=(),
+                prefetch=(),
+                offline_outcome=opsf.OfflineOutcome.UNCHANGED,
+                offline_strategy=OfflineStrategy.BUNDLED,
+                sandbox_network=opsf.SandboxNetwork.NONE,
+                source=(
+                    "polaris_scanner.py offline_strategy, sandbox_requirements; "
+                    "module header: the checks are compiled in and --audit-path "
+                    "makes no network call"
+                ),
+            ),
+            output=opsf.OutputFacet(
+                native_formats=(opsf.OutputFormat.TOOL_JSON,),
+                side_reports=(),
+                non_finding_artifacts=(),
+                note="Polaris's own AuditData JSON, converted to SARIF by "
+                "convert_polaris_output",
+            ),
+            targets=opsf.TargetsFacet(
+                kinds=(opsf.TargetKind.IAC_KUBERNETES,),
+                tool_type=ScannerToolType.IAC,
+                selection="`polaris audit --audit-path` over the target; objects "
+                "are located by reading the tree's *.yaml and *.yml files",
+                covers_note="a community scanner; it declares no covers display string",
+            ),
+            runtime=opsf.RuntimeFacet(
+                kind=opsf.RuntimeKind.USER_INSTALLED_CLI,
+                external_programs=(),
+                invocations=opsf.Invocations.ONE,
+                python_only=False,
+                use_uv_tool=False,
+            ),
+            platforms=opsf.PlatformsFacet(
+                provisionable=(),
+                note="installed by the plugin's own pinned installer "
+                "(polaris_install.py: linux, darwin amd64/arm64 and windows/amd64), "
+                "not by the shared tool_downloads table, so the register lists none",
+            ),
+            severity=opsf.SeverityFacet(
+                severity_class=opsf.SeverityClass.NATIVE,
+                note="danger is HIGH and warning is MEDIUM; an undocumented value "
+                "is HIGH",
+            ),
+            silencing=opsf.SilencingFacet(
+                tool_side=(
+                    opsf.SilencingLayer(
+                        layer=opsf.SilencingLayerKind.INLINE_COMMENT,
+                        writer=opsf.SilencingWriter.REPOSITORY,
+                        honored=opsf.Honored.NO,
+                        surface="polaris.fairwinds.com/<check>-exempt annotations "
+                        "on the audited manifests",
+                        cite="polaris_scanner.py module header: ASH passes "
+                        "--disallow-exemptions",
+                    ),
+                ),
+            ),
+            identity=opsf.IdentityFacet(
+                fingerprint_class=opsf.FingerprintClass.POSITIONAL_ONLY,
+                note="no fingerprint; identity is file and the line of metadata.name",
+            ),
+            extensibility=opsf.ExtensibilityFacet(
+                custom_rules=opsf.CustomRules.NONE,
+                env_prefixes=(),
+                options_surface="no options beyond the base; a Polaris config file "
+                "is not passed, so the scanned tree cannot add checks",
+            ),
+            exit_codes=opsf.ExitCodesFacet(
+                success_exit_codes=(0, 3),
+                semantics="ASH passes --set-exit-code-on-danger: 3 is a completed "
+                "run with a danger-level failure, 1 is a Polaris failure",
+            ),
+            provenance=opsf.ProvenanceFacet(
+                tier=opsf.Tier.COMMUNITY_OPTIN,
+                source=opsf.ProvenanceSource.USER_INSTALLED,
+                selection_surfaces=("ash_polaris_plugins in ash_plugin_modules",),
+                upstream_license="Apache-2.0 (FairwindsOps/polaris v10.2.6; no "
+                "license or service gate, the binary is downloaded and never vendored)",
+            ),
+            prerequisites=opsf.PrerequisitesFacet(
+                kinds=(opsf.Prerequisite.MANIFEST,),
+                note="Kubernetes manifests in the scan set",
+            ),
+        )
+    )
+
     success_exit_codes: ClassVar[Set[int]] = {0, DANGER_EXIT_CODE}
     # The strict default (no network, baseline environment); see the module docstring.
     sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements()
@@ -208,8 +405,12 @@ class PolarisScanner(ScannerPluginBase[PolarisScannerConfig]):
 
     @model_validator(mode="after")
     def setup_custom_install_commands(self) -> "PolarisScanner":
-        """Install from the pinned release asset in ``utils/tool_downloads.py``."""
-        self.custom_install_commands.update(pinned_tool_install_commands("polaris"))
+        """Install from the pinned release asset in ``polaris_install.py``.
+
+        The pin is module-local: ``utils/tool_downloads.py`` has no Polaris entry, and
+        building the commands from it raised at construction. This table never raises.
+        """
+        self.custom_install_commands.update(polaris_install_commands())
         return self
 
     def _source_dir(self) -> Path:
