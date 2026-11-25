@@ -1,0 +1,60 @@
+{
+  "capabilityInfo": [
+    {
+      "capability": "CAPABILITY_NETWORK",
+      "capabilityName": "CAPABILITY_NETWORK",
+      "capabilityType": "CAPABILITY_TYPE_DIRECT",
+      "depPath": "example.com/app/server.Serve net/http.ListenAndServe",
+      "packageDir": "example.com/app/server",
+      "packageName": "example.com/app/server",
+      "path": [
+        {
+          "name": "example.com/app/server.Serve",
+          "package": "example.com/app/server",
+          "site": {
+            "column": "5",
+            "filename": "server/serve.go",
+            "line": "12"
+          }
+        },
+        {
+          "name": "net/http.ListenAndServe",
+          "package": "net/http"
+        }
+      ]
+    },
+    {
+      "capabilityName": "CAPABILITY_EXEC",
+      "capabilityType": "CAPABILITY_TYPE_TRANSITIVE",
+      "depPath": "example.com/app/util.Run os/exec.Command",
+      "packageName": "example.com/app/util",
+      "path": [
+        {
+          "name": "example.com/app/util.Run"
+        }
+      ]
+    },
+    {
+      "capabilityName": "CAPABILITY_FILES",
+      "capabilityType": "CAPABILITY_TYPE_DIRECT",
+      "depPath": "example.com/app/store.Load os.ReadFile",
+      "packageName": "example.com/app/store",
+      "path": [
+        {
+          "name": "example.com/app/store.Load",
+          "package": "example.com/app/store",
+          "site": {
+            "column": "9",
+            "filename": "store/load.go",
+            "line": "30"
+          }
+        }
+      ]
+    }
+  ],
+  "moduleInfo": [
+    {
+      "path": "example.com/app"
+    }
+  ]
+}
