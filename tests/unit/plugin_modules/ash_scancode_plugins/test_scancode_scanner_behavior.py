@@ -558,6 +558,8 @@ class TestCapturedReports:
         # itself (no hand-passed strip), so a wrong anchor reads as moved findings.
         target = tmp_path / dirname
         target.mkdir()
+        # An empty directory short-circuits scan() to a bool; give it a file.
+        (target / "app.py").write_text("print(1)\n")
         document = json.loads((CAPTURED / name).read_text(encoding="utf-8"))
         scanner = _scanner(target, tmp_path)
         report = _run(scanner, FakeScanCode(document=document), monkeypatch)
@@ -570,6 +572,7 @@ class TestCapturedReports:
         # the capture's first segment, nothing is stripped and the URIs keep "pos/".
         target = tmp_path / "other"
         target.mkdir()
+        (target / "app.py").write_text("print(1)\n")
         document = json.loads((CAPTURED / "positive.json").read_text(encoding="utf-8"))
         report = _run(
             _scanner(target, tmp_path), FakeScanCode(document=document), monkeypatch

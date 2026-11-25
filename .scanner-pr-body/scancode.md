@@ -79,7 +79,13 @@ Module tests: all pass. ruff format and check green.
 - HIGH, facets-vs-register mismatch: fixed in this branch. `TargetsFacet.kinds` now declares
   `source_code` and `package_sources` (the SCA-served kind guarddog also uses), with a
   `tool_type_note`; pinned by `TestToolTypeIsServedByTheDeclaredKinds`. The central
-  `SCANNER_TOOL_TYPES` entry (`"scancode": "SCA"`) stays owed to the integration lane.
+  `SCANNER_TOOL_TYPES` entry (`"scancode": "SCA"`) stays owed to the integration lane;
+  with that one entry applied on the desk, all 13 ScanCode operational-consistency cells pass,
+  the one-story cell included.
+- Test fix: the two end-to-end `scan()` capture tests ran over an empty directory, so `scan()`
+  returned early with a bool; the target now holds a file.
+- Desk result (module + facets families, ScanCode cells): 65 passed, 2 failed; both failures
+  are the central rows (`SCANNER_TOOL_TYPES` KeyError, corpus prep for the captures).
 - Final review, SHOULD (held, licensing): `provenance.upstream_license` reads
   `LICENSE_NOT_READ` while the docs page states Apache-2.0 code and CC-BY-4.0 data. Recording
   a license determination in the register needs explicit approval, so it is left as is.
