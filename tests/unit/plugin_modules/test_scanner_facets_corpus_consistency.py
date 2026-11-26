@@ -207,10 +207,16 @@ CORPORA: Mapping[str, Optional[CorpusSpec]] = {
     "npm-audit": CorpusSpec("npmaudit", prep="npm-audit"),
     "opengrep": CorpusSpec("opengrep", sarif=("captured/*.sarif",)),
     "semgrep": CorpusSpec("semgrep", sarif=("captured/*.sarif",)),
-    # Authored in the shape `snyk code test --sarif` writes (see the README in
-    # the directory); a licensed capture committed under captured/ joins it.
+    # No corpus until a licensed `snyk code test --sarif` run is committed under
+    # captured/: the authored file beside it is written to match the adapter, so
+    # it is not read as evidence of the tool (see the README in the directory).
+    # The register's snyk-code cells are UNCONFIRMED for that reason. When a
+    # capture lands, point this row at "captured/*.sarif" with prep="snyk-code".
     "snyk-code": CorpusSpec(
-        "snyk", sarif=("authored/*.sarif", "captured/*.sarif"), prep="snyk-code"
+        "snyk",
+        missing="no snyk SARIF from a licensed run is committed; commit "
+        "`snyk code test --sarif` output under snyk/captured/ (the authored "
+        "shape under snyk/authored is not evidence of the tool)",
     ),
     "syft": CorpusSpec(
         "syft",
@@ -775,9 +781,12 @@ def test_discovery_does_not_depend_on_which_tier_declares_a_scanner() -> None:
         assert needle not in body, needle
 
 
-def test_the_scanners_read_from_captures_and_authored_shapes_are_observed() -> None:
-    """The scanners whose cells were redeclared unread are observed now."""
-    for name in ("snyk-code", "grype", "ferret-scan"):
+def test_the_scanners_read_from_captures_are_observed() -> None:
+    """The scanners whose cells were redeclared unread are observed now, over a
+    capture of the tool. snyk-code is not among them: its only committed SARIF is
+    authored, so it has no corpus and its cells stay unconfirmed."""
+    assert observed_frame("snyk-code", CORPORA["snyk-code"]) is None
+    for name in ("grype", "ferret-scan"):
         frame = observed_frame(name, CORPORA[name])
         assert frame is not None, name
         assert frame["rule_id"][1] > 0 and frame["rule_id"][0] == frame["rule_id"][1]
