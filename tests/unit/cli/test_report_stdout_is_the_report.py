@@ -124,7 +124,8 @@ def results_dir(tmp_path):
 
 def _report(output_dir: Path, fmt: str, *extra: str):
     return CliRunner().invoke(
-        app, ["report", "--format", fmt, "--output-dir", str(output_dir), *extra]
+        app,
+        ["results", "report", "--format", fmt, "--output-dir", str(output_dir), *extra],
     )
 
 
@@ -812,7 +813,7 @@ class TestMissingResults:
                 _model().model_dump_json(by_alias=True), encoding="utf-8"
             )
 
-        result = CliRunner().invoke(app, ["report", "--format", "sarif"])
+        result = CliRunner().invoke(app, ["results", "report", "--format", "sarif"])
 
         assert result.exit_code == 1, result.output
         expected = (default / "ash_aggregated_results.json").as_posix()
@@ -848,7 +849,7 @@ class TestMissingResults:
         monkeypatch.delenv("ASH_OUTPUT_DIR", raising=False)
 
         _report(tmp_path / "nowhere", "sarif")
-        CliRunner().invoke(app, ["report", "--format", "sarif"])
+        CliRunner().invoke(app, ["results", "report", "--format", "sarif"])
 
         assert list(tmp_path.iterdir()) == []
 

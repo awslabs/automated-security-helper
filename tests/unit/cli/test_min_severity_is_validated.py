@@ -68,7 +68,16 @@ def test_scan_accepts_each_documented_value_in_any_case(in_tmp, value):
 
 def test_merge_refuses_an_unknown_value(in_tmp):
     result = _invoke(
-        ["merge", "--output-dir", "o", "--results", "r", "--min-severity", "bogus"]
+        [
+            "results",
+            "merge",
+            "--output-dir",
+            "o",
+            "--results",
+            "r",
+            "--min-severity",
+            "bogus",
+        ]
     )
 
     assert result.exit_code == USAGE_ERROR_EXIT, result.output
@@ -80,7 +89,7 @@ def test_merge_accepts_each_value_in_any_case(in_tmp, value):
     """The Terraform executor passes its MinSeverity variable through unchanged."""
     import typer.main
 
-    command = typer.main.get_command(app).commands["merge"]
+    command = typer.main.get_command(app).commands["results"].commands["merge"]
     ctx = command.make_context(
         "merge", ["--output-dir", "o", "--results", "r", "--min-severity", value]
     )
@@ -89,7 +98,16 @@ def test_merge_accepts_each_value_in_any_case(in_tmp, value):
     assert MinSeverity(ctx.params["min_severity"]) == MinSeverity(value.lower())
 
     result = _invoke(
-        ["merge", "--output-dir", "o", "--results", "r", "--min-severity", value]
+        [
+            "results",
+            "merge",
+            "--output-dir",
+            "o",
+            "--results",
+            "r",
+            "--min-severity",
+            value,
+        ]
     )
     # The merge itself then refuses the missing results; the severity was accepted.
     assert "--min-severity" not in _plain(result.output), result.output

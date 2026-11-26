@@ -200,7 +200,8 @@ def test_a_report_over_existing_results_reads_back_the_name(tmp_path):
     assert names.decision(found, KEEP) == REPORTED, (found, again)
 
     report = names.ash(
-        tmp_path, ["report", "--output-dir", str(output), "--format", "flat-json"]
+        tmp_path,
+        ["results", "report", "--output-dir", str(output), "--format", "flat-json"],
     )
     assert report.code == 0, report
     assert _recorded_ignore_paths(_loaded(output)) == sorted([ODD, CONTROL])
@@ -233,6 +234,7 @@ def test_a_merge_applies_the_recorded_config_to_the_name(tmp_path):
     ran = names.ash(
         tmp_path,
         [
+            "results",
             "merge",
             *[part for shard in shards for part in ("--results", str(shard))],
             "--output-dir",
@@ -288,6 +290,7 @@ def test_the_odd_name_and_its_spelled_twin_read_back_as_one_name_through_a_merge
     ran = names.ash(
         tmp_path,
         [
+            "results",
             "merge",
             *[part for shard in shards for part in ("--results", str(shard))],
             "--output-dir",

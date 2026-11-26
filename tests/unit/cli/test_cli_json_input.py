@@ -495,9 +495,18 @@ class TestSkeleton:
         assert list(kwargs["scanners"]) == ["bandit"]
 
 
-@pytest.mark.parametrize("command", ["scan", "build-image", "report", "merge"])
+@pytest.mark.parametrize(
+    "command",
+    [
+        ["scan"],
+        ["container", "build"],
+        ["results", "report"],
+        ["results", "merge"],
+    ],
+    ids=" ".join,
+)
 def test_commands_expose_both_options(runner, command):
-    result = runner.invoke(app, [command, "--help"])
+    result = runner.invoke(app, [*command, "--help"])
     assert result.exit_code == 0, result.output
     # Rich styles each dash-separated segment of a flag separately.
     plain = re.sub(r"\x1b\[[0-9;]*m", "", result.output)
@@ -505,9 +514,13 @@ def test_commands_expose_both_options(runner, command):
     assert "--generate-cli-skeleton" in plain
 
 
-@pytest.mark.parametrize("command", ["build-image", "report", "merge"])
+@pytest.mark.parametrize(
+    "command",
+    [["container", "build"], ["results", "report"], ["results", "merge"]],
+    ids=" ".join,
+)
 def test_other_commands_produce_a_skeleton(runner, command):
-    result = runner.invoke(app, [command, "--generate-cli-skeleton"])
+    result = runner.invoke(app, [*command, "--generate-cli-skeleton"])
     assert result.exit_code == 0, result.output
     assert isinstance(json.loads(result.stdout), dict)
 

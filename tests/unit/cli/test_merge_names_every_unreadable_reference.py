@@ -116,7 +116,7 @@ def _write(shards: Path, index: int, count: int = 2, **recorded: str) -> Path:
 
 
 def _merge(directories, *extra: str):
-    arguments = ["merge", "--output-dir", "merged"]
+    arguments = ["results", "merge", "--output-dir", "merged"]
     for directory in directories:
         arguments += ["--results", str(directory)]
     return CliRunner().invoke(app, [*arguments, *extra], env={"COLUMNS": "300"})

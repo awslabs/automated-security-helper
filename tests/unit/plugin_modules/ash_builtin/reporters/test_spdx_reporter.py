@@ -186,7 +186,15 @@ def test_ash_report_format_spdx_exits_zero_and_prints_the_document(tmp_path, mod
     )
     result = CliRunner().invoke(
         app,
-        ["report", "--format", "spdx", "--output-dir", str(tmp_path), "--no-color"],
+        [
+            "results",
+            "report",
+            "--format",
+            "spdx",
+            "--output-dir",
+            str(tmp_path),
+            "--no-color",
+        ],
     )
     assert result.exit_code == 0, result.output
     # rich's print_json highlights regardless of --no-color; compare plain text.

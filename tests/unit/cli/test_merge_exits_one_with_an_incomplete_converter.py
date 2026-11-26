@@ -42,7 +42,7 @@ def _invoke(args):
         patch("automated_security_helper.cli.merge.ash_plugin_manager", manager),
         patch("automated_security_helper.cli.merge.load_plugins"),
     ):
-        return CliRunner().invoke(app, ["merge", *args])
+        return CliRunner().invoke(app, ["results", "merge", *args])
 
 
 def _merge_args(tmp_path, shards, *flags):

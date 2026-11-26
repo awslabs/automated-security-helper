@@ -7171,10 +7171,10 @@ def _print_summary(
         _print_text(f"    - Markdown summary: '{out_dir_alias}/reports/ash.summary.md'")
         _print_text(f"    - Text summary: '{out_dir_alias}/reports/ash.summary.txt'")
         print(
-            "  2. Use [magenta]ashx report[/magenta] to view a short text summary of the scan in your terminal"
+            "  2. Use [magenta]ashx results report[/magenta] to view a short text summary of the scan in your terminal"
         )
         print(
-            "  3. Use [magenta]ashx inspect findings[/magenta] to explore the findings interactively"
+            "  3. Use [magenta]ashx results inspect findings[/magenta] to explore the findings interactively"
         )
         _print_text(
             f"  4. Review scanner-specific reports and outputs in the '{out_dir_alias}/scanners' directory"

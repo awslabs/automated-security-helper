@@ -348,7 +348,8 @@ class ShardAssignment(StrippedRecordModel):
             "shard owns it: candidate_scanners after the --scanners allowlist, "
             "--exclude-scanners, --python-only and each scanner's own enabled "
             "flag. Unlike selected_scanners, which covers assigned_scanners only, "
-            "it covers every candidate. It lets ash merge tell a scanner no job "
+            "it covers every candidate. It lets ashx results merge tell a scanner "
+            "no job "
             "asked for, which is the operator's choice, from one some job asked "
             "for and its owner did not, which is a coverage hole. None on results "
             "written before this field existed."
@@ -357,7 +358,8 @@ class ShardAssignment(StrippedRecordModel):
     python_only: bool | None = Field(
         default=None,
         description=(
-            "Whether this shard ran with --python-only. ash merge reads it to tell "
+            "Whether this shard ran with --python-only. ashx results merge reads "
+            "it to tell "
             "a sharded --python-only scan, where every shard leaves the non-Python "
             "scanners out, from a matrix whose jobs disagree on the flag, where a "
             "scanner one shard left out ran nowhere. None on results written before "

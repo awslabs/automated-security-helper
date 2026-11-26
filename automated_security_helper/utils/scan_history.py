@@ -410,7 +410,7 @@ def record_run(
         ASH_LOGGER.warning(
             "This scan is not recorded in the history: it is a shard, a workspace "
             "aggregate, or filtered by --changed-files-only or --baseline. "
-            "``ash merge`` does not record either, so a sharded CI builds no "
+            "``ashx results merge`` does not record either, so a sharded CI builds no "
             "history; record from an unsharded, unfiltered scan."
         )
     return path

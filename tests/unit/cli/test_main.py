@@ -29,8 +29,8 @@ def test_a_probe_group_built_from_ash_typer_group_has_only_its_own_commands():
 
     probe = AshTyperGroup(name="probe")
     assert not set(_LAZY_SUBCOMMANDS) & set(probe.commands)
-    assert "report" not in probe.commands
-    assert probe.commands.get("report") is None
+    assert "results" not in probe.commands
+    assert probe.commands.get("results") is None
 
 
 def test_main_app_commands():
@@ -51,19 +51,21 @@ def test_main_app_commands():
         "scan",
         "config",
         "dependencies",
-        "inspect",
+        "results",
         "plugin",
-        "build-image",
-        "report",
-        "merge",
+        "container",
         "mcp",
     ):
         assert expected in names
 
-    # A lazy name resolves to a real, callable click command with parameters.
-    report = group.commands["report"]
-    assert report.name == "report"
-    assert report.params
+    # The spellings removed in 4.0 are not commands of the tree.
+    for removed in ("build-image", "report", "diff", "trend", "merge", "inspect"):
+        assert removed not in names
+
+    # A lazy name resolves to a real click group whose commands have parameters.
+    results = group.commands["results"]
+    assert results.name == "results"
+    assert results.commands["report"].params
 
 
 @patch("automated_security_helper.cli.main.run_ash_scan_cli_command")

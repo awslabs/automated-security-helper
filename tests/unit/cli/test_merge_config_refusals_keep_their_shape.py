@@ -44,7 +44,9 @@ def _merge(args):
         patch("automated_security_helper.cli.merge.ash_plugin_manager", manager),
         patch("automated_security_helper.cli.merge.load_plugins"),
     ):
-        return CliRunner().invoke(app, ["merge", *args], env={"COLUMNS": "300"})
+        return CliRunner().invoke(
+            app, ["results", "merge", *args], env={"COLUMNS": "300"}
+        )
 
 
 def _results_args(tmp_path: Path, shards) -> list:

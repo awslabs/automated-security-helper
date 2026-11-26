@@ -135,8 +135,8 @@ def test_ash_version_in_image(snapshot):
 
 
 @pytest.mark.e2e
-def test_build_image_help_in_image(text_snapshot):
-    result = _in_image("ashx", "build-image", "--help")
+def test_container_build_help_in_image(text_snapshot):
+    result = _in_image("ashx", "container", "build", "--help")
     assert result["exit_code"] == 0
     assert result["stdout"] == text_snapshot("txt")
 

@@ -496,6 +496,7 @@ class TestStoredResultsRerendered:
         result = CliRunner().invoke(
             app,
             [
+                "results",
                 "report",
                 "--format",
                 report_format,

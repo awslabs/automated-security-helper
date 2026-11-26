@@ -296,7 +296,7 @@ class _Harness:
     def merge(self, shard_paths: Sequence[Path], *args: str):
         from automated_security_helper.cli.main import app
 
-        argv = ["merge"]
+        argv = ["results", "merge"]
         for path in shard_paths:
             argv += ["--results", str(path)]
         argv += ["--output-dir", str(self.output_dir), *args]
@@ -526,7 +526,7 @@ class TestRecordedReporterDestinations:
         assert "reporters.endpoint-reporter.options.endpoint" in harness.ignored_keys(
             named
         )
-        assert "ashx merge's --config-overrides or --config" in named[0]
+        assert "ashx results merge's --config-overrides or --config" in named[0]
 
     def test_the_merged_results_do_not_record_the_shards_destinations(self, harness):
         shard_paths = harness.write_shards(SHARD_CONFIG)
@@ -639,7 +639,7 @@ class TestTheOperatorsBase:
             for m in harness.ignoring()
             # The warning names the file with forward slashes on every platform.
             if operator.as_posix() in m
-            and "ashx merge's --config-overrides instead" in m
+            and "ashx results merge's --config-overrides instead" in m
         ]
         assert len(named) == 1, harness.warnings
         for key in (
@@ -972,7 +972,7 @@ class TestEnablementIsTheOperators:
         assert written == {"endpoint": ENDPOINT_DEFAULT}
         named = [m for m in harness.ignoring() if "endpoint-reporter.enabled" in m]
         assert named, harness.warnings
-        assert "ashx merge's --config-overrides or --config" in named[0]
+        assert "ashx results merge's --config-overrides or --config" in named[0]
 
     def test_a_shard_that_repeats_the_operators_enabled_is_not_warned_about(
         self, harness
@@ -1045,7 +1045,9 @@ class TestMergeWarnings:
         for message in messages:
             assert shard_paths[0].as_posix() in message, message
             assert "a shard recorded in its results" in message, message
-            assert "ashx merge's --config-overrides or --config" in message, message
+            assert "ashx results merge's --config-overrides or --config" in message, (
+                message
+            )
             assert "inside the scanned tree" not in message, message
             assert "--ash-plugin-modules" not in message, message
 
@@ -1416,7 +1418,7 @@ class TestVerdictSettings:
         named = [
             m
             for m in harness.warnings
-            if "ashx merge's --config sets global_settings.suppressions" in m
+            if "ashx results merge's --config sets global_settings.suppressions" in m
         ]
         assert named, harness.warnings
         assert "client_supplied" not in named[0], named[0]
@@ -1447,7 +1449,7 @@ class TestVerdictSettings:
         assert not [
             m
             for m in harness.warnings
-            if "ashx merge's --config sets global_settings.suppressions" in m
+            if "ashx results merge's --config sets global_settings.suppressions" in m
         ], harness.warnings
 
     def test_a_flag_that_decides_the_setting_leaves_no_config_warning(self, harness):
@@ -1465,7 +1467,7 @@ class TestVerdictSettings:
         assert not [
             m
             for m in harness.warnings
-            if "ashx merge's --config sets fail_on_findings" in m
+            if "ashx results merge's --config sets fail_on_findings" in m
         ], harness.warnings
 
     def test_an_operator_config_that_sets_no_verdict_setting_names_none(self, harness):
@@ -1486,7 +1488,9 @@ class TestVerdictSettings:
         result = harness.merge(shard_paths, "--config", str(operator))
 
         assert result.exit_code == 0, (result.output, result.exception)
-        assert not [m for m in harness.warnings if "ashx merge's --config sets" in m]
+        assert not [
+            m for m in harness.warnings if "ashx results merge's --config sets" in m
+        ]
 
 
 @pytest.mark.unit
@@ -1683,7 +1687,7 @@ class TestTheRealChain:
             tmp_path / "shard-config" / "ash.yaml", SHARD_CONFIG
         )
         recorded = resolve_config(config_path=recorded_file)
-        argv = ["merge"]
+        argv = ["results", "merge"]
         for index, model in enumerate(build_shards(2)):
             model.ash_config = recorded
             target = tmp_path / "artifacts" / f"shard-{index}"

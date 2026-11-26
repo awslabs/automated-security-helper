@@ -1018,7 +1018,8 @@ class ReportMetadata(StrippedRecordModel):
                 "The names in --scanners or ASH_SCANNERS that matched no "
                 "registered scanner, recorded by a scan that ran because other "
                 "names matched; sorted, each name once, in the spelling given. "
-                "Null when every name matched or no list was given. `ash merge` "
+                "Null when every name matched or no list was given. "
+                "`ashx results merge` "
                 "records every shard's names, united. An unknown "
                 "--exclude-scanners name is never recorded."
             ),
@@ -1251,7 +1252,8 @@ class AshAggregatedResults(RecordModel):
                 "The shape of each value a secret finding exposed, as its masked "
                 "form shows it: visible prefix, visible suffix and length, never "
                 "the value. Every token of these shapes is masked whenever the "
-                "results are masked, which is how `ash merge` masks, in one shard's "
+                "results are masked, which is how `ashx results merge` masks, in one "
+                "shard's "
                 "findings, a value another shard exposed."
             ),
         ),

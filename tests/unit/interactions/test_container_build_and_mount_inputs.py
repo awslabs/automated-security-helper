@@ -273,7 +273,7 @@ class TestTheImageIsBuiltFromAshsOwnDockerfile:
                 ],
                 id="scan",
             ),
-            pytest.param(["build-image", "--no-run"], id="build-image"),
+            pytest.param(["container", "build", "--no-run"], id="container-build"),
         ],
     )
     @pytest.mark.unit
@@ -669,6 +669,8 @@ class TestTheBuildTargetIsTheOneRequested:
         """
         monkeypatch.setenv("CI", "true")
 
-        _invoke_cli(["build-image", "--no-run", "--ash-revision-to-install", "v3.7.0"])
+        _invoke_cli(
+            ["container", "build", "--no-run", "--ash-revision-to-install", "v3.7.0"]
+        )
 
         assert _flag(_only(commands, "build"), "--target") == "non-root"

@@ -91,7 +91,7 @@ try:
     if spec["command"] == "merge":
         from automated_security_helper.cli.main import app
 
-        app(["merge"] + spec["args"], prog_name="ash")
+        app(["results", "merge"] + spec["args"], prog_name="ashx")
     else:
         from automated_security_helper.cli.entrypoint import main
 
@@ -234,7 +234,7 @@ class TestOnlyTheOperatorChoosesThePluginModules:
         assert _flat(f"Ignoring ash_plugin_modules entries '{MARKER_PACKAGE}'") in (
             warning
         ), result["output"]
-        assert _flat("ashx merge's --config-overrides or --config") in warning
+        assert _flat("ashx results merge's --config-overrides or --config") in warning
 
     def test_a_module_the_operators_config_names_is_imported(self, tmp_path):
         """The shards record no module; the operator's --config names one."""

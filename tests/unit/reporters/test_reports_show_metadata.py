@@ -237,7 +237,7 @@ def test_a_committed_results_file_reports_its_metadata_shown(
     )
     monkeypatch.chdir(tmp_path)
 
-    printed = _through_a_pipe(["report", "--format", fmt], monkeypatch)
+    printed = _through_a_pipe(["results", "report", "--format", fmt], monkeypatch)
 
     # The control: the committed file is the one rendered.
     assert "PROJECT-" in printed and "VERSION-" in printed, printed[:800]

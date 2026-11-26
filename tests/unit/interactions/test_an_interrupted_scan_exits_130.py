@@ -439,9 +439,10 @@ def test_build_image_says_it_was_interrupted_and_exits_130(tmp_path, isolated):
     returncode, stdout, stderr = _interrupt(
         tmp_path,
         env,
-        ["build-image", "--oci-runner", str(runtime), "--no-run"],
+        ["container", "build", "--oci-runner", str(runtime), "--no-run"],
         to_the_group=True,
-        # build-image scans its working directory; the runtime is kept outside it.
+        # container build scans its working directory; the runtime is kept outside
+        # it.
         cwd=tmp_path / "src",
     )
 
@@ -566,7 +567,7 @@ class _InterruptedRuntime:
 @pytest.mark.parametrize(
     "command",
     [
-        pytest.param(["build-image", "--no-run"], id="build-image"),
+        pytest.param(["container", "build", "--no-run"], id="container-build"),
         pytest.param(
             [
                 "scan",
@@ -1258,7 +1259,7 @@ def test_build_image_names_a_verdict_only_when_it_would_have_scanned(
 
     monkeypatch.setattr(image, "run_ash_scan", _interrupted)
 
-    result = CliRunner().invoke(app, ["build-image", *args])
+    result = CliRunner().invoke(app, ["container", "build", *args])
 
     assert result.exit_code == 130, result.output
     assert says in result.stderr, result.stderr

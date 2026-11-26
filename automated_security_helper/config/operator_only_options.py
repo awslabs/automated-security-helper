@@ -1223,7 +1223,7 @@ def drop_recorded_operator_only_options(config: "AshConfig") -> "AshConfig":
                 f"Ignoring {', '.join(dropped)} in the configuration the shards "
                 "recorded: a file in a shard's scanned repository could have set "
                 "them, and they decide which findings in this host's account are "
-                "updated and archived. ash merge takes them only from the "
+                "updated and archived. ashx results merge takes them only from the "
                 "operator's own --config, the configuration its off-host reporters "
                 "run with."
             ),

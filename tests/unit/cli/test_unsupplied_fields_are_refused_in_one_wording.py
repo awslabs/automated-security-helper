@@ -145,9 +145,23 @@ def shard(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 def _run(command: str, shard: Path):
     if command == "merge":
-        arguments = ["merge", "--results", str(shard), "--output-dir", "merged"]
+        arguments = [
+            "results",
+            "merge",
+            "--results",
+            str(shard),
+            "--output-dir",
+            "merged",
+        ]
     else:
-        arguments = ["report", "--format", "markdown", "--output-dir", str(shard)]
+        arguments = [
+            "results",
+            "report",
+            "--format",
+            "markdown",
+            "--output-dir",
+            str(shard),
+        ]
     return CliRunner().invoke(app, arguments, env={"COLUMNS": "300"})
 
 

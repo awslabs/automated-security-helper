@@ -375,7 +375,14 @@ class TestOptionsBeforeASubcommand:
         monkeypatch.setenv("ASH_SOURCE_DIR", str(in_tmp / "src"))
 
         result = _invoke(
-            ["report", "--output-dir", "elsewhere-out", "--format", "flat-json"]
+            [
+                "results",
+                "report",
+                "--output-dir",
+                "elsewhere-out",
+                "--format",
+                "flat-json",
+            ]
         )
 
         assert "does not take" not in _plain(result.output)
@@ -390,7 +397,7 @@ class TestOptionsBeforeASubcommand:
         assert probe.source_dirs == ["src"]
 
 
-class TestBuildImageRefusesWhatItDoesNotDeclare:
+class TestContainerBuildRefusesWhatItDoesNotDeclare:
     @pytest.mark.parametrize(
         "args",
         [["--scanners", "bandit"], ["--fail-on-finding"], ["extra"]],
@@ -398,14 +405,16 @@ class TestBuildImageRefusesWhatItDoesNotDeclare:
     )
     def test_is_a_usage_error(self, in_tmp, args):
         with patch("automated_security_helper.cli.image.run_ash_scan") as run:
-            result = _invoke(["build-image", "--no-build", "--no-run", *args])
+            result = _invoke(["container", "build", "--no-build", "--no-run", *args])
 
         assert result.exit_code == USAGE_ERROR_EXIT, result.output
         run.assert_not_called()
 
     def test_its_own_options_work(self, in_tmp):
         with patch("automated_security_helper.cli.image.run_ash_scan") as run:
-            result = _invoke(["build-image", "--no-build", "--no-run", "--offline"])
+            result = _invoke(
+                ["container", "build", "--no-build", "--no-run", "--offline"]
+            )
 
         assert result.exit_code == 0, result.output
         assert run.call_args.kwargs["offline"] is True

@@ -143,10 +143,10 @@ def test_the_walk_reaches_the_documented_tree():
         "ashx scan",
         "ashx config validate-plugin-dependencies",
         "ashx dependencies install",
-        "ashx inspect sarif-fields",
+        "ashx results inspect sarif-fields",
         "ashx plugin list",
     } <= walked
     assert {_command_id(path) for path, _ in SKELETON_COMMANDS} >= {
         "ashx scan",
-        "ashx report",
+        "ashx results report",
     }

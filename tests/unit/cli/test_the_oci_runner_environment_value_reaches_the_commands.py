@@ -75,10 +75,10 @@ def _scan(*arguments: str, **environment: str):
 
 
 def _build_image(*arguments: str, **environment: str):
-    """``ash build-image --no-run`` through the parser: (result, stub)."""
+    """``ashx container build --no-run`` through the parser: (result, stub)."""
     with patch("automated_security_helper.cli.image.run_ash_scan") as run:
         result = CliRunner().invoke(
-            app, ["build-image", "--no-run", *arguments], env=environment
+            app, ["container", "build", "--no-run", *arguments], env=environment
         )
     return result, run
 

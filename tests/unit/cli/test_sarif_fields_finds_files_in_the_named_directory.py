@@ -72,6 +72,7 @@ def test_only_the_named_directorys_files_are_read(tmp_path, name, sibling):
     result = CliRunner().invoke(
         app,
         [
+            "results",
             "inspect",
             "sarif-fields",
             "--sarif-dir",
@@ -106,6 +107,7 @@ def test_only_the_named_directorys_scanner_files_are_read(tmp_path, name, siblin
     result = CliRunner().invoke(
         app,
         [
+            "results",
             "inspect",
             "sarif-fields",
             "--sarif-dir",

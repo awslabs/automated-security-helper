@@ -1723,14 +1723,14 @@ function Invoke-ASH {
             }
         }
 
-        # OCI_RUNNER is what ./ash and the ash CLI read. ASH_OCI_RUNNER, a deprecated name
+        # OCI_RUNNER is what the ashx CLI reads. ASH_OCI_RUNNER, a deprecated name
         # only this function reads, applies when OCI_RUNNER is unset and no -OCIRunner
         # was passed, so a profile that sets it keeps the runner it chose.
         # $ociRunnerSource names the variable the value came from, for the refusal of a
         # relative path below.
         $ociRunnerSource = 'OCI_RUNNER'
         if (-not $PSBoundParameters.ContainsKey('OCIRunner') -and [string]::IsNullOrEmpty($OCIRunner) -and -not [string]::IsNullOrEmpty($env:ASH_OCI_RUNNER)) {
-            Write-Warning "ASH_OCI_RUNNER is deprecated; set OCI_RUNNER instead, which ./ash and the ash CLI also read."
+            Write-Warning "ASH_OCI_RUNNER is deprecated; set OCI_RUNNER instead, which the ashx CLI also reads."
             $OCIRunner = $env:ASH_OCI_RUNNER
             $ociRunnerSource = 'ASH_OCI_RUNNER'
         }

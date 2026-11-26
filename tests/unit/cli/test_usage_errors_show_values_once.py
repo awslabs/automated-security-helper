@@ -272,7 +272,7 @@ def test_text_that_only_looks_like_a_repr_is_left_as_it_is():
     "command",
     [
         pytest.param(["scan"], id="scan"),
-        pytest.param(["report"], id="report"),
+        pytest.param(["results", "report"], id="results-report"),
         pytest.param(["config", "get"], id="config-get"),
         pytest.param(["dependencies", "install"], id="dependencies-install"),
     ],
@@ -304,15 +304,19 @@ def test_an_extra_argument_holding_a_newline_stays_on_one_line(tmp_path):
 
 @pytest.mark.parametrize(
     "command",
-    [pytest.param(["scan"], id="scan"), pytest.param(["merge"], id="merge")],
+    [
+        pytest.param(["scan"], id="scan"),
+        pytest.param(["results", "merge"], id="results-merge"),
+    ],
 )
 @pytest.mark.integration
 def test_a_refused_output_format_stays_on_one_line(tmp_path, command):
     """The format refusals build their own message around the value as typed."""
-    if command == ["merge"]:
+    if command == ["results", "merge"]:
         results = tmp_path / "results.json"
         results.write_text("{}", encoding="utf-8")
         command = [
+            "results",
             "merge",
             "--results",
             str(results),

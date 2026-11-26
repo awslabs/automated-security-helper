@@ -859,7 +859,8 @@ def _validate_shard_options(
             "--shard-index/--shard-count cannot be combined with --workspace. "
             "Both spread one scan over more compute, but along different axes, and "
             "only sharding is recombinable: it partitions the scanners and stamps "
-            "the partition onto the results so 'ashx merge' can prove the shards "
+            "the partition onto the results so 'ashx results merge' can prove the "
+            "shards "
             "reconstruct exactly one whole scan. Workspace mode's unified results "
             "file is assembled from the per-project payloads and carries none of "
             "each project's scan metadata, so a sharded workspace run would write "
@@ -1533,7 +1534,7 @@ def run_ash_scan_cli_command(
         typer.Option(
             "--shard-index",
             rich_help_panel="CI and sharding",
-            help="Zero-based index of this shard when one scan is split across several executors. Requires --shard-count. A 3-way split uses indices 0, 1 and 2. Each shard runs a disjoint subset of the scanners and records which ones in its results; recombine them with 'ashx merge'.",
+            help="Zero-based index of this shard when one scan is split across several executors. Requires --shard-count. A 3-way split uses indices 0, 1 and 2. Each shard runs a disjoint subset of the scanners and records which ones in its results; recombine them with 'ashx results merge'.",
             envvar="ASH_SHARD_INDEX",
         ),
     ] = None,
@@ -1779,7 +1780,7 @@ def run_ash_scan_cli_command(
 
     Start with: ash --mode container --source-dir .
 
-    Review the result with: ash inspect findings
+    Review the result with: ashx results inspect findings
 
     Options are grouped by workflow below. Running ash without a subcommand starts a scan.
     """

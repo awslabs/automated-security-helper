@@ -327,7 +327,7 @@ class TestPathsArePrintedAsGiven:
             side_effect=ShardCoverageError(f"shard {name} completed none"),
         ):
             result = CliRunner().invoke(
-                app, ["merge", "--output-dir", "merged", "--results", "."]
+                app, ["results", "merge", "--output-dir", "merged", "--results", "."]
             )
 
         assert result.exit_code == 1, result.output

@@ -75,6 +75,7 @@ def _diff(tmp_path, before, after):
     return CliRunner().invoke(
         app,
         [
+            "results",
             "diff",
             _write(tmp_path, "before.json", before),
             _write(tmp_path, "after.json", after),
@@ -135,7 +136,9 @@ def test_absent_after_is_the_name_the_mcp_tool_calls_resolved(tmp_path, monkeypa
 
     before = _write(tmp_path, "b.json", _results(_finding("B101"), _finding("B102")))
     after = _write(tmp_path, "a.json", _results(_finding("B102")))
-    invoked = CliRunner().invoke(app, ["diff", before, after, "--format", "json"])
+    invoked = CliRunner().invoke(
+        app, ["results", "diff", before, after, "--format", "json"]
+    )
     cli = json.loads(invoked.stdout)
     mcp = mcp_diff_scan_results(before, after)
     assert cli["absent_after"] and "absent_after" not in mcp
@@ -219,7 +222,7 @@ def test_the_reviewer_persona_names_ash_diff():
         "personas/security-reviewer.md",
         "For comparing two scans directly, run `ash diff` on the two results files.",
     )
-    assert CliRunner().invoke(app, ["diff", "--help"]).exit_code == 0
+    assert CliRunner().invoke(app, ["results", "diff", "--help"]).exit_code == 0
 
 
 def test_the_analyst_persona_lists_what_ash_diff_compares():
@@ -229,7 +232,7 @@ def test_the_analyst_persona_lists_what_ash_diff_compares():
         "`ash diff` lists the new, absent, moved, severity-changed, and "
         "suppression-changed findings between two scans",
     )
-    assert CliRunner().invoke(app, ["diff", "--help"]).exit_code == 0
+    assert CliRunner().invoke(app, ["results", "diff", "--help"]).exit_code == 0
 
 
 def test_the_sdlc_review_row_names_both_comparisons():
@@ -241,4 +244,4 @@ def test_the_sdlc_review_row_names_both_comparisons():
     from automated_security_helper.cli.mcp_tools import mcp_diff_scan_results
 
     assert callable(mcp_diff_scan_results)
-    assert CliRunner().invoke(app, ["diff", "--help"]).exit_code == 0
+    assert CliRunner().invoke(app, ["results", "diff", "--help"]).exit_code == 0

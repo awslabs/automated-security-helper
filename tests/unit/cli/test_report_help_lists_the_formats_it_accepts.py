@@ -33,7 +33,7 @@ FORMATS = sorted(fmt.value for fmt in ExportFormat)
 def _format_help() -> str:
     from automated_security_helper.cli.main import app
 
-    report = typer.main.get_command(app).commands["report"]
+    report = typer.main.get_command(app).commands["results"].commands["report"]
     option = next(param for param in report.params if "--format" in param.opts)
     return option.help or ""
 

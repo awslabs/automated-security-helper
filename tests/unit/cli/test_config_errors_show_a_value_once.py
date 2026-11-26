@@ -124,6 +124,7 @@ def test_an_invalid_override_is_shown_once(tmp_path: Path) -> None:
     result = CliRunner().invoke(
         app,
         [
+            "results",
             "report",
             "--output-dir",
             str(tmp_path / "out"),

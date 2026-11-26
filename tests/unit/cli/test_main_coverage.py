@@ -176,7 +176,7 @@ class TestAppStructure:
         assert result.exit_code == 0
 
     def test_inspect_subcommand(self):
-        result = runner.invoke(app, ["inspect", "--help"])
+        result = runner.invoke(app, ["results", "inspect", "--help"])
         assert result.exit_code == 0
 
     def test_dependencies_subcommand(self):

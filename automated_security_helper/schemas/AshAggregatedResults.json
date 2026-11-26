@@ -26,7 +26,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -92,7 +92,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -117,7 +117,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -1054,7 +1054,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -1087,7 +1087,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -1103,7 +1103,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -1119,7 +1119,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -1135,7 +1135,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -1516,7 +1516,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -1625,7 +1625,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -1919,7 +1919,7 @@
                     "$ref": "#/$defs/ExportFormat"
                   },
                   {
-                    "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+                    "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
                     "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
                     "type": "string"
                   }
@@ -1933,7 +1933,7 @@
                   "$ref": "#/$defs/ExportFormat"
                 },
                 {
-                  "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+                  "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
                   "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
                   "type": "string"
                 }
@@ -2576,7 +2576,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -2604,13 +2604,13 @@
       "properties": {
         "annotate": {
           "default": false,
-          "description": "When true, the CSV and flat-JSON reports gain three columns that name each finding's duplicate cluster: `cluster_id`, `duplicate_of` (the primary finding's id, on every non-primary member) and `duplicate_sources` (on the primary: the other members' scanner, rule, id and severity). Rows and counts are unchanged. Off by default because the columns change the CSV header. CLI: `--annotate-duplicates` on `ash scan` and `ash report`.",
+          "description": "When true, the CSV and flat-JSON reports gain three columns that name each finding's duplicate cluster: `cluster_id`, `duplicate_of` (the primary finding's id, on every non-primary member) and `duplicate_sources` (on the primary: the other members' scanner, rule, id and severity). Rows and counts are unchanged. Off by default because the columns change the CSV header. CLI: `--annotate-duplicates` on `ashx scan` and `ashx results report`.",
           "title": "Annotate",
           "type": "boolean"
         },
         "fold": {
           "default": false,
-          "description": "When true, the human-readable reports (HTML, Markdown, text, and the Bedrock summary) show one row per duplicate cluster (the primary finding, with a note naming the other scanners that reported it) in their findings tables, detailed findings, finding cards and hotspots, and add deduplicated counts beside, never in place of, the per-scanner counts. Findings fold when they share a CVE and package, or when overlapping lines share a CWE; line overlaps chain, so two findings can fold through a third that overlaps both. IaC resource clusters are annotated only. Finding ids, SARIF, per-scanner metrics, suppressions, baselines, the CSV, flat-JSON and JUnit reports and the exit code are unchanged. Off by default because it changes row counts. CLI: `--fold-duplicates` on `ash scan` and `ash report`.",
+          "description": "When true, the human-readable reports (HTML, Markdown, text, and the Bedrock summary) show one row per duplicate cluster (the primary finding, with a note naming the other scanners that reported it) in their findings tables, detailed findings, finding cards and hotspots, and add deduplicated counts beside, never in place of, the per-scanner counts. Findings fold when they share a CVE and package, or when overlapping lines share a CWE; line overlaps chain, so two findings can fold through a third that overlaps both. IaC resource clusters are annotated only. Finding ids, SARIF, per-scanner metrics, suppressions, baselines, the CSV, flat-JSON and JUnit reports and the exit code are unchanged. Off by default because it changes row counts. CLI: `--fold-duplicates` on `ashx scan` and `ashx results report`.",
           "title": "Fold",
           "type": "boolean"
         }
@@ -2709,7 +2709,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -2914,7 +2914,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -2932,7 +2932,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -3244,7 +3244,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -3296,7 +3296,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -3343,7 +3343,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -3365,7 +3365,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -3390,7 +3390,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -3466,7 +3466,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -3521,7 +3521,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -3618,7 +3618,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -3681,7 +3681,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -3706,7 +3706,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -3898,7 +3898,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -3959,7 +3959,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -3984,7 +3984,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -4015,7 +4015,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -4093,7 +4093,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -4124,7 +4124,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -4149,7 +4149,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -4193,7 +4193,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -4230,7 +4230,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -4255,7 +4255,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -4286,7 +4286,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -4345,7 +4345,7 @@
                 "type": "string"
               },
               {
-                "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+                "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
                 "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
                 "type": "string"
               }
@@ -4420,7 +4420,7 @@
                 "type": "string"
               },
               {
-                "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+                "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
                 "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
                 "type": "string"
               }
@@ -4435,7 +4435,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -4457,7 +4457,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -4482,7 +4482,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -4547,7 +4547,7 @@
                 "type": "string"
               },
               {
-                "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+                "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
                 "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
                 "type": "string"
               }
@@ -7033,7 +7033,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -7659,7 +7659,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -7718,7 +7718,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -7751,7 +7751,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -7776,7 +7776,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -9551,7 +9551,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -9810,7 +9810,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -9868,7 +9868,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -9962,7 +9962,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -10008,7 +10008,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -10083,7 +10083,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -10108,7 +10108,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -10133,7 +10133,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -10516,7 +10516,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -10571,7 +10571,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -10596,7 +10596,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -10632,7 +10632,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -10764,7 +10764,7 @@
           "type": "integer"
         },
         "honored": {
-          "description": "Whether the scanned repository's .gitignore and .ignore files decided which files were scanned. False when the operator set honor_ignore_files: false or passed --no-honor-ignore-files. In merged results (a workspace scan's, or ashx merge's), True only when every merged scan honored them; see honored_scan_count.",
+          "description": "Whether the scanned repository's .gitignore and .ignore files decided which files were scanned. False when the operator set honor_ignore_files: false or passed --no-honor-ignore-files. In merged results (a workspace scan's, or ashx results merge's), True only when every merged scan honored them; see honored_scan_count.",
           "title": "Honored",
           "type": "boolean"
         },
@@ -10779,7 +10779,7 @@
             }
           ],
           "default": null,
-          "description": "In merged results (a workspace scan's, or ashx merge's) whose scans did not agree, how many of the scan_count merged scans honored the ignore files; honored is then False. Absent for a single scan, and when every merged scan agreed.",
+          "description": "In merged results (a workspace scan's, or ashx results merge's) whose scans did not agree, how many of the scan_count merged scans honored the ignore files; honored is then False. Absent for a single scan, and when every merged scan agreed.",
           "title": "Honored Scan Count"
         },
         "output_dir_file_count": {
@@ -12079,7 +12079,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -12126,7 +12126,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -12155,7 +12155,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -13423,7 +13423,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -13446,7 +13446,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -13466,7 +13466,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -13483,7 +13483,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -13500,7 +13500,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -13517,7 +13517,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -13534,7 +13534,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -13551,7 +13551,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -13568,7 +13568,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -13585,7 +13585,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -13602,7 +13602,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -13622,7 +13622,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -13639,7 +13639,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -13656,7 +13656,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -13767,7 +13767,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -13825,7 +13825,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -13840,7 +13840,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -13875,7 +13875,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -13914,7 +13914,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -14006,7 +14006,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -14031,7 +14031,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -14896,7 +14896,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -14933,7 +14933,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -14958,7 +14958,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -14994,7 +14994,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -15126,7 +15126,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -15199,7 +15199,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -15230,7 +15230,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -15256,7 +15256,7 @@
                 "type": "string"
               },
               {
-                "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+                "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
                 "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
                 "type": "string"
               }
@@ -15278,7 +15278,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -15310,7 +15310,7 @@
                 "type": "string"
               },
               {
-                "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+                "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
                 "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
                 "type": "string"
               }
@@ -17968,7 +17968,7 @@
             }
           ],
           "default": null,
-          "description": "The names in --scanners or ASH_SCANNERS that matched no registered scanner, recorded by a scan that ran because other names matched; sorted, each name once, in the spelling given. Null when every name matched or no list was given. `ash merge` records every shard's names, united. An unknown --exclude-scanners name is never recorded.",
+          "description": "The names in --scanners or ASH_SCANNERS that matched no registered scanner, recorded by a scan that ran because other names matched; sorted, each name once, in the spelling given. Null when every name matched or no list was given. `ashx results merge` records every shard's names, united. An unknown --exclude-scanners name is never recorded.",
           "title": "Requested Scanners Not Run"
         },
         "shard": {
@@ -20261,7 +20261,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -20303,7 +20303,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -20805,7 +20805,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -20830,7 +20830,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -22651,7 +22651,7 @@
             }
           ],
           "default": null,
-          "description": "Every candidate scanner this executor's selection asks for, whichever shard owns it: candidate_scanners after the --scanners allowlist, --exclude-scanners, --python-only and each scanner's own enabled flag. Unlike selected_scanners, which covers assigned_scanners only, it covers every candidate. It lets ash merge tell a scanner no job asked for, which is the operator's choice, from one some job asked for and its owner did not, which is a coverage hole. None on results written before this field existed.",
+          "description": "Every candidate scanner this executor's selection asks for, whichever shard owns it: candidate_scanners after the --scanners allowlist, --exclude-scanners, --python-only and each scanner's own enabled flag. Unlike selected_scanners, which covers assigned_scanners only, it covers every candidate. It lets ashx results merge tell a scanner no job asked for, which is the operator's choice, from one some job asked for and its owner did not, which is a coverage hole. None on results written before this field existed.",
           "title": "Intended Scanners"
         },
         "python_only": {
@@ -22664,7 +22664,7 @@
             }
           ],
           "default": null,
-          "description": "Whether this shard ran with --python-only. ash merge reads it to tell a sharded --python-only scan, where every shard leaves the non-Python scanners out, from a matrix whose jobs disagree on the flag, where a scanner one shard left out ran nowhere. None on results written before this field existed.",
+          "description": "Whether this shard ran with --python-only. ashx results merge reads it to tell a sharded --python-only scan, where every shard leaves the non-Python scanners out, from a matrix whose jobs disagree on the flag, where a scanner one shard left out ran nowhere. None on results written before this field existed.",
           "title": "Python Only"
         },
         "selected_scanners": {
@@ -23726,7 +23726,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -23789,7 +23789,7 @@
                 "type": "string"
               },
               {
-                "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+                "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
                 "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
                 "type": "string"
               }
@@ -23837,7 +23837,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -23879,7 +23879,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -24255,7 +24255,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -24305,7 +24305,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -24320,7 +24320,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -25513,7 +25513,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -25611,7 +25611,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -25640,7 +25640,7 @@
                 "type": "string"
               },
               {
-                "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+                "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
                 "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
                 "type": "string"
               }
@@ -25680,7 +25680,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -25901,7 +25901,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -27335,7 +27335,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -27354,7 +27354,7 @@
               "type": "number"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -27796,7 +27796,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -27833,7 +27833,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -27892,7 +27892,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -27924,7 +27924,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             }
@@ -27940,7 +27940,7 @@
               "type": "integer"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -27965,7 +27965,7 @@
               "type": "string"
             },
             {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ashx results merge and ashx results report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
               "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
@@ -28548,7 +28548,7 @@
       "type": "object"
     },
     "secret_value_shapes": {
-      "description": "The shape of each value a secret finding exposed, as its masked form shows it: visible prefix, visible suffix and length, never the value. Every token of these shapes is masked whenever the results are masked, which is how `ash merge` masks, in one shard's findings, a value another shard exposed.",
+      "description": "The shape of each value a secret finding exposed, as its masked form shows it: visible prefix, visible suffix and length, never the value. Every token of these shapes is masked whenever the results are masked, which is how `ashx results merge` masks, in one shard's findings, a value another shard exposed.",
       "items": {
         "$ref": "#/$defs/SecretValueShape"
       },

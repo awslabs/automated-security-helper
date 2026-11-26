@@ -1861,7 +1861,7 @@ class AshDeduplicationConfig(RedactedSection):
                 "`duplicate_sources` (on the primary: the other members' scanner, "
                 "rule, id and severity). Rows and counts are unchanged. Off by "
                 "default because the columns change the CSV header. CLI: "
-                "`--annotate-duplicates` on `ash scan` and `ash report`."
+                "`--annotate-duplicates` on `ashx scan` and `ashx results report`."
             )
         ),
     ] = False
@@ -1883,7 +1883,8 @@ class AshDeduplicationConfig(RedactedSection):
                 "Finding ids, SARIF, per-scanner metrics, suppressions, "
                 "baselines, the CSV, flat-JSON and JUnit reports and the exit "
                 "code are unchanged. Off by default because it changes row "
-                "counts. CLI: `--fold-duplicates` on `ash scan` and `ash report`."
+                "counts. CLI: `--fold-duplicates` on `ashx scan` and "
+                "`ashx results report`."
             )
         ),
     ] = False

@@ -138,6 +138,7 @@ def runs(tmp_path_factory: pytest.TempPathFactory):
         merge = runner.invoke(
             app,
             [
+                "results",
                 "merge",
                 "--results",
                 str(shard_results),
@@ -151,6 +152,7 @@ def runs(tmp_path_factory: pytest.TempPathFactory):
         report = runner.invoke(
             app,
             [
+                "results",
                 "report",
                 "--format",
                 "gitlab-cyclonedx",

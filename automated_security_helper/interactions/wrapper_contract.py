@@ -70,9 +70,10 @@ WRAPPER_FORWARDED_OPTIONS: tuple[str, ...] = (
 )
 
 #: The subcommands whose own ``-o`` is not the container runtime's. ``scan`` and
-#: ``build-image`` are the container-mode commands, where the wrapper reads ``-o`` as
-#: the runner; every other command's ``-o`` is its own and is forwarded.
-CONTAINER_MODE_SUBCOMMANDS: tuple[str, ...] = ("scan", "build-image", "container")
+#: ``container`` (``container build``) are the container-mode commands, where the
+#: wrapper reads ``-o`` as the runner; every other command's ``-o`` is its own and
+#: is forwarded.
+CONTAINER_MODE_SUBCOMMANDS: tuple[str, ...] = ("scan", "container")
 
 #: The subcommands that are groups handing the options typed before them to one of
 #: their commands (AshTyperGroup._options_for_subcommand), so `./ash --quiet container

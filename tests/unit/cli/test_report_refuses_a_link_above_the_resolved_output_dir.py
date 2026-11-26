@@ -58,7 +58,8 @@ def _report(output_dir: Path):
     """The result of the command, and the reporter's patched ``report``."""
     with patch(SARIF_REPORT, return_value=json.dumps({"runs": []})) as reporter:
         result = CliRunner().invoke(
-            app, ["report", "--format", "sarif", "--output-dir", str(output_dir)]
+            app,
+            ["results", "report", "--format", "sarif", "--output-dir", str(output_dir)],
         )
     return result, reporter
 
