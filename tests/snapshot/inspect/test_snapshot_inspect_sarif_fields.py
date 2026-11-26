@@ -50,6 +50,7 @@ def project_dir(tmp_path: Path, monkeypatch, snapshot_normalizer) -> Path:
 def _run():
     return run_cli(
         [
+            "results",
             "inspect",
             "sarif-fields",
             "--sarif-dir",

@@ -11,7 +11,6 @@ reports (checkov_scanner.rewrite_checkov_paths). These tests run the checkov ASH
 uses, so a checkov release that changes either behavior fails here.
 """
 
-import ast
 import json
 import os
 import shutil
@@ -31,8 +30,8 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.checkov_scann
 )
 from automated_security_helper.plugin_modules.ash_builtin.scanners.checkov_vcs_frameworks import (
     KNOWN_VCS_CONFIGURATION_FRAMEWORKS,
-    vcs_configuration_frameworks,
 )
+from tests.utils.installed_checkov import installed_checkov_frameworks
 
 PluginContext.model_rebuild()
 
@@ -234,80 +233,21 @@ def test_a_cwd_one_level_below_the_root_writes_the_same_paths_as_the_root(tmp_pa
     assert from_child == from_root
 
 
-def _installed_checkov_frameworks(checkov_path: str) -> set:
-    """The framework names the installed checkov enumerates, read statically.
-
-    checkov builds ``checkov_runners`` (its --framework and --skip-framework
-    vocabulary) from the string constants of the ``CheckType`` class in
-    ``checkov/common/bridgecrew/check_type.py``. This locates that file through
-    the console script's own interpreter and parses it with ``ast``, executing
-    no checkov code. A missing file or an empty parse FAILS rather than skips:
-    checkov is installed (``_checkov()`` passed), so either means a checkov
-    refactor moved the registry and the VCS-configuration derivation in
-    checkov_vcs_frameworks.py must be re-measured.
-    """
-    with open(checkov_path, "rb") as handle:
-        first_line = handle.readline().strip()
-    if not first_line.startswith(b"#!"):
-        pytest.skip("checkov console script has no shebang; cannot find its env")
-    interpreter = first_line[2:].decode("utf-8", errors="replace").split()[0]
-    if os.path.basename(interpreter) == "env" or not os.path.isfile(interpreter):
-        pytest.skip(f"cannot resolve checkov's interpreter from shebang {interpreter}")
-    purelib = subprocess.run(  # nosec B603 - fixed argv, interpreter from shebang
-        [
-            interpreter,
-            "-I",
-            "-c",
-            "import sysconfig; print(sysconfig.get_paths()['purelib'])",
-        ],
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout.strip()
-    check_type_py = (
-        Path(purelib) / "checkov" / "common" / "bridgecrew" / "check_type.py"
-    )
-    if not check_type_py.is_file():
-        pytest.fail(
-            f"checkov is installed but {check_type_py} does not exist: checkov "
-            "moved its framework registry; re-measure the VCS-configuration "
-            "derivation in checkov_vcs_frameworks.py against this checkov"
-        )
-    tree = ast.parse(check_type_py.read_text(encoding="utf-8"))
-    for node in tree.body:
-        if isinstance(node, ast.ClassDef) and node.name == "CheckType":
-            frameworks = {
-                statement.value.value
-                for statement in node.body
-                if isinstance(statement, ast.Assign)
-                and isinstance(statement.value, ast.Constant)
-                and isinstance(statement.value.value, str)
-            }
-            if frameworks:
-                return frameworks
-    pytest.fail(
-        f"{check_type_py} no longer holds a CheckType class with string "
-        "constants: checkov refactored its framework registry; re-measure the "
-        "VCS-configuration derivation in checkov_vcs_frameworks.py"
-    )
-
-
-def test_framework_mirror_and_vcs_derivation_match_installed_checkov():
-    """ASH's framework mirror, and the VCS-configuration skip set derived from
-    it, agree with the checkov ASH runs.
+def test_framework_mirror_and_vcs_floor_match_installed_checkov():
+    """ASH's framework mirror and its VCS-configuration skip set agree with the
+    checkov ASH runs.
 
     Three directions, each loud on a different drift. The mirror equals
     checkov's registry, so a checkov release that adds, removes or renames a
-    framework fails here (an added ``*_configuration`` framework then enters
-    the derived skip set the moment the mirror is updated). The installed
-    registry's ``*_configuration`` names equal the measured floor, so a new
-    VCS framework in checkov is flagged even before the mirror changes. And
-    every name ASH derives exists in the installed checkov, because checkov
-    rejects an unknown ``--skip-framework`` value outright
-    (``normalize_framework_arg`` calls ``parser.error``), which would end the
-    scan rather than skip nothing.
+    framework fails here (the Literal may grow for typing; the skip set does
+    not follow it). The installed registry's ``*_configuration`` names equal
+    the measured floor, so a new VCS framework in checkov is flagged here and
+    adding it to the skip set is then an explicit decision that also raises the
+    checkov constraint's lower bound (checkov rejects an unknown
+    ``--skip-framework`` value outright: ``normalize_framework_arg`` calls
+    ``parser.error``). And every floor name exists in the installed checkov.
     """
-    installed = _installed_checkov_frameworks(_checkov())
+    installed = installed_checkov_frameworks(_checkov())
     mirrored = set(get_args(CheckFrameworks)) - {"all"}
 
     assert mirrored == installed, (
@@ -319,7 +259,8 @@ def test_framework_mirror_and_vcs_derivation_match_installed_checkov():
         framework for framework in installed if framework.endswith("_configuration")
     } == set(KNOWN_VCS_CONFIGURATION_FRAMEWORKS), (
         "the installed checkov's VCS configuration frameworks differ from the "
-        "measured floor in checkov_vcs_frameworks.py; re-measure the derivation "
-        "(env var pattern included) and update KNOWN_VCS_CONFIGURATION_FRAMEWORKS"
+        "measured floor in checkov_vcs_frameworks.py; re-measure (env var pattern "
+        "included), update KNOWN_VCS_CONFIGURATION_FRAMEWORKS and raise the "
+        "checkov constraint's lower bound to the first release that has the name"
     )
-    assert set(vcs_configuration_frameworks(get_args(CheckFrameworks))) <= installed
+    assert set(KNOWN_VCS_CONFIGURATION_FRAMEWORKS) <= installed

@@ -8,7 +8,7 @@ reports say which findings are the same problem, without changing any of that.
 | Switch | CLI flag | What it changes |
 |---|---|---|
 | `global_settings.deduplication.annotate` | `--annotate-duplicates` | The CSV and flat JSON reports gain three columns that name each finding's duplicate cluster. No row is added or removed. |
-| `global_settings.deduplication.fold` | `--fold-duplicates` | The HTML, Markdown and text reports show one row per cluster, with a note naming the other scanners, and print deduplicated counts beside the per-scanner counts. |
+| `global_settings.deduplication.fold` | `--fold-duplicates` | The human-readable reports (HTML, Markdown, text, and the Bedrock summary) show one row per cluster, with a note naming the other scanners, and print deduplicated counts beside the per-scanner counts. |
 
 Both are off by default, and they are independent: `fold` does not need `annotate`. They
 are off because both change what a CI job may read. `annotate` adds three columns to the
@@ -78,11 +78,16 @@ every row is the same as without the annotation.
 
 ## What the fold shows
 
-With `fold` on, the HTML, Markdown and text reports show the primary of each foldable
-cluster in their findings tables, detailed findings, finding cards and hotspots, with a
-note such as `Also reported by trivy CVE-2024-0001 (MEDIUM)`. The summary adds
-deduplicated counts next to the per-scanner counts, labeled as deduplicated. They never
-replace the per-scanner counts.
+With `fold` on, the human-readable reports (HTML, Markdown, text, and the Bedrock
+summary) show one row per foldable cluster in their findings tables, detailed findings,
+finding cards and hotspots, with a note such as
+`Also reported by trivy CVE-2024-0001 (MEDIUM)`. The row that stands for a cluster is
+an actionable member when the view holds one (the gate is per scanner, so a cluster can
+mix dispositions), else the cluster's severity-ranked primary. Line-overlap clusters
+chain: two findings can fold through a third that overlaps both. The summary adds
+deduplicated counts next to the per-scanner counts when anything folded, labeled as
+deduplicated and counting live (unsuppressed) rows. They never replace the per-scanner
+counts.
 
 ## What never changes
 

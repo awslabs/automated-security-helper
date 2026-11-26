@@ -10,7 +10,9 @@
  be evaluated here reads not-run, which is not a pass.
 
  Exit status: 0 when every named plugin passes, 1 when any row is red, 3 when none is red
- but some row was not run, 2 for a usage error (an unknown plugin, no transcript root).
+ but some row was not run, 2 for a usage error (an unknown plugin, no transcript root, a
+ plugin that cannot be loaded). A red row outranks a load error: a run that found both
+ exits 1, so a red verdict is never masked by an unrelated plugin's import failure.
 
 ┌─ Arguments ─────────────────────────────────────────────────────────────────────────────────────┐
 │   names      <str>  Scanner names to verify (as in `ash plugin list`). Omit with --all.         │

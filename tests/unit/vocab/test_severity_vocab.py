@@ -65,10 +65,14 @@ def test_an_off_ladder_word_is_none_not_an_error(text):
     assert Severity.from_text(text) is None
 
 
-def test_the_threshold_ingest_helper_has_its_own_vocabulary():
-    assert SeverityThreshold.from_text("all") is SeverityThreshold.ALL
-    assert SeverityThreshold.from_text("INFO") is None
-    assert SeverityThreshold.from_text(SeverityThreshold.LOW) is SeverityThreshold.LOW
+def test_the_threshold_has_no_lenient_parser():
+    # The gate contract is case-sensitive (utils/severity_ladder.py), so the
+    # threshold enum offers members only; a case-folding parser would add a
+    # second, looser spelling rule with no production caller.
+    assert not hasattr(SeverityThreshold, "from_text")
+    assert SeverityThreshold("ALL") is SeverityThreshold.ALL
+    with pytest.raises(ValueError):
+        SeverityThreshold("all")
     assert Severity.from_text(Severity.LOW) is Severity.LOW
 
 

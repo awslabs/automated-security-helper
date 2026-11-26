@@ -39,9 +39,17 @@ from automated_security_helper.base.scanner_plugin import (
     ScannerPluginConfigBase,
 )
 from automated_security_helper.config.ash_config import AshConfig
+from automated_security_helper.core.phases.scanner_executor import (
+    UNSTOPPED_LATER_RUN_ENDING,
+    _could_not_stop,
+    _timeout_ending,
+)
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.utils import subprocess_utils
-from automated_security_helper.utils.subprocess_utils import TIMEOUT_RETURNCODE
+from automated_security_helper.utils.subprocess_utils import (
+    COULD_NOT_STOP_ENDING,
+    TIMEOUT_RETURNCODE,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -109,6 +117,20 @@ UNSTOPPED_TIMEOUT = {
 COMMAND = [sys.executable, "-c", "pass"]
 
 
+def _run_then_note(scanner: _Scanner):
+    """A side run that makes its response, then writes a note of its own that the
+    downgrade of a side run's ERROR lines does not keep out of the record."""
+
+    def run(command, **kwargs):
+        response = scanner._run_subprocess(command, **kwargs)
+        scanner._plugin_log(
+            "a side run's note", level=logging.INFO, append_to_stream="stderr"
+        )
+        return response
+
+    return run
+
+
 def _side_run(scanner: _Scanner) -> None:
     scanner._run_unrecorded(scanner._run_subprocess, COMMAND, timeout=5)
 
@@ -123,8 +145,76 @@ def test_a_side_run_whose_kill_failed_leaves_the_could_not_stop_record(
 
     assert scanner.scan_could_not_stop is not None
     assert "pid 4242" in scanner.scan_could_not_stop
+    # Kept, under the side run's own key: it is not the scan's own timeout.
+    assert set(scanner.scan_could_not_stop_runs) == {"side_run:timed_out"}
+    assert [flag for flag, _ in scanner.scan_could_not_stop_history] == [
+        "side_run:timed_out"
+    ]
+
+
+def test_a_side_runs_failed_stop_is_not_read_as_the_scans_own_timeout(
+    tmp_path, monkeypatch
+):
+    """A side run whose tool could not be stopped, then the scan's own run killed
+    at its timeout: the headline must not say the timed-out tool survived, and the
+    kept record still fails the run."""
+    scanner = _scanner_answering(
+        tmp_path, monkeypatch, UNSTOPPED_TIMEOUT, KILLED_TIMEOUT
+    )
+
+    _side_run(scanner)
+    scanner._run_subprocess(command=COMMAND, timeout=5)
+
+    assert _timeout_ending(scanner) != COULD_NOT_STOP_ENDING
+    assert _timeout_ending(scanner) == UNSTOPPED_LATER_RUN_ENDING
+    # The deliberate property: any could-not-stop entry fails the run, because
+    # the process may still be writing into the output directory.
+    assert _could_not_stop(scanner) is not None
+    assert "pid 4242" in _could_not_stop(scanner)
+
+
+def test_the_scans_own_failed_stop_is_still_read_as_its_timeout(tmp_path, monkeypatch):
+    """Control for the test above: the same record from the scan's own run keeps
+    the timeout's own ending."""
+    scanner = _scanner_answering(tmp_path, monkeypatch, UNSTOPPED_TIMEOUT)
+
+    scanner._run_subprocess(command=COMMAND, timeout=5)
+
     assert set(scanner.scan_could_not_stop_runs) == {"timed_out"}
-    assert [flag for flag, _ in scanner.scan_could_not_stop_history] == ["timed_out"]
+    assert _timeout_ending(scanner) == COULD_NOT_STOP_ENDING
+
+
+def test_a_side_run_whose_stop_failed_is_named_once_at_error(
+    tmp_path, monkeypatch, caplog
+):
+    """The one line that says which scanner left a process running and how to give
+    it longer, written after the put-back so it stays with the scan's lines."""
+    scanner = _scanner_answering(tmp_path, monkeypatch, UNSTOPPED_TIMEOUT)
+
+    with caplog.at_level(logging.DEBUG):
+        _side_run(scanner)
+        errors = [r for r in caplog.records if r.levelno >= logging.ERROR]
+
+    assert len(errors) == 1
+    text = errors[0].getMessage()
+    assert "watched" in text
+    assert "scanners.watched.options.scan_timeout" in text
+    assert "pid 4242" in text
+    assert any("could not be stopped" in line for line in scanner.errors)
+    assert scanner._side_run_active is False
+
+
+def test_a_side_run_that_stopped_cleanly_says_nothing_about_a_stop(
+    tmp_path, monkeypatch, caplog
+):
+    """Control for the test above: a killed timeout adds no could-not-stop line."""
+    scanner = _scanner_answering(tmp_path, monkeypatch, KILLED_TIMEOUT)
+
+    with caplog.at_level(logging.DEBUG):
+        _side_run(scanner)
+
+    assert not [r for r in caplog.records if "could not be stopped" in r.getMessage()]
+    assert scanner.errors == []
 
 
 def test_a_side_run_that_raises_after_a_failed_kill_keeps_the_record(
@@ -172,7 +262,13 @@ def test_a_main_runs_could_not_stop_record_survives_a_clean_side_run(
 def test_a_side_run_timeout_leaves_the_error_lines_and_the_notes_in_step(
     tmp_path, monkeypatch
 ):
-    """Seeded with a non-zero scan record, so a reset to a clean one fails too."""
+    """Seeded with a non-zero scan record, so a reset to a clean one fails too.
+
+    The side run writes a note that survives the downgrade of its ERROR lines
+    (``append_to_stream="stderr"`` puts it in ``errors`` and in the record of
+    ASH's own notes at any level), so the put-back has something to remove from
+    both. Without ``_plugin_log_lines`` in the put-back list the note stays.
+    """
     scanner = _scanner_answering(tmp_path, monkeypatch, KILLED_TIMEOUT)
     scanner.exit_code = 6
     scanner.errors = ["earlier line"]
@@ -180,7 +276,7 @@ def test_a_side_run_timeout_leaves_the_error_lines_and_the_notes_in_step(
     errors_before = list(scanner.errors)
     notes_before = list(scanner._plugin_log_lines)
 
-    _side_run(scanner)
+    scanner._run_unrecorded(_run_then_note(scanner), COMMAND, timeout=5)
 
     assert scanner.exit_code == 6
     assert scanner.errors == errors_before
@@ -193,9 +289,10 @@ def test_a_side_run_that_raises_puts_the_record_back(tmp_path, monkeypatch):
     scanner.exit_code = 6
     scanner.errors = ["earlier line"]
     scanner._plugin_log_lines = ["earlier note"]
+    note_then_run = _run_then_note(scanner)
 
     def run_then_raise(command, **kwargs):
-        scanner._run_subprocess(command, **kwargs)
+        note_then_run(command, **kwargs)
         raise RuntimeError("boom")
 
     with pytest.raises(RuntimeError, match="boom"):
@@ -204,6 +301,25 @@ def test_a_side_run_that_raises_puts_the_record_back(tmp_path, monkeypatch):
     assert scanner.exit_code == 6
     assert scanner.errors == ["earlier line"]
     assert scanner._plugin_log_lines == ["earlier note"]
+
+
+def test_the_side_runs_note_is_in_the_record_before_the_put_back(tmp_path, monkeypatch):
+    """Control for the two tests above: the note they arrange is really written
+    to both lists while the side run is in flight."""
+    scanner = _scanner_answering(tmp_path, monkeypatch, KILLED_TIMEOUT)
+    seen: dict[str, list[str]] = {}
+    note_then_run = _run_then_note(scanner)
+
+    def run_and_look(command, **kwargs):
+        response = note_then_run(command, **kwargs)
+        seen["errors"] = list(scanner.errors)
+        seen["notes"] = list(scanner._plugin_log_lines)
+        return response
+
+    scanner._run_unrecorded(run_and_look, COMMAND, timeout=5)
+
+    assert any("a side run's note" in line for line in seen["errors"])
+    assert any("a side run's note" in line for line in seen["notes"])
 
 
 def test_a_side_runs_timeout_note_is_not_shown_at_error(tmp_path, monkeypatch, caplog):

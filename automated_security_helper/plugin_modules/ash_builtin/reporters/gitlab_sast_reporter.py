@@ -115,7 +115,10 @@ class _Draft:
     finding_id: str
     #: Whether *finding_id* is the legacy one, which collisions are counted on.
     legacy: bool
-    #: The value of ``FlatVulnerability.is_suppressed``, under its field's name.
+    #: Whether a suppression is in effect on the SARIF result
+    #: (``suppressions_in_effect``, SARIF 3.35.4) -- computed here from the
+    #: result, not read from ``FlatVulnerability.is_suppressed``, whose value
+    #: for the same finding can differ.
     is_suppressed: bool
     #: The gate's grade in GitLab's spelling; empty when there is none.
     severity: str
@@ -138,9 +141,10 @@ def _projection_schema() -> Dict[str, Any]:
     ``legacy``                Boolean    whether the id is the legacy
                                          rule-file-line one, the only kind that
                                          is counted
-    ``is_suppressed``         Boolean    whether a suppression is in effect (the
-                                         name of the model field the value fills,
-                                         ``FlatVulnerability.is_suppressed``)
+    ``is_suppressed``         Boolean    whether a suppression is in effect on
+                                         the SARIF result
+                                         (``suppressions_in_effect``), not
+                                         ``FlatVulnerability.is_suppressed``
     ``severity``              String     the gate's grade, in GitLab's spelling;
                                          null when there is none
     ``occurrence``            Int64      how many drafts before this one, in the

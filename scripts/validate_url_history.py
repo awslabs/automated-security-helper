@@ -23,7 +23,9 @@ three in agreement:
   whose old page serves exactly that URL and whose new page serves exactly the
   mapped target;
 - no redirect shadows a live URL: an entry whose old URL another page still
-  serves would overwrite that page's output;
+  serves would overwrite that page's output, and no two entries serve one URL;
+- every rename in the ledger (an ``R`` row) names a new URL that is well formed
+  and that a page, a redirect entry or a mapped URL serves;
 - with --site-dir, every historical URL resolves inside the built tree: it is
   a page, or a redirect page whose refresh target reaches a real page within
   a bounded number of hops and without revisiting a URL.
@@ -133,8 +135,72 @@ def load_history(path: Path) -> tuple[list[str], list[str]]:
     return urls, findings
 
 
+#: A normalized page URL: ``/``, or ``/segment/`` repeated, no query, fragment or
+#: whitespace.
+_URL_FORM = re.compile(r"/(?:[^\s/?#]+/)*")
+
+
+def load_history_targets(path: Path) -> list[tuple[int, str, str]]:
+    """``(line, old URL, new URL)`` of each ledger row that records a rename.
+
+    Only an ``R`` row with a non-empty fourth field carries a new URL; both URLs
+    are normalized the way :func:`load_history` normalizes the old one.
+    """
+    rows: list[tuple[int, str, str]] = []
+    for number, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        if not raw.strip() or raw.lstrip().startswith("#"):
+            continue
+        fields = raw.split("\t")
+        if len(fields) < 4 or fields[1] != "R" or not fields[2].strip():
+            continue
+        if fields[3].strip():
+            rows.append((number, normalize_url(fields[2]), normalize_url(fields[3])))
+    return rows
+
+
+def check_history_targets(
+    rows: list[tuple[int, str, str]],
+    mapping: dict,
+    yml_urls: dict[str, str],
+    docs_dir: Path,
+    ledger_name: str = "historical-urls.tsv",
+) -> list[str]:
+    """Each rename's new URL is well formed and lands on something that exists.
+
+    Existing means a page the docs tree serves, an old page ``docs/redirects.yml``
+    redirects (it is served as a redirect page), or a dead URL the map redirects.
+    A bogus new URL in the ledger would otherwise pass every source-only run: the
+    old URL is covered either way, and nothing else reads the new one.
+    """
+    findings: list[str] = []
+    for number, old, new in rows:
+        if not _URL_FORM.fullmatch(new):
+            findings.append(
+                f"{ledger_name}:{number}: new URL {new!r} for {old} is not a "
+                "/path/ page URL"
+            )
+        elif (
+            page_for_url(docs_dir, new) is None
+            and new not in yml_urls
+            and new not in mapping["redirects"]
+        ):
+            findings.append(
+                f"{ledger_name}:{number}: {old} was renamed to {new}, which no "
+                "docs page, docs/redirects.yml entry or mapped URL serves"
+            )
+    return findings
+
+
 def load_map(path: Path) -> tuple[dict, list[str]]:
-    """The dead-URL map, plus findings about its own shape."""
+    """The dead-URL map, plus findings about its own shape.
+
+    Its ``counts`` block is checked where a count is derivable from the map:
+    ``dead`` and ``mapped`` (the redirects), ``distinct_targets`` (the distinct
+    mapped targets) and ``tombstones``. The other keys (``basename_or_section_match``,
+    ``fallbacks``, ``rename_chain``) classify how an entry was chosen, which the
+    file's own rows do not let a reader derive, so they are informational and
+    never checked.
+    """
     findings: list[str] = []
     document = json.loads(path.read_text(encoding="utf-8"))
     redirects = document.get("redirects")
@@ -157,7 +223,12 @@ def load_map(path: Path) -> tuple[dict, list[str]]:
         if url in tombstones:
             findings.append(f"{path.name}: {url} is both redirected and tombstoned")
     counts = document.get("counts") or {}
-    for key, wanted in (("dead", len(redirects)), ("tombstones", len(tombstones))):
+    for key, wanted in (
+        ("dead", len(redirects)),
+        ("mapped", len(redirects)),
+        ("distinct_targets", len({normalize_url(v) for v in redirects.values()})),
+        ("tombstones", len(tombstones)),
+    ):
         if key in counts and counts[key] != wanted:
             findings.append(
                 f"{path.name}: counts.{key} says {counts[key]}, "
@@ -173,6 +244,7 @@ def load_redirects_yml(path: Path) -> tuple[dict[str, str], list[str]]:
     """docs/redirects.yml as old page -> new page, parsed by its flat grammar."""
     findings: list[str] = []
     entries: dict[str, str] = {}
+    served: dict[str, tuple[str, int]] = {}
     in_block = False
     for number, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
         line = raw.rstrip()
@@ -191,6 +263,20 @@ def load_redirects_yml(path: Path) -> tuple[dict[str, str], list[str]]:
         old, new = match.group(1), match.group(2)
         if old in entries:
             findings.append(f"{path.name}:{number}: {old} is redirected twice")
+        else:
+            # Two different old pages can serve one URL (``x.md`` and
+            # ``x/index.md``); the redirect pages they build would overwrite each
+            # other, so the later one would win downstream without a word.
+            url = url_of_page(old)
+            if url in served:
+                first, first_number = served[url]
+                findings.append(
+                    f"{path.name}:{number}: {old} serves {url}, which {first} "
+                    f"(line {first_number}) already serves; the later redirect "
+                    "page would overwrite the earlier"
+                )
+            else:
+                served[url] = (old, number)
         entries[old] = new
     return entries, findings
 
@@ -356,6 +442,9 @@ def run(root: Path, site_dir: Path | None = None) -> tuple[list[str], str]:
     merged.update(mapping["redirects"])
     findings += check_map_targets(mapping, docs_dir)
     findings += check_history_covered(history, mapping, yml_urls, docs_dir)
+    findings += check_history_targets(
+        load_history_targets(root / HISTORY_FILE), mapping, yml_urls, docs_dir
+    )
     findings += check_no_chains(merged)
     findings += check_map_materialized(mapping, yml_urls)
     findings += check_no_shadowed_urls(yml_urls, docs_dir)

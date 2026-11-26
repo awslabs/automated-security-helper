@@ -23,6 +23,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from automated_security_helper.config.plugin_module_trust import off_host_package
 from automated_security_helper.plugin_manifests import opt_in_module_for
 
 pytestmark = pytest.mark.unit
@@ -60,8 +61,20 @@ def _install_commands(script: str):
 
 
 def _config_modules(path: str) -> "set[str]":
+    """The modules a repo-relative config loads at run time.
+
+    ``plugin_module_trust`` drops an off-host package (``ash_snyk_plugins``,
+    ``ash_aws_plugins``) that a config file inside the checkout lists, so the command
+    exits 2 for it; only the ``--ash-plugin-modules`` and ``--config-overrides``
+    flags can load one. Counting those entries as loaded would pass the very
+    command this check exists to catch.
+    """
     doc = yaml.safe_load((REPO_ROOT / path).read_text(encoding="utf-8")) or {}
-    return set(doc.get("ash_plugin_modules") or [])
+    return {
+        module
+        for module in doc.get("ash_plugin_modules") or []
+        if off_host_package(module) is None
+    }
 
 
 def problems_in(command: str) -> "list[str]":
@@ -133,3 +146,18 @@ _ALPHA = "--config .ash/.ash_alpha_plugins.yaml"
 )
 def test_the_check_itself(command, bad):
     assert bool(problems_in(command)) is bad
+
+
+def test_a_repo_config_cannot_load_an_off_host_module(tmp_path, monkeypatch):
+    """A config in the checkout that lists snyk does not load it, so the command is bad.
+
+    Control: the same tool with the module on ``--ash-plugin-modules`` is fine.
+    """
+    config = tmp_path / "cfg.yaml"
+    config.write_text(f"ash_plugin_modules:\n  - {_SNYK}\n", encoding="utf-8")
+    monkeypatch.setattr(f"{__name__}.REPO_ROOT", tmp_path)
+    assert problems_in("ash dependencies install --config cfg.yaml --tool snyk-code")
+    assert not problems_in(
+        f"ash dependencies install --config cfg.yaml --ash-plugin-modules {_SNYK}"
+        " --tool snyk-code"
+    )
