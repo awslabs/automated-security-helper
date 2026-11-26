@@ -1,0 +1,27 @@
+{
+  "end": "2026-11-25T00:16:16.913688157Z",
+  "files_failed_to_scan": 0,
+  "files_parsed": 0,
+  "files_scanned": 0,
+  "kics_version": "2.1.20",
+  "lines_ignored": 0,
+  "lines_parsed": 0,
+  "lines_scanned": 0,
+  "paths": [],
+  "queries": [],
+  "queries_failed_to_compute_similarity_id": 0,
+  "queries_failed_to_execute": 0,
+  "queries_total": 0,
+  "scan_id": "console",
+  "severity_counters": {
+    "CRITICAL": 0,
+    "HIGH": 0,
+    "INFO": 0,
+    "LOW": 0,
+    "MEDIUM": 0,
+    "TRACE": 0
+  },
+  "start": "2026-11-25T00:16:16.912000027Z",
+  "total_bom_resources": 0,
+  "total_counter": 0
+}
