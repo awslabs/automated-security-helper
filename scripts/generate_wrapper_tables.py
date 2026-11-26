@@ -2,18 +2,19 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Render the wrapper contract into the marked blocks of ``./ash`` and ``utils/ash_helpers.ps1``.
+"""Render the wrapper contract into the marked blocks of ``utils/ash_helpers.ps1``.
 
 Usage:
     uv run python scripts/generate_wrapper_tables.py           # rewrite the blocks
     uv run python scripts/generate_wrapper_tables.py --check   # exit 1 with a diff if stale
 
-The two host wrappers exist for hosts with no Python, so they carry written-out copies of
-the ``ash`` CLI's own surface: the subcommand names, the root options that take a value,
-which subcommands take the options a wrapper adds, the runner discovery order. This
-script computes those from the real typer app and container mode's constants
-(``automated_security_helper/interactions/wrapper_contract.py``) and writes them between
-marker comments inside each wrapper, in that wrapper's own syntax::
+The PowerShell host wrapper exists for hosts with no Python, so it carries written-out
+copies of the ``ashx`` CLI's own surface: the subcommand names, the root options that
+take a value, which subcommands take the options the wrapper adds, the runner discovery
+order. This script computes those from the real typer app and container mode's
+constants (``automated_security_helper/interactions/wrapper_contract.py``) and writes
+them between marker comments inside the wrapper, in its own syntax (v4 removed the
+``./ash`` bash wrapper, which had blocks of its own, and its renderers with it)::
 
     # BEGIN generated: <name> (scripts/generate_wrapper_tables.py)
     ...
@@ -37,7 +38,6 @@ from typing import Callable
 REPO_ROOT = Path(__file__).resolve().parent.parent
 GENERATOR = "scripts/generate_wrapper_tables.py"
 
-ASH = "ash"
 POWERSHELL = "utils/ash_helpers.ps1"
 
 
@@ -130,53 +130,6 @@ def ps_ci_runner_markers(contract) -> list[str]:
         lines.append(f"    {name:<{width}} = $env:{name}")
     lines.append("}")
     return lines
-
-
-# ---------------------------------------------------------------------------
-# Bash renderers
-# ---------------------------------------------------------------------------
-
-
-def _sh_words(values) -> str:
-    return " ".join(values)
-
-
-def sh_subcommands(contract) -> list[str]:
-    return [f'ASH_SUBCOMMANDS="{_sh_words(contract.subcommands)}"']
-
-
-def sh_dash_o_subcommands(contract) -> list[str]:
-    return [f'ASH_DASH_O_IS_THE_SUBCOMMANDS="{_sh_words(contract.dash_o_subcommands)}"']
-
-
-def sh_root_value_options(contract) -> list[str]:
-    return [f'ASH_ROOT_VALUE_OPTIONS="{_sh_words(contract.root_value_options)}"']
-
-
-def sh_takes_quiet_and_color(contract) -> list[str]:
-    return [
-        f'ASH_TAKES_QUIET="{_sh_words(contract.takers("--quiet"))}"',
-        f'ASH_TAKES_COLOR="{_sh_words(contract.takers("--no-color"))}"',
-    ]
-
-
-def sh_takes_sandbox(contract) -> list[str]:
-    return [f'ASH_TAKES_SANDBOX="{_sh_words(contract.sandbox_subcommands)}"']
-
-
-def sh_exit_codes(contract) -> list[str]:
-    return [
-        f"WRAPPER_REFUSAL_EXIT={contract.refusal_exit}",
-        f"USAGE_ERROR_EXIT={contract.usage_error_exit}",
-    ]
-
-
-def sh_runner_order(contract) -> list[str]:
-    return [f'ASH_RUNNER_ORDER="{_sh_words(contract.runner_order)}"']
-
-
-def sh_ci_runner_markers(contract) -> list[str]:
-    return [f'ASH_CI_RUNNER_MARKERS="{_sh_words(contract.ci_runner_markers)}"']
 
 
 Renderer = Callable[..., list[str]]

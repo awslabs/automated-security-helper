@@ -4,7 +4,7 @@
 """The wrapper contract spec against values written down here by hand.
 
 ``automated_security_helper/interactions/wrapper_contract.py`` computes the tables the
-two host wrappers carry from the real typer app. Comparing what it computed with the
+host wrapper carries from the real typer app. Comparing what it computed with the
 typer app it read would pass under any bug in how it reads it: a dropped subcommand, a
 mis-collected option. So these expectations are literals. A legitimate change to the CLI
 (a new subcommand, a new option on one) changes the literals in the same commit; a
@@ -53,10 +53,16 @@ def test_only_scan_takes_sandbox():
 
 
 def test_root_value_options():
+    # Every spelling of a value-taking root option, deprecated ones included: the
+    # wrapper has to skip the value after `--ash-revision`/`-rev` (the old spellings of
+    # --ash-revision-to-install) and `--offline-semgrep-rulesets` (the old spelling of
+    # --offline-rulesets) as much as after the new ones, or it reads the value as a
+    # subcommand (cli/deprecations.py keeps both old spellings working through v4).
     assert contract().root_value_options == (
         "--add-scanners",
         "--ash-config-from-host",
         "--ash-plugin-modules",
+        "--ash-revision",
         "--ash-revision-to-install",
         "--base-ref",
         "--baseline",
@@ -80,6 +86,7 @@ def test_root_value_options():
         "--mode",
         "--oci",
         "--oci-runner",
+        "--offline-rulesets",
         "--offline-semgrep-rulesets",
         "--only-scanners",
         "--output-dir",
@@ -100,6 +107,7 @@ def test_root_value_options():
         "-f",
         "-g",
         "-o",
+        "-rev",
         "-u",
     )
 
@@ -132,10 +140,6 @@ def test_the_forwarded_option_list_is_in_the_table_order():
         WRAPPER_FORWARDED_OPTIONS
     )
     assert set(WRAPPER_FORWARDED_OPTIONS) == set(EXPECTED_OPTION_SUBCOMMANDS)
-
-
-def test_the_subcommands_whose_own_dash_o_is_forwarded():
-    assert contract().dash_o_subcommands == ("get-genai-guide", "config")
 
 
 def test_runner_order_image_pattern_and_build_targets():
