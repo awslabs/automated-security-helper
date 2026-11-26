@@ -285,11 +285,13 @@ def test_no_gate_owned_option_can_be_set_from_extra_args(
 #: because a scanner that was never selected is recorded SKIPPED rather than MISSING and
 #: SKIPPED is on the completeness allowlist.
 #:
-#: The value in each pair is one that would do damage, not a placeholder, and
-#: ``test_a_reserved_option_would_really_have_narrowed_the_scan`` resolves these same values
-#: through the real CLI. Without that, a typo in the frozenset would leave this table green
-#: while the hole stayed open: the refusal would fire on a spelling ASH does not accept, and
-#: the spelling ASH does accept would sail past.
+#: The value in each pair is one that would do damage, not a placeholder, and the
+#: positive controls below resolve the same value through the real CLI for every
+#: pair but ``--mode``, ``--phases`` and ``--config-overrides``; for
+#: ``--cli-json-input`` they resolve a document of the same kind. Without that, a typo
+#: in the frozenset would leave this table green while the hole stayed open: the
+#: refusal would fire on a spelling ASH does not accept, and the spelling ASH does
+#: accept would sail past.
 _NARROWING_OPTIONS_WITH_VALUES = [
     ("--scanners", "bandit", "scans one scanner and reports the other nine as SKIPPED"),
     (
@@ -348,10 +350,7 @@ _NARROWING_OPTIONS_WITH_VALUES = [
     (
         "--cli-json-input",
         "selection.json",
-        (
-            "the document it names sets any parameter the gate does not pass "
-            "itself, the scanner selection among them"
-        ),
+        "the document it names can set the scanner selection, as --only-scanners does",
     ),
 ]
 
@@ -534,7 +533,8 @@ def test_every_reserved_spelling_is_one_the_cli_actually_accepts():
 
     scan_command = typer.main.get_command(app).commands["scan"]
     # get_params, not params: click adds its help option there, and --help is a
-    # spelling the gate reserves. Resilient parsing, so no eager callback runs.
+    # spelling the gate reserves. Resilient parsing, under which the eager
+    # callbacks return without printing or exiting.
     ctx = scan_command.make_context("scan", [], resilient_parsing=True)
     declared = {
         spelling
@@ -559,8 +559,9 @@ def test_every_reserved_spelling_is_one_the_cli_actually_accepts():
 _SCANNER_OPTIONS_NOT_RESERVED = {
     "require_scanner_selection": (
         "hidden; container mode passes it to the scan it starts, and it only refuses "
-        "a scan whose settled default_scanners differs from the document it names "
-        "or a document it cannot read, so it can stop a scan but cannot narrow one"
+        "a scan whose settled default_scanners differs from the JSON document it is "
+        "given, or a document it cannot read, so it can stop a scan but cannot narrow "
+        "one"
     ),
 }
 
@@ -568,7 +569,7 @@ _SCANNER_OPTIONS_NOT_RESERVED = {
 def test_every_option_that_names_scanners_is_reserved():
     """Every option whose spelling names scanners is refused by the gate or exempted.
 
-    GATE_OWNED_SCAN_OPTIONS is written out by hand while the CLI keeps growing, so an
+    GATE_OWNED_SCAN_OPTIONS is a literal while the CLI keeps growing, so an
     option that chooses scanners can arrive without an entry here.
     ``--only-scanners`` states the whole selection, and ``--add-scanners`` means what
     ``--scanners`` means, so in the local mode the gate scans in, with no
@@ -638,21 +639,21 @@ def test_every_option_handled_before_the_scan_runs_is_reserved():
     """Options click handles itself, which the scan function never sees, are reserved.
 
     ``--help`` and ``--generate-cli-skeleton`` print and end the command with exit 0,
-    and ``--cli-json-input`` reads a document whose values stand for every parameter
-    the command line does not set. None of the three reaches the scan function
-    (click's ``expose_value=False``), and none has "scanner" in its spelling, so
+    and ``--cli-json-input`` reads a document that can supply any parameter the
+    command line does not set, apart from hidden ones, ``--express`` and the options
+    of this kind. None of the three reaches the scan function (click's
+    ``expose_value=False``), and none has "scanner" in its spelling, so
     ``test_every_option_that_names_scanners_is_reserved`` cannot see them. Exit 0 is
-    the outcome this gate reads as a pass, and a document reaches every option the
-    gate does not pass itself, so every option of this kind is reserved. They are read
-    off the real click command, so one added the same way fails here until the gate
-    reserves it.
+    the outcome this gate reads as a pass, and a document can set the scanner
+    selection, so every option of this kind is reserved. They are read off the real
+    click command, so one added the same way fails here until the gate reserves it.
     """
     import typer.main
 
     from automated_security_helper.cli.main import app
 
     scan_command = typer.main.get_command(app).commands["scan"]
-    # Resilient parsing, so the eager options do not run their callbacks here.
+    # Resilient parsing, under which the eager callbacks return without acting.
     ctx = scan_command.make_context("scan", [], resilient_parsing=True)
     not_exposed = {
         param.name: {*param.opts, *param.secondary_opts}

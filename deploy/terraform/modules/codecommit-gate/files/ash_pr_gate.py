@@ -216,7 +216,7 @@ SCAN_ENV_DROPPED_VARIABLES = frozenset(
 #: is split on the first = in `_is_gate_owned_option`, because `click` accepts it for
 #: options that take a value, --min-severity among them.
 #:
-#: The set is still written out by hand, so it can fall behind the CLI. Two tests in
+#: The set itself is a literal, so it can fall behind the CLI. Two tests in
 #: tests/unit/deploy/test_codecommit_gate_fails_closed.py read the real click command
 #: and fail when it gains an option this set misses:
 #: test_every_option_that_names_scanners_is_reserved, for an option whose spelling
@@ -263,6 +263,14 @@ GATE_OWNED_SCAN_OPTIONS = frozenset(
         # one name, and --config-overrides reaches the same settings key by key.
         "--config",
         "--config-overrides",
+        # The flag spelling of the content-database staleness settings, which
+        # --config-overrides also reaches. With --allow-stale-content-db, a clean scan
+        # against a database older than its declared bound exits 0 instead of 1, and
+        # exit 0 is the outcome this gate reads as a pass. The negation overrides the
+        # config's staleness settings for every database. Either choice belongs in the
+        # base config, in its content_db_staleness settings.
+        "--allow-stale-content-db",
+        "--no-allow-stale-content-db",
         # Skip the scan phase, or answer from a results file rather than from a scan.
         # --use-existing fails closed today only because `clone_source` clears
         # WORK_ROOT on every invocation, so the file it would read cannot exist -- an
@@ -281,9 +289,10 @@ GATE_OWNED_SCAN_OPTIONS = frozenset(
         "--help",
         "--version",
         "--generate-cli-skeleton",
-        # Read parameter values from a JSON document. The document's values stand for
-        # every parameter the command line does not set, so it reaches each option
-        # above that this gate does not pass itself, the scanner selection included.
+        # Read parameter values from a JSON document, which can supply any parameter
+        # the command line does not set apart from hidden ones, --express and the
+        # options click handles itself. So a document can set the scanner selection
+        # the way --only-scanners does.
         "--cli-json-input",
     }
 )

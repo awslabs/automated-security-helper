@@ -135,20 +135,27 @@
 
 ### Fixes
 
-- **The Terraform CodeCommit gate reserves six more `ash scan` options in
+- **The Terraform CodeCommit gate reserves more `ash scan` options in
   `ash_scan_extra_args`.** `--only-scanners` and `--add-scanners` join `--scanners`,
   because the gate's completeness check covers only the scanners that were selected,
   so the gate decides the selection: `--only-scanners` states the whole selection,
   and `--add-scanners` means what `--scanners` means, so in the local mode the gate
   scans in, with no `default_scanners.only` in the base config, the scanners it names
-  are the whole selection. `--cli-json-input` is reserved because a document it names
-  can set any parameter the gate does not pass itself, the selection included.
-  `--help`, `--version` and `--generate-cli-skeleton` are reserved because each ends
-  `ash scan` with exit 0 before any scanner starts, and exit 0 is the gate's pass
-  outcome. A deployment that sets one of them in `ash_scan_extra_args` reports an
-  error on every pull request until it is removed. Two unit tests now read the
-  `ash scan` options and fail when an option whose spelling names scanners, or one
-  that click handles before the scan function runs, is not reserved by the gate.
+  are the whole selection. `--cli-json-input` is reserved because the JSON document it
+  reads can supply any option the command line leaves unset, apart from hidden
+  options, `--express` and the options click handles itself, so a document can set
+  the selection the way `--only-scanners` does. `--help`, `--version` and
+  `--generate-cli-skeleton` are reserved because each ends `ash scan` with exit 0
+  before any scanner starts, and exit 0 is the gate's pass outcome.
+  `--allow-stale-content-db` and `--no-allow-stale-content-db` are reserved like
+  `--config-overrides`, which reaches the same staleness settings: with the first, a
+  clean scan against a content database older than its declared bound passes instead
+  of failing. Set `content_db_staleness` in the base config to make that choice. A
+  deployment that sets one of these options in `ash_scan_extra_args` reports an error
+  on every pull request until it is removed. Two unit tests now read the `ash scan`
+  options and fail when an option whose spelling names scanners, or one that click
+  handles before the scan function runs, is not reserved by the gate; the first
+  exempts an option it lists with the reason it cannot narrow a scan.
 - **`Invoke-ASH` now matches `./ash` and the `ash` CLI on two container-run details.**
   It passes `GITHUB_ACTIONS`, `TF_BUILD` and `TEAMCITY_VERSION` into the container when
   set (by name, or with their values when `OCI_RUNNER_WRAPPER` is set; a value that holds
