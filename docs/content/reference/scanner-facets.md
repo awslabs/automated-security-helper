@@ -332,7 +332,7 @@ Ranges are written in the grammar native to the runtime: `python` uses PEP 440 s
 | `remediation_text` | `unconfirmed` |  | UNCONFIRMED: not classified by the survey; the flat model has no remediation column, and matchDetails[].fix.suggestedVersion is a version, not text |
 | `snippet` | `n/a` |  | a package match has no source code snippet |
 | `references` | `mapped` | tool.driver.rules[].helpUri, read into the flat references by the shared rule read when the result carries none of its own | grype writes the advisory dataSource as the rule helpUri; the native match urls (matches[].vulnerability.urls, relatedVulnerabilities[].urls) are still never read |
-| `tags` | `unconfirmed` |  | UNCONFIRMED: the survey reads SARIF rule properties.tags off the conformance tests' presenter shape (rule-level, which the flat reader never takes as the tags column anyway); no grype SARIF fixture from a real run is committed, so a `grype -o sarif` capture settles whether results carry tags |
+| `tags` | `unconfirmed` |  | UNCONFIRMED: the survey reads SARIF rule properties.tags off the conformance tests' presenter shape (rule-level, which the flat reader takes as the tags column only when the result itself carries none); no grype SARIF fixture from a real run is committed, so a `grype -o sarif` capture settles whether results carry tags |
 | `extras` | `mapped` | SARIF result properties bag (package identity keys this adapter writes) passed through to the flat properties |  |
 
 ## `mcp-config`
