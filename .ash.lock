@@ -76,7 +76,7 @@
           "symbol": "NpmAuditScanner._probe_npm_version"
         }
       ],
-      "sha256": "8f1053578a57d93dc454fe9f65ab735eb7754b1144d20f422fa4f3a20cddcb2f"
+      "sha256": "361c6ec58e5f8d0af33a76ed0610588f962024be794721162d0b7205770f00e4"
     },
     "automated_security_helper/utils/content_db_refresh.py": {
       "created": "2026-11-25T17:03:23Z",

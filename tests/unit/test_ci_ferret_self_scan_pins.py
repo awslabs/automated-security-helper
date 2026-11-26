@@ -78,6 +78,12 @@ HADOLINT_BEHAVIOR_TEST = (
 BETTERLEAKS_SCANNER_TEST = (
     "tests/unit/plugin_modules/ash_betterleaks_plugins/test_betterleaks_scanner.py"
 )
+MCP_CONFIG_SCANNER = "automated_security_helper/plugin_modules/ash_builtin/scanners/mcp_config_scanner.py"
+IMAGE_DELIVERY_SNAPSHOT = "tests/snapshot/mcp/test_snapshot_mcp_image_delivery.py"
+IMAGE_DELIVERY_TEST = "tests/unit/cli/mcp/test_image_delivery_names_one_subject.py"
+IMAGE_ANCHOR_TEST = (
+    "tests/unit/cli/mcp/test_run_ash_scan_anchors_an_image_scan_in_its_own_directory.py"
+)
 
 
 @dataclass(frozen=True)
@@ -167,6 +173,23 @@ _RANGED_PIN_MARKERS: dict[tuple[str, str], list[_Marker]] = {
     # pin against: the commit the v1.10.1 tag points at.
     ("API_KEY_OR_SECRET", BETTERLEAKS_SCANNER_TEST): [
         _Marker((r'^    COMMIT = "',)),
+    ],
+    # The MCP config scanner's rule-id constant for an environment value, one line of
+    # the module. The pattern names the constant by its prefix and its value's.
+    ("API_KEY_OR_SECRET", MCP_CONFIG_SCANNER): [
+        _Marker((r'^RULE_ENV_\w+ = "MCP-ENV-',)),
+    ],
+    # The two module constants holding the MCP request header the image-delivery
+    # snapshot calls send, the refused id first. One pin takes both lines.
+    ("API_KEY_OR_SECRET", IMAGE_DELIVERY_SNAPSHOT): [
+        _Marker((r'^_BAD_\w+ = \{"mcp-', r'^_[A-Z]+ = \{"mcp-')),
+    ],
+    # The module constant naming the made-up MCP session each image test delivers to.
+    ("API_KEY_OR_SECRET", IMAGE_DELIVERY_TEST): [
+        _Marker((r'^_[A-Z]+ = "\w+-image-delivery"$',)),
+    ],
+    ("API_KEY_OR_SECRET", IMAGE_ANCHOR_TEST): [
+        _Marker((r'^_[A-Z]+ = "\w+-image-anchor"$',)),
     ],
 }
 

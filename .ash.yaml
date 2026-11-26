@@ -384,7 +384,9 @@ global_settings:
       reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
     - rule_id: zizmor/dangerous-triggers
       path: .github/workflows/ash-dependabot-auto-merge.yml
-      reason: "Reviewed. The workflow_run trigger is the point of the file: it approves a dependabot bump only after every required check on the head is green. The header of the workflow, under THE SAFETY OF THE TRIGGER, names why nothing the audit warns about can happen there. ASH runs zizmor without its inline ignore comments, so the decision is recorded here."
+      line_start: 113
+      line_end: 113
+      reason: "Reviewed. The workflow_run trigger is the point of the file: it approves a dependabot bump only after every required check on the head is green. The header of the workflow, under THE SAFETY OF THE TRIGGER, names why nothing the audit warns about can happen there. ASH runs zizmor without its inline ignore comments, so the decision is recorded here, pinned to the trigger's own line: zizmor 1.33.1 reports that line, a release that reports the whole on: block still overlaps it, and a dangerous trigger reported on another line of the file is not covered. .ash/.ash_alpha_plugins.yaml carries the same entry."
     - rule_id: generic-api-key
       path: tests/unit/utils/test_finding_trend.py
       reason: "False positive. A report-id helper whose default argument is a made-up twelve-character token, so the generated ids are fixed. The provider-specific gitleaks rules still apply to this file."
@@ -3301,6 +3303,11 @@ global_settings:
       line_start: 187
       line_end: 187
       reason: "'.env' is the example file name a docs graphic row shows for the secrets category; display data, not a read."
+    - rule_id: threat-process-download-exec
+      path: automated_security_helper/utils/install_providers.py
+      line_start: 293
+      line_end: 293
+      reason: "A tuple comparison in classify_install_command that recognizes a declared install command of the shape <interpreter> -m pip install, so the command is classed as a Python environment install; nothing is downloaded or run here. Pinned to its line rather than scoped to the definition, which is the whole command parser."
     # === semgrep/opengrep Python compatibility (ASH requires 3.10+) ===
     - rule_id: "python.lang.compatibility.*"
       path: "automated_security_helper/**/*.py"
