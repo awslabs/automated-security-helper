@@ -125,7 +125,9 @@ def test_an_old_scanner_column_heading_is_refused_naming_the_new_one(
     findings = dc.check_scanner_names([page], tmp_path)
     old = [f for f in findings if "is the old heading" in str(f)]
     assert len(old) == 1, findings
-    assert str(page.relative_to(tmp_path)) in str(old[0]).replace("\\", "/")
+    # The finding names the page in the checks' "/" form (docs_checks.rel_path), on
+    # Windows too, so the expected path is spelled the same way.
+    assert page.relative_to(tmp_path).as_posix() in str(old[0])
     assert f"use '{new_heading.capitalize()}'" in str(old[0])
     assert _messages(warnings_logged) == []
 

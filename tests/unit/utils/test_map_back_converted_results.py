@@ -13,6 +13,7 @@ files in the scanned tree maps nothing, and that a converted file with no sideca
 """
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -588,8 +589,20 @@ def _map_through_source(context, script: Path, source_name: str) -> SarifReport:
 
 @pytest.mark.parametrize(
     "name",
-    ["my:config.json", "sub\\config.json", "a'b.json"],
-    ids=["colon-in-name", "backslash-in-name", "quote-in-name"],
+    [
+        pytest.param("my:config.json", id="colon-in-name"),
+        # A POSIX file name only: on Windows "\\" separates path parts, so no file
+        # name holds one, and the name is the file config.json in a directory sub.
+        pytest.param(
+            "sub\\config.json",
+            id="backslash-in-name",
+            marks=pytest.mark.skipif(
+                sys.platform == "win32",
+                reason="a backslash separates path parts on Windows",
+            ),
+        ),
+        pytest.param("a'b.json", id="quote-in-name"),
+    ],
 )
 def test_a_posix_file_name_with_a_colon_or_backslash_is_a_source(converted, name):
     """Containment is the check on a name; the text refusals are scheme and drive."""
