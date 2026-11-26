@@ -98,15 +98,18 @@ class SandboxRequirements:
             and fails when git refuses a directory another user owns (opengrep's
             ``git ls-files``). ``build_scanner_policy`` computes the directories git
             should trust from the scan target (``safe_directories_for``: the target,
-            and the top of its checkout when the top and its ``.git`` each belong to
-            the target's owner or to the effective uid), and ``filter_env`` turns
-            them into ``GIT_CONFIG_*`` entries for that child alone. Of the other
+            and the top of its checkout when the top, its ``.git`` and, for a
+            ``.git`` file, the git directory it names each belong to the target's
+            owner or to the effective uid), and ``filter_env`` turns them into
+            ``GIT_CONFIG_*`` entries for that child alone. Of the other
             ``GIT_CONFIG_*`` variables only those that can take configuration away
             pass (``GIT_CONFIG_NOSYSTEM``, and ``GIT_CONFIG_GLOBAL`` or
-            ``GIT_CONFIG_SYSTEM`` set to the null device), so the child never gets a
-            ``safe.directory`` ASH did not name, and never ``*``; an environment
-            list entry that could add configuration is refused for this tool
-            (``_git_config_refusal``).
+            ``GIT_CONFIG_SYSTEM`` set to the null device), so ASH adds no
+            ``safe.directory`` beside the ones it names, and never ``*``; git still
+            reads the host's system configuration, and a global file the
+            environment points it at, unless the list takes them away with those
+            variables. An environment list entry for any other ``GIT_CONFIG_*``
+            name is refused for this tool (``_git_config_refusal``).
         read_paths_require_grant: ``read_paths`` and ``cache_paths`` follow the
             scanner's options, which the scanned repository can write (a rules
             file or baseline path, for example). ``read_paths`` are mounted only
@@ -256,8 +259,8 @@ def _git_config_refusal(name: str, value: Optional[str]) -> Optional[str]:
     ``value`` is the value the entry carries, or None for an environment list entry
     that passes the caller's value. Such a scanner gets the ``safe.directory``
     block ASH writes, so of git's configuration variables it takes only those that
-    can take configuration away: ``GIT_CONFIG_NOSYSTEM``, whatever its value (it can
-    only stop git reading the system file), and ``GIT_CONFIG_GLOBAL`` or
+    can take configuration away: ``GIT_CONFIG_NOSYSTEM``, whatever its value, since
+    no value of it adds configuration, and ``GIT_CONFIG_GLOBAL`` or
     ``GIT_CONFIG_SYSTEM`` set to the null device (``_names_null_device``). Every
     other name under the prefix is refused, those two included when they name
     anything else or pass the caller's value, which cannot be checked before the
@@ -271,6 +274,12 @@ def _git_config_refusal(name: str, value: Optional[str]) -> Optional[str]:
     if name in _GIT_CONFIG_FILE_NAMES:
         if value is not None and _names_null_device(value):
             return None
+        if value == "":
+            return (
+                "it is empty, and only the null device "
+                f"({os.devnull}) is taken for it. Set it to the null device to keep "
+                "git from reading a file at that level, or remove the entry"
+            )
         if value is None:
             return (
                 "it passes the caller's value, which cannot be checked before the "
@@ -335,6 +344,66 @@ def _owner_refusal(path: Path, owner: int, effective: int) -> Optional[str]:
     )
 
 
+#: The most bytes git reads of a ``.git`` file; it refuses a larger one
+#: (``read_gitfile_gently`` in git's ``setup.c``).
+_GITFILE_MAX_BYTES = 1 << 20
+
+
+def _gitdir_named_by(git: Path) -> Optional[Path]:
+    """The git directory a ``.git`` file names, resolved as git resolves it, or None
+    when ``git`` is a directory, which is then the git directory itself.
+
+    git reads a ``.git`` that is a file (a linked work tree's, a submodule's) as one
+    ``gitdir: <path>`` line, a relative path being read against the file's directory,
+    and its ownership check reads the directory that line names as well as the file
+    and the work tree's top. A link is followed, as git follows it. The file is read
+    only when it is a regular file, and it is opened without blocking, so a ``.git``
+    that is a pipe cannot stall the walk.
+
+    Raises:
+        OSError: ``git`` cannot be read.
+        ValueError: ``git`` is neither a directory nor a regular file, is larger
+            than git reads, or is not a ``gitdir:`` file.
+    """
+    mode = os.stat(git).st_mode
+    if stat.S_ISDIR(mode):
+        return None
+    if not stat.S_ISREG(mode):
+        raise ValueError("it is neither a directory nor a file")
+    descriptor = os.open(git, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0))
+    with os.fdopen(descriptor, "rb") as handle:
+        if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+            raise ValueError("it is neither a directory nor a file")
+        data = handle.read(_GITFILE_MAX_BYTES + 1)
+    if len(data) > _GITFILE_MAX_BYTES:
+        raise ValueError("it is larger than git reads")
+    text = os.fsdecode(data)
+    if not text.startswith("gitdir: "):
+        raise ValueError("it is not a gitdir: file")
+    named = text[len("gitdir: ") :].rstrip("\r\n")
+    if not named:
+        raise ValueError("it names no directory")
+    if not os.path.isabs(named):
+        named = os.path.join(os.path.dirname(git), named)
+    return Path(os.path.realpath(named))
+
+
+def _gitdir_refusal(git: Path, owner: int, effective: int) -> Optional[str]:
+    """Why the git directory a ``.git`` file names fails the owner test of
+    ``safe_directories_for``, or None when ``git`` is a directory or names one that
+    belongs to ``owner`` or to ``effective``."""
+    try:
+        gitdir = _gitdir_named_by(git)
+    except OSError as error:
+        reason = error.strerror or type(error).__name__
+        return f"the git directory that {git} names cannot be read ({reason})"
+    except ValueError as error:
+        return f"the git directory that {git} names cannot be read ({error})"
+    if gitdir is None:
+        return None
+    return _owner_refusal(gitdir, owner, effective)
+
+
 def _log_unnamed_top(top: str, reason: str) -> None:
     """Log at debug level why ``safe_directories_for`` does not name ``top``."""
     from automated_security_helper.utils.log import ASH_LOGGER
@@ -347,19 +416,21 @@ def safe_directories_for(target: Path) -> List[str]:
 
     The real path of ``target``, and, when it sits in a checkout, the checkout's top:
     the first parent holding a ``.git`` (a directory, or the file a linked work tree
-    and a submodule have). The top is named only when the top itself and its
-    ``.git`` entry each belong to the user who owns ``target`` or to the effective
-    uid (``os.lstat``, so a link is not followed), and the top is a directory
-    ``_usable_safe_directory`` admits, which a filesystem root never is. git's own
-    ownership check reads both of those entries: a top that belongs to anyone else
-    could have its ``.git`` replaced by its owner, so a ``.git`` the effective uid
-    owns does not make that top one git may trust. A ``.git`` whose top fails a
-    test ends the walk: git takes the first ``.git`` it meets as the top, so a
-    parent above it is not the checkout's. No ``.git`` above ``target`` names
-    nothing more, the conservative reading. Each such stop is logged at debug
-    level, with its reason in its own words: an owner that cannot be read, an
-    owner that is neither of the two users, or a top that a ``safe.directory``
-    entry cannot name.
+    and a submodule have). The top is named only when the top itself, its ``.git``
+    entry and, for a ``.git`` file, the git directory that file names
+    (``_gitdir_named_by``) each belong to the user who owns ``target`` or to the
+    effective uid (``os.lstat``, so a link is not followed), and the top is a
+    directory ``_usable_safe_directory`` admits, which a filesystem root never is.
+    These are the entries git's own ownership check reads: a top that belongs to
+    anyone else could have its ``.git`` replaced by its owner, and a git directory
+    that belongs to anyone else holds configuration its owner can change, so the
+    other entries belonging to the effective uid do not make that top one git may
+    trust. A ``.git`` whose top fails a test ends the walk: git takes the first
+    ``.git`` it meets as the top, so a parent above it is not the checkout's. No
+    ``.git`` above ``target`` names nothing more, the conservative reading. Each
+    such stop is logged at debug level, with its reason in its own words: an owner
+    or a ``.git`` file that cannot be read, an owner that is neither of the two
+    users, or a top that a ``safe.directory`` entry cannot name.
 
     Where the platform has no user ids (Windows: there is no ``os.geteuid``, and
     ``os.lstat`` reports uid 0 for every file, because the owner there is a
@@ -405,6 +476,10 @@ def safe_directories_for(target: Path) -> List[str]:
             )
             if reason is not None
         ]
+        if not refusals:
+            gitdir_reason = _gitdir_refusal(git, owner, effective)
+            if gitdir_reason is not None:
+                refusals.append(gitdir_reason)
         if refusals:
             _log_unnamed_top(top, "; ".join(refusals))
         elif _usable_safe_directory(top):
@@ -731,10 +806,10 @@ class SandboxPolicy:
             raise SandboxUnavailable(str(refused)) from None
         if self.git_safe_directory:
             # The scanner's ``GIT_CONFIG_*`` block is written by ``filter_env`` from
-            # ``safe_directories``. A listed entry that could add configuration
-            # beside it would be dropped silently or contradict that block, so it is
-            # refused; one that can only take configuration away is passed
-            # (``_git_config_refusal``).
+            # ``safe_directories``. A listed ``GIT_CONFIG_*`` entry that could add
+            # configuration beside it would be dropped silently or contradict that
+            # block, so it is refused; one that can only take configuration away is
+            # passed (``_git_config_refusal``).
             names, values = parse_environment(self.environment)
             for name in names:
                 reason = _git_config_refusal(name, values.get(name))
@@ -764,13 +839,13 @@ class SandboxPolicy:
                 continue
             if self.git_safe_directory and _git_config_refusal(key, value) is not None:
                 # The caller's block, the entries the scanner merged into it
-                # against that block, and every other channel that could add git
-                # configuration are not passed: the block is rebuilt below from the
-                # directories the policy names, so its count and indices agree with
-                # what the child receives. An entry that can only take
-                # configuration away is screened below like any other variable.
-                # (The environment list may not name one that could add any;
-                # ``__post_init__``.)
+                # against that block, and every other ``GIT_CONFIG_*`` variable that
+                # could add git configuration are not passed: the block is rebuilt
+                # below from the directories the policy names, so its count and
+                # indices agree with what the child receives. A ``GIT_CONFIG_*``
+                # variable that can only take configuration away is screened below
+                # like any other variable. (The environment list may not name one
+                # that could add any; ``__post_init__``.)
                 continue
             if key == "PYTHONPATH":
                 # Passed through for the workers ASH starts with its own

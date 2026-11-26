@@ -294,18 +294,19 @@
   documented to reach the project approvals API that checkov's GitLab check reads.
   Name a framework in `frameworks`, with or without `all`, to run it. In an offline
   scan their settings are not fetched.
-- opengrep's git is told to trust the directory it scans and, when that directory
-  sits in a checkout, the checkout's top, and nothing else. The top is trusted only
-  when it and its `.git` each belong to the scanned directory's owner or to the
-  effective uid, and never where the platform has no user ids (Windows), where
-  git's own ownership check decides. With the sandbox on, a `sandbox.environment`
-  entry that could add git configuration is refused for opengrep, which is then
-  reported MISSING with the entry named: `GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_<n>`,
-  `GIT_CONFIG_VALUE_<n>`, `GIT_CONFIG_PARAMETERS`, `GIT_CONFIG`, any other
-  `GIT_CONFIG_` name, and `GIT_CONFIG_GLOBAL` or `GIT_CONFIG_SYSTEM` naming
-  anything but the null device or listed without a value. `GIT_CONFIG_NOSYSTEM`,
-  and `GIT_CONFIG_GLOBAL` or `GIT_CONFIG_SYSTEM` set to the null device
-  (`/dev/null`, or `NUL` on Windows), are passed to it.
+- The `safe.directory` entries ASH gives opengrep's git name the directory it scans
+  and, when that directory sits in a checkout, the checkout's top, and no other
+  directory. The top is named only when it, its `.git` and, for a `.git` file, the
+  git directory that file names each belong to the scanned directory's owner or to
+  the effective uid, and never where the platform has no user ids (Windows), where
+  git's own ownership check decides. With the sandbox on, a `GIT_CONFIG_*` entry in
+  `sandbox.environment` that could add git configuration is refused for opengrep,
+  which is then reported MISSING with the entry named: `GIT_CONFIG_COUNT`,
+  `GIT_CONFIG_KEY_<n>`, `GIT_CONFIG_VALUE_<n>`, `GIT_CONFIG_PARAMETERS`,
+  `GIT_CONFIG`, any other `GIT_CONFIG_` name, and `GIT_CONFIG_GLOBAL` or
+  `GIT_CONFIG_SYSTEM` naming anything but the null device or listed without a
+  value. `GIT_CONFIG_NOSYSTEM`, and `GIT_CONFIG_GLOBAL` or `GIT_CONFIG_SYSTEM` set
+  to the null device (`/dev/null`, or `NUL` on Windows), are passed to it.
 
 ## v3.8.0 (2026-11-12)
 

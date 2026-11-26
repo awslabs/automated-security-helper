@@ -623,9 +623,10 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
 
         Git compares ``safe.directory`` with the top of the work tree, so a scan
         pointed at a subdirectory of a checkout names the checkout's top level as
-        well: the first parent that holds a ``.git``, when that parent and its
-        ``.git`` each belong to the scanned directory's owner or to the effective
-        uid, and never a filesystem root (``safe_directories_for``). Outside a
+        well: the first parent that holds a ``.git``, when that parent, its ``.git``
+        and, for a ``.git`` file, the git directory it names each belong to the
+        scanned directory's owner or to the effective uid, and never a filesystem
+        root (``safe_directories_for``). Outside a
         checkout only the scanned directory is named. Where the platform has no user
         ids (Windows) no owner can be compared, so the top is not named and git's own
         ownership check decides it.
