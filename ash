@@ -1982,8 +1982,12 @@ else
       detect_subcommand
       KEEP_STDIN="NO"
       if [[ -n "${SUBCOMMAND}" ]]; then
+        # Set to empty first, so the environment variable reference does not read these
+        # two arrays, which `read -a` fills, as variables ASH takes from the environment.
+        STDIN_COMMANDS=()
         read -r -d '' -a STDIN_COMMANDS <<< "${ASH_READS_STDIN}"
         for STDIN_COMMAND in "${STDIN_COMMANDS[@]}"; do
+          STDIN_COMMAND_WORDS=()
           read -r -d '' -a STDIN_COMMAND_WORDS <<< "${STDIN_COMMAND//:/ }"
           STDIN_NAMED="YES"
           for ((STDIN_STEP = 0; STDIN_STEP < ${#STDIN_COMMAND_WORDS[@]}; STDIN_STEP++)); do
