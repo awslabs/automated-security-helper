@@ -87,6 +87,7 @@ from automated_security_helper.utils.subprocess_utils import (
     SPAWN_FAILURE_RETURNCODE,
     WAS_KILLED_ENDING,
     could_not_stop_sentence,
+    keep_an_ignored_sigint_ignored,
 )
 from automated_security_helper.utils.sarif_utils import (
     apply_suppressions_to_sarif,
@@ -3068,6 +3069,13 @@ class ScannerExecutor:
         if total <= 1:
             ASH_LOGGER.debug("Single scanner detected, executing directly")
             return self.run_sequential(aggregated_results)
+
+        # Every tool is started on a pool worker, where the hold around its start
+        # cannot set a disposition, so an ignored SIGINT is set again here, before
+        # the pool starts (subprocess_utils.keep_an_ignored_sigint_ignored). Off
+        # the main thread, as on a workspace's project worker, this does nothing:
+        # the project pool sets it before its workers start.
+        keep_an_ignored_sigint_ignored()
 
         scanner_tasks_map: Dict[str, Any] = {}
         all_scanner_names = [t[0] for t in self.scanner_tasks]

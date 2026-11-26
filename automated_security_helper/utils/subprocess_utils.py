@@ -1576,7 +1576,10 @@ class HeldInterrupt:
 
     Only the main thread can set a signal handler, so elsewhere nothing is held or
     set. The disposition belongs to the process, so a child started off the main
-    thread keeps what the main thread last set. The signal mask is not touched: a
+    thread gets what was set last. In a process that ignores SIGINT, once polars
+    has loaded, that is polars' handler until the main thread sets SIG_IGN again,
+    which a pool whose workers start children has it do before the pool starts
+    (:func:`keep_an_ignored_sigint_ignored`). The signal mask is not touched: a
     child inherits the mask, but not a handler, which exec resets.
     """
 
@@ -1660,6 +1663,40 @@ class HeldInterrupt:
             self._hand_over()
         except KeyboardInterrupt as interrupt:
             raise interrupt from exc
+
+
+def keep_an_ignored_sigint_ignored() -> None:
+    """Set an ignored SIGINT again, on the main thread, before a pool's workers
+    start children.
+
+    Importing polars puts a SIGINT handler in place from native code while
+    ``signal.getsignal`` still reads SIG_IGN, and exec resets a caught signal to
+    its default, so in a process started with SIGINT ignored (a script's
+    ``ash scan &``) a child started after the import began with SIGINT at its
+    default. HeldInterrupt, entered around each start, sets SIG_IGN again, but
+    only the main thread can set a disposition, and the scanner pool's workers
+    start every tool of a scan with two or more scanners, the workspace's project
+    workers every tool of a workspace scan. Called on the main thread before such
+    a pool starts, this sets SIG_IGN again, and the disposition, which belongs to
+    the process, holds for every child the workers start. polars is imported
+    first: its import puts the handler in place once (measured with polars
+    1.44.2: a query afterwards leaves SIG_IGN as it is), so a first import in a
+    worker, after this, would put it back for every child started after it.
+
+    A no-op off the main thread, where no disposition can be set, and where Python
+    does not record SIGINT as ignored: a Python handler is held at each start
+    instead, and a SIGINT at its default stays at its default. So polars is
+    imported here only in a process that ignores SIGINT. A handler another native
+    library installs from a worker after this call is not undone.
+    """
+    if threading.current_thread() is not threading.main_thread():
+        return
+    if signal.getsignal(signal.SIGINT) != signal.SIG_IGN:
+        return
+    with contextlib.suppress(ImportError):
+        import polars as pl  # noqa: F401 - imported for the handler its import installs
+
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
 
 
 def discard_tool_pid_once_exited(process: subprocess.Popen) -> bool:
