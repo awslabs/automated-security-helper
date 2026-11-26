@@ -1,16 +1,18 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""credsweeper, the alpha secret scanner's uv tool, is a pinned tool.
+"""credsweeper's pin stays scanner-side; the image deliberately does not carry it.
 
-A Python tool follows the bandit/checkov/guarddog shape rather than the binary
-one: no release-asset table, a ``ThirdPartyLicense`` entry whose
-``distribution`` is the PyPI name, license files read from the installed
-wheel's dist-info, and image wiring through ``--uv-tool-pins`` (which pins
-``scanners.credsweeper.options.tool_version`` to the entry's version) plus the
-``--licenses-only`` line. The entry's version is the release the register's
-license read was made on (the LICENSE in the 1.19.7 wheel), so the files and
-commit describe the release the image installs.
+The intended shape was the bandit/checkov/guarddog one (a ``ThirdPartyLicense``
+entry with ``distribution``, the module in the image's alpha list, a wheel
+license on the ``--licenses-only`` line), and the first image build refused it:
+credsweeper 1.19.7 depends on ``pyjks``, whose ``twofish==0.3.0`` dependency is
+an sdist-only C extension, and the image carries no compiler (measured in the
+docs-CI image build: ``error: [Errno 2] No such file or directory: 'gcc'``).
+A license entry is a claim the image bundles the tool, so until the toolchain
+decision is made (the same class as secretlint's Node and dependency-check's
+Java), credsweeper has no entry and no image wiring, and these tests pin that
+state so a later edit flips it deliberately rather than by drift.
 """
 
 from __future__ import annotations
@@ -28,43 +30,32 @@ from automated_security_helper.utils.tool_downloads import THIRD_PARTY_LICENSES
 pytestmark = pytest.mark.unit
 
 
-def test_the_license_entry_is_the_uv_tool_shape():
-    entry = THIRD_PARTY_LICENSES["credsweeper"]
-    assert entry.version == "1.19.7"
-    assert entry.license == "MIT"
-    assert entry.repository == "https://github.com/Samsung/CredSweeper"
-    assert len(entry.commit) == 40
-    assert entry.distribution == "credsweeper"
-    assert [f.name for f in entry.files] == ["LICENSE"]
-
-
-def test_the_entry_version_is_the_registers_read_and_satisfies_the_constraint():
-    entry = THIRD_PARTY_LICENSES["credsweeper"]
+def test_the_register_carries_the_license_read():
     citation = CredSweeperScanner.operational_facets.provenance.upstream_license
-    assert entry.version in citation, (
-        "the register's license read and the license entry name different "
-        "releases; re-read the license at the entry's version"
-    )
-    # The scanner's own default is a range; the image pins inside it.
+    assert citation.startswith("MIT (source: the LICENSE file in the credsweeper ")
+    assert "1.19.7" in citation
+
+
+def test_the_scanner_constraint_brackets_the_read_release():
     low, high = "1.19.6", "2.0.0"
     assert CREDSWEEPER_DEFAULT_VERSION_CONSTRAINT == f">={low},<{high}"
-    parts = tuple(int(p) for p in entry.version.split("."))
+    read = tuple(int(p) for p in "1.19.7".split("."))
     assert (
         tuple(int(p) for p in low.split("."))
-        <= parts
+        <= read
         < tuple(int(p) for p in high.split("."))
     )
 
 
-def test_the_image_installs_and_attributes_the_pinned_credsweeper():
+def test_the_image_does_not_claim_to_bundle_credsweeper():
+    """No license entry and no image wiring until the compiler decision is made."""
+    assert "credsweeper" not in THIRD_PARTY_LICENSES
     dockerfile = (Path(__file__).resolve().parents[3] / "Dockerfile").read_text()
-    # Installed by `ash dependencies install` through uv with the --uv-tool-pins
-    # override, which needs the plugin module loaded for that install.
-    assert "ash_credsweeper_plugins" in dockerfile
-    # Its license files come from the installed wheel's dist-info.
-    assert "credsweeper" in _licenses_only_line(dockerfile)
-    # A failed install fails the build, not the first scan that enables it.
-    assert "RUN credsweeper --version" in dockerfile
+    assert "ash_credsweeper_plugins" not in dockerfile
+    assert "credsweeper" not in _licenses_only_line(dockerfile)
+    assert "RUN credsweeper --version" not in dockerfile
+    # The measured reason is recorded where the next editor will look.
+    assert "twofish" in dockerfile
 
 
 def _licenses_only_line(dockerfile: str) -> str:

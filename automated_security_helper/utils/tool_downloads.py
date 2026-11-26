@@ -1114,7 +1114,6 @@ _THIRD_PARTY_HASHES: dict[str, str] = {
     "cfn-guard/LICENSE": "28878a48de57252ed2c9119db71b2fc9766833a0c159d9f5df54cba4dea52dba",  # pragma: allowlist secret
     "cfn-guard/NOTICE": "ba249a48f79f76c72cffea8689eb7a5ce450a4a67ad6b1e44e8ff15a95b2b751",  # pragma: allowlist secret
     "crane commit": "8a72a424fdecb4caa14f2d525e5d2503331442b5",  # pragma: allowlist secret
-    "credsweeper commit": "f5887c0390dcd0b74aae9c7552ac51df3fc7b3fc",  # pragma: allowlist secret
     "ggshield commit": "4cccd600fd3890a7aba07fd0a45e483f3099fe70",  # pragma: allowlist secret
     "gitleaks commit": "83d9cd684c87d95d656c1458ef04895a7f1cbd8e",  # pragma: allowlist secret
     "gosec commit": "5eb1d104ef85ff2c905c877eb600e8c1dee33a22",  # pragma: allowlist secret
@@ -1322,18 +1321,13 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
         commit=_THIRD_PARTY_HASHES["crane commit"],
         files=(LicenseFile("LICENSE"),),
     ),
-    # The alpha CredSweeper scanner's uv tool. The wheel's dist-info carries
-    # licenses/LICENSE (MIT, "Copyright (c) 2021 SAMSUNG"), the file the scanner's
-    # register cites; the repository publishes no NOTICE.
-    "credsweeper": ThirdPartyLicense(
-        tool="credsweeper",
-        version="1.19.7",
-        license="MIT",
-        repository="https://github.com/Samsung/CredSweeper",
-        commit=_THIRD_PARTY_HASHES["credsweeper commit"],
-        files=(LicenseFile("LICENSE"),),
-        distribution="credsweeper",
-    ),
+    # CredSweeper (alpha scanner) has NO entry: the table is what the image must
+    # carry, and the image cannot install credsweeper 1.19.7 -- it depends on pyjks,
+    # whose twofish 0.3.0 dependency is an sdist-only C extension, and the image
+    # carries no compiler (measured: `error: [Errno 2] No such file or directory:
+    # 'gcc'`). The scanner installs on user machines with a toolchain; its register
+    # carries the license read (MIT, the 1.19.7 wheel's licenses/LICENSE).
+    #
     # The alpha ggshield scanner's uv tool. The wheel's dist-info carries
     # licenses/LICENSE (MIT), the file whose sha256 the scanner's register cites.
     "ggshield": ThirdPartyLicense(
