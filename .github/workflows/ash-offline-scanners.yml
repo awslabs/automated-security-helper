@@ -12,8 +12,9 @@ name: ASH - Offline-capable scanners (non-blocking)
 # The register (automated_security_helper/base/scanner_operational_facets.py) says
 # these scanners do not need the network. A declaration nothing exercises is a
 # claim, so this job is the exercise. It fails when a required scanner does not run
-# unsandboxed (it is missing, errors or is skipped), and when any scanner's status
-# or findings differ between the sandboxed and the unsandboxed run. It does not see
+# unsandboxed (it is missing, errors or is skipped), when mcp-config reports no
+# finding from the fixture's MCP config file, and when any scanner's status or
+# findings differ between the sandboxed and the unsandboxed run. It does not see
 # every network attempt: a scanner that tries the network, has the attempt refused,
 # swallows the error and still reports the same findings passes.
 #
@@ -139,7 +140,6 @@ jobs:
               "betterleaks": "an alpha plugin; this job loads no alpha plugin modules",
               "ferret-scan": "an alpha plugin; this job loads no alpha plugin modules",
               "hadolint": "an alpha plugin; this job loads no alpha plugin modules",
-              "mcp-config": "the parity fixture holds no MCP config file for it to read",
               "syft": "left to the real-scanner offline tests in ash-unified-ci.yml",
           }
 
@@ -181,7 +181,10 @@ jobs:
           PY
       # Offline pair only. --require makes a required scanner that is absent,
       # MISSING, ERROR or SKIPPED unsandboxed a failure, so "completed" means it ran,
-      # not that it was absent. The proxy variables reach only the unsandboxed run's
+      # not that it was absent. mcp-config reads only MCP config files and is PASSED
+      # on a tree that has none, so "ran" says nothing about it: the parity fixture
+      # carries a .mcp.json, and --require-findings fails the job unless mcp-config
+      # reports findings from it. The proxy variables reach only the unsandboxed run's
       # scanners; see the header. GitHub reads `env:` keys without regard to case, so
       # the lowercase proxy variables cannot sit beside the uppercase ones there (the
       # workflow file is refused as defining each twice); the script exports them.
@@ -203,6 +206,7 @@ jobs:
           python scripts/verify_sandbox_scanner_parity.py \
             --sandbox bwrap --ash ash \
             --require "$REQUIRED_SCANNERS" \
+            --require-findings mcp-config \
             --report "$PARITY_REPORT"
       - name: Collect the report and scan output
         if: failure()
