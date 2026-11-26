@@ -101,7 +101,7 @@ class NoCommandLineDumper(_DumperBase):
             _COMMAND_START.search(value) or NAMED_HASH_COMMAND.search(value)
         ):
             style = '"'
-        return super().represent_scalar(tag, value, style)  # type: ignore[misc]
+        return super().represent_scalar(tag, value, style)
 
     def write_double_quoted(self, text: str, split: bool = True) -> None:
         if NAMED_HASH_COMMAND.search(text):
@@ -109,7 +109,7 @@ class NoCommandLineDumper(_DumperBase):
             return
         if any(prefix in text for prefix in _COMMAND_PREFIXES):
             split = False
-        super().write_double_quoted(text, split)  # type: ignore[misc]
+        super().write_double_quoted(text, split)
 
     def _write_double_quoted_with_hashes_escaped(self, text: str) -> None:
         """*text* as one double-quoted scalar on one line, each character the
@@ -137,13 +137,14 @@ class NoCommandLineDumper(_DumperBase):
                     pieces.append("\\u%04X" % code)
                 else:
                     pieces.append("\\U%08X" % code)
-        self.write_indicator('"', True)  # type: ignore[attr-defined]
+        self.write_indicator('"', True)
         data = "".join(pieces)
-        self.column += len(data)  # type: ignore[attr-defined]
-        if self.encoding:  # type: ignore[attr-defined]
-            data = data.encode(self.encoding)  # type: ignore[attr-defined, assignment]
-        self.stream.write(data)  # type: ignore[attr-defined]
-        self.write_indicator('"', False)  # type: ignore[attr-defined]
+        self.column += len(data)
+        if self.encoding:
+            self.stream.write(data.encode(self.encoding))
+        else:
+            self.stream.write(data)
+        self.write_indicator('"', False)
 
     def _written_as_itself(self, character: str) -> bool:
         """Whether the emitter writes *character* inside double quotes as it is:
@@ -153,7 +154,7 @@ class NoCommandLineDumper(_DumperBase):
             return False
         if "\x20" <= character <= "\x7e":
             return True
-        return bool(self.allow_unicode) and (  # type: ignore[attr-defined]
+        return bool(self.allow_unicode) and (
             _FIRST_PRINTABLE <= character <= _LAST_BEFORE_SURROGATES
             or _FIRST_AFTER_SURROGATES <= character <= _LAST_PRINTABLE
         )
