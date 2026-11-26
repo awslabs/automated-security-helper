@@ -1854,6 +1854,7 @@
               }
             },
             "severity_threshold": "MEDIUM",
+            "suppression_invalidation_scope": "file",
             "suppressions": []
           },
           "description": "Global default settings for ASH shared across scanners. If the same setting exists at the scanner level and is set in both places, the scanner level settings take precedence."
@@ -2580,6 +2581,10 @@
           "default": "MEDIUM",
           "description": "Global minimum severity level to consider findings as failures across all scanners",
           "title": "Severity Threshold"
+        },
+        "suppression_invalidation_scope": {
+          "description": "The invalidation scope `ash suppress add` records in .ash.lock for a new symbol suppression when --invalidation-scope is not given. 'file': a change to the code of the suppression's file makes it stop applying until it is reviewed again. 'symbol': only a change to the code of the suppressed definition does (its lines, every definition bearing its name, the headers of the definitions it sits in, the file's prelude). Applies to new .ash.lock scopes only: a scan and `ash suppress verify` read the kind recorded in the lock, so editing this never changes a reviewed binding.",
+          "type": "string"
         },
         "suppressions": {
           "default": [],

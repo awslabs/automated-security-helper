@@ -4,6 +4,7 @@ global_settings:
   severity_threshold: MEDIUM
   ignore_paths: []
   suppressions: []
+  suppression_invalidation_scope: file
   exclusions: []
   mcp:
     runtime_overrides:

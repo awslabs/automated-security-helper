@@ -1,18 +1,18 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""``.ash.lock``: the content hash a symbol-scoped suppression is bound to.
+"""``.ash.lock``: the syntax-tree digests a symbol-scoped suppression is bound to.
 
 A symbol suppression keeps covering a definition wherever edits move it, which
 is its strength and its risk: the definition can be rewritten and the old
 review still applies. The lock closes that. For every file a symbol suppression
-names, the lock records the SHA-256 of the file's bytes at the time somebody
-reviewed the suppression. While the file still hashes to that value the
-suppression applies. When the file changes, every symbol suppression bound to
-it stops applying (its findings return) and the scan names the file, the
-suppressions, and the command that records the new review.
+names, the lock records digests of the file's tree-sitter parse at the time
+somebody reviewed the suppression (``utils/ast_digest.py``). While the code is
+unchanged the suppression applies. When it changes, the suppression stops
+applying (its findings return) and the scan names the file, the suppression
+and the command that records the new review.
 
-The file is committed, so a change to a hash shows up in a code review beside
+The file is committed, so a change to a digest shows up in a code review beside
 the change to the file it covers.
 
 Format
@@ -23,26 +23,65 @@ One JSON document with a fixed key order and two-space indentation::
     {
       "files": {
         "src/app.py": {
-          "created": "2026-11-25T18:00:00Z",
-          "scopes": [{"rule_id": "B602", "symbol": "Handler.run"}],
-          "sha256": "9f86d081..."
+          "created": "2026-11-26T19:00:00Z",
+          "digests": {
+            "algorithm": "ash-ast-1",
+            "file": "<64 hex>",
+            "symbols": {"Handler.run": "<64 hex>"}
+          },
+          "grammar": {
+            "distribution": "tree-sitter-python 0.25.0",
+            "fingerprint": "<64 hex>",
+            "language": "python",
+            "tree_sitter": "0.26.0"
+          },
+          "scopes": [
+            {"invalidation_scope": "file", "rule_id": "B603", "symbol": "other"},
+            {"invalidation_scope": "symbol", "rule_id": "B602", "symbol": "Handler.run"}
+          ],
+          "source_sha256": "<64 hex>"
         }
       },
-      "version": 1
+      "version": 2
     }
 
 Keys are sorted, entries are sorted by path, and scopes by rule id then symbol,
-so the same tree always produces the same bytes. The whole file is hashed, not
-the symbol's span: a span hash would change on every reformat of the definition
-and say nothing the whole-file hash does not say more simply.
+so the same tree always produces the same bytes.
 
-Files are read as bytes, with no newline normalization, so a checkout that
-rewrites line endings changes the hash and the suppressions go inert until the
-lock is refreshed on that checkout.
+What each value covers
+----------------------
 
-The commands that write the lock are ``ash suppress add`` and
-``ash suppress refresh`` (``cli/suppress.py``); the lock is meant to be written
-by them and read by people.
+``source_sha256`` is the SHA-256 of the file's bytes with CRLF and lone CR
+rewritten to LF (a leading byte order mark kept). While it matches, every scope
+of the entry is current with no parse at all, so a checkout that converts line
+endings stays current. When the bytes changed, the scope's own digest decides:
+
+- ``invalidation_scope: file``: the digest of the whole file's tree. Spaces,
+  tabs and line breaks between tokens do not count; every token does, comments
+  included, and so do the exact text of string literals and, in JavaScript and
+  TypeScript, whether a line break precedes a token.
+- ``invalidation_scope: symbol``: the digest of the suppressed definition alone:
+  every token on its lines, every definition bearing its name, the headers of
+  the definitions it sits in, and the file's prelude (byte order mark, encoding
+  declaration, ``#!`` line, ``from __future__`` imports, leading comments and
+  directives). An edit elsewhere in the file keeps the suppression.
+
+``digests.algorithm`` names the canonical form and ``grammar`` the grammar the
+digests were computed under; a changed file whose grammar tables are not the
+recorded ones cannot be compared and reads stale until it is refreshed.
+
+Version 1
+---------
+
+A version 1 entry (``created``, ``scopes`` and a ``sha256`` of the raw bytes) is
+still read with version 1 meaning: any byte change, line endings included,
+makes it stale. ``ash suppress migrate`` converts every entry whose bytes still
+match; ``add`` converts the entry it touches and ``refresh`` the files it
+names. Nothing converts an entry whose file changed without a review.
+
+The commands that write the lock are ``ash suppress add``, ``refresh`` and
+``migrate`` (``cli/suppress.py``); the lock is meant to be written by them and
+read by people.
 """
 
 from __future__ import annotations
@@ -50,13 +89,17 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shlex
-from dataclasses import dataclass, field
+import stat as stat_module
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
+from automated_security_helper.core.enums import InvalidationScope
 from automated_security_helper.core.exceptions import ASHConfigValidationError
+from automated_security_helper.utils.ast_digest import ALGORITHM, DigestUnavailable
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
 
 #: The lock's place, relative to the scan root: a dotfile at the repository root,
@@ -72,14 +115,36 @@ LEGACY_LOCK_RELATIVE_PATH = ".ash/ash.lock"
 #: the lock for each file it checks says it once.
 _LEGACY_WARNED: set[str] = set()
 
-#: The lock format version this module reads and writes.
-LOCK_VERSION = 1
+#: The lock format version this module writes.
+LOCK_VERSION = 2
+
+#: The versions this module reads: version 1 entries keep version 1 meaning.
+READABLE_LOCK_VERSIONS = (1, 2)
 
 #: The command that records a new review of locked files.
 REFRESH_COMMAND = "ash suppress refresh"
 
+#: The command that converts version 1 entries whose bytes still match.
+MIGRATE_COMMAND = "ash suppress migrate"
+
 #: A file larger than this is refused rather than read whole into memory.
 MAX_LOCKED_FILE_BYTES = 64 * 1024 * 1024
+
+#: What a version 1 entry's staleness means, for messages.
+VERSION_1_REASON = "a version 1 entry, so any byte change counts"
+
+_HEX64 = re.compile(r"[0-9a-f]{64}")
+_KINDS = {kind.value for kind in InvalidationScope}
+
+_DOCUMENT_KEYS = {"files", "version"}
+_LEGACY_ENTRY_KEYS = {"created", "scopes", "sha256"}
+_TREE_ENTRY_KEYS = {"created", "digests", "grammar", "scopes", "source_sha256"}
+_DIGEST_KEYS = {"algorithm", "file", "symbols"}
+_GRAMMAR_KEYS = {"distribution", "fingerprint", "language", "tree_sitter"}
+_LEGACY_SCOPE_KEYS = {"rule_id", "symbol"}
+_TREE_SCOPE_KEYS = {"invalidation_scope", "rule_id", "symbol"}
+#: Fields only a version 2 entry has: a version 1 document holding one is refused.
+_VERSION_2_ENTRY_FIELDS = ("source_sha256", "digests", "grammar")
 
 
 class AshLockError(ValueError):
@@ -88,33 +153,171 @@ class AshLockError(ValueError):
 
 @dataclass(frozen=True, order=True)
 class LockScope:
-    """One suppression bound to a locked file: its rule id and symbol."""
+    """One suppression bound to a locked file: its rule id and symbol, and the
+    invalidation scope that decides when it stops applying.
+
+    A version 1 scope carries no invalidation scope (None). The kind is not
+    compared: two scopes of one entry never differ by it alone, and leaving it
+    out keeps the order of scopes rule id then symbol in both versions.
+    """
 
     rule_id: str
     symbol: str
+    invalidation_scope: Optional[str] = field(default=None, compare=False)
 
     def describe(self) -> str:
         rule = self.rule_id or "(any rule)"
         return f"{rule} in {self.symbol}"
 
+    def describe_with_kind(self) -> str:
+        if self.invalidation_scope is None:
+            return self.describe()
+        return f"{self.describe()} ({self.invalidation_scope} scope)"
 
-@dataclass
-class LockEntry:
-    """One locked file: the hash of its bytes, when it was first locked, and the
-    suppression scopes bound to it."""
 
-    sha256: str
-    created: str
-    scopes: List[LockScope] = field(default_factory=list)
+@dataclass(frozen=True)
+class LockGrammar:
+    """The grammar a tree entry's digests were computed under."""
+
+    language: str
+    fingerprint: str
+    distribution: str
+    tree_sitter: str
 
     def to_json(self) -> Dict[str, Any]:
         return {
-            "created": self.created,
-            "scopes": [
-                {"rule_id": s.rule_id, "symbol": s.symbol} for s in sorted(self.scopes)
-            ],
-            "sha256": self.sha256,
+            "distribution": self.distribution,
+            "fingerprint": self.fingerprint,
+            "language": self.language,
+            "tree_sitter": self.tree_sitter,
         }
+
+
+@dataclass
+class LockEntry:
+    """One locked file: when it was first locked, the suppression scopes bound
+    to it and what they are bound to.
+
+    A version 1 entry has ``sha256``, the hash of the raw bytes. A tree entry
+    has ``source_sha256`` (the anchor), the digests and the grammar.
+    """
+
+    created: str
+    scopes: List[LockScope] = field(default_factory=list)
+    sha256: Optional[str] = None
+    source_sha256: Optional[str] = None
+    algorithm: Optional[str] = None
+    file_digest: Optional[str] = None
+    symbol_digests: Dict[str, str] = field(default_factory=dict)
+    grammar: Optional[LockGrammar] = None
+
+    @property
+    def is_legacy(self) -> bool:
+        """A version 1 entry: bound to the raw bytes, with version 1 meaning."""
+        return self.source_sha256 is None
+
+    @property
+    def anchor(self) -> Optional[str]:
+        """The hash that, while it matches, makes every scope current."""
+        return self.sha256 if self.is_legacy else self.source_sha256
+
+    def to_json(self) -> Dict[str, Any]:
+        if self.is_legacy:
+            # Field for field as the version 1 writer wrote it.
+            return {
+                "created": self.created,
+                "scopes": [
+                    {"rule_id": s.rule_id, "symbol": s.symbol}
+                    for s in sorted(self.scopes)
+                ],
+                "sha256": self.sha256,
+            }
+        if self.grammar is None:
+            # The reader and _snapshot never build one; refuse to write it.
+            raise ValueError("a syntax-tree lock entry has no grammar")
+        return {
+            "created": self.created,
+            "digests": {
+                "algorithm": self.algorithm,
+                "file": self.file_digest,
+                "symbols": dict(sorted(self.symbol_digests.items())),
+            },
+            "grammar": self.grammar.to_json(),
+            "scopes": [
+                {
+                    "invalidation_scope": s.invalidation_scope,
+                    "rule_id": s.rule_id,
+                    "symbol": s.symbol,
+                }
+                for s in sorted(self.scopes)
+            ],
+            "source_sha256": self.source_sha256,
+        }
+
+
+@dataclass(frozen=True)
+class ScopeState:
+    """The state of one recorded scope against one read of its file.
+
+    ``state`` is ``ok``, ``stale``, ``gone`` (a symbol scope whose symbol the
+    file no longer defines), ``missing`` (the file cannot be read) or
+    ``unverifiable`` (the file changed and cannot be digested). ``reason``
+    says why, when there is more to say than the state. ``per_symbol`` is True
+    when the state comes from the symbol's own digest rather than from the
+    file as a whole.
+    """
+
+    state: str
+    reason: str = ""
+    per_symbol: bool = False
+
+
+_OK = ScopeState("ok")
+_MISSING = ScopeState("missing")
+
+
+@dataclass(frozen=True)
+class LockProblem:
+    """One problem ``ash suppress verify`` reports: per file for a file-scope or
+    version 1 entry and for a cause the whole file shares, per symbol for a
+    symbol-scope one."""
+
+    key: str
+    state: str
+    scopes: Tuple[LockScope, ...]
+    symbol: Optional[str] = None
+    reason: str = ""
+
+
+@dataclass(frozen=True)
+class RefreshOutcome:
+    """What ``AshLock.review`` did to one entry.
+
+    ``state`` is ``refreshed`` (re-bound to changed code), ``converted`` (a
+    kind changed, the code did not), ``unchanged``, ``upgraded`` (a version 1
+    entry whose bytes still matched, rewritten as a tree entry), ``dropped``
+    (every scope was gone and was dropped, and the entry with them),
+    ``missing``, ``gone`` (a symbol scope's symbol is not defined; the entry is
+    left as it was) or ``unverifiable`` (the entry is left as it was).
+    """
+
+    key: str
+    state: str
+    old: Optional[str]
+    new: Optional[str]
+    reason: str = ""
+    gone: Tuple[str, ...] = ()
+    dropped: Tuple[LockScope, ...] = ()
+
+
+@dataclass(frozen=True)
+class MigrateOutcome:
+    """What ``AshLock.migrate`` did to one version 1 entry: ``migrated``,
+    ``stale`` (left as written), ``missing`` or ``unverifiable``."""
+
+    key: str
+    state: str
+    reason: str = ""
 
 
 def lock_key(path: str) -> Optional[str]:
@@ -142,7 +345,7 @@ def resolved_lock_key(source_dir: Path | str, path: Any) -> Optional[str]:
     already in the config, ``ash suppress verify``, and the check of a config
     (``unlocked_symbol_suppressions``). It is also the key a scan looks up: the
     scan's resolver follows links in a finding's path before it builds its key
-    (``SymbolResolver._locked_and_unchanged``). With ``link -> src``, a
+    (``SymbolResolver._scope_is_current``). With ``link -> src``, a
     suppression whose ``path`` is ``link/app.py`` is locked, found and refused
     under ``src/app.py`` by every one of them. Before this, ``add`` followed
     the link and the config check did not, so the refusal's own advice
@@ -193,26 +396,275 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def file_sha256(source_dir: Path, key: str) -> Optional[str]:
-    """SHA-256 of the bytes of ``key`` under ``source_dir``, or None.
+def normalize_line_endings(data: bytes) -> bytes:
+    """CRLF and lone CR rewritten to LF, nothing else.
+
+    Meaning-preserving in every language the lock digests: Python's tokenizer,
+    ECMAScript's line terminators and template literals, and Java's line
+    terminators and text blocks all read CR and CRLF as LF.
+    """
+    return data.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+
+
+def source_sha256(raw: bytes) -> str:
+    """The anchor of a tree entry: SHA-256 of ``raw`` with its line endings
+    normalized (``normalize_line_endings``) and a leading byte order mark kept,
+    since the mark changes how javac reads a file and pairs with a Python
+    encoding declaration."""
+    return hashlib.sha256(normalize_line_endings(raw)).hexdigest()
+
+
+def read_bounded(path: Path) -> bytes:
+    """The bytes of the regular file ``path``, at most ``MAX_LOCKED_FILE_BYTES``.
+
+    The one read every lock check and every analysis makes: the file is
+    opened once, checked as a regular file on the open descriptor, and read
+    with a bound, so a file that grows during the read is refused rather than
+    read past the bound. Raises OSError, or ValueError naming why the file is
+    refused.
+    """
+    with open(path, "rb") as handle:
+        info = os.fstat(handle.fileno())
+        if not stat_module.S_ISREG(info.st_mode):
+            raise ValueError("not a regular file")
+        data = handle.read(MAX_LOCKED_FILE_BYTES + 1)
+    if len(data) > MAX_LOCKED_FILE_BYTES:
+        raise ValueError(f"larger than {MAX_LOCKED_FILE_BYTES // (1024 * 1024)} MiB")
+    return data
+
+
+def locked_file_bytes(source_dir: Path | str, key: str) -> Optional[bytes]:
+    """The bytes of ``key`` under ``source_dir``, or None.
 
     None when the file is missing, is not a regular file, lies outside the
     source directory once links are followed, is larger than
     ``MAX_LOCKED_FILE_BYTES`` or cannot be read. Callers treat None as "this
-    file has no hash", so a suppression bound to it stays inert.
+    file cannot be checked", so a suppression bound to it stays inert.
     """
     try:
         root = Path(source_dir).resolve()
         target = (root / key).resolve()
         if not target.is_relative_to(root):
             return None
-        info = target.stat()
-        if not target.is_file() or info.st_size > MAX_LOCKED_FILE_BYTES:
-            return None
-        # Whole file, at most MAX_LOCKED_FILE_BYTES (checked above).
-        return hashlib.sha256(target.read_bytes()).hexdigest()
+        return read_bounded(target)
     except (OSError, RuntimeError, ValueError):
         return None
+
+
+def file_sha256(source_dir: Path, key: str) -> Optional[str]:
+    """SHA-256 of the bytes of ``key`` under ``source_dir``, or None
+    (``locked_file_bytes``): what a version 1 entry records."""
+    data = locked_file_bytes(source_dir, key)
+    return None if data is None else hashlib.sha256(data).hexdigest()
+
+
+class LockedFile:
+    """One read of one locked file, and what a check needs from it.
+
+    Every check of a file (one ``bind``, one ``refresh`` of it, one resolver's
+    view of it) reads it once through this, so the lock state and the spans a
+    finding is checked against come from the same bytes. The analysis
+    (``symbol_spans.analyze``) is made on first use.
+    """
+
+    __slots__ = ("key", "raw", "_raw_sha256", "_anchor", "_analysis")
+
+    def __init__(self, key: str, raw: Optional[bytes]) -> None:
+        self.key = key
+        self.raw = raw
+        self._raw_sha256: Optional[str] = None
+        self._anchor: Optional[str] = None
+        self._analysis: Any = None
+
+    @classmethod
+    def read(cls, source_dir: Path | str, key: str) -> "LockedFile":
+        return cls(key, locked_file_bytes(source_dir, key))
+
+    @property
+    def raw_sha256(self) -> Optional[str]:
+        if self.raw is None:
+            return None
+        if self._raw_sha256 is None:
+            self._raw_sha256 = hashlib.sha256(self.raw).hexdigest()
+        return self._raw_sha256
+
+    @property
+    def anchor(self) -> Optional[str]:
+        if self.raw is None:
+            return None
+        if self._anchor is None:
+            self._anchor = source_sha256(self.raw)
+        return self._anchor
+
+    def analysis(self) -> Any:
+        if self._analysis is None:
+            # Imported here: symbol_spans imports this module at module level.
+            from automated_security_helper.utils.symbol_spans import analyze
+
+            if self.raw is None:
+                # Callers read the state of an unread file as missing first;
+                # one that does not is told the file cannot be digested.
+                raise DigestUnavailable("the file cannot be read")
+            self._analysis = analyze(self.raw, self.key)
+        return self._analysis
+
+
+def _kind_value(kind: Any) -> Optional[str]:
+    if kind is None:
+        return None
+    value = kind.value if isinstance(kind, InvalidationScope) else str(kind)
+    if value not in _KINDS:
+        raise AshLockError(
+            f"invalidation scope {value!r} is not one of {', '.join(sorted(_KINDS))}"
+        )
+    return value
+
+
+def _converted_scopes(scopes: Iterable[LockScope]) -> List[LockScope]:
+    """A version 1 entry's scopes as tree-entry scopes: each ``file``, and
+    case-variant duplicates collapsed to one."""
+    seen: set = set()
+    converted: List[LockScope] = []
+    for scope in sorted(scopes):
+        identity = (scope.rule_id.casefold(), scope.symbol)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        converted.append(
+            LockScope(scope.rule_id, scope.symbol, InvalidationScope.FILE.value)
+        )
+    return converted
+
+
+def recorded_scope(
+    entry: LockEntry, rule_id: Optional[str], symbol: str
+) -> Optional[LockScope]:
+    """The scope of ``entry`` for ``(rule_id, symbol)``, or None.
+
+    The rule id is compared case-insensitively, as suppression rule ids match
+    everywhere else; the symbol is exact, as symbol resolution is.
+    """
+    wanted = (rule_id or "").casefold()
+    for scope in entry.scopes:
+        if scope.rule_id.casefold() == wanted and scope.symbol == symbol:
+            return scope
+    return None
+
+
+def _digest_failure(exc: BaseException) -> str:
+    return f"the digest could not be computed ({type(exc).__name__}: {exc})"
+
+
+def _grammar_changed(grammar: LockGrammar, identity: Any) -> str:
+    recorded = f"{grammar.language} {grammar.distribution}"
+    running = f"{identity.language} {identity.distribution}"
+    if recorded == running:
+        running += " with other grammar tables"
+    return (
+        f"the file changed and its grammar changed (recorded {recorded}, running "
+        f"{running}), so the change cannot be compared"
+    )
+
+
+def _file_level(entry: LockEntry, locked: LockedFile) -> Optional[ScopeState]:
+    """The state every scope of ``entry`` shares, or None when each scope's
+    own digest decides (the file changed and can be digested)."""
+    if locked.raw is None:
+        return _MISSING
+    if entry.is_legacy:
+        if locked.raw_sha256 == entry.sha256:
+            return _OK
+        return ScopeState("stale", VERSION_1_REASON)
+    if locked.anchor == entry.source_sha256:
+        return _OK
+    if entry.algorithm != ALGORITHM:
+        return ScopeState(
+            "unverifiable",
+            f"its entry was written with digest {entry.algorithm}, which this ASH "
+            "does not compute",
+        )
+    try:
+        analysis = locked.analysis()
+        analysis.require_digestible()
+        identity = analysis.identity()
+    except DigestUnavailable as exc:
+        return ScopeState("unverifiable", str(exc))
+    except Exception as exc:  # noqa: BLE001 - a binding error fails closed
+        return ScopeState("unverifiable", _digest_failure(exc))
+    grammar = entry.grammar
+    if grammar is None:
+        # The reader refuses a tree entry without one; fail closed regardless.
+        return ScopeState("unverifiable", "its entry records no grammar")
+    if (
+        identity.language != grammar.language
+        or identity.fingerprint != grammar.fingerprint
+    ):
+        return ScopeState("stale", _grammar_changed(grammar, identity))
+    return None
+
+
+def _digest_state(entry: LockEntry, scope: LockScope, locked: LockedFile) -> ScopeState:
+    """A scope's state from its own digest, the file being digestible."""
+    analysis = locked.analysis()
+    try:
+        if scope.invalidation_scope == InvalidationScope.SYMBOL.value:
+            digest = analysis.symbol_digest(scope.symbol)
+            if digest is None:
+                return ScopeState(
+                    "gone", f"the file no longer defines {scope.symbol}", True
+                )
+            if digest == entry.symbol_digests.get(scope.symbol):
+                return _OK
+            return ScopeState("stale", f"{scope.symbol} changed", True)
+        if analysis.file_digest() == entry.file_digest:
+            return _OK
+        return ScopeState("stale")
+    except DigestUnavailable as exc:
+        return ScopeState("unverifiable", str(exc))
+    except Exception as exc:  # noqa: BLE001 - a binding error fails closed
+        return ScopeState("unverifiable", _digest_failure(exc))
+
+
+def check_scope(entry: LockEntry, scope: LockScope, locked: LockedFile) -> ScopeState:
+    """The state of ``scope`` of ``entry`` against one read of its file.
+
+    In order: a file that cannot be read is ``missing``; a version 1 entry is
+    current while the raw bytes hash to it; a tree entry is current while the
+    bytes, line endings normalized, hash to its anchor, under any grammar; a
+    changed file that cannot be digested, or whose entry another algorithm
+    wrote, is ``unverifiable``; one whose grammar tables are not the recorded
+    ones is ``stale``; otherwise the scope's own digest (the file's or the
+    symbol's) decides, and a symbol the file no longer defines is ``gone``.
+    """
+    level = _file_level(entry, locked)
+    if level is not None:
+        return level
+    return _digest_state(entry, scope, locked)
+
+
+_SEVERITY = ("unverifiable", "stale", "gone")
+
+
+def scopes_of_problem(
+    entry: LockEntry, symbol: Optional[str], state: ScopeState
+) -> List[LockScope]:
+    """The scopes a problem covers: those of one symbol for a symbol-scope
+    problem, the file-scope ones for a file digest that changed, every scope
+    for a cause the whole file shares."""
+    if symbol is not None:
+        return [
+            s
+            for s in entry.scopes
+            if s.symbol == symbol
+            and s.invalidation_scope == InvalidationScope.SYMBOL.value
+        ]
+    if entry.is_legacy or state.state != "stale" or state.reason:
+        return list(entry.scopes)
+    return [
+        s
+        for s in entry.scopes
+        if s.invalidation_scope != InvalidationScope.SYMBOL.value
+    ]
 
 
 @dataclass
@@ -300,54 +752,300 @@ class AshLock:
             if staged.exists():
                 staged.unlink()
 
+    def read(self, key: str) -> LockedFile:
+        """One read of the locked file ``key``."""
+        return LockedFile.read(self.source_dir, key)
+
+    def _snapshot(
+        self,
+        key: str,
+        locked: LockedFile,
+        scopes: Sequence[LockScope],
+        *,
+        created: str,
+    ) -> Tuple[LockEntry, Tuple[str, ...]]:
+        """A tree entry for ``scopes`` from one read: the anchor, the file
+        digest, the grammar's identity and a digest for each symbol-scoped
+        symbol. Returns the entry and the symbol-scoped symbols the file does
+        not define (left out of the entry's digests).
+
+        Raises AshLockError naming the file and why when it cannot be digested;
+        a missing extra's reason carries the install command.
+        """
+        try:
+            analysis = locked.analysis()
+            analysis.require_digestible()
+            identity = analysis.identity()
+            file_digest = analysis.file_digest()
+            symbols: Dict[str, str] = {}
+            gone: List[str] = []
+            for scope in scopes:
+                if scope.invalidation_scope != InvalidationScope.SYMBOL.value:
+                    continue
+                if scope.symbol in symbols or scope.symbol in gone:
+                    continue
+                digest = analysis.symbol_digest(scope.symbol)
+                if digest is None:
+                    gone.append(scope.symbol)
+                else:
+                    symbols[scope.symbol] = digest
+        except DigestUnavailable as exc:
+            raise AshLockError(f"{key} cannot be locked: {exc}") from None
+        except AshLockError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - a binding error fails closed
+            raise AshLockError(
+                f"{key} cannot be locked: {_digest_failure(exc)}"
+            ) from None
+        anchor = locked.anchor
+        if anchor is None:
+            raise AshLockError(f"{key} is not a readable file inside the scan root")
+        entry = LockEntry(
+            created=created,
+            scopes=sorted(scopes),
+            source_sha256=anchor,
+            algorithm=ALGORITHM,
+            file_digest=file_digest,
+            symbol_digests=symbols,
+            grammar=LockGrammar(
+                language=identity.language,
+                fingerprint=identity.fingerprint,
+                distribution=identity.distribution,
+                tree_sitter=identity.tree_sitter,
+            ),
+        )
+        return entry, tuple(gone)
+
     def bind(
         self,
         key: str,
         scope: LockScope,
         *,
+        invalidation_scope: Any = None,
         now: Optional[str] = None,
     ) -> LockEntry:
-        """Lock ``key`` at its current hash and bind ``scope`` to it.
+        """Lock ``key`` from one read of it and bind ``scope`` to it.
 
-        A file already locked at the same hash keeps its entry and gains the
-        scope. A file locked at another hash is re-hashed: its old scopes were
-        reviewed against bytes that no longer exist, so only a deliberate
-        ``refresh`` does that, and ``bind`` refuses it (``AshLockError``).
+        The kind of a new scope is ``invalidation_scope`` (or the scope's own),
+        ``file`` when neither says. A new file gets a tree entry. A version 1
+        entry whose raw bytes still match is converted (its scopes become
+        ``file``) and gains the scope. A tree entry gains it only while every
+        scope it already records is current; then it is re-snapshotted from
+        this read, which re-approves nothing, since every digest it rewrites
+        equals the one it replaces. A file whose recorded scopes are not all
+        current is refused (``AshLockError``) naming the refresh: only a
+        deliberate review re-binds them.
 
         A scope the entry already records is not added again, a rule id that
-        differs only in case included: the entry is matched as
-        ``scope_is_recorded`` matches it, the rule id compared
-        case-insensitively. Compared exactly, ``b602`` after ``B602`` added a
-        second scope and rewrote the lock for a suppression the config
-        already held.
+        differs only in case included, and leaves the entry as it was; asking
+        for it with another kind is refused naming the conversion. A symbol
+        scope for a symbol the file does not define is refused; a file scope
+        binds it.
+
+        Writing needs a digest, so a file that cannot be digested (no grammar
+        for its extension, the ``symbols`` extra missing, a parse error) is
+        refused too.
         """
-        digest = file_sha256(self.source_dir, key)
-        if digest is None:
+        requested = _kind_value(
+            invalidation_scope
+            if invalidation_scope is not None
+            else scope.invalidation_scope
+        )
+        locked = self.read(key)
+        if locked.raw is None:
             raise AshLockError(f"{key} is not a readable file inside the scan root")
         entry = self.entries.get(key)
         if entry is None:
-            entry = LockEntry(sha256=digest, created=now or _utc_now())
-            self.entries[key] = entry
-        elif entry.sha256 != digest:
-            raise AshLockError(
-                f"{key} changed since it was locked; review its suppressions, "
-                f"then run `{REFRESH_COMMAND} {shlex.quote(key)}` before adding another"
+            kind = requested or InvalidationScope.FILE.value
+            built, gone = self._snapshot(
+                key,
+                locked,
+                [LockScope(scope.rule_id, scope.symbol, kind)],
+                created=now or _utc_now(),
             )
-        if not scope_is_recorded(entry, scope.rule_id, scope.symbol):
-            entry.scopes.append(scope)
-            entry.scopes.sort()
-        return entry
+            if gone:
+                raise AshLockError(_undefined(key, gone[0]))
+            self.entries[key] = built
+            return built
+        converted = entry.is_legacy
+        if converted:
+            if locked.raw_sha256 != entry.sha256:
+                raise AshLockError(
+                    f"{key} changed since it was locked; review its suppressions, "
+                    f"then run `{REFRESH_COMMAND} {shlex.quote(key)}` before adding "
+                    "another"
+                )
+            current = _converted_scopes(entry.scopes)
+        else:
+            for recorded in entry.scopes:
+                state = check_scope(entry, recorded, locked)
+                if state.state != "ok":
+                    why = f": {state.reason}" if state.reason else ""
+                    raise AshLockError(
+                        f"{key} changed since its suppressions were reviewed "
+                        f"({recorded.describe_with_kind()} is {state.state}{why}); "
+                        f"review them, then run `{REFRESH_COMMAND} "
+                        f"{shlex.quote(key)}` before adding another"
+                    )
+            current = list(entry.scopes)
+        recorded = _find(current, scope.rule_id, scope.symbol)
+        if recorded is not None:
+            if requested is not None and requested != recorded.invalidation_scope:
+                raise AshLockError(
+                    f"{recorded.describe()} is recorded for {key} with "
+                    f"invalidation scope {recorded.invalidation_scope}; change it "
+                    f"after review with `{REFRESH_COMMAND} --invalidation-scope "
+                    f"{requested} --symbol {shlex.quote(scope.symbol)} "
+                    f"{shlex.quote(key)}`"
+                )
+            if not converted:
+                return entry
+            additions: List[LockScope] = []
+        else:
+            additions = [
+                LockScope(
+                    scope.rule_id,
+                    scope.symbol,
+                    requested or InvalidationScope.FILE.value,
+                )
+            ]
+        built, gone = self._snapshot(
+            key, locked, current + additions, created=entry.created
+        )
+        if gone:
+            raise AshLockError(_undefined(key, gone[0]))
+        self.entries[key] = built
+        return built
+
+    def review(
+        self,
+        key: str,
+        *,
+        invalidation_scope: Any = None,
+        symbol: Optional[str] = None,
+        drop_gone: bool = False,
+    ) -> RefreshOutcome:
+        """Record a new review of one locked file: re-bind every scope of it
+        from one read, converting a version 1 entry.
+
+        ``invalidation_scope`` sets the kind of the selected scopes: every
+        scope, or those of ``symbol``. An entry whose bytes did not change and
+        whose kinds stay is ``unchanged`` and not rewritten; a version 1 entry
+        whose bytes still match is ``upgraded``. A symbol scope whose symbol the
+        file no longer defines leaves the whole entry as it was (``gone``),
+        unless ``drop_gone``, which drops that scope and the entry with its
+        last one. A file that cannot be read is ``missing`` and one that
+        changed and cannot be digested ``unverifiable``; both are left as they
+        were.
+        """
+        entry = self.entries[key]
+        kind = _kind_value(invalidation_scope)
+        old = entry.anchor
+        scopes = (
+            _converted_scopes(entry.scopes) if entry.is_legacy else list(entry.scopes)
+        )
+        if symbol is not None and not any(s.symbol == symbol for s in scopes):
+            raise AshLockError(f"{key} records no suppression scoped to {symbol}")
+        kind_changed = False
+        if kind is not None:
+            updated = []
+            for scope in scopes:
+                if symbol is None or scope.symbol == symbol:
+                    if scope.invalidation_scope != kind:
+                        kind_changed = True
+                    scope = replace(scope, invalidation_scope=kind)
+                updated.append(scope)
+            scopes = updated
+        locked = self.read(key)
+        if locked.raw is None:
+            return RefreshOutcome(key, "missing", old, None)
+        unchanged_bytes = (
+            locked.raw_sha256 == entry.sha256
+            if entry.is_legacy
+            else locked.anchor == entry.source_sha256
+        )
+        if entry.is_legacy and unchanged_bytes and kind is not None:
+            # The legacy kinds were never chosen, so naming one converts.
+            kind_changed = True
+        if unchanged_bytes and not kind_changed:
+            if not entry.is_legacy:
+                return RefreshOutcome(key, "unchanged", old, old)
+            try:
+                built, gone = self._snapshot(key, locked, scopes, created=entry.created)
+            except AshLockError:
+                # No digest without the extra: the bytes are the reviewed ones,
+                # so the entry is current as it is.
+                return RefreshOutcome(key, "unchanged", old, old)
+            self.entries[key] = built
+            return RefreshOutcome(key, "upgraded", old, built.source_sha256)
+        try:
+            built, gone = self._snapshot(key, locked, scopes, created=entry.created)
+        except AshLockError as exc:
+            return RefreshOutcome(key, "unverifiable", old, None, reason=str(exc))
+        dropped: Tuple[LockScope, ...] = ()
+        if gone:
+            if not drop_gone:
+                return RefreshOutcome(key, "gone", old, None, gone=gone)
+            dropped = tuple(
+                s
+                for s in scopes
+                if s.invalidation_scope == InvalidationScope.SYMBOL.value
+                and s.symbol in gone
+            )
+            kept = [s for s in scopes if s not in dropped]
+            if not kept:
+                del self.entries[key]
+                return RefreshOutcome(
+                    key, "dropped", old, None, gone=gone, dropped=dropped
+                )
+            built, _ = self._snapshot(key, locked, kept, created=entry.created)
+        self.entries[key] = built
+        state = "converted" if unchanged_bytes else "refreshed"
+        return RefreshOutcome(
+            key, state, old, built.source_sha256, gone=gone, dropped=dropped
+        )
 
     def refresh(self, key: str) -> Tuple[Optional[str], Optional[str]]:
-        """Re-hash one locked file. Returns ``(old, new)``; ``new`` is None when
-        the file can no longer be hashed (the entry is left as it was)."""
-        entry = self.entries[key]
-        new = file_sha256(self.source_dir, key)
-        if new is None:
-            return entry.sha256, None
-        old = entry.sha256
-        entry.sha256 = new
-        return old, new
+        """Re-bind one locked file (``review``). Returns ``(old, new)``, the
+        anchors before and after; ``new`` is None when the file was left as it
+        was (missing, a gone symbol, or a change that cannot be digested)."""
+        outcome = self.review(key)
+        if outcome.state in ("refreshed", "converted", "unchanged", "upgraded"):
+            return outcome.old, outcome.new
+        return outcome.old, None
+
+    def migrate(self) -> List[MigrateOutcome]:
+        """Convert every version 1 entry whose raw bytes still match.
+
+        A converted entry approves nothing: the bytes present are the bytes
+        reviewed. A stale entry is left as written (its change needs a review,
+        ``refresh``), and so are one whose file cannot be read and one that
+        cannot be digested. Never re-hashes a changed file.
+        """
+        outcomes: List[MigrateOutcome] = []
+        converted: Dict[str, LockEntry] = {}
+        for key in sorted(self.entries):
+            entry = self.entries[key]
+            if not entry.is_legacy:
+                continue
+            locked = self.read(key)
+            if locked.raw is None:
+                outcomes.append(MigrateOutcome(key, "missing"))
+                continue
+            if locked.raw_sha256 != entry.sha256:
+                outcomes.append(MigrateOutcome(key, "stale", VERSION_1_REASON))
+                continue
+            try:
+                built, _ = self._snapshot(
+                    key, locked, _converted_scopes(entry.scopes), created=entry.created
+                )
+            except AshLockError as exc:
+                outcomes.append(MigrateOutcome(key, "unverifiable", str(exc)))
+                continue
+            converted[key] = built
+            outcomes.append(MigrateOutcome(key, "migrated"))
+        self.entries.update(converted)
+        return outcomes
 
     def drop(self, key: str) -> None:
         """Remove one entry: the way out for a locked file that is gone.
@@ -358,31 +1056,274 @@ class AshLock:
         """
         del self.entries[key]
 
+    def scope_state(
+        self, key: str, scope: LockScope, locked: Optional[LockedFile] = None
+    ) -> ScopeState:
+        """The state of one recorded scope (``check_scope``), from ``locked``
+        or a fresh read."""
+        return check_scope(
+            self.entries[key], scope, locked if locked is not None else self.read(key)
+        )
+
     def status(self, key: str) -> str:
-        """``"ok"``, ``"stale"`` (hash differs), ``"missing"`` (file gone or
-        unreadable) or ``"unlocked"`` (no entry)."""
+        """``"unlocked"`` (no entry), ``"missing"`` (the file cannot be read),
+        ``"ok"``, or the most severe state of its scopes: ``"unverifiable"``,
+        then ``"stale"``, then ``"gone"``."""
         entry = self.entries.get(key)
         if entry is None:
             return "unlocked"
-        digest = file_sha256(self.source_dir, key)
-        if digest is None:
-            return "missing"
-        return "ok" if digest == entry.sha256 else "stale"
+        locked = self.read(key)
+        level = _file_level(entry, locked)
+        if level is not None:
+            return level.state
+        scopes = entry.scopes or [LockScope("", "", InvalidationScope.FILE.value)]
+        states = {_digest_state(entry, s, locked).state for s in scopes}
+        for state in _SEVERITY:
+            if state in states:
+                return state
+        return "ok"
 
-    def problems(self) -> List[Tuple[str, str]]:
-        """Every locked file that is not ``ok``, as ``(key, status)``, by path."""
-        found = []
+    def problems(self) -> List[LockProblem]:
+        """Every problem with the lock, by path: one per file for a file-scope or
+        version 1 entry and for a cause the whole file shares (missing,
+        unverifiable, its grammar changed), one per symbol for a symbol scope."""
+        found: List[LockProblem] = []
         for key in sorted(self.entries):
-            state = self.status(key)
-            if state != "ok":
-                found.append((key, state))
+            found.extend(self._problems_of(key, self.entries[key], self.read(key)))
+        return found
+
+    def _problems_of(
+        self, key: str, entry: LockEntry, locked: LockedFile
+    ) -> List[LockProblem]:
+        level = _file_level(entry, locked)
+        if level is not None:
+            if level.state == "ok":
+                return []
+            return [
+                LockProblem(
+                    key, level.state, tuple(sorted(entry.scopes)), None, level.reason
+                )
+            ]
+        found: List[LockProblem] = []
+        file_scopes = [
+            s
+            for s in entry.scopes
+            if s.invalidation_scope != InvalidationScope.SYMBOL.value
+        ]
+        if file_scopes or not entry.scopes:
+            state = _digest_state(
+                entry, LockScope("", "", InvalidationScope.FILE.value), locked
+            )
+            if state.state != "ok":
+                found.append(
+                    LockProblem(
+                        key, state.state, tuple(sorted(file_scopes)), None, state.reason
+                    )
+                )
+        symbols = sorted(
+            {
+                s.symbol
+                for s in entry.scopes
+                if s.invalidation_scope == InvalidationScope.SYMBOL.value
+            }
+        )
+        for name in symbols:
+            of_symbol = [
+                s
+                for s in entry.scopes
+                if s.symbol == name
+                and s.invalidation_scope == InvalidationScope.SYMBOL.value
+            ]
+            state = _digest_state(entry, of_symbol[0], locked)
+            if state.state != "ok":
+                found.append(
+                    LockProblem(
+                        key, state.state, tuple(sorted(of_symbol)), name, state.reason
+                    )
+                )
         return found
 
 
+def _find(
+    scopes: Iterable[LockScope], rule_id: str, symbol: str
+) -> Optional[LockScope]:
+    wanted = (rule_id or "").casefold()
+    for scope in scopes:
+        if scope.rule_id.casefold() == wanted and scope.symbol == symbol:
+            return scope
+    return None
+
+
+def _undefined(key: str, symbol: str) -> str:
+    return (
+        f"{key} defines no {symbol}, so a symbol-scoped suppression has no "
+        "definition to bind to; check the name, or record it with "
+        "--invalidation-scope file"
+    )
+
+
+def _unknown_keys(where: str, what: str, value: Dict[str, Any], allowed: set) -> None:
+    unknown = sorted(set(value) - allowed)
+    if unknown:
+        raise AshLockError(
+            f"{where} has an unknown key {', '.join(repr(k) for k in unknown)} in "
+            f"{what}; a lock with a key this ASH does not know was written by a "
+            "newer ASH, so it is not read"
+        )
+
+
+def _is_hex64(value: Any) -> bool:
+    return isinstance(value, str) and _HEX64.fullmatch(value) is not None
+
+
+def _legacy_entry(where: str, key: str, raw: Dict[str, Any], strict: bool) -> LockEntry:
+    if strict:
+        _unknown_keys(where, f"the entry for {key}", raw, _LEGACY_ENTRY_KEYS)
+    digest = raw.get("sha256")
+    created = raw.get("created")
+    scopes = raw.get("scopes", [])
+    if (
+        not isinstance(digest, str)
+        or len(digest) != 64
+        or not isinstance(created, str)
+        or not isinstance(scopes, list)
+    ):
+        raise AshLockError(f"{where} has a malformed entry for {key}")
+    parsed: List[LockScope] = []
+    for scope in scopes:
+        if (
+            not isinstance(scope, dict)
+            or not isinstance(scope.get("symbol"), str)
+            or not isinstance(scope.get("rule_id", ""), str)
+        ):
+            raise AshLockError(f"{where} has a malformed scope for {key}")
+        if strict:
+            _unknown_keys(where, f"a scope of {key}", scope, _LEGACY_SCOPE_KEYS)
+        parsed.append(LockScope(scope.get("rule_id", ""), scope["symbol"]))
+    return LockEntry(created=created, scopes=sorted(parsed), sha256=digest)
+
+
+def _tree_entry(where: str, key: str, raw: Dict[str, Any]) -> LockEntry:
+    _unknown_keys(where, f"the entry for {key}", raw, _TREE_ENTRY_KEYS)
+    created = raw.get("created")
+    anchor = raw.get("source_sha256")
+    digests = raw.get("digests")
+    grammar = raw.get("grammar")
+    scopes = raw.get("scopes")
+    if (
+        not isinstance(created, str)
+        or not _is_hex64(anchor)
+        or not isinstance(digests, dict)
+        or not isinstance(grammar, dict)
+        or not isinstance(scopes, list)
+    ):
+        raise AshLockError(f"{where} has a malformed entry for {key}")
+    _unknown_keys(where, f"the digests of {key}", digests, _DIGEST_KEYS)
+    _unknown_keys(where, f"the grammar of {key}", grammar, _GRAMMAR_KEYS)
+    algorithm = digests.get("algorithm")
+    file_digest = digests.get("file")
+    symbols = digests.get("symbols")
+    if (
+        not isinstance(algorithm, str)
+        or not algorithm
+        or not _is_hex64(file_digest)
+        or not isinstance(symbols, dict)
+        or not all(isinstance(k, str) and _is_hex64(v) for k, v in symbols.items())
+    ):
+        raise AshLockError(f"{where} has malformed digests for {key}")
+    if (
+        not all(isinstance(grammar.get(k), str) for k in _GRAMMAR_KEYS)
+        or not grammar.get("language")
+        or not _is_hex64(grammar.get("fingerprint"))
+    ):
+        raise AshLockError(f"{where} has a malformed grammar for {key}")
+    parsed: List[LockScope] = []
+    seen: set = set()
+    for scope in scopes:
+        if not isinstance(scope, dict):
+            raise AshLockError(f"{where} has a malformed scope for {key}")
+        _unknown_keys(where, f"a scope of {key}", scope, _TREE_SCOPE_KEYS)
+        rule_id = scope.get("rule_id")
+        symbol = scope.get("symbol")
+        kind = scope.get("invalidation_scope")
+        if not isinstance(rule_id, str) or not isinstance(symbol, str):
+            raise AshLockError(f"{where} has a malformed scope for {key}")
+        if kind not in _KINDS:
+            raise AshLockError(
+                f"{where} has a scope for {key} without a valid invalidation scope "
+                f"(one of {', '.join(sorted(_KINDS))})"
+            )
+        identity = (rule_id.casefold(), symbol)
+        if identity in seen:
+            raise AshLockError(f"{where} records {rule_id} in {symbol} twice for {key}")
+        seen.add(identity)
+        parsed.append(LockScope(rule_id, symbol, kind))
+    symbol_scoped = {
+        s.symbol
+        for s in parsed
+        if s.invalidation_scope == InvalidationScope.SYMBOL.value
+    }
+    if set(symbols) != symbol_scoped:
+        raise AshLockError(
+            f"{where} has symbol digests for {key} that do not match its "
+            "symbol-scoped suppressions"
+        )
+    return LockEntry(
+        created=created,
+        scopes=sorted(parsed),
+        source_sha256=anchor,
+        algorithm=algorithm,
+        file_digest=file_digest,
+        symbol_digests=dict(symbols),
+        grammar=LockGrammar(
+            language=grammar["language"],
+            fingerprint=grammar["fingerprint"],
+            distribution=grammar["distribution"],
+            tree_sitter=grammar["tree_sitter"],
+        ),
+    )
+
+
+def _has_version_2_fields(raw: Dict[str, Any]) -> bool:
+    scopes = raw.get("scopes")
+    return any(k in raw for k in _VERSION_2_ENTRY_FIELDS) or (
+        isinstance(scopes, list)
+        and any(isinstance(s, dict) and "invalidation_scope" in s for s in scopes)
+    )
+
+
+def _is_tree_entry(raw: Dict[str, Any]) -> Optional[bool]:
+    """True for a tree entry, False for a version 1 entry, None for neither."""
+    tree_fields = [k for k in _VERSION_2_ENTRY_FIELDS if k in raw]
+    scopes = raw.get("scopes")
+    kinds = (
+        [isinstance(s, dict) and "invalidation_scope" in s for s in scopes]
+        if isinstance(scopes, list)
+        else []
+    )
+    if "sha256" in raw and not tree_fields and not any(kinds):
+        return False
+    if len(tree_fields) == len(_VERSION_2_ENTRY_FIELDS) and "sha256" not in raw:
+        if all(kinds):
+            return True
+    return None
+
+
 def _entries_of(document: Any, where: str = LOCK_RELATIVE_PATH) -> Dict[str, LockEntry]:
-    """The entries of a parsed lock; ``where`` names the file in a refusal."""
-    if not isinstance(document, dict) or document.get("version") != LOCK_VERSION:
-        raise AshLockError(f"{where} is not a version {LOCK_VERSION} lock file")
+    """The entries of a parsed lock; ``where`` names the file in a refusal.
+
+    The version is compared by type, so ``true`` and ``1.0`` are refused: in
+    Python ``True == 1``. A version 1 document holds version 1 entries only and
+    its unknown keys are ignored, as they always were. A version 2 document is
+    strict: an unknown key anywhere is refused, since an older writer that
+    dropped keys would otherwise erase a newer writer's choices.
+    """
+    version = document.get("version") if isinstance(document, dict) else None
+    if type(version) is not int or version not in READABLE_LOCK_VERSIONS:
+        raise AshLockError(f"{where} is not a version 1 or 2 lock file")
+    strict = version == 2
+    if strict:
+        _unknown_keys(where, "the document", document, _DOCUMENT_KEYS)
     files = document.get("files")
     if not isinstance(files, dict):
         raise AshLockError(f"{where} has no 'files' mapping")
@@ -390,26 +1331,22 @@ def _entries_of(document: Any, where: str = LOCK_RELATIVE_PATH) -> Dict[str, Loc
     for key, raw in files.items():
         if lock_key(key) != key or not isinstance(raw, dict):
             raise AshLockError(f"{where} has a malformed entry for a file")
-        digest = raw.get("sha256")
-        created = raw.get("created")
-        scopes = raw.get("scopes", [])
-        if (
-            not isinstance(digest, str)
-            or len(digest) != 64
-            or not isinstance(created, str)
-            or not isinstance(scopes, list)
-        ):
-            raise AshLockError(f"{where} has a malformed entry for {key}")
-        parsed: List[LockScope] = []
-        for scope in scopes:
-            if (
-                not isinstance(scope, dict)
-                or not isinstance(scope.get("symbol"), str)
-                or not isinstance(scope.get("rule_id", ""), str)
-            ):
-                raise AshLockError(f"{where} has a malformed scope for {key}")
-            parsed.append(LockScope(scope.get("rule_id", ""), scope["symbol"]))
-        entries[key] = LockEntry(sha256=digest, created=created, scopes=sorted(parsed))
+        if not strict and _has_version_2_fields(raw):
+            raise AshLockError(
+                f"{where} is a version 1 lock file but its entry for {key} has "
+                "version 2 fields"
+            )
+        kind = _is_tree_entry(raw)
+        if kind is None:
+            raise AshLockError(
+                f"{where} has an entry for {key} that is neither a version 1 entry "
+                "nor a tree entry"
+            )
+        entries[key] = (
+            _tree_entry(where, key, raw)
+            if kind
+            else _legacy_entry(where, key, raw, strict)
+        )
     return entries
 
 
@@ -440,16 +1377,9 @@ def symbol_suppressions(suppressions: Iterable[Any]) -> List[Any]:
 
 
 def scope_is_recorded(entry: LockEntry, rule_id: Optional[str], symbol: str) -> bool:
-    """Whether ``entry`` records the scope ``(rule_id, symbol)``.
-
-    The rule id is compared case-insensitively, as suppression rule ids match
-    everywhere else; the symbol is exact, as symbol resolution is.
-    """
-    wanted = (rule_id or "").casefold()
-    return any(
-        scope.rule_id.casefold() == wanted and scope.symbol == symbol
-        for scope in entry.scopes
-    )
+    """Whether ``entry`` records the scope ``(rule_id, symbol)``
+    (``recorded_scope``)."""
+    return recorded_scope(entry, rule_id, symbol) is not None
 
 
 def unlocked_symbol_suppressions(
@@ -499,10 +1429,11 @@ def refusal_text(
         (
             f"{len(unlocked)} symbol-scoped suppression(s) are not recorded in "
             f"{LOCK_RELATIVE_PATH}: a symbol suppression is bound, rule and "
-            "symbol by name, to the content hash of its file, so a change to "
-            "the file or an unreviewed scope is reviewed again. Run the "
-            "command for each one, which writes the suppression and its lock entry "
-            "together (an entry already in the config is only locked):"
+            "symbol by name, to the syntax tree of its file or of its symbol as "
+            "it was reviewed, so a change to the code or an unreviewed scope is "
+            "reviewed again. Run the command for each one, which writes the "
+            "suppression and its lock entry together (an entry already in the "
+            "config is only locked):"
         )
     ]
     for suppression in unlocked[:10]:
@@ -546,7 +1477,8 @@ def refuse_unlocked_symbol_suppressions(
 
     Nothing is checked when no suppression sets ``symbol``, so a config without
     one never reads the lock. A lock file that cannot be used is the same
-    refusal, in its own words.
+    refusal, in its own words. Only the recorded scopes are checked: no file
+    is read or parsed here.
 
     ``scanned_tree`` False says ``source_dir`` is only a guess at the directory
     a scan reads (the config check given no source directory takes the config
@@ -567,11 +1499,20 @@ def refuse_unlocked_symbol_suppressions(
         )
 
 
-def stale_notice(key: str, entry: LockEntry, state: str, *, gone: bool = True) -> str:
-    """The one notice a scan prints for a locked file whose hash does not match.
+def stale_notice(
+    key: str,
+    entry: LockEntry,
+    state: str,
+    *,
+    gone: bool = True,
+    symbol: Optional[str] = None,
+    reason: Optional[str] = None,
+    scopes: Optional[Sequence[LockScope]] = None,
+) -> str:
+    """The one notice a scan prints for a recorded scope that is not current.
 
-    A ``stale`` file has bytes to review, so the advice is the refresh; a
-    ``missing`` one has none, and ``refresh`` on it exits 1 and changes
+    A ``stale`` scope has code to review, so the advice is the refresh; a
+    ``missing`` file has none, and ``refresh`` on it exits 1 and changes
     nothing, so the advice is the drop. The two used to share the refresh
     advice, which left a deleted file failing ``verify`` forever.
 
@@ -579,14 +1520,24 @@ def stale_notice(key: str, entry: LockEntry, state: str, *, gone: bool = True) -
     (``file_is_gone``). One that still exists but cannot be hashed keeps its
     entry, which ``refresh --drop-missing`` does not drop, so its advice is to
     make the file hashable again.
+
+    ``symbol`` names the definition a symbol-scope problem is about (a
+    ``stale`` or ``gone`` symbol), ``reason`` says why when there is more to
+    say, and ``scopes`` are the suppressions it covers (every scope of the
+    entry when not given). A version 1 entry's notice says the entry predates
+    syntax-tree digests, so any byte change counts.
     """
-    scopes = ", ".join(s.describe() for s in sorted(entry.scopes)) or "none recorded"
+    listed = scopes if scopes is not None else entry.scopes
+    described = (
+        ", ".join(s.describe_with_kind() for s in sorted(listed)) or "none recorded"
+    )
+    quoted = shlex.quote(key)
     if state == "missing" and gone:
         return (
             f"Stale suppression: {key} no longer exists, so the symbol "
-            f"suppressions bound to it do not apply. Suppressions: {scopes}. "
+            f"suppressions bound to it do not apply. Suppressions: {described}. "
             f"Drop the dead entry with "
-            f"`{REFRESH_COMMAND} --drop-missing {shlex.quote(key)}` and remove "
+            f"`{REFRESH_COMMAND} --drop-missing {quoted}` and remove "
             f"its suppressions from the config."
         )
     if state == "missing":
@@ -595,14 +1546,40 @@ def stale_notice(key: str, entry: LockEntry, state: str, *, gone: bool = True) -
             f"be read, is not a regular file, is larger than "
             f"{MAX_LOCKED_FILE_BYTES // (1024 * 1024)} MiB, or is a link that "
             f"leads out of the scan root), so the symbol suppressions bound to "
-            f"it do not apply. Suppressions: {scopes}. Make it a readable "
+            f"it do not apply. Suppressions: {described}. Make it a readable "
             f"regular file inside the scan root, then, after reviewing any "
-            f"change, record it with `{REFRESH_COMMAND} {shlex.quote(key)}`."
+            f"change, record it with `{REFRESH_COMMAND} {quoted}`."
         )
+    if state == "gone":
+        return (
+            f"Stale suppression: {key} no longer defines {symbol}, so the "
+            f"symbol-scoped suppressions bound to it do not apply. Suppressions: "
+            f"{described}. Rename the suppression's symbol and record it with "
+            f"`ash suppress add`, or remove it, then run "
+            f"`{REFRESH_COMMAND} --drop-missing {quoted}`."
+        )
+    if state == "unverifiable":
+        return (
+            f"Stale suppression: {key} has changed since its suppressions were "
+            f"reviewed and the change cannot be checked ({reason}), so the "
+            f"symbol suppressions bound to it do not apply and their findings "
+            f"are reported again. Suppressions: {described}. Fix what stops the "
+            f"check, or, after reviewing the change, record it with "
+            f"`{REFRESH_COMMAND} {quoted}`."
+        )
+    what = f"{symbol} in {key}" if symbol else key
+    why = ""
+    if entry.is_legacy:
+        why = (
+            " Its entry predates syntax-tree digests (a version 1 entry), so any "
+            "byte change counts."
+        )
+    elif reason and not symbol:
+        why = f" ({reason[0].upper()}{reason[1:]}.)"
     return (
-        f"Stale suppression: {key} has changed since its suppressions were "
+        f"Stale suppression: {what} has changed since its suppressions were "
         f"reviewed, so the symbol suppressions bound to it do not apply and "
-        f"their findings are reported again. Suppressions: {scopes}. After "
-        f"reviewing the change, record it with "
-        f"`{REFRESH_COMMAND} {shlex.quote(key)}`."
+        f"their findings are reported again.{why} Suppressions: {described}. "
+        f"After reviewing the change, record it with "
+        f"`{REFRESH_COMMAND} {quoted}`."
     )

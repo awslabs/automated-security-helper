@@ -6,6 +6,7 @@ global_settings:
   - path: dist/**
     reason: build output
   suppressions: []
+  suppression_invalidation_scope: file
   exclusions: []
   mcp:
     runtime_overrides:

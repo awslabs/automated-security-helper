@@ -685,8 +685,8 @@
 │ config           ASH configuration management                                                   │
 │ dependencies     Check or install dependencies for ASH plugins                                  │
 │ plugin           Manage ASH plugins                                                             │
-│ suppress         Create symbol suppressions and keep their content-hash lock (.ash.lock)        │
-│                  current.                                                                       │
+│ suppress         Create symbol suppressions and keep the syntax-tree lock that binds them to    │
+│                  reviewed code (.ash.lock) current.                                             │
 │ express          Manage the express daemon: a resident warm ASH process that removes startup    │
 │                  cost from every scan. Unix only; scans fall back to ordinary cold runs         │
 │                  wherever the daemon is unavailable.                                            │

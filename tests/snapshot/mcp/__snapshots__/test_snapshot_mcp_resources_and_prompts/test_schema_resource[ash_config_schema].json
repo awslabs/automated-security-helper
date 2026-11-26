@@ -699,6 +699,7 @@
               }
             },
             "severity_threshold": "MEDIUM",
+            "suppression_invalidation_scope": "file",
             "suppressions": []
           },
           "description": "Global default settings for ASH shared across scanners. If the same setting exists at the scanner level and is set in both places, the scanner level settings take precedence."
@@ -1433,6 +1434,11 @@
           "default": "MEDIUM",
           "description": "Global minimum severity level to consider findings as failures across all scanners",
           "title": "Severity Threshold"
+        },
+        "suppression_invalidation_scope": {
+          "$ref": "#/$defs/InvalidationScope",
+          "default": "file",
+          "description": "The invalidation scope `ash suppress add` records in .ash.lock for a new symbol suppression when --invalidation-scope is not given. 'file': a change to the code of the suppression's file makes it stop applying until it is reviewed again. 'symbol': only a change to the code of the suppressed definition does (its lines, every definition bearing its name, the headers of the definitions it sits in, the file's prelude). Applies to new .ash.lock scopes only: a scan and `ash suppress verify` read the kind recorded in the lock, so editing this never changes a reviewed binding."
         },
         "suppressions": {
           "default": [],
@@ -4839,6 +4845,26 @@
       },
       "title": "ImageLocator",
       "type": "object"
+    },
+    "InvalidationScope": {
+      "anyOf": [
+        {
+          "description": "What makes a recorded symbol suppression stop applying (``.ash.lock``).\n\n``FILE``: any change to the code of the suppression's file. ``SYMBOL``: a\nchange to the code of the suppressed definition itself (its lines, every\ndefinition bearing its name, the headers of the definitions it sits in, and\nthe file's prelude). Layout between tokens is never a change. Each recorded\nscope carries one; ``ash suppress add --invalidation-scope`` chooses it for\na new scope, ``ash suppress refresh --invalidation-scope`` converts one.",
+          "enum": [
+            "file",
+            "symbol"
+          ],
+          "title": "InvalidationScope",
+          "type": "string"
+        },
+        {
+          "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+          "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+          "type": "string"
+        }
+      ],
+      "description": "What makes a recorded symbol suppression stop applying (``.ash.lock``).\n\n``FILE``: any change to the code of the suppression's file. ``SYMBOL``: a\nchange to the code of the suppressed definition itself (its lines, every\ndefinition bearing its name, the headers of the definitions it sits in, and\nthe file's prelude). Layout between tokens is never a change. Each recorded\nscope carries one; ``ash suppress add --invalidation-scope`` chooses it for\na new scope, ``ash suppress refresh --invalidation-scope`` converts one.",
+      "title": "InvalidationScope"
     },
     "JUnitXMLReporterConfig": {
       "additionalProperties": false,

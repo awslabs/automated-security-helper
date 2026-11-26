@@ -75,6 +75,7 @@
           "resource_id": null
         }
       ],
+      "suppression_invalidation_scope": "file",
       "exclusions": [],
       "mcp": {
         "runtime_overrides": {
