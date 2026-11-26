@@ -1,0 +1,530 @@
+"""The docs feature coverage gate fails on a feature no example reaches, and passes
+once an example reaches it, with the real docs runner and real coverage.
+
+A gate that cannot fail is worse than none: the docs feature coverage check would be
+green over examples that exercise nothing. So a planted feature, one ASH function, is
+measured end to end here: synthetic pages run through ``PageRunner`` with a coverage
+directory of their own (``DocsCoverage``), coverage.py starts in every Python process
+of each block through ``COVERAGE_PROCESS_START`` and the rc file the runner writes
+into that directory, and ``scripts/docs_feature_coverage.py check`` reads the data
+and the runner's records:
+
+* a page whose block does not call the planted function fails the gate, naming it;
+* a python block that calls it passes;
+* a shell block's python grandchild carries the block's coverage context;
+* a block that reaches the function and then fails its expected exit does not count;
+* nor does a block that reaches it while it shows ASH refusing something (its marker
+  expects the usage-error exit), nor one whose output sample no longer matches;
+* a call that the function's early exit answers does not reach its region.
+
+It also pins what the runner records (every block it ran or saved, with its session
+and the exit it expects) and that a block's context is its own: given to that block
+only, never carried to the next one, and nothing at all without coverage.
+
+Each test builds its own coverage directory and never reads ASH_DOCS_COVERAGE_DIR: the
+docs examples job sets that variable for this whole directory, and these pages must
+not reach its data.
+
+Skipped on Windows, which the docs runner does not support (see docs_runner.py).
+"""
+
+from __future__ import annotations
+
+import hashlib
+import importlib.util
+import inspect
+import json
+import os
+import sys
+from pathlib import Path
+
+import pytest
+from coverage import CoverageData
+
+from automated_security_helper.core.enums import AshExitCode
+
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(
+        os.name == "nt",
+        reason="POSIX shell and process groups; the docs job has no Windows runner",
+    ),
+]
+
+HERE = Path(__file__).resolve().parent
+REPO_ROOT = HERE.parents[2]
+FENCE = "```"
+
+#: The planted feature's id. Its kind is measured by code reach alone, like the MCP
+#: tools and the plugins, so a passing block that runs its region covers it.
+PLANTED_ID = "mcp-tool:planted"
+
+#: A name the planted function reads past its early exit (it does not end like a
+#: secret, so that exit does not answer it), and a name the early exit answers at once.
+REACHES_THE_REGION = "EXAMPLE_LOG_LEVEL"
+ANSWERED_EARLY = "EXAMPLE_API_TOKEN"
+
+
+def _load(name: str, path: Path):
+    if name in sys.modules:
+        return sys.modules[name]
+    spec = importlib.util.spec_from_file_location(name, path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    try:
+        spec.loader.exec_module(module)
+    except BaseException:
+        del sys.modules[name]
+        raise
+    return module
+
+
+runner = _load("_ash_docs_runner", HERE / "docs_runner.py")
+checks = runner.load_docs_checks()
+
+
+def _cov():
+    """scripts/docs_feature_coverage.py, loaded by path like the other scripts."""
+    return _load(
+        "_ash_docs_feature_coverage", REPO_ROOT / "scripts" / "docs_feature_coverage.py"
+    )
+
+
+def _planted_function():
+    from automated_security_helper.core import constants
+
+    return constants.is_secret_shaped_environment_name
+
+
+def _planted():
+    """The planted feature: ``is_secret_shaped_environment_name``, a pure function of
+    automated_security_helper.core.constants.
+
+    Chosen because importing that module runs none of its body: measured on this
+    tree, no statement of it runs at ``import automated_security_helper.core.constants``,
+    while the module's import-time lines do. So a block that imports the module puts
+    its own context in the data (the check then has a passing block it can read) and
+    reaches this function only if it calls it. A function whose body ran at import
+    would make the uncovered page below cover it; that test says so if it happens.
+
+    Its region starts past its one early exit, the ``return True`` for a name that
+    ends like a secret. So the pages that must reach it call it with a name that is
+    not secret-shaped, and one page calls it with a name that exit answers.
+    """
+    return _cov().code_feature(PLANTED_ID, _planted_function())
+
+
+def _run_page(tmp_path: Path, text: str, coverage=None):
+    """Run a synthetic page; with ``coverage``, through the runner's coverage hook."""
+    docs = tmp_path / "docs"
+    docs.mkdir(exist_ok=True)
+    path = docs / "page.md"
+    path.write_text(text, encoding="utf-8")
+    page = checks.parse_page(path, docs)
+    scratch = tmp_path / "sessions"
+    scratch.mkdir()
+    if coverage is None:
+        results = runner.PageRunner(page, scratch).run()
+    else:
+        results = runner.PageRunner(page, scratch, coverage=coverage).run()
+    return page, results
+
+
+def _coverage(tmp_path: Path):
+    return runner.DocsCoverage(directory=tmp_path / "coverage")
+
+
+def _check(tmp_path: Path, coverage, page):
+    """Run the gate over this page's run alone, with an empty baseline."""
+    baseline = tmp_path / "baseline.txt"
+    baseline.write_text("# This file may only shrink.\n", encoding="utf-8")
+    out = tmp_path / "out"
+    code = _cov().run_check(
+        data=coverage.directory,
+        baseline=baseline,
+        docs_root=page.path.parent,
+        out=out,
+        features=[_planted()],
+        corpus=[page.path],
+    )
+    report = json.loads(
+        (out / "docs-feature-coverage.json").read_text(encoding="utf-8")
+    )
+    (feature,) = [entry for entry in report["features"] if entry["id"] == PLANTED_ID]
+    markdown = (out / "docs-feature-coverage.md").read_text(encoding="utf-8")
+    return code, report, feature, markdown
+
+
+def _contexts_on(path: str, lines, directory: Path) -> set[str]:
+    """The contexts the data files record on any of ``lines`` of ``path``, read with
+    coverage.py's own API and nothing of the module under test."""
+    found: set[str] = set()
+    parts = sorted((directory / "data").glob(".coverage.*"))
+    assert parts, f"no coverage data file was written under {directory / 'data'}"
+    for part in parts:
+        data = CoverageData(basename=str(part))
+        data.read()
+        try:
+            for measured in data.measured_files():
+                if not measured.replace("\\", "/").endswith("/" + path):
+                    continue
+                for line, contexts in data.contexts_by_lineno(measured).items():
+                    if line in lines:
+                        found.update(contexts)
+        finally:
+            data.close()
+    return found
+
+
+def _region_contexts(directory: Path) -> set[str]:
+    (region,) = _planted().regions
+    return _contexts_on(region.path, region.lines, directory)
+
+
+def _fence_lines(page) -> list[int]:
+    return [block.fence_line for block in page.blocks]
+
+
+def _record(coverage) -> dict:
+    """The runner's record of page.md."""
+    name = hashlib.sha256(b"page.md").hexdigest()[:16] + ".json"
+    return json.loads(
+        (coverage.directory / "blocks" / name).read_text(encoding="utf-8")
+    )
+
+
+def _calls(name: str) -> str:
+    return f"""{FENCE}python
+import automated_security_helper.core.constants as constants
+
+print(constants.is_secret_shaped_environment_name("{name}"))
+{FENCE}
+"""
+
+
+IMPORTS_THE_MODULE = f"""{FENCE}python
+import automated_security_helper.core.constants as constants
+
+print(constants.ASH_DOCS_URL)
+{FENCE}
+"""
+
+CALLS_THE_FUNCTION = _calls(REACHES_THE_REGION)
+
+
+def test_a_page_whose_block_does_not_call_the_planted_function_fails_the_gate(tmp_path):
+    coverage = _coverage(tmp_path)
+    page, results = _run_page(tmp_path, IMPORTS_THE_MODULE, coverage)
+
+    assert [r.ok for r in results] == [True], runner.failure_report(results)
+    assert not _region_contexts(coverage.directory), (
+        "the planted function's body ran without the block calling it, so this page "
+        "cannot show the gate failing; plant a function whose body does not run when "
+        "its module is imported"
+    )
+    code, report, feature, markdown = _check(tmp_path, coverage, page)
+
+    assert code == 1
+    assert feature["covered"] is False
+    assert report["gate"]["failures"]["F1"] == [PLANTED_ID]
+    assert PLANTED_ID in markdown
+    # The block's own context reached the data: this is a gate failure over a sound
+    # measurement, not a measurement that measured nothing.
+    assert report["denominators"]["blocks_passed"] == 1
+    assert report["denominators"]["contexts"] >= 1
+
+
+def test_a_python_block_that_calls_the_planted_function_passes_the_gate(tmp_path):
+    coverage = _coverage(tmp_path)
+    page, results = _run_page(tmp_path, CALLS_THE_FUNCTION, coverage)
+
+    assert [r.ok for r in results] == [True], runner.failure_report(results)
+    (line,) = _fence_lines(page)
+    assert _region_contexts(coverage.directory) == {f"page.md::{line}"}
+    code, _report, feature, _markdown = _check(tmp_path, coverage, page)
+
+    assert code == 0
+    assert feature["covered"] is True
+    assert feature["pages"] == ["page.md"]
+
+
+def test_a_shell_blocks_python_grandchild_carries_the_blocks_context(tmp_path):
+    """ASH runs in children of a block's shell (``ash``, ``python``), not in the shell
+    and not in the pytest process: the context and the rc file reach them through the
+    session's environment."""
+    coverage = _coverage(tmp_path)
+    page, results = _run_page(
+        tmp_path,
+        f"""{FENCE}bash
+python -c "import automated_security_helper.core.constants as c; c.is_secret_shaped_environment_name('{REACHES_THE_REGION}')"
+{FENCE}
+""",
+        coverage,
+    )
+
+    assert [r.ok for r in results] == [True], runner.failure_report(results)
+    (line,) = _fence_lines(page)
+    assert _region_contexts(coverage.directory) == {f"page.md::{line}"}
+    code, _report, feature, _markdown = _check(tmp_path, coverage, page)
+
+    assert code == 0
+    assert feature["covered"] is True
+
+
+def test_a_block_that_reaches_the_planted_function_and_then_fails_does_not_count(
+    tmp_path,
+):
+    """An example that does not end the way its marker says demonstrates nothing,
+    even when its code ran."""
+    coverage = _coverage(tmp_path)
+    page, results = _run_page(
+        tmp_path,
+        IMPORTS_THE_MODULE
+        + f"""
+{FENCE}python
+import automated_security_helper.core.constants as constants
+
+constants.is_secret_shaped_environment_name("{REACHES_THE_REGION}")
+raise SystemExit(3)
+{FENCE}
+""",
+        coverage,
+    )
+
+    assert [r.ok for r in results] == [True, False], runner.failure_report(results)
+    _first, second = _fence_lines(page)
+    assert _region_contexts(coverage.directory) == {f"page.md::{second}"}, (
+        "the failing block did not reach the planted function, so this test would "
+        "pass for the wrong reason"
+    )
+    code, report, feature, _markdown = _check(tmp_path, coverage, page)
+
+    assert code == 1
+    assert feature["covered"] is False
+    assert report["gate"]["failures"]["F1"] == [PLANTED_ID]
+
+
+def test_a_block_that_shows_a_refusal_does_not_count_though_it_reached_the_function(
+    tmp_path,
+):
+    """A block whose marker expects ASH's usage-error exit passes when ASH refuses
+    what it was given: it shows the refusal, not the work of the code it reached."""
+    refused = int(AshExitCode.USAGE_ERROR)
+    coverage = _coverage(tmp_path)
+    page, results = _run_page(
+        tmp_path,
+        IMPORTS_THE_MODULE
+        + f"""
+<!-- doctest: run expect-exit={refused} -->
+{FENCE}python
+import automated_security_helper.core.constants as constants
+
+constants.is_secret_shaped_environment_name("{REACHES_THE_REGION}")
+raise SystemExit({refused})
+{FENCE}
+""",
+        coverage,
+    )
+
+    assert [r.ok for r in results] == [True, True], runner.failure_report(results)
+    first, second = _fence_lines(page)
+    assert _region_contexts(coverage.directory) == {f"page.md::{second}"}, (
+        "the refusal block did not reach the planted function, so this test would "
+        "pass for the wrong reason"
+    )
+    assert [
+        (block["line"], block["expected"], block["ok"])
+        for block in _record(coverage)["blocks"]
+    ] == [(first, "0", True), (second, str(refused), True)]
+    code, report, feature, _markdown = _check(tmp_path, coverage, page)
+
+    assert code == 1
+    assert feature["covered"] is False
+    assert report["gate"]["failures"]["F1"] == [PLANTED_ID]
+
+
+def test_a_block_whose_output_sample_no_longer_matches_does_not_count(tmp_path):
+    """An output sample is part of what its example claims: the record's verdict for
+    the block it shows is the block's and the sample's together."""
+    coverage = _coverage(tmp_path)
+    page, results = _run_page(
+        tmp_path,
+        IMPORTS_THE_MODULE
+        + "\n"
+        + CALLS_THE_FUNCTION
+        + f"""
+<!-- doctest: output -->
+{FENCE}text
+a line the block does not print
+{FENCE}
+""",
+        coverage,
+    )
+
+    assert [r.ok for r in results] == [True, True, False], runner.failure_report(
+        results
+    )
+    first, shown, _sample = _fence_lines(page)
+    assert _region_contexts(coverage.directory) == {f"page.md::{shown}"}
+    assert [(block["line"], block["ok"]) for block in _record(coverage)["blocks"]] == [
+        (first, True),
+        (shown, False),
+    ]
+    code, report, feature, _markdown = _check(tmp_path, coverage, page)
+
+    assert code == 1
+    assert feature["covered"] is False
+    assert report["gate"]["failures"]["F1"] == [PLANTED_ID]
+
+
+def test_a_call_that_the_functions_early_exit_answers_does_not_reach_its_region(
+    tmp_path,
+):
+    """The statements up to a function's last early exit run on calls that do none of
+    the work past it, so they are not its region: the function ran, and the gate
+    still finds it uncovered."""
+    coverage = _coverage(tmp_path)
+    page, results = _run_page(tmp_path, _calls(ANSWERED_EARLY), coverage)
+
+    assert [r.ok for r in results] == [True], runner.failure_report(results)
+    (line,) = _fence_lines(page)
+    (region,) = _planted().regions
+    source, start = inspect.getsourcelines(_planted_function())
+    before = set(range(start, start + len(source))) - region.lines
+    assert f"page.md::{line}" in _contexts_on(
+        region.path, before, coverage.directory
+    ), (
+        "the block did not run the planted function at all, so this test would pass "
+        "for the wrong reason"
+    )
+    assert not _region_contexts(coverage.directory)
+    code, report, feature, _markdown = _check(tmp_path, coverage, page)
+
+    assert code == 1
+    assert feature["covered"] is False
+    assert report["gate"]["failures"]["F1"] == [PLANTED_ID]
+
+
+def test_the_runner_records_every_block_it_ran_or_saved_with_its_session(tmp_path):
+    """One record per page: each block run or saved, with its context, the session it
+    ran in, whether the runner runs it, its save-as path, the exit it expects and its
+    verdict (with its output sample's). An output sample is compared, not run, and is
+    not in the record."""
+    coverage = _coverage(tmp_path)
+    page, results = _run_page(
+        tmp_path,
+        f"""{FENCE}python
+print("first")
+{FENCE}
+
+<!-- doctest: save-as=notes/settings.yaml -->
+{FENCE}yaml
+project_name: example
+{FENCE}
+
+<!-- doctest: run fresh -->
+{FENCE}bash
+echo second
+{FENCE}
+
+<!-- doctest: output -->
+{FENCE}text
+second
+{FENCE}
+""",
+        coverage,
+    )
+
+    assert all(r.ok for r in results), runner.failure_report(results)
+    first, saved, fresh, _sample = _fence_lines(page)
+
+    assert _record(coverage) == {
+        "schema": 1,
+        "page": "page.md",
+        "blocks": [
+            {
+                "line": first,
+                "context": f"page.md::{first}",
+                "session": 1,
+                "runs": True,
+                "save_as": None,
+                "expected": "0",
+                "ok": True,
+            },
+            {
+                "line": saved,
+                "context": f"page.md::{saved}",
+                "session": 1,
+                "runs": False,
+                "save_as": "notes/settings.yaml",
+                "expected": "0",
+                "ok": True,
+            },
+            {
+                "line": fresh,
+                "context": f"page.md::{fresh}",
+                "session": 2,
+                "runs": True,
+                "save_as": None,
+                "expected": "0",
+                "ok": True,
+            },
+        ],
+    }
+
+
+def test_each_block_gets_its_own_context_and_cannot_carry_one_forward(tmp_path):
+    """The context is the block's own variable, like a marker's env=: a block that
+    exports another value does not hand it to the next block. A session carries one
+    coverage variable, the rc file the runner wrote into the coverage directory, and
+    a fresh session gets it again; the directory itself reaches no session."""
+    coverage = _coverage(tmp_path)
+    rcfile = coverage.directory / "coverage.rc"
+    text = f"""{FENCE}bash
+test "$DOCS_COVERAGE_CONTEXT" = "page.md::1"
+test "$COVERAGE_PROCESS_START" = "{rcfile}"
+test -z "${{ASH_DOCS_COVERAGE_DIR:-}}"
+export DOCS_COVERAGE_CONTEXT=carried-forward
+{FENCE}
+
+{FENCE}bash
+test "$DOCS_COVERAGE_CONTEXT" = "page.md::8"
+{FENCE}
+
+<!-- doctest: run fresh -->
+{FENCE}bash
+test "$DOCS_COVERAGE_CONTEXT" = "page.md::13"
+test "$COVERAGE_PROCESS_START" = "{rcfile}"
+test -z "${{ASH_DOCS_COVERAGE_DIR:-}}"
+{FENCE}
+"""
+    page, results = _run_page(tmp_path, text, coverage)
+
+    assert _fence_lines(page) == [1, 8, 13], "the expected contexts above are stale"
+    assert [r.ok for r in results] == [True, True, True], runner.failure_report(results)
+    assert rcfile.is_file()
+
+
+def test_without_coverage_a_session_sees_no_coverage_variable_and_nothing_is_recorded(
+    tmp_path, monkeypatch
+):
+    """A runner built without coverage changes nothing, even in a process whose own
+    environment names a coverage directory and a context: the twins and the runner's
+    own failure proofs never reach the docs examples' data."""
+    from_the_environment = tmp_path / "from-the-environment"
+    monkeypatch.setenv("ASH_DOCS_COVERAGE_DIR", str(from_the_environment))
+    monkeypatch.setenv("DOCS_COVERAGE_CONTEXT", "from-the-environment")
+
+    _page, results = _run_page(
+        tmp_path,
+        f"""{FENCE}bash
+test -z "${{ASH_DOCS_COVERAGE_DIR:-}}"
+test -z "${{DOCS_COVERAGE_CONTEXT:-}}"
+test -z "${{COVERAGE_PROCESS_START:-}}"
+{FENCE}
+""",
+    )
+
+    assert [r.ok for r in results] == [True], runner.failure_report(results)
+    assert not from_the_environment.exists()
