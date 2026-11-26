@@ -3,14 +3,16 @@
 
 """Which directories opengrep's child is told git may trust, and who decides.
 
-The scanned directory is always named. A parent is named only when it is the top of the
-checkout the directory sits in; the top, its ``.git`` entry and, for a ``.git`` file,
-the git directory that file names each belong to the user who owns the scanned
-directory or to the effective uid; and it is a directory a ``safe.directory`` entry may
-name (never a filesystem root). git's own ownership check reads the same entries, so a
-top or git directory that a third user owns is never named. One list, computed from the
-scan target, reaches the unsandboxed child and the sandboxed one; no environment
-variable carries it, so an inherited value cannot choose entries.
+The scanned directory is named. A parent is named only when it is the top of the
+checkout the directory sits in; the top, its ``.git`` entry, what a ``.git`` link points
+at and the git directory a ``.git`` file names each belong to the user who owns the
+scanned directory or to the effective uid; and it is a directory a ``safe.directory``
+entry may name (never a filesystem root). A scan of the checkout's top itself is held to
+the same test, and the top is left out when it fails. git's own ownership check reads
+these entries, so a top, ``.git`` or git directory that a third user owns is never
+named. One list, computed from the scan target, reaches the unsandboxed child and the
+sandboxed one; no environment variable carries it, so an inherited value cannot choose
+entries.
 
 Of git's configuration variables the sandboxed child gets the
 ``GIT_CONFIG_COUNT``/``KEY_<n>``/``VALUE_<n>`` block ASH writes, and only what can take
@@ -26,6 +28,7 @@ The tests that pin the owner rule need user ids; the ``without_user_ids`` tests 
 the other reading on every platform by taking ``os.geteuid`` away.
 """
 
+import errno
 import os
 import sys
 from pathlib import Path
@@ -394,37 +397,277 @@ def test_a_git_files_git_directory_must_belong_to_a_trusted_user_too(
 
 
 @needs_user_ids
+@pytest.mark.parametrize("points_at", ["a-git-directory", "a-git-file"])
 @pytest.mark.parametrize(
-    "make_git, reason",
+    "resolved_uid, top_named",
+    [
+        pytest.param(0, True, id="resolved-the-effective-uids"),
+        pytest.param(1, True, id="resolved-the-target-owners"),
+        pytest.param(2, False, id="resolved-a-third-users"),
+    ],
+)
+def test_what_a_git_link_resolves_to_must_belong_to_a_trusted_user_too(
+    test_plugin_context,
+    monkeypatch,
+    only_staged_checkouts,
+    walk_messages,
+    points_at,
+    resolved_uid,
+    top_named,
+):
+    """git reads the repository through a ``.git`` link, so the walk tests what the
+    link resolves to as well as the link: a git directory or a ``.git`` file that a
+    third user owns keeps the top unnamed, even when the link and the top belong to
+    trusted users. A link to an entry a trusted user owns is followed, and the top is
+    named."""
+    repo = only_staged_checkouts / "repo"
+    sub = repo / "pkg" / "inner"
+    sub.mkdir(parents=True)
+    store = only_staged_checkouts / "store"
+    gitdir = store / "repo.git"
+    gitdir.mkdir(parents=True)
+    if points_at == "a-git-directory":
+        resolved = gitdir
+    else:
+        resolved = store / "repo.gitfile"
+        resolved.write_text(f"gitdir: {os.path.realpath(gitdir)}\n", encoding="utf-8")
+    (repo / ".git").symlink_to(resolved)
+    effective = os.geteuid()
+    _owned_by(
+        monkeypatch,
+        {sub: effective + 1, repo: effective + 1, resolved: effective + resolved_uid},
+    )
+    scanner = _scanner(test_plugin_context)
+
+    envs = _both_spawn_paths(scanner, _policy(only_staged_checkouts, sub), sub)
+
+    top = os.path.realpath(repo)
+    expected = [os.path.realpath(sub), *([top] if top_named else [])]
+    for name, env in envs.items():
+        assert _named(env) == expected, name
+    refusals = [
+        m for m in walk_messages if f"safe_directories_for: not naming {top}:" in m
+    ]
+    if top_named:
+        assert not refusals, refusals
+    else:
+        assert refusals, walk_messages
+        assert all(
+            f"{os.path.realpath(resolved)} is owned by uid" in m for m in refusals
+        ), refusals
+
+
+#: A scan pointed at the checkout's top: the owners of the top, which is the scan
+#: target, and of its ``.git`` entry, as offsets from the effective uid, and whether the
+#: top is named.
+_SCANNED_TOP_OWNERS = [
+    pytest.param(0, 0, True, id="own-top-own-git"),
+    pytest.param(1, 0, True, id="foreign-top-git-the-effective-uids"),
+    pytest.param(1, 1, True, id="foreign-top-git-the-top-owners"),
+    pytest.param(0, 2, False, id="own-top-git-a-third-users"),
+    pytest.param(1, 2, False, id="foreign-top-git-a-third-users"),
+]
+
+
+@needs_user_ids
+@pytest.mark.parametrize("top_uid, git_uid, top_named", _SCANNED_TOP_OWNERS)
+def test_a_scan_of_the_checkout_top_names_it_only_when_its_git_entry_passes(
+    test_plugin_context,
+    monkeypatch,
+    only_staged_checkouts,
+    walk_messages,
+    top_uid,
+    git_uid,
+    top_named,
+):
+    """git compares ``safe.directory`` with the work tree's top, so a scan pointed at
+    the top is the one where naming the scanned directory tells git to trust the
+    checkout. The top is held to the test a parent top is held to, and both spawn
+    paths leave it out when its ``.git`` belongs to a third user."""
+    repo, _sub = _checkout(only_staged_checkouts)
+    effective = os.geteuid()
+    _owned_by(
+        monkeypatch,
+        {repo: effective + top_uid, repo / ".git": effective + git_uid},
+    )
+    scanner = _scanner(test_plugin_context)
+
+    envs = _both_spawn_paths(scanner, _policy(only_staged_checkouts, repo), repo)
+
+    top = os.path.realpath(repo)
+    for name, env in envs.items():
+        assert _named(env) == ([top] if top_named else []), name
+    refusals = [
+        m for m in walk_messages if f"safe_directories_for: not naming {top}:" in m
+    ]
+    if top_named:
+        assert not refusals, refusals
+    else:
+        assert refusals, walk_messages
+        git_entry = os.path.join(top, ".git")
+        assert all(f"{git_entry} is owned by uid" in m for m in refusals), refusals
+
+
+@needs_user_ids
+@pytest.mark.parametrize(
+    "gitdir_uid, top_named",
+    [
+        pytest.param(0, True, id="gitdir-the-effective-uids"),
+        pytest.param(1, True, id="gitdir-the-top-owners"),
+        pytest.param(2, False, id="gitdir-a-third-users"),
+    ],
+)
+def test_a_scan_of_the_checkout_top_tests_the_git_directory_its_git_file_names(
+    test_plugin_context,
+    monkeypatch,
+    only_staged_checkouts,
+    walk_messages,
+    gitdir_uid,
+    top_named,
+):
+    """A scanned top whose ``.git`` is a file (a linked work tree, a submodule) is
+    named only when the git directory that file names belongs to a trusted user, as
+    for a parent top."""
+    repo, _sub, gitdir = _checkout_with_a_git_file(only_staged_checkouts, "absolute")
+    effective = os.geteuid()
+    _owned_by(
+        monkeypatch,
+        {
+            repo: effective + 1,
+            repo / ".git": effective + 1,
+            gitdir: effective + gitdir_uid,
+        },
+    )
+    scanner = _scanner(test_plugin_context)
+
+    envs = _both_spawn_paths(scanner, _policy(only_staged_checkouts, repo), repo)
+
+    top = os.path.realpath(repo)
+    for name, env in envs.items():
+        assert _named(env) == ([top] if top_named else []), name
+    refusals = [
+        m for m in walk_messages if f"safe_directories_for: not naming {top}:" in m
+    ]
+    if top_named:
+        assert not refusals, refusals
+    else:
+        assert refusals, walk_messages
+        assert all(
+            f"{os.path.realpath(gitdir)} is owned by uid" in m for m in refusals
+        ), refusals
+
+
+def _a_link_to_itself(path):
+    path.symlink_to(path)
+
+
+def _an_unreadable_git_file(path):
+    path.write_text("gitdir: elsewhere\n", encoding="utf-8")
+    path.chmod(0)
+
+
+def _a_git_file_naming(make_named):
+    """A ``.git`` file whose ``gitdir:`` line names what ``make_named`` makes in the
+    ``.git`` file's directory."""
+
+    def make(path):
+        path.write_text(f"gitdir: {make_named(path.parent)}\n", encoding="utf-8")
+
+    return make
+
+
+def _nothing(directory):
+    return directory / "missing"
+
+
+def _a_loop(directory):
+    loop = directory / "loop"
+    loop.symlink_to(loop)
+    return loop
+
+
+#: A process that reads every file whatever its mode (root) cannot be shown a ``.git``
+#: file it may not open.
+_READS_ANY_FILE = hasattr(os, "geteuid") and os.geteuid() == 0
+
+#: The two frames of an unreadable entry: the ``.git`` itself, which git would not read
+#: as a git directory or a ``gitdir:`` file, and the git directory a ``.git`` file names.
+_ITSELF = "cannot be read the way git reads it"
+_WHAT_IT_NAMES = "names cannot be read"
+
+
+@needs_user_ids
+@pytest.mark.parametrize(
+    "make_git, frame, reason",
     [
         pytest.param(
             lambda path: path.write_text("not a gitfile\n", encoding="utf-8"),
+            _ITSELF,
             "it is not a gitdir: file",
             id="not-a-gitdir-file",
         ),
         pytest.param(
             lambda path: path.write_text("gitdir: \n", encoding="utf-8"),
+            _ITSELF,
             "it names no directory",
             id="names-no-directory",
         ),
         pytest.param(
+            lambda path: path.write_bytes(
+                b"gitdir: " + b"x" * policy_module._GITFILE_MAX_BYTES
+            ),
+            _ITSELF,
+            "it is larger than git reads",
+            id="larger-than-git-reads",
+        ),
+        pytest.param(
             lambda path: os.mkfifo(path),
+            _ITSELF,
             "it is neither a directory nor a file",
             id="a-pipe",
         ),
         pytest.param(
             lambda path: path.symlink_to(path.parent / "missing"),
-            "cannot be read",
+            _ITSELF,
+            os.strerror(errno.ENOENT),
             id="a-dangling-link",
+        ),
+        pytest.param(
+            _a_link_to_itself,
+            _ITSELF,
+            os.strerror(errno.ELOOP),
+            id="a-link-to-itself",
+        ),
+        pytest.param(
+            _an_unreadable_git_file,
+            _ITSELF,
+            os.strerror(errno.EACCES),
+            marks=pytest.mark.skipif(_READS_ANY_FILE, reason="root reads any file"),
+            id="a-git-file-it-may-not-open",
+        ),
+        pytest.param(
+            _a_git_file_naming(_nothing),
+            _WHAT_IT_NAMES,
+            os.strerror(errno.ENOENT),
+            id="a-git-file-naming-nothing",
+        ),
+        pytest.param(
+            _a_git_file_naming(_a_loop),
+            _WHAT_IT_NAMES,
+            os.strerror(errno.ELOOP),
+            id="a-git-file-naming-a-loop",
         ),
     ],
 )
-def test_a_git_entry_whose_git_directory_cannot_be_read_names_no_top(
-    monkeypatch, only_staged_checkouts, walk_messages, make_git, reason
+def test_a_git_entry_git_cannot_read_leaves_the_top_unnamed(
+    only_staged_checkouts, walk_messages, make_git, frame, reason
 ):
-    """A ``.git`` that is not a directory and not a ``gitdir:`` file git would read
-    leaves the top unnamed, and the walk says why. A pipe is never opened for
-    reading, so it cannot stall the walk."""
+    """A ``.git`` that git would not read as a git directory or a ``gitdir:`` file, and
+    a ``.git`` file whose git directory cannot be followed, leave the top unnamed, and
+    the walk says why, in words that tell the ``.git`` itself from the directory it
+    names. A link is followed, and a loop of links stops at the kernel's limit instead
+    of naming the top; a pipe is never opened for reading, so it cannot stall the walk;
+    a ``.git`` file larger than git reads is refused unread, as git refuses it."""
     repo = only_staged_checkouts / "repo"
     sub = repo / "pkg" / "inner"
     sub.mkdir(parents=True)
@@ -432,16 +675,46 @@ def test_a_git_entry_whose_git_directory_cannot_be_read_names_no_top(
 
     assert policy_module.safe_directories_for(sub) == [os.path.realpath(sub)]
     top = os.path.realpath(repo)
+    git_entry = os.path.join(top, ".git")
     refusals = [
         m for m in walk_messages if f"safe_directories_for: not naming {top}:" in m
     ]
     assert refusals, walk_messages
-    assert all("cannot be read" in m and reason in m for m in refusals), refusals
+    assert all(f"{git_entry} {frame} ({reason})" in m for m in refusals), refusals
+
+
+@needs_user_ids
+def test_a_git_directory_realpath_cannot_resolve_leaves_the_top_unnamed(
+    monkeypatch, only_staged_checkouts, walk_messages
+):
+    """``os.path.realpath`` follows links by recursing, and on Python 3.11 and 3.12 a
+    long enough chain raises ``RecursionError``. A git directory that cannot be
+    resolved is one the walk cannot test, so the top is left unnamed with the reason
+    logged, and the scan goes on instead of failing."""
+    repo, sub, gitdir = _checkout_with_a_git_file(only_staged_checkouts, "absolute")
+    named = os.path.realpath(gitdir)
+    real_realpath = os.path.realpath
+
+    def realpath(path, *args, **kwargs):
+        if os.fspath(path) == named:
+            raise RecursionError("maximum recursion depth exceeded")
+        return real_realpath(path, *args, **kwargs)
+
+    monkeypatch.setattr(os.path, "realpath", realpath)
+
+    assert policy_module.safe_directories_for(sub) == [real_realpath(sub)]
+    top = real_realpath(repo)
+    git_entry = os.path.join(top, ".git")
+    refusals = [
+        m for m in walk_messages if f"safe_directories_for: not naming {top}:" in m
+    ]
+    assert refusals, walk_messages
+    assert all(f"{git_entry} {_WHAT_IT_NAMES}" in m for m in refusals), refusals
 
 
 @needs_user_ids
 def test_a_top_whose_path_a_safe_directory_entry_cannot_carry_is_logged(
-    monkeypatch, only_staged_checkouts, walk_messages
+    only_staged_checkouts, walk_messages
 ):
     """A top whose path holds a ``*`` passes the owner test but cannot be written as a
     ``safe.directory`` entry, and neither can a target inside it; the walk names

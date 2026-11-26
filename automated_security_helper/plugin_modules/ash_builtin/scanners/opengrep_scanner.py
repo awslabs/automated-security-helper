@@ -623,13 +623,14 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
 
         Git compares ``safe.directory`` with the top of the work tree, so a scan
         pointed at a subdirectory of a checkout names the checkout's top level as
-        well: the first parent that holds a ``.git``, when that parent, its ``.git``
-        and, for a ``.git`` file, the git directory it names each belong to the
-        scanned directory's owner or to the effective uid, and never a filesystem
-        root (``safe_directories_for``). Outside a
-        checkout only the scanned directory is named. Where the platform has no user
-        ids (Windows) no owner can be compared, so the top is not named and git's own
-        ownership check decides it.
+        well: the first parent that holds a ``.git``, when that parent, its ``.git``,
+        what a ``.git`` link resolves to and, for a ``.git`` file, the git directory
+        it names each belong to the scanned directory's owner or to the effective
+        uid, and never a filesystem root (``safe_directories_for``). A scan pointed
+        at the top itself names it only on the same test. Outside a checkout only
+        the scanned directory is named. Where the platform has no user ids
+        (Windows) no owner can be compared, so a top above the scanned directory is
+        not named and git's own ownership check decides it.
 
         A sandboxed spawn reads the same list from the policy, which computes it
         from the scan target with the same function, and rebuilds the entries

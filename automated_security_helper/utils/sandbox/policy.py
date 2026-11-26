@@ -98,9 +98,10 @@ class SandboxRequirements:
             and fails when git refuses a directory another user owns (opengrep's
             ``git ls-files``). ``build_scanner_policy`` computes the directories git
             should trust from the scan target (``safe_directories_for``: the target,
-            and the top of its checkout when the top, its ``.git`` and, for a
-            ``.git`` file, the git directory it names each belong to the target's
-            owner or to the effective uid), and ``filter_env`` turns them into
+            and the top of its checkout when the top, its ``.git``, what a ``.git``
+            link resolves to and, for a ``.git`` file, the git directory it names
+            each belong to the target's owner or to the effective uid; a target that
+            is itself the top is named only then), and ``filter_env`` turns them into
             ``GIT_CONFIG_*`` entries for that child alone. Of the other
             ``GIT_CONFIG_*`` variables only those that can take configuration away
             pass (``GIT_CONFIG_NOSYSTEM``, and ``GIT_CONFIG_GLOBAL`` or
@@ -229,7 +230,7 @@ _GIT_CONFIG_BLOCK_NAME = re.compile(r"^GIT_CONFIG_(?:COUNT|(?:KEY|VALUE)_[0-9]+)
 
 #: The variables that name the file git reads in place of its global or its system
 #: configuration. Set to the null device they only stop git reading that level's
-#: file; set to anything else they add what that file holds.
+#: file; set to a file they add what that file holds.
 _GIT_CONFIG_FILE_NAMES = ("GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM")
 
 
@@ -277,8 +278,8 @@ def _git_config_refusal(name: str, value: Optional[str]) -> Optional[str]:
         if value == "":
             return (
                 "it is empty, and only the null device "
-                f"({os.devnull}) is taken for it. Set it to the null device to keep "
-                "git from reading a file at that level, or remove the entry"
+                f"({os.devnull}) is taken for it. Set it to the null device, or "
+                "remove the entry"
             )
         if value is None:
             return (
@@ -349,34 +350,70 @@ def _owner_refusal(path: Path, owner: int, effective: int) -> Optional[str]:
 _GITFILE_MAX_BYTES = 1 << 20
 
 
-def _gitdir_named_by(git: Path) -> Optional[Path]:
-    """The git directory a ``.git`` file names, resolved as git resolves it, or None
-    when ``git`` is a directory, which is then the git directory itself.
+def _why_unreadable(error: BaseException) -> str:
+    """The words a log line gives for why a path could not be read or followed."""
+    if isinstance(error, RecursionError):
+        return "its links do not resolve"
+    if isinstance(error, OSError):
+        return error.strerror or type(error).__name__
+    return str(error)
+
+
+def _git_entry_refusal(git: Path, owner: int, effective: int) -> Optional[str]:
+    """Why a checkout's ``.git`` entry fails the owner test of
+    ``safe_directories_for``, or None when it passes.
+
+    The entry must belong to ``owner`` (the scan target's owner) or to ``effective``
+    (the effective uid), and so must, when the entry is a link, the git directory or
+    ``.git`` file it resolves to, because git reads the repository through the link.
+    A link that cannot be followed (it names nothing, or it is a loop) fails, in its
+    own words. ``os.stat`` follows the link before ``os.path.realpath`` does: the
+    kernel stops after a bounded number of links, where ``realpath`` recurses once
+    per link and raises ``RecursionError`` on a long chain on Python 3.11 and 3.12.
+    """
+    reason = _owner_refusal(git, owner, effective)
+    if reason is not None or not os.path.islink(git):
+        return reason
+    try:
+        os.stat(git)
+        resolved = Path(os.path.realpath(git))
+    except (OSError, ValueError, RecursionError) as error:
+        return f"{git} cannot be read the way git reads it ({_why_unreadable(error)})"
+    return _owner_refusal(resolved, owner, effective)
+
+
+def _gitdir_named_by(git: Path) -> Optional[str]:
+    """The path a ``.git`` file names, made absolute as git makes it, or None when
+    ``git`` is a directory, which is then the git directory itself.
 
     git reads a ``.git`` that is a file (a linked work tree's, a submodule's) as one
-    ``gitdir: <path>`` line, a relative path being read against the file's directory,
-    and its ownership check reads the directory that line names as well as the file
-    and the work tree's top. A link is followed, as git follows it. The file is read
-    only when it is a regular file, and it is opened without blocking, so a ``.git``
-    that is a pipe cannot stall the walk.
+    ``gitdir: <path>`` line, a relative path being read against the directory
+    ``git`` is in (the link's directory, when ``git`` is a link). It reads as many
+    bytes as the file's size says, and refuses a file larger than it reads. A link
+    is followed, as git follows it. The file is opened only when it is a regular
+    file, without blocking and without becoming the controlling terminal, and it is
+    checked again once open, so a ``.git`` that is a pipe or a device cannot stall
+    the walk or be read.
 
     Raises:
         OSError: ``git`` cannot be read.
         ValueError: ``git`` is neither a directory nor a regular file, is larger
-            than git reads, or is not a ``gitdir:`` file.
+            than git reads, is not a ``gitdir:`` file, or names no directory.
     """
     mode = os.stat(git).st_mode
     if stat.S_ISDIR(mode):
         return None
     if not stat.S_ISREG(mode):
         raise ValueError("it is neither a directory nor a file")
-    descriptor = os.open(git, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0))
+    flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOCTTY", 0)
+    descriptor = os.open(git, flags)
     with os.fdopen(descriptor, "rb") as handle:
-        if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+        opened = os.fstat(handle.fileno())
+        if not stat.S_ISREG(opened.st_mode):
             raise ValueError("it is neither a directory nor a file")
-        data = handle.read(_GITFILE_MAX_BYTES + 1)
-    if len(data) > _GITFILE_MAX_BYTES:
-        raise ValueError("it is larger than git reads")
+        if opened.st_size > _GITFILE_MAX_BYTES:
+            raise ValueError("it is larger than git reads")
+        data = handle.read(opened.st_size)
     text = os.fsdecode(data)
     if not text.startswith("gitdir: "):
         raise ValueError("it is not a gitdir: file")
@@ -385,23 +422,68 @@ def _gitdir_named_by(git: Path) -> Optional[Path]:
         raise ValueError("it names no directory")
     if not os.path.isabs(named):
         named = os.path.join(os.path.dirname(git), named)
-    return Path(os.path.realpath(named))
+    return named
 
 
 def _gitdir_refusal(git: Path, owner: int, effective: int) -> Optional[str]:
     """Why the git directory a ``.git`` file names fails the owner test of
-    ``safe_directories_for``, or None when ``git`` is a directory or names one that
-    belongs to ``owner`` or to ``effective``."""
+    ``safe_directories_for``, or None when ``git`` is a directory or names a git
+    directory that belongs to ``owner`` or to ``effective``.
+
+    A ``.git`` that git would not read as a ``gitdir:`` file fails, and so does a git
+    directory that cannot be followed (it names nothing, or a loop of links), each in
+    its own words. The path is followed with ``os.stat`` before ``os.path.realpath``
+    resolves it, as in ``_git_entry_refusal``.
+    """
     try:
-        gitdir = _gitdir_named_by(git)
-    except OSError as error:
-        reason = error.strerror or type(error).__name__
-        return f"the git directory that {git} names cannot be read ({reason})"
-    except ValueError as error:
-        return f"the git directory that {git} names cannot be read ({error})"
-    if gitdir is None:
+        named = _gitdir_named_by(git)
+    except (OSError, ValueError) as error:
+        return f"{git} cannot be read the way git reads it ({_why_unreadable(error)})"
+    if named is None:
         return None
+    try:
+        os.stat(named)
+        gitdir = Path(os.path.realpath(named))
+    except (OSError, ValueError, RecursionError) as error:
+        return (
+            f"the git directory that {git} names cannot be read "
+            f"({_why_unreadable(error)})"
+        )
     return _owner_refusal(gitdir, owner, effective)
+
+
+def _checkout_top_refusal(top: Path, owner: int, effective: int) -> Optional[str]:
+    """Why ``safe_directories_for`` does not name ``top``, a directory holding a
+    ``.git``, or None when it may.
+
+    The owner tests come first: the top itself (``_owner_refusal``), its ``.git``
+    entry and what a ``.git`` link resolves to (``_git_entry_refusal``), and, once
+    those pass, the git directory a ``.git`` file names (``_gitdir_refusal``). Then
+    the top must be a directory ``_usable_safe_directory`` admits, which a
+    filesystem root never is.
+    """
+    git = top / ".git"
+    refusals = [
+        reason
+        for reason in (
+            _owner_refusal(top, owner, effective),
+            _git_entry_refusal(git, owner, effective),
+        )
+        if reason is not None
+    ]
+    if not refusals:
+        gitdir_reason = _gitdir_refusal(git, owner, effective)
+        if gitdir_reason is not None:
+            refusals.append(gitdir_reason)
+    if refusals:
+        return "; ".join(refusals)
+    if _usable_safe_directory(str(top)):
+        return None
+    if top.parent == top:
+        return "it is a filesystem root, which a safe.directory entry never names"
+    return (
+        "its path holds a * or a line break, which a safe.directory entry cannot carry"
+    )
 
 
 def _log_unnamed_top(top: str, reason: str) -> None:
@@ -416,21 +498,32 @@ def safe_directories_for(target: Path) -> List[str]:
 
     The real path of ``target``, and, when it sits in a checkout, the checkout's top:
     the first parent holding a ``.git`` (a directory, or the file a linked work tree
-    and a submodule have). The top is named only when the top itself, its ``.git``
-    entry and, for a ``.git`` file, the git directory that file names
-    (``_gitdir_named_by``) each belong to the user who owns ``target`` or to the
-    effective uid (``os.lstat``, so a link is not followed), and the top is a
-    directory ``_usable_safe_directory`` admits, which a filesystem root never is.
-    These are the entries git's own ownership check reads: a top that belongs to
-    anyone else could have its ``.git`` replaced by its owner, and a git directory
-    that belongs to anyone else holds configuration its owner can change, so the
-    other entries belonging to the effective uid do not make that top one git may
-    trust. A ``.git`` whose top fails a test ends the walk: git takes the first
-    ``.git`` it meets as the top, so a parent above it is not the checkout's. No
-    ``.git`` above ``target`` names nothing more, the conservative reading. Each
-    such stop is logged at debug level, with its reason in its own words: an owner
-    or a ``.git`` file that cannot be read, an owner that is neither of the two
-    users, or a top that a ``safe.directory`` entry cannot name.
+    and a submodule have). The top is named only when ``_checkout_top_refusal``
+    finds nothing against it: the top itself, its ``.git`` entry, what that entry
+    resolves to when it is a link, and, for a ``.git`` file, the git directory that
+    file names each belong to the user who owns ``target`` or to the effective uid,
+    and the top is a directory ``_usable_safe_directory`` admits, which a filesystem
+    root never is. git's own ownership check reads the top, the ``.git`` entry and
+    the git directory, git reads the repository through a ``.git`` link, and naming
+    the top lets git trust the checkout without that check: a top that belongs to
+    anyone else could have its ``.git`` replaced by its owner, and a ``.git``, what a
+    link resolves to or a git directory that belongs to anyone else could be changed
+    by its owner, so the other entries belonging to the effective uid do not make
+    that top one git may trust. A linked work tree's common directory, which holds
+    most of its repository's configuration, is not tested.
+
+    A scan pointed at the checkout's top is held to the same test, and the top is
+    left out when it fails. git compares ``safe.directory`` with the work tree's
+    top, so naming a subdirectory of a checkout changes nothing for git, and naming
+    the top is the one case where an entry makes git trust a checkout.
+
+    The first ``.git`` the walk meets, in ``target`` or above it, ends the walk,
+    whether or not its top is named, and so does one git itself would pass over (a
+    link that names nothing, a pipe): no parent above it is named, the conservative
+    reading. When the walk meets no ``.git``, it names nothing more. Each top left
+    unnamed is logged at debug level, with its reason in its own words: an owner, a
+    ``.git`` or a git directory that cannot be read, an owner that is neither of the
+    two users, or a top that a ``safe.directory`` entry cannot name.
 
     Where the platform has no user ids (Windows: there is no ``os.geteuid``, and
     ``os.lstat`` reports uid 0 for every file, because the owner there is a
@@ -439,7 +532,8 @@ def safe_directories_for(target: Path) -> List[str]:
     first ``.git``, logs it, and names nothing more, the same reading as an owner
     that cannot be read. git's own ownership check, which reads the owner itself,
     then decides whether to trust the checkout's top. ``target`` is named as on
-    every platform, so a scan of the checkout's top still names it.
+    every platform, so there a scan of the checkout's top still names it, without
+    the test and without a log line.
 
     The one list both spawn paths read: ``build_scanner_policy`` stores it on the
     sandbox policy, and the scanner's unsandboxed spawn calls this function itself.
@@ -457,43 +551,25 @@ def safe_directories_for(target: Path) -> List[str]:
         if not os.path.lexists(git):
             continue
         top = str(parent)
-        if top in named:
-            # The scan target is the checkout's top, named already.
-            break
+        # A scan of the checkout's top named it already; it stays named only on the
+        # test a parent top is held to.
+        target_is_top = top in named
         if geteuid is None:
-            _log_unnamed_top(
-                top,
-                f"the owner of {git} cannot be read on this platform (no user ids), "
-                "so git's own ownership check decides whether to trust it",
-            )
+            if not target_is_top:
+                _log_unnamed_top(
+                    top,
+                    f"the owner of {git} cannot be read on this platform (no user "
+                    "ids), so git's own ownership check decides whether to trust it",
+                )
             break
-        effective = geteuid()
-        refusals = [
-            reason
-            for reason in (
-                _owner_refusal(parent, owner, effective),
-                _owner_refusal(git, owner, effective),
-            )
-            if reason is not None
-        ]
-        if not refusals:
-            gitdir_reason = _gitdir_refusal(git, owner, effective)
-            if gitdir_reason is not None:
-                refusals.append(gitdir_reason)
-        if refusals:
-            _log_unnamed_top(top, "; ".join(refusals))
-        elif _usable_safe_directory(top):
-            named.append(top)
-        elif Path(top).parent == Path(top):
-            _log_unnamed_top(
-                top, "it is a filesystem root, which a safe.directory entry never names"
-            )
+        reason = _checkout_top_refusal(parent, owner, geteuid())
+        if reason is None:
+            if not target_is_top:
+                named.append(top)
         else:
-            _log_unnamed_top(
-                top,
-                "its path holds a * or a line break, which a safe.directory entry "
-                "cannot carry",
-            )
+            if target_is_top:
+                named.remove(top)
+            _log_unnamed_top(top, reason)
         break
     return named
 
