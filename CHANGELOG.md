@@ -99,22 +99,8 @@
 
 - **The "community" scanner tier is now called "alpha".** The opt-in scanners ASH ships
   but does not yet promote as supported (Betterleaks, Ferret Scan, GuardDog, hadolint,
-  Snyk Code, Trivy and the rest of the `ash_*_plugins` modules) are alpha scanners:
-  the name says maturity, not provenance. Behavior is unchanged. The plugin pages moved
-  from `docs/plugins/community/` to `docs/plugins/alpha/` (the old URLs redirect), the
-  repository's own scan config is now `.ash/.ash_alpha_plugins.yaml`, the register's
-  tier value is `alpha_optin`, and the CI config variant is `alpha`. Two old spellings
-  are accepted for one release: the register tier value `community_optin` (it warns)
-  and the Dockerfile build argument `ASH_COMMUNITY_PLUGIN_MODULES`, now
-  `ASH_ALPHA_PLUGIN_MODULES` (a value given for the old name wins). The docs checks
-  refuse the old `Community plugins` / `Community scanners` column headings and name
-  the new one. ASH 3.9.0 stops accepting the old spellings.
-
-### Deprecations
-
-- **The "community" scanner tier is now called "alpha".** The opt-in scanners ASH ships
-  but does not yet promote as supported (Betterleaks, Ferret Scan, GuardDog, hadolint,
-  Snyk Code, Trivy and the rest of the `ash_*_plugins` modules) are alpha scanners:
+  Snyk Code and Trivy, each an `ash_*_plugins` scanner package; the `ash_aws_plugins`
+  reporters load the same opt-in way but are not alpha) are alpha scanners:
   the name says maturity, not provenance. Behavior is unchanged. The plugin pages moved
   from `docs/plugins/community/` to `docs/plugins/alpha/` (the old URLs redirect), the
   repository's own scan config is now `.ash/.ash_alpha_plugins.yaml`, the register's

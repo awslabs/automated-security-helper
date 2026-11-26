@@ -352,6 +352,15 @@ entries:
   span_at_migration:
   - 132
   - 147
+- config: .ash.yaml
+  rule_id: B104
+  path: automated_security_helper/cli/mcp/__init__.py
+  old_line_start: 953
+  old_line_end: 953
+  symbol: _log_where_the_server_listens
+  span_at_migration:
+  - 934
+  - 965
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: B104
   path: automated_security_helper/cli/mcp/__init__.py

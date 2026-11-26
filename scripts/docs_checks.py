@@ -8586,15 +8586,15 @@ def check_scanner_names(
                 for index, cell in enumerate(headers)
                 if cell in SCANNER_COLUMN_HEADERS
             ]
-            for heading in headers:
+            for index, heading in enumerate(headers):
                 if heading in _OLD_SCANNER_HEADERS:
                     findings.append(
                         Finding(
                             "scanners",
                             page.rel,
                             table.header_line,
-                            f"'{heading.title()}' is the old heading of the alpha "
-                            f"tier; use '{_OLD_SCANNER_HEADERS[heading]}'",
+                            f"'{table.header[index].strip()}' is the old heading of "
+                            f"the alpha tier; use '{_OLD_SCANNER_HEADERS[heading]}'",
                         )
                     )
             column_count += len(columns)

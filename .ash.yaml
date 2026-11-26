@@ -1062,12 +1062,17 @@ global_settings:
         OSError matching TMPDIR). The unsafe mode is the input of a refusal test.
     - rule_id: B104
       path: automated_security_helper/cli/mcp/__init__.py
+      symbol: _log_where_the_server_listens
       reason: >-
         Not a bind. The flagged line is the startup LOG helper that reproduces
         uvicorn's "running on" message: host = "0.0.0.0" if config.host is None
         mirrors the display default uvicorn itself logs; the socket was bound
         elsewhere, where tests/unit/cli/test_mcp_non_loopback_bind_is_refused.py
         asserts a non-loopback bind is refused without the explicit opt-in.
+        Pinned to the helper (kept in step with the same entry in
+        .ash/.ash_alpha_plugins.yaml) so a bind added anywhere else in the
+        file still reports; tests/unit/cli/mcp/test_b104_suppressions_stay_pinned.py
+        fails if the helper loses the expression or either entry goes file-wide.
     - rule_id: B104
       path: tests/unit/cli/test_mcp_loopback_accepts_only_its_own_origin.py
       reason: >-

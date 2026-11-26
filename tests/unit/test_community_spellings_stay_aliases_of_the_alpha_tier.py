@@ -4,10 +4,13 @@
 """The pre-rename "community" spellings of the alpha tier are aliases for one release.
 
 The opt-in scanners ASH ships but does not promote as supported were called
-"community"; the tier is now "alpha". Every old user-facing spelling still works,
-maps to the new one, and warns once, naming the release that drops it. Each test
-here reads one old spelling through the real code path and fails when the alias
-is gone, does not map, or stays silent.
+"community"; the tier is now "alpha". The old spellings that still work map to
+the new one for one release: the tier values warn once per process, and the
+Dockerfile build argument wins over the new one and warns at build time. The
+docs-lint column headings are the exception: that lint is internal, so the old
+headings are refused with the heading to use rather than kept as aliases. Each
+test here reads one old spelling through the real code path and fails when its
+alias is gone, does not map, or stays silent where a warning is promised.
 """
 
 from __future__ import annotations
@@ -176,12 +179,21 @@ def test_the_aliases_are_gone_by_the_release_that_says_it_drops_them():
 
 
 def test_the_old_dockerfile_build_argument_still_wins_over_the_new_one():
-    """`--build-arg ASH_COMMUNITY_PLUGIN_MODULES=...` is read until the alias window ends."""
+    """`--build-arg ASH_COMMUNITY_PLUGIN_MODULES=...` is read until the alias window ends.
+
+    An EXPLICITLY EMPTY value wins too (the CHANGELOG says a value given for the
+    old name wins), so the default is a sentinel rather than "": a `:-` fallback
+    cannot tell `--build-arg ASH_COMMUNITY_PLUGIN_MODULES=""` from the argument
+    not being given. A build that gives the old name warns.
+    """
     text = (REPO_ROOT / "Dockerfile").read_text(encoding="utf-8")
-    assert text.count('ARG ASH_COMMUNITY_PLUGIN_MODULES=""\n') == 2
+    assert text.count('ARG ASH_COMMUNITY_PLUGIN_MODULES="__UNSET__"\n') == 2
+    assert text.count('[ "${ASH_COMMUNITY_PLUGIN_MODULES}" = "__UNSET__" ]') == 2
+    assert text.count('--config-overrides "ash_plugin_modules+=[${modules}]"') == 2
     assert (
-        text.count("${ASH_COMMUNITY_PLUGIN_MODULES:-${ASH_ALPHA_PLUGIN_MODULES}}") == 2
+        text.count("the ASH_COMMUNITY_PLUGIN_MODULES build argument is deprecated") == 2
     )
+    assert "${ASH_COMMUNITY_PLUGIN_MODULES:-" not in text
 
 
 def test_the_renamed_anchors_keep_their_old_ids_for_the_alias_window():
