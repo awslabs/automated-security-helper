@@ -17,7 +17,7 @@ from pydantic.json_schema import SkipJsonSchema
 from typing import Annotated, Any, Dict, List, Optional, Set, TYPE_CHECKING
 
 from automated_security_helper.base.forward_refs import OnceOnlyResolver
-from automated_security_helper.core.asset import Asset
+from automated_security_helper.core.asset import Asset, AssetKind
 from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
 from automated_security_helper.plugins.plugin_manager import AshPluginManager
 
@@ -113,6 +113,19 @@ def _raise_link_refusal(error: ValidationError) -> None:
     refused = (errors[0].get("ctx") or {}).get("error")
     if isinstance(refused, OutputDirLinkRefused):
         raise refused from error
+
+
+def scans_container_image(context: Any) -> bool:
+    """Whether *context*'s scan subject is a container image, by its asset's kind.
+
+    Here, beside the ``asset`` field, so the helpers in ``utils`` can ask: the
+    layer order keeps them from importing ``core``, where ``AssetKind`` lives
+    (tests/unit/test_layer_dag_boundaries.py). Any object with an ``asset``
+    attribute is read; one with no asset is a filesystem scan, as the field
+    documents.
+    """
+    asset = getattr(context, "asset", None)
+    return getattr(asset, "kind", None) == AssetKind.CONTAINER_IMAGE
 
 
 # One PluginContext is built per run and handed to every converter, scanner and

@@ -225,6 +225,7 @@ from automated_security_helper.utils.config_trust import (
     NOT_THE_OPERATORS,
     refusal_warning,
 )
+from automated_security_helper.utils.image_reference import checked_image_reference
 from automated_security_helper.utils.process_env import snapshot_environ
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 
@@ -233,6 +234,11 @@ if TYPE_CHECKING:
 
 # UNBOUNDED_TRIVY_TIMEOUT and trivy_timeout live in the shared base since trivy-repo
 # passes the same bound; both names stay importable from this module.
+
+#: trivy's own subcommand for a container-image scan. The word is trivy's CLI
+#: grammar, not ASH's TargetType label, which happens to share the spelling;
+#: named once so the vocab drift gate can tell the two apart.
+_TRIVY_IMAGE_SUBCOMMAND = "image"
 
 
 class TrivyScannerConfigOptions(ScannerOptionsBase):
@@ -437,12 +443,12 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
                     "`trivy fs` over the target; the default scanner is vuln only, and "
                     "secret, misconfig and license are opt-in (options.scanners); a "
                     "container-image asset through `trivy image` "
-                    "(_execute_image_scan: a reference by --image-src from the "
-                    "detected engine, --input for a saved archive; an OCI layout "
-                    "directory is re-packed as a docker-archive first, "
-                    "utils/oci_layout_archive.py, which trivy reads through --input), "
-                    "with the ignore paths as --skip-files globs and the layer "
-                    "of each result read from a second, JSON pass"
+                    "(_execute_image_scan: a reference by --image-src, the detected "
+                    "engine's store then remote; --input for a saved archive or an "
+                    "OCI image-layout directory, which trivy reads directly, the "
+                    "v0.76.2 container_image.md OCI Layout section), with the "
+                    "ignore paths as --skip-files globs and the layer of each "
+                    "result read from a second, JSON pass"
                 ),
             ),
             runtime=opsf.RuntimeFacet(
@@ -579,7 +585,10 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
                 NOT_THE_OPERATORS,
             ),
         )
-        if granted is chosen:
+        # Equality, not identity: _operator_gated answering with a copy of the
+        # granted list must not read as a refusal, which would silently
+        # replace the operator's chosen set with the default.
+        if granted == chosen:
             return
         if self.config is not None:
             self.config.options = options.model_copy(update={"scanners": default})
@@ -708,9 +717,12 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         """Resolve the argv, results path and environment for one image run.
 
         The fs scan's resolution with the image differences and nothing else:
-        the subcommand token is ``image`` for this resolution only, the target
-        slot carries the reference (with ``--image-src`` naming the detected
-        engine, else ``remote``) or ``--input=<tar>`` for a saved archive, and
+        the subcommand token is ``image`` for this resolution only, a
+        reference is the last token, after ``--`` (with ``--image-src`` naming
+        the detected engine's store first, then ``remote``), and a direct
+        payload is ``--input=<path>`` in the target slot (trivy reads a saved
+        tar of either format and an OCI image-layout directory through the
+        same flag), and
         none of the fs-shaped plumbing applies -- no skip-dirs budget (nothing
         of the source tree is walked), while ASH's own trivy.yaml, module-dir,
         ignorefile and secret-config neutralizations carry over, because they
@@ -724,6 +736,11 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
 
         if self.results_dir is None:
             raise ScannerError("TrivyScanner has no results directory")
+        engine = self._image_engine
+        if engine is None:
+            # A direct call outside scan_image (a test driving this hook
+            # alone); the template detects once per target otherwise.
+            engine = detect_container_engine()
         results_file = self.results_dir.joinpath("image", "results_sarif.sarif")
         results_file.parent.mkdir(exist_ok=True, parents=True)
         results_file.unlink(missing_ok=True)
@@ -744,10 +761,15 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         # carries them all: measured on trivy 0.76.2, --skip-dirs removes
         # nothing from an image scan, while --skip-files globs do (a directory
         # is its "/**" glob; utils/image_ignore_paths).
+        operator_skips = self._operator_skip_plan(extra)
         extra.extend(
             f"--skip-files={skip_files_glob_value(glob)}"
             for glob in self._image_exclude_globs()
         )
+        # The operator's own skip lists, which ASH's --skip-files flag would
+        # otherwise replace -- trivy reads a list flag from one source only --
+        # exactly as the fs resolution re-adds them.
+        extra.extend(self._operator_skip_args(extra, operator_skips))
 
         if image.oci_layout is not None:
             # trivy image has no input mode for a layout directory, so the layout
@@ -763,28 +785,29 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
             target_token = f"--input={repacked.absolute().as_posix()}"
         elif image.oci_archive is not None:
             target_token = f"--input={Path(image.oci_archive).absolute().as_posix()}"
-        elif image.ref is not None:
-            engine = detect_container_engine()
-            if engine == ContainerEngine.NONE:
-                extra.append("--image-src=remote")
-            else:
-                extra.append(f"--image-src={engine.value}")
-            target_token = image.ref
         else:
-            # An ImageLocator holds a reference, a saved archive or a layout; the
-            # layout and the archive are handled above, so this is unreachable
-            # for a well-formed locator and narrows ``image.ref`` for typing.
-            raise ScannerError(
-                f"container image at {image.shown()} has neither a reference nor "
-                "a saved archive for trivy image to read"
-            )
+            # The engine's store first, then the registry: trivy's daemon
+            # sources only INSPECT what the daemon already holds and never
+            # pull, so a single-source value made every not-yet-pulled
+            # reference an ERROR on any host with a socket while grype and
+            # syft (whose stereoscope pulls through the daemon) succeeded.
+            # Offline never reaches here for a reference (the base template
+            # skips it), so remote is always an admitted fallback.
+            sources = [] if engine == ContainerEngine.NONE else [engine.value]
+            sources.append("remote")
+            extra.append(f"--image-src={','.join(sources)}")
+            # Digest-pinned where the REGISTRY named the digest
+            # (ImageLocator.pulled_ref): the remote source then pulls exactly
+            # the manifest the finding ids key on, however the tag has moved.
+            # Read against the one reference grammar once more, whichever way
+            # the locator was built: it lands in a positional slot.
+            target_token = checked_image_reference(image.pulled_ref())
 
         original_subcommands = self.subcommands
         try:
             # For this resolution only, exactly as the extra-args swaps are
             # scoped: the next fs target must not inherit the image subcommand.
-            # trivy's image subcommand is spelled like the image tree label.
-            self.subcommands = [TargetType.IMAGE.value]
+            self.subcommands = [_TRIVY_IMAGE_SUBCOMMAND]
             final_args = self._resolve_arguments(
                 target=target_token, results_file=results_file
             )
@@ -792,6 +815,20 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
             self.subcommands = original_subcommands
         target_index = len(final_args) - 1 - final_args[::-1].index(target_token)
         final_args[target_index:target_index] = extra
+        if self._offline():
+            # A payload scan (--input) runs offline; with misconfig opted in,
+            # trivy's Terraform checks would still fetch module sources, so
+            # the offline resolution drops them here exactly as the fs one
+            # does (TrivyScannerBase._offline_misconfig_args).
+            final_args = self._offline_misconfig_args(final_args)
+        if image.oci_archive is None and image.oci_layout is None:
+            # A reference is trivy's one positional, and it carries no scheme:
+            # it goes LAST, after "--", so nothing it holds can be read as an
+            # option, and every option -- the output file the base builder
+            # puts after the target included -- precedes it. The layer pass
+            # reads the subject as the argv's last token (_attach_image_layers).
+            del final_args[len(final_args) - 1 - final_args[::-1].index(target_token)]
+            final_args.extend(["--", target_token])
 
         subprocess_env = (
             {**snapshot_environ(), **self.extra_env} if self.extra_env else None
@@ -816,11 +853,26 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         """Tie each dependency result to one package copy and set trivy's severity.
 
         The severity step is ``TrivyScannerBase._attach_trivy_severity``, shared
-        with trivy-repo; see "Severity" above for the rule.
+        with trivy-repo; see "Severity" above for the rule. The package step is
+        host-tree work (it joins results to the TARGET's lockfiles) and is
+        skipped for an image scan: joining image packages to the host's
+        lockfiles would attribute a copy the image does not hold.
+
+        Both image decisions read ONE signal, ``_image_scan_in_progress``: the
+        layer pass used to key on ``final_args[1]``, so anything placed before
+        the subcommand would have skipped it silently while the package join
+        still skipped, splitting the two halves of "this is an image scan".
+        The flag is read with a default because the facets corpus harness
+        replays captured reports through ``cls.__new__(cls)`` skeletons, which
+        have no pydantic private state and are never mid-image-scan.
         """
-        if len(final_args) > 1 and final_args[1] == "image":
+        in_image = bool(getattr(self, "_image_scan_in_progress", False))
+        if in_image:
             self._attach_image_layers(sarif_report, final_args)
-        sarif_report = self._attach_package_identity(sarif_report, target)
+        else:
+            # The package-identity join reads the source tree's lockfiles,
+            # which an image's results are not about.
+            sarif_report = self._attach_package_identity(sarif_report, target)
         sarif_report = self._attach_misconfig_resources(sarif_report, final_args)
         return self._attach_trivy_severity(sarif_report)
 
@@ -857,14 +909,46 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
                 level=logging.WARNING,
             )
             return 0
+        # The join is sound only when the second read is of the same bytes.
+        # A payload (--input) and a digest-pinned reference are; so is a tag
+        # an engine's own store serves (one store, read twice within one
+        # scan). A bare tag read remotely -- no consultable engine socket --
+        # can resolve to a different manifest on the second pull, and layers
+        # joined across two images would attribute the wrong build.
+        subject = final_args[-1] if final_args else ""
+        reads_a_payload = any(
+            arg == "--input" or arg.startswith("--input=") for arg in final_args
+        )
+        engine_socket = getattr(self, "_image_engine_socket", None)
+        if not reads_a_payload and "@" not in subject and engine_socket is None:
+            self._plugin_log(
+                "The image scan's layer attribution is skipped: the reference "
+                "is a tag without a digest and no local engine store serves "
+                "it, so a second remote read could name another build's "
+                "layers. Pin the reference by digest to attribute layers.",
+                level=logging.WARNING,
+            )
+            return 0
         env = {**snapshot_environ(), **self.extra_env} if self.extra_env else None
         env = with_offline_tool_environment(env, self._scanner_offline())
+        # What is LEFT of the scan's one budget, not a second full one: the
+        # SARIF run already spent part of it, and an attribution pass must not
+        # double the time an operator bounded. The floor keeps a nearly-spent
+        # budget from turning into an unbounded wait (0 disables trivy's own
+        # timeout). Cancellation passes through: ScanCancelled is a
+        # BaseException, which the attribution except below never catches.
+        budget = self._effective_scan_timeout()
+        if budget is not None and self.start_time is not None:
+            from datetime import datetime, timezone
+
+            elapsed = (datetime.now(timezone.utc) - self.start_time).total_seconds()
+            budget = max(1.0, budget - elapsed)
         try:
             completed = spawn_run(
                 argv,
                 capture_output=True,
                 text=True,
-                timeout=self._effective_scan_timeout(),
+                timeout=budget,
                 check=False,
                 cwd=self._subprocess_cwd(json_path.parent),
                 env=env,

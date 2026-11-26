@@ -33,7 +33,7 @@ from automated_security_helper.base.scanner_facets import (
     ScannerFacets,
 )
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
-from automated_security_helper.base.uv_tool_mixin import _tool_name
+from automated_security_helper.base.uv_tool_mixin import tool_name
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import ToolArgs
@@ -672,10 +672,10 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
         it, so the row says where the copy is and how to allow it rather than
         "not installed".
         """
-        found = find_executable(_tool_name(self))
+        found = find_executable(tool_name(self))
         ASH_LOGGER.verbose(f"Found opengrep executable at: {found}")
         if found is None:
-            refusal = in_tree_refusal(_tool_name(self))
+            refusal = in_tree_refusal(tool_name(self))
             if refusal is not None:
                 self.dependency_unavailable_reason = refusal
                 self._plugin_log(refusal, level=logging.WARNING)
@@ -696,7 +696,7 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
     def _get_opengrep_version(self) -> tuple[int, int, int] | None:
         try:
             result = spawn_run(  # nosec B603 — list args, executable from find_executable()
-                [_tool_name(self), "--version"],
+                [tool_name(self), "--version"],
                 capture_output=True,
                 text=True,
                 timeout=5,

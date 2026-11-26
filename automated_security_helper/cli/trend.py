@@ -40,9 +40,11 @@ from automated_security_helper.utils.finding_trend import (
     TrendRefusal,
     TrendRun,
     build_trend,
+    cell_counts,
     longest_compatible_suffix,
     run_from_results,
     runs_and_recorded_from_history,
+    status_totals,
 )
 from automated_security_helper.utils.scan_history import (
     run_order_key,
@@ -146,10 +148,7 @@ def _print_text(payload: dict[str, Any]) -> None:
             )
         )
 
-    totals: dict[tuple[int, str], int] = {}
-    for entry in payload["series"]:
-        key = (entry["run"], entry["status"])
-        totals[key] = totals.get(key, 0) + entry["count"]
+    totals = status_totals(payload["series"])
     for boundary in payload["boundaries"]:
         k = boundary["run"]
         echo(
@@ -188,22 +187,15 @@ def _print_text(payload: dict[str, Any]) -> None:
         table = Table(
             "Run", "Scanner", "Severity", "New", "Carried", "Fixed", "Unobserved"
         )
-        cells: dict[tuple[int, str | None, str], dict[str, int]] = {}
-        for entry in payload["series"]:
-            cell = (entry["run"], entry["scanner"], entry["severity"])
-            counts = cells.setdefault(cell, {})
-            counts[entry["status"]] = counts.get(entry["status"], 0) + entry["count"]
-        for (run, scanner, severity), counts in sorted(
-            cells.items(), key=lambda item: (item[0][0], item[0][1] or "", item[0][2])
-        ):
+        for run, scanner, severity, counts in cell_counts(payload["series"]):
             table.add_row(
                 str(run),
                 raw_controls_on_one_line(scanner or "-"),
                 raw_controls_on_one_line(severity),
-                str(counts.get("new", 0)),
-                str(counts.get("carried", 0)),
-                str(counts.get("fixed", 0)),
-                str(counts.get("unobserved", 0)),
+                str(counts["new"]),
+                str(counts["carried"]),
+                str(counts["fixed"]),
+                str(counts["unobserved"]),
             )
         ash_console(markup=False, highlight=False).print(table)
 
