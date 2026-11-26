@@ -1727,6 +1727,27 @@ def test_a_marker_behind_a_generated_alias_key_is_refused(kind):
     assert "067" not in text, text
 
 
+class _NamedTuplePlainStr(NamedTuple):
+    name: str
+
+
+class _PrefixedStrSection(RedactedSection):
+    model_config = ConfigDict(alias_generator=_prefixed)
+    items: Optional[_NamedTuplePlainStr] = None
+
+
+def test_a_marker_behind_a_generated_alias_key_at_a_str_field_keeps_the_text():
+    """The must-not-flag control for the named-tuple cell above: the same
+    generated key at a str field keeps the text, so the refusal there answers
+    to the field's type, not to the key being a generated one."""
+    section = _PrefixedStrSection.model_validate(
+        {"x_items": {"x_name": env_resolved_scalar("067", VARIABLE)}}
+    )
+    assert section.items is not None
+    assert section.items.name == "067"
+    assert type(section.items.name) is str
+
+
 def test_sections_under_a_root_model_keep_a_marker_at_a_str_field_as_text():
     """The must-not-flag control for the cells above: a str field keeps the
     text, downcast to a plain str, behind the RootModel."""
@@ -1917,10 +1938,13 @@ def _typed_dict_fields(adapter):
     return nodes[0]["fields"]
 
 
-def _named_tuple_parameters(adapter):
-    nodes = _schema_nodes(adapter.core_schema, "arguments")
+def _named_tuple_fields(adapter):
+    """The fields of the one ``named-tuple`` node: the shape pydantic 2.14
+    builds a NamedTuple as (2.13 built a ``call`` node over an ``arguments``
+    schema), and the one the walk's generated-alias read takes them from."""
+    nodes = _schema_nodes(adapter.core_schema, "named-tuple")
     assert len(nodes) == 1, nodes
-    return {param["name"]: param for param in nodes[0]["arguments_schema"]}
+    return {field["name"]: field for field in nodes[0]["fields"]}
 
 
 def test_the_public_schema_carries_a_typed_dicts_own_generated_alias():
@@ -1943,10 +1967,8 @@ def test_the_public_schema_carries_the_enclosing_generated_alias_for_a_typed_dic
 
 def test_the_public_schema_carries_a_named_tuples_generated_alias():
     config = ConfigDict(alias_generator=_prefixed)
-    parameters = _named_tuple_parameters(
-        TypeAdapter(List[_NamedTuplePlainInt], config=config)
-    )
-    assert parameters["count"]["alias"] == "x_count"
+    fields = _named_tuple_fields(TypeAdapter(List[_NamedTuplePlainInt], config=config))
+    assert fields["count"]["validation_alias"] == "x_count"
 
 
 @_NEEDS_GENERIC_NAMED_TUPLE
@@ -1955,8 +1977,8 @@ def test_the_public_schema_carries_the_alias_choices_of_a_parameterized_holder()
     turn back into the objects the walk's alias helper reads."""
     typed_dict = _typed_dict_fields(TypeAdapter(List[_GenericTypedDict[int]]))
     assert typed_dict["count"]["validation_alias"] == [["count"], ["n"]]
-    named_tuple = _named_tuple_parameters(TypeAdapter(List[_GenericNamedTuple[int]]))
-    assert named_tuple["count"]["alias"] == [["count"], ["n"]]
+    named_tuple = _named_tuple_fields(TypeAdapter(List[_GenericNamedTuple[int]]))
+    assert named_tuple["count"]["validation_alias"] == [["count"], ["n"]]
 
 
 @pydantic.dataclasses.dataclass(config=ConfigDict(alias_generator=_prefixed))

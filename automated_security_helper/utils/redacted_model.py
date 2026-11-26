@@ -1212,8 +1212,9 @@ def _alias_object(form: Any) -> Any:
 
 
 def _holder_core_schema(schema: Any) -> Any:
-    """The ``typed-dict`` or ``call`` node of a ``List[holder]`` core schema,
-    through ``definitions`` and ``definition-ref``; None when it is not found."""
+    """The ``typed-dict``, ``named-tuple`` or ``dataclass`` node of a
+    ``List[holder]`` core schema, through ``definitions`` and
+    ``definition-ref``; None when it is not found."""
     definitions: Dict[Any, Any] = {}
     for _ in range(16):
         if not isinstance(schema, dict):
@@ -1248,12 +1249,16 @@ def _generated_aliases(
     ``TypeAdapter`` over ``List[annotation]``: TypeAdapter refuses a config for
     a TypedDict itself, so the config goes with the wrapper, and a TypedDict
     with a config of its own keeps it. The read depends on the core schema's
-    dict shape (a ``typed-dict`` field's ``validation_alias``, a NamedTuple
-    parameter's ``alias``, a ``dataclass-args`` field's ``validation_alias``),
-    which is documented but less stable than a field
-    object; a schema of another shape reads as None and the caller falls back
-    to the metadata. Built once per holder and generator (a generator is kept
-    alive by its entry, which is cleared at 256)."""
+    dict shape (a ``typed-dict`` field's ``validation_alias``, a
+    ``named-tuple`` field's ``validation_alias``, a ``dataclass-args`` field's
+    ``validation_alias``), which is documented but less stable than a field
+    object: pydantic 2.14 builds a NamedTuple as a ``named-tuple`` node, where
+    2.13 built a ``call`` node over an ``arguments`` schema whose parameters
+    carried the same alias as ``alias``. A schema of another shape reads as
+    None and the caller falls back to the metadata, which holds no generated
+    key, so the tests that pin these shapes are what keeps the refusal behind
+    a generated key from lapsing. Built once per holder and generator (a
+    generator is kept alive by its entry, which is cleared at 256)."""
     key = (annotation, id(alias_generator))
     cached = _GENERATED_ALIAS_CACHE.get(key)
     if cached is not None and cached[0] is alias_generator:
@@ -1270,13 +1275,11 @@ def _generated_aliases(
                 name: _alias_object(field.get("validation_alias"))
                 for name, field in node["fields"].items()
             }
-        elif isinstance(node, dict) and node.get("type") == "call":
-            arguments = node.get("arguments_schema")
-            if isinstance(arguments, dict) and arguments.get("type") == "arguments":
-                result = {
-                    parameter["name"]: _alias_object(parameter.get("alias"))
-                    for parameter in arguments["arguments_schema"]
-                }
+        elif isinstance(node, dict) and node.get("type") == "named-tuple":
+            result = {
+                field["name"]: _alias_object(field.get("validation_alias"))
+                for field in node["fields"]
+            }
         elif isinstance(node, dict) and node.get("type") == "dataclass":
             arguments = node.get("schema")
             if (
