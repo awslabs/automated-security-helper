@@ -856,9 +856,10 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
     #: The record read is the committed side report (tests/test_data/scanners/
     #: checkov/src.test.yaml.json, failed_checks[] keys check_id, file_path,
     #: file_line_range, check_name, resource, guideline, fixed_definition,
-    #: code_block); no checkov SARIF golden is committed, so the cells that
-    #: live only in the SARIF are n/a with the UNCONFIRMED reason the register
-    #: uses for an unread source. resource_id is MAPPED:
+    #: code_block) and the committed checkov-3.4.6 SARIF capture. A cell the
+    #: capture settles carries its evidence (MAPPED, or n/a with the reason
+    #: read off the capture); a cell neither source settles is UNCONFIRMED,
+    #: never n/a. resource_id is MAPPED:
     #: :func:`attach_checkov_resources` copies each record's ``resource`` from
     #: the JSON report onto its SARIF result under ``ash_resource_id``, and only
     #: for the frameworks in :data:`_RESOURCE_FRAMEWORKS` (the per-framework

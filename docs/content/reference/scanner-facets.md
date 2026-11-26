@@ -45,7 +45,7 @@ The facet vocabulary, in declaration order: `rule_id`, `severity`, `file_path`, 
 | [`ferret-scan`](#ferret-scan) | 8 | 0 | 12 | 0 |
 | [`guarddog`](#guarddog) | 12 | 0 | 8 | 0 |
 | [`hadolint`](#hadolint) | 7 | 0 | 13 | 0 |
-| [`snyk-code`](#snyk-code) | 10 | 2 | 6 | 2 |
+| [`snyk-code`](#snyk-code) | 9 | 0 | 6 | 5 |
 | [`trivy-repo`](#trivy-repo) | 15 | 0 | 3 | 2 |
 
 ## Runtime compatibility
@@ -652,12 +652,12 @@ Ranges are written in the grammar native to the runtime: `python` uses PEP 440 s
 | `taxonomy_cve` | `n/a` |  | snyk code rules are source-defect classes, not CVEs |
 | `taxonomy_cwe` | `mapped` | rule properties "cwe" (e.g. ["CWE-798"]), normalized by normalize_rule_cwe_into_tags into the rule's tags as external/cwe/cwe-&lt;n&gt;, which the shared flat reader reads |  |
 | `fingerprints` | `mapped` | result "fingerprints" {"0", "1"} |  |
-| `fix_available` | `mappable-dropped` | rule properties "isAutofixable" | no flat fix_available write exists for snyk; weak signal (autofix availability, not a fixed version); UNCONFIRMED against a real tool run |
+| `fix_available` | `unconfirmed` |  | UNCONFIRMED: the survey names rule properties "isAutofixable" as the candidate field, but no snyk SARIF from a real run is committed to show it is there; no flat fix_available write exists for snyk, and it would be a weak signal (autofix availability, not a fixed version); a `snyk code test --sarif` run settles it |
 | `remediation_text` | `unconfirmed` |  | UNCONFIRMED: the survey classified rule help.markdown under references only; a `snyk code test --sarif` run settles whether remediation text is separate |
 | `snippet` | `unconfirmed` |  | the survey read no snippet in the native regions; UNCONFIRMED against a real tool run |
-| `references` | `mappable-dropped` | rule "help.markdown" and properties "exampleCommitFixes" | the rule help survives the SARIF model and dies at the flat reader; UNCONFIRMED against a real tool run |
+| `references` | `unconfirmed` |  | UNCONFIRMED: the survey reads rule "help.markdown" and properties "exampleCommitFixes" as the candidate fields, and the rule help survives the SARIF model and dies at the flat reader, but no snyk SARIF from a real run is committed to show they are there; a `snyk code test --sarif` run settles it |
 | `tags` | `mapped` | tool.driver.rules[].properties.tags, read into the flat tags by the shared rule read when the result carries none of its own | no tag write exists in this adapter at this checkout; the rule-level tags are what the flat row carries |
-| `extras` | `mapped` | result properties bag, passed through the SARIF model untouched and read whole into the flat properties | the rule properties bag survives the SARIF model but the flat reader takes only the rule's tags and helpUri from the rule, so rule-bag keys (cwe, isAutofixable, exampleCommitFixes) reach the flat row only through the cells above that name them |
+| `extras` | `unconfirmed` |  | UNCONFIRMED: no snyk SARIF from a real run is committed and the extras column is not observed by the gate, so what the result properties bag carries is unread; the rule properties bag survives the SARIF model but the flat reader takes only the rule's tags and helpUri from the rule, so rule-bag keys (cwe, isAutofixable, exampleCommitFixes) reach the flat row only through the cells above that name them; a `snyk code test --sarif` capture settles it |
 
 ## `trivy-repo`
 
