@@ -48,6 +48,15 @@
 
 ### Behavior changes
 
+- **`ash merge` records the merged run in the scan history.** With
+  `global_settings.history.enabled` in the merged configuration (the shards'
+  recorded config, with `--config-overrides` applied), the merge appends one run
+  record to `<output-dir>/history/` under the merged report's own id, so a
+  sharded CI's history now comes from the merge; before, the merge recorded
+  nothing and a CI that only ever ran shards built no history at all. A re-merge
+  of the same shards replaces its record rather than adding a second run, and
+  the warning a non-recorded run logs now says where a sharded CI's history
+  comes from.
 - **npm-audit findings are located at the lockfile they were audited from**
   (`deploy/cdk/package-lock.json`, say), not at the installed package's
   `node_modules/<package>/package.json`. A path-scoped suppression for an npm-audit
@@ -78,6 +87,30 @@
   baseline or a suppression keyed by that id needs refreshing. A suppression written
   against the config file's path and lines is not affected. A result that has a line in
   the generated script with no sidecar row is unchanged.
+- **checkov's `all` no longer runs its GitLab, GitHub and Bitbucket configuration
+  frameworks.** `frameworks` defaults to `all`, and checkov now leaves
+  `gitlab_configuration`, `github_configuration` and `bitbucket_configuration` out of
+  it, so a scan that reported their `CKV_GITLAB_*`, `CKV_GITHUB_*` or `CKV_BITBUCKET_*`
+  findings no longer does. They check the repository host's settings through its API
+  rather than files in the scanned tree, and GitLab's CI job token is not documented to
+  reach the project approvals API that checkov's GitLab check reads. To run one, name
+  it in `frameworks`, with or without `all` (`frameworks: [all, gitlab_configuration]`);
+  the `framework` list of the operator's checkov config file is read the same way. In
+  an offline scan their settings are not fetched, and the scan warns for each one that
+  runs. The conf directory ASH names for each below the scanner's results directory is
+  emptied before every run, so a framework never reports settings an earlier run
+  fetched as this scan's; a directory set in `CKV_GITLAB_CONF_DIR_NAME`,
+  `CKV_GITHUB_CONF_DIR_NAME` or `CKV_BITBUCKET_CONF_DIR_NAME` is left as it is.
+- **`frameworks: []` runs checkov as `all` does, and checkov gets a GitLab, GitHub or
+  Bitbucket token only for a configuration framework that runs in an online scan.**
+  checkov reads no `--framework` as all frameworks, and an empty list was passed as no
+  `--framework`, so it ran the three configuration frameworks; it is now passed as `all`
+  is, the config file's `framework` list takes its place the same way, and checkov's
+  `CKV_FRAMEWORK` variable no longer chooses the frameworks for it. checkov reads
+  `CI_JOB_TOKEN`, `GITHUB_TOKEN` and `APP_PASSWORD`, the API tokens of its GitLab, GitHub
+  and Bitbucket configuration frameworks, every time it starts, whichever frameworks
+  run. Each is now left out of checkov's environment in an offline scan and when its
+  framework does not run, and a framework that runs online gets its token as before.
 
 ### Maintenance
 
@@ -135,11 +168,78 @@
 
 ### Fixes
 
-- **A profile written by v3.8.0's `ash config init` again counts as a shipped default
-  for MCP clients.** The v3.8.0 default `denied_paths` list had been edited in place in
-  the table of shipped defaults, so such a profile was read as the operator's own list
-  and a client-delivered suppression was refused with `config_field_denied`. The v3.8.0
-  list is its own entry again, and a test pins it from a literal kept outside the table.
+- **A profile written by v3.8.0's `ash config init` keeps counting as a shipped default
+  for MCP clients.** The unreleased edits to the table of shipped defaults had changed
+  the v3.8.0 `denied_paths` entry in place, so such a profile would have been read as the
+  operator's own list and a client-delivered suppression refused with
+  `config_field_denied`. The v3.8.0 list is its own entry again, and a test pins it from
+  a literal kept outside the table.
+- **`ash report` honors every `--config-overrides` spelling of the deduplication
+  settings.** An override that sets `global_settings.deduplication.annotate` or
+  `fold` through an object value at the section or at `global_settings`, with a
+  hyphen for an underscore, or in the append form `key+=value` now replaces the value
+  recorded in the results, as the dotted form already did. Before, the recorded value
+  stayed in force, with exit 0 and no message. The command also no longer resolves the
+  configuration a second time to learn which fields the config file wrote, so a
+  configuration that loads only because an override relaxed it keeps its own
+  `annotate` and `fold`, and each configuration warning is printed once.
+
+- **A retired scanner name no longer outranks the current one across config files.**
+  Where one file is layered over another (an `extends` chain, or an operator's
+  workspace overlay over a project's file), the later file now wins whichever spelling
+  each file uses for a scanner's section. Before, a base file's section under a retired
+  name overrode the extending file's section under the current name. Inside one file, a
+  section under the retired name still overlays the current one. No shipped scanner
+  name is retired today, so no current configuration reads differently.
+
+- **A session's patched profile that reads a value from the environment is no longer
+  refused for that value.** When the registered profile sets an option a client may
+  not set from an environment reference and `select_profile`'s patch changes only keys
+  the profile permits, the patched copy is accepted when it is bound and when it is
+  scanned: the filled-in value counts as the profile's own where the copy holds, at
+  exactly that place, the one reference text the profile wrote there. A value the copy
+  wrote itself, the reference at another place, and a place the profile's files read
+  twice (a base and the file that extends it) are still refused. Each value the copy
+  repeats from the profile is also judged on its own now, validated as a config file is
+  with only that value placed, so another spelling of a field, a key the model drops,
+  or reference text in a typed field elsewhere in the copy no longer decides whether it
+  counts as repeated, and an error while reading it leaves it a change instead of
+  escaping the check.
+
+- **The warning for a dropped trusted config chain names who decides
+  `honor_ignore_files` correctly.** A deciding file that an `extends` entry reached
+  with a value read from the environment is shown as `<value>`, as other warnings show
+  such a file, and it is named as the chain names it. When `--config-overrides` sets the
+  key (`--no-honor-ignore-files` is such an override), the warning says the override
+  decides the value instead of naming a file that may have written the other value. In
+  a long-running process such as the MCP server, saying one ending of the warning for a
+  file no longer keeps a later resolution from saying another.
+
+- **On Windows, `--no-color` now turns color off in the scan's progress output.** The
+  scan (and a workspace scan) forced Rich's "windows" color system on every Windows run,
+  so the flag was ignored there and output redirected into a pipe or a file carried
+  escape codes. Both now use "auto" when color is on, as the logger already did, so Rich
+  checks whether the output is a terminal, and no color when `--no-color` is given.
+  Output into a pipe is plain text.
+- **A stored suppression with an empty `scope` no longer applies.** A results file
+  that held `{"resource_id": "X", "scope": {}}` was read with its empty scope kept as
+  inert, then the entry-level `resource_id` was written into that scope, so the entry
+  suppressed findings on resource `X` while its note said the scope was empty. A config
+  file refuses this shape and still does. The stored entry now stays inert, and the
+  empty-scope note is recorded once for it.
+- **A suppression's glob-free `package_path` now covers a finding whose install path is
+  spelled with a trailing slash.** An entry with `package_path: node_modules/a` did not
+  suppress a finding reported at `node_modules/a/`, so the finding stayed in the
+  report. It does now. Nothing else widens: `node_modules/ab/` and paths below the
+  named copy are still not covered, and an entry written with the trailing slash still
+  does not cover a finding reported without one.
+- **A cancelled scan no longer appears in `ash trend`.** The run's history record is
+  removed on every path a cancel takes the run's results back: a cancel that lands
+  during the final results rewrite or before the MCP server's own check now has the
+  record discarded when the server puts the previous results back, and a cancel that
+  escapes the orchestrator's write step after the record was appended is discarded by
+  the orchestrator itself. A discard that fails leaves a debug-level line saying why
+  the stale record stayed, instead of nothing.
 - **`Invoke-ASH` now matches `./ash` and the `ash` CLI on two container-run details.**
   It passes `GITHUB_ACTIONS`, `TF_BUILD` and `TEAMCITY_VERSION` into the container when
   set (by name, or with their values when `OCI_RUNNER_WRAPPER` is set; a value that holds
@@ -263,9 +363,15 @@
   finding. Two instances of one module, or two resources of a Terraform plan (every
   plan finding is on the plan file), gave findings that differed in nothing. ASH now
   reads the resource from checkov's JSON report, for Terraform, Terraform plans,
-  Terraform JSON, CloudFormation, Kubernetes, ARM and Bicep: `aws_db_instance.this`,
+  CloudFormation, Kubernetes and Bicep: `aws_db_instance.this`,
   `module.db.aws_db_instance.this`, `AWS::S3::Bucket.Bucket`, `Deployment.shop.web`,
-  `Microsoft.Storage/storageAccounts.st`.
+  `Microsoft.Storage/storageAccounts.st`. An id names one resource: when the records of
+  one file give an id at two different line ranges, two resources share it, and the
+  findings of neither carry it, so a suppression for them is scoped by path and lines.
+  Terraform JSON and ARM findings name no resource. checkov leaves the resource type out
+  of a Terraform JSON id. An ARM name built from a parameter with no default stays the
+  template expression, so resources can share an id, and an ARM template's line ranges
+  cannot always tell them apart: a template on one line puts every resource at line 1.
   It is in the `resource_id` of the flat JSON and CSV reports, and a `resource_id`
   suppression now binds to it. checkov is always asked for its JSON report for this,
   so `results_json.json` is in checkov's results directory on every run, not only when
@@ -301,12 +407,6 @@
   scanner's results directory instead of below checkov's working directory, the
   filesystem root. A directory set in `CKV_GITLAB_CONF_DIR_NAME`,
   `CKV_GITHUB_CONF_DIR_NAME` or `CKV_BITBUCKET_CONF_DIR_NAME` is used as set.
-- checkov leaves its GitLab, GitHub and Bitbucket configuration frameworks out when
-  `frameworks` is `all`, the default. They read the repository host's settings through
-  its API rather than files in the scanned tree, and GitLab's CI job token is not
-  documented to reach the project approvals API that checkov's GitLab check reads.
-  Name a framework in `frameworks`, with or without `all`, to run it. In an offline
-  scan their settings are not fetched.
 - Listed `GIT_CONFIG_*` environment entries are refused for scanners that need
   git `safe.directory` (opengrep); remove the entry from the environment list to
   run such a scanner.

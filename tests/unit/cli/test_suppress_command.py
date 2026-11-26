@@ -149,7 +149,13 @@ class TestAdd:
         [
             (["--symbol", "not valid!", "--file", "src/app.py"], "--symbol"),
             (["--symbol", "risky", "--file", "src/missing.py"], "not a file"),
-            (["--symbol", "risky", "--file", "../outside.py"], "not a path inside"),
+            # A relative --file is resolved against the source directory first, as
+            # the scan's resolver does, so one that leaves it is refused there,
+            # before any lock key is read.
+            (
+                ["--symbol", "risky", "--file", "../outside.py"],
+                "is not inside the source directory",
+            ),
         ],
     )
     def test_bad_input_is_refused_and_writes_nothing(self, repo, args, fragment):

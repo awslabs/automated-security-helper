@@ -16,6 +16,12 @@ single-threaded check passes; the cure is to leave out, in the child, the exit
 hooks a warm import registered through a Rust extension. The first test pins
 the premise (the hook does hang without the cure) so that a polars release that
 fixes it turns the cure into dead code loudly instead of silently.
+
+The premise is a Linux measurement: the hang was found on the ubuntu-24.04-arm
+``e2e-express`` leg and reproduced on x86_64 Linux. On macOS the naive forked
+child exits (every macOS unit leg read ``EXITED`` here), so there is no hang to
+pin and the first test runs on Linux only. The cure is applied on every
+platform express runs on, and the second test holds it everywhere.
 """
 
 import subprocess
@@ -85,6 +91,10 @@ def _run(mode: str) -> str:
     return proc.stdout.strip()
 
 
+@pytest.mark.skipif(
+    sys.platform != "linux",
+    reason="the hang is a Linux measurement; on macOS the naive forked child exits",
+)
 def test_the_exit_hooks_of_a_forked_child_hang_without_the_cure():
     assert _run("naive") == "HUNG"
 

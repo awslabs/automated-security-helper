@@ -257,6 +257,10 @@ class TestTheScannerRunsTheLayerPass:
 
     def _args(self, scanner, tmp_path):
         scanner._image_layers_json = tmp_path / "layers.json"
+        # An engine's own store serves the tag: one store, read twice within
+        # one scan, so the join is sound and the pass runs. The bare-tag rows
+        # below clear this to pin the guard.
+        scanner._image_engine_socket = "/run/docker.sock"
         return ["trivy", "image", "--format", "sarif", "--output", "/o.sarif", "ref"]
 
     def test_the_second_pass_asks_for_json_and_fills_the_column(
@@ -294,3 +298,107 @@ class TestTheScannerRunsTheLayerPass:
         )
         report = _captured_sarif()
         assert scanner._attach_image_layers(report, self._args(scanner, tmp_path)) == 0
+
+    def test_a_bare_tag_with_no_engine_store_skips_the_pass(
+        self, tmp_path, monkeypatch
+    ):
+        # A tag no local store serves can resolve to a DIFFERENT manifest on
+        # the second pull, and layers joined across two images attribute the
+        # wrong build: the pass is skipped, running nothing.
+        scanner = self._scanner(tmp_path)
+
+        def never(argv, **kwargs):  # pragma: no cover - the assertion
+            raise AssertionError("the skipped pass must not run the tool")
+
+        monkeypatch.setattr(
+            "automated_security_helper.utils.subprocess_utils.spawn_run", never
+        )
+        args = self._args(scanner, tmp_path)
+        scanner._image_engine_socket = None
+        report = _captured_sarif()
+        assert scanner._attach_image_layers(report, args) == 0
+        assert _layer_of(report) == [None]
+
+    def test_a_digest_pinned_reference_runs_without_an_engine(
+        self, tmp_path, monkeypatch
+    ):
+        # A digest names one manifest wherever it is read, so the join is
+        # sound with no local store at all.
+        scanner = self._scanner(tmp_path)
+        document = json.loads(
+            (CAPTURED / "trivy-0.76.2-secret-image.json").read_text(encoding="utf-8")
+        )
+        seen = self._fake_spawn(monkeypatch, document)
+        args = self._args(scanner, tmp_path)
+        scanner._image_engine_socket = None
+        args[-1] = "registry.example.com/team/app@sha256:" + "a" * 64
+        report = _captured_sarif()
+        assert scanner._attach_image_layers(report, args) == 1
+        assert _layer_of(report) == [LAYER]
+        assert seen["argv"][-1] == args[-1]
+
+    @pytest.mark.parametrize(
+        "locator_args",
+        [
+            pytest.param(
+                {"ref": "registry.example.com/team/app@sha256:" + "a" * 64},
+                id="written-pinned",
+            ),
+            pytest.param(
+                {
+                    "ref": "registry.example.com/team/app:1.2.3",
+                    "resolved_digest": "sha256:" + "a" * 64,
+                    "resolved_from": "registry",
+                },
+                id="registry-resolved-tag",
+            ),
+        ],
+    )
+    def test_the_scans_own_argv_names_a_pinned_subject_last(
+        self, tmp_path, monkeypatch, locator_args
+    ):
+        # The rows above build the argv by hand with the reference last, the
+        # token the pass reads as the subject. Built by the scan's own
+        # resolution, a pinned reference read remotely must be that token too:
+        # with the output file last, the pass skipped a join that is sound.
+        from automated_security_helper.core.asset import ImageLocator
+        from automated_security_helper.core.container_engine import ContainerEngine
+
+        scanner = self._scanner(tmp_path)
+        scanner._image_engine = ContainerEngine.NONE
+        scanner._image_engine_socket = None
+        document = json.loads(
+            (CAPTURED / "trivy-0.76.2-secret-image.json").read_text(encoding="utf-8")
+        )
+        seen = self._fake_spawn(monkeypatch, document)
+        locator = ImageLocator(**locator_args)
+        argv, _results, _env = scanner._execute_image_scan(locator)
+        report = _captured_sarif()
+        assert scanner._attach_image_layers(report, argv) == 1
+        assert _layer_of(report) == [LAYER]
+        assert seen["argv"][-2:] == ["--", locator.pulled_ref()]
+
+    def test_the_scans_own_argv_still_skips_a_bare_tag_with_no_engine(
+        self, tmp_path, monkeypatch
+    ):
+        # The control, through the same resolution: a tag no local store
+        # serves is still not read a second time.
+        from automated_security_helper.core.asset import ImageLocator
+        from automated_security_helper.core.container_engine import ContainerEngine
+
+        scanner = self._scanner(tmp_path)
+        scanner._image_engine = ContainerEngine.NONE
+        scanner._image_engine_socket = None
+
+        def never(argv, **kwargs):  # pragma: no cover - the assertion
+            raise AssertionError("the skipped pass must not run the tool")
+
+        monkeypatch.setattr(
+            "automated_security_helper.utils.subprocess_utils.spawn_run", never
+        )
+        argv, _results, _env = scanner._execute_image_scan(
+            ImageLocator(ref="registry.example.com/team/app:1.2.3")
+        )
+        report = _captured_sarif()
+        assert scanner._attach_image_layers(report, argv) == 0
+        assert _layer_of(report) == [None]
