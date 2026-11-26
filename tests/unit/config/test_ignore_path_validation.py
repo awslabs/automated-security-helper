@@ -425,13 +425,20 @@ class TestIgnorePathValidation:
         assert len(path_errors) == 1, errors
 
 
-#: The advice for a suppression path "docs/" is whatever the suppression matcher
-#: makes of it: 'docs/**/*' while the matcher reads the trailing slash as written,
-#: as it does today (file_path_matches("docs/a.py", "docs/") is False), and none
-#: once it reads "docs/" as the directory's files. The expectation is taken from
-#: the matcher, so a matcher that changes turns this cell red until the advice
-#: changes with it.
-_FOLLOWS_THE_MATCHER = "follows-the-matcher"
+def test_the_matcher_reads_a_glob_free_directory_path_as_its_files():
+    """The premise of the "no advice" cells below, pinned where it is used: under
+    the bare-directory rule (issue #894) a glob-free suppression path, with or
+    without a trailing slash, matches the files below the directory, anchored at
+    the top. It is also what lets the scan drop its old warning that a
+    trailing-slash suppression matches nothing."""
+    from automated_security_helper.utils.suppression_matcher import file_path_matches
+
+    assert file_path_matches("docs/a.py", "docs/") is True
+    assert file_path_matches("docs/a.py", "docs") is True
+    assert file_path_matches("docs/sub/b.py", "docs/") is True
+    # Anchored: not a directory of that name deeper in the tree.
+    assert file_path_matches("pkg/docs/a.py", "docs/") is False
+    assert file_path_matches("pkg/docs/a.py", "docs") is False
 
 
 @pytest.mark.parametrize("checker", ["lint", "validate"])
@@ -443,7 +450,7 @@ _FOLLOWS_THE_MATCHER = "follows-the-matcher"
         ("ignore_paths", "docs", None),
         ("ignore_paths", "docs/", None),
         ("suppressions", "docs", None),
-        ("suppressions", "docs/", _FOLLOWS_THE_MATCHER),
+        ("suppressions", "docs/", None),
         # A "**" pattern's last component names a path exactly, so the files
         # inside the directory do not match, and the advice gives the spelling.
         ("ignore_paths", "**/docs", "'**/docs/'"),
@@ -459,12 +466,6 @@ def test_one_spelling_for_every_file_inside_a_directory(
     path, where ``**/docs/**`` would also match a path named exactly ``docs``.
     A glob-free path gets no advice: under the bare-directory rule (issue #894)
     it already matches the directory's files, with or without the slash."""
-    if advice == _FOLLOWS_THE_MATCHER:
-        from automated_security_helper.utils.suppression_matcher import (
-            file_path_matches,
-        )
-
-        advice = None if file_path_matches("docs/a.py", "docs/") else "'docs/**/*'"
     entry = {"path": path, "reason": "r"}
     if section == "suppressions":
         entry["rule_id"] = "R1"
