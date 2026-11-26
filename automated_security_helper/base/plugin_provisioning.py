@@ -185,8 +185,13 @@ OFFLINE_RULESET_BOUND_REASON = (
 
 #: Pins no scanner owns: tools the ENGINE provisions. ``uv`` runs every ``uv_python``
 #: scanner, so it belongs to none of them. Tagged without a leading "v" upstream, so the
-#: release URL has none either.
-ENGINE_TOOL_PINS: tuple[ToolPin, ...] = (ToolPin("uv", "0.13.9"),)
+#: release URL has none either. ``crane`` is the registry client that resolves a tag-only
+#: image reference to its digest (``utils/image_digest_resolver.py``); the scan, not any one
+#: scanner, runs it, so it belongs to none of them either.
+ENGINE_TOOL_PINS: tuple[ToolPin, ...] = (
+    ToolPin("crane", "v0.22.1"),
+    ToolPin("uv", "0.13.9"),
+)
 
 # ---------------------------------------------------------------------------
 # One block per scanner that provisions anything. A scanner that provisions nothing
