@@ -119,7 +119,8 @@ class Verdict:
     detail: str
 
     def row(self) -> str:
-        if self.outcome == "excluded":
+        observation = FACET_COLUMNS.get(self.facet)
+        if self.outcome == "excluded" or (observation and observation.excluded):
             counted = "excluded"
         else:
             counted = (
@@ -141,15 +142,32 @@ def judge(
 ) -> Verdict:
     """The verdict for one cell. ``observed`` is (non_null_count, total_results)
     or None when the scanner has no corpus at all."""
-    if FACET_COLUMNS[facet].excluded is not None:
-        return Verdict(scanner, facet, state.value, None, None, "excluded", "G10")
-    non_null, total = observed if observed is not None else (None, None)
-    populated = bool(non_null)
-    cell = f"{scanner}.{facet} declared {state.value}"
+    excluded = FACET_COLUMNS[facet].excluded is not None
     if state is FacetState.UNCONFIRMED:
-        # Neither contamination nor proof: nobody has read a real run for this
-        # cell, so whatever the corpus holds proves nothing yet. It is a fixture
-        # owed, listed in the table and never failed.
+        # Checked before the exclusion: an UNCONFIRMED cell on a column the gate
+        # cannot observe is still a fixture owed, and the owed list is the only
+        # place it is visible. An excluded column has no observation to join.
+        non_null, total = (None, None) if excluded or observed is None else observed
+        cell = f"{scanner}.{facet} declared {state.value}"
+        if bool(non_null):
+            # A populated column is a read: the cell is settled (redeclare it
+            # MAPPED, or N/A or DROPPED with the evidence) or contaminated (fix
+            # the adapter). Left UNCONFIRMED, a value would reach the flat row
+            # from a committed fixture with no check at all.
+            return Verdict(
+                scanner,
+                facet,
+                state.value,
+                non_null,
+                total,
+                "FAIL",
+                f"{cell} (nobody has read a run) but the observed column is "
+                f"populated ({non_null} of {total} results): the cell is "
+                "settled or contaminated: redeclare it MAPPED with its native "
+                f"field, or fix the adapter. {EXITS}",
+            )
+        # Empty or no corpus: nothing proves the cell either way. It is a
+        # fixture owed, listed in the table and never failed.
         return Verdict(
             scanner,
             facet,
@@ -160,6 +178,11 @@ def judge(
             "fixture owed: author or capture the real run that settles the cell, "
             "then redeclare it MAPPED or N/A with the evidence",
         )
+    if excluded:
+        return Verdict(scanner, facet, state.value, None, None, "excluded", "G10")
+    non_null, total = observed if observed is not None else (None, None)
+    populated = bool(non_null)
+    cell = f"{scanner}.{facet} declared {state.value}"
     if state not in (FacetState.MAPPED, FacetState.NA, FacetState.DROPPED):
         # A new FacetState member must be judged on purpose. Without this the
         # chain below ends in an "ok" return that every unhandled state reaches,

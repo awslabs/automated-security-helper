@@ -451,11 +451,13 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
             native_field='result "fingerprints" {"0", "1"}',
         ),
         fix_available=FacetDecl(
-            state=FacetState.DROPPED,
-            native_field='rule properties "isAutofixable"',
-            reason="no flat fix_available write exists for snyk; weak signal "
-            "(autofix availability, not a fixed version); UNCONFIRMED "
-            "against a real tool run",
+            state=FacetState.UNCONFIRMED,
+            reason="UNCONFIRMED: the survey names rule properties "
+            '"isAutofixable" as the candidate field, but no snyk SARIF from '
+            "a real run is committed to show it is there; no flat "
+            "fix_available write exists for snyk, and it would be a weak "
+            "signal (autofix availability, not a fixed version); a `snyk "
+            "code test --sarif` run settles it",
         ),
         remediation_text=FacetDecl(
             state=FacetState.UNCONFIRMED,
@@ -469,10 +471,12 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
             "UNCONFIRMED against a real tool run",
         ),
         references=FacetDecl(
-            state=FacetState.DROPPED,
-            native_field='rule "help.markdown" and properties "exampleCommitFixes"',
-            reason="the rule help survives the SARIF model and dies at the "
-            "flat reader; UNCONFIRMED against a real tool run",
+            state=FacetState.UNCONFIRMED,
+            reason='UNCONFIRMED: the survey reads rule "help.markdown" and '
+            'properties "exampleCommitFixes" as the candidate fields, and the '
+            "rule help survives the SARIF model and dies at the flat reader, "
+            "but no snyk SARIF from a real run is committed to show they are "
+            "there; a `snyk code test --sarif` run settles it",
         ),
         tags=FacetDecl(
             state=FacetState.MAPPED,
@@ -483,13 +487,15 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
             "rule-level tags are what the flat row carries",
         ),
         extras=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="result properties bag, passed through the SARIF model "
-            "untouched and read whole into the flat properties",
-            reason="the rule properties bag survives the SARIF model but the "
-            "flat reader takes only the rule's tags and helpUri from the "
-            "rule, so rule-bag keys (cwe, isAutofixable, exampleCommitFixes) "
-            "reach the flat row only through the cells above that name them",
+            state=FacetState.UNCONFIRMED,
+            reason="UNCONFIRMED: no snyk SARIF from a real run is committed "
+            "and the extras column is not observed by the gate, so what the "
+            "result properties bag carries is unread; the rule properties bag "
+            "survives the SARIF model but the flat reader takes only the "
+            "rule's tags and helpUri from the rule, so rule-bag keys (cwe, "
+            "isAutofixable, exampleCommitFixes) reach the flat row only "
+            "through the cells above that name them; a `snyk code test "
+            "--sarif` capture settles it",
         ),
     )
 
