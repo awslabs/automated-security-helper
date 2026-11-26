@@ -275,6 +275,15 @@ class TestEnumerationRefusals:
 
 @pytest.mark.unit
 class TestMainOverTheRealPins:
+    """main() over the real pins, every lookup a stub.
+
+    main() looks up the pins outside tool_downloads.py as well (``REPO_PINS``: the
+    workflow, Dockerfile and script pins, on GitHub, Docker Hub, a snapshot archive and
+    pyproject.toml), so every fetcher is the stub and every pin main() enumerates has an
+    answer. A pin left without one would be a failed lookup, which exits 2 whatever the
+    hold says.
+    """
+
     def _run(self, monkeypatch, capsys, latest_for, argv):
         def lookup(project: str) -> str:
             return latest_for(project)
@@ -283,8 +292,7 @@ class TestMainOverTheRealPins:
             checker,
             "DEFAULT_FETCHERS",
             {
-                checker.GITHUB: lookup,
-                checker.PYPI: lookup,
+                **dict.fromkeys(checker.DEFAULT_FETCHERS, lookup),
                 checker.RUBYGEMS: lambda project: [
                     {
                         "number": lookup(project),
@@ -299,10 +307,14 @@ class TestMainOverTheRealPins:
         return code, capsys.readouterr().out
 
     def _versions(self) -> dict[str, str]:
-        return {
-            p.project: p.version
-            for p in checker.enumerate_pins(checker.load_pins_module())
-        }
+        """project -> pinned value over every pin main() looks up, so the stub reports
+        each one current. A tool pinned both in the pins module and in a workflow
+        (cfn-guard, actionlint) shares one project; the first spelling answers both."""
+        module_pins = checker.enumerate_pins(checker.load_pins_module())
+        versions: dict[str, str] = {}
+        for p in module_pins + checker.enumerate_repo_pins():
+            versions.setdefault(p.project, p.version)
+        return versions
 
     def test_pygit2_at_its_acknowledged_release_passes_and_is_listed(
         self, monkeypatch, capsys

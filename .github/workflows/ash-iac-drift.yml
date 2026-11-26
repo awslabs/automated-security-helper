@@ -1827,7 +1827,11 @@ jobs:
   # without a reviewed edit. cfn-guard has no PyPI package; the release tarball is
   # fetched by exact version and checked against the sha256 below, which is the
   # digest GitHub publishes for that asset. Bumping either is an edit to this file
-  # or to deploy/tests/cfn-lint-requirements.in.
+  # or to deploy/tests/cfn-lint-requirements.in. The cfn-guard version is the release
+  # the cfn-guard plugin pins (its ToolPin in automated_security_helper/base/
+  # plugin_provisioning.py); scripts/check_pinned_tool_versions.py reads this line as
+  # one of its REPO_PINS, and its tests require the two to name the same release, so a
+  # bump of one is a bump of both.
   #
   # The self-test runs first and on every run, not only when the script changes.
   # It breaks copies of the committed templates on purpose and requires each tool
@@ -1844,12 +1848,12 @@ jobs:
     permissions:
       contents: read
     env:
-      CFN_GUARD_VERSION: "3.2.1"
+      CFN_GUARD_VERSION: "3.3.0"
       CFN_GUARD_ASSET: cfn-guard-v3-x86_64-ubuntu-latest.tar.gz
       # A published release digest, public by construction. detect-secrets reads any
       # 64-character hex string as a high-entropy secret, so the line carries its
       # inline marker, as the checksums in tool_downloads.py do.
-      CFN_GUARD_SHA256: 09c2b8cfd81d513374a8da89d4805dc55006a3da52bbf598e272022d4d198e94  # pragma: allowlist secret
+      CFN_GUARD_SHA256: cd7559616dc114565da1326c2ad7463a3c91cd1499f335406fff04747218c8ed  # pragma: allowlist secret
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
