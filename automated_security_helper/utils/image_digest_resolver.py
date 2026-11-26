@@ -19,9 +19,10 @@ order, and the first that answers wins:
    is read. An image the daemon does not hold answers 404 and the ladder goes on.
 2. **The registry.** ``crane digest`` (the pinned ``crane`` of
    ``utils/tool_downloads``) reads the manifest's digest from the registry. It
-   is a registry read, so it is network use: offline mode never makes it, and
-   the three scanners that read images declare the fetch in their
-   operational-facets rows (``Fetched.IMAGE_DIGEST``).
+   is a registry read, so it is network use: offline mode never makes it,
+   grype and trivy -- the image scanners whose FINDING ids the digest keys --
+   declare the fetch in their operational-facets rows
+   (``Fetched.IMAGE_DIGEST``; syft reports no findings, so it declares none).
 
 Which rung answered is logged once, at INFO. When EVERY rung fails the locator
 is returned unchanged, the ids key on the reference text exactly as they did
