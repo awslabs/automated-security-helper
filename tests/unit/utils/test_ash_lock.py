@@ -1,29 +1,31 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""``.ash.lock`` binds a symbol suppression to its file's content hash.
+"""``.ash.lock`` binds a symbol suppression to syntax-tree digests of its file.
 
 Why this exists
 ---------------
 A symbol suppression follows its definition wherever edits move it, so a
-rewritten definition kept the old review. The lock records the hash of the
-file's bytes when the suppression was reviewed:
+rewritten definition kept the old review. The lock records digests of the
+file's parse when the suppression was reviewed:
 
 - a symbol suppression whose file has no lock entry is refused where the config
   is validated, and the message names the command that creates the entry;
-- when the file's hash no longer matches, the suppression does not apply (its
-  finding returns) and one notice names the file, the suppressions and the
-  refresh command; ``ash suppress refresh`` cures it;
+- when the file's code changes, the suppression does not apply (its finding
+  returns) and one notice names the file, the suppressions and the refresh
+  command; ``ash suppress refresh`` cures it;
 - a line-pinned suppression is not touched by any of it;
-- the same tree always produces the same lock bytes.
+- the same tree always produces the same lock bytes, and the version 2 document
+  is read strictly (version by type, no unknown key, one shape per entry).
 
-The inert-on-mismatch tests parse real source with tree-sitter, which is the
-optional ``symbols`` extra: without it they skip, unless
-``ASH_REQUIRE_SYMBOLS_EXTRA`` is set, as CI sets it.
+Writing an entry parses the file with tree-sitter, the optional ``symbols``
+extra: without it those tests skip, unless ``ASH_REQUIRE_SYMBOLS_EXTRA`` is set,
+as CI sets it. The version 2 document tests read fixture JSON and parse nothing.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import sys
@@ -60,6 +62,7 @@ from automated_security_helper.utils.ash_lock import (
     refuse_unlocked_symbol_suppressions,
 )
 from automated_security_helper.utils.sarif_utils import apply_suppressions_to_sarif
+from tests.utils.optional_extras import require_symbols_extra
 
 pytestmark = pytest.mark.unit
 
@@ -158,6 +161,8 @@ def _apply(root: Path, tmp_path: Path, suppressions, lines, context=None):
 
 
 def _lock(root: Path, *scopes: LockScope) -> AshLock:
+    # A lock entry records digests of the file's parse: binding needs the extra.
+    require_symbols_extra()
     lock = AshLock(source_dir=root)
     for scope in scopes:
         lock.bind("src/app.py", scope, now="2026-01-01T00:00:00Z")
@@ -205,6 +210,7 @@ class TestRefusalWithoutALockEntry:
         refuse_unlocked_symbol_suppressions([_symbol_suppression()], root)
 
     def test_an_entry_for_another_file_does_not(self, tmp_path):
+        require_symbols_extra()
         root = _tree(tmp_path)
         (root / "src" / "b.py").write_text("x = 1\n", encoding="utf-8")
         lock = AshLock(source_dir=root)
@@ -623,6 +629,7 @@ class TestLockFile:
         ).read_bytes()
 
     def test_the_bytes_are_sorted_and_end_in_one_newline(self, tmp_path):
+        require_symbols_extra()
         root = _tree(tmp_path)
         (root / "src" / "a.py").write_text("x = 1\n", encoding="utf-8")
         lock = AshLock(source_dir=root)
@@ -631,7 +638,14 @@ class TestLockFile:
         text = lock.to_text()
         assert text.endswith("}\n") and not text.endswith("\n\n")
         assert text.index('"src/a.py"') < text.index('"src/app.py"')
-        assert text.index('"created"') < text.index('"scopes"') < text.index('"sha256"')
+        # A tree entry's keys: created < digests < grammar < scopes < source_sha256.
+        assert (
+            text.index('"created"')
+            < text.index('"digests"')
+            < text.index('"grammar"')
+            < text.index('"scopes"')
+            < text.index('"source_sha256"')
+        )
 
     def test_a_reloaded_lock_writes_the_same_bytes(self, tmp_path):
         root = _tree(tmp_path)
@@ -724,6 +738,7 @@ class TestTheLockIsTheRootDotfile:
         monkeypatch.setattr(ash_lock_module, "_LEGACY_WARNED", set())
         root = _tree(tmp_path)
         _legacy_lock(root)
+        require_symbols_extra()
         (root / "src" / "b.py").write_text("x = 1\n", encoding="utf-8")
         current = AshLock(source_dir=root)
         current.bind("src/b.py", LockScope("B101", "f"))
@@ -732,3 +747,197 @@ class TestTheLockIsTheRootDotfile:
             lock = AshLock.load(root)
         assert set(lock.entries) == {"src/b.py"} and not lock.from_legacy
         assert not [r for r in caplog.records if "deprecated" in r.getMessage()]
+
+
+# --- the version 2 document, read and written with no parse -------------------
+
+
+def _tree_entry() -> dict:
+    return {
+        "created": "2026-01-01T00:00:00Z",
+        "digests": {
+            "algorithm": "ash-ast-1",
+            "file": "a" * 64,
+            "symbols": {"risky": "b" * 64},
+        },
+        "grammar": {
+            "distribution": "tree-sitter-python 0.25.0",
+            "fingerprint": "c" * 64,
+            "language": "python",
+            "tree_sitter": "0.26.0",
+        },
+        # Sorted by rule id then symbol, as the writer sorts them.
+        "scopes": [
+            {"invalidation_scope": "symbol", "rule_id": "B602", "symbol": "risky"},
+            {"invalidation_scope": "file", "rule_id": "B603", "symbol": "other"},
+        ],
+        "source_sha256": "d" * 64,
+    }
+
+
+def _legacy_entry() -> dict:
+    return {
+        "created": "2026-01-01T00:00:00Z",
+        "scopes": [{"rule_id": "B604", "symbol": "install"}],
+        "sha256": "e" * 64,
+    }
+
+
+def _document(version=2, **entries) -> dict:
+    if not entries:
+        entries = {"src/app.py": _tree_entry(), "src/old.py": _legacy_entry()}
+    return {"files": entries, "version": version}
+
+
+def _text(document) -> str:
+    return json.dumps(document, indent=2, sort_keys=True) + "\n"
+
+
+def _load(tmp_path: Path, document) -> AshLock:
+    (tmp_path / LOCK_RELATIVE_PATH).write_text(_text(document), encoding="utf-8")
+    return AshLock.load(tmp_path)
+
+
+def _refused(tmp_path: Path, document, match=None) -> str:
+    with pytest.raises(AshLockError, match=match) as caught:
+        _load(tmp_path, document)
+    return str(caught.value)
+
+
+class TestVersion2Document:
+    def test_a_tree_entry_and_a_version_1_entry_round_trip_byte_for_byte(
+        self, tmp_path
+    ):
+        document = _document()
+        lock = _load(tmp_path, document)
+        assert lock.entries["src/old.py"].is_legacy
+        assert not lock.entries["src/app.py"].is_legacy
+        assert lock.to_text() == _text(document)
+        assert lock.to_text().endswith("}\n") and not lock.to_text().endswith("\n\n")
+
+    @pytest.mark.parametrize("version", [3, True, 1.0, "2", None])
+    def test_the_version_is_compared_by_type(self, tmp_path, version):
+        _refused(tmp_path, _document(version=version), "version 1 or 2")
+
+    def test_versions_1_and_2_load(self, tmp_path):
+        assert _load(tmp_path, _document(version=1, **{"a.py": _legacy_entry()}))
+        assert _load(tmp_path, _document(version=2))
+
+    @pytest.mark.parametrize(
+        "field", ["source_sha256", "digests", "invalidation_scope"]
+    )
+    def test_a_version_1_document_holds_no_version_2_field(self, tmp_path, field):
+        entry = _legacy_entry()
+        if field == "invalidation_scope":
+            entry["scopes"][0]["invalidation_scope"] = "file"
+        else:
+            entry[field] = _tree_entry()[field]
+        _refused(tmp_path, _document(version=1, **{"a.py": entry}), "version 2 fields")
+        loaded = _load(tmp_path, _document(version=1, **{"a.py": _legacy_entry()}))
+        assert loaded.entries["a.py"].is_legacy, "the control: the field removed"
+
+    def test_a_version_1_document_still_ignores_unknown_keys(self, tmp_path):
+        entry = dict(_legacy_entry(), comment="kept by hand")
+        assert _load(tmp_path, _document(version=1, **{"a.py": entry})).entries["a.py"]
+
+    @pytest.mark.parametrize(
+        "level", ["document", "entry", "digests", "grammar", "scope", "legacy"]
+    )
+    def test_a_version_2_document_refuses_an_unknown_key(self, tmp_path, level):
+        document = _document()
+        tree = document["files"]["src/app.py"]
+        target = {
+            "document": document,
+            "entry": tree,
+            "digests": tree["digests"],
+            "grammar": tree["grammar"],
+            "scope": tree["scopes"][0],
+            "legacy": document["files"]["src/old.py"],
+        }[level]
+        target["extra"] = 1
+        assert "unknown key 'extra'" in _refused(tmp_path, document)
+
+    @pytest.mark.parametrize(
+        "case",
+        [
+            "sha256-beside-digests",
+            "no-grammar",
+            "kind-on-legacy",
+            "tree-scope-without-kind",
+        ],
+    )
+    def test_an_entry_is_a_tree_entry_or_a_version_1_entry(self, tmp_path, case):
+        document = _document()
+        tree = document["files"]["src/app.py"]
+        legacy = document["files"]["src/old.py"]
+        if case == "sha256-beside-digests":
+            tree["sha256"] = "e" * 64
+        elif case == "no-grammar":
+            del tree["grammar"]
+        elif case == "kind-on-legacy":
+            legacy["scopes"][0]["invalidation_scope"] = "file"
+        else:
+            del tree["scopes"][0]["invalidation_scope"]
+        _refused(tmp_path, document)
+        assert _load(tmp_path, _document()), "the control"
+
+    @pytest.mark.parametrize("value", ["A" * 64, "a" * 63, "g" * 64])
+    def test_new_digest_fields_are_lowercase_hex(self, tmp_path, value):
+        for path in (
+            ("source_sha256",),
+            ("digests", "file"),
+            ("grammar", "fingerprint"),
+        ):
+            document = _document()
+            target = document["files"]["src/app.py"]
+            for part in path[:-1]:
+                target = target[part]
+            target[path[-1]] = value
+            _refused(tmp_path, document)
+        document = _document()
+        document["files"]["src/old.py"]["sha256"] = "E" * 64
+        assert _load(tmp_path, document), (
+            "a version 1 sha256 keeps its length check only"
+        )
+
+    def test_a_tree_entry_records_a_scope_once(self, tmp_path):
+        document = _document()
+        document["files"]["src/app.py"]["scopes"].append(
+            {"invalidation_scope": "symbol", "rule_id": "b602", "symbol": "risky"}
+        )
+        _refused(tmp_path, document, "twice")
+        legacy = _legacy_entry()
+        legacy["scopes"].append({"rule_id": "b604", "symbol": "install"})
+        loaded = _load(tmp_path, _document(**{"src/old.py": legacy}))
+        assert len(loaded.entries["src/old.py"].scopes) == 2
+
+    @pytest.mark.parametrize("case", ["extra", "missing", "file-scoped"])
+    def test_symbol_digests_match_the_symbol_scoped_suppressions(self, tmp_path, case):
+        document = _document()
+        tree = document["files"]["src/app.py"]
+        if case == "extra":
+            tree["digests"]["symbols"]["more"] = "b" * 64
+        elif case == "missing":
+            tree["digests"]["symbols"] = {}
+        else:
+            tree["digests"]["symbols"]["other"] = "b" * 64
+        _refused(tmp_path, document, "symbol digests")
+
+    def test_an_unknown_algorithm_is_read(self, tmp_path):
+        document = _document()
+        document["files"]["src/app.py"]["digests"]["algorithm"] = "ash-ast-9"
+        assert _load(tmp_path, document).entries["src/app.py"].algorithm == "ash-ast-9"
+        document["files"]["src/app.py"]["digests"]["algorithm"] = ""
+        _refused(tmp_path, document)
+
+    def test_a_version_1_lock_is_written_back_as_version_2_entry_for_entry(
+        self, tmp_path
+    ):
+        document = _document(version=1, **{"src/old.py": _legacy_entry()})
+        lock = _load(tmp_path, document)
+        lock.save()
+        written = json.loads(
+            (tmp_path / LOCK_RELATIVE_PATH).read_text(encoding="utf-8")
+        )
+        assert written["version"] == 2
+        assert written["files"] == document["files"]

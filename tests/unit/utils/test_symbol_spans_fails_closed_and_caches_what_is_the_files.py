@@ -8,9 +8,10 @@ refused rather than accepted and then matching nothing. A tree-sitter binding
 whose API is not the one called (TypeError) is a grammar that is not available,
 and fails closed as a missing one does. SymbolResolver.contains returns False,
 never raises, for a path with an embedded NUL, and for a region that ends
-before it starts. The index cache keeps a result only when it is the file's
-own: a missing grammar and a read failure are not cached, and a file whose stat
-moved during the read is not cached under the stat read first.
+before it starts. The analysis cache keeps a result only when it is the bytes'
+own: a missing grammar and a read failure are not cached. It is keyed by the
+bytes' SHA-256, never by stat, so a same-size rewrite that keeps the mtime is
+analyzed as the new bytes, and it is bounded.
 
 With the symbols extra: a TypeScript type alias contributes a segment, and a
 method's decorator line is inside the method's span.
@@ -19,7 +20,6 @@ method's decorator line is inside the method's span.
 from __future__ import annotations
 
 import os
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -106,39 +106,47 @@ def clean_cache():
 def test_a_missing_grammar_is_answered_but_not_cached(
     tmp_path, monkeypatch, clean_cache
 ):
+    _require_symbols_extra()
     source = tmp_path / "a.py"
     source.write_text("def f():\n    pass\n", encoding="utf-8")
     calls = []
+    real_parse = symbol_spans._parse
 
-    def index(source_bytes, grammar):
+    def parse(source_bytes, grammar):
         calls.append(1)
         if len(calls) == 1:
             raise SymbolsUnavailableError("not installed yet")
-        return {"f": [(1, 2)]}
+        return real_parse(source_bytes, grammar)
 
-    monkeypatch.setattr(symbol_spans, "index_symbols", index)
+    monkeypatch.setattr(symbol_spans, "_parse", parse)
 
     first = symbol_spans._index_file(source)
     second = symbol_spans._index_file(source)
+    third = symbol_spans._index_file(source)
 
     assert isinstance(first, symbol_spans._Unresolvable)
+    assert "not installed yet" in first.reason
     assert isinstance(second, symbol_spans._Indexed), second
-    assert len(calls) == 2
+    # Parsed again after the miss, then served from the cache: the clean parse
+    # is the bytes' own.
+    assert isinstance(third, symbol_spans._Indexed) and len(calls) == 2
 
 
 def test_a_read_failure_is_answered_but_not_cached(tmp_path, monkeypatch, clean_cache):
+    _require_symbols_extra()
+    from automated_security_helper.utils import ash_lock
+
     source = tmp_path / "a.py"
     source.write_text("def f():\n    pass\n", encoding="utf-8")
-    real_read = Path.read_bytes
+    real_read = ash_lock.read_bounded
     failures = [PermissionError(13, "Permission denied")]
 
-    def read_bytes(self):
+    def read_bounded(path):
         if failures:
             raise failures.pop()
-        return real_read(self)
+        return real_read(path)
 
-    monkeypatch.setattr(Path, "read_bytes", read_bytes)
-    monkeypatch.setattr(symbol_spans, "index_symbols", lambda s, g: {"f": [(1, 2)]})
+    monkeypatch.setattr(ash_lock, "read_bounded", read_bounded)
 
     first = symbol_spans._index_file(source)
     second = symbol_spans._index_file(source)
@@ -148,28 +156,43 @@ def test_a_read_failure_is_answered_but_not_cached(tmp_path, monkeypatch, clean_
     assert isinstance(second, symbol_spans._Indexed), second
 
 
-def test_a_file_that_changes_during_the_read_is_not_cached_under_the_old_stat(
-    tmp_path, monkeypatch, clean_cache
+def test_a_same_size_rewrite_that_keeps_the_mtime_is_analyzed_as_the_new_bytes(
+    tmp_path, clean_cache
 ):
+    # The cache is keyed by the bytes' SHA-256, never by stat. Keyed by
+    # (path, mtime_ns, size), a rewrite that keeps both (a restore by tar,
+    # rsync -t or cp -p, in a long-lived process) was answered with the old
+    # bytes' spans while its lock digest read the new bytes as current.
+    _require_symbols_extra()
     source = tmp_path / "a.py"
-    source.write_text("def f():\n    pass\n", encoding="utf-8")
-    stat = source.stat()
-    calls = []
+    source.write_text("def f():\n    return 1\n\n\ndef g():\n    return 2\n", "utf-8")
+    before = source.stat()
+    first = SymbolResolver(tmp_path)
+    assert first.contains("a.py", 2, 2, "f") is True, "the control"
+    source.write_text("def g():\n    return 1\n\n\ndef f():\n    return 2\n", "utf-8")
+    os.utime(source, ns=(before.st_atime_ns, before.st_mtime_ns))
+    after = source.stat()
+    assert (after.st_mtime_ns, after.st_size) == (before.st_mtime_ns, before.st_size)
 
-    def index(source_bytes, grammar):
-        calls.append(1)
-        if len(calls) == 1:
-            # The file is rewritten while this parse runs: a longer file.
-            source.write_text("def f():\n    pass\n\ndef g():\n    pass\n", "utf-8")
-        return {"f": [(1, 2)]}
+    second = SymbolResolver(tmp_path)
 
-    monkeypatch.setattr(symbol_spans, "index_symbols", index)
+    assert second.contains("a.py", 2, 2, "f") is False
+    assert second.contains("a.py", 5, 5, "f") is True
 
-    symbol_spans._index_file(source)
-    key = (str(source), stat.st_mtime_ns, stat.st_size)
 
-    assert key not in symbol_spans._INDEX_CACHE
-    assert source.stat().st_size != stat.st_size, "the control: the file changed"
+def test_the_analysis_cache_is_bounded(tmp_path, monkeypatch, clean_cache):
+    _require_symbols_extra()
+    monkeypatch.setattr(symbol_spans, "_ANALYSIS_CACHE_MAX", 3)
+    for n in range(3):
+        symbol_spans.analyze(f"x = {n}\n".encode(), "a.py")
+    assert len(symbol_spans._ANALYSIS_CACHE) == 3, "the control: under the bound"
+    symbol_spans.analyze(b"x = 3\n", "a.py")
+    assert len(symbol_spans._ANALYSIS_CACHE) == 3
+    keys = [k[0] for k in symbol_spans._ANALYSIS_CACHE]
+    import hashlib
+
+    assert hashlib.sha256(b"x = 0\n").hexdigest() not in keys
+    assert hashlib.sha256(b"x = 3\n").hexdigest() in keys
 
 
 def _require_symbols_extra() -> None:

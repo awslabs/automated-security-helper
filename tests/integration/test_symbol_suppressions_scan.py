@@ -10,6 +10,11 @@ the same file and must stay visible, which is the narrowness this feature
 exists for. A second entry names a function that does not exist, and must land
 in the unused-suppressions report.
 
+The fixture is scanned in three copies: ``app.py`` is locked at file scope and
+``app_symbol.py`` and ``app_symbol_edit.py`` at symbol scope. After an appended
+comment the file-scope suppression stops applying and the symbol-scope one does
+not; after an edit inside ``risky`` the symbol-scope suppression stops too.
+
 The scan runs as a subprocess of the installed ``ash`` entry point, so the
 config is read, validated and applied by the same code a user runs.
 """
@@ -64,37 +69,64 @@ def _require_symbols_extra() -> None:
         pytest.skip(f"[symbols] extra not installed ({exc})")
 
 
+#: The fixture's copies and the invalidation scope each one's risky is locked at.
+FILES = {"app.py": "file", "app_symbol.py": "symbol", "app_symbol_edit.py": "symbol"}
+
+
 def _line(marker: str) -> int:
     hits = [i for i, t in enumerate(FIXTURE.splitlines(), 1) if marker in t]
     assert len(hits) == 1
     return hits[0]
 
 
+def _b602(sarif_path: Path) -> dict:
+    """{file: {line: suppressed}} for every B602 result of the report."""
+    sarif = json.loads(sarif_path.read_text(encoding="utf-8"))
+    found: dict = {}
+    for run in sarif["runs"]:
+        for result in run.get("results", []):
+            if result.get("ruleId") != "B602":
+                continue
+            location = result["locations"][0]["physicalLocation"]
+            uri = location["artifactLocation"]["uri"]
+            found.setdefault(uri, {})[location["region"]["startLine"]] = bool(
+                result.get("suppressions")
+            )
+    return found
+
+
 def test_symbol_suppression_in_a_real_bandit_scan(tmp_path):
     _require_symbols_extra()
     source = tmp_path / "project"
     source.mkdir()
-    (source / "app.py").write_text(FIXTURE, encoding="utf-8")
+    # app.py is locked at file scope; app_symbol.py and app_symbol_edit.py, the
+    # same code, at symbol scope.
+    for name in FILES:
+        (source / name).write_text(FIXTURE, encoding="utf-8")
     # A symbol suppression needs its (rule_id, symbol) scope recorded on its
-    # file's .ash.lock entry; the scan refuses the config otherwise. Both
-    # config entries below are bound, and the key is built with lock_key, the
+    # file's .ash.lock entry; the scan refuses the config otherwise. Every
+    # config entry below is bound, and the key is built with lock_key, the
     # normalization `ash suppress add` and the scan's resolver share.
     from automated_security_helper.utils.ash_lock import AshLock, LockScope, lock_key
 
-    key = lock_key("app.py")
-    assert key is not None
     lock = AshLock(source_dir=source)
-    lock.bind(key, LockScope("B602", "risky"))
-    lock.bind(key, LockScope("B602", "deleted_function"))
+    for name, kind in FILES.items():
+        key = lock_key(name)
+        assert key is not None
+        lock.bind(key, LockScope("B602", "risky"), invalidation_scope=kind)
+    lock.bind("app.py", LockScope("B602", "deleted_function"))
     lock.save()
     output = tmp_path / "out"
     config_path = tmp_path / "ash.yaml"
-    live = {
-        "rule_id": "B602",
-        "path": "app.py",
-        "symbol": "risky",
-        "reason": "cmd is a constant at every call site",
-    }
+    live = [
+        {
+            "rule_id": "B602",
+            "path": name,
+            "symbol": "risky",
+            "reason": "cmd is a constant at every call site",
+        }
+        for name in FILES
+    ]
     gone = {
         "rule_id": "B602",
         "path": "app.py",
@@ -106,7 +138,7 @@ def test_symbol_suppression_in_a_real_bandit_scan(tmp_path):
             {
                 "project_name": "symbol-suppression-e2e",
                 "fail_on_findings": False,
-                "global_settings": {"suppressions": [live, gone]},
+                "global_settings": {"suppressions": [*live, gone]},
             }
         ),
         encoding="utf-8",
@@ -142,23 +174,19 @@ def test_symbol_suppression_in_a_real_bandit_scan(tmp_path):
 
     sarif_path = output / "reports" / "ash.sarif"
     assert sarif_path.exists(), log
-    sarif = json.loads(sarif_path.read_text(encoding="utf-8"))
-    b602 = {}
-    for run in sarif["runs"]:
-        for result in run.get("results", []):
-            if result.get("ruleId") != "B602":
-                continue
-            region = result["locations"][0]["physicalLocation"]["region"]
-            b602[region["startLine"]] = bool(result.get("suppressions"))
+    b602 = _b602(sarif_path)
 
     inside = _line("# inside risky")
     sibling = _line("# inside also_risky")
     module_level = _line("# module level")
-    # All three findings are present, or the assertions below prove nothing.
-    assert set(b602) == {inside, sibling, module_level}, (b602, log)
-    assert b602[inside] is True, log
-    assert b602[sibling] is False, log
-    assert b602[module_level] is False, log
+    for name in FILES:
+        found = b602.get(name, {})
+        # All three findings are present, and the one inside risky is
+        # suppressed in every file, or the second scan proves nothing.
+        assert set(found) == {inside, sibling, module_level}, (name, b602, log)
+        assert found[inside] is True, (name, log)
+        assert found[sibling] is False, (name, log)
+        assert found[module_level] is False, (name, log)
 
     unused = json.loads(
         (output / "reports" / "ash.unused-suppressions.json").read_text(
@@ -171,9 +199,18 @@ def test_symbol_suppression_in_a_real_bandit_scan(tmp_path):
 
     # The guarantee the lock exists for: after an edit to the locked file the
     # suppression stops applying and the finding inside `risky` comes back.
-    (source / "app.py").write_text(
-        FIXTURE + "# edited after review\n", encoding="utf-8"
+    # Under symbol scope only an edit inside `risky` does that: the same
+    # appended comment leaves app_symbol.py's suppression applying.
+    for name in ("app.py", "app_symbol.py"):
+        (source / name).write_text(
+            FIXTURE + "# edited after review\n", encoding="utf-8"
+        )
+    edited = FIXTURE.replace(
+        "return subprocess.call(cmd, shell=True)  # inside risky",
+        "return subprocess.call(cmd.strip(), shell=True)  # inside risky",
     )
+    assert edited != FIXTURE
+    (source / "app_symbol_edit.py").write_text(edited, encoding="utf-8")
     second_output = tmp_path / "out-after-edit"
     second = subprocess.run(
         [
@@ -205,12 +242,10 @@ def test_symbol_suppression_in_a_real_bandit_scan(tmp_path):
     )
     second_sarif_path = second_output / "reports" / "ash.sarif"
     assert second_sarif_path.exists(), second_log
-    second_sarif = json.loads(second_sarif_path.read_text(encoding="utf-8"))
-    stale_b602 = {}
-    for run in second_sarif["runs"]:
-        for result in run.get("results", []):
-            if result.get("ruleId") != "B602":
-                continue
-            region = result["locations"][0]["physicalLocation"]["region"]
-            stale_b602[region["startLine"]] = bool(result.get("suppressions"))
-    assert stale_b602.get(inside) is False, (stale_b602, second_log)
+    after = _b602(second_sarif_path)
+    assert after.get("app.py", {}).get(inside) is False, (after, second_log)
+    assert after.get("app_symbol.py", {}).get(inside) is True, (after, second_log)
+    assert after.get("app_symbol_edit.py", {}).get(inside) is False, (
+        after,
+        second_log,
+    )

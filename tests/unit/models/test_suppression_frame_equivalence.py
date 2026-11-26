@@ -84,8 +84,13 @@ class REFERENCE:
         if entry.symbol is not None:
             if symbol_resolver is None:
                 return False
+            # The entry's rule id picks its own recorded .ash.lock scope.
             return symbol_resolver.contains(
-                finding.file_path, finding.line_start, finding.line_end, entry.symbol
+                finding.file_path,
+                finding.line_start,
+                finding.line_end,
+                entry.symbol,
+                rule_id=entry.rule_id,
             )
         return True
 
@@ -183,9 +188,15 @@ class JournalResolver:
     def __init__(self, journal: Journal, answers: dict) -> None:
         self.journal, self.answers = journal, answers
 
-    def contains(self, file_path, line_start, line_end, symbol) -> bool:
-        self.journal.events.append(("symbol", file_path, line_start, line_end, symbol))
-        return self.answers.get(symbol, False)
+    def contains(
+        self, file_path, line_start, line_end, symbol, *, rule_id=None
+    ) -> bool:
+        self.journal.events.append(
+            ("symbol", file_path, line_start, line_end, symbol, rule_id)
+        )
+        # Answered by rule id where an answer names one: a lock records a scope
+        # per (rule id, symbol), so the resolver's answer depends on both.
+        return self.answers.get((symbol, rule_id), self.answers.get(symbol, False))
 
 
 def install_hooks(journal: Journal):
@@ -475,7 +486,7 @@ def cases(draw, min_size=1, max_size=1, repeat=1):
 
 
 def resolver_answers(draw_bool):
-    return {"f": draw_bool, "Cls.method": not draw_bool}
+    return {"f": draw_bool, "Cls.method": not draw_bool, ("f", "B602"): not draw_bool}
 
 
 @pytest.fixture

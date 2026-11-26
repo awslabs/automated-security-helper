@@ -955,13 +955,15 @@ class TestApplyToSarif:
         _write(root, "src/app.py", PYTHON_SOURCE)
         _write(root, "other/untouched.py", PYTHON_SOURCE)
         parsed = []
-        real = symbol_spans.index_symbols
+        real = symbol_spans._parse
 
         def counting(source, grammar):
             parsed.append(grammar.language)
             return real(source, grammar)
 
-        monkeypatch.setattr(symbol_spans, "index_symbols", counting)
+        # The one parse function: the lock binds of _context below and both
+        # passes share one analysis of the file's bytes.
+        monkeypatch.setattr(symbol_spans, "_parse", counting)
         lines = [
             _line(PYTHON_SOURCE, "MARK module_function body"),
             _line(PYTHON_SOURCE, "MARK Outer.Inner.method body"),

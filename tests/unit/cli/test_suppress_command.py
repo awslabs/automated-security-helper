@@ -19,9 +19,19 @@ import yaml
 from typer.testing import CliRunner
 
 from automated_security_helper.cli.main import app
+from automated_security_helper.utils import symbol_spans
 from automated_security_helper.utils.ash_lock import LOCK_RELATIVE_PATH
+from tests.utils.optional_extras import require_symbols_extra
 
 pytestmark = pytest.mark.unit
+
+
+@pytest.fixture(autouse=True)
+def _fresh_cache():
+    symbol_spans.clear_symbol_cache()
+    yield
+    symbol_spans.clear_symbol_cache()
+
 
 SOURCE = "def risky():\n    return 1\n\n\ndef other():\n    return 2\n"
 
@@ -68,9 +78,19 @@ def _run(*args: str) -> _Result:
     return _Result(CliRunner().invoke(app, ["suppress", *args]))
 
 
-def _add(repo, symbol="risky", rule="B602", file="src/app.py"):
+def _add(repo, symbol="risky", rule="B602", file="src/app.py", *extra: str):
+    # A lock entry records digests of the file's parse: add needs the extra.
+    require_symbols_extra()
     return _run(
-        "add", rule, "--symbol", symbol, "--file", file, "--reason", "It is constant."
+        "add",
+        rule,
+        "--symbol",
+        symbol,
+        "--file",
+        file,
+        "--reason",
+        "It is constant.",
+        *extra,
     )
 
 
@@ -97,8 +117,10 @@ class TestAdd:
             }
         ]
         entry = _lock(repo)["files"]["src/app.py"]
-        assert len(entry["sha256"]) == 64
-        assert entry["scopes"] == [{"rule_id": "B602", "symbol": "risky"}]
+        assert len(entry["source_sha256"]) == 64
+        assert entry["scopes"] == [
+            {"invalidation_scope": "file", "rule_id": "B602", "symbol": "risky"}
+        ]
         assert "A comment the writer must keep." in (repo / ".ash.yaml").read_text(
             encoding="utf-8"
         )
@@ -107,8 +129,8 @@ class TestAdd:
         assert _add(repo).exit_code == 0
         assert _add(repo, symbol="other").exit_code == 0
         assert _lock(repo)["files"]["src/app.py"]["scopes"] == [
-            {"rule_id": "B602", "symbol": "other"},
-            {"rule_id": "B602", "symbol": "risky"},
+            {"invalidation_scope": "file", "rule_id": "B602", "symbol": "other"},
+            {"invalidation_scope": "file", "rule_id": "B602", "symbol": "risky"},
         ]
 
     def test_adding_the_same_suppression_twice_writes_it_once(self, repo):
@@ -195,7 +217,7 @@ class TestAdd:
         # command said "Already in".
         assert (repo / LOCK_RELATIVE_PATH).read_bytes() == lock_before
         assert _lock(repo)["files"]["src/app.py"]["scopes"] == [
-            {"rule_id": "B602", "symbol": "risky"}
+            {"invalidation_scope": "file", "rule_id": "B602", "symbol": "risky"}
         ]
 
     @pytest.mark.skipif(
@@ -435,3 +457,319 @@ class TestRoundTrip:
         first = (repo / LOCK_RELATIVE_PATH).read_bytes()
         assert _run("refresh", "--all").exit_code == 0
         assert (repo / LOCK_RELATIVE_PATH).read_bytes() == first
+
+
+def _edit(repo, old: str, new: str) -> None:
+    app = repo / "src" / "app.py"
+    text = app.read_text(encoding="utf-8")
+    assert old in text, old
+    app.write_text(text.replace(old, new), encoding="utf-8")
+
+
+def _kinds(repo) -> dict:
+    return {
+        s["symbol"]: s["invalidation_scope"]
+        for s in _lock(repo)["files"]["src/app.py"]["scopes"]
+    }
+
+
+def _version_1_lock(repo, scopes=(("B602", "risky"),)) -> bytes:
+    """A version 1 lock over src/app.py as it stands, as v3.9-era commands wrote it."""
+    import hashlib
+
+    entry = {
+        "created": "2026-01-01T00:00:00Z",
+        "scopes": [{"rule_id": r, "symbol": s} for r, s in scopes],
+        "sha256": hashlib.sha256((repo / "src" / "app.py").read_bytes()).hexdigest(),
+    }
+    text = (
+        json.dumps(
+            {"files": {"src/app.py": entry}, "version": 1}, indent=2, sort_keys=True
+        )
+        + "\n"
+    )
+    (repo / LOCK_RELATIVE_PATH).write_text(text, encoding="utf-8")
+    config = repo / ".ash.yaml"
+    config.write_text(
+        CONFIG
+        + "".join(
+            f"    - rule_id: {r}\n      path: src/app.py\n      symbol: {s}\n"
+            "      reason: by hand\n"
+            for r, s in scopes
+        ),
+        encoding="utf-8",
+    )
+    return text.encode("utf-8")
+
+
+def _without_the_extra(monkeypatch) -> None:
+    def refuse(grammar):
+        raise symbol_spans.SymbolsUnavailableError("ImportError: no tree_sitter")
+
+    monkeypatch.setattr(symbol_spans, "_load_language", refuse)
+    monkeypatch.setattr(symbol_spans, "_identity_cache", {})
+    monkeypatch.setattr(symbol_spans, "_validated", {})
+    symbol_spans.clear_symbol_cache()
+
+
+class TestInvalidationScope:
+    def test_add_records_file_scope_unless_told_otherwise(self, repo):
+        assert _add(repo).exit_code == 0
+        assert _kinds(repo) == {"risky": "file"}
+        assert _lock(repo)["files"]["src/app.py"]["digests"]["symbols"] == {}
+        result = _add(
+            repo, "other", "B602", "src/app.py", "--invalidation-scope", "symbol"
+        )
+        assert result.exit_code == 0, result.output
+        assert "reviewed again when other changes" in result.output
+        assert _kinds(repo) == {"other": "symbol", "risky": "file"}
+        assert set(_lock(repo)["files"]["src/app.py"]["digests"]["symbols"]) == {
+            "other"
+        }
+
+    def test_the_flag_is_case_insensitive(self, repo):
+        result = _add(
+            repo, "risky", "B602", "src/app.py", "--invalidation-scope", "FILE"
+        )
+        assert result.exit_code == 0, result.output
+        assert "reviewed again when src/app.py changes" in result.output
+        assert _kinds(repo) == {"risky": "file"}
+
+    def test_add_never_changes_a_recorded_kind(self, repo):
+        assert _add(repo).exit_code == 0
+        lock_before = (repo / LOCK_RELATIVE_PATH).read_bytes()
+        config_before = (repo / ".ash.yaml").read_bytes()
+        result = _add(
+            repo, "risky", "B602", "src/app.py", "--invalidation-scope", "symbol"
+        )
+        assert result.exit_code == 1
+        assert (
+            "ash suppress refresh --invalidation-scope symbol --symbol risky src/app.py"
+            in result.output
+        )
+        assert (repo / LOCK_RELATIVE_PATH).read_bytes() == lock_before
+        assert (repo / ".ash.yaml").read_bytes() == config_before
+        same = _add(repo, "risky", "B602", "src/app.py", "--invalidation-scope", "file")
+        assert same.exit_code == 0 and "Already in" in same.output
+
+    def test_symbol_scope_round_trip(self, repo):
+        assert (
+            _add(
+                repo, "risky", "B602", "src/app.py", "--invalidation-scope", "symbol"
+            ).exit_code
+            == 0
+        )
+        _edit(repo, "return 2", "return 22")
+        assert _run("verify").exit_code == 0, "an edit outside risky"
+        _edit(repo, "return 1", "return 11")
+        stale = _run("verify")
+        assert stale.exit_code == 1
+        assert "stale: src/app.py symbol risky (B602 in risky)" in stale.output
+        assert _run("refresh", "src/app.py").exit_code == 0
+        assert _run("verify").exit_code == 0
+
+    def test_file_scope_sees_the_edit_outside(self, repo):
+        assert _add(repo).exit_code == 0
+        _edit(repo, "return 2", "return 22")
+        result = _run("verify")
+        assert result.exit_code == 1
+        assert "stale: src/app.py (B602 in risky)" in result.output
+
+    def test_layout_keeps_a_file_scope_current(self, repo):
+        assert _add(repo).exit_code == 0
+        _edit(repo, "def risky():\n    return 1", "def risky( ):\n    return  1")
+        result = _run("verify")
+        assert result.exit_code == 0, result.output
+
+    def test_refresh_converts_the_selected_symbol(self, repo):
+        assert _add(repo).exit_code == 0
+        assert _add(repo, symbol="other").exit_code == 0
+        alone = _run("refresh", "--symbol", "risky", "src/app.py")
+        assert alone.exit_code == 1 and "--invalidation-scope" in alone.output
+        kept = _run("refresh", "src/app.py")
+        assert kept.exit_code == 0 and _kinds(repo) == {
+            "other": "file",
+            "risky": "file",
+        }
+        converted = _run(
+            "refresh",
+            "--invalidation-scope",
+            "symbol",
+            "--symbol",
+            "risky",
+            "src/app.py",
+        )
+        assert converted.exit_code == 0, converted.output
+        assert "converted: src/app.py" in converted.output
+        assert "1 refreshed, 0 unchanged, 0 missing, 0 dropped" in converted.output
+        assert _kinds(repo) == {"other": "file", "risky": "symbol"}
+        first = (repo / LOCK_RELATIVE_PATH).read_bytes()
+        again = _run(
+            "refresh",
+            "--invalidation-scope",
+            "symbol",
+            "--symbol",
+            "risky",
+            "src/app.py",
+        )
+        assert again.exit_code == 0 and "unchanged: src/app.py" in again.output
+        assert (repo / LOCK_RELATIVE_PATH).read_bytes() == first
+
+    def test_a_gone_symbol_fails_verify_until_dropped(self, repo):
+        assert (
+            _add(
+                repo, "risky", "B602", "src/app.py", "--invalidation-scope", "symbol"
+            ).exit_code
+            == 0
+        )
+        _edit(repo, "def risky():", "def renamed():")
+        gone = _run("verify")
+        assert gone.exit_code == 1
+        assert "gone: src/app.py symbol risky (B602 in risky)" in gone.output
+        assert "--drop-missing src/app.py" in gone.output
+        refused = _run("refresh", "src/app.py")
+        assert refused.exit_code == 1
+        assert "0 unverifiable, 1 gone" in refused.output
+        dropped = _run("refresh", "--drop-missing", "src/app.py")
+        assert dropped.exit_code == 0, dropped.output
+        assert "dropped:   src/app.py symbol risky" in dropped.output
+        assert "src/app.py" not in _lock(repo)["files"]
+        # The suppression is still in the config, so the config is refused.
+        unlocked = _run("verify")
+        assert unlocked.exit_code == 1 and "unlocked: src/app.py" in unlocked.output
+
+    def test_a_rename_under_file_scope_is_a_refresh(self, repo):
+        assert _add(repo).exit_code == 0
+        _edit(repo, "def risky():", "def renamed():")
+        result = _run("refresh", "src/app.py")
+        assert result.exit_code == 0, result.output
+        assert "refreshed: src/app.py" in result.output
+        assert "unverifiable" not in result.output and "gone" not in result.output
+
+
+class TestMigrate:
+    def test_current_version_1_entries_are_migrated(self, repo):
+        _version_1_lock(repo)
+        info = _run("verify")
+        assert info.exit_code == 0, info.output
+        assert "ash suppress migrate" in info.output
+        result = _run("migrate")
+        assert result.exit_code == 0, result.output
+        assert "migrated: src/app.py" in result.output
+        assert "1 migrated, 0 stale, 0 missing, 0 unverifiable" in result.output
+        entry = _lock(repo)["files"]["src/app.py"]
+        assert "sha256" not in entry and _kinds(repo) == {"risky": "file"}
+        assert "ash suppress migrate" not in _run("verify").output
+
+    def test_a_stale_version_1_entry_is_left_and_named(self, repo):
+        written = _version_1_lock(repo)
+        _edit(repo, "return 2", "return 22")
+        verify = _run("verify")
+        assert verify.exit_code == 1
+        assert "stale: src/app.py (B602 in risky); a version 1 entry" in verify.output
+        result = _run("migrate")
+        assert result.exit_code == 1
+        assert "stale:    src/app.py" in result.output
+        assert "ash suppress refresh src/app.py" in result.output
+        assert (repo / LOCK_RELATIVE_PATH).read_bytes() == written
+
+
+class TestWithoutTheExtra:
+    def test_writes_refuse_and_verify_needs_it_only_for_a_changed_file(
+        self, repo, monkeypatch
+    ):
+        assert _add(repo).exit_code == 0
+        lock_before = (repo / LOCK_RELATIVE_PATH).read_bytes()
+        config_before = (repo / ".ash.yaml").read_bytes()
+        _without_the_extra(monkeypatch)
+        assert _run("verify").exit_code == 0, "unchanged bytes need no parse"
+        refused = _add(repo, symbol="other")
+        assert refused.exit_code == 1 and "install it with" in refused.output
+        _edit(repo, "return 2", "return 22")
+        verify = _run("verify")
+        assert verify.exit_code == 1 and "unverifiable: src/app.py" in verify.output
+        refresh = _run("refresh", "src/app.py")
+        assert refresh.exit_code == 1 and "install it with" in refresh.output
+        assert "1 unverifiable, 0 gone" in refresh.output
+        assert (repo / LOCK_RELATIVE_PATH).read_bytes() == lock_before
+        assert (repo / ".ash.yaml").read_bytes() == config_before
+
+    def test_migrate_refuses_and_writes_nothing(self, repo, monkeypatch):
+        written = _version_1_lock(repo)
+        _without_the_extra(monkeypatch)
+        result = _run("migrate")
+        assert result.exit_code == 1 and "install it with" in result.output
+        assert (repo / LOCK_RELATIVE_PATH).read_bytes() == written
+
+
+class TestSummary:
+    def test_the_second_summary_line_appears_only_for_unverifiable_or_gone(self, repo):
+        assert _add(repo).exit_code == 0
+        clean = _run("refresh", "--all")
+        assert "0 refreshed, 1 unchanged, 0 missing, 0 dropped" in clean.output
+        assert "unverifiable" not in clean.output
+        _edit(repo, "return 2", "return (")
+        broken = _run("refresh", "--all")
+        assert broken.exit_code == 1
+        assert "0 refreshed, 0 unchanged, 0 missing, 0 dropped" in broken.output
+        assert "1 unverifiable, 0 gone" in broken.output
+        assert "syntax error at line" in broken.output
+
+
+class TestConfigDefault:
+    def _config(self, repo, value: str) -> None:
+        (repo / ".ash.yaml").write_text(
+            CONFIG.replace(
+                "  severity_threshold: MEDIUM\n",
+                f"  severity_threshold: MEDIUM\n  suppression_invalidation_scope: {value}\n",
+            ),
+            encoding="utf-8",
+        )
+
+    def test_add_reads_the_default_for_a_new_scope(self, repo):
+        self._config(repo, "symbol")
+        assert _add(repo).exit_code == 0
+        assert _kinds(repo) == {"risky": "symbol"}
+        flagged = _add(
+            repo, "other", "B602", "src/app.py", "--invalidation-scope", "file"
+        )
+        assert flagged.exit_code == 0
+        assert _kinds(repo) == {"other": "file", "risky": "symbol"}
+
+    def test_the_default_never_rewrites_a_recorded_kind(self, repo):
+        assert _add(repo).exit_code == 0
+        self._config(repo, "symbol")
+        again = _add(repo)
+        assert again.exit_code == 0, again.output
+        assert "keeps its recorded invalidation scope (file)" in again.output
+        assert _kinds(repo) == {"risky": "file"}
+        assert (
+            _run(
+                "refresh",
+                "--invalidation-scope",
+                "symbol",
+                "--symbol",
+                "risky",
+                "src/app.py",
+            ).exit_code
+            == 0
+        )
+        assert _kinds(repo) == {"risky": "symbol"}
+
+    def test_a_value_that_is_no_kind_is_refused(self, repo):
+        self._config(repo, "bytes")
+        refused = _add(repo)
+        assert refused.exit_code == 1
+        assert "suppression_invalidation_scope" in refused.output
+        validate = CliRunner().invoke(
+            app, ["config", "validate", "--config", ".ash.yaml"]
+        )
+        assert validate.exit_code == 3, validate.output
+        self._config(repo, "file")
+        assert _add(repo).exit_code == 0
+        assert (
+            CliRunner()
+            .invoke(app, ["config", "validate", "--config", ".ash.yaml"])
+            .exit_code
+            == 0
+        )
