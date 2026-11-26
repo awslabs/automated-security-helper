@@ -176,6 +176,16 @@ _ALLOWED: dict[tuple[str, str], str] = {
         "stable digest to pin."
     ),
     (
+        ".github/workflows/ash-image-scan-live-engine.yml",
+        "http://127.0.0.1:5000/v2/ash-live-engine/manifests/ci",
+    ): (
+        "A HEAD request reading the Docker-Content-Digest header from the job's own "
+        "loopback registry, holding the image the job itself just built and pushed. "
+        "No file is fetched or executed; the digest read IS the trust anchor the "
+        "scan's ids are then compared against, and the step refuses anything that "
+        "is not a sha256:<64 hex> value."
+    ),
+    (
         "scripts/setup-finch-linux.sh",
         "artifact.runfinch.com/deb/GPG_KEY.pub",
     ): (
