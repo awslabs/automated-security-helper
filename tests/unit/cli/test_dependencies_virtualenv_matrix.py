@@ -18,6 +18,7 @@ from pathlib import Path
 import pytest
 
 from automated_security_helper.utils.install_providers import venv_python
+from automated_security_helper.utils.subprocess_utils import parse_allow_in_tree_tools
 from automated_security_helper.utils.uv_tool_runner import UV_NO_CONFIG
 from tests.unit.cli.dependencies_install_support import build_scene, run_install
 
@@ -277,6 +278,45 @@ def test_create_never_vends_a_virtualenv_inside_the_tree(tmp_path, monkeypatch):
     assert scene.result.exit_code == 3, scene.text
     assert scene.calls == [], scene.calls
     assert not target.exists()
+
+
+def test_a_symlink_into_the_tree_is_refused_by_its_real_path(tmp_path, monkeypatch):
+    """An out-of-tree symlink that resolves INTO the tree is still in-tree.
+
+    The boundary is judged on realpaths (``in_tree_path_refusal``), the way the
+    scan-time refusal judges a lookup: the link's own path sits outside the tree,
+    so a judgement on abspath -- which never follows the link -- admits it and
+    this test goes red. The interpreter the install commands would execute is the
+    tree's either way.
+    """
+    scene = _scene(monkeypatch, tmp_path)
+    in_tree = _venv(tmp_path / "src-tree" / "hidden-venv")
+    link = tmp_path / "outside-venv"  # outside the tree by its own path
+    link.symlink_to(in_tree)
+
+    run_install(scene, monkeypatch, tmp_path, "--virtualenv-path", str(link))
+
+    assert scene.result.exit_code == 3, scene.text
+    assert "inside the scanned source tree" in " ".join(scene.text.split()), scene.text
+    assert scene.calls == [], scene.calls
+
+
+def test_the_in_tree_opt_in_reads_on_as_the_scan_lookup_does(tmp_path, monkeypatch):
+    """``ASH_ALLOW_IN_TREE_TOOLS=on`` opts the installer in, exactly as it opts the
+    scan-time lookups in: both sites read the variable through the one parse
+    function (``parse_allow_in_tree_tools``). A second inline parse accepted a
+    different set -- ``on`` opted the scan in and not the installer -- which is the
+    split this test pins shut.
+    """
+    scene = _scene(monkeypatch, tmp_path)
+    monkeypatch.setenv("ASH_ALLOW_IN_TREE_TOOLS", "on")
+    assert parse_allow_in_tree_tools("on") is True  # the shared reading, as a control
+    in_tree = _venv(tmp_path / "src-tree" / ".venv")
+
+    run_install(scene, monkeypatch, tmp_path, "--virtualenv-path", str(in_tree))
+
+    assert scene.result.exit_code == 0, scene.text
+    assert [c[:2] for c in scene.argvs] == [["uv", "pip"]], scene.argvs
 
 
 def test_the_in_tree_opt_in_admits_a_tree_virtualenv(tmp_path, monkeypatch):

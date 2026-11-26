@@ -131,3 +131,101 @@ def test_a_stale_record_falls_through_to_the_path_probe(
 
     assert scanner.validate_plugin_dependencies() is False
     assert not marker.exists()
+
+
+def test_an_overriding_scanner_reads_the_record_before_any_lookup(
+    tmp_path, own_home, monkeypatch, scanner
+):
+    """checkov overrides ``validate_plugin_dependencies`` without chaining, the
+    shape most scanners share -- the record read must still run first.
+
+    ``__pydantic_init_subclass__`` wraps every override with the record read, so
+    the promise "the forced path is resolved before any PATH or uv lookup" holds
+    for the overriding scanners too. The witness: checkov's own validation body is
+    replaced with one that raises, so ANY route into its PATH/uv probing fails
+    this test; with the record present the wrapped entry point answers True
+    without reaching it, and without a record the scanner's own route still runs.
+    """
+    from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+        checkov_scanner,
+    )
+
+    binary = tmp_path / "tools-checkov" / "checkov"
+    binary.parent.mkdir()
+    binary.write_text("#!/bin/sh\nexit 0\n")
+    binary.chmod(0o755)
+    record_forced_binaries(
+        [
+            ForcedBinary(
+                scanner_key="checkov",
+                path=binary,
+                sha256=hashlib.sha256(binary.read_bytes()).hexdigest(),
+            )
+        ]
+    )
+
+    checkov = checkov_scanner.CheckovScanner(
+        config=checkov_scanner.CheckovScannerConfig(), context=scanner.context
+    )
+
+    def own_route_reached(self):
+        raise AssertionError("checkov's PATH/uv probing ran before the record read")
+
+    # The wrapper closed over the original override at class creation, so the
+    # trap is planted where the wrapper calls back into the scanner's own route:
+    # the first thing checkov's override does.
+    monkeypatch.setattr(
+        checkov_scanner.CheckovScanner,
+        "resolve_deferred_tool_version",
+        own_route_reached,
+    )
+
+    assert checkov.validate_plugin_dependencies() is True
+
+    # Control: with no record for checkov, the scanner's own route is reached.
+    record_forced_binaries([], erase=["checkov"])
+    with pytest.raises(AssertionError, match="before the record read"):
+        checkov.validate_plugin_dependencies()
+
+
+def test_a_precluded_reason_keeps_the_force_out(tmp_path, own_home, off_path, scanner):
+    """A scanner whose check answers more than binary presence names the gate in
+    ``_forced_binary_precluded_reason`` and the force never outvotes it (npm-audit
+    offline is the measured fail-open: ``npm audit --offline`` prints a clean
+    audit, so a bypass is a silent false clean)."""
+    binary, marker = _forced_file(tmp_path)
+    _record(binary)
+
+    class GatedScanner(type(scanner)):
+        def _forced_binary_precluded_reason(self):
+            return "a semantic gate the force may not outvote"
+
+        def validate_plugin_dependencies(self) -> bool:
+            return False  # its own route refuses in this harness
+
+    gated = GatedScanner(config=StubConfig(), context=scanner.context)
+    assert gated.validate_plugin_dependencies() is False
+    assert not marker.exists()
+
+
+def test_the_record_is_read_under_the_name_the_installer_writes(
+    tmp_path, own_home, off_path, scanner
+):
+    """The installer keys a record by the config's name, falling back to the
+    plugin class name when the config carries none (``ash dependencies install``
+    builds ``plugin_name = config.name or plugin_class.__name__``). The reader
+    makes the same fallback, so a record written under the class name is found
+    rather than looked up under the empty string."""
+    binary, _marker = _forced_file(tmp_path)
+    record_forced_binaries(
+        [
+            ForcedBinary(
+                scanner_key=type(scanner).__name__,
+                path=binary,
+                sha256=hashlib.sha256(binary.read_bytes()).hexdigest(),
+            )
+        ]
+    )
+    object.__setattr__(scanner.config, "name", None)
+
+    assert scanner._forced_binary_satisfies() is True

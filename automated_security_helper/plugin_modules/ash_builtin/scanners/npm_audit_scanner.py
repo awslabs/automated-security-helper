@@ -17,6 +17,7 @@ from typing import (
     List,
     Literal,
     Any,
+    Optional,
     Sequence,
     Set,
     TypeGuard,
@@ -822,6 +823,17 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         self.custom_install_commands["windows"]["amd64"] = []
 
         return self
+
+    def _forced_binary_precluded_reason(self) -> Optional[str]:
+        """Offline, a forced npm must not satisfy validation.
+
+        The offline refusal below is a semantic verdict, not a presence probe:
+        ``npm audit --offline`` prints a clean audit and exits 0, so a
+        ``--binary-path`` record that outvoted it would turn an offline scan into
+        a silent false clean. The same reason ``validate_plugin_dependencies``
+        records, read from the same predicate.
+        """
+        return _OFFLINE_REASON if self._scanner_offline() else None
 
     def validate_plugin_dependencies(self) -> bool:
         """Validate the scanner configuration and requirements.

@@ -208,3 +208,42 @@ def test_the_retold_command_is_judged_no_inherit_whatever_the_keyword_says(
     assert present is not None and present.path == at_destination
     # Any other argv is returned unchanged.
     assert pinned_command_without_system_tools(["ls", "-l"]) == ["ls", "-l"]
+
+
+def test_the_script_constants_call_the_installer_with_the_flag_they_claim(monkeypatch):
+    """The ``-c`` script texts are frozen constants recognized byte for byte, so
+    nothing type-checks what they pass: this executes each in process, with
+    ``install_pinned_tool`` stubbed to a recorder and ``sys.argv`` patched, and
+    pins that the no-inherit text passes ``inherit_system_tools=False`` while the
+    plain text passes no keyword. A mistyped or omitted kwarg in either constant
+    -- which the child python would only surface at install time -- goes red here.
+    Nothing downloads and nothing runs: the recorder is the whole installer.
+    """
+    import sys as real_sys
+
+    from automated_security_helper.utils import download_utils as du
+
+    calls = []
+    monkeypatch.setattr(du, "install_pinned_tool", lambda *a, **k: calls.append((a, k)))
+    monkeypatch.setattr(
+        real_sys, "argv", ["ash-pinned-install", "grype", "linux", "amd64", "/dest/bin"]
+    )
+
+    exec(  # nosec B102 -- the product's own frozen script text, installer stubbed
+        compile(
+            du._PINNED_TOOL_INSTALL_SCRIPT_NO_INHERIT, "<no-inherit-script>", "exec"
+        ),
+        {},
+    )
+    exec(  # nosec B102 -- as above, the plain form
+        compile(du._PINNED_TOOL_INSTALL_SCRIPT, "<pinned-script>", "exec"),
+        {},
+    )
+
+    assert calls == [
+        (
+            ("grype", "linux", "amd64", Path("/dest/bin")),
+            {"inherit_system_tools": False},
+        ),
+        (("grype", "linux", "amd64", Path("/dest/bin")), {}),
+    ]

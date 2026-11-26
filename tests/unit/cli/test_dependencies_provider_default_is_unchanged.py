@@ -18,7 +18,9 @@ import pytest
 from automated_security_helper.base.plugin_base import CustomCommand
 from automated_security_helper.utils.download_utils import (
     create_pinned_tool_install_command,
+    create_url_download_command,
 )
+from automated_security_helper.utils.uv_tool_runner import UV_NO_CONFIG
 from tests.unit.cli.dependencies_install_support import (
     CHECKOV_COMMAND,
     build_scene,
@@ -32,13 +34,32 @@ def test_default_run_emits_todays_commands_byte_for_byte(tmp_path, monkeypatch):
     pinned = create_pinned_tool_install_command(
         "grype", "linux", "amd64", str(tmp_path / "bin")
     )
+    # The URL-download script argv, the shape opengrep's configured pin declares.
+    url_download = create_url_download_command(
+        "https://example.invalid/opengrep",
+        destination=str(tmp_path / "bin"),
+        rename_to="opengrep",
+        expected_sha256="a" * 64,
+    )
+    # The uv ASH-environment form (`_ash_environment_install`'s second shape).
+    uv_ash_env = [
+        "uv",
+        "pip",
+        "install",
+        UV_NO_CONFIG,
+        "--python",
+        sys.executable,
+        "aws-cdk-lib>=2",
+    ]
     declared = [
         list(CHECKOV_COMMAND),
         [sys.executable, "-m", "pip", "install", "ash[sarif]"],
+        uv_ash_env,
         ["gem", "install", "cfn-nag", "--user-install"],
         ["apt-get", "install", "-y", "jq=1.7"],
         CustomCommand(args=["echo $HOME"], shell=True),  # nosec B604
         pinned,
+        url_download,
         ["npm", "install", "-g", "left-pad@1"],
     ]
     scene = build_scene(
@@ -53,10 +74,12 @@ def test_default_run_emits_todays_commands_byte_for_byte(tmp_path, monkeypatch):
     expected = [
         (list(CHECKOV_COMMAND), False),
         ([sys.executable, "-m", "pip", "install", "ash[sarif]"], False),
+        (list(uv_ash_env), False),
         (["gem", "install", "cfn-nag", "--user-install"], False),
         (["apt-get", "install", "-y", "jq=1.7"], False),
         (["echo $HOME"], True),
         (list(pinned.args), False),
+        (list(url_download.args), False),
         (["npm", "install", "-g", "left-pad@1"], False),
     ]
     assert scene.calls == expected, (scene.calls, scene.text)

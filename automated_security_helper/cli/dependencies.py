@@ -1193,6 +1193,11 @@ def install_dependencies(
                 "record, re-checking the file and its SHA-256 each time. The "
                 "path must be absolute, exist, and be an executable regular file "
                 "outside the scanned tree. ASH checks the file and never runs it. "
+                "The record resolves the scanner's own binary only: a scanner's "
+                "other requirements (npm-audit's offline refusal, trivy's offline "
+                "database, cfn-guard's rules, actionlint's integrations) still "
+                "apply, and cdk-nag, detect-secrets and mcp-config run Python "
+                "libraries rather than one binary, so they never consult it. "
                 "'<scanner>=' with an empty path removes the recorded entry."
             ),
         ),

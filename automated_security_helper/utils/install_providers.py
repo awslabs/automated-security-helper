@@ -1148,6 +1148,7 @@ def in_tree_path_refusal(
     """
     from automated_security_helper.utils.subprocess_utils import (
         ALLOW_IN_TREE_TOOLS_ENV,
+        parse_allow_in_tree_tools,
     )
 
     if source_dir is None:
@@ -1160,11 +1161,11 @@ def in_tree_path_refusal(
         inside = False
     if not inside:
         return None
-    if os.environ.get(ALLOW_IN_TREE_TOOLS_ENV, "").strip().lower() in (
-        "1",
-        "true",
-        "yes",
-    ):
+    # The ONE reading of the opt-in (``parse_allow_in_tree_tools``), shared with
+    # the scan-time lookups: a second inline tuple here accepted a different set
+    # ("on" opted the scan in and not the installer), so an operator's value was
+    # honored by one check and refused by the other.
+    if parse_allow_in_tree_tools(os.environ.get(ALLOW_IN_TREE_TOOLS_ENV)):
         return None
     return (
         f"{shown}: the path is inside the scanned source tree, which ASH "

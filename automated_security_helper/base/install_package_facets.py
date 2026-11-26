@@ -30,8 +30,11 @@ rather than guessed, so ``--providers apt`` for a tool with no apt row is refuse
 naming the missing row.
 
 ``preference`` is the order the installer tries ecosystems in for a tool when
-``--providers`` is not given (after ``uv``, which is always first). The operator's
-own ``--providers`` list replaces it.
+``--providers`` is not given, after the provider the tool's command was declared
+for and then ``uv`` (``candidate_order`` in ``utils/install_providers.py``: the
+native provider first, so the declared command stays the identity of the default
+run, then ``uv``, then this list). The operator's own ``--providers`` list
+replaces all of it.
 """
 
 from __future__ import annotations
@@ -52,8 +55,9 @@ _BREW_CAVEAT = (
 )
 
 #: The order ecosystems are tried in for a tool when ``--providers`` is not given
-#: (``uv`` is always tried first, before this list). A provider that cannot serve the
-#: tool, or has no row for it, is skipped with its reason printed.
+#: (the tool's native provider and then ``uv`` are tried first, before this list;
+#: ``candidate_order`` in ``utils/install_providers.py``). A provider that cannot
+#: serve the tool, or has no row for it, is skipped with its reason printed.
 DEFAULT_PREFERENCE: Tuple[str, ...] = (
     "release-download",
     "pipx",

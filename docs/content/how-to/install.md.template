@@ -199,7 +199,7 @@ its plugin declares, which is what the command did before the option existed.
 | `pipx` | Python tools in pipx environments. It cannot install into a named virtualenv, and `pipx install --python` takes an executable, a version, or a path, so a version-range request such as `>=3.10,<3.14` is refused |
 | `pip` | Packages into one interpreter, or into the virtualenv named by `--virtualenv-path`; `python -m venv` creates it |
 | `release-download` | ASH's pinned release downloads for the tools that have one |
-| `nix` | The toolchain the repository flake pins, by realizing the dev shell that `--mode nix` runs. One realization serves every tool in the run, and it takes no interpreter request or exact version pin |
+| `nix` | The toolchain the repository flake pins, by realizing the dev shell that `--mode nix` runs. One realization serves every tool in the run, and it takes no interpreter request or exact version pin. The realized tools live in the Nix store and are not placed on `PATH` or in the bin directory, so the post-install verdict can read a nix-only tool as missing; a `--mode nix` scan finds them |
 | `apt`, `dnf`, `yum`, `zypper`, `brew`, `npm`, `pnpm`, `conda`, `choco`, `gem` | One generic system-package shape: the install command of that manager for the package that provides the tool |
 | `go`, `cargo` | Declared and not implemented; they refuse with "not implemented" |
 | `custom` | A plugin's own shell or download command, run as declared |
@@ -260,6 +260,15 @@ dependency validation and later `ash dependencies install` runs resolve the scan
 the forced path before any PATH or uv lookup, re-checking the file and its SHA-256 each
 time, and a record whose file moved or changed is named and set aside rather than
 trusted by its path. `--binary-path scanner=` with an empty path removes the record.
+
+The record answers one question for every scanner, whichever way its dependency check
+probes: where the scanner's own binary is. A scanner's other requirements still hold
+and are checked first, so the force never turns them off: npm-audit and snyk-code
+still refuse to run offline, trivy still needs its offline vulnerability database,
+cfn-guard its rules files, and actionlint its configured integrations. Three scanners
+run Python libraries rather than one binary and never consult the record: cdk-nag
+(aws-cdk-lib and cdk-nag plus Node.js), detect-secrets, and mcp-config -- forcing a
+path for them records it but satisfies nothing.
 
 ## Choose a version to pin
 
