@@ -56,8 +56,12 @@ def _captured_options(tmp_path, **kwargs):
 
 
 class TestTheDecoratorsStayOnRunAshScan:
-    def test_run_ash_scan_is_wrapped_by_its_scope_decorators(self):
-        assert hasattr(run_ash_scan, "__wrapped__")
+    def test_run_ash_scan_is_wrapped_by_both_scope_decorators(self):
+        # Two layers, counted: either decorator alone satisfied a bare
+        # hasattr, and the regression being pinned was losing BOTH.
+        inner = run_ash_scan.__wrapped__
+        assert hasattr(inner, "__wrapped__")
+        assert not hasattr(inner.__wrapped__, "__wrapped__")
 
     def test_the_image_scope_helper_is_not_wrapped(self):
         assert not hasattr(module._refuse_an_image_scan_scope, "__wrapped__")

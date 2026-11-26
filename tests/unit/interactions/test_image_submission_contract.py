@@ -114,9 +114,37 @@ class TestExclusivityRefusals:
         text = _refusal_of(image=IMAGE_REF, changed_files_only=True)
         assert "changed_files_only" in text
 
+    def test_an_image_beside_the_staged_scope_is_refused(self):
+        # The rule lives in the shared gate, so a library caller is refused
+        # exactly as the CLI's own loop refuses the typed flag.
+        text = _refusal_of(image=IMAGE_REF, staged=True)
+        assert "staged" in text
+
+    def test_an_image_beside_a_baseline_is_refused(self):
+        # The CLI refused --baseline while the library half-applied it (the
+        # baseline read against the anchor directory): one gate, one answer.
+        text = _refusal_of(image=IMAGE_REF, baseline="previous.json")
+        assert "baseline" in text
+
     def test_a_whitespace_ref_names_nothing(self):
         text = _refusal_of(image="   ")
         assert "names no reference" in text
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            pytest.param("/etc", id="absolute-path"),
+            pytest.param("../app", id="relative-path"),
+            pytest.param("--insecure", id="option"),
+            pytest.param("app@sha256:abc", id="short-digest"),
+        ],
+    )
+    def test_a_non_reference_is_refused_with_the_grammar_text(self, value):
+        # The library entry point reads the same grammar as the CLI and the
+        # MCP gate: a path reaches the scanner tools as a directory to catalog.
+        text = _refusal_of(image=value)
+        assert "not an image reference" in text
+        assert repr(value) in text
 
 
 class TestPayloadGates:

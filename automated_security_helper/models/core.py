@@ -834,12 +834,12 @@ def suppression_id(suppression: Dict[str, Any]) -> str:
             "@".join(_text(suppression.get(f), "*") for f in PACKAGE_SUPPRESSION_FIELDS)
         )
     # A symbol is a sixth part, and its presence always brings the fifth, so a
-    # symbol can never be read as a package. With the scope part below, a part
-    # COUNT alone no longer says which fields an id carries (five parts is
-    # package-scoped OR scope-only; six is package+symbol OR package+scope): a
-    # reader telling them apart must check the "scope=" prefix on the LAST
-    # part, never split by position. No consumer in this repository parses an
-    # id by position; the linter and the reports compare ids whole.
+    # symbol can never be read as a package. With the image= and scope= parts
+    # below, a part COUNT alone no longer says which fields an id carries: a
+    # reader telling them apart must check each trailing part's prefix
+    # ("image=", "scope="), never split by position. No consumer in this
+    # repository parses an id by position; the linter and the reports compare
+    # ids whole.
     if symbol:
         parts.append(_text(symbol, "*"))
     # An image-scoped entry gets an ``image=`` part, so two entries that differ
@@ -1295,6 +1295,11 @@ class AshSuppression(IgnorePathWithReason):
         A suppression that sets ``symbol`` gets that fifth part (``*@*@*``
         when no package field is set) and the symbol as a sixth. Entries
         without a symbol keep the id they had before the field existed.
+
+        A suppression that sets ``image`` gets an ``image=<pattern>`` part,
+        and one that sets a scope a ``scope=...`` part, each only when set, so
+        entries differing only there do not share an id. Trailing parts are
+        told apart by their prefix, never by position (``suppression_id``).
         """
         return suppression_id(self.model_dump())
 
@@ -1315,9 +1320,10 @@ class AshSuppression(IgnorePathWithReason):
         """Return True if ``finding`` is covered by this suppression rule.
 
         Checks rule_id (exact or glob), path (supports ``**``), optional line
-        range overlap, the optional package fields, the optional scope and the
-        optional symbol. Expired suppressions, and ones kept from a results file
-        with unknown keys, never match.
+        range overlap, the optional package fields, the optional ``image``
+        pattern, the optional scope and the optional symbol. Expired
+        suppressions, and ones kept from a results file with unknown keys,
+        never match.
 
         Each package field that is set must match the finding's corresponding
         field. A finding that does not carry that field does not match: the
