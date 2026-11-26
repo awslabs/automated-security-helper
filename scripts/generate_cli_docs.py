@@ -365,7 +365,8 @@ def _output_formats_note(_param: Any) -> str:
 
 
 def _report_format_note(_param: Any) -> str:
-    """``ash report --format``: cli/report.py looks the value up among loaded reporters."""
+    """``ash results report --format``: cli/report.py looks the value up among loaded
+    reporters."""
     return (
         "Accepted values: the name of a reporter that is loaded: "
         + ", ".join(code(r) for r in _builtin_reporters())
@@ -379,7 +380,7 @@ def _report_format_note(_param: Any) -> str:
 #: say what is accepted; the note is computed from the code that decides it.
 VALUE_NOTES = {
     (("scan",), "--output-formats"): _output_formats_note,
-    (("report",), "--format"): _report_format_note,
+    (("results", "report"), "--format"): _report_format_note,
 }
 
 
