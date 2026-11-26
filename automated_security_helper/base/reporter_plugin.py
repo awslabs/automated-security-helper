@@ -611,12 +611,12 @@ class ReporterPluginBase(PluginBase, Generic[T]):
     """
 
     if TYPE_CHECKING:
-        # Every concrete reporter fills its config in ``model_post_init`` when
-        # none was given, so the methods read it as the plugin's own config
-        # type; the runtime field below still accepts None until then.
-        # The ``= None`` keeps it optional in the constructor the checker
-        # sees; this branch is never evaluated.
-        config: T = None  # ty: ignore[invalid-assignment]
+        # The methods read the config as the reporter's own model: the declared
+        # model validator and ``configure`` give a reporter a config of that
+        # model, and ``setup_paths`` builds one from its defaults when none was
+        # given. None for a reporter whose model cannot be built without a
+        # section, which is why a method reads it through ``_require_config``.
+        config: T | None = None
     else:
         config: T | ReporterPluginConfigBase | None = None
     dependencies_satisfied: bool = True
@@ -717,6 +717,20 @@ class ReporterPluginBase(PluginBase, Generic[T]):
             cls, ReporterPluginConfigBase, config, handler
         )
 
+    def _require_config(self) -> T:
+        """The reporter's configuration, or a ``ScannerError`` naming the
+        reporter when it has none.
+
+        ``setup_paths`` gives a reporter its declared model's defaults when it
+        was built without a section, so a reporter reaches a method without a
+        configuration only when its model cannot be built without one, or when
+        its config was set to None afterwards.
+        """
+        config = self.config
+        if config is None:
+            raise ScannerError(f"{self.__class__.__name__} has no configuration")
+        return config
+
     @model_validator(mode="after")
     def setup_paths(self) -> Self:
         """Set up default paths and initialize plugin configuration."""
@@ -734,10 +748,12 @@ class ReporterPluginBase(PluginBase, Generic[T]):
             # to run on, and building it with no config used to be allowed, so
             # the refusal does not fail its construction (the section is checked
             # where one is given, by ``configure`` and the ``config`` field).
+            # The defaults are what an empty section validates to, so they are
+            # built by the declared model's validation, as a given section is.
             declared = self._declared_config_model()
             if declared is not None:
                 try:
-                    self.config = declared()
+                    self.config = self._validated_by_declared_model({}, _as_given)
                 except ValidationError:
                     ASH_LOGGER.debug(
                         f"{self.__class__.__name__} declares a config model with a "
@@ -772,8 +788,7 @@ class ReporterPluginBase(PluginBase, Generic[T]):
         model. Assignment alone is not validated here.
         """
         if config:
-            config = self._validated_by_declared_model(config, _as_given)
-            self.config = config
+            self.config = self._validated_by_declared_model(config, _as_given)
 
     def companion_file_names(self) -> Tuple[str, ...]:
         """The files this reporter writes itself in the reports directory, beside its report.

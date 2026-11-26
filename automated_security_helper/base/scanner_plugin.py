@@ -420,32 +420,27 @@ class ScannerPluginBase(PluginBase, Generic[T]):
     """
 
     if TYPE_CHECKING:
-        # Every concrete scanner fills its config in ``model_post_init`` when
-        # none was given, so the methods read it as the plugin's own config
-        # type; the runtime field below still accepts None until then.
-        # The ``= None`` keeps both optional in the constructor the checker
-        # sees; this branch is never evaluated.
-        config: T = None  # ty: ignore[invalid-assignment]
-        # The scanner's own results directory, set by ``_pre_scan`` before the
-        # scan runs.
-        results_dir: Path = None  # ty: ignore[invalid-assignment]
+        # The methods read the config as the scanner's own model: the declared
+        # model validator gives a scanner a config of that model, and
+        # ``model_post_init`` refuses a scanner built without one. None before
+        # then, which is why a method reads it through ``_require_config``.
+        config: T | None = None
     else:
         config: T | ScannerPluginConfigBase | None = None
     dependencies_satisfied: bool = False
 
-    def _require_results_dir(self) -> Path:
-        """The scanner's results directory, or a ``ScannerError`` naming the
-        scanner when ``_pre_scan`` has not set one.
+    def _require_config(self) -> T:
+        """The scanner's configuration, or a ``ScannerError`` naming the scanner
+        when it has none.
 
-        The field is typed as always set for the methods that run after
-        ``_pre_scan``; a scanner reached without it stops here with a named
-        error rather than a ``TypeError`` or ``AttributeError`` on ``None``
-        further down.
+        ``model_post_init`` refuses a scanner built without a configuration, so
+        a scanner reaches a method without one only when its config was set to
+        None afterwards.
         """
-        results_dir: Path | None = self.results_dir
-        if results_dir is None:
-            raise ScannerError(f"{self.__class__.__name__} has no results directory")
-        return Path(results_dir)
+        config = self.config
+        if config is None:
+            raise ScannerError(f"{self.__class__.__name__} has no configuration")
+        return config
 
     #: Human-readable target coverage ("Terraform", "Python"), for the docs graphics.
     #: Supplements the by-stack prose of the coverage page; it never replaces it.
@@ -710,10 +705,14 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             raise ScannerError(f"No context provided for {self.__class__.__name__}!")
         ASH_LOGGER.trace(f"Using provided context for {self.__class__.__name__}")
 
-        # Set up results directory based on output directory
-        self.results_dir = self.context.output_dir.joinpath("scanners").joinpath(
-            self.config.name
-        )
+        # Set up results directory based on output directory. It is named for the
+        # config, so a config without a name cannot place it.
+        name = self.config.name
+        if name is None:
+            raise ScannerError(
+                f"Unable to initialize {self.__class__.__name__}! Its configuration has no name."
+            )
+        self.results_dir = self.context.output_dir.joinpath("scanners").joinpath(name)
 
         self._process_config_options()
 
@@ -1047,11 +1046,12 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         if read.values is None:
             raise RuntimeError(f"the plugin's values hook {read.failure()}")
         cache = self._content_db_cache_dir
+        context = self._require_context()
         cwd = cwd_outside_scanned_tree(
-            self.context.source_dir,
-            results_dir=self.results_dir or self.context.output_dir,
-            source_dir=self.context.source_dir,
-            config=getattr(self.context, "config", None),
+            context.source_dir,
+            results_dir=self.results_dir or context.output_dir,
+            source_dir=context.source_dir,
+            config=getattr(context, "config", None),
         )
         return ProbeContext(
             env=probe_env(getattr(self, "extra_env", None)),
@@ -1247,7 +1247,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         # inside the hook that exists to make a one-file commit fast. Only the
         # few candidates are resolved for real, which is what absorbs a
         # symlinked spelling of the checkout path on either side.
-        source_text = os.fspath(self.context.source_dir)
+        source_text = os.fspath(self._require_context().source_dir)
         resolved_source = Path(source_text).resolve()
         allowed = {
             (resolved_source / os.path.relpath(entry, source_text)).as_posix()
@@ -1471,8 +1471,9 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         if config is not None:
             if hasattr(config, "model_dump") and callable(config.model_dump):
                 config = config.model_dump(by_alias=True)
-            if config != self.config.model_dump(by_alias=True):
-                self.config = self.config.__class__.model_validate(config)
+            current = self._require_config()
+            if config != current.model_dump(by_alias=True):
+                self.config = current.__class__.model_validate(config)
                 self._reset_dependency_validation()
 
         # Honors the setup phase's validation of this instance (memoized above)
@@ -1536,7 +1537,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         if dumps_enabled:
             self._plugin_log(
                 text_without_values(
-                    f"self.config: {self._config_as_written(self.config.model_dump(by_alias=True))}",
+                    f"self.config: {self._config_as_written(self._require_config().model_dump(by_alias=True))}",
                     dump_values,
                 ),
                 target_type=target_type,
@@ -1562,20 +1563,22 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         if not Path(target).exists():
             # Text, not markup: the executor logs this and the scan prints it.
             raise ScannerError(
-                f"({self.config.name or self.__class__.__name__} @ {target_type}) "
+                f"({self._require_config().name or self.__class__.__name__} @ {target_type}) "
                 f"Target {target} does not exist!"
             )
 
         # Ensure all required directories exist
-        self.context.work_dir.mkdir(parents=True, exist_ok=True)
+        context = self._require_context()
+        work_dir = self._require_work_dir()
+        work_dir.mkdir(parents=True, exist_ok=True)
         if self.results_dir:
             self.results_dir.mkdir(parents=True, exist_ok=True)
 
         # Log the paths being used
         self._plugin_log(
-            f"Using source_dir: {self.context.source_dir}",
-            f"Using output_dir: {self.context.output_dir}",
-            f"Using work_dir: {self.context.work_dir}",
+            f"Using source_dir: {context.source_dir}",
+            f"Using output_dir: {context.output_dir}",
+            f"Using work_dir: {work_dir}",
             f"Using results_dir: {self.results_dir}",
             target_type=target_type,
             level=logging.DEBUG,
