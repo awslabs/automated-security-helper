@@ -21,12 +21,14 @@ import yaml
 from automated_security_helper.utils.ash_lock import (
     LEGACY_LOCK_RELATIVE_PATH,
     LOCK_RELATIVE_PATH,
+    MAX_LOCKED_FILE_BYTES,
     REFRESH_COMMAND,
     AshLock,
     AshLockError,
     LockScope,
     add_command_for,
-    lock_key,
+    file_is_gone,
+    resolved_lock_key,
     scope_is_recorded,
 )
 from automated_security_helper.utils.console import echo
@@ -50,6 +52,13 @@ suppress_app = typer.Typer(
 _SOURCE_DIR_HELP = (
     "The directory the scan covers, which holds .ash.lock. Defaults to the "
     "current directory."
+)
+
+#: Why a file that exists has no hash (``ash_lock.file_sha256``).
+_UNHASHABLE = (
+    "unreadable, not a regular file, larger than "
+    f"{MAX_LOCKED_FILE_BYTES // (1024 * 1024)} MiB, or a link that leads out of "
+    "the source directory"
 )
 
 
@@ -86,22 +95,23 @@ def _note_legacy(lock: AshLock) -> None:
 
 
 def _key_for(root: Path, path: str) -> str:
-    """The lock key of ``path``: resolved, then relative to the source directory.
+    """The lock key of ``path``: ``resolved_lock_key``, the file's own path
+    with links followed, relative to the source directory.
 
-    A relative path is resolved too, exactly as the scan's resolver builds the
-    key it looks up (``SymbolResolver._locked_and_unchanged``): with
-    ``link -> src``, an entry written under ``link/app.py`` would never be read
-    by a scan looking up ``src/app.py``, and the suppression would sit inert
-    with ``add`` and ``verify`` both green.
+    The key the scan's resolver looks up (``SymbolResolver._locked_and_unchanged``)
+    and the one the config check and ``verify`` look up: with ``link -> src``,
+    an entry written under ``link/app.py`` would never be read by a scan looking
+    up ``src/app.py``, and the suppression would sit inert with ``add`` and
+    ``verify`` both green. An absolute path is first taken relative to the
+    source directory.
     """
     candidate = Path(path)
-    if not candidate.is_absolute():
-        candidate = root / candidate
-    try:
-        candidate = candidate.resolve().relative_to(root)
-    except (OSError, ValueError):
-        _fail(f"{path} is not inside the source directory {root.as_posix()}")
-    key = lock_key(candidate.as_posix())
+    if candidate.is_absolute():
+        try:
+            path = candidate.resolve().relative_to(root).as_posix()
+        except (OSError, RuntimeError, ValueError):
+            _fail(f"{path} is not inside the source directory {root.as_posix()}")
+    key = resolved_lock_key(root, path)
     if key is None:
         _fail(f"{path} is not a path inside the source directory")
     return key
@@ -235,12 +245,15 @@ def add(
     except AshLockError as e:
         _fail(str(e))
 
+    # Keyed as the entry was (resolved_lock_key): a config entry written as
+    # link/app.py is the suppression of src/app.py when link -> src, so it is
+    # only locked, not written a second time under the other spelling.
     already = any(
         isinstance(e.get("rule_id"), str)
         and e["rule_id"].strip().casefold() == rule_id.casefold()
         and e.get("symbol") == symbol
         and isinstance(e.get("path"), str)
-        and lock_key(e["path"]) == key
+        and resolved_lock_key(root, e["path"]) == key
         for e in _suppressions_in(config_path)
     )
     if not already:
@@ -342,16 +355,36 @@ def refresh(
     for key in keys:
         old, new = lock.refresh(key)
         if new is None:
-            if drop_missing:
+            # No hash also comes from a file that is still there (unreadable,
+            # not a regular file, too large, a link out of the root). Only a
+            # file that no longer exists has a dead entry to drop; the others
+            # keep theirs, since dropping it leaves their suppressions
+            # unrecorded and every scan refusing the config.
+            gone = file_is_gone(root, key)
+            if drop_missing and gone:
                 lock.drop(key)
                 dropped += 1
                 echo(shown_on_one_line(f"dropped:   {key} (no longer exists)"))
-            else:
+            elif gone:
                 missing += 1
                 echo(
                     shown_on_one_line(
-                        f"missing:   {key} (cannot be read; left as it was; "
+                        f"missing:   {key} (no longer exists; left as it was; "
                         "drop the dead entry with --drop-missing)"
+                    )
+                )
+            else:
+                missing += 1
+                kept = (
+                    "; --drop-missing removes only the entry of a file that "
+                    "no longer exists"
+                    if drop_missing
+                    else ""
+                )
+                echo(
+                    shown_on_one_line(
+                        f"missing:   {key} (exists but cannot be hashed: "
+                        f"{_UNHASHABLE}; left as it was{kept})"
                     )
                 )
         elif old != new:
@@ -406,11 +439,20 @@ def verify(
     problems: List[str] = []
     for key, state in lock.problems():
         scopes = ", ".join(s.describe() for s in sorted(lock.entries[key].scopes))
-        if state == "missing":
+        if state == "missing" and file_is_gone(root, key):
             problems.append(
                 f"missing: {key} ({scopes or 'no scopes'}); the file is gone, so "
                 f"drop the dead entry with "
                 f"`{REFRESH_COMMAND} --drop-missing {shlex.quote(key)}`"
+            )
+        elif state == "missing":
+            # Still there, so --drop-missing keeps the entry: the cure is the
+            # file, not the lock.
+            problems.append(
+                f"missing: {key} ({scopes or 'no scopes'}); the file exists but "
+                f"cannot be hashed ({_UNHASHABLE}); make it a readable regular "
+                f"file, then, after review, run "
+                f"`{REFRESH_COMMAND} {shlex.quote(key)}`"
             )
         else:
             problems.append(
@@ -434,15 +476,33 @@ def verify(
             path = entry.get("path")
             if not symbol or not isinstance(path, str):
                 continue
-            key = lock_key(path)
-            locked = lock.entries.get(key) if key is not None else None
-            if locked is None or not scope_is_recorded(
-                locked, entry.get("rule_id"), str(symbol)
-            ):
+            rule_id = entry.get("rule_id")
+            if rule_id is not None and not isinstance(rule_id, str):
+                # An unquoted `rule_id: 602` reads as a YAML integer, which the
+                # config model's strict string field refuses, so a scan stops
+                # on this config. Reported, not compared: the comparison
+                # called .casefold() on it and raised AttributeError.
                 problems.append(
-                    f"unlocked: {path} in {config_path.name}; run "
-                    f"`{add_command_for(entry.get('rule_id'), str(symbol), path)}`"
+                    f"malformed: {path} in {config_path.name}; its rule_id is "
+                    f"not a string (it reads as {type(rule_id).__name__}); "
+                    "write it quoted"
                 )
+                continue
+            key = resolved_lock_key(root, path)
+            locked = lock.entries.get(key) if key is not None else None
+            if locked is None or not scope_is_recorded(locked, rule_id, str(symbol)):
+                if file_is_gone(root, path):
+                    # `add` refuses a path that is not a file, so its command
+                    # cannot work here: the suppression itself is what is left.
+                    problems.append(
+                        f"unlocked: {path} in {config_path.name}; the file no "
+                        "longer exists, so remove the suppression from the config"
+                    )
+                else:
+                    problems.append(
+                        f"unlocked: {path} in {config_path.name}; run "
+                        f"`{add_command_for(rule_id, str(symbol), path)}`"
+                    )
     for line in problems:
         echo(shown_on_one_line(line))
     if problems:

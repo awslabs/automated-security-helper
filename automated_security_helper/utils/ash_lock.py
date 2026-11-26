@@ -133,6 +133,62 @@ def lock_key(path: str) -> Optional[str]:
     return None if text in ("", ".") else text
 
 
+def resolved_lock_key(source_dir: Path | str, path: Any) -> Optional[str]:
+    """The key the lock holds for ``path`` under ``source_dir``: the file's own
+    path, with symbolic links followed, or None when it cannot be one.
+
+    The one key function for every place that writes or looks up an entry for
+    a suppression's file: ``ash suppress add`` and its check for a suppression
+    already in the config, ``ash suppress verify``, and the check of a config
+    (``unlocked_symbol_suppressions``). It is also the key a scan looks up: the
+    scan's resolver follows links in a finding's path before it builds its key
+    (``SymbolResolver._locked_and_unchanged``). With ``link -> src``, a
+    suppression whose ``path`` is ``link/app.py`` is locked, found and refused
+    under ``src/app.py`` by every one of them. Before this, ``add`` followed
+    the link and the config check did not, so the refusal's own advice
+    (``add ... --file link/app.py``) locked ``src/app.py`` and the check went on
+    asking for ``link/app.py``.
+
+    ``path`` is read as ``lock_key`` reads it first (a backslash is a
+    separator, a leading ``./`` is dropped), so a path that is no key there
+    (absolute, climbing out with ``..``, empty) is none here either, and
+    neither is one whose links lead out of ``source_dir``. A path that names no
+    existing file keeps its spelling, so a pattern or a file that is gone is
+    looked up as written.
+    """
+    key = lock_key(path)
+    if key is None:
+        return None
+    try:
+        root = Path(source_dir).resolve()
+        relative = (root / key).resolve().relative_to(root)
+    except (OSError, RuntimeError, ValueError):
+        return None
+    return lock_key(relative.as_posix())
+
+
+def file_is_gone(source_dir: Path | str, path: Any) -> bool:
+    """Whether the file a suppression's ``path`` names under ``source_dir`` no
+    longer exists.
+
+    Read with ``os.path.lexists``: a symbolic link that exists counts as
+    existing, whether or not its target does. A file that exists but cannot be
+    hashed (unreadable, not a regular file, larger than
+    ``MAX_LOCKED_FILE_BYTES``, or a link that leads out of the root) is not
+    gone. Its entry stays and the advice is to fix the file, where a gone
+    file's advice is to drop its entry and remove its suppressions. A path
+    that cannot be a lock key (``lock_key``) is never called gone, and neither
+    is a pattern or a directory spelling (a glob character, a trailing
+    separator), which names no one file to be gone.
+    """
+    key = lock_key(path)
+    if key is None:
+        return False
+    if any(character in path for character in "*?[") or path.endswith(("/", "\\")):
+        return False
+    return not os.path.lexists(Path(source_dir) / key)
+
+
 def _utc_now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -257,6 +313,13 @@ class AshLock:
         scope. A file locked at another hash is re-hashed: its old scopes were
         reviewed against bytes that no longer exist, so only a deliberate
         ``refresh`` does that, and ``bind`` refuses it (``AshLockError``).
+
+        A scope the entry already records is not added again, a rule id that
+        differs only in case included: the entry is matched as
+        ``scope_is_recorded`` matches it, the rule id compared
+        case-insensitively. Compared exactly, ``b602`` after ``B602`` added a
+        second scope and rewrote the lock for a suppression the config
+        already held.
         """
         digest = file_sha256(self.source_dir, key)
         if digest is None:
@@ -270,7 +333,7 @@ class AshLock:
                 f"{key} changed since it was locked; review its suppressions, "
                 f"then run `{REFRESH_COMMAND} {shlex.quote(key)}` before adding another"
             )
-        if scope not in entry.scopes:
+        if not scope_is_recorded(entry, scope.rule_id, scope.symbol):
             entry.scopes.append(scope)
             entry.scopes.sort()
         return entry
@@ -350,16 +413,22 @@ def _entries_of(document: Any, where: str = LOCK_RELATIVE_PATH) -> Dict[str, Loc
     return entries
 
 
-def add_command_for(rule_id: Optional[str], symbol: str, path: str) -> str:
+def add_command_for(rule_id: Any, symbol: str, path: str) -> str:
     """The ``ash suppress add`` line that locks one suppression.
 
     Every value is shell-quoted: the rule id, symbol and path come from the
     config, which a pull request controls, so an unquoted ``x; curl ... | sh``
     in a path would run something else when a maintainer pastes the suggested
-    command from CI output.
+    command from CI output. A rule id that is not a string (an unquoted
+    ``rule_id: 602`` read from YAML) is written as its text: ``shlex.quote``
+    takes only a string, and raised ``TypeError`` on it.
     """
+    if isinstance(rule_id, str):
+        rule = rule_id
+    else:
+        rule = "" if rule_id is None else str(rule_id)
     return (
-        f"ash suppress add {shlex.quote(rule_id or '<rule-id>')} "
+        f"ash suppress add {shlex.quote(rule or '<rule-id>')} "
         f"--symbol {shlex.quote(symbol)} --file {shlex.quote(path)} "
         f"--reason '<why this is safe>'"
     )
@@ -396,10 +465,16 @@ def unlocked_symbol_suppressions(
     wildcard that names no one file is still looked up as written, so it is
     unlocked; an absolute path or one climbing out of the root never is)
     counts as unlocked.
+
+    The file is looked up under ``resolved_lock_key``, the key ``add`` writes
+    and a scan reads: a path through a symbolic link is found under the file
+    it leads to.
     """
     missing = []
     for suppression in symbol_suppressions(suppressions):
-        key = lock_key(getattr(suppression, "path", None) or "")
+        key = resolved_lock_key(
+            lock.source_dir, getattr(suppression, "path", None) or ""
+        )
         entry = lock.entries.get(key) if key is not None else None
         if entry is None or not scope_is_recorded(
             entry, getattr(suppression, "rule_id", None), suppression.symbol
@@ -408,8 +483,18 @@ def unlocked_symbol_suppressions(
     return missing
 
 
-def refusal_text(unlocked: Sequence[Any]) -> str:
-    """The validation message for symbol suppressions with no lock entry."""
+def refusal_text(
+    unlocked: Sequence[Any], source_dir: Optional[Path | str] = None
+) -> str:
+    """The validation message for symbol suppressions with no lock entry.
+
+    With ``source_dir``, the scanned directory, a suppression whose file no
+    longer exists there (``file_is_gone``) is told to be removed from the
+    config rather than given the ``add`` command, which refuses a path that is
+    not a file. That is the state ``refresh --drop-missing`` leaves: the entry
+    dropped, the suppressions still in the config. Without ``source_dir``
+    every suppression that names one file gets the command.
+    """
     lines = [
         (
             f"{len(unlocked)} symbol-scoped suppression(s) are not recorded in "
@@ -431,6 +516,13 @@ def refusal_text(unlocked: Sequence[Any]) -> str:
                 "definition, locking each such file with its own entry."
             )
             continue
+        if source_dir is not None and file_is_gone(source_dir, path):
+            rule = getattr(suppression, "rule_id", None) or "(any rule)"
+            lines.append(
+                f"  {path!r} no longer exists, so its suppression ({rule} in "
+                f"{suppression.symbol}) cannot be locked: remove it from the config."
+            )
+            continue
         lines.append(
             "  "
             + add_command_for(
@@ -445,13 +537,21 @@ def refusal_text(unlocked: Sequence[Any]) -> str:
 
 
 def refuse_unlocked_symbol_suppressions(
-    suppressions: Iterable[Any], source_dir: Path | str
+    suppressions: Iterable[Any],
+    source_dir: Path | str,
+    *,
+    scanned_tree: bool = True,
 ) -> None:
     """Raise ``ASHConfigValidationError`` for a symbol suppression with no lock entry.
 
     Nothing is checked when no suppression sets ``symbol``, so a config without
     one never reads the lock. A lock file that cannot be used is the same
     refusal, in its own words.
+
+    ``scanned_tree`` False says ``source_dir`` is only a guess at the directory
+    a scan reads (the config check given no source directory takes the config
+    file's own location), so a file missing from it is not called gone, and
+    every unrecorded suppression gets the ``add`` command.
     """
     symbols = symbol_suppressions(suppressions)
     if not symbols:
@@ -462,25 +562,42 @@ def refuse_unlocked_symbol_suppressions(
         raise ASHConfigValidationError(str(e)) from None
     unlocked = unlocked_symbol_suppressions(symbols, lock)
     if unlocked:
-        raise ASHConfigValidationError(refusal_text(unlocked))
+        raise ASHConfigValidationError(
+            refusal_text(unlocked, source_dir if scanned_tree else None)
+        )
 
 
-def stale_notice(key: str, entry: LockEntry, state: str) -> str:
+def stale_notice(key: str, entry: LockEntry, state: str, *, gone: bool = True) -> str:
     """The one notice a scan prints for a locked file whose hash does not match.
 
     A ``stale`` file has bytes to review, so the advice is the refresh; a
     ``missing`` one has none, and ``refresh`` on it exits 1 and changes
     nothing, so the advice is the drop. The two used to share the refresh
     advice, which left a deleted file failing ``verify`` forever.
+
+    ``gone`` says whether a ``missing`` file no longer exists
+    (``file_is_gone``). One that still exists but cannot be hashed keeps its
+    entry, which ``refresh --drop-missing`` does not drop, so its advice is to
+    make the file hashable again.
     """
     scopes = ", ".join(s.describe() for s in sorted(entry.scopes)) or "none recorded"
-    if state == "missing":
+    if state == "missing" and gone:
         return (
-            f"Stale suppression: {key} no longer exists or cannot be read, so "
-            f"the symbol suppressions bound to it do not apply. Suppressions: "
-            f"{scopes}. Drop the dead entry with "
+            f"Stale suppression: {key} no longer exists, so the symbol "
+            f"suppressions bound to it do not apply. Suppressions: {scopes}. "
+            f"Drop the dead entry with "
             f"`{REFRESH_COMMAND} --drop-missing {shlex.quote(key)}` and remove "
             f"its suppressions from the config."
+        )
+    if state == "missing":
+        return (
+            f"Stale suppression: {key} exists but cannot be hashed (it cannot "
+            f"be read, is not a regular file, is larger than "
+            f"{MAX_LOCKED_FILE_BYTES // (1024 * 1024)} MiB, or is a link that "
+            f"leads out of the scan root), so the symbol suppressions bound to "
+            f"it do not apply. Suppressions: {scopes}. Make it a readable "
+            f"regular file inside the scan root, then, after reviewing any "
+            f"change, record it with `{REFRESH_COMMAND} {shlex.quote(key)}`."
         )
     return (
         f"Stale suppression: {key} has changed since its suppressions were "

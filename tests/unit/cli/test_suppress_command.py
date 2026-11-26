@@ -11,6 +11,7 @@ current, and ``refresh`` is what brings a reviewed change back to current.
 from __future__ import annotations
 
 import json
+import os
 import sys
 
 import pytest
@@ -52,11 +53,15 @@ def repo(tmp_path, monkeypatch):
 
 
 class _Result:
-    """The exit code and everything the command printed, stdout then stderr."""
+    """The exit code and everything the command printed, stdout then stderr,
+    and the exception that ended it, if one was not ``typer.Exit``."""
 
     def __init__(self, result):
         self.exit_code = result.exit_code
         self.output = result.stdout + result.stderr
+        self.crash = (
+            None if isinstance(result.exception, SystemExit) else result.exception
+        )
 
 
 def _run(*args: str) -> _Result:
@@ -180,11 +185,53 @@ class TestAdd:
         self, repo
     ):
         assert _add(repo).exit_code == 0
+        lock_before = (repo / LOCK_RELATIVE_PATH).read_bytes()
         again = _add(repo, rule=" b602 ")
         assert again.exit_code == 0, again.output
         assert "Already in" in again.output
         entries = [s for s in _suppressions(repo) if s.get("symbol")]
         assert [e["rule_id"] for e in entries] == ["B602"]
+        # The lock too: a second, case-variant scope rewrote it while the
+        # command said "Already in".
+        assert (repo / LOCK_RELATIVE_PATH).read_bytes() == lock_before
+        assert _lock(repo)["files"]["src/app.py"]["scopes"] == [
+            {"rule_id": "B602", "symbol": "risky"}
+        ]
+
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="symlink creation needs privileges on Windows",
+    )
+    def test_a_config_entry_through_a_link_is_cleared_by_the_command_verify_names(
+        self, repo
+    ):
+        # With link -> src, add keyed link/app.py as src/app.py and verify (and
+        # a scan's config check) looked it up as written, so verify's own
+        # advice looped: the command wrote a second suppression for
+        # src/app.py, and link/app.py stayed unrecorded.
+        (repo / "link").symlink_to(repo / "src", target_is_directory=True)
+        config = repo / ".ash.yaml"
+        config.write_text(
+            CONFIG
+            + "    - rule_id: B602\n      path: link/app.py\n      symbol: risky\n"
+            "      reason: by hand\n",
+            encoding="utf-8",
+        )
+        before = _run("verify")
+        assert before.exit_code == 1, before.output
+        assert (
+            "ash suppress add B602 --symbol risky --file link/app.py" in before.output
+        )
+        config_before = config.read_bytes()
+
+        result = _add(repo, file="link/app.py")
+
+        assert result.exit_code == 0, result.output
+        assert "Already in" in result.output
+        assert config.read_bytes() == config_before
+        assert set(_lock(repo)["files"]) == {"src/app.py"}
+        after = _run("verify")
+        assert after.exit_code == 0, after.output
 
 
 class TestRoundTrip:
@@ -244,6 +291,86 @@ class TestRoundTrip:
         assert dropped.exit_code == 0, dropped.output
         assert "dropped:   src/app.py" in dropped.output
         assert "src/app.py" not in _lock(repo)["files"]
+
+    @pytest.mark.parametrize(
+        "make_unhashable",
+        [
+            pytest.param(
+                lambda app: app.chmod(0),
+                id="unreadable",
+                marks=pytest.mark.skipif(
+                    sys.platform == "win32"
+                    or (hasattr(os, "geteuid") and os.geteuid() == 0),
+                    reason="a mode-0 file stays readable to root, and on Windows",
+                ),
+            ),
+            pytest.param(
+                lambda app: (app.unlink(), app.mkdir()),
+                id="not-a-regular-file",
+            ),
+        ],
+    )
+    def test_drop_missing_keeps_the_entry_of_a_file_that_is_still_there(
+        self, repo, make_unhashable
+    ):
+        # A file that cannot be hashed is not gone: dropping its entry printed
+        # "(no longer exists)", which was false, and left its suppressions
+        # unrecorded, so every scan refused the config instead of warning.
+        assert _add(repo).exit_code == 0
+        app = repo / "src" / "app.py"
+        make_unhashable(app)
+        try:
+            kept = _run("refresh", "--drop-missing", "src/app.py")
+            checked = _run("verify")
+        finally:
+            if app.is_dir():
+                app.rmdir()
+            else:
+                app.chmod(0o644)
+        assert kept.exit_code == 1, kept.output
+        assert "dropped:" not in kept.output
+        assert "exists but cannot be hashed" in kept.output
+        assert "src/app.py" in _lock(repo)["files"]
+        assert checked.exit_code == 1, checked.output
+        assert "exists but cannot be hashed" in checked.output
+        assert "--drop-missing" not in checked.output
+
+    def test_verify_tells_a_suppression_whose_file_is_gone_to_be_removed(self, repo):
+        # After the drop the suppression is unrecorded; the `add` command it
+        # was given fails on a path that is not a file, so the advice is the
+        # one step left: remove the suppression.
+        assert _add(repo).exit_code == 0
+        (repo / "src" / "app.py").unlink()
+        assert _run("refresh", "--drop-missing", "src/app.py").exit_code == 0
+        result = _run("verify")
+        assert result.exit_code == 1, result.output
+        assert "unlocked: src/app.py" in result.output
+        assert (
+            "the file no longer exists, so remove the suppression from the config"
+            in result.output
+        )
+        assert "ash suppress add" not in result.output
+
+    @pytest.mark.parametrize("locked", [False, True], ids=["unlocked", "locked"])
+    def test_verify_reports_a_rule_id_that_is_not_a_string(self, repo, locked):
+        # `rule_id: 602` reads from YAML as an int. With its file locked,
+        # verify called .casefold() on it (AttributeError); without, it built
+        # the add command with shlex.quote(602) (TypeError). Both ended in a
+        # traceback.
+        if locked:
+            assert _add(repo).exit_code == 0
+        config = repo / ".ash.yaml"
+        config.write_text(
+            config.read_text(encoding="utf-8")
+            + "    - rule_id: 602\n      path: src/app.py\n      symbol: risky\n"
+            "      reason: by hand\n",
+            encoding="utf-8",
+        )
+        result = _run("verify")
+        assert result.crash is None, repr(result.crash)
+        assert result.exit_code == 1, result.output
+        assert "malformed: src/app.py in .ash.yaml" in result.output
+        assert "rule_id is not a string" in result.output
 
     def test_verify_lists_a_symbol_suppression_with_no_entry(self, repo):
         config = repo / ".ash.yaml"

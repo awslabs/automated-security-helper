@@ -150,19 +150,27 @@
 - **Symbol suppressions are bound to their file's content hash in `.ash.lock`.**
   A symbol-scoped suppression the lock does not record is refused when the config is
   validated (`ash scan`, a workspace scan handing the orchestrator a resolved config,
-  `ash config validate`, and the MCP `validate_config`, which used to skip the check
-  without a source directory), with a message that names the command to run. The lock
-  records the reviewed `(rule_id, symbol)` scopes beside each file's hash and both are
-  required: locking a file for one rule does not approve a suppression added to the
-  same file later. When a locked file's bytes change, its symbol suppressions stop
-  applying, their findings return, and the scan prints one notice naming the file, the
-  suppressions and `ash suppress refresh`. The new `ash suppress add`, `refresh` and
-  `verify` commands write the suppression and its lock entry together, record a
-  reviewed change, and fail CI when the lock is out of date; `add` resolves `--file`
-  to the key the scan looks up (a path through a symlink locks the real file), a
-  whole-lock refresh is the explicit `refresh --all`, and `refresh --drop-missing`
-  removes the entry of a locked file that is gone. Line-range suppressions are
-  unchanged. This repository's own symbol suppressions are locked in the same change.
+  and `ash config validate`), with a message that names the command to run. The MCP
+  `validate_config` tool, which has no source directory and used to skip the check,
+  reports the same finding as a warning that says the lock was not checked against a
+  source tree: it can read only the lock at the root the config file's location
+  implies, and config content has none, so it cannot say whether a scan refuses the
+  config. The lock records the reviewed `(rule_id, symbol)` scopes beside each file's
+  hash and both are required: locking a file for one rule does not approve a
+  suppression added to the same file later. When a locked file's bytes change, its
+  symbol suppressions stop applying, their findings return, and each scan prints one
+  notice naming the file, the suppressions and `ash suppress refresh`. The new
+  `ash suppress add`, `refresh` and `verify` commands write the suppression and its
+  lock entry together, record a reviewed change, and fail CI when the lock is out of
+  date. A suppression's path is keyed the way the scan looks it up, so a path through
+  a symlink is locked, verified and checked under the real file. A whole-lock refresh
+  is the explicit `refresh --all`, and `refresh --drop-missing` removes the entry of a
+  locked file that no longer exists. A locked file that is still there but cannot be
+  hashed (unreadable, not a regular file, over 64 MiB, or a link out of the source
+  directory) keeps its entry, and `refresh` and `verify` report it as such. A symbol
+  suppression whose file is gone is advised to be removed from the config, not added
+  again. Line-range suppressions are unchanged. This repository's own symbol
+  suppressions are locked in the same change.
   The lock is the root dotfile `.ash.lock`; a lock still at `.ash/ash.lock` is read
   with a deprecation warning (deprecated in v3.9, removed in v4.0) that advises
   `git mv`. See
