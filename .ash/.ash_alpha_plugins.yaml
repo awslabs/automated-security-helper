@@ -1466,18 +1466,18 @@ global_settings:
       reason: "The entrypoint reads one variable by name, ASH_MCP_AUTH_HEADER_VALUE_SECRET_ARN, the secret it needs to resolve; nothing else in the environment."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/plugin_modules/ash_builtin/converters/archive_converter.py
-      line_start: 145
-      line_end: 145
+      line_start: 146
+      line_end: 146
       reason: "'.git-credentials' is an entry of SCANNABLE_MEMBER_NAMES, the archive member names the converter extracts so the secret scanners can read them; a name in a table, not a read."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/plugin_modules/ash_builtin/converters/archive_converter.py
-      line_start: 148
-      line_end: 148
+      line_start: 149
+      line_end: 149
       reason: "'.env' is an entry of SCANNABLE_MEMBER_NAMES, the archive member names the converter extracts so the secret scanners can read them; a name in a table, not a read."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/plugin_modules/ash_builtin/converters/archive_converter.py
-      line_start: 175
-      line_end: 175
+      line_start: 176
+      line_end: 176
       reason: "'.env' is the dotfile stem whose stage-suffixed variants (.env.local) the converter admits for scanning; a name in a table, not a read."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/plugin_modules/ash_builtin/scanners/npm_audit_scanner.py
