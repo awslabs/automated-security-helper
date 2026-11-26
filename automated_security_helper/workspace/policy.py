@@ -376,7 +376,10 @@ def ceiling_unreachable_counts(
         return {}
 
     not_gating = {normalise_scanner_name(str(name)) for name in non_gating_scanners}
-    counts: dict[str, int] = {}
+    from automated_security_helper.utils.frame_ops import ordered_counts
+    from automated_security_helper.utils.frame_text import unwire, wire
+
+    names: list[str] = []
     for result in results:
         if not isinstance(result, Mapping):
             continue
@@ -412,9 +415,15 @@ def ceiling_unreachable_counts(
         # "unattributed" matches the name the aggregator uses for a finding with
         # no scanner_name, so the two payloads agree on what to call it.
         name = str(scanner) if scanner else "unattributed"
-        counts[name] = counts.get(name, 0) + 1
+        names.append(wire(name))
 
-    return counts
+    if not names:
+        return {}
+
+    import polars as pl
+
+    frame = pl.DataFrame({"name": names}, schema={"name": pl.String})
+    return {unwire(name): n for name, n in ordered_counts(frame, "name").iter_rows()}
 
 
 def normalise_scanner_name(name: str) -> str:
