@@ -2811,8 +2811,8 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
             List[Path]: List of paths to extracted files
         """
         extracted_whole: List[str] = []
-        setattr(self.context, _EXTRACTED_WHOLE, extracted_whole)
         context = self._require_context()
+        setattr(context, _EXTRACTED_WHOLE, extracted_whole)
         # TODO : Convert utils/identifyipynb.sh script to python using nbconvert as lib
         ASH_LOGGER.debug(
             f"Searching for archive files in search_path within the ASH scan set: {context.source_dir}"

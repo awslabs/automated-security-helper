@@ -113,6 +113,24 @@ def test_a_converter_whose_context_has_no_configuration_is_refused(tmp_path):
         converter._skipped(str(context.source_dir / ".mcp.json"))
 
 
+def test_a_converter_without_a_context_is_refused_before_it_records_anything(
+    tmp_path,
+):
+    from automated_security_helper.plugin_modules.ash_builtin.converters.archive_converter import (
+        ArchiveConverter,
+        ArchiveConverterConfig,
+    )
+
+    converter = ArchiveConverter(
+        context=_context(tmp_path), config=ArchiveConverterConfig()
+    )
+    # Construction refuses a converter without a context, so it is taken away
+    # afterwards.
+    converter.context = None
+    with pytest.raises(ScannerError, match="No context provided for ArchiveConverter"):
+        converter.convert()
+
+
 def test_a_converter_whose_results_directory_is_unset_is_refused(tmp_path):
     from automated_security_helper.plugin_modules.ash_builtin.converters.sdist_lock_harvester import (
         SdistLockHarvester,
