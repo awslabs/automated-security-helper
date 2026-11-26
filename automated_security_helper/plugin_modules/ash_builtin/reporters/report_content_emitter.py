@@ -992,11 +992,24 @@ class ReportContentEmitter:
         )
 
     @classmethod
-    def _by_severity(cls, vulns: List[FlatVulnerability]) -> List[FlatVulnerability]:
-        """*vulns* most severe first; findings equal on every key keep their order."""
+    def by_severity(
+        cls,
+        vulns: List[FlatVulnerability],
+        *,
+        suppressed: Sequence[bool] | None = None,
+    ) -> List[FlatVulnerability]:
+        """*vulns* most severe first; findings equal on every key keep their order.
+
+        With *suppressed*, one flag per finding, the unsuppressed ones come
+        first (the HTML cards' order); each group is ordered as above. The line
+        in each key is ``line_start or 0``, always an int, which the frame
+        ordering needs.
+        """
         return [
             vulns[position]
-            for position in severity_order([cls._severity_sort_key(v) for v in vulns])
+            for position in severity_order(
+                [cls._severity_sort_key(v) for v in vulns], suppressed
+            )
         ]
 
     def get_findings_overview(self) -> List[Dict[str, Any]]:
@@ -1032,7 +1045,7 @@ class ReportContentEmitter:
         actionable_findings, notes = self.fold_findings(actionable_findings)
 
         # Limit the number of detailed findings
-        actionable_findings = self._by_severity(actionable_findings)
+        actionable_findings = self.by_severity(actionable_findings)
         # A negative limit would slice from the end and drop the last findings
         # instead of none; the reporters refuse one, and a caller that passes
         # one anyway gets none.
@@ -1056,7 +1069,7 @@ class ReportContentEmitter:
         """
         left_out = [vuln for vuln in self.flat_vulns if self.is_policy_not_gating(vuln)]
         left_out, notes = self.fold_findings(left_out)
-        left_out = self._by_severity(left_out)
+        left_out = self.by_severity(left_out)
         return [
             self._with_note(self._overview_row(vuln), vuln, notes)
             for vuln in left_out[: max(max_findings, 0)]

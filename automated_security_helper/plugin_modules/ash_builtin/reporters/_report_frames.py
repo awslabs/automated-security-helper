@@ -105,7 +105,10 @@ def top_locations(locations: Iterable[str], limit: int | None) -> List[tuple[str
     return [(unwire(location), int(count)) for location, count in ranked.iter_rows()]
 
 
-def severity_order(keys: Sequence[tuple[int, str, int, str]]) -> List[int]:
+def severity_order(
+    keys: Sequence[tuple[int, str, int, str]],
+    suppressed: Sequence[bool] | None = None,
+) -> List[int]:
     """The positions of *keys* in ascending order, ties in their given order.
 
     Each key is ``(severity place, file, line, rule)``. A file or rule may hold a
@@ -113,21 +116,32 @@ def severity_order(keys: Sequence[tuple[int, str, int, str]]) -> List[int]:
     :func:`wire` and lines as their ranks. The ``line`` column is a dense rank of
     the lines given, not a line: only the order of lines is read here, and every
     line has a rank, where ``models.flat_frame`` holds the line and a null for
-    one that does not fit 64 bits.
+    one that does not fit 64 bits. Every line in a key is an int, never None: a
+    rank map has no entry for None, so a caller whose rows may lack a line gives
+    the line the Python sort it replaces read for it (0 for no line).
+
+    *suppressed*, one flag per key, is a leading sort column: ``False`` rows come
+    before ``True`` rows, as ``False < True`` does in a Python tuple compare, and
+    each group keeps the ordering above. Each flag is read through ``bool()``, so
+    a row whose flag is None sorts as live.
     """
     if not keys:
         return []
+    if suppressed is not None and len(suppressed) != len(keys):
+        raise ValueError("severity_order needs one suppression flag per key")
     line_rank = ranks(k[2] for k in keys)
-    ordered = (
-        pl.DataFrame(
-            {
-                "place": pl.Series([k[0] for k in keys], dtype=pl.Int64),
-                "file": pl.Series([wire(k[1]) for k in keys], dtype=pl.String),
-                "line": pl.Series([line_rank[k[2]] for k in keys], dtype=pl.Int64),
-                "rule": pl.Series([wire(k[3]) for k in keys], dtype=pl.String),
-            }
+    columns: dict[str, pl.Series] = {}
+    if suppressed is not None:
+        columns["suppressed"] = pl.Series(
+            [bool(flag) for flag in suppressed], dtype=pl.Boolean
         )
+    columns["place"] = pl.Series([k[0] for k in keys], dtype=pl.Int64)
+    columns["file"] = pl.Series([wire(k[1]) for k in keys], dtype=pl.String)
+    columns["line"] = pl.Series([line_rank[k[2]] for k in keys], dtype=pl.Int64)
+    columns["rule"] = pl.Series([wire(k[3]) for k in keys], dtype=pl.String)
+    ordered = (
+        pl.DataFrame(columns)
         .with_row_index("position")
-        .sort(["place", "file", "line", "rule"], maintain_order=True)
+        .sort(list(columns), maintain_order=True)
     )
     return ordered["position"].to_list()

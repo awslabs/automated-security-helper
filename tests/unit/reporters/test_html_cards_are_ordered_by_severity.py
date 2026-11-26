@@ -14,6 +14,7 @@ order of the rendered titles must equal the oracle's.
 
 import random
 import re
+from types import SimpleNamespace
 from typing import List
 
 import pytest
@@ -25,7 +26,11 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.html_reporte
     _SEVERITY_ORDER,
     HtmlReporter,
 )
+from automated_security_helper.plugin_modules.ash_builtin.reporters._report_frames import (
+    severity_order,
+)
 from automated_security_helper.plugin_modules.ash_builtin.reporters.report_content_emitter import (
+    _SEVERITY_ORDER as _EMITTER_ORDER,
     ReportContentEmitter,
 )
 from tests.unit.models._flat_vulnerability_helpers import flat_with_severity
@@ -136,3 +141,86 @@ class TestTheCardsKeepTheOrderTheOracleGives:
         assert "No findings in this report" in HtmlReporter._format_finding_cards(
             ReportContentEmitter(AshAggregatedResults())
         )
+
+
+LONE_SURROGATE = chr(0xDC80)
+EDGE_FILES = ["", "a", LONE_SURROGATE, chr(0xD7FF), chr(0xE000), NFC, NFD]
+EDGE_LINES = [0, 1, -1, 2**63, 2**63 - 1, 10**30, -(10**30)]
+
+
+def _standin(index, severity, suppressed, file_path, line_start, rule_id):
+    return SimpleNamespace(
+        index=index,
+        severity=severity,
+        is_suppressed=suppressed,
+        file_path=file_path,
+        line_start=line_start,
+        rule_id=rule_id,
+    )
+
+
+def _standins(seed: int, count: int):
+    rng = random.Random(seed)
+    return [
+        _standin(
+            index,
+            rng.choice(SEVERITIES + ["weird"]),
+            rng.choice([True, False, None, 0, 1]),
+            rng.choice(EDGE_FILES + [None]),
+            rng.choice(EDGE_LINES + [None]),
+            rng.choice(RULES + [LONE_SURROGATE]),
+        )
+        for index in range(count)
+    ]
+
+
+class TestTheEmittersOrderWithSuppressionFlags:
+    @pytest.mark.parametrize("seed", range(40))
+    def test_it_equals_the_sorted_key_over_edge_text_and_lines(self, seed):
+        rows = _standins(seed, 5 + seed)
+        flags = [bool(row.is_suppressed) for row in rows]
+        got = ReportContentEmitter.by_severity(rows, suppressed=flags)
+        want = sorted(
+            rows, key=lambda row: (bool(row.is_suppressed),) + REFERENCE_PLACE_KEY(row)
+        )
+        assert [row.index for row in got] == [row.index for row in want]
+
+    @pytest.mark.parametrize("seed", range(10))
+    def test_without_flags_it_orders_as_it_always_did(self, seed):
+        rows = _standins(seed, 20)
+        got = ReportContentEmitter.by_severity(rows)
+        want = sorted(rows, key=REFERENCE_PLACE_KEY)
+        assert [row.index for row in got] == [row.index for row in want]
+
+    def test_a_line_of_none_and_a_line_of_zero_tie(self):
+        rows = [
+            _standin(0, "HIGH", False, "a", 0, "R"),
+            _standin(1, "HIGH", False, "a", None, "R"),
+            _standin(2, "HIGH", False, "a", -1, "R"),
+            _standin(3, "HIGH", False, "a", None, "R"),
+        ]
+        got = ReportContentEmitter.by_severity(rows, suppressed=[False] * 4)
+        assert [row.index for row in got] == [2, 0, 1, 3]
+
+    def test_a_row_whose_flag_is_none_sorts_as_live(self):
+        flags = [True, None, False]
+        positions = severity_order([(0, "a", 0, "r")] * 3, [bool(f) for f in flags])
+        assert positions == [1, 2, 0]
+        assert severity_order([(0, "a", 0, "r")] * 3, flags) == [1, 2, 0]
+
+    def test_a_flag_count_that_differs_from_the_key_count_is_refused(self):
+        with pytest.raises(ValueError):
+            severity_order([(0, "a", 0, "r")] * 2, [False])
+
+    def test_no_keys_with_flags_is_empty(self):
+        assert severity_order([], []) == []
+
+
+def REFERENCE_PLACE_KEY(row):
+    """The emitter's own sort key, as written before the flags were added."""
+    return (
+        _EMITTER_ORDER.get(str(row.severity).upper(), len(_EMITTER_ORDER)),
+        row.file_path or "",
+        row.line_start or 0,
+        row.rule_id or "",
+    )
