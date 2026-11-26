@@ -147,7 +147,9 @@ scanner_diagnostics() {
   echo "::group::host memory and kernel kill messages"
   free -m || true
   ulimit -a || true
-  (sudo -n dmesg 2>/dev/null || dmesg 2>/dev/null) | grep -i -E 'out of memory|oom|killed process|segfault|SIGSYS|audit.*seccomp' | tail -n 20 || true
+  # Read-only diagnostic: dmesg needs root on Linux runners. `sudo -n` never
+  # prompts, and a host without passwordless sudo falls back to plain dmesg.
+  (sudo -n dmesg 2>/dev/null || dmesg 2>/dev/null) | grep -i -E 'out of memory|oom|killed process|segfault|SIGSYS|audit.*seccomp' | tail -n 20 || true # nosemgrep: sudo-in-shell-script
   echo "::endgroup::"
 }
 
