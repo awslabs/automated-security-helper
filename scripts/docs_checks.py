@@ -8557,12 +8557,15 @@ SCANNER_COLUMN_HEADERS = {
     "built-in scanners": "built-in",
     "alpha plugins": "alpha",
     "alpha scanners": "alpha",
+    # The tier was called community before it was called alpha; the old headings are
+    # accepted as aliases for this release.
+    "community plugins": "alpha",
+    "community scanners": "alpha",
 }
-#: Headings from before the tier was renamed. This lint is internal, so they are
-#: refused with the heading to use rather than kept as aliases.
-_OLD_SCANNER_HEADERS = {
-    "community plugins": "Alpha plugins",
-    "community scanners": "Alpha scanners",
+#: The old column headings that still work, and the heading to use instead.
+_DEPRECATED_SCANNER_HEADERS = {
+    "community plugins": "alpha plugins",
+    "community scanners": "alpha scanners",
 }
 _SCANNER_ITEM = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]*")
 
@@ -8618,16 +8621,12 @@ def check_scanner_names(
                 if cell in SCANNER_COLUMN_HEADERS
             ]
             for heading in headers:
-                if heading in _OLD_SCANNER_HEADERS:
-                    findings.append(
-                        Finding(
-                            "scanners",
-                            page.rel,
-                            table.header_line,
-                            f"'{heading.title()}' is the old heading of the alpha "
-                            f"tier; use '{_OLD_SCANNER_HEADERS[heading]}'",
-                        )
+                if heading in _DEPRECATED_SCANNER_HEADERS:
+                    from automated_security_helper.base.plugin_manifest import (
+                        warn_community_alias,
                     )
+
+                    warn_community_alias(heading, _DEPRECATED_SCANNER_HEADERS[heading])
             column_count += len(columns)
             for number, cells in table.rows:
                 for index, header, kind in columns:

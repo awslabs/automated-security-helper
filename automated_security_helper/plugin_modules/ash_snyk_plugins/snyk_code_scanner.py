@@ -23,6 +23,7 @@ from automated_security_helper.base.scanner_facets import (
     FacetState,
     ScannerFacets,
 )
+from automated_security_helper.models.vocab import TargetType
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.config.confinement_remedy import SET_BY_THE_OPERATOR
 from automated_security_helper.models.core import ToolArgs
@@ -39,6 +40,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
     SarifReport,
 )
 from automated_security_helper.utils.display_text import escape_controls
+from automated_security_helper.utils.log import VERBOSE_LEVEL
 from automated_security_helper.utils.get_scan_set import (
     file_links_leaving_tree,
     honors_ignore_files,
@@ -482,8 +484,12 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
         ),
         extras=FacetDecl(
             state=FacetState.MAPPED,
-            native_field="result and rule properties bags, passed through the "
-            "SARIF model untouched",
+            native_field="result properties bag, passed through the SARIF model "
+            "untouched and read whole into the flat properties",
+            reason="the rule properties bag survives the SARIF model but the "
+            "flat reader takes only the rule's tags and helpUri from the "
+            "rule, so rule-bag keys (cwe, isAutofixable, exampleCommitFixes) "
+            "reach the flat row only through the cells above that name them",
         ),
     )
 
@@ -533,6 +539,7 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
                 python_only=False,
                 use_uv_tool=False,
             ),
+            runtime_compat=opsf.RuntimeCompatFacet(rows=()),
             platforms=opsf.PlatformsFacet(
                 provisionable=(),
                 note="the user's installed Snyk CLI, absent from TOOL_VERSIONS, so ASH provisions "
@@ -579,7 +586,6 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
                 semantics="from the CLI's exit codes: 0 no issues, 1 issues found, 2 an error, 3 no supported project (read through the staged-refusal logic)",
             ),
             provenance=opsf.ProvenanceFacet(
-                tier=opsf.Tier.ALPHA_OPTIN,
                 source=opsf.ProvenanceSource.USER_INSTALLED,
                 selection_surfaces=("ash_snyk_plugins in ash_plugin_modules",),
                 upstream_license=opsf.LICENSE_NOT_READ,
@@ -663,7 +669,7 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
         return super()._process_config_options()
 
     def _resolve_arguments(
-        self, target: Path, results_file: Path | None = None
+        self, target: str | Path, results_file: str | Path | None = None
     ) -> List[str]:
         """Resolve arguments for Snyk code test command.
 
@@ -678,7 +684,7 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
         self._process_config_options()
 
         # Start with base command and subcommands
-        args = [self.command, *self.subcommands]
+        args: List[str] = [self._tool_command(), *self.subcommands]
 
         # Add extra args. A value may be a number or a bool (ToolExtraArg), and
         # a spawn takes text only; a bool is spelled as a config file spells it,
@@ -831,7 +837,7 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
     def scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[Any] | None = None,
         config: Any | None = None,
         *args,
@@ -924,7 +930,7 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
         try:
             if (
                 not self.config.options.honor_tree_exclusions
-                and target_type != "source"
+                and target_type != TargetType.SOURCE
             ):
                 # The converted target is tested where ASH wrote it, so the
                 # exclusion files there are the ones snyk reads. The source target
@@ -963,7 +969,7 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
             results_file.unlink(missing_ok=True)
 
             tested = target
-            if target_type == "source":
+            if target_type == TargetType.SOURCE:
                 staged = self._stage_source(target, global_ignore_paths or [], cleanup)
                 if staged is None:
                     # _stage_source has said why: every file is left out, or there
@@ -1007,7 +1013,7 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
                     f"Running command: {shown_command} (the arguments are not "
                     f"shown: the plugin's values hook {read.failure()})",
                     target_type=target_type,
-                    level=logging.VERBOSE,
+                    level=VERBOSE_LEVEL,
                 )
             else:
                 recorded_command_line, recorded_arguments = redacted_command_record(
@@ -1018,7 +1024,7 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
                     "Running command: "
                     f"{text_without_values(' '.join(final_args), redact_values)}",
                     target_type=target_type,
-                    level=logging.VERBOSE,
+                    level=VERBOSE_LEVEL,
                 )
 
             # No environment modifications are currently needed for Snyk Code.
@@ -1261,7 +1267,7 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
             # (PluginBase.unevaluated_targets).
             self._plugin_log(
                 f"{shown} not copied for Snyk: {why}",
-                target_type="source",
+                target_type=TargetType.SOURCE,
                 level=logging.DEBUG,
             )
             self.record_unevaluated_target(shown)
@@ -1309,7 +1315,7 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
                 self._plugin_log(
                     f"{relative.as_posix()} not copied for Snyk: honor_ignore_files "
                     "is false, and snyk would apply it to the copy",
-                    target_type="source",
+                    target_type=TargetType.SOURCE,
                     level=logging.DEBUG,
                 )
                 continue
@@ -1359,7 +1365,7 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
                 self._plugin_log(
                     f"{relative.as_posix()} not copied for Snyk: {reason}; it is "
                     f"tested as {tested_as}",
-                    target_type="source",
+                    target_type=TargetType.SOURCE,
                     level=logging.DEBUG,
                 )
                 continue
@@ -1377,7 +1383,7 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
             self._plugin_log(
                 f"{_count(refused, 'file')} in the scan set not copied "
                 f"({refused_reasons}), so Snyk does not test them.",
-                target_type="source",
+                target_type=TargetType.SOURCE,
                 level=logging.WARNING,
             )
         if not copied:
@@ -1392,7 +1398,7 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
                 "sent to Snyk."
                 if ignored
                 else "The scan set holds no file to send to Snyk, so nothing is sent.",
-                target_type="source",
+                target_type=TargetType.SOURCE,
                 level=logging.INFO,
             )
             return None
@@ -1400,7 +1406,7 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
         self._plugin_log(
             f"Testing a copy of {_count(copied, 'file')} from the scan set; "
             f"{_count(ignored, 'file')} under ignore paths not sent to Snyk.",
-            target_type="source",
+            target_type=TargetType.SOURCE,
             level=logging.INFO,
         )
 

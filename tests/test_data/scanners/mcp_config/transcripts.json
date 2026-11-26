@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "transcripts": [
+    {
+      "adapter_prep": null,
+      "also_for": [],
+      "argv": null,
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": null,
+      "id": "mcp-config-violating",
+      "live_input": false,
+      "note": "the scanner's own SARIF over a set of MCP config files that break each rule; the scanner runs in process, so no tool argv, exit code or version exists to record",
+      "observable": true,
+      "pin_stamp": null,
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "sarif",
+          "path": "captured/mcp-config-violating.sarif",
+          "sha256": "4ff6d05252a4cc79386c85a0642a8f39714e9d69c534e892889b50d35c77ba42"
+        }
+      ],
+      "retention": "current",
+      "scanner": "mcp-config",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "mcp-config",
+        "version": "unknown"
+      }
+    }
+  ],
+  "unrecorded": []
+}

@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from datetime import datetime, timedelta, timezone
+from enum import Enum
 import json
 import re
 from typing import Dict, List, Any, TYPE_CHECKING
@@ -12,7 +13,9 @@ from automated_security_helper.models.flat_vulnerability import (
     FlatVulnerability,
     _extract_snippet_from_message,
 )
+from automated_security_helper.models.vocab import Disposition
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.core.enums import ScannerStatus
 from automated_security_helper.core.unified_metrics import get_unified_scanner_metrics
 from automated_security_helper.core.scanner_statistics_calculator import (
     ScannerStatisticsCalculator,
@@ -21,6 +24,8 @@ from automated_security_helper.core.scanner_statistics_calculator import (
 if TYPE_CHECKING:
     from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.core.constants import ASH_DEFAULT_SEVERITY_LEVEL
+from automated_security_helper.models.flat_frame import FLAT_SPEC
+from automated_security_helper.models.frame_model import column_vocabularies
 from automated_security_helper.models.workspace import is_workspace_scan
 from automated_security_helper.plugin_modules.ash_builtin.reporters.workspace_section import (
     workspace_policy_gates,
@@ -37,7 +42,6 @@ from automated_security_helper.utils.finding_clusters import (
 from automated_security_helper.utils.policy_origin import is_policy_origin
 from automated_security_helper.utils.severity_ladder import (
     SEVERITY_COUNT_KEYS,
-    SEVERITY_DISPLAY_ORDER,
     severity_fails_threshold,
 )
 from automated_security_helper.plugin_modules.ash_builtin.reporters._report_frames import (
@@ -124,15 +128,55 @@ _SCAN_TIME_FORMATS = (
 #: A trailing ``+HH:MM`` or ``-HH:MM`` UTC offset.
 _UTC_OFFSET = re.compile(r"([+-])(\d{2}):(\d{2})$")
 
-#: The place of each severity in a findings list, most severe first. A severity
-#: this table does not name sorts after all of them.
-_SEVERITY_ORDER = SEVERITY_DISPLAY_ORDER
+#: The place of each severity in a findings list, most severe first: the
+#: vocabulary the EnumColumn marker records on ``FlatVulnerability.severity``,
+#: not a local ladder copy. A severity it does not name sorts after all of them.
+_SEVERITY_ORDER = {
+    name: place for place, name in enumerate(column_vocabularies(FLAT_SPEC)["severity"])
+}
 
 #: The keys of the summary's two disposition counts that are not severities. The
 #: emitter writes them and the text, markdown and HTML reporters read them back:
-#: spelled once here, so a rename reaches every consumer.
-SUMMARY_BELOW_THRESHOLD = "below_threshold"
-SUMMARY_POLICY_NOT_GATING = "policy_not_gating"
+#: derived from the ``Disposition`` members, so a rename reaches every consumer.
+SUMMARY_ACTIONABLE = Disposition.ACTIONABLE.summary_key
+SUMMARY_SUPPRESSED = Disposition.SUPPRESSED.summary_key
+SUMMARY_BELOW_THRESHOLD = Disposition.BELOW_THRESHOLD.summary_key
+SUMMARY_POLICY_NOT_GATING = Disposition.POLICY_NOT_GATING.summary_key
+
+
+class OutcomeTone(str, Enum):
+    """How serious the scan outcome reads, and how each report draws it.
+
+    The value is the summary's ``tone`` text and the report stylesheet's
+    ``outcome--<tone>`` class. Each member also answers its HTML masthead
+    symbol and its Markdown alert type, read from one table keyed by the member
+    (a module-level check refuses a member the table has no row for), so a
+    report looks both up on the member and a new tone cannot reach a table that
+    lacks a row for it.
+    """
+
+    DANGER = "danger"
+    WARNING = "warning"
+    SUCCESS = "success"
+
+    @property
+    def symbol(self) -> str:
+        return _TONE_PRESENTATION[self][0]
+
+    @property
+    def alert(self) -> str:
+        return _TONE_PRESENTATION[self][1]
+
+
+_TONE_PRESENTATION: Dict[OutcomeTone, tuple[str, str]] = {
+    OutcomeTone.DANGER: ("!", "CAUTION"),
+    OutcomeTone.WARNING: ("!", "WARNING"),
+    OutcomeTone.SUCCESS: ("\u2713", "TIP"),
+}
+if set(_TONE_PRESENTATION) != set(OutcomeTone):
+    raise RuntimeError("an OutcomeTone has no presentation row")
+
+
 _UNLISTED_SEVERITY_PLACE = len(_SEVERITY_ORDER)
 
 
@@ -372,8 +416,8 @@ class ReportContentEmitter:
             # scanner had run and been fast. A machine-readable export keeps
             # the recorded number.
             did_not_run = self._human_presentation and metrics.status in (
-                "SKIPPED",
-                "MISSING",
+                ScannerStatus.SKIPPED,
+                ScannerStatus.MISSING,
             )
             unrecorded = (
                 self._human_presentation
@@ -448,9 +492,9 @@ class ReportContentEmitter:
         groups: Dict[tuple[str, str], Dict[str, Any]] = {}
         for result in self.get_scanner_results():
             status = result["status"]
-            if status == "SKIPPED":
+            if status == ScannerStatus.SKIPPED:
                 reason = result["skipped_reason"] or result["missing_reason"]
-            elif status == "MISSING":
+            elif status == ScannerStatus.MISSING:
                 reason = result["missing_reason"] or result["skipped_reason"]
             else:
                 continue
@@ -507,8 +551,11 @@ class ReportContentEmitter:
         }
 
         def ran(result: Dict[str, Any]) -> bool:
-            return result["status"] in ("PASSED", "FAILED") or (
-                result["status"] == "ERROR"
+            return result["status"] in (
+                ScannerStatus.PASSED,
+                ScannerStatus.FAILED,
+            ) or (
+                result["status"] == ScannerStatus.ERROR
                 and (
                     result["scanner_name"] in ran_against_stale
                     or result["scanner_name"] in partial_scanners
@@ -524,7 +571,9 @@ class ReportContentEmitter:
         # A FAILED row is a scanner the resolver graded as carrying findings at
         # or above its threshold; the "Review required" title reads it below so
         # a run whose rows fail reads as such even when the counts disagree.
-        rows_failed = any(result["status"] == "FAILED" for result in results)
+        rows_failed = any(
+            result["status"] == ScannerStatus.FAILED for result in results
+        )
         if is_workspace_scan(self.model):
             # The scanner rows grade each finding by the scanner resolver's
             # answer, which with the merged file's missing ash_config is ASH's
@@ -567,11 +616,11 @@ class ReportContentEmitter:
                 # A workspace scan counted every finding above, these included.
                 actionable += flag_total(extras, "actionable")
         completed = sum(ran(result) for result in results)
-        skipped = sum(result["status"] == "SKIPPED" for result in results)
+        skipped = sum(result["status"] == ScannerStatus.SKIPPED for result in results)
         unavailable = [
             result["scanner_name"]
             for result in results
-            if result["status"] != "SKIPPED" and not ran(result)
+            if result["status"] != ScannerStatus.SKIPPED and not ran(result)
         ]
         stale = stale_content_databases(self.model)
         # A project skipped as no-changes was examined: nothing under it changed,
@@ -618,10 +667,12 @@ class ReportContentEmitter:
         # lesser of the two. The gate is read as the title reads it (the
         # recount, and the rows' FAILED status only outside a workspace), so a
         # project gated above ASH's default does not turn its gap into a danger.
-        gap_tone = "danger" if actionable or rows_failed else "warning"
+        gap_tone = (
+            OutcomeTone.DANGER if actionable or rows_failed else OutcomeTone.WARNING
+        )
 
         if not completed:
-            title, tone = "No scanners completed", "warning"
+            title, tone = "No scanners completed", OutcomeTone.WARNING
             description = "Scanner coverage is unavailable."
             next_step = (
                 "Check scanner results and dependencies, then run the scan again."
@@ -642,11 +693,11 @@ class ReportContentEmitter:
             description = f"{actionable} actionable {finding_label}. Content database freshness needs review."
             next_step = "Review the database notices, refresh the affected scanners, and scan again."
         elif actionable or rows_failed:
-            title, tone = "Review required", "danger"
+            title, tone = "Review required", OutcomeTone.DANGER
             description = f"{actionable} {finding_label} at or above the configured scanner thresholds."
             next_step = "Review findings by severity, then inspect the source."
         else:
-            title, tone = "No actionable findings", "success"
+            title, tone = "No actionable findings", OutcomeTone.SUCCESS
             if policy_not_gating:
                 # A finding the workspace policy added, in a project whose
                 # policy_scanners_gate is off, can sit above the threshold and
@@ -668,14 +719,14 @@ class ReportContentEmitter:
 
         summary = {
             "title": title,
-            "tone": tone,
+            "tone": tone.value,
             "description": description,
             "next_step": next_step,
-            "actionable": actionable,
+            SUMMARY_ACTIONABLE: actionable,
             "active": active,
             SUMMARY_BELOW_THRESHOLD: max(0, active - actionable - policy_not_gating),
             SUMMARY_POLICY_NOT_GATING: policy_not_gating,
-            "suppressed": suppressed,
+            SUMMARY_SUPPRESSED: suppressed,
             "counts": counts,
             "completed": completed,
             "scanners": len(results),
@@ -795,6 +846,21 @@ class ReportContentEmitter:
             vuln.workspace_project in self._policy_not_gating
             and self._is_policy_origin_finding(vuln)
         )
+
+    def disposition(self, vuln: FlatVulnerability) -> Disposition:
+        """What the report does with *vuln*: the one answer the cards show.
+
+        In the order the gates are asked: suppressed first, then left out of
+        the project's outcome by where it came from, then actionable, and
+        what remains is below the threshold.
+        """
+        if vuln.is_suppressed:
+            return Disposition.SUPPRESSED
+        if self.is_policy_not_gating(vuln):
+            return Disposition.POLICY_NOT_GATING
+        if self.is_finding_actionable(vuln):
+            return Disposition.ACTIONABLE
+        return Disposition.BELOW_THRESHOLD
 
     def _threshold_for(self, project: str | None, scanner_name: str) -> str:
         """The gate a finding of *scanner_name* in *project* is graded by.

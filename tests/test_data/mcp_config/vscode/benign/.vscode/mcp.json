@@ -1,0 +1,17 @@
+{
+  // Workspace MCP servers
+  "inputs": [],
+  "servers": {
+    "files": {
+      "type": "stdio",
+      "command": "/usr/local/bin/mcp-files",
+      "args": ["--root", "/srv/data"],
+      "env": { "LOG_LEVEL": "info" }
+    },
+    "docs": {
+      "type": "http",
+      "url": "https://mcp.example.com/docs",
+      "headers": { "X-Client": "ash-fixture" }
+    }
+  }
+}

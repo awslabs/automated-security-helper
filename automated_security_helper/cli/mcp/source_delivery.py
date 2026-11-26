@@ -72,10 +72,12 @@ import zipfile
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, TypeVar, cast
 
+from automated_security_helper.core.asset import ImageLocator
+from automated_security_helper.cli.mcp.error_types import McpErrorType
 from automated_security_helper.cli.mcp.session_identity import (
     UNIDENTIFIED_SESSION_ID,
 )
-from automated_security_helper.cli.mcp.session_paths import (
+from automated_security_helper.config.session_paths import (
     hidden_deleting_name,
     mark_session_workspace,
     session_directory,
@@ -161,6 +163,15 @@ _S_IFMT_SHIFTED = 0xF000 << 16
 
 _SESSION_SOURCE_DIRS: Dict[str, Path] = {}
 
+#: The image each session delivered as its scan subject, keyed like
+#: ``_SESSION_SOURCE_DIRS`` and living by the same rule: process-local, the
+#: single source of truth, nothing persisted on ``MCPSession``. One session has
+#: ONE scan subject, so the two registries are kept mutually consistent by the
+#: setters below: a source delivery drops the image binding (the latest
+#: delivery wins), and an image binding present therefore means it was
+#: delivered after any source tree the session still holds.
+_SESSION_IMAGE_LOCATORS: Dict[str, "ImageLocator"] = {}
+
 
 class SourceDeliveryBusyError(RuntimeError):
     """A change to the delivered tree was refused because a scan of the session runs.
@@ -187,9 +198,6 @@ CLONE_MAX_WORKERS = 8
 #: (an ``rmtree``) can hold a worker for seconds, so the size bounds how many
 #: of those one tenant's calls can queue another's chunk behind.
 DELIVERY_MAX_WORKERS = 8
-
-#: ``error_type`` the MCP tools return for :class:`SourceDeliveryBusyError`.
-SOURCE_DELIVERY_BUSY = "source_delivery_busy"
 
 
 @contextlib.contextmanager
@@ -319,15 +327,109 @@ def delivered_session_count() -> int:
     diagnostic does not need.
     """
 
-    return len(_SESSION_SOURCE_DIRS)
+    return len(_SESSION_SOURCE_DIRS.keys() | _SESSION_IMAGE_LOCATORS.keys())
+
+
+def _clear_image_dir_except(image_dir: Path, keep: Optional[Path] = None) -> None:
+    """Remove every entry of a session's ``image/`` directory but *keep*.
+
+    The directory holds the session's one delivered archive; anything else in
+    it is scratch from an earlier subject. Best effort, as every scratch
+    removal here is.
+    """
+
+    try:
+        entries = list(image_dir.iterdir())
+    except OSError:
+        return
+    for entry in entries:
+        if keep is not None and entry == keep:
+            continue
+        with contextlib.suppress(OSError):
+            if entry.is_dir() and not entry.is_symlink():
+                shutil.rmtree(entry)
+            else:
+                entry.unlink()
+
+
+def _remove_delivered_image_archive(session_id: str) -> None:
+    """Remove the archive directory of the session's current image binding."""
+
+    previous = _SESSION_IMAGE_LOCATORS.get(session_id)
+    if previous is not None and previous.oci_archive is not None:
+        _clear_image_dir_except(previous.oci_archive.parent)
 
 
 def _set_session_source_dir(session_id: str, source_dir: Path) -> None:
     _SESSION_SOURCE_DIRS[session_id] = source_dir
+    # The latest delivery wins: a source tree delivered after an image makes
+    # the tree the session's one scan subject, exactly as an image delivered
+    # after a tree makes the image it (get_session_image_locator's contract).
+    _remove_delivered_image_archive(session_id)
+    _SESSION_IMAGE_LOCATORS.pop(session_id, None)
 
 
 def _drop_session_source_dir(session_id: str) -> None:
+    """End the session's scan subject: the source record and the image binding.
+
+    Every path that ends a session's source record (disconnect, idle sweep,
+    state set aside) comes through here, so the image binding ends with it and
+    cannot outlive its session.
+    """
+
     _SESSION_SOURCE_DIRS.pop(session_id, None)
+    _SESSION_IMAGE_LOCATORS.pop(session_id, None)
+
+
+def ensure_session_workspace(
+    session_id: str, *, workspace_root: Optional[Path] = None
+) -> Path:
+    """The session's workspace directory, created and marked as the server's.
+
+    The anchor an image scan runs in: an image asset has no target directory
+    of its own, so its output tree (``<workspace>/<session>/.ash/ash_output``)
+    goes under the directory the server already owns for the session, which is
+    also why ``ASH_MCP_ALLOWED_ROOTS`` is not implicated by a bare ref -- the
+    sandbox already permits a session its own workspace.
+    """
+
+    root = workspace_root if workspace_root is not None else resolve_workspace_root()
+    return _created_session_dir(root, session_id)
+
+
+def ensure_session_image_scan_dir(
+    session_id: str, *, workspace_root: Optional[Path] = None
+) -> Path:
+    """The dedicated, empty directory an image scan is anchored in.
+
+    The scan's anchoring directory is the scan target and the config-confinement
+    boundary, so anchoring at the session workspace itself would put the
+    delivered tree, the uploads, the image archives and the materialized
+    profile inside both. ``<session>/image-scan`` holds only what the scan
+    writes there (its ``.ash`` output tree).
+    """
+
+    session_dir = ensure_session_workspace(session_id, workspace_root=workspace_root)
+    return _ensure_dir(session_dir / "image-scan")
+
+
+def get_session_image_locator(session_id: str) -> Optional["ImageLocator"]:
+    """The image this session delivered as its scan subject, or None.
+
+    Not None means the image was delivered after any source tree the session
+    still holds (the setters keep that invariant), so a scan that resolves its
+    omitted target reads this first and the recorded ``source_dir`` second.
+    """
+
+    return _SESSION_IMAGE_LOCATORS.get(session_id)
+
+
+def _set_session_image_locator(session_id: str, locator: "ImageLocator") -> None:
+    _SESSION_IMAGE_LOCATORS[session_id] = locator
+
+
+def _drop_session_image_locator(session_id: str) -> None:
+    _SESSION_IMAGE_LOCATORS.pop(session_id, None)
 
 
 # ---------------------------------------------------------------------------
@@ -335,25 +437,11 @@ def _drop_session_source_dir(session_id: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def resolve_workspace_root() -> Path:
-    """Resolve the configured MCP workspace root.
-
-    Resolution order:
-
-    1. ``$ASH_MCP_WORKSPACE_ROOT``
-    2. ``$XDG_CACHE_HOME/ash-mcp/``
-    3. ``~/.cache/ash-mcp/``
-    """
-
-    env_root = os.environ.get("ASH_MCP_WORKSPACE_ROOT")
-    if env_root:
-        return Path(env_root).expanduser()
-
-    xdg = os.environ.get("XDG_CACHE_HOME")
-    if xdg:
-        return Path(xdg).expanduser() / "ash-mcp"
-
-    return Path.home() / ".cache" / "ash-mcp"
+#: The workspace root resolution lives in ``config.mcp_sandbox`` (the config
+#: trust layer judges paths against it); it is re-exported here.
+from automated_security_helper.config.mcp_sandbox import (  # noqa: E402
+    resolve_workspace_root as resolve_workspace_root,
+)
 
 
 class InvalidSessionIdError(ValueError):
@@ -371,7 +459,7 @@ def _session_workspace(workspace_root: Path, session_id: str) -> Path:
 
     The session id is validated against an explicit allowlist and the joined path
     is confirmed to stay inside ``workspace_root``; see
-    ``cli/mcp/session_paths.py`` for both. That keeps the session sandbox flat, so
+    ``config/session_paths.py`` for both. That keeps the session sandbox flat, so
     one session's directory is a sibling of another's and never a parent of it.
 
     The return value is the unresolved join, unchanged from before, so a caller
@@ -394,10 +482,6 @@ def _session_workspace(workspace_root: Path, session_id: str) -> Path:
         raise InvalidSessionIdError(str(e)) from e
 
 
-#: ``error_type`` every delivery tool returns for :class:`SessionWorkspaceError`.
-SESSION_WORKSPACE_UNAVAILABLE = "session_workspace_unavailable"
-
-
 class SessionWorkspaceError(OSError):
     """The session's workspace could not be prepared for, or hold, the new source.
 
@@ -406,7 +490,7 @@ class SessionWorkspaceError(OSError):
     a failed delivery could not fully delete is not one of these: it stays in its
     staging directory, logged, and the delivery reports the failure that ended it.
     An OSError, so a caller that catches OSError catches it. The MCP tools report it as
-    SESSION_WORKSPACE_UNAVAILABLE, an ``error_type`` a client can branch on, not
+    McpErrorType.SESSION_WORKSPACE_UNAVAILABLE, an ``error_type`` a client can branch on, not
     the exception's class name and not the errno's.
     """
 
@@ -869,7 +953,7 @@ def _created_session_dir(root: Path, session_id: str) -> Path:
             ``session_workspace_unavailable``.
     """
 
-    from automated_security_helper.cli.mcp.profile_registry import (
+    from automated_security_helper.config.session_profiles import (
         DEFAULT_SESSION_ID,
     )
 
@@ -1028,17 +1112,13 @@ class CloneRefusedError(RuntimeError):
     subclass's ``error_type``, so a new refusal type needs no other change.
     """
 
-    error_type = "clone_refused"
-
-
-#: ``error_type`` the MCP tool returns for :class:`GitTimeoutError`.
-CLONE_TIMED_OUT = "clone_timed_out"
+    error_type = McpErrorType.CLONE_REFUSED.value
 
 
 class GitTimeoutError(CloneRefusedError):
     """A git command of a delivery ran past ``GIT_TIMEOUT_SECONDS`` and was stopped."""
 
-    error_type = CLONE_TIMED_OUT
+    error_type = McpErrorType.CLONE_TIMED_OUT.value
 
 
 #: Bytes a clone may grow the session's source directory to, the same limit the
@@ -1050,24 +1130,17 @@ MAX_CLONE_BYTES = _MAX_EXTRACTED_BYTES
 #: Seconds between looks at the size of the tree a git command is writing.
 GIT_POLL_SECONDS = 0.5
 
-#: ``error_type`` the MCP tool returns for :class:`CloneTooLargeError`.
-CLONE_TOO_LARGE = "clone_too_large"
-
 
 class CloneTooLargeError(CloneRefusedError):
     """A clone passed ``MAX_CLONE_BYTES`` or ``_MAX_FILES`` entries."""
 
-    error_type = CLONE_TOO_LARGE
-
-
-#: ``error_type`` the MCP tool returns for :class:`CloneTreeUnreadableError`.
-CLONE_TREE_UNREADABLE = "clone_tree_unreadable"
+    error_type = McpErrorType.CLONE_TOO_LARGE.value
 
 
 class CloneTreeUnreadableError(CloneRefusedError):
     """The tree a git command wrote could not be read once the command had exited."""
 
-    error_type = CLONE_TREE_UNREADABLE
+    error_type = McpErrorType.CLONE_TREE_UNREADABLE.value
 
 
 def _walk_failed(error: OSError) -> None:
@@ -1366,15 +1439,6 @@ def _refuse_remote_helper_prefix(url: str) -> None:
             f"transport: git would run that helper rather than connect to a host"
         )
 
-
-#: ``error_type`` values set_source_git returns, besides the scan-target refusal
-#: of a local clone source (scan_target_not_permitted) and invalid_session_id.
-#: A client branches on these, so they are stable; the message is for a person.
-CLONE_URL_NOT_PERMITTED = "clone_url_not_permitted"
-CLONE_REF_NOT_PERMITTED = "clone_ref_not_permitted"
-INVALID_CLONE_DEPTH = "invalid_clone_depth"
-GIT_CLONE_FAILED = "git_clone_failed"
-GIT_CHECKOUT_FAILED = "git_checkout_failed"
 
 #: The most commits of history ``set_source_git`` fetches: a limit on how much history
 #: a delivery fetches. It is not a limit on disk or time (a depth of 1000 is the whole
@@ -1801,6 +1865,115 @@ def set_source_git(
     )
 
 
+class CloneRequestRefused(ValueError):
+    """A remote-git source request refused before anything was cloned.
+
+    ``error_type`` is the name the MCP tool answers with for the same refusal, so
+    the CLI and the MCP server agree on which rule refused a request.
+    """
+
+    def __init__(self, message: str, error_type: str) -> None:
+        super().__init__(message)
+        self.error_type = error_type
+
+
+def validated_remote_clone_request(
+    url: str,
+    ref: Optional[str] = None,
+    depth: object = 1,
+    ssh_key_id: Optional[str] = None,
+) -> Tuple[str, Optional[str], int, Tuple[str, str, int]]:
+    """The rules every remote-git source request obeys, whichever surface took it.
+
+    The MCP ``set_source_git`` tool and ``ash scan --source-git`` both run this,
+    in this order, so a request one refuses for these reasons the other refuses
+    with the same ``error_type``: an option-like, command-executing or
+    control-character URL; an option-like ref; a depth that is not a whole number
+    from 1 to ``MAX_CLONE_DEPTH``; a local path or ``file://`` URL; a URL whose
+    host or scheme git cannot be said to reach unambiguously (only https and ssh,
+    and the scp-like ``host:path`` form); and any ssh key id. What this does NOT
+    decide is which hosts may be cloned from: the MCP tool acts for a remote
+    client, so its operator's ``ASH_MCP_GIT_ALLOWED_HOSTS`` list applies there
+    (``clone_endpoint_allowed``), while on the command line the person typing the
+    URL is the operator.
+
+    Returns:
+        ``(url, ref, depth, (scheme, host, port))``, each checked.
+
+    Raises:
+        CloneRequestRefused: the first rule the request breaks.
+    """
+    try:
+        url = _validate_clone_url(url)
+    except ValueError as error:
+        raise CloneRequestRefused(
+            str(error), McpErrorType.CLONE_URL_NOT_PERMITTED.value
+        ) from error
+    if ref:
+        try:
+            ref = _reject_option_like(ref, "ref")
+        except ValueError as error:
+            raise CloneRequestRefused(
+                str(error), McpErrorType.CLONE_REF_NOT_PERMITTED.value
+            ) from error
+    try:
+        depth = _validated_clone_depth(depth)
+    except ValueError as error:
+        raise CloneRequestRefused(
+            str(error), McpErrorType.INVALID_CLONE_DEPTH.value
+        ) from error
+    if local_clone_path(url) is not None:
+        raise CloneRequestRefused(
+            "a clone source must be a remote https or ssh url; a local path or "
+            "file:// url would read this machine's own filesystem",
+            McpErrorType.LOCAL_CLONE_SOURCE_REFUSED.value,
+        )
+    try:
+        endpoint = remote_clone_endpoint(url)
+    except ValueError as error:
+        raise CloneRequestRefused(
+            str(error), McpErrorType.CLONE_URL_NOT_PERMITTED.value
+        ) from error
+    try:
+        _refuse_ssh_key_id(ssh_key_id)
+    except ValueError as error:
+        raise CloneRequestRefused(
+            str(error), McpErrorType.SSH_KEY_NOT_REGISTERED.value
+        ) from error
+    return url, ref or None, depth, endpoint
+
+
+def clone_remote_source(
+    url: str,
+    ref: Optional[str] = None,
+    *,
+    depth: int = 1,
+    destination: Path,
+) -> Path:
+    """Clone a remote repository for the command line, under *destination*.
+
+    The same request rules as the MCP tool (:func:`validated_remote_clone_request`)
+    and the same git: the allowlisted environment (:func:`_git_environment`), no
+    system or global configuration, no credentials or helpers of the caller's,
+    redirects not followed, a bounded time. The clone goes to
+    ``<destination>/source`` and ``HOME`` for git is ``<destination>/home``; the
+    caller owns *destination* and removes it.
+
+    Raises:
+        CloneRequestRefused: the request broke a rule; nothing was run.
+        RuntimeError: git is not on PATH.
+        GitCommandError, GitTimeoutError: git ran and failed or ran too long.
+    """
+    url, ref, depth, _endpoint = validated_remote_clone_request(url, ref, depth)
+    git = _git_executable()
+    home = Path(destination) / "home"
+    target = Path(destination) / "source"
+    _ensure_dir(home)
+    _ensure_dir(target)
+    _clone(url, ref, git=git, depth=depth, target=target, env=_git_environment(home))
+    return target
+
+
 @_while_no_scan_runs(removes_workspace=False)
 def _clone_into_session(
     url: str,
@@ -2069,7 +2242,11 @@ def _clone(
         program=program,
     )
     result = _run_git_step(
-        cmd, env=env, what="git clone", error_type=GIT_CLONE_FAILED, grows_in=target
+        cmd,
+        env=env,
+        what="git clone",
+        error_type=McpErrorType.GIT_CLONE_FAILED.value,
+        grows_in=target,
     )
     if result.returncode != 0:
         detail = result.stderr.strip() or result.stdout.strip()
@@ -2084,7 +2261,9 @@ def _clone(
             # own after git's text (or the whole detail when git printed none).
             detail = _with_the_redirect_hint(detail)
         message = f"git clone failed (exit {result.returncode}): {detail}"
-        raise GitCommandError(message, GIT_CLONE_FAILED, disk_full=disk_full)
+        raise GitCommandError(
+            message, McpErrorType.GIT_CLONE_FAILED.value, disk_full=disk_full
+        )
     if not ref:
         # A clone of a repository whose HEAD names a branch that does not exist
         # (an empty repository, or one whose default branch was deleted) exits 0
@@ -2104,13 +2283,13 @@ def _clone(
             ),
             env=env,
             what="git rev-parse HEAD",
-            error_type=GIT_CLONE_FAILED,
+            error_type=McpErrorType.GIT_CLONE_FAILED.value,
         )
         if head.returncode != 0:
             raise GitCommandError(
                 "git clone produced no commit: the repository's default branch "
                 "has no commits or does not exist. Name a ref to deliver.",
-                GIT_CLONE_FAILED,
+                McpErrorType.GIT_CLONE_FAILED.value,
             )
         return
 
@@ -2137,7 +2316,7 @@ def _clone(
         ),
         env=env,
         what=f"git fetch {ref!r}",
-        error_type=GIT_CLONE_FAILED,
+        error_type=McpErrorType.GIT_CLONE_FAILED.value,
         grows_in=target,
     )
     if fetch.returncode != 0:
@@ -2145,7 +2324,7 @@ def _clone(
         if _is_disk_full(fetch_detail):
             raise GitCommandError(
                 f"git fetch {ref!r} failed (exit {fetch.returncode}): {fetch_detail}",
-                GIT_CLONE_FAILED,
+                McpErrorType.GIT_CLONE_FAILED.value,
                 disk_full=True,
             )
     revision = "FETCH_HEAD" if fetch.returncode == 0 else ref
@@ -2161,14 +2340,16 @@ def _clone(
         ),
         env=env,
         what=f"git checkout {ref!r}",
-        error_type=GIT_CHECKOUT_FAILED,
+        error_type=McpErrorType.GIT_CHECKOUT_FAILED.value,
         grows_in=target,
     )
     if checkout.returncode != 0:
         detail = checkout.stderr.strip() or checkout.stdout.strip()
         message = f"git checkout {ref!r} failed (exit {checkout.returncode}): {detail}"
         raise GitCommandError(
-            message, GIT_CHECKOUT_FAILED, disk_full=_is_disk_full(detail)
+            message,
+            McpErrorType.GIT_CHECKOUT_FAILED.value,
+            disk_full=_is_disk_full(detail),
         )
 
 
@@ -2876,6 +3057,7 @@ def remove_session_workspace(
     doomed = _set_aside_for_removal(session_dir, session_id)
     gone = True if doomed is None else _remove_tree(doomed)
     _drop_session_source_dir(session_id)
+    _drop_session_image_locator(session_id)
     return gone
 
 
@@ -2908,3 +3090,258 @@ def _set_aside_for_removal(workspace: Path, session_id: str) -> Optional[Path]:
     with contextlib.suppress(OSError):
         os.utime(doomed)
     return doomed
+
+
+# ---------------------------------------------------------------------------
+# Image delivery: the session's scan subject as a container image.
+#
+# The submission contract's MCP side (C2 of the container-targets design), in
+# the two shapes the design names:
+#
+# 1. ``set_source_image`` -- an indirect reference. The ref is stored on the
+#    session and NOTHING is fetched at delivery time: resolution belongs to a
+#    container engine or the scanner tools' own registry clients at scan start.
+# 2. ``set_source_image_archive_chunk`` + ``..._finalize`` -- the direct
+#    payload, the exact shape of the zip channel: base64 chunks of at most
+#    1 MiB through the SAME chunk machinery, caps and locks, a sha256 verified
+#    at finalize, and a staging-into-place rename, differing only in what
+#    finalize does with the verified bytes: no extraction (a saved image stays
+#    one tar the scanners read whole), one stat-level shape sniff
+#    (utils/image_payload_refusals.image_archive_refusal, the gate the CLI's
+#    --image-archive runs), and the file moved under ``<session>/image/``.
+#
+# One session has one scan subject: these setters and the source setters keep
+# the two registries mutually consistent (see _SESSION_IMAGE_LOCATORS).
+# ---------------------------------------------------------------------------
+
+#: Control characters and whitespace cannot appear in any registry reference
+#: grammar, and a leading ``-`` reads as a flag to any tool argv the ref later
+#: lands in; both are refused at delivery, where the CLI's --image relies on
+#: the shell having tokenized its value already.
+_REF_REFUSED = re.compile(r"[\s\x00-\x1f\x7f]")
+
+#: The longest reference accepted. A hostname is at most 253 characters and a
+#: repository path 255 by the distribution spec, with a tag or digest on top;
+#: 512 admits every real reference and bounds what a client can park in the
+#: session registry and in every log line that shows it.
+_MAX_IMAGE_REF_CHARS = 512
+
+
+def validate_image_ref(image_ref: str) -> str:
+    """The ref as stored, or a ValueError naming what cannot be one.
+
+    A grammar floor, not a parser: registries disagree on fine points, and the
+    tools that resolve the ref answer malformed ones themselves. What is
+    refused here is only what can never be a reference (empty, whitespace,
+    control characters) or what would read as something else where the ref is
+    later used (a leading ``-``, which is an option to any argv).
+    """
+
+    ref = (image_ref or "").strip()
+    if not ref:
+        raise ValueError("image_ref names no reference: it is empty or whitespace")
+    if len(ref) > _MAX_IMAGE_REF_CHARS:
+        raise ValueError(
+            f"image_ref is too long: {len(ref)} characters, at most "
+            f"{_MAX_IMAGE_REF_CHARS} (no registry reference is longer)"
+        )
+    if ref.startswith("-"):
+        raise ValueError(
+            "image_ref cannot start with '-': a reference never does, and the "
+            "value would read as an option where the ref is used"
+        )
+    if _REF_REFUSED.search(ref):
+        raise ValueError(
+            "image_ref carries whitespace or a control character, which no "
+            "registry reference grammar allows"
+        )
+    return ref
+
+
+@_while_no_scan_runs(removes_workspace=False)
+def set_source_image(
+    image_ref: str,
+    *,
+    session_id: str,
+) -> ImageLocator:
+    """Record *image_ref* as this session's scan subject. Nothing is fetched.
+
+    Under the session's change lock, as every delivery is: the scan subject
+    must not flip while a scan of the session reads it. Returns the stored
+    locator. Digest-pinned refs are preferred (the attribution then agrees
+    across machines); a tag-only ref is accepted and resolved at scan start
+    where an engine is present.
+
+    Raises:
+        ValueError: for a value that can never be a reference
+            (:func:`validate_image_ref`).
+    """
+
+    locator = ImageLocator(ref=validate_image_ref(image_ref))
+    # A reference replaces a delivered archive as the subject: the archive is
+    # scratch now and must not stay in the session workspace.
+    _remove_delivered_image_archive(session_id)
+    _set_session_image_locator(session_id, locator)
+    ASH_LOGGER.info(
+        "session %s delivered image ref %s as its scan subject",
+        session_id,
+        locator.ref,
+    )
+    return locator
+
+
+def set_source_image_archive_chunk(
+    upload_id: str,
+    sequence: int,
+    data_b64: str,
+    last: bool,
+    *,
+    workspace_root: Optional[Path] = None,
+    session_id: str,
+) -> Dict[str, object]:
+    """Append one chunk of a saved-image archive upload.
+
+    The zip channel's chunk machinery, byte for byte
+    (:func:`set_source_zip_chunk`): same locks, same ordering rule, same
+    per-chunk and per-upload caps, same ``upload_id`` namespace -- one upload
+    is one id whichever finalize it is meant for. What makes the bytes an
+    image archive is the finalize that claims them
+    (:func:`set_source_image_archive_finalize`).
+    """
+
+    try:
+        return set_source_zip_chunk(
+            upload_id,
+            sequence,
+            data_b64,
+            last,
+            workspace_root=workspace_root,
+            session_id=session_id,
+        )
+    except ValueError as error:
+        # The zip channel's cap wording names a zip; this is an image archive.
+        text = str(error)
+        if "max zip size" in text:
+            raise ValueError(
+                text.replace("max zip size", "max image archive size")
+            ) from error
+        raise
+
+
+@_while_no_scan_runs(removes_workspace=False)
+def set_source_image_archive_finalize(
+    upload_id: str,
+    expected_sha256: str,
+    *,
+    workspace_root: Optional[Path] = None,
+    session_id: str,
+) -> Path:
+    """Verify an uploaded image archive and record it as the scan subject.
+
+    The zip finalize's verification, without its extraction: the assembled
+    upload must hash to *expected_sha256* and carry tar magic where every
+    ``docker save`` / OCI archive carries it; it is then moved whole under
+    ``<session>/image/`` and the session's image locator points at it. A
+    saved image is one file the scanner tools read themselves, so nothing is
+    unpacked, which is also why the zip channel's member validation has no
+    counterpart here: no member is ever extracted.
+
+    Returns:
+        The archive's path in the session workspace (the locator's
+        ``oci_archive``).
+
+    Raises:
+        UploadNotFoundError: the upload never received its final chunk.
+        ValueError: sha256 mismatch, oversize upload, bytes that are not a
+            plain tar (the gate's wording, a gzip remedy included), or an
+            upload replaced by another chunk while this finalize read it
+            (send the finalize again).
+        SessionWorkspaceError: the session's ``image/`` directory could not
+            be created.
+    """
+
+    root = workspace_root if workspace_root is not None else resolve_workspace_root()
+    session_dir = _created_session_dir(root, session_id)
+    final = _final_zip_path(session_dir, upload_id)
+
+    try:
+        handle = final.open("rb")
+    except FileNotFoundError:
+        raise UploadNotFoundError(
+            f"no finalized upload for upload_id={upload_id!r} "
+            f"(did the last chunk arrive with last=True?)"
+        ) from None
+    opened = os.fstat(handle.fileno())
+
+    def remove_upload() -> None:
+        _remove_zip_still_at(final, opened, session_id, upload_id)
+
+    # The refusals below are decided while the file is open and acted on after
+    # it is closed: a file still open cannot be deleted on Windows.
+    refused: Optional[str] = None
+    with handle:
+        actual_size = opened.st_size
+        if actual_size > _MAX_ZIP_BYTES:
+            refused = f"upload too large: {actual_size} > {_MAX_ZIP_BYTES} bytes"
+        else:
+            digest = hashlib.sha256()
+            for block in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(block)
+            actual_sha = digest.hexdigest()
+            if actual_sha.lower() != expected_sha256.lower():
+                refused = (
+                    f"sha256 mismatch: expected {expected_sha256}, got {actual_sha}"
+                )
+    if refused is not None:
+        with contextlib.suppress(OSError):
+            remove_upload()
+        raise ValueError(refused)
+
+    # The gate the CLI's --image-archive runs, one wording for both surfaces.
+    # Run on the staged file BEFORE anything is moved, so a refused
+    # re-delivery under an upload id already delivered leaves the delivered
+    # archive and its binding as they were (the zip channel's contract).
+    from automated_security_helper.utils.image_payload_refusals import (
+        image_archive_refusal,
+    )
+
+    image_dir = session_dir / "image"
+    _ensure_dir(image_dir)
+    destination = image_dir / f"{upload_id}.tar"
+
+    # Under the upload's lock, and only while the path still names the file
+    # the checksum read: a chunk of the same upload can assemble a new file
+    # over the path meanwhile (set_source_zip_chunk's last=True renames over
+    # it), and that one belongs to its own finalize.
+    with _upload_lock(session_id, upload_id):
+        try:
+            still_there = os.path.samestat(opened, final.stat())
+        except FileNotFoundError:
+            still_there = False
+        if not still_there:
+            raise ValueError(
+                f"the upload {upload_id!r} changed while this finalize read "
+                "it; send the finalize again"
+            )
+        refusal = image_archive_refusal(final)
+        if refusal is not None:
+            with contextlib.suppress(OSError):
+                final.unlink()
+            # The staged name is an upload-channel detail; the caller is told
+            # the archive's own name, as the gate always worded it.
+            raise ValueError(refusal.replace(str(final), str(destination)))
+        os.replace(final, destination)
+
+    # The archive is the session's one image subject: every other entry in
+    # ``image/`` (the previous archive, a stray from an earlier cycle) is
+    # scratch now. Best effort, as every scratch removal here is.
+    _clear_image_dir_except(image_dir, destination)
+
+    locator = ImageLocator(oci_archive=destination)
+    _set_session_image_locator(session_id, locator)
+    ASH_LOGGER.info(
+        "session %s delivered image archive %s as its scan subject",
+        session_id,
+        destination,
+    )
+    return destination

@@ -1078,7 +1078,7 @@
     },
     "ArchiveConverterConfigOptions": {
       "additionalProperties": true,
-      "description": "Limits on what extracting one archive may write.\n\nEach is an inclusive maximum, checked against what the archive declares, for\nevery member, before anything is written. An archive over any of them is not\nextracted at all. The defaults are far above an ordinary source archive. Set\ninside the scanned tree (``.ash/.ash.yaml``), by a config an MCP client\nsupplied, or by a workspace project's own config, a value can only lower a\nlimit; raise one with ``--config-overrides`` or a config file outside the tree.",
+      "description": "Limits on what extracting one archive may write.\n\nEach is an inclusive maximum, checked against what the archive declares, for\nevery member, before anything is written. An archive over any of them is not\nextracted at all. The defaults are far above an ordinary source archive. Set\ninside the scanned tree (``.ash.yaml``), by a config an MCP client\nsupplied, or by a workspace project's own config, a value can only lower a\nlimit; raise one with ``--config-overrides`` or a config file outside the tree.",
       "properties": {
         "max_compression_ratio": {
           "anyOf": [
@@ -1669,6 +1669,11 @@
                 "install_timeout": 300,
                 "tool_version": ">=7.16.0,<8.0.0"
               }
+            },
+            "mcp_config": {
+              "enabled": true,
+              "name": "mcp_config",
+              "options": {}
             }
           },
           "description": "Converter configurations by name."
@@ -1785,6 +1790,7 @@
                   "/scanners/ferret-scan/options/config_file",
                   "/scanners/grype/options/config_file",
                   "/scanners/syft/options/config_file",
+                  "/scanners/syft/options/sdist_harvest/**",
                   "/scanners/trivy-repo/options/secret_config_file",
                   "/scanners/trivy-repo/options/config_file",
                   "/scanners/trivy-repo/options/module_dir",
@@ -2267,6 +2273,22 @@
                 "severity_threshold": null
               }
             },
+            "mcp-config": {
+              "enabled": true,
+              "name": "mcp-config",
+              "options": {
+                "allowed_command_prefixes": [],
+                "flag_env_secrets": true,
+                "forbid_auto_approval": true,
+                "forbid_privilege_escalation": true,
+                "forbid_unpinned_runners": true,
+                "offline": false,
+                "remote_url_prefixes": [],
+                "require_local": false,
+                "scan_timeout": 1800,
+                "severity_threshold": null
+              }
+            },
             "npm-audit": {
               "enabled": true,
               "name": "npm-audit",
@@ -2326,6 +2348,19 @@
                 "exclude": [],
                 "offline": false,
                 "scan_timeout": 1800,
+                "sdist_harvest": {
+                  "cache_dir": null,
+                  "ecosystems": [
+                    "cargo",
+                    "gomod",
+                    "npm"
+                  ],
+                  "enabled": true,
+                  "lockfiles": [
+                    "uv.lock"
+                  ],
+                  "max_sdist_mb": 100
+                },
                 "severity_threshold": null
               }
             },
@@ -2480,6 +2515,7 @@
                 "/scanners/ferret-scan/options/config_file",
                 "/scanners/grype/options/config_file",
                 "/scanners/syft/options/config_file",
+                "/scanners/syft/options/sdist_harvest/**",
                 "/scanners/trivy-repo/options/secret_config_file",
                 "/scanners/trivy-repo/options/config_file",
                 "/scanners/trivy-repo/options/module_dir",
@@ -2770,6 +2806,7 @@
               "/scanners/ferret-scan/options/config_file",
               "/scanners/grype/options/config_file",
               "/scanners/syft/options/config_file",
+              "/scanners/syft/options/sdist_harvest/**",
               "/scanners/trivy-repo/options/secret_config_file",
               "/scanners/trivy-repo/options/config_file",
               "/scanners/trivy-repo/options/module_dir",
@@ -2870,6 +2907,19 @@
           "default": null,
           "description": "(Optional) Expiration date (YYYY-MM-DD). The entry stops applying on this date, by the local clock of the host running the scan. 'expiration' is accepted as a deprecated alias when a config is read; the alias is removed in ASH v4.",
           "title": "Expires"
+        },
+        "image": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "(Optional) Only suppress findings inside a container image whose submitted reference or resolved digest matches this pattern (glob, case-insensitive), e.g. 'alpine:*' or 'sha256:abc*'. Omit it to match any asset; filesystem findings and image findings alike. Findings that carry no image never match an image-scoped suppression.",
+          "title": "Image"
         },
         "line_end": {
           "anyOf": [
@@ -3074,6 +3124,51 @@
       "title": "Assessor",
       "type": "object"
     },
+    "Asset": {
+      "additionalProperties": false,
+      "description": "The subject of one scan: its kind, and the one locator that kind uses.",
+      "properties": {
+        "filesystem": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FilesystemLocator"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "image": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ImageLocator"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "kind": {
+          "$ref": "#/$defs/AssetKind"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "Asset",
+      "type": "object"
+    },
+    "AssetKind": {
+      "description": "What kind of subject a scan is about.",
+      "enum": [
+        "filesystem",
+        "container_image"
+      ],
+      "title": "AssetKind",
+      "type": "string"
+    },
     "AssetType": {
       "enum": [
         "algorithm",
@@ -3203,11 +3298,25 @@
           "type": "array"
         },
         "confidence_level": {
+          "anyOf": [
+            {
+              "enum": [
+                "all",
+                "low",
+                "medium",
+                "high"
+              ],
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": "all",
           "description": "Confidence level for bandit scan (all, low, medium, high)",
-          "pattern": "^(all|low|medium|high)$",
-          "title": "Confidence Level",
-          "type": "string"
+          "title": "Confidence Level"
         },
         "config_file": {
           "anyOf": [
@@ -6324,6 +6433,15 @@
             }
           },
           "description": "Configure the options for the JupyterConverter"
+        },
+        "mcp_config": {
+          "$ref": "#/$defs/McpConfigConverterConfig",
+          "default": {
+            "enabled": true,
+            "name": "mcp_config",
+            "options": {}
+          },
+          "description": "Configure the options for the McpConfigConverter"
         }
       },
       "title": "ConverterConfigSegment",
@@ -9261,14 +9379,9 @@
           "title": "Accepted Reason"
         },
         "kind": {
+          "$ref": "#/$defs/FailureKind",
           "default": "tool",
-          "description": "What failed: 'input' when the file is not one the converter could hand to its tool (for the jupyter converter, not a notebook), 'tool' when the tool could not convert it. The completeness gate's trust in 'accepted' rides on the kind, so any other value is read as 'tool', which is never accepted, rather than as 'input' or as a refusal to load the record.",
-          "enum": [
-            "input",
-            "tool"
-          ],
-          "title": "Kind",
-          "type": "string"
+          "description": "What failed: 'input' when the file is not one the converter could hand to its tool (for the jupyter converter, not a notebook), 'tool' when the tool could not convert it. The completeness gate's trust in 'accepted' rides on the kind, so any other value is read as 'tool', which is never accepted, rather than as 'input' or as a refusal to load the record."
         },
         "path": {
           "description": "The input's path relative to the scanned tree, with '/' separators.",
@@ -9287,6 +9400,15 @@
       ],
       "title": "FailedInputInfo",
       "type": "object"
+    },
+    "FailureKind": {
+      "description": "What failed when a converter could not convert an input.\n\n``INPUT`` is the file not being one the converter could hand to its tool;\n``TOOL`` is the tool, or the run, failing. The kind decides who may waive\nthe completeness gate: only an ``INPUT`` failure can be accepted by an\n``ash-unconverted-input`` suppression. Any value this version does not know\nreads as ``TOOL``, the side that is never accepted.",
+      "enum": [
+        "input",
+        "tool"
+      ],
+      "title": "FailureKind",
+      "type": "string"
     },
     "FairnessAssessment": {
       "additionalProperties": false,
@@ -9361,6 +9483,22 @@
       ],
       "title": "FieldModel",
       "type": "string"
+    },
+    "FilesystemLocator": {
+      "additionalProperties": false,
+      "description": "A local directory, exactly today's source directory.",
+      "properties": {
+        "root": {
+          "format": "path",
+          "title": "Root",
+          "type": "string"
+        }
+      },
+      "required": [
+        "root"
+      ],
+      "title": "FilesystemLocator",
+      "type": "object"
     },
     "Fix": {
       "additionalProperties": false,
@@ -10822,6 +10960,64 @@
         }
       },
       "title": "Ikev2TransformTypes",
+      "type": "object"
+    },
+    "ImageLocator": {
+      "additionalProperties": false,
+      "description": "Where a container image is, in exactly one of three shapes.\n\nThe three shapes are the submission contract's: an indirect reference\n(``ref``, resolved by an engine or a tool's own registry client) and the\ntwo direct-payload shapes that need no engine at all (``oci_layout``,\n``oci_archive``). Exactly one is set; a locator naming none would send a\nscanner nowhere, and one naming two would leave which subject was meant to\nthe reader.",
+      "properties": {
+        "oci_archive": {
+          "anyOf": [
+            {
+              "format": "path",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Oci Archive"
+        },
+        "oci_layout": {
+          "anyOf": [
+            {
+              "format": "path",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Oci Layout"
+        },
+        "ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ref"
+        },
+        "resolved_digest": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resolved Digest"
+        }
+      },
+      "title": "ImageLocator",
       "type": "object"
     },
     "ImpactAnalysisJustification": {
@@ -13676,6 +13872,194 @@
       "title": "MarkdownReporterConfigOptions",
       "type": "object"
     },
+    "McpConfigConverterConfig": {
+      "additionalProperties": true,
+      "description": "MCP server config (.mcp.json and similar) to shell script converter configuration.",
+      "properties": {
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "const": "mcp_config",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
+          "default": "mcp_config",
+          "title": "Name"
+        },
+        "options": {
+          "$ref": "#/$defs/McpConfigConverterConfigOptions",
+          "default": {},
+          "description": "Configure MCP server config converter"
+        }
+      },
+      "title": "McpConfigConverterConfig",
+      "type": "object"
+    },
+    "McpConfigConverterConfigOptions": {
+      "additionalProperties": true,
+      "description": "The MCP config converter has no options of its own.",
+      "properties": {},
+      "title": "McpConfigConverterConfigOptions",
+      "type": "object"
+    },
+    "McpConfigScannerConfig": {
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "const": "mcp-config",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
+          "default": "mcp-config",
+          "title": "Name"
+        },
+        "options": {
+          "$ref": "#/$defs/McpConfigScannerConfigOptions",
+          "default": {
+            "allowed_command_prefixes": [],
+            "flag_env_secrets": true,
+            "forbid_auto_approval": true,
+            "forbid_privilege_escalation": true,
+            "forbid_unpinned_runners": true,
+            "offline": false,
+            "remote_url_prefixes": [],
+            "require_local": false,
+            "scan_timeout": 1800,
+            "severity_threshold": null
+          },
+          "description": "Configure the MCP server config policy scanner"
+        }
+      },
+      "title": "McpConfigScannerConfig",
+      "type": "object"
+    },
+    "McpConfigScannerConfigOptions": {
+      "additionalProperties": true,
+      "properties": {
+        "allowed_command_prefixes": {
+          "default": [],
+          "description": "When not empty, every stdio command must be a path that starts with one of these prefixes (MEDIUM), compared on path boundaries after the command is normalized. A bare command name such as `npx` does not start with a path prefix and is flagged. Empty turns the check off.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Allowed Command Prefixes",
+          "type": "array"
+        },
+        "flag_env_secrets": {
+          "default": true,
+          "description": "Flag an `env` entry whose name says key, token, secret or password and whose value is a literal rather than a reference such as `${NAME}` (LOW). The value is never written into the finding.",
+          "title": "Flag Env Secrets",
+          "type": "boolean"
+        },
+        "forbid_auto_approval": {
+          "default": true,
+          "description": "Flag settings that approve MCP tool calls without asking (HIGH): gemini `trust: true`, a non-empty kiro `autoApprove` or roo `alwaysAllow`, and codex `approval_mode` of `auto` or `full-auto`.",
+          "title": "Forbid Auto Approval",
+          "type": "boolean"
+        },
+        "forbid_privilege_escalation": {
+          "default": true,
+          "description": "Flag sudo, doas, su and pkexec used as the command, or as a whole argument, of a stdio MCP server entry (HIGH). The match is on the whole word, so a name that merely contains one is not flagged.",
+          "title": "Forbid Privilege Escalation",
+          "type": "boolean"
+        },
+        "forbid_unpinned_runners": {
+          "default": true,
+          "description": "Flag npx, bunx, pnpm dlx, pnpx and uvx entries whose package has no exact version, such as `npx -y pkg` or `uvx pkg` (MEDIUM). `pkg@1.2.3` and `pkg==1.2.3` are pinned; `pkg@latest` and ranges are not.",
+          "title": "Forbid Unpinned Runners",
+          "type": "boolean"
+        },
+        "offline": {
+          "default": false,
+          "description": "Run this scanner offline even when ASH runs online. False follows ASH's own mode; it never puts a scanner online under --offline.",
+          "title": "Offline",
+          "type": "boolean"
+        },
+        "remote_url_prefixes": {
+          "default": [],
+          "description": "When not empty, every remote URL must start with one of these prefixes (MEDIUM), compared on URL boundaries with the scheme and host in lower case, and a remote URL that is not loopback must be https (MEDIUM). Empty turns the check off.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Remote Url Prefixes",
+          "type": "array"
+        },
+        "require_local": {
+          "default": false,
+          "description": "Flag every remote (url, httpUrl, serverUrl) entry whose host is not loopback (MEDIUM). `localhost`, `127.0.0.0/8` and `::1` count as local, whichever way the IPv6 address is spelled.",
+          "title": "Require Local",
+          "type": "boolean"
+        },
+        "scan_timeout": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": 1800,
+          "description": "Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes.",
+          "title": "Scan Timeout"
+        },
+        "severity_threshold": {
+          "anyOf": [
+            {
+              "enum": [
+                "ALL",
+                "LOW",
+                "MEDIUM",
+                "HIGH",
+                "CRITICAL"
+              ],
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM.",
+          "title": "Severity Threshold"
+        }
+      },
+      "title": "McpConfigScannerConfigOptions",
+      "type": "object"
+    },
     "Message": {
       "anyOf": [
         {
@@ -15923,6 +16307,18 @@
       "additionalProperties": true,
       "description": "Context container for plugins to ensure consistent path information.",
       "properties": {
+        "asset": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Asset"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The subject of this scan, when the caller named one that is not the source directory: a CONTAINER_IMAGE asset carries the image locator the scan was submitted with. None (the default) means the subject is source_dir, exactly as it always was, so every existing caller and every filesystem scan is unchanged. source_dir stays set either way: it is where the output tree and the config are anchored, and the scan phase routes by the asset's kind, not by which directory fields exist."
+        },
         "config": {
           "$ref": "#/$defs/AshConfig",
           "default": null,
@@ -19988,27 +20384,8 @@
           "type": "array"
         },
         "mode": {
-          "anyOf": [
-            {
-              "enum": [
-                "off",
-                "auto",
-                "bwrap",
-                "firejail",
-                "landlock",
-                "sandbox-exec"
-              ],
-              "type": "string"
-            },
-            {
-              "description": "An environment reference, kept as the configuration file wrote it: the variable's value is never recorded. The field is read with its default, the model's own and not the one written inside the reference (the 600 of ${VAR:600}); a reference inside a list takes the whole list out, so the list is read with its default too. The load warns and lists the field as unreadable. ash merge and ash report refuse unless the operator supplies the field, and a command that runs a scan takes the operator's own value. A true/false field holds no reference at all.",
-              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
-              "type": "string"
-            }
-          ],
-          "default": "off",
           "description": "How scanner subprocesses are confined. 'off' runs them as plain subprocesses. 'auto' uses the best sandbox available (Linux: bwrap, then firejail, then landlock; macOS: sandbox-exec). Any other value requires that backend. A scanner that cannot be sandboxed as requested is recorded MISSING with the reason; it is never run unsandboxed. A mode that --sandbox, ASH_CONFIG or the operator's config file sets is a floor: a config file inside a git checkout or the scanned directory cannot turn it off or switch backends. Not applied in container mode, where the container is the boundary; ASH logs a warning when it is set there.",
-          "title": "Mode"
+          "type": "string"
         },
         "network_scanners": {
           "anyOf": [
@@ -20291,6 +20668,26 @@
           },
           "description": "Configure the options for Grype"
         },
+        "mcp-config": {
+          "$ref": "#/$defs/McpConfigScannerConfig",
+          "default": {
+            "enabled": true,
+            "name": "mcp-config",
+            "options": {
+              "allowed_command_prefixes": [],
+              "flag_env_secrets": true,
+              "forbid_auto_approval": true,
+              "forbid_privilege_escalation": true,
+              "forbid_unpinned_runners": true,
+              "offline": false,
+              "remote_url_prefixes": [],
+              "require_local": false,
+              "scan_timeout": 1800,
+              "severity_threshold": null
+            }
+          },
+          "description": "Configure the options for the MCP server config scanner"
+        },
         "npm-audit": {
           "$ref": "#/$defs/NpmAuditScannerConfig",
           "default": {
@@ -20364,6 +20761,19 @@
               "exclude": [],
               "offline": false,
               "scan_timeout": 1800,
+              "sdist_harvest": {
+                "cache_dir": null,
+                "ecosystems": [
+                  "cargo",
+                  "gomod",
+                  "npm"
+                ],
+                "enabled": true,
+                "lockfiles": [
+                  "uv.lock"
+                ],
+                "max_sdist_mb": 100
+              },
               "severity_threshold": null
             }
           },
@@ -21694,6 +22104,73 @@
       ],
       "title": "ScoreMethod",
       "type": "string"
+    },
+    "SdistHarvestOptions": {
+      "description": "Options for the cross-toolchain sdist lockfile harvest.\n\nThe harvest itself runs in the convert phase (the ``sdist-lock-harvester``\nconverter), because the syft subprocess's declared sandbox allows it no\nnetwork and the harvested lockfiles must sit where grype and trivy also\nread; the OPTIONS live here because this is the surface where the operator\nconfigures SBOM behavior. See ``utils/sdist_harvest.py`` for the mechanism.",
+      "properties": {
+        "cache_dir": {
+          "anyOf": [
+            {
+              "format": "path",
+              "type": "string"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Where verified harvests are cached, keyed by each sdist's sha256 and with each cached file's digest recorded and re-verified before it is served, so an entry can never serve different bytes than the lock pins; a warmed cache serves entries offline with no network. Defaults to ash/sdist-harvest under the user-level cache directory (XDG_CACHE_HOME, or ~/.cache), never a directory under the scanned tree, whose content the scanned repository could ship. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it.",
+          "title": "Cache Dir"
+        },
+        "ecosystems": {
+          "default": [
+            "cargo",
+            "gomod",
+            "npm"
+          ],
+          "description": "Which embedded lockfiles are harvested from a pinned sdist: cargo reads Cargo.lock, gomod reads go.sum, npm reads package-lock.json. The vocabulary is the GitLab CycloneDX reporter's existing ecosystem mapping.",
+          "items": {
+            "enum": [
+              "cargo",
+              "gomod",
+              "npm"
+            ],
+            "type": "string"
+          },
+          "title": "Ecosystems",
+          "type": "array"
+        },
+        "enabled": {
+          "default": true,
+          "description": "Harvest embedded lockfiles from the hash-pinned sdists of resolved dependencies whose wheels carry a platform tag (compiled native extensions with no artifact audit data), so the SBOM covers cross-toolchain packages such as a compiled wheel's statically linked Rust crates. On by default in online mode; inert in offline mode, where each skipped package is a visible informational record. The only network it adds is a GET of bytes the project's own lockfile already pins by sha256, verified before extraction; nothing fetched is executed.",
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "lockfiles": {
+          "default": [
+            "uv.lock"
+          ],
+          "description": "The Python lockfiles walked for resolved packages to flag. uv.lock only today: it pins each sdist by URL and sha256, which is what authorizes a fetch. The list exists so other hash-and-URL-pinned formats can be added without a schema change.",
+          "items": {
+            "const": "uv.lock",
+            "type": "string"
+          },
+          "title": "Lockfiles",
+          "type": "array"
+        },
+        "max_sdist_mb": {
+          "default": 100,
+          "description": "The largest sdist, in megabytes, the harvest will fetch. Checked against the lockfile's own recorded size before any fetch, and enforced on the bytes actually streamed during it: a transfer that passes the bound is aborted on the wire, so a lying size claim cannot buy an unbounded download. Either way the package is skipped with an informational record rather than stalling the scan.",
+          "exclusiveMinimum": 0,
+          "title": "Max Sdist Mb",
+          "type": "integer"
+        }
+      },
+      "title": "SdistHarvestOptions",
+      "type": "object"
     },
     "SecretValueShape": {
       "description": "What the masked form of a value shows: its visible prefix and suffix and its length.\n\nRecorded with the results (``AshAggregatedResults.secret_value_shapes``) so that\na union of result sets built in another process -- ``ash merge`` of shard\nresults -- can mask a value that no shard holds any more. It holds only what\n``_mask_secret_value`` already shows in every masked message, never a digest:\na digest of a short value can be reversed by trying values.",
@@ -23504,6 +23981,19 @@
             "exclude": [],
             "offline": false,
             "scan_timeout": 1800,
+            "sdist_harvest": {
+              "cache_dir": null,
+              "ecosystems": [
+                "cargo",
+                "gomod",
+                "npm"
+              ],
+              "enabled": true,
+              "lockfiles": [
+                "uv.lock"
+              ],
+              "max_sdist_mb": 100
+            },
             "severity_threshold": null
           },
           "description": "Configure Syft scanner"
@@ -23595,6 +24085,23 @@
           "default": 1800,
           "description": "Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes.",
           "title": "Scan Timeout"
+        },
+        "sdist_harvest": {
+          "$ref": "#/$defs/SdistHarvestOptions",
+          "default": {
+            "cache_dir": null,
+            "ecosystems": [
+              "cargo",
+              "gomod",
+              "npm"
+            ],
+            "enabled": true,
+            "lockfiles": [
+              "uv.lock"
+            ],
+            "max_sdist_mb": 100
+          },
+          "description": "Configure the cross-toolchain sdist lockfile harvest, which completes the SBOM for compiled dependencies whose artifacts carry no audit data. The harvest runs in the convert phase; offline mode disables its fetches whatever these options say."
         },
         "severity_threshold": {
           "anyOf": [
@@ -27458,14 +27965,9 @@
           "type": "array"
         },
         "status": {
+          "$ref": "#/$defs/WorkspaceRunStatus",
           "default": "completed",
-          "description": "Whether projects were scanned at all. The discriminator for the code-2 collision -- see the module docstring.",
-          "enum": [
-            "completed",
-            "refused"
-          ],
-          "title": "Status",
-          "type": "string"
+          "description": "Whether projects were scanned at all. The discriminator for the code-2 collision -- see the module docstring."
         },
         "unconvertible_finding_paths": {
           "default": 0,
@@ -27501,6 +28003,15 @@
       ],
       "title": "WorkspaceResults",
       "type": "object"
+    },
+    "WorkspaceRunStatus": {
+      "description": "Whether a workspace run scanned projects at all.\n\nThe discriminator for the code-2 collision (see the module docstring). Distinct\nfrom ``ProjectRunStatus`` (one project's outcome) and the MCP registry's scan\nstatus, which share the word ``completed`` and stay separate vocabularies.",
+      "enum": [
+        "completed",
+        "refused"
+      ],
+      "title": "WorkspaceRunStatus",
+      "type": "string"
     },
     "YAMLReporterConfig": {
       "additionalProperties": true,

@@ -113,6 +113,10 @@ _RANDOM_CALL = (
 #: The same for the other rules, by rule id and path. A moved pin fails below with the
 #: line to use, and so does a row whose entry is gone. An entry with no row here is not
 #: looked at.
+#: Entries scoped by ``symbol`` instead of a line range have no rows here: the
+#: resolver finds the definition wherever it moves, and
+#: tests/unit/config/test_symbol_migration_record.py holds each one to a symbol
+#: that resolves.
 _RANGED_PIN_MARKERS: dict[tuple[str, str], list[_Marker]] = {
     # The three ferret_scanner.py bandit pins are gone: the import and the call carry
     # nosec comments, bandit reports nothing for either, and the pins excused nothing
@@ -132,10 +136,10 @@ _RANGED_PIN_MARKERS: dict[tuple[str, str], list[_Marker]] = {
     ("API_KEY_OR_SECRET", FINDING_TREND_TEST): [
         _Marker((r"^def report_id\(second, token=",)),
     ],
-    # The two lines of .ash/.ash.yaml whose reasons quote a placeholder fixture; they
+    # The two lines of .ash.yaml whose reasons quote a placeholder fixture; they
     # are the findings the self-scan reports on that file, and each is the one line of
     # the file that has this shape.
-    ("API_KEY_OR_SECRET", ".ash/.ash.yaml"): [
+    ("API_KEY_OR_SECRET", ".ash.yaml"): [
         _Marker((r'HEAD = "[0-9a-f]{40}" and TOKEN =',)),
         _Marker((r'`\w+ = "abcdefghijklmnop"` is a fixture',)),
     ],
@@ -629,12 +633,12 @@ def test_an_every_line_pattern_that_matches_nothing_is_reported():
             "def other_id(second, count=3):",
         ),
         (
-            ("API_KEY_OR_SECRET", ".ash/.ash.yaml"),
+            ("API_KEY_OR_SECRET", ".ash.yaml"),
             'HEAD = "' + "0123456789abcdef0123456789abcdef01234567" + '" and TOKEN =',
             'HEAD = "unset" and nothing else',
         ),
         (
-            ("API_KEY_OR_SECRET", ".ash/.ash.yaml"),
+            ("API_KEY_OR_SECRET", ".ash.yaml"),
             "`" + 'secret = "abcdefghijklmnop"` is a fixture fed into',
             "`value` is a fixture fed into",
         ),

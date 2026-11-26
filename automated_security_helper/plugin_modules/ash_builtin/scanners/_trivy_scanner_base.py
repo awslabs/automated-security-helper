@@ -56,6 +56,11 @@ from typing import (
 import yaml
 from pydantic import Field, PrivateAttr, model_validator
 
+from automated_security_helper.base.scanner_facets import (
+    FacetDecl,
+    FacetState,
+    ScannerFacets,
+)
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
@@ -63,7 +68,9 @@ from automated_security_helper.base.scanner_plugin import (
 from automated_security_helper.core.enums import OfflineStrategy
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason, ToolExtraArg
+from automated_security_helper.models.vocab import Severity
 from automated_security_helper.schemas.sarif_schema_model import (
+    Level,
     PropertyBag,
     SarifReport,
 )
@@ -106,6 +113,126 @@ from automated_security_helper.utils.package_identity import (
 )
 
 C = TypeVar("C", bound=ScannerPluginConfigBase)
+
+#: The facets register cells both trivy scanners share, because both read trivy's
+#: SARIF through this base (base/scanner_facets.py). Each class still declares its
+#: own ``facets`` attribute from this value (the registry totality test reads the
+#: class's own dict), overriding only the cells it classifies differently. The
+#: cells describe trivy's vulnerability results and, for resource_id, the
+#: terraform misconfiguration results; no committed capture holds a secret or a
+#: license result, so those result classes are not classified here.
+#: Native fields are quoted from the committed trivy SARIF
+#: (tests/test_data/scanners/trivy/trivy-0.69.3.vuln.sarif) and from the M0
+#: misconfig capture (tests/test_data/scanners/trivy/captured/
+#: trivy-0.76.2-misconfig-terraform.{json,sarif}, M0-FINDINGS.md (a)).
+TRIVY_SARIF_FACETS = ScannerFacets(
+    rule_id=FacetDecl(
+        state=FacetState.MAPPED,
+        native_field="SARIF result ruleId",
+    ),
+    severity=FacetDecl(
+        state=FacetState.MAPPED,
+        native_field='result message line "Severity: <level>", checked '
+        "against the result level and the rule tags (issue_severity)",
+    ),
+    file_path=FacetDecl(
+        state=FacetState.MAPPED,
+        native_field="SARIF locations[].physicalLocation.artifactLocation.uri",
+    ),
+    line_range=FacetDecl(
+        state=FacetState.MAPPED,
+        native_field="SARIF region.startLine / region.endLine",
+    ),
+    column=FacetDecl(
+        state=FacetState.MAPPED,
+        native_field="SARIF region.startColumn",
+    ),
+    message=FacetDecl(
+        state=FacetState.MAPPED,
+        native_field="SARIF result message.text",
+    ),
+    resource_id=FacetDecl(
+        state=FacetState.MAPPED,
+        native_field="Results[].Misconfigurations[].CauseMetadata.Resource "
+        "(trivy's JSON report, absent from its SARIF), copied onto the "
+        "SARIF result under ash_resource_id by attach_trivy_resources "
+        "for result type terraform only: cloudformation carries a "
+        "file:line locator (t.yaml:3-4) and kubernetes and dockerfile "
+        "carry none (trivy 0.76.2, M0-FINDINGS.md (a))",
+        example="aws_s3_bucket.m0_fixture_bucket",
+    ),
+    resource_type=FacetDecl(
+        state=FacetState.NA,
+        reason="trivy's CauseMetadata names Provider and Service (AWS, "
+        "s3) and no resource type; the type is only the prefix of the "
+        "dropped address, which would be a derivation",
+    ),
+    package_name=FacetDecl(
+        state=FacetState.MAPPED,
+        native_field='result message line 1 "Package: <name>" (_package_from_message)',
+    ),
+    package_version=FacetDecl(
+        state=FacetState.MAPPED,
+        native_field='result message line 2 "Installed Version: <version>" '
+        "(_package_from_message)",
+    ),
+    package_path=FacetDecl(
+        state=FacetState.MAPPED,
+        native_field="npm lockfile entry at the SARIF region.startLine of "
+        "the result's location (one result per installed copy)",
+    ),
+    taxonomy_cve=FacetDecl(
+        state=FacetState.MAPPED,
+        native_field="SARIF result ruleId (the CVE id)",
+    ),
+    taxonomy_cwe=FacetDecl(
+        state=FacetState.UNCONFIRMED,
+        reason="UNCONFIRMED: trivy's SARIF rules carry no CWE (tags are "
+        "vulnerability, security, <severity>); the JSON format's CweIDs "
+        "has no committed vulnerability fixture, and a `trivy fs --format "
+        "json` run over a lockfile settles it",
+    ),
+    fingerprints=FacetDecl(
+        state=FacetState.NA,
+        reason="trivy's SARIF results carry no fingerprints (result keys "
+        "are level, locations, message, ruleId, ruleIndex)",
+    ),
+    fix_available=FacetDecl(
+        state=FacetState.MAPPED,
+        native_field='message line "Fixed Version: <version>", written as '
+        "fix_available=True when non-empty by "
+        "TrivyScannerBase._fixed_version_from_message (an empty value "
+        "writes nothing)",
+    ),
+    remediation_text=FacetDecl(
+        state=FacetState.UNCONFIRMED,
+        reason="UNCONFIRMED: not classified by the survey; the flat "
+        "model has no remediation column, and the rule help text carries "
+        "the fixed version already declared under fix_available",
+    ),
+    snippet=FacetDecl(
+        state=FacetState.NA,
+        reason="trivy's SARIF results carry no code snippet",
+    ),
+    references=FacetDecl(
+        state=FacetState.MAPPED,
+        native_field="SARIF rule helpUri, read into the flat references "
+        "by FlatVulnerability.from_sarif_result when the result carries "
+        "no relatedLocations",
+    ),
+    tags=FacetDecl(
+        state=FacetState.MAPPED,
+        native_field="SARIF rule properties.tags, read into the flat tags "
+        "by FlatVulnerability.from_sarif_result when the result carries "
+        "none (the severity word among them still feeds issue_severity)",
+    ),
+    extras=FacetDecl(
+        state=FacetState.MAPPED,
+        native_field="result properties bag (issue_severity and the "
+        "package identity keys this adapter writes) passed through to "
+        "the flat properties",
+    ),
+)
 
 #: Flags every trivy scan gets, online or offline. ``trivy --offline-scan``: trivy scans
 #: never contact package registries; the database refresh is a separate step
@@ -211,21 +338,26 @@ def _split_list_string(value: str) -> List[str]:
 
 #: trivy's severities that ASH reports as the same name. trivy's fifth, UNKNOWN,
 #: is left to ASH's generic SARIF mapping.
-TRIVY_SEVERITIES = ("CRITICAL", "HIGH", "MEDIUM", "LOW")
+TRIVY_SEVERITIES = (
+    Severity.CRITICAL.value,
+    Severity.HIGH.value,
+    Severity.MEDIUM.value,
+    Severity.LOW.value,
+)
 
 #: The SARIF level trivy gives a result of each severity (``toSarifErrorLevel``).
 _SARIF_LEVEL = {
-    "CRITICAL": "error",
-    "HIGH": "error",
-    "MEDIUM": "warning",
-    "LOW": "note",
+    Severity.CRITICAL.value: Level.error.value,
+    Severity.HIGH.value: Level.error.value,
+    Severity.MEDIUM.value: Level.warning.value,
+    Severity.LOW.value: Level.note.value,
 }
 
 #: ``_SARIF_LEVEL`` with trivy's fifth severity: ``toSarifErrorLevel`` gives
 #: UNKNOWN the ``note`` level, LOW's. Read against a message's ``Severity:`` lines
 #: (``trivy_severity``), so a line trivy wrote for an UNKNOWN rating still reads as
 #: trivy's own, and the result is left to ASH's generic mapping as before.
-_MESSAGE_LEVEL = {**_SARIF_LEVEL, "UNKNOWN": "note"}
+_MESSAGE_LEVEL = {**_SARIF_LEVEL, "UNKNOWN": Level.note.value}
 
 #: trivy's severities from the highest down, UNKNOWN last. Between two
 #: ``Severity:`` lines of one level, ``trivy_severity`` reads the higher.
@@ -436,6 +568,16 @@ def skip_dirs_value(path: str) -> str:
     else:
         escaped = "".join("\\" + ch if ch in _GLOB_SPECIAL else ch for ch in path)
     return _csv_field(escaped)
+
+
+def skip_files_glob_value(glob: str) -> str:
+    """*glob* as one ``--skip-files`` value, its glob characters left to trivy.
+
+    The CSV quoting of :func:`_csv_field` only: unlike :func:`skip_dirs_value`,
+    which escapes glob characters to name one directory literally, an image
+    exclude glob (``/opt/dir/**``) is meant to be read as a glob.
+    """
+    return _csv_field(glob)
 
 
 def _csv_field(value: str) -> str:
@@ -932,6 +1074,10 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
     # trivy (_trivy_config_file) is kept for the same reason: a trivy.yaml can name
     # the cache (``cache.dir``).
     _scan_config_file: Optional[str] = PrivateAttr(default=None)
+
+    # Where the image scan's second, JSON pass writes its report (trivy's SARIF
+    # names no layer, its JSON does; see utils/image_layer_digests).
+    _image_layers_json: Optional[Path] = PrivateAttr(default=None)
 
     def _environment_values(self) -> Tuple[str, ...]:
         """The configuration's environment values, plus the two input-file variables

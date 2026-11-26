@@ -54,8 +54,10 @@ OCI_RUNNER_FROM_OPTION="NO"
 # scan, and an --output-dir that is a file, cannot be made, cannot be entered or
 # cannot be written (refuse_usage). A failed build or run is not a refusal: it keeps
 # its own status.
+# BEGIN generated: sh-exit-codes (scripts/generate_wrapper_tables.py)
 WRAPPER_REFUSAL_EXIT=3
 USAGE_ERROR_EXIT=5
+# END generated: sh-exit-codes
 refuse() {
   echo "ERROR: $*" >&2
   exit "${WRAPPER_REFUSAL_EXIT}"
@@ -359,7 +361,7 @@ require_mountable() {
 # tests/unit/test_sandbox_refused_by_every_container_entrypoint.py checks both
 # lists against the real commands and options.
 # BEGIN generated: sh-subcommands (scripts/generate_wrapper_tables.py)
-ASH_SUBCOMMANDS="scan build-image report diff trend merge mcp get-genai-guide config dependencies inspect plugin express"
+ASH_SUBCOMMANDS="scan build-image report diff trend merge results mcp get-genai-guide container config dependencies inspect plugin suppress express"
 # END generated: sh-subcommands
 # The subjects `scan` takes (`./ash scan fs [PATH]`). The first word after scan that
 # is not an option or an option's value names one, and the word after that is the
@@ -369,7 +371,7 @@ ASH_SUBCOMMANDS="scan build-image report diff trend merge mcp get-genai-guide co
 # BEGIN generated: sh-scan-subjects (scripts/generate_wrapper_tables.py)
 ASH_SCAN_SUBJECTS="fs"
 ASH_SCAN_VALUE_OPTIONS="--cli-json-input"
-ASH_ROOT_OPTIONS="--add-scanners --all-enabled-plugins --all-enabled-scanners --allow-in-tree-tools --allow-missing-projects --allow-stale-content-db --annotate-duplicates --ash-config-from-host --ash-plugin-modules --ash-revision-to-install --base-ref --baseline --build --build-target --changed-files-only --cleanup --cli-json-input --color --compact-report --config --config-file-from-another-checkout --config-file-from-scanned-repository --config-from-scanned-repository --config-overrides --container-gid --container-uid --custom-build-arg --custom-containerfile --debug --dry-run --exclude-scanners --express --fail-on-findings --fail-on-incomplete-scanners --fold-duplicates --force --format --formats --full --generate-cli-skeleton --honor-ignore-files --ignore-suppressions --inspect --log-level --min-severity --mode --no-allow-stale-content-db --no-build --no-cleanup --no-color --no-express --no-fail-on-findings --no-fail-on-incomplete-scanners --no-honor-ignore-files --no-ignore-suppressions --no-inspect --no-offline --no-progress --no-quiet --no-run --no-show-summary --no-simple --no-use-existing --oci --oci-runner --offline --offline-semgrep-rulesets --only-scanners --output-dir --output-format --output-formats --phases --progress --python-based-plugins-only --python-based-scanners-only --python-only --quiet --require-scanner-selection --run --runner --sandbox --scanners --shard-count --shard-index --show-completion --show-summary --simple --source-dir --staged --strategy --use-existing --verbose --version --workspace --workspace-config"
+ASH_ROOT_OPTIONS="--add-scanners --all-enabled-plugins --all-enabled-scanners --allow-in-tree-tools --allow-missing-projects --allow-stale-content-db --annotate-duplicates --ash-config-from-host --ash-plugin-modules --ash-revision-to-install --base-ref --baseline --build --build-target --changed-files-only --cleanup --cli-json-input --color --compact-report --config --config-file-from-another-checkout --config-file-from-scanned-repository --config-from-scanned-repository --config-overrides --container-gid --container-uid --custom-build-arg --custom-containerfile --debug --dry-run --exclude-scanners --express --fail-on-findings --fail-on-incomplete-scanners --fold-duplicates --force --format --formats --full --generate-cli-skeleton --honor-ignore-files --ignore-suppressions --image --image-archive --image-layout --inspect --log-level --min-severity --mode --no-allow-stale-content-db --no-build --no-cleanup --no-color --no-express --no-fail-on-findings --no-fail-on-incomplete-scanners --no-honor-ignore-files --no-ignore-suppressions --no-inspect --no-offline --no-progress --no-quiet --no-run --no-show-summary --no-simple --no-use-existing --oci --oci-runner --offline --offline-semgrep-rulesets --only-scanners --output-dir --output-format --output-formats --phases --progress --python-based-plugins-only --python-based-scanners-only --python-only --quiet --require-scanner-selection --run --runner --sandbox --scanners --shard-count --shard-index --show-completion --show-summary --simple --source-dir --staged --strategy --use-existing --verbose --version --workspace --workspace-config"
 # END generated: sh-scan-subjects
 # The bash completion function `./ash --show-completion` prints, for hosts with no
 # Python to run the CLI's own completion.
@@ -439,7 +441,7 @@ ASH_DASH_O_IS_THE_SUBCOMMANDS="get-genai-guide config"
 # (`--phases report`, `--phases inspect`), so the token after one of these is
 # the option's value, not the subcommand.
 # BEGIN generated: sh-root-value-options (scripts/generate_wrapper_tables.py)
-ASH_ROOT_VALUE_OPTIONS="--add-scanners --ash-config-from-host --ash-plugin-modules --ash-revision-to-install --base-ref --baseline --build-target --config --config-file-from-another-checkout --config-file-from-scanned-repository --config-overrides --container-gid --container-uid --custom-build-arg --custom-containerfile --exclude-scanners --format --formats --log-level --min-severity --mode --oci --oci-runner --offline-semgrep-rulesets --only-scanners --output-dir --output-format --output-formats --phases --require-scanner-selection --runner --sandbox --scanners --shard-count --shard-index --source-dir --strategy --workspace --workspace-config -c -f -g -o -u"
+ASH_ROOT_VALUE_OPTIONS="--add-scanners --ash-config-from-host --ash-plugin-modules --ash-revision-to-install --base-ref --baseline --build-target --config --config-file-from-another-checkout --config-file-from-scanned-repository --config-overrides --container-gid --container-uid --custom-build-arg --custom-containerfile --exclude-scanners --format --formats --image --image-archive --image-layout --log-level --min-severity --mode --oci --oci-runner --offline-semgrep-rulesets --only-scanners --output-dir --output-format --output-formats --phases --require-scanner-selection --runner --sandbox --scanners --shard-count --shard-index --source-dir --strategy --workspace --workspace-config -c -f -g -o -u"
 # END generated: sh-root-value-options
 
 # The first word of ASH_ARG_WORDS that names an ash subcommand, in SUBCOMMAND,
@@ -1833,8 +1835,22 @@ if [[ "${OFFLINE}" == "YES" ]]; then
   DOCKER_RUN_EXTRA_ARGS="${DOCKER_RUN_EXTRA_ARGS} --network=none"
 fi
 
-# Resolve the OCI_RUNNER
-RESOLVED_OCI_RUNNER=${OCI_RUNNER:-$(command -v finch || command -v docker || command -v nerdctl || command -v podman)}
+# Resolve the OCI_RUNNER: the one named, else the first of the runners below that is on
+# PATH. The order is the ash CLI's own (container mode's candidates), generated.
+# BEGIN generated: sh-runner-order (scripts/generate_wrapper_tables.py)
+ASH_RUNNER_ORDER="finch docker nerdctl podman"
+# END generated: sh-runner-order
+first_runner_on_path() {
+    local candidate found
+    for candidate in ${ASH_RUNNER_ORDER}; do
+        if found="$(command -v "${candidate}")"; then
+            echo "${found}"
+            return 0
+        fi
+    done
+    return 1
+}
+RESOLVED_OCI_RUNNER=${OCI_RUNNER:-$(first_runner_on_path)}
 # If we couldn't resolve an OCI_RUNNER, refuse. Checked before OCI_RUNNER_WRAPPER is
 # prefixed, which would otherwise turn an empty runner into "sudo " and pass the check.
 # A blank OCI_RUNNER from the environment is refused too: unquoted below, " " ran a
@@ -1892,7 +1908,10 @@ else
     # character, a vertical tab included, is a word there, so it is a wrapper here.
     RUNNER_ENV_ARGS=()
     if [ "${NO_RUN}" = "NO" ]; then
-      for RUNNER_VARIABLE in GITHUB_ACTIONS TF_BUILD TEAMCITY_VERSION; do
+      # BEGIN generated: sh-ci-runner-markers (scripts/generate_wrapper_tables.py)
+      ASH_CI_RUNNER_MARKERS="GITHUB_ACTIONS TF_BUILD TEAMCITY_VERSION"
+      # END generated: sh-ci-runner-markers
+      for RUNNER_VARIABLE in ${ASH_CI_RUNNER_MARKERS}; do
         if [[ -z "${!RUNNER_VARIABLE:-}" ]]; then
           continue
         elif [[ -z "${OCI_RUNNER_WRAPPER//[$' \t\n']/}" ]]; then
@@ -2088,8 +2107,8 @@ else
       # tests/unit/test_ash_bash_entrypoint_subcommand_args.py checks them against
       # the real commands.
       # BEGIN generated: sh-takes-quiet-and-color (scripts/generate_wrapper_tables.py)
-      ASH_TAKES_QUIET="scan build-image mcp"
-      ASH_TAKES_COLOR="scan build-image report merge mcp"
+      ASH_TAKES_QUIET="scan build-image mcp container"
+      ASH_TAKES_COLOR="scan build-image report merge mcp container"
       # END generated: sh-takes-quiet-and-color
       # Container mode never sandboxes the scanners inside the image; the container
       # is the boundary. So the scan is given --sandbox off, as `ash scan --mode

@@ -36,10 +36,31 @@ import socket
 import struct
 import sys
 import time
+from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Mapping, MutableMapping, Optional
 
 from automated_security_helper.utils.process_env import snapshot_environ
+
+
+class ExpressOp(str, Enum):
+    """The verbs of the express daemon's socket protocol (an ``"op"`` frame key).
+
+    One definition for every half that speaks the protocol: the daemon (which
+    reads them), the client library and the ``ash express`` command (which
+    write them). The enum types what this process EMITS and compares; it does
+    not close what the daemon accepts. Client and daemon can be different
+    versions, so the daemon keeps reading ``op`` tolerantly and answers an
+    unknown verb from a newer peer with its ``unknown op`` refusal, never a
+    raise.
+    """
+
+    SCAN = "scan"
+    STATUS = "status"
+    STOP = "stop"
+    GO = "go"
+    SIGNAL = "signal"
+
 
 #: Bumped when a frame's shape changes incompatibly. The daemon refuses a
 #: request whose protocol differs, and the client reads that refusal as a stale
@@ -741,34 +762,27 @@ def scrubbed_daemon_environment(environ: Mapping[str, str]) -> dict[str, str]:
     return kept
 
 
-#: The ``op`` of each request frame the protocol carries. The daemon dispatches
-#: on these and the client and the ``ash express`` commands build their frames
-#: from them (the ``*_frame`` builders below), so a frame's spelling lives once.
-OP_STATUS = "status"
-OP_STOP = "stop"
-OP_SCAN = "scan"
-OP_GO = "go"
-OP_SIGNAL = "signal"
-
-
+#: The client and the ``ash express`` commands build their request frames with
+#: these builders, from the :class:`ExpressOp` members, so a frame's spelling
+#: lives once (the enum) and its shape lives once (here).
 def status_frame() -> dict[str, Any]:
     """The control request asking a daemon for its status."""
-    return {"op": OP_STATUS}
+    return {"op": ExpressOp.STATUS.value}
 
 
 def stop_frame() -> dict[str, Any]:
     """The control request asking a daemon to stop."""
-    return {"op": OP_STOP}
+    return {"op": ExpressOp.STOP.value}
 
 
 def go_frame() -> dict[str, Any]:
     """The client's answer to the daemon's scan ok: fork the scan now."""
-    return {"op": OP_GO}
+    return {"op": ExpressOp.GO.value}
 
 
 def signal_frame(signum: int) -> dict[str, Any]:
     """The client forwarding *signum* to the scan the daemon forked for it."""
-    return {"op": OP_SIGNAL, "signum": int(signum)}
+    return {"op": ExpressOp.SIGNAL.value, "signum": int(signum)}
 
 
 def send_frame(sock: socket.socket, frame: dict[str, Any]) -> None:

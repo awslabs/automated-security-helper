@@ -824,7 +824,7 @@ def test_a_tree_cannot_turn_a_declared_reporter_off(tmp_path, ash_log):
 
     source = tmp_path / "repo"
     _write(
-        source / ".ash" / ".ash.yaml",
+        source / ".ash.yaml",
         {"reporters": {"aliased-reporter": {"enabled": False}}},
     )
     config = resolve_config(source_dir=source)

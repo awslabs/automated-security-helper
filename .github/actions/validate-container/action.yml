@@ -25,7 +25,7 @@ runs:
 
     # WHY A SCAN LEG EXISTS AT ALL
     #
-    # This action used to end at `ash build-image --force`. `build-image` proves the
+    # This action used to end at `ash container build --force`. `container build` proves the
     # Dockerfile still builds under a given runtime; it says nothing about whether ASH
     # can scan with the result, which is the only reason the image is built. So podman
     # and finch were the two runtimes in the matrix whose image nobody ever ran, while
@@ -52,7 +52,7 @@ runs:
 
     # WHY EVERY BUILD STEP PASSES --no-run
     #
-    # `ash build-image` defaults to building AND scanning: cli/image.py passes
+    # `ash container build` defaults to building AND scanning: cli/image.py passes
     # `run=not no_run`, and it never passes `source_dir`, so run_ash_scan.py resolves
     # the source to `Path.cwd()` -- this checkout. A build step written as a plain
     # `run:` therefore scanned ASH's own repository and exited with that scan's status,
@@ -93,9 +93,9 @@ runs:
         #
         # So the shape test is "the command is the first thing on the line, after an
         # optional `run:`", which catches both forms. Four kinds of line in this file
-        # name `ash build-image` without being an invocation of it, and all four must
+        # name `ash container build` without being an invocation of it, and all four must
         # stay excluded: the prose at the top, the two comment blocks, this check's own
-        # source, and the `echo "::error::ash build-image ..."` in the retry loop.
+        # source, and the `echo "::error::ash container build ..."` in the retry loop.
         #
         # The count is asserted too. Without it a future edit that hides an invocation
         # from the shape test would leave this passing on whatever it still sees, which
@@ -105,7 +105,7 @@ runs:
         for line in lines:
             stripped = line.strip()
             command = stripped[4:].strip() if stripped.startswith("run:") else stripped
-            if not command.startswith("ash build-image"):
+            if not command.startswith("ash container build"):
                 continue
             runtime = next((r for r in expected if f"--oci-runner {r}" in command), None)
             found.setdefault(runtime, []).append(command)
@@ -172,7 +172,7 @@ runs:
       env:
         ASH_BASE_OCI_LAYOUT: ${{ steps.prepull-podman.outputs.oci-layout }}
         ASH_BASE_IMAGE_OVERRIDE: ${{ steps.prepull-podman.outputs.base-image-override }}
-      run: ash build-image --oci-runner podman --build-target ci --force --no-run
+      run: ash container build --oci-runner podman --build-target ci --force --no-run
 
     # === finch ===
     - name: "finch: install (macOS)"
@@ -203,7 +203,7 @@ runs:
       env:
         ASH_BASE_OCI_LAYOUT: ${{ steps.prepull-finch.outputs.oci-layout }}
         ASH_BASE_IMAGE_OVERRIDE: ${{ steps.prepull-finch.outputs.base-image-override }}
-      run: ash build-image --oci-runner finch --build-target ci --force --no-run
+      run: ash container build --oci-runner finch --build-target ci --force --no-run
 
     # === nerdctl ===
     #
@@ -274,7 +274,7 @@ runs:
     # Five of the eight failures are not this race and are excluded from both
     # halves of the ratio. On those five runs the podman and finch legs failed too,
     # in exactly the same five runs and no others, which no nerdctl-specific cause
-    # can produce; they are a branch whose `build-image` runs a full scan that
+    # can produce; they are a branch whose `container build` runs a full scan that
     # reports findings and exits 2.
     #
     # That leaves 3 failures of this shape in 144 - 5 = 139 terminal outcomes:
@@ -363,7 +363,7 @@ runs:
       env:
         ASH_BASE_OCI_LAYOUT: ${{ steps.prepull-nerdctl.outputs.oci-layout }}
         ASH_BASE_IMAGE_OVERRIDE: ${{ steps.prepull-nerdctl.outputs.base-image-override }}
-        # The tag ash build-image applies for --build-target ci, which every build
+        # The tag ash container build applies for --build-target ci, which every build
         # and scan in this action passes, so this is the image the load above would
         # have created. CI variables do not choose the stage, so it is named
         # explicitly rather than left to the default (non-root).
@@ -388,7 +388,7 @@ runs:
           # reporting a build break that never happened. Flag order matches those
           # two legs on attempt 1: --oci-runner nerdctl --build-target ci --force
           # --no-run.
-          ash build-image --oci-runner nerdctl --build-target ci "${force_args[@]}" --no-run 2>&1 | tee "${log}"
+          ash container build --oci-runner nerdctl --build-target ci "${force_args[@]}" --no-run 2>&1 | tee "${log}"
           rc="${PIPESTATUS[0]}"
           set -e
 
@@ -427,7 +427,7 @@ runs:
           # wrapper rather than the race itself, and the match should survive
           # nerdctl rewording its wrapper while the upstream race is still open.
           if ! grep -qE 'parent snapshot.*does not exist' "${log}"; then
-            echo "::error::ash build-image --oci-runner nerdctl exited ${rc} for a reason other than the containerd snapshot GC race. Not retried."
+            echo "::error::ash container build --oci-runner nerdctl exited ${rc} for a reason other than the containerd snapshot GC race. Not retried."
             exit "${rc}"
           fi
 
@@ -635,13 +635,13 @@ runs:
         # The stderr log paths below come from find, so they are printed through
         # one_line.
         . "${RUNNER_TEMP}/ash-one-line.sh"
-        # The community modules this image ships, read from the Dockerfile's own list
-        # and the plugins' declarations (.github/scripts/community-scanner-legs.py),
-        # not named here: a community scanner added to the image is then loaded and
+        # The alpha modules this image ships, read from the Dockerfile's own list
+        # and the plugins' declarations (.github/scripts/alpha-scanner-legs.py),
+        # not named here: an alpha scanner added to the image is then loaded and
         # checked by this leg without an edit to it. Read before `set +e`, so a
         # metadata the script cannot read fails the step instead of scanning with none.
-        mapfile -t community_args < <(python3 .github/scripts/community-scanner-legs.py args)
-        test "${#community_args[@]}" -gt 0
+        mapfile -t alpha_args < <(python3 .github/scripts/alpha-scanner-legs.py args)
+        test "${#alpha_args[@]}" -gt 0
         set +e
         ash scan \
           --mode container \
@@ -651,7 +651,7 @@ runs:
           --output-dir /tmp/ash-selftest/output \
           --simple \
           --fail-on-incomplete-scanners \
-          "${community_args[@]}" \
+          "${alpha_args[@]}" \
           --phases scan \
           --phases report
         rc=$?
@@ -780,18 +780,18 @@ runs:
             "trivy",
             "zizmor",
         ]
-        # The community scanners (betterleaks, GuardDog and hadolint today) come from the
+        # The alpha scanners (betterleaks, GuardDog and hadolint today) come from the
         # image's own module list through the plugins' declarations, the same source the
         # scan above loaded them from, so this list cannot drift from what was loaded.
-        # An empty answer fails: a leg with no community scanner to check is a leg that
+        # An empty answer fails: a leg with no alpha scanner to check is a leg that
         # lost its metadata, not a pass.
-        community = subprocess.run(
-            [sys.executable, ".github/scripts/community-scanner-legs.py", "scanners"],
+        alpha = subprocess.run(
+            [sys.executable, ".github/scripts/alpha-scanner-legs.py", "scanners"],
             check=True, capture_output=True, text=True,
         ).stdout.split()
-        if not community:
-            sys.exit("FAIL: community-scanner-legs.py named no community scanner")
-        image_supplied = sorted(builtin_supplied + community)
+        if not alpha:
+            sys.exit("FAIL: alpha-scanner-legs.py named no alpha scanner")
+        image_supplied = sorted(builtin_supplied + alpha)
 
         for name in sorted(statuses):
             print(f"  {name:<18} {statuses[name]}")
@@ -961,7 +961,7 @@ runs:
     #
     # Whether this leg runs is not decided by where the plugin came from. It is
     # decided by the image listing the module and the plugin declaring a scanner of
-    # that name (.github/scripts/community-scanner-legs.py), so the same leg covers a
+    # that name (.github/scripts/alpha-scanner-legs.py), so the same leg covers a
     # plugin served by any registry, or shipped inside the SDK.
     #
     # The secret is assembled when the step runs and never written in this file, so
@@ -969,15 +969,15 @@ runs:
     # GitHub personal access token shape that the pinned betterleaks (1.10.1) reports
     # as github-pat. An AWS key id in a quoted assignment was measured not to be
     # reported by that build, so the fixture is not one.
-    - name: "Scan with the image's betterleaks (community plugin)"
+    - name: "Scan with the image's betterleaks (alpha plugin)"
       shell: bash
       env:
         ASH_BASE_OCI_LAYOUT: ${{ steps.prepull-podman.outputs.oci-layout || steps.prepull-finch.outputs.oci-layout || steps.prepull-nerdctl.outputs.oci-layout }}
         ASH_BASE_IMAGE_OVERRIDE: ${{ steps.prepull-podman.outputs.base-image-override || steps.prepull-finch.outputs.base-image-override || steps.prepull-nerdctl.outputs.base-image-override }}
         RUNTIME: ${{ inputs.runtime }}
       run: |
-        python3 .github/scripts/community-scanner-legs.py scanners | grep -x -F betterleaks
-        mapfile -t community_args < <(python3 .github/scripts/community-scanner-legs.py args)
+        python3 .github/scripts/alpha-scanner-legs.py scanners | grep -x -F betterleaks
+        mapfile -t alpha_args < <(python3 .github/scripts/alpha-scanner-legs.py args)
         rm -rf /tmp/ash-selftest-betterleaks
         mkdir -p /tmp/ash-selftest-betterleaks
         printf 'token = "%s%s"\n' ghp_ x7Kq9ZmP2vLw4RtYb8NcD3sFh6JgA1eUoW5i > /tmp/ash-selftest-betterleaks/settings.py
@@ -988,7 +988,7 @@ runs:
           --build-target ci \
           --source-dir /tmp/ash-selftest-betterleaks \
           --output-dir /tmp/ash-selftest-betterleaks/output \
-          "${community_args[@]}" \
+          "${alpha_args[@]}" \
           --scanners betterleaks \
           --simple \
           --phases scan \

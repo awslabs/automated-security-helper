@@ -657,6 +657,7 @@ SHOWN_SUPPRESSION_FIELDS = (
     "expires",
     *PACKAGE_SUPPRESSION_FIELDS,
     "symbol",
+    "image",
     "resource_id",
 )
 

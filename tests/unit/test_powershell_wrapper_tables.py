@@ -80,10 +80,15 @@ def test_the_subcommand_table_matches_the_real_commands():
     table = _ps1_table("ashOptionSubcommands")
     for option, takers in sorted(table.items()):
         assert option in _options(root), f"ash itself does not take {option}"
+        # A `container` word is followed by `build`, which takes what the root's
+        # options are handed to (AshTyperGroup._options_for_subcommand).
         assert takers == {
             name
             for name, command in root.commands.items()
-            if option in _options(command, name)
+            if option
+            in _options(
+                command.commands["build"] if name == "container" else command, name
+            )
         }, option
 
 

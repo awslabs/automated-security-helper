@@ -121,6 +121,7 @@ on:
       - "ASH - Offline-capable scanners (non-blocking)"
       - "ASH - Package Build"
       - "ASH - PR Title Check"
+      - "ASH - Scan-Time Benchmark"
       - "Run ASH (pull request head, informational)"
       - "Run ASH"
       - "TypeScript CI"
@@ -268,7 +269,7 @@ jobs:
       - name: Mint an installation token for the automation app
         if: steps.decide.outputs.approve == 'true'
         id: app-token
-        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
         with:
           app-id: ${{ secrets.ASH_AUTOMATIONS_APP_ID }}
           private-key: ${{ secrets.ASH_AUTOMATIONS_PRIVATE_KEY }}

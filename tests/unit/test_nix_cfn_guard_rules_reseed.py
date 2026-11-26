@@ -75,6 +75,7 @@ def _pinned_tree(tmp_path: Path) -> Path:
     tree = tmp_path / "self"
     for relative in (
         ("assets", "install-pinned-tool.py"),
+        ("base", "plugin_provisioning.py"),
         ("core", "exceptions.py"),
         ("utils", "tool_downloads.py"),
     ):

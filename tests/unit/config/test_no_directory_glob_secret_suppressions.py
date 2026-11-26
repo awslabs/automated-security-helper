@@ -64,9 +64,10 @@ WILDCARD_CHARS = ("*", "?", "[")
 
 
 def _config_files() -> list[Path]:
-    return sorted(
+    in_ash_dir = [
         p for p in ASH_CONFIG_DIR.iterdir() if p.is_file() and p.suffix == ".yaml"
-    )
+    ]
+    return sorted([REPO_ROOT / ".ash.yaml", *in_ash_dir])
 
 
 def is_directory_glob(path: str) -> bool:

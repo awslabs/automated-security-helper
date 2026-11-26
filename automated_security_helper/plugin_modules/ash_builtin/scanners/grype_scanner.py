@@ -26,6 +26,7 @@ from automated_security_helper.base.scanner_facets import (
     FacetState,
     ScannerFacets,
 )
+from automated_security_helper.models.vocab import SeverityThresholdText, TargetType
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.core.constants import SHIPPED_SEVERITY_LEVEL
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
@@ -278,7 +279,7 @@ class GrypeScannerConfigOptions(ScannerOptionsBase):
         ),
     ] = None
     severity_threshold: Annotated[
-        Literal["ALL", "LOW", "MEDIUM", "HIGH", "CRITICAL"] | None,
+        SeverityThresholdText | None,
         Field(
             description=f"Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of {SHIPPED_SEVERITY_LEVEL}."
         ),
@@ -572,14 +573,21 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
                 kinds=(
                     opsf.TargetKind.PACKAGE_INVENTORY,
                     opsf.TargetKind.DEPENDENCY_LOCKFILES,
+                    opsf.TargetKind.CONTAINER_IMAGE,
                 ),
                 tool_type=ScannerToolType.SCA,
-                selection="a dir: scan of the source tree, with a lockfile join for locations",
+                selection=(
+                    "a dir: scan of the source tree, with a lockfile join for "
+                    "locations; a container-image asset through a stereoscope "
+                    "target (_execute_image_scan: docker-archive:/oci-archive:/"
+                    "oci-dir: for a payload, docker:/podman:/registry: for a "
+                    "reference by the detected engine), with the ignore paths "
+                    "as --exclude globs"
+                ),
                 covers_note=(
-                    "covers said 'Packages and container images', but only a dir: scan "
-                    "is wired and no SBOM document or image is consumed; the display "
-                    "string now reads 'Packages and dependency files' and the register "
-                    "declares the wired truth (UNCLAIMED_TARGET_KINDS names the rest)"
+                    "the display string reads 'Packages and dependency files'; "
+                    "container images are scanned when the submission names one "
+                    "(the asset routing), which the display string understates"
                 ),
             ),
             runtime=opsf.RuntimeFacet(
@@ -590,6 +598,7 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
                 python_only=False,
                 use_uv_tool=False,
             ),
+            runtime_compat=opsf.RuntimeCompatFacet(rows=()),
             platforms=opsf.PlatformsFacet(
                 provisionable=opsf.PLATFORMS_NO_WINDOWS_ARM64,
                 note="no windows/arm64 asset (tool_downloads.py docstring)",
@@ -630,7 +639,6 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
                 semantics="per the adapter's own comment at the success_exit_codes declaration",
             ),
             provenance=opsf.ProvenanceFacet(
-                tier=opsf.Tier.BUILTIN_DEFAULT,
                 source=opsf.ProvenanceSource.PINNED_RELEASE_BINARY,
                 selection_surfaces=(),
                 upstream_license=(
@@ -1095,7 +1103,7 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
     def _execute_scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason],
     ):
         """Resolve final argv, results path, and subprocess env for Grype."""
@@ -1168,6 +1176,69 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
                 # The operator's config, outside the scanned tree, when there is
                 # one (_process_config_options): its database settings reach the
                 # update as they reach the scan. None keeps the empty config.
+                config_file=getattr(self, "_content_db_operator_config", None),
+                values=self._values_to_redact(),
+            )
+            scan_env.update(GRYPE_PREPARED_ENV)
+        return final_args, results_file, scan_env
+
+    def _execute_image_scan(self, image):
+        """Resolve argv, results path and env for a container-image scan.
+
+        The dir: scan's resolution with the image differences and nothing
+        else: the target is a stereoscope string built from the locator and
+        the detected engine (utils/image_tool_targets.py: a payload needs no
+        engine; a reference prefers the daemon's content store, else the
+        tool's own registry client), there are no ``--exclude`` patterns
+        because nothing of the source tree is scanned, and the empty config
+        and the database cache are exactly the dir: scan's, so the offline
+        database posture carries over unchanged.
+        """
+        from automated_security_helper.utils.image_tool_targets import (
+            stereoscope_target,
+        )
+
+        target_results_dir = Path(os.path.abspath(self.results_dir)).joinpath("image")
+        results_file = target_results_dir.joinpath("results_sarif.sarif")
+        results_file.parent.mkdir(exist_ok=True, parents=True)
+
+        original_extra_args = self.args.extra_args
+        try:
+            self.args.extra_args = list(original_extra_args)
+            if not any(arg.key == "--config" for arg in self.args.extra_args):
+                empty = empty_tool_config(
+                    "grype-empty.yaml", "{}\n", context=self.context
+                )
+                self.args.extra_args.append(
+                    ToolExtraArg(key="--config", value=empty.as_posix())
+                )
+            # The ignore paths grype can be told to leave uncataloged (measured
+            # on grype 0.122.1: an absolute in-image glob is honored on an
+            # image source; utils/image_ignore_paths).
+            self.args.extra_args.extend(
+                ToolExtraArg(key="--exclude", value=glob)
+                for glob in self._image_exclude_globs()
+            )
+            final_args = self._resolve_arguments(
+                target=stereoscope_target(image),
+                results_file=results_file,
+            )
+        finally:
+            self.args.extra_args = original_extra_args
+
+        scan_env = {**snapshot_environ(), **self.extra_env}
+        cache = default_cache_dir("grype", scan_env)
+        scan_env["GRYPE_DB_CACHE_DIR"] = cache.as_posix()
+        self._content_db_cache_dir = cache
+        if sandboxed_online(self._scanner_offline()):
+            prepare_content_db(
+                "grype",
+                cache,
+                offline=False,
+                source_dir=self.context.source_dir,
+                results_dir=self.results_dir or results_file.parent,
+                config=getattr(self.context, "config", None),
+                scan_id=scan_id_for(self.context),
                 config_file=getattr(self, "_content_db_operator_config", None),
                 values=self._values_to_redact(),
             )

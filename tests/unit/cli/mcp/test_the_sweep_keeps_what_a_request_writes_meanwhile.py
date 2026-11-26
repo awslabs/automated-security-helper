@@ -29,6 +29,7 @@ import time
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from automated_security_helper.cli.mcp.error_types import McpErrorType
 import pytest
 import yaml
 
@@ -165,7 +166,7 @@ def test_a_profile_bound_during_the_sweep_stays_bound(
     result = landed["result"]
     if result["success"] is not True:
         # The client is told, and selects the profile again.
-        assert result["error_type"] == sessions.SESSION_WORKSPACE_BUSY, result
+        assert result["error_type"] == McpErrorType.SESSION_WORKSPACE_BUSY.value, result
         assert mcp_select_profile("strict", session_id=SESSION)["success"] is True
     state = get_session_state(SESSION)
     assert state is not None
@@ -205,7 +206,9 @@ def test_a_scan_after_the_profile_is_selected_again_runs_with_it_bound(
 
     _sweep_with_a_write_in_its_window(monkeypatch, bind)
     if landed["result"]["success"] is not True:
-        assert landed["result"]["error_type"] == sessions.SESSION_WORKSPACE_BUSY
+        assert (
+            landed["result"]["error_type"] == McpErrorType.SESSION_WORKSPACE_BUSY.value
+        )
         assert mcp_select_profile("strict", session_id=SESSION)["success"] is True
 
     started = AsyncMock()

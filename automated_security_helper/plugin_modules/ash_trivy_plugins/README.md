@@ -43,7 +43,7 @@ trivy --version
 
 ### Basic Configuration
 
-Add to your ASH config file (`.ashrc.yaml` in a new project):
+Add to your ASH config file (`.ash.yaml` in the project root):
 
 ```yaml
 scanners:

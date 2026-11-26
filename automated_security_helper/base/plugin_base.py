@@ -11,6 +11,7 @@ import re
 import threading
 from pathlib import Path
 from typing import (
+    TYPE_CHECKING,
     Annotated,
     Any,
     Callable,
@@ -35,6 +36,7 @@ from automated_security_helper.base.uv_tool_mixin import (
     guarded_values_read,
 )
 from automated_security_helper.core.enums import PackageManager
+from automated_security_helper.models.vocab import TargetType
 from automated_security_helper.core.exceptions import (
     ScannerError,
     ToolNotProvisionableError,
@@ -55,6 +57,9 @@ from automated_security_helper.utils.uv_tool_runner import (
 from automated_security_helper.utils.log import ASH_LOGGER, MARKUP, escape_markup
 from automated_security_helper.utils.offline_tool_env import (
     with_offline_tool_environment,
+)
+from automated_security_helper.utils.runtime_compat_env import (
+    with_runtime_compat_environment,
 )
 from automated_security_helper.utils.redacted_model import (
     NO_RICH_REPR,
@@ -956,14 +961,22 @@ class PluginBase(UVToolMixin, BaseModel):
     model_config = ConfigDict(
         extra="allow",
         arbitrary_types_allowed=True,
-        use_enum_values=True,
         # A phase builds a plugin from its config section, which a config model
         # may not type (a plugin module's section), so the plugin's own error is
         # the one raised. A refused value can be a secret read from the
         # environment, and an error's text goes wherever the error is shown.
         hide_input_in_errors=True,
     )
-    context: PluginContext | None = None
+    if TYPE_CHECKING:
+        # A phase hands every plugin its context before any method that reads
+        # a directory from it runs; the few that can be reached without one
+        # check ``is None`` first. The runtime field below accepts None so a
+        # plugin can still be built on its own.
+        # The ``= None`` keeps it optional in the constructor the checker
+        # sees; this branch is never evaluated.
+        context: PluginContext = None  # ty: ignore[invalid-assignment]
+    else:
+        context: PluginContext | None = None
     config: PluginConfigBase | None = None
 
     output: List[str] = []
@@ -1255,7 +1268,7 @@ class PluginBase(UVToolMixin, BaseModel):
         self,
         *msg: str,
         level: int = 15,
-        target_type: str | None = "source",
+        target_type: TargetType | None = TargetType.SOURCE,
         append_to_stream: Literal["stderr", "stdout", "none"] = "none",
     ):
         """Log a message to the plugin's log file.
@@ -1572,7 +1585,7 @@ class PluginBase(UVToolMixin, BaseModel):
                         stderr_text,
                         values,
                         plugin_inputs=plugin_inputs,
-                        tool_name=self.command,
+                        tool_name=self._tool_command(),
                         limit=None,
                     )
                 else:
@@ -2235,7 +2248,7 @@ class PluginBase(UVToolMixin, BaseModel):
 
         # Set once a run returned a response, so the handler below can tell an
         # exception from before the command ran from one while reading its result.
-        response: Dict | None = None
+        response: Optional[Dict] = None
         # The recorders already run for this response (_record_response), so none
         # runs twice, in the handler below included.
         invoked: Set[str] = set()
@@ -2250,7 +2263,7 @@ class PluginBase(UVToolMixin, BaseModel):
         stderr_log_before = _log_identity(stderr_log)
         try:
             # Use provided cwd or fall back to context.source_dir
-            working_dir = cwd if cwd is not None else Path(self.context.source_dir)
+            working_dir = Path(cwd if cwd is not None else self.context.source_dir)
 
             # Offline, the tool's own update, version and telemetry checks are
             # turned off in the environment it gets (utils/offline_tool_env.py).
@@ -2260,6 +2273,11 @@ class PluginBase(UVToolMixin, BaseModel):
             env = with_offline_tool_environment(
                 env, scanner_offline() if callable(scanner_offline) else None
             )
+
+            # A POLYFILL row of the scanner's runtime-compat facet puts its shim
+            # directory on the child's PYTHONPATH (utils/runtime_compat_env.py);
+            # a scanner with no such row gets its environment back unchanged.
+            env = with_runtime_compat_environment(env, self)
 
             # A uv command started in the scanned tree (`uv pip ...`, `uv run ...`)
             # runs the tree's .venv python and builds its project unless told not

@@ -75,6 +75,16 @@ class SandboxRequirements:
             and read by every later run. For a tool that would otherwise reach for
             a shared cache that backend keeps out of reach: cdk-nag turns jsii's
             package cache (``~/Library/Caches/com.amazonaws.jsii``) off.
+        sandbox_exec_cache_env: Variables that, under sandbox-exec only, point at a
+            private, empty directory for the spawn, for a tool that derives a
+            writable cache location from them and offers no setting of its own.
+            Go's ``os.UserCacheDir`` reads ``HOME`` alone on macOS and ignores
+            ``XDG_CACHE_HOME``, so betterleaks' regular-expression engine
+            (go-re2 over wazero) keeps its compilation cache under
+            ``$HOME/Library/Caches/com.github.wasilibs``, a place the profile
+            denies; the engine then crashes instead of running without a cache.
+            The other backends already give the tool a home it can write, or an
+            overlay, and leave the variable alone.
         unpack_dir_env: The tool unpacks itself and runs what it unpacked, at a
             location this environment variable decides (opengrep's macOS binary,
             built with Nuitka's onefile mode, unpacks to
@@ -127,6 +137,7 @@ class SandboxRequirements:
     network_requires_grant: bool = False
     system_trust_roots: bool = False
     sandbox_exec_env: Tuple[Tuple[str, str], ...] = ()
+    sandbox_exec_cache_env: Tuple[str, ...] = ()
     unpack_dir_env: Optional[str] = None
     git_safe_directory: bool = False
     read_paths_require_grant: bool = False
@@ -497,6 +508,8 @@ class SandboxPolicy:
     scan_data: Tuple[Path, ...] = ()
     system_trust_roots: bool = False
     sandbox_exec_env: Dict[str, str] = field(default_factory=dict)
+    #: See ``SandboxRequirements.sandbox_exec_cache_env``.
+    sandbox_exec_cache_env: Tuple[str, ...] = ()
     unpack_dir_env: Optional[str] = None
     #: uv's tools-directory lock file, which ``uv tool run`` opens read-write before
     #: it looks for an installed tool. The file, not the directory. uv keeps nothing
@@ -2048,6 +2061,7 @@ def build_scanner_policy(
         scan_data=tuple(scan_data),
         system_trust_roots=requirements.system_trust_roots,
         sandbox_exec_env=dict(requirements.sandbox_exec_env),
+        sandbox_exec_cache_env=requirements.sandbox_exec_cache_env,
         unpack_dir_env=requirements.unpack_dir_env,
         uv_tool_locks=tuple(_uv_tool_locks(uv_data)),
         unread=tuple(unread),

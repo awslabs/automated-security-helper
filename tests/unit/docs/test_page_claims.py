@@ -5694,7 +5694,16 @@ def _outputs_known_file_names() -> Set[str]:
     import automated_security_helper.plugin_modules as plugin_modules
     from automated_security_helper.core.constants import ASH_CONFIG_FILE_NAMES
 
-    known = {"ash.log", "ash.log.jsonl", "ash.txt", *ASH_CONFIG_FILE_NAMES}
+    # ash.lock is the committed suppression lock (utils/ash_lock.py), an input
+    # ASH reads and ``ash suppress`` writes under .ash/, not a report.
+    known = {
+        "ash.log",
+        "ash.log.jsonl",
+        "ash.txt",
+        "ash.lock",
+        ".ash.lock",
+        *ASH_CONFIG_FILE_NAMES,
+    }
     for module_info in pkgutil.iter_modules(plugin_modules.__path__):
         module = importlib.import_module(
             f"{plugin_modules.__name__}.{module_info.name}"
@@ -6866,7 +6875,7 @@ def test_config_validate_names_a_wrong_suppression_field_and_exits_3(
 ) -> None:
     """agents.md (8. Draft a suppression).
 
-    The tutorial's ``.ashrc.yaml``, read from its ``cat`` block, is checked with
+    The tutorial's ``.ash.yaml``, read from its ``cat`` block, is checked with
     ``ash config validate`` as written and with one field broken in each way the
     page's sentence lists. A wrong value and a missing required field exit 3 and
     name the field, and a scan, resolving the same file, refuses it too. A typo
@@ -6891,14 +6900,12 @@ def test_config_validate_names_a_wrong_suppression_field_and_exits_3(
         "field such as `reason` makes validate name the field and exit with code 3; a typo "
         "in a required key does the same, because the required field then goes missing:",
     )
-    assert_on_page(
-        _CONFIG_AGENTS_PAGE, "sed 's/reason:/reasn:/' .ashrc.yaml > typo.yaml"
-    )
-    text = _config_heredoc(_CONFIG_AGENTS_PAGE, ".ashrc.yaml")
+    assert_on_page(_CONFIG_AGENTS_PAGE, "sed 's/reason:/reasn:/' .ash.yaml > typo.yaml")
+    text = _config_heredoc(_CONFIG_AGENTS_PAGE, ".ash.yaml")
     if change is not None:
         assert change[0] in text, f"the tutorial's file has no {change[0]!r}"
         text = text.replace(change[0], change[1])
-    tree = _config_scan_tree(tmp_path, {".ashrc.yaml": text})
+    tree = _config_scan_tree(tmp_path, {".ash.yaml": text})
 
     result = _ash(["config", "validate"], cwd=tree)
     output = result.stdout + result.stderr
@@ -6979,7 +6986,7 @@ def test_an_unquoted_expiration_date_makes_ash_refuse_the_whole_config(
     database).
 
     The config block each page shows, read from the page, is the repository's
-    ``.ashrc.yaml`` for a detect-secrets scan of a tree with no findings. With the date
+    ``.ash.yaml`` for a detect-secrets scan of a tree with no findings. With the date
     unquoted, the scan must refuse the file with exit 3. The control is the block as
     written, which scans with exit 0, so the refusal is the date's.
     """
@@ -6995,7 +7002,7 @@ def test_an_unquoted_expiration_date_makes_ash_refuse_the_whole_config(
     block = _config_yaml_block(page, heading)
     assert f"{key}: {written}" in block, block
     text = block if quoted else block.replace(written, written.strip('"'))
-    tree = _config_scan_tree(tmp_path, {"app.py": "x = 1\n", ".ashrc.yaml": text})
+    tree = _config_scan_tree(tmp_path, {"app.py": "x = 1\n", ".ash.yaml": text})
 
     result = _ash([*_CONFIG_SCAN, "--source-dir", str(tree)], cwd=tmp_path)
     assert result.returncode == verdict, (
@@ -7075,7 +7082,7 @@ def test_ash_log_names_the_config_file_once_the_scan_has_loaded_it(
 
     A repository with one hardcoded password is scanned from its own directory, as the
     page scans it: with the tutorial's operator config passed with ``--config``, then
-    with only the repository's own ``.ashrc.yaml``. Both are reached through a symbolic
+    with only the repository's own ``.ash.yaml``. Both are reached through a symbolic
     link to their directory, and the shell's ``PWD`` names the repository through its
     link. ``.ash/ash_output/ash.log`` must hold a ``Using ASH configuration from`` line
     for the file and no line naming another one, and the scan must exit as the page
@@ -7105,7 +7112,7 @@ def test_ash_log_names_the_config_file_once_the_scan_has_loaded_it(
     )
     assert_on_page(
         _CONFIG_PLATFORM_PAGE,
-        'grep -F "Using ASH configuration from $(pwd -P)/.ashrc.yaml" '
+        'grep -F "Using ASH configuration from $(pwd -P)/.ash.yaml" '
         ".ash/ash_output/ash.log",
     )
     assert_on_page(
@@ -7113,11 +7120,11 @@ def test_ash_log_names_the_config_file_once_the_scan_has_loaded_it(
         "The scan exits 0 although the finding is still there.",
     )
     assert_on_page(
-        _CONFIG_PLATFORM_PAGE, "printf 'fail_on_findings: false\\n' > .ashrc.yaml"
+        _CONFIG_PLATFORM_PAGE, "printf 'fail_on_findings: false\\n' > .ash.yaml"
     )
     files = {"app.py": _CONFIG_SECRET}
     if given == "repository":
-        files[".ashrc.yaml"] = "fail_on_findings: false\n"
+        files[".ash.yaml"] = "fail_on_findings: false\n"
     tree = _config_scan_tree(tmp_path / "real", files)
     (tmp_path / "link").symlink_to(tree.parent, target_is_directory=True)
     linked_tree = tmp_path / "link" / tree.name
@@ -7164,7 +7171,7 @@ def test_ash_log_names_the_config_file_once_the_scan_has_loaded_it(
     if given == "operator":
         expected, how = named_config, "as --config named it"
     else:
-        expected, how = (tree / ".ashrc.yaml").resolve(), "by its resolved path"
+        expected, how = (tree / ".ash.yaml").resolve(), "by its resolved path"
     assert all(Path(path) == expected for path in named), (
         f"ash.log names {named}, not {expected} {how}"
     )
@@ -7653,7 +7660,7 @@ _CHILD_CTRL_C_ROW = (
     "container runtime as well, and ASH waits up to 5 seconds for it to stop, as above; "
     "without a console, ASH ends the runtime at once. A scan prints the interrupted-scan "
     "message above. `ash "
-    "build-image` prints `ASH build-image interrupted before it finished.`, and, without "
+    "container build` prints `ASH container build interrupted before it finished.`, and, without "
     "`--no-run`, adds `: there is no verdict, and the output directory may hold partial "
     "results` before the period. |"
 )
@@ -8225,9 +8232,9 @@ def test_ctrl_c_ends_a_scan_with_exit_code_130_in_every_mode(
         )
 
 
-_BUILD_ONLY_INTERRUPTED = "ASH build-image interrupted before it finished."
+_BUILD_ONLY_INTERRUPTED = "ASH container build interrupted before it finished."
 _BUILD_AND_SCAN_INTERRUPTED = (
-    "ASH build-image interrupted before it finished: there is no verdict, and the output "
+    "ASH container build interrupted before it finished: there is no verdict, and the output "
     "directory may hold partial results."
 )
 
@@ -11815,9 +11822,11 @@ def test_while_a_scan_of_the_session_runs_delivery_is_refused_and_chunks_accepte
     """
     assert_on_page(
         MCP_SERVER,
-        "While a scan of a session runs, `clear_source`, `set_source_git`, and "
-        "`set_source_zip_finalize` are refused with `error_type` `source_delivery_busy`, "
-        "because each would remove or replace the tree the scan is reading.",
+        "While a scan of a session runs, `clear_source`, `set_source_git`, "
+        "`set_source_zip_finalize`, `set_source_image`, and "
+        "`set_source_image_archive_finalize` are refused with `error_type` "
+        "`source_delivery_busy`, because each would remove or replace the subject "
+        "the scan is reading.",
     )
     assert_on_page(
         MCP_SERVER, "Chunks are still accepted, because they land beside the tree."
@@ -11834,6 +11843,9 @@ def test_while_a_scan_of_the_session_runs_delivery_is_refused_and_chunks_accepte
         refused = {
             "set_source_zip_finalize": _delivery_finalize(data, "during"),
             "set_source_git": _delivery_tool("set_source_git", url=url),
+            "set_source_image": _delivery_tool(
+                "set_source_image", image_ref="registry.example.com/team/app:1"
+            ),
             "clear_source": _delivery_tool("clear_source"),
         }
 
@@ -11906,9 +11918,9 @@ def test_an_unquoted_off_sandbox_mode_is_read_as_the_mode_off(
     and so names no mode, and a mode that is not lowercase must exit 3.
     """
     assert_on_page(_SANDBOX_HOW_TO, _SANDBOX_MODES_SENTENCE)
-    from automated_security_helper.config.ash_config import SandboxConfig
+    from automated_security_helper.core.enums import SandboxMode
 
-    allowed = typing.get_args(SandboxConfig.model_fields["mode"].annotation)
+    allowed = [mode.value for mode in SandboxMode]
     listed = re.findall(r"`([^`]+)`", _SANDBOX_MODES_SENTENCE.split(", lowercase")[0])
     assert list(allowed) == listed, (allowed, listed)
 
@@ -12396,7 +12408,7 @@ def test_a_config_in_any_checkout_cannot_grant_and_the_warning_names_it(
 
 
 #: trust-model.md's quote of the warning for a repository config at
-#: /work/repo/.ash/.ash.yaml that grants grype a network and a read path. The sandbox
+#: /work/repo/.ash.yaml that grants grype a network and a read path. The sandbox
 #: step says where the file sits (``sandbox_grants.confinement_membership``): the
 #: scanned repository's own config is inside the scanned tree, so the repository being
 #: scanned wrote it. The reporter and scanner-config steps give the generic reason
@@ -12404,7 +12416,7 @@ def test_a_config_in_any_checkout_cannot_grant_and_the_warning_names_it(
 #: below keeps.
 _DROPPED_GRANTS_WARNING = (
     "Ignoring sandbox.network_scanners, sandbox.extra_read_paths from "
-    "/work/repo/.ash/.ash.yaml: the file is inside the scanned tree, so the repository "
+    "/work/repo/.ash.yaml: the file is inside the scanned tree, so the repository "
     "being scanned wrote it. A network_scanners list there still removes "
     "network from scanners it does not name, and a sandbox mode there still applies when "
     "nothing else turns the sandbox on. To keep a setting, move the file outside every "
@@ -12459,14 +12471,14 @@ def test_the_dropped_grants_warning_reads_as_the_pages_quote(
         + _DROPPED_GRANTS_WARNING.replace("/work/repo/", "/home/me/src/app/"),
     )
     troubleshoot = (
-        "Ignoring sandbox.network_scanners from /home/me/repo/.ash/.ash.yaml: the file "
+        "Ignoring sandbox.network_scanners from /home/me/repo/.ash.yaml: the file "
         "is inside the scanned tree, so the repository being scanned wrote it."
     )
     assert_on_page("how-to/troubleshoot.md", f"{troubleshoot} ...")
     monkeypatch.delenv("ASH_CONFIG", raising=False)
 
     both = _repository_warnings(
-        tmp_path / "both", ash_log, _SANDBOX_GRANTS, "/work/repo/.ash/.ash.yaml"
+        tmp_path / "both", ash_log, _SANDBOX_GRANTS, "/work/repo/.ash.yaml"
     )
     dropped = [w for w in both if w.startswith("Ignoring sandbox.")]
     assert dropped == [_DROPPED_GRANTS_WARNING], dropped
@@ -12475,7 +12487,7 @@ def test_the_dropped_grants_warning_reads_as_the_pages_quote(
         tmp_path / "network",
         ash_log,
         {"project_name": "grants", "sandbox": {"network_scanners": ["grype"]}},
-        "/home/me/repo/.ash/.ash.yaml",
+        "/home/me/repo/.ash.yaml",
     )
     dropped = [w for w in network if w.startswith("Ignoring sandbox.")]
     assert len(dropped) == 1 and dropped[0].startswith(troubleshoot), dropped
@@ -12572,7 +12584,7 @@ def test_the_warning_for_an_aws_reporter_a_repository_turns_on_reads_as_quoted(
     as the page quotes it, with the file's path written as the page writes it.
     """
     quoted = (
-        "Ignoring reporters.aws-security-hub.enabled from /home/me/repo/.ash/.ash.yaml: "
+        "Ignoring reporters.aws-security-hub.enabled from /home/me/repo/.ash.yaml: "
         "that config is inside a git checkout or the scanned tree, or was delivered by "
         "an MCP client, and these options choose whether findings are sent, where they "
         f"are sent or written, and which credentials send them. {_KEEP_A_SETTING}"
@@ -12587,7 +12599,7 @@ def test_the_warning_for_an_aws_reporter_a_repository_turns_on_reads_as_quoted(
             "project_name": "app",
             "reporters": {"aws-security-hub": {"enabled": True}},
         },
-        "/home/me/repo/.ash/.ash.yaml",
+        "/home/me/repo/.ash.yaml",
     )
     ignored = [w for w in warnings if w.startswith("Ignoring reporters.")]
     assert ignored == [quoted], ignored
@@ -22377,7 +22389,7 @@ def test_the_betterleaks_page_names_the_module_the_code_ships_and_the_defaults_i
         "With the module listed, `betterleaks` runs by default, like every other "
         "scanner.",
     )
-    enabling = _betterleaks_page_yaml("# .ash/.ash.yaml")
+    enabling = _betterleaks_page_yaml("# .ash.yaml")
     assert enabling == {"ash_plugin_modules": [_BETTERLEAKS_MODULE]}
     module = importlib.import_module(_BETTERLEAKS_MODULE)
     from automated_security_helper.plugin_modules.ash_betterleaks_plugins.betterleaks_scanner import (
@@ -22675,7 +22687,7 @@ _HOMEPAGE_ALPHA_SENTENCE = (
     "A scan runs one only when its module is named in `ash_plugin_modules` or "
     "`--ash-plugin-modules`. See the "
     "[alpha plugins](docs/plugins/alpha/index.md) and the "
-    "[scanners reference](reference/scanners.md) for all 22 scanners."
+    "[scanners reference](reference/scanners.md) for all 23 scanners."
 )
 
 
@@ -22698,21 +22710,19 @@ def test_the_homepage_says_asha_ships_six_alpha_scanners_and_links_each(
 
     The sentence is on the page. Its count of six is the number of scanners the
     vendored alpha plugin packages declare, which is every in-tree alpha
-    module; its 22 is built in plus alpha; and each link it carries resolves to
+    module; its 23 is built in plus alpha; and each link it carries resolves to
     a page under docs/content, the alpha index and the scanners reference
     included.
     """
-    from automated_security_helper.core.scanner_inventory import (
-        _VENDORED_SCANNER_PLUGIN_PACKAGES,
-    )
+    from automated_security_helper.plugins.enablement import modules_needing_naming
 
     assert_on_page(_HOMEPAGE, _HOMEPAGE_ALPHA_SENTENCE)
     builtin, alpha = _shipped_scanner_split(tmp_path, monkeypatch)
-    assert len(_VENDORED_SCANNER_PLUGIN_PACKAGES) == len(alpha) == 6, (
-        len(_VENDORED_SCANNER_PLUGIN_PACKAGES),
+    assert len(modules_needing_naming()) == len(alpha) == 6, (
+        len(modules_needing_naming()),
         sorted(alpha),
     )
-    assert len(builtin) + len(alpha) == 22, (len(builtin), len(alpha))
+    assert len(builtin) + len(alpha) == 23, (len(builtin), len(alpha))
     links = re.findall(r"\]\(([^)#]+\.md)", _HOMEPAGE_ALPHA_SENTENCE)
     assert len(links) == 8, links
     for link in links:

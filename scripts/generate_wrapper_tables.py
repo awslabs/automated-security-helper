@@ -197,6 +197,28 @@ def ps_build_target_completer(contract) -> list[str]:
     ]
 
 
+def ps_exit_codes(contract) -> list[str]:
+    return [
+        f"$refusalExitCode = {contract.refusal_exit}",
+        f"$usageErrorExitCode = {contract.usage_error_exit}",
+    ]
+
+
+def ps_image_reference_pattern(contract) -> list[str]:
+    return [f"$imageReferencePattern = '\\A{contract.image_name_pattern}\\z'"]
+
+
+def ps_ci_runner_markers(contract) -> list[str]:
+    # Each marker is read as ``$env:<name>`` by name, not through a lookup by a variable,
+    # so the environment-variable reference still finds Invoke-ASH reading it.
+    width = max(len(name) for name in contract.ci_runner_markers)
+    lines = ["$ciRunnerMarkers = [ordered]@{"]
+    for name in contract.ci_runner_markers:
+        lines.append(f"    {name:<{width}} = $env:{name}")
+    lines.append("}")
+    return lines
+
+
 # ---------------------------------------------------------------------------
 # Bash renderers
 # ---------------------------------------------------------------------------
@@ -303,6 +325,21 @@ def sh_takes_sandbox(contract) -> list[str]:
     return [f'ASH_TAKES_SANDBOX="{_sh_words(contract.sandbox_subcommands)}"']
 
 
+def sh_exit_codes(contract) -> list[str]:
+    return [
+        f"WRAPPER_REFUSAL_EXIT={contract.refusal_exit}",
+        f"USAGE_ERROR_EXIT={contract.usage_error_exit}",
+    ]
+
+
+def sh_runner_order(contract) -> list[str]:
+    return [f'ASH_RUNNER_ORDER="{_sh_words(contract.runner_order)}"']
+
+
+def sh_ci_runner_markers(contract) -> list[str]:
+    return [f'ASH_CI_RUNNER_MARKERS="{_sh_words(contract.ci_runner_markers)}"']
+
+
 Renderer = Callable[..., list[str]]
 
 #: file -> [(block name, renderer)]. The names are the ones written in the markers.
@@ -315,6 +352,9 @@ BLOCKS: dict[str, list[tuple[str, Renderer]]] = {
         ("ps1-runner-discovery", ps_runner_discovery),
         ("ps1-build-target-completer", ps_build_target_completer),
         ("ps1-completion", ps_completion),
+        ("ps1-exit-codes", ps_exit_codes),
+        ("ps1-image-reference-pattern", ps_image_reference_pattern),
+        ("ps1-ci-runner-markers", ps_ci_runner_markers),
     ],
     ASH: [
         ("sh-subcommands", sh_subcommands),
@@ -324,6 +364,9 @@ BLOCKS: dict[str, list[tuple[str, Renderer]]] = {
         ("sh-root-value-options", sh_root_value_options),
         ("sh-takes-quiet-and-color", sh_takes_quiet_and_color),
         ("sh-takes-sandbox", sh_takes_sandbox),
+        ("sh-exit-codes", sh_exit_codes),
+        ("sh-runner-order", sh_runner_order),
+        ("sh-ci-runner-markers", sh_ci_runner_markers),
     ],
 }
 
@@ -392,14 +435,18 @@ def write(root: Path = REPO_ROOT, contract=None) -> list[str]:
         if not BLOCKS[file]:
             continue
         path = root / file
-        text = path.read_text(encoding="utf-8")
+        # Read with newline="" so the file's own line endings are seen, not translated:
+        # a work tree checked out with CRLF (autocrlf on Windows) is written back with
+        # CRLF, and one with LF with LF. The blocks are rendered on LF text, as
+        # check_file reads it, and each line ending is restored on the way out.
+        with path.open("r", encoding="utf-8", newline="") as handle:
+            raw = handle.read()
+        ending = "\r\n" if "\r\n" in raw else "\n"
+        text = raw.replace("\r\n", "\n")
         new = render_file(text, file, contract)
         if new != text:
-            # read_text translated CRLF to LF, so the file is written back with LF
-            # endings; newline="" stops the write adding a second translation on
-            # Windows. The committed files are LF (.gitattributes: eol=lf).
             with path.open("w", encoding="utf-8", newline="") as handle:
-                handle.write(new)
+                handle.write(new.replace("\n", ending))
             written.append(file)
     return written
 

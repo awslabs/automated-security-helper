@@ -85,7 +85,7 @@ jobs:
       # previous entry's temporary merge commit, which carries that entry's
       # unmerged config and sits on a queue branch GitHub deletes. The trailing
       # `|| ''` keeps the input empty on workflow_dispatch.
-      config: .ash/.ash.yaml
+      config: .ash.yaml
       config-ref: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_ref || '' }}
       # The install steps come from the pull request's workflow files and the ASH
       # from its base commit, so a pull request that adds a scanner asks the base
@@ -111,7 +111,7 @@ jobs:
       install-grype: true
       install-syft: true
       install-opengrep: true
-      # .ash/.ash.yaml enables cfn-nag, so the runner has to carry it. Without
+      # .ash.yaml enables cfn-nag, so the runner has to carry it. Without
       # this the scanner resolves MISSING and the run reports an incomplete
       # scan -- correctly, because the CloudFormation in this repository was
       # never actually being checked.
@@ -322,7 +322,7 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
       # No uv cache: this job adds no cache other than the grype database it exists for.
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
         with:
           enable-cache: false
 
@@ -440,3 +440,48 @@ jobs:
         with:
           path: ~/.opengrep/cli/latest
           key: opengrep-${{ runner.os }}-${{ steps.key.outputs.week }}
+
+  # The control that keeps the scan's `symbols` extra load-bearing. The suppression
+  # configs scope entries by `symbol`, resolved by tree-sitter from the optional
+  # `symbols` extra. Resolution fails closed, so an environment that loses the
+  # extra re-surfaces every symbol-suppressed finding as a residual. Where the
+  # extra is installed is guarded elsewhere: setup-ash's "Check the symbols extra
+  # is importable" step fails the unified-CI legs at install, and
+  # tests/unit/test_reusable_workflow_defaults.py pins the extra in the
+  # reusable scan workflow's ASH_UVX_SOURCE. THIS job does not build those
+  # environments. It proves the behavior the extra gates, in a fresh uv
+  # environment: WITHOUT the extra, every entry in the migration record must
+  # match nothing (the fail-closed path is live, not documentation); WITH it,
+  # every one must resolve to its symbol and match.
+  # scripts/verify_symbol_suppressions_extra.py names the offending entries when
+  # either half breaks.
+  symbols-extra-control:
+    name: Symbol suppressions fail closed without the extra, resolve with it
+    # Not on push, like the scan: the control guards the scan legs' environments,
+    # so it runs where they run.
+    if: github.event_name != 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      # The uv version setup-ash pins, and no cache: this job runs on pull
+      # requests, where setup-uv's default would save a cache entry from the ref.
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
+        with:
+          version: "0.11.4"
+          enable-cache: false
+      - name: Without the extra, every symbol suppression fails closed
+        run: |
+          uv sync --frozen
+          uv run --no-sync python scripts/verify_symbol_suppressions_extra.py fail-closed
+      - name: With the extra, every symbol suppression resolves and matches
+        run: |
+          uv sync --frozen --extra symbols
+          uv run --no-sync python scripts/verify_symbol_suppressions_extra.py resolves

@@ -19,7 +19,6 @@ from typing import (
     Iterable,
     Iterator,
     List,
-    Literal,
     Mapping,
     NamedTuple,
     Sequence,
@@ -28,6 +27,7 @@ from typing import (
 )
 from pydantic import BaseModel, Field, ConfigDict, PrivateAttr
 
+from automated_security_helper.models.vocab import PluginKind
 from automated_security_helper.plugins.events import AshEventType
 from automated_security_helper.utils.import_caches import invalidate_import_caches
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
@@ -629,7 +629,7 @@ class AshPluginManager(BaseModel):
 
     def register_plugin_module(
         self,
-        plugin_type: Literal["converter", "scanner", "reporter"],
+        plugin_type: PluginKind | str,
         plugin_module_class,
         plugin_module_path: str,
         plugin_module_version: str | None = None,
@@ -826,7 +826,7 @@ class AshPluginManager(BaseModel):
 
     def remove_plugin_module_registration(
         self,
-        plugin_type: Literal["converter", "scanner", "reporter"],
+        plugin_type: PluginKind | str,
         plugin_module_name: str,
         plugin_module_path: str | None = None,
     ) -> bool:
@@ -866,13 +866,7 @@ class AshPluginManager(BaseModel):
 
     def _registrations(self, plugin_type) -> Dict[str, AshPluginRegistration] | None:
         """The registration dict for *plugin_type*, or None for an unknown type."""
-        if plugin_type == "converter":
-            return self.plugin_library.converters
-        if plugin_type == "scanner":
-            return self.plugin_library.scanners
-        if plugin_type == "reporter":
-            return self.plugin_library.reporters
-        return None
+        return self._registry(plugin_type)
 
     @contextmanager
     def untrusted_import(self, module_name: str) -> Iterator[None]:
@@ -1036,12 +1030,15 @@ class AshPluginManager(BaseModel):
             for form in registration._masked_forms
         )
 
-    def _registry(self, plugin_type: str) -> Dict[str, AshPluginRegistration] | None:
-        return {
-            "converter": self.plugin_library.converters,
-            "scanner": self.plugin_library.scanners,
-            "reporter": self.plugin_library.reporters,
-        }.get(plugin_type)
+    def _registry(
+        self, plugin_type: PluginKind | str
+    ) -> Dict[str, AshPluginRegistration] | None:
+        """The registration dict of a plugin kind, or None for an unknown one."""
+        kind = PluginKind.coerce(plugin_type)
+        if kind is None:
+            return None
+        # The library's three fields are named for the kinds' plural sections.
+        return getattr(self.plugin_library, kind.section)
 
     @staticmethod
     def _registered_classes(
@@ -1101,7 +1098,7 @@ class AshPluginManager(BaseModel):
 
     def plugin_modules(
         self,
-        plugin_type: Literal["converter", "scanner", "reporter"],
+        plugin_type: PluginKind | str,
         filter_callback: Callable = lambda x: True,
         *args,
         **kwargs,

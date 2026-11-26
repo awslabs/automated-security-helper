@@ -11,6 +11,7 @@
       "uid": "<UUID>"
     },
     "metadata": {
+      "correlation_uid": "secret/526d4f5a01d12fdd431bc8bbc0d7761b06ad444ee88980fb69f73aa785d9d43d",
       "logged_time": 1768478442000,
       "product": {
         "name": "Automated Security Helper",
@@ -24,6 +25,9 @@
     "status_id": 1,
     "time": 1768478442000,
     "type_uid": 200201,
+    "unmapped": {
+      "ash/correlationId": "secret/526d4f5a01d12fdd431bc8bbc0d7761b06ad444ee88980fb69f73aa785d9d43d"
+    },
     "vulnerabilities": [
       {
         "affected_code": [
@@ -55,6 +59,7 @@
       "uid": "<UUID>"
     },
     "metadata": {
+      "correlation_uid": "secret/52d79ee239d5aa630d75a16834fb6d683cc5a156d7ea811c9d3691f3df488c92",
       "logged_time": 1768478442000,
       "product": {
         "name": "Automated Security Helper",
@@ -68,6 +73,9 @@
     "status_id": 1,
     "time": 1768478442000,
     "type_uid": 200201,
+    "unmapped": {
+      "ash/correlationId": "secret/52d79ee239d5aa630d75a16834fb6d683cc5a156d7ea811c9d3691f3df488c92"
+    },
     "vulnerabilities": [
       {
         "affected_code": [
@@ -99,6 +107,7 @@
       "uid": "<UUID>"
     },
     "metadata": {
+      "correlation_uid": "secret/bea398717d1c7da73d19ee50a664412bb1abe54522552f0a0e220631c81ae18f",
       "logged_time": 1768478442000,
       "product": {
         "name": "Automated Security Helper",
@@ -112,6 +121,9 @@
     "status_id": 1,
     "time": 1768478442000,
     "type_uid": 200201,
+    "unmapped": {
+      "ash/correlationId": "secret/bea398717d1c7da73d19ee50a664412bb1abe54522552f0a0e220631c81ae18f"
+    },
     "vulnerabilities": [
       {
         "affected_code": [
@@ -143,6 +155,7 @@
       "uid": "<UUID>"
     },
     "metadata": {
+      "correlation_uid": "secret/aa254316b268d98b8c5404630ecde57783d7813a98add705025b82f455cc101b",
       "logged_time": 1768478442000,
       "product": {
         "name": "Automated Security Helper",
@@ -156,6 +169,9 @@
     "status_id": 1,
     "time": 1768478442000,
     "type_uid": 200201,
+    "unmapped": {
+      "ash/correlationId": "secret/aa254316b268d98b8c5404630ecde57783d7813a98add705025b82f455cc101b"
+    },
     "vulnerabilities": [
       {
         "affected_code": [
@@ -187,6 +203,7 @@
       "uid": "<UUID>"
     },
     "metadata": {
+      "correlation_uid": "secret/7333b5bbfc42b4379d88f7c47c09c211f0e10ba7335fb779f97e0a5d7245196b",
       "logged_time": 1768478442000,
       "product": {
         "name": "Automated Security Helper",
@@ -200,6 +217,9 @@
     "status_id": 1,
     "time": 1768478442000,
     "type_uid": 200201,
+    "unmapped": {
+      "ash/correlationId": "secret/7333b5bbfc42b4379d88f7c47c09c211f0e10ba7335fb779f97e0a5d7245196b"
+    },
     "vulnerabilities": [
       {
         "affected_code": [

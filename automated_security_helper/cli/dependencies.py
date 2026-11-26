@@ -13,7 +13,15 @@ import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path, PurePath, PureWindowsPath
-from typing import Annotated, Any, Iterable, List, NoReturn, Optional, Tuple
+from typing import (
+    Annotated,
+    Any,
+    Iterable,
+    List,
+    NoReturn,
+    Optional,
+    Tuple,
+)
 
 import typer
 
@@ -60,6 +68,7 @@ from automated_security_helper.core.constants import (
     is_blank_bin_path,
     usable_home,
 )
+from automated_security_helper.models.vocab import PluginKind
 from automated_security_helper.core.exceptions import (
     ASHConfigFileNotFoundError,
     ASHConfigValidationError,
@@ -183,19 +192,20 @@ DEPRECATED_TOOL_ALIASES: dict[str, str] = {
 
 #: The plugin types --plugin-type selects, each the plugin manager's own name for
 #: that kind of plugin.
-PLUGIN_KINDS = ("converter", "scanner", "reporter")
+PLUGIN_KINDS = PluginKind.values()
 
 
-def _plugin_kind(plugin_type: str) -> str:
+def _plugin_kind(plugin_type: str) -> PluginKind:
     """The registry kind a --plugin-type value selects.
 
     install_dependencies refuses a value that is not one of PLUGIN_KINDS before
     anything is selected, so a value reaching here is one of them; any other is a
     programming error, not a kind to guess.
     """
-    if plugin_type not in PLUGIN_KINDS:
+    kind = PluginKind.coerce(plugin_type)
+    if kind is None:
         raise ValueError(f"not a plugin type: {plugin_type!r}")
-    return plugin_type
+    return kind
 
 
 def _selection_key(name: str) -> str:
@@ -969,6 +979,16 @@ def _run_install_command(cmd: List[str], shell: bool = False) -> int:
     return code
 
 
+def _run_declared_install_command(cmd: List[str], shell: bool) -> int:
+    """Run one install command with the shell flag its CustomCommand declared.
+
+    The one call that forwards the operator's own declaration, kept in a
+    definition of its own so the self-scan's B604 suppression covers this call
+    and nothing else in the install loop.
+    """
+    return _run_install_command(cmd, shell=shell)  # nosec B604 - Args for this command are evaluated for security prior to this internal method being invoked
+
+
 def _consoles_that_no_color_turns_off() -> tuple:
     """The consoles ``--no-color`` turns color off on: the panels' and the table's,
     the error one and the shared one the ``print()`` lines are written through."""
@@ -1022,7 +1042,7 @@ def install_dependencies(
         metavar="<path>",
     ),
     plugin_types: List[str] = typer.Option(
-        ["converter", "scanner", "reporter"],
+        list(PluginKind.values()),
         "--plugin-type",
         "-t",
         help="Plugin types to install dependencies for",
@@ -1126,7 +1146,7 @@ def install_dependencies(
     # The default when no bin path was given, or a blank one, from the option or
     # from a whitespace-only ASH_BIN_PATH that click passes through as given.
     target_bin_path: Optional[Path]
-    if is_blank_bin_path(bin_path):
+    if bin_path is None or is_blank_bin_path(bin_path):
         target_bin_path = ASH_BIN_PATH
     elif (
         from_environment(ctx, "bin_path")
@@ -1668,29 +1688,30 @@ def install_dependencies(
                     + escape(", ".join(sorted(o.name for o in failed_to_load)))
                 )
             )
-            # An alpha scanner that ships with ASH is not a typo when its module
-            # is simply not loaded: say which module to add.
-            from automated_security_helper.core.alpha_scanners import (
-                alpha_module_for,
+            # A scanner that ships with ASH is not a typo when its module is
+            # simply not loaded: say which module to add.
+            from automated_security_helper.plugin_manifests import (
+                opt_in_module_for,
             )
 
-            alpha = {
-                name: module for name in unknown if (module := alpha_module_for(name))
+            unloaded = {
+                name: module for name in unknown if (module := opt_in_module_for(name))
             }
-            alpha_note = "".join(
-                f"\n[yellow]{escape(name)}[/yellow] is an alpha plugin scanner: "
+            unloaded_note = "".join(
+                f"\n[yellow]{escape(name)}[/yellow] is provided by a plugin "
+                "module this run did not load: "
                 + escape(
                     f"load {module} with --config (ash_plugin_modules) or "
                     f'--config-overrides "ash_plugin_modules+=[{module}]".'
                 )
-                for name, module in sorted(alpha.items())
+                for name, module in sorted(unloaded.items())
             )
             console.print(
                 Panel(
                     f"[bold red]Unknown tool(s): "
                     f"{escape(', '.join(sorted(unknown)))}[/bold red]\n"
                     f"[cyan]Available:[/cyan] {escape(', '.join(available))}"
-                    f"{alpha_note}{broken_note}",
+                    f"{unloaded_note}{broken_note}",
                     title="Nothing installed",
                     expand=False,
                 )
@@ -1857,7 +1878,7 @@ def install_dependencies(
                 outcome.commands_attempted += 1
                 # A CustomCommand declared with shell=True runs through the shell,
                 # as declared; the flag was dropped before the installer saw it.
-                cmd_exit_code = _run_install_command(cmd, shell=shell)  # nosec B604 - Args for this command are evaluated for security prior to this internal method being invoked
+                cmd_exit_code = _run_declared_install_command(cmd, shell)
                 if cmd_exit_code != 0:
                     print(f"Command failed with exit code: {cmd_exit_code}")
                     outcome.commands_failed += 1
@@ -1899,7 +1920,11 @@ def install_dependencies(
         ]
         if outcome.needs_external_tool:
             outcome.executable = _resolved_executable(outcome, source_dir)
-            if outcome.executable is None and outcome.uv_managed:
+            if (
+                outcome.executable is None
+                and outcome.uv_managed
+                and outcome.command is not None
+            ):
                 outcome.executable = _uv_tool_executable(outcome.command)
             # Last, and only for a plugin the verdict counts (see
             # _report_and_exit) that declares its check can start the tool off
@@ -2007,6 +2032,8 @@ def _resolved_executable(
     """
     if outcome.runs_in_ash_interpreter and os.path.isabs(sys.executable or ""):
         return sys.executable
+    if outcome.command is None:
+        return None
     return find_executable_for_scan(outcome.command, source_dir)
 
 

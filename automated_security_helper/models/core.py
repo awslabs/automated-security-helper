@@ -32,6 +32,7 @@ from pydantic import (
 )
 from datetime import datetime, date
 
+from automated_security_helper.models.frame_model import RankEncoded
 from automated_security_helper.utils.path_matching import (
     _path_pattern_matches,
     ignore_path_pattern,
@@ -841,6 +842,12 @@ def suppression_id(suppression: Dict[str, Any]) -> str:
     # id by position; the linter and the reports compare ids whole.
     if symbol:
         parts.append(_text(symbol, "*"))
+    # An image-scoped entry gets an ``image=`` part, so two entries that differ
+    # only by image do not share an id. The prefix is one no symbol, package part
+    # or scope part starts with. Entries without an image keep the id they had.
+    image = suppression.get("image")
+    if image:
+        parts.append("image=" + _text(image, "*"))
     # A scoped entry gets a last part so two entries that differ only by scope
     # (the demo shape: one rule, one path, 26 resource_ids) do not share an id,
     # which collapsed them in the unused-suppressions report and the linter.
@@ -1026,11 +1033,20 @@ class AshSuppression(IgnorePathWithReason):
     rule_id: Annotated[str | None, Field(None, description="Rule ID to suppress")] = (
         None
     )
+    # The line numbers are unbounded Python ints; a frame column is 64-bit. The
+    # markers record how the suppression frames carry them (utils/
+    # suppression_frame.py): as dense ranks over one build's collection, which
+    # the overlap expression compares by order alone. Pydantic ignores the
+    # markers, so validation and the JSON schema are unchanged.
     line_start: Annotated[
-        int | None, Field(None, description="(Optional) Starting line number")
+        int | None,
+        Field(None, description="(Optional) Starting line number"),
+        RankEncoded("lines"),
     ] = None
     line_end: Annotated[
-        int | None, Field(None, description="(Optional) Ending line number")
+        int | None,
+        Field(None, description="(Optional) Ending line number"),
+        RankEncoded("lines"),
     ] = None
     package_name: Annotated[
         str | None,
@@ -1064,6 +1080,20 @@ class AshSuppression(IgnorePathWithReason):
                 "'deploy/cdk/node_modules/aws-cdk-lib/node_modules/brace-expansion'. "
                 "Separates two copies with the same name and version. Findings that "
                 "do not report an install path never match."
+            ),
+        ),
+    ] = None
+    image: Annotated[
+        str | None,
+        Field(
+            None,
+            description=(
+                "(Optional) Only suppress findings inside a container image "
+                "whose submitted reference or resolved digest matches this "
+                "pattern (glob, case-insensitive), e.g. 'alpine:*' or "
+                "'sha256:abc*'. Omit it to match any asset; filesystem findings "
+                "and image findings alike. Findings that carry no image never "
+                "match an image-scoped suppression."
             ),
         ),
     ] = None
@@ -1182,6 +1212,15 @@ class AshSuppression(IgnorePathWithReason):
                 "package_name, package_version and package_path must be omitted "
                 "rather than left blank"
             )
+        return v
+
+    @field_validator("image")
+    @classmethod
+    def validate_image_not_blank(cls, v):
+        """Reject a blank image pattern, as the package fields are: it reads as
+        "any image" but would match nothing."""
+        if v is not None and not v.strip():
+            raise ValueError("image must be omitted rather than left blank")
         return v
 
     @field_validator("rule_id")

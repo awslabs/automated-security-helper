@@ -30,7 +30,7 @@ import yaml
 pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-DEFAULT = REPO_ROOT / ".ash" / ".ash.yaml"
+DEFAULT = REPO_ROOT / ".ash.yaml"
 ALPHA = REPO_ROOT / ".ash" / ".ash_alpha_plugins.yaml"
 
 Key = Tuple[Any, ...]

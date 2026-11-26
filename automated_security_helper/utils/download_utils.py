@@ -35,6 +35,7 @@ from automated_security_helper.core.constants import (
     warn_if_home_unusable,
 )
 from automated_security_helper.core.exceptions import (
+    DownloadTooLargeError,
     ToolDownloadIntegrityError,
     ToolNotProvisionableError,
 )
@@ -288,8 +289,18 @@ def _windows_misreads_name(name: str) -> bool:
     )
 
 
-def _copy_whole_body(response, sink, url: str) -> int:
+def _copy_whole_body(response, sink, url: str, max_bytes: Optional[int] = None) -> int:
     """Copy the response body to ``sink``, refusing a body the server cut short.
+
+    ``max_bytes`` bounds the transfer itself: a response that DECLARES a longer
+    body is refused before any byte of it is read, and a body with no usable
+    declared length (chunked, or a server whose header lies) is aborted the
+    moment the copied bytes pass the bound, raising ``DownloadTooLargeError``
+    without writing the over-bound chunk. The bound exists for callers whose
+    size expectation comes from data the other side of a trust boundary wrote
+    (the sdist harvest's ``max_sdist_mb``, where the lockfile's recorded size
+    is the scanned repository's own claim); checking a claim and streaming
+    without a bound would be no limit at all.
 
     ``HTTPResponse.read(amt)`` returns an empty read when the connection closes
     before ``Content-Length`` bytes have arrived (http.client leaves the
@@ -315,10 +326,20 @@ def _copy_whole_body(response, sink, url: str) -> int:
     Returns the number of bytes copied.
     """
     expected = _declared_body_length(response)
+    if max_bytes is not None and expected is not None and expected > max_bytes:
+        raise DownloadTooLargeError(
+            f"{_without_query(url)} declares a body of {expected} bytes, over "
+            f"the caller's bound of {max_bytes}; nothing was read"
+        )
     copied = 0
     for chunk in iter(lambda: response.read(_HASH_CHUNK_BYTES), b""):
-        sink.write(chunk)
         copied += len(chunk)
+        if max_bytes is not None and copied > max_bytes:
+            raise DownloadTooLargeError(
+                f"the transfer of {_without_query(url)} passed the caller's "
+                f"bound of {max_bytes} bytes and was aborted"
+            )
+        sink.write(chunk)
     if expected is not None and copied != expected:
         raise ConnectionError(
             f"the connection closed after {copied} of {expected} bytes of {url}"
@@ -400,6 +421,7 @@ def download_file(
     expected_sha256: Optional[str] = None,
     *,
     mode: int = 0o644,
+    max_bytes: Optional[int] = None,
 ) -> Path:
     """Download a file from a URL to the specified destination.
 
@@ -417,15 +439,24 @@ def download_file(
             bit is then set on the staged file's own descriptor before the rename,
             never by a later chmod of the landed path. Every download used to land
             executable whatever it was; the data default is least privilege.
+        max_bytes: Bound on the transferred body, enforced ON THE WIRE: a
+            response declaring a longer body is refused before any byte of it
+            is read, and an undeclared body is aborted the moment the bound
+            passes (``_copy_whole_body``). For callers whose size expectation
+            comes from the other side of a trust boundary, where checking the
+            claim alone would be no limit at all. When omitted, the transfer
+            is unbounded, as before.
 
     Returns:
         Path to the downloaded file
 
     Raises:
         ToolDownloadIntegrityError: if expected_sha256 is given and does not match
+        DownloadTooLargeError: if max_bytes is given and the body exceeds it;
+            the transfer is aborted at the bound and nothing lands
     """
     landed, _digest = _download_verified(
-        url, destination, rename_to, expected_sha256, mode=mode
+        url, destination, rename_to, expected_sha256, mode=mode, max_bytes=max_bytes
     )
     return landed
 
@@ -437,6 +468,7 @@ def _download_verified(
     expected_sha256: Optional[str] = None,
     *,
     mode: int,
+    max_bytes: Optional[int] = None,
 ) -> "tuple[Path, str]":
     """``download_file``, and also the digest of the bytes that landed.
 
@@ -490,7 +522,7 @@ def _download_verified(
                 try:
                     with _open_url(url, _DOWNLOAD_SOCKET_TIMEOUT_SECONDS) as response:
                         _refuse_a_non_https_landing(url, response)
-                        _copy_whole_body(response, temp_file, url)
+                        _copy_whole_body(response, temp_file, url, max_bytes=max_bytes)
                     break
                 except Exception as exc:
                     # Re-raised unless the error is both transient and there is
@@ -2479,7 +2511,7 @@ def pinned_tool_install_commands(
 
 def get_opengrep_url(
     target_platform: Literal["linux", "darwin", "macos", "windows"],
-    arch: Literal["amd64", "arm64", "x86_64", "aarch64"],
+    arch: str,
     version: str = "v1.1.5",
     linux_type: Literal["musllinux", "manylinux"] = "manylinux",
 ) -> str:

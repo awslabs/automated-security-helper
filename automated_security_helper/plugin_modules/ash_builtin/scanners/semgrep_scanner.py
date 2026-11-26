@@ -31,7 +31,10 @@ from automated_security_helper.core.enums import OfflineStrategy, ScannerToolTyp
 from automated_security_helper.models.core import ToolArgs
 from automated_security_helper.plugin_modules.ash_builtin.scanners._grep_scanner_base import (
     DEFAULT_EXCLUDES,
+    GREP_SHARED_FACETS,
+    GrepMetricsMode,
     GrepScannerBase,
+    GrepSeverityWord,
 )
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.utils.process_env import hold_environ, release_environ
@@ -88,14 +91,14 @@ class SemgrepScannerConfigOptions(ScannerOptionsBase):
     ] = []
 
     severity: Annotated[
-        List[Literal["INFO", "WARNING", "ERROR"]],
+        List[GrepSeverityWord],
         Field(
             description="Report findings only from rules matching the supplied severity level.",
         ),
     ] = []
 
     metrics: Annotated[
-        Literal["auto", "on", "off"],
+        GrepMetricsMode,
         Field(
             description="Configures how usage metrics are sent to the Semgrep server.",
         ),
@@ -168,61 +171,11 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
 
     #: The facets register row (base/scanner_facets.py). Declaration only, zero
     #: behavior change: semgrep's own SARIF is validated and passed through
-    #: without result edits, so every native field below is a field of that
-    #: SARIF. Pure code SAST: the only resource-shaped values in its output are
-    #: file paths, which are locators, never resource ids.
+    #: without result edits, so every native field is a field of that SARIF.
+    #: The cells it shares with opengrep live in GREP_SHARED_FACETS
+    #: (_grep_scanner_base.py); the three below are this tool's own.
     facets: ClassVar[ScannerFacets] = ScannerFacets(
-        rule_id=FacetDecl(state=FacetState.MAPPED, native_field="results[].ruleId"),
-        severity=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="results[].level",
-        ),
-        file_path=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="results[].locations[].physicalLocation.artifactLocation.uri",
-        ),
-        line_range=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="results[].locations[].physicalLocation.region."
-            "startLine/endLine",
-        ),
-        column=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="results[].locations[].physicalLocation.region."
-            "startColumn/endColumn",
-        ),
-        message=FacetDecl(
-            state=FacetState.MAPPED, native_field="results[].message.text"
-        ),
-        resource_id=FacetDecl(
-            state=FacetState.NA,
-            reason="pure code SAST; the only locators in its output are file "
-            "paths, which are never resource ids",
-        ),
-        resource_type=FacetDecl(
-            state=FacetState.NA,
-            reason="pure code SAST; no deployable resource exists in the output",
-        ),
-        package_name=FacetDecl(
-            state=FacetState.NA,
-            reason="code findings name a file and a rule, not a package",
-        ),
-        package_version=FacetDecl(
-            state=FacetState.NA,
-            reason="code findings name a file and a rule, not a package",
-        ),
-        package_path=FacetDecl(
-            state=FacetState.NA,
-            reason="code findings name a file and a rule, not a package",
-        ),
-        taxonomy_cve=FacetDecl(
-            state=FacetState.NA,
-            reason="code rules carry no CVE ids",
-        ),
-        taxonomy_cwe=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="tool.driver.rules[].properties.tags (CWE entries)",
-        ),
+        **GREP_SHARED_FACETS,
         fingerprints=FacetDecl(
             state=FacetState.NA,
             reason="semgrep OSS writes the placeholder 'requires login' as "
@@ -239,15 +192,6 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
             "fingerprints, locations, message, properties, ruleId), so there "
             "is nothing in the SARIF ASH reads to map",
         ),
-        remediation_text=FacetDecl(
-            state=FacetState.NA,
-            reason="rule help describes the rule, not a remediation; fixes are "
-            "recorded under fix_available",
-        ),
-        snippet=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="results[].locations[].physicalLocation.region.snippet.text",
-        ),
         references=FacetDecl(
             state=FacetState.UNCONFIRMED,
             reason="UNCONFIRMED: the committed captures are local-rule runs, "
@@ -256,17 +200,6 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
             "(FlatVulnerability.from_sarif_result); redeclare MAPPED when a "
             "registry-rule capture is committed (the corpus gate lists this "
             "cell as a fixture owed until then)",
-        ),
-        tags=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="tool.driver.rules[].properties.tags, read into the "
-            "flat tags when the result carries none (they also feed the CWE "
-            "read)",
-        ),
-        extras=FacetDecl(
-            state=FacetState.MAPPED,
-            native_field="results[].properties (SARIF property bag, passed "
-            "through unmodified)",
         ),
     )
 
@@ -320,6 +253,7 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
                 python_only=True,
                 use_uv_tool=True,
             ),
+            runtime_compat=opsf.RuntimeCompatFacet(rows=()),
             platforms=opsf.PlatformsFacet(
                 provisionable=(),
                 note="a PyPI package run through uv; platform support is the package's and was not read here",
@@ -368,7 +302,6 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
                 semantics="the base default {0, 1}; _grep_scanner_base.py notes it matches the tool",
             ),
             provenance=opsf.ProvenanceFacet(
-                tier=opsf.Tier.BUILTIN_DEFAULT,
                 source=opsf.ProvenanceSource.PYPI_VIA_UV,
                 selection_surfaces=("options.config",),
                 upstream_license=(
@@ -468,7 +401,7 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
         directly.
         """
         if direct_only:
-            found = find_executable(self.command)
+            found = find_executable(self._tool_command())
             if found is None:
                 self._plugin_log(
                     "uv's install of semgrep failed and no semgrep binary is on PATH; "
@@ -486,7 +419,7 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
         # set and ASH online, the resolver used to probe (and could install) from
         # PyPI while the scan, the version probe and the install ran offline.
         command = get_uv_tool_command(
-            self.command,
+            self._tool_command(),
             from_spec=self._uv_probe_from_spec(),
             offline=self._is_offline_mode(),
         )
@@ -532,7 +465,7 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
 
         extras = self._get_tool_package_extras()
         constraint = self._get_tool_version_constraint()
-        package = self.uv_tool_package_name or self.command
+        package = self._uv_package()
         requirement = build_requirement(package, extras, constraint)
         # The values hook is read ONCE, guarded, for the verify and every line
         # below, as _select_tool_execution reads it: a bare read let a raising
@@ -574,7 +507,7 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
                 text,
                 values,
                 plugin_inputs=self._uv_run_inputs_for_records(),
-                tool_name=self.command,
+                tool_name=self._tool_command(),
                 limit=None,
             )
 
@@ -664,7 +597,7 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
 
         The same fact also sets ``SemgrepScannerConfig.enabled`` to False on Windows by
         default, and that is not this method's substitute: a config default is
-        overridable, and this repository's own ``.ash/.ash.yaml`` does override it with
+        overridable, and this repository's own ``.ash.yaml`` does override it with
         ``semgrep: enabled: true``, which is how the MISSING classification was reached
         at all. An operator asking for semgrep on Windows should get a clear SKIPPED with
         a reason, not a silent config default and not a failed gate.

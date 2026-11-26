@@ -30,6 +30,7 @@ import pytest
 
 from automated_security_helper.base.engine_phase import EnginePhase
 from automated_security_helper.base.plugin_context import PluginContext
+from automated_security_helper.core.enums import ExecutionPhase
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.plugins.events import AshEventType
 
@@ -38,8 +39,8 @@ pytestmark = pytest.mark.unit
 
 class _FakePhase(EnginePhase):
     @property
-    def phase_name(self) -> str:
-        return "scan"
+    def phase_name(self) -> ExecutionPhase:
+        return ExecutionPhase.SCAN
 
     def _execute_phase(self, aggregated_results, **kwargs):
         return aggregated_results

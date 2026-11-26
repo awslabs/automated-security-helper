@@ -196,10 +196,7 @@ def test_pnpm_findings_carry_the_npm_result_shape(plugin_context):
     ]
     props = critical.properties.model_extra
     location = critical.locations[0].model_dump(by_alias=True, exclude_none=True)
-    assert (
-        location["physicalLocation"]["artifactLocation"]["uri"]
-        == "node_modules/minimist/package.json"
-    )
+    assert location["physicalLocation"]["artifactLocation"]["uri"] == "pnpm-lock.yaml"
     assert props["package_name"] == "minimist"
     assert props["package_version"] == "1.2.5"
     assert props["severity"] == "critical"

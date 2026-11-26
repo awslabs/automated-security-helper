@@ -31,6 +31,7 @@ from automated_security_helper.base.reporter_plugin import (
     ReporterWorkspaceBehaviour,
 )
 from automated_security_helper.core.constants import ASH_DEFAULT_SEVERITY_LEVEL
+from automated_security_helper.core.enums import ThresholdSource
 from automated_security_helper.core.scanner_statistics_calculator import (
     ScannerStatisticsCalculator,
 )
@@ -61,6 +62,7 @@ from automated_security_helper.utils.sarif_utils import (
     result_rule_id,
     suppressions_in_effect,
 )
+from automated_security_helper.models.vocab import SeverityThreshold
 from automated_security_helper.utils.severity_ladder import (
     SEVERITIES,
     SEVERITY_THRESHOLDS,
@@ -167,7 +169,7 @@ def _configured_severity_threshold(model: "AshAggregatedResults") -> str:
             threshold,
             ", ".join(SEVERITY_THRESHOLDS),
         )
-        return "ALL"
+        return SeverityThreshold.ALL.value
     return normalized
 
 
@@ -194,7 +196,9 @@ def _scanner_threshold(
             model, scanner_name
         )
         cache[scanner_name] = (
-            _normalized_threshold(threshold) if source == "config" else None
+            _normalized_threshold(threshold)
+            if source == ThresholdSource.CONFIG
+            else None
         )
     return cache[scanner_name]
 
@@ -418,7 +422,7 @@ class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
                 if "scanner_name" in extra:
                     actual_scanner = extra["scanner_name"]
                 elif props is not None and getattr(props, "tags", None):
-                    for tag in props.tags:
+                    for tag in props.tags or ():
                         if tag.startswith("tool_name::"):
                             actual_scanner = tag.split("::")[1]
                             break

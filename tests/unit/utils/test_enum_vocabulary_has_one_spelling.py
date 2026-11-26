@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from automated_security_helper.cli import mcp_tools
+from automated_security_helper.cli.mcp.error_types import McpErrorType
 from automated_security_helper.core import constants
 from automated_security_helper.core.enums import ScannerStatus
 from automated_security_helper.core.phases import scanner_executor
@@ -84,8 +84,10 @@ def test_severity_name_sites_read_the_ladders_names():
     assert flat_vulnerability._SEVERITY_ORDER == names
     assert sarif_utils._CANONICAL_SEVERITIES == names
     assert constants.VALID_SEVERITY_VALUES == frozenset(names)
+    # The emitter derives its places from the vocabulary the severity column's
+    # EnumColumn marker records, so it is the ladder's table by value, not by identity.
     assert (
-        report_content_emitter._SEVERITY_ORDER is severity_ladder.SEVERITY_DISPLAY_ORDER
+        report_content_emitter._SEVERITY_ORDER == severity_ladder.SEVERITY_DISPLAY_ORDER
     )
     assert html_reporter._SEVERITY_ORDER == severity_ladder.SEVERITY_DISPLAY_ORDER
 
@@ -141,13 +143,13 @@ def test_express_frames_come_from_the_runtime_builders():
     assert runtime.stop_frame() == {"op": "stop"}
     assert runtime.go_frame() == {"op": "go"}
     assert runtime.signal_frame(2) == {"op": "signal", "signum": 2}
-    assert (
-        runtime.OP_STATUS,
-        runtime.OP_STOP,
-        runtime.OP_SCAN,
-        runtime.OP_GO,
-        runtime.OP_SIGNAL,
-    ) == ("status", "stop", "scan", "go", "signal")
+    assert tuple(op.value for op in runtime.ExpressOp) == (
+        "scan",
+        "status",
+        "stop",
+        "go",
+        "signal",
+    )
 
 
 @pytest.mark.parametrize(
@@ -160,10 +162,10 @@ def test_no_hand_built_express_op_frame_outside_the_runtime(relative):
     assert not re.search(r'\.get\("op"\)\s*[!=]=\s*"', source), relative
 
 
-def test_mcp_server_uses_the_shared_config_refusal_constant():
+def test_mcp_server_uses_the_shared_config_refusal_member():
     source = (PACKAGE / "cli" / "mcp_server.py").read_text(encoding="utf-8")
     assert '"config_input_not_permitted"' not in source
-    assert mcp_tools.CONFIG_INPUT_NOT_PERMITTED == "config_input_not_permitted"
+    assert McpErrorType.CONFIG_INPUT_NOT_PERMITTED.value == "config_input_not_permitted"
 
 
 @pytest.mark.parametrize(

@@ -18,6 +18,9 @@ from automated_security_helper.cli.mcp_tools import (
     mcp_get_scan_progress,
     mcp_get_scan_results,
 )
+from automated_security_helper.core.resource_management.scan_registry import (
+    MCScanStatus,
+)
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.terminal_text import raw_controls_on_one_line
 
@@ -86,7 +89,7 @@ async def _fetch_initial_scan_info(
         # the same dead client and logged the dead send as a monitor failure.
         await _safe_send(
             True,
-            lambda: ctx.error(
+            lambda: ctx.error(  # ty: ignore[deprecated]
                 raw_controls_on_one_line(
                     "Failed to get scan info: "
                     f"{registry_info.get('error', 'Unknown error')}"
@@ -100,7 +103,7 @@ async def _fetch_initial_scan_info(
     if not directory_path:
         await _safe_send(
             True,
-            lambda: ctx.error("Missing directory path in scan registry"),
+            lambda: ctx.error("Missing directory path in scan registry"),  # ty: ignore[deprecated]
             "Failed to send scan-info error",
         )
         return None
@@ -193,43 +196,56 @@ async def _handle_scan_completed(
 
     return await _safe_send(
         connection_alive,
-        lambda: ctx.info(raw_controls_on_one_line(summary)),
+        lambda: ctx.info(raw_controls_on_one_line(summary)),  # ty: ignore[deprecated]
         "Failed to send completion summary",
     )
+
+
+def _scan_status(progress_info: dict) -> Optional[MCScanStatus]:
+    """The registry status a progress response carries, as a member.
+
+    The ingest point for the response's ``status`` text: a value outside the
+    vocabulary is ``None`` and matches no arm, as it matched no string before.
+    """
+    try:
+        return MCScanStatus(progress_info.get("status"))
+    except ValueError:
+        return None
 
 
 async def _handle_terminal_status(
     ctx: Context, progress_info: dict, connection_alive: bool
 ) -> bool:
     """Emit progress + final message for ``failed``/``incomplete``/``cancelled``."""
-    status = progress_info.get("status")
+    status = _scan_status(progress_info)
+    status_text = progress_info.get("status")
     connection_alive = await _safe_send(
         connection_alive,
         lambda: ctx.report_progress(
             progress=1.0,
             total=1.0,
-            message=raw_controls_on_one_line(f"Scan {status}"),
+            message=raw_controls_on_one_line(f"Scan {status_text}"),
         ),
         "Failed to send final status progress",
     )
 
-    if status == "failed":
+    if status is MCScanStatus.FAILED:
         error_message = progress_info.get("error_message", "Unknown error")
         connection_alive = await _safe_send(
             connection_alive,
-            lambda: ctx.error(
+            lambda: ctx.error(  # ty: ignore[deprecated]
                 raw_controls_on_one_line(f"Scan failed: {error_message}")
             ),
             "Failed to send completion message",
         )
-    elif status == "incomplete":
+    elif status is MCScanStatus.INCOMPLETE:
         names = ", ".join(
             row.get("scanner", "?")
             for row in progress_info.get("incomplete_scanners") or []
         )
         connection_alive = await _safe_send(
             connection_alive,
-            lambda: ctx.warning(
+            lambda: ctx.warning(  # ty: ignore[deprecated]
                 raw_controls_on_one_line(
                     "Scan finished with incomplete coverage; its results are partial"
                     + (f". Did not complete: {names}" if names else "")
@@ -237,10 +253,10 @@ async def _handle_terminal_status(
             ),
             "Failed to send completion message",
         )
-    elif status == "cancelled":
+    elif status is MCScanStatus.CANCELLED:
         connection_alive = await _safe_send(
             connection_alive,
-            lambda: ctx.info("Scan was cancelled."),
+            lambda: ctx.info("Scan was cancelled."),  # ty: ignore[deprecated]
             "Failed to send completion message",
         )
     return connection_alive
@@ -325,7 +341,7 @@ async def _emit_scanner_progress(
     )
     connection_alive = await _safe_send(
         connection_alive,
-        lambda: ctx.debug(
+        lambda: ctx.debug(  # ty: ignore[deprecated]
             raw_controls_on_one_line(
                 f"Scanner progress: {scanner_name}/{target_type} - "
                 f"{int(progress * 100)}%"
@@ -380,7 +396,7 @@ async def _process_scanner_result(
         logger.warning(warning_message)
         connection_alive = await _safe_send(
             connection_alive,
-            lambda: ctx.warning(raw_controls_on_one_line(warning_message)),
+            lambda: ctx.warning(raw_controls_on_one_line(warning_message)),  # ty: ignore[deprecated]
             "Failed to send warning message",
         )
 
@@ -452,7 +468,7 @@ async def _report_lost_scan(
     )
     return await _safe_send(
         connection_alive,
-        lambda: ctx.error(raw_controls_on_one_line(message)),
+        lambda: ctx.error(raw_controls_on_one_line(message)),  # ty: ignore[deprecated]
         "Failed to send lost-scan error",
     )
 
@@ -479,7 +495,7 @@ async def _run_monitor_loop(
             # fails here is one failed send, not a monitor failure.
             await _safe_send(
                 connection_alive,
-                lambda: ctx.warning(
+                lambda: ctx.warning(  # ty: ignore[deprecated]
                     raw_controls_on_one_line(
                         f"Scan monitoring timed out after {_MAX_WAIT_SECONDS} seconds"
                     )
@@ -504,13 +520,17 @@ async def _run_monitor_loop(
             # running for the rest of _MAX_WAIT_SECONDS on a scan nobody tracks.
             await _report_lost_scan(ctx, scan_id, progress_info, connection_alive)
             return
-        status = progress_info.get("status")
-        if status == "completed":
+        status = _scan_status(progress_info)
+        if status is MCScanStatus.COMPLETED:
             await _handle_scan_completed(
                 ctx, output_dir, connection_alive, session_id=session_id
             )
             return
-        if status in ["failed", "incomplete", "cancelled"]:
+        if status in (
+            MCScanStatus.FAILED,
+            MCScanStatus.INCOMPLETE,
+            MCScanStatus.CANCELLED,
+        ):
             await _handle_terminal_status(ctx, progress_info, connection_alive)
             return
 
@@ -720,7 +740,7 @@ async def monitor_scan_progress(
         logger.info(f"Scan monitoring cancelled for scan_id: {scan_id}")
         await _safe_send(
             connection_alive,
-            lambda: ctx.info("Scan monitoring stopped."),
+            lambda: ctx.info("Scan monitoring stopped."),  # ty: ignore[deprecated]
             "Failed to send cancellation message",
         )
     except Exception as exc:
@@ -731,6 +751,6 @@ async def monitor_scan_progress(
         logger.exception(error_message)
         await _safe_send(
             connection_alive,
-            lambda: ctx.error(raw_controls_on_one_line(error_message)),
+            lambda: ctx.error(raw_controls_on_one_line(error_message)),  # ty: ignore[deprecated]
             "Failed to send error message to client",
         )

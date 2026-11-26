@@ -1015,7 +1015,8 @@ def metrics_consistency_discrepancies(
             # assigned to the dict directly can be one; as an object, it is checked.
             row: object = scanner_info
             if hasattr(scanner_info, "source") and hasattr(scanner_info, "converted"):
-                for target_info in [scanner_info.source, scanner_info.converted]:
+                targets: list[Any] = [scanner_info.source, scanner_info.converted]
+                for target_info in targets:
                     if target_info and target_info.severity_counts:
                         counts = target_info.severity_counts
                         scanner_totals["critical"] += counts.critical
@@ -1264,7 +1265,7 @@ def _populate_scanner_results_from_unified_metrics(
             info=metrics.info,
         )
 
-        # Convert status from string to enum
+        # Convert status from string to enum (the ingest point for the row's text)
         try:
             status = ScannerStatus(metrics.status)
         except (ValueError, TypeError):

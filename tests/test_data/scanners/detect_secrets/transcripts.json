@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "transcripts": [
+    {
+      "adapter_prep": "detect-secrets",
+      "also_for": [],
+      "argv": null,
+      "env_allowlist": [],
+      "exit_code": null,
+      "fixture_tree": null,
+      "id": "detect-secrets-worker-m0",
+      "live_input": false,
+      "note": "the worker's native (key, secrets) pairs over the planted fixture beside it; the file records no tool version",
+      "observable": true,
+      "pin_stamp": null,
+      "provenance": "attested",
+      "reason": null,
+      "recorded_on": null,
+      "results": [
+        {
+          "format": "json",
+          "path": "captured/detect-secrets-worker-m0.json",
+          "sha256": "9bcb3e2f42b75974e7b3c2df6e94c843fb91618c697f2a07a1d1dc5bb6d969c4"
+        }
+      ],
+      "retention": "current",
+      "scanner": "detect-secrets",
+      "side_reports": [],
+      "stderr_tail": null,
+      "tool": {
+        "name": "detect-secrets",
+        "version": "unknown"
+      }
+    }
+  ],
+  "unrecorded": []
+}

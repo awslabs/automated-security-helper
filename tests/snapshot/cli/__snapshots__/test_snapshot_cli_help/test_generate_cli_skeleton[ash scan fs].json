@@ -58,5 +58,8 @@
   "ash_revision_to_install": null,
   "custom_containerfile": null,
   "custom_build_arg": null,
-  "baseline": null
+  "baseline": null,
+  "image": null,
+  "image_archive": null,
+  "image_layout": null
 }

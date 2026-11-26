@@ -2,7 +2,7 @@
 
 The exit code of every `ash` command, with the conditions that produce it. For how to change the scan verdict, see [Set the gate](../how-to/set-the-gate.md).
 
-On every command, a command-line usage error exits 5: an unknown option, subcommand, or argument; a value outside the choices an option takes (such as `--mode` or `--min-severity`) or a number that is not one; a missing required option; or a `--cli-json-input` document that ASH cannot read or use. `ash scan`, `ash build-image`, and `ash` with no subcommand reject an option or argument they do not define. An option given to `ash` before a subcommand is passed to the command named right after `ash`, and is a usage error when that command does not take it: `ash --source-dir . config get` exits 5, because `ash config` has no `--source-dir`, while `ash config get --source-dir .` works. Some names and paths that ASH cannot use are usage errors too, such as a `--scanners` list that names no scanner, a `--source-dir` that does not exist, or an `--output-dir` that ASH cannot create, while `ash report`, and a scan with `--use-existing`, exit 1 when they find no results to use. The tables below list both. Two `ash dependencies install` selections exit 2 instead: a `--tool` name that it has no plugin for, or whose plugin type `--plugin-type` leaves out, and a `--plugin-type` other than `converter`, `scanner`, or `reporter`. Usage errors have a code of their own so that a CI gate does not read a mistyped flag as a scan with findings.
+On every command, a command-line usage error exits 5: an unknown option, subcommand, or argument; a value outside the choices an option takes (such as `--mode` or `--min-severity`) or a number that is not one; a missing required option; or a `--cli-json-input` document that ASH cannot read or use. `ash scan`, `ash container build`, and `ash` with no subcommand reject an option or argument they do not define. An option given to `ash` before a subcommand is passed to the command named right after `ash`, and is a usage error when that command does not take it: `ash --source-dir . config get` exits 5, because `ash config` has no `--source-dir`, while `ash config get --source-dir .` works. Some names and paths that ASH cannot use are usage errors too, such as a `--scanners` list that names no scanner, a `--source-dir` that does not exist, or an `--output-dir` that ASH cannot create, while `ash report`, and a scan with `--use-existing`, exit 1 when they find no results to use. The tables below list both. Two `ash dependencies install` selections exit 2 instead: a `--tool` name that it has no plugin for, or whose plugin type `--plugin-type` leaves out, and a `--plugin-type` other than `converter`, `scanner`, or `reporter`. Usage errors have a code of their own so that a CI gate does not read a mistyped flag as a scan with findings.
 
 ## `ash scan` {#scan}
 
@@ -122,7 +122,7 @@ ASH stops at the first of these that applies:
 
 ### Container and Nix mode {#container}
 
-In `--mode container` (and `ash build-image`) and `--mode nix`, ASH reads the results back on the host and computes the code by the rules above, applying `--min-severity` there. `--ignore-suppressions` reaches the scan inside the container and works there as in a local scan.
+In `--mode container` (and `ash container build`) and `--mode nix`, ASH reads the results back on the host and computes the code by the rules above, applying `--min-severity` there. `--ignore-suppressions` reaches the scan inside the container and works there as in a local scan.
 
 | Code | Condition |
 |---|---|
@@ -131,7 +131,7 @@ In `--mode container` (and `ash build-image`) and `--mode nix`, ASH reads the re
 | 3 | Refused before a container started: a path ASH would mount is not UTF-8 ([Mounts and network](../how-to/run-in-a-container.md#mounts)); a config file cannot be used, or would be mounted from a place the scanned repository chooses ([The config file](../how-to/run-in-a-container.md#config)); a config file reads a variable a container scan does not pass in; or, through `OCI_RUNNER_WRAPPER`, the variables a config reads cannot be passed in an env file; or the output directory is a symlink, or a symlink below the source directory leads to it (such as a committed `.ash` link, for the default `.ash/ash_output`), as in every mode ([`ash scan`](#scan)). Nothing is created or mounted, also with `--no-run`. `./ash` and `Invoke-ASH` refuse the same output directory with exit 3 |
 | 1 | The results file is missing or does not parse |
 | 0, or the build's code | `--no-run` |
-| 130 | Interrupted with Ctrl-C. Outside Windows, ASH passes the interrupt to the container runtime or the Nix shell, unless the terminal already delivered it there, waits up to 5 seconds for it to stop, and then kills it; a second Ctrl-C during the wait kills it at once. On Windows, a Ctrl-C typed in the console reaches the container runtime as well, and ASH waits up to 5 seconds for it to stop, as above; without a console, ASH ends the runtime at once. A scan prints the interrupted-scan message above. `ash build-image` prints `ASH build-image interrupted before it finished.`, and, without `--no-run`, adds `: there is no verdict, and the output directory may hold partial results` before the period. |
+| 130 | Interrupted with Ctrl-C. Outside Windows, ASH passes the interrupt to the container runtime or the Nix shell, unless the terminal already delivered it there, waits up to 5 seconds for it to stop, and then kills it; a second Ctrl-C during the wait kills it at once. On Windows, a Ctrl-C typed in the console reaches the container runtime as well, and ASH waits up to 5 seconds for it to stop, as above; without a console, ASH ends the runtime at once. A scan prints the interrupted-scan message above. `ash container build` prints `ASH container build interrupted before it finished.`, and, without `--no-run`, adds `: there is no verdict, and the output directory may hold partial results` before the period. |
 | any other | The container exited with a code other than 0, 1, or 2 (for example 3, 4, 5, 125, 126, 127, or 137); ASH exits with the same code |
 | 1 | Nix mode: `nix` is not installed |
 | 3, 4, or 5 | Nix mode: the Nix shell wrote no results and exited with 3, 4, or 5, which means the ASH inside it refused the run before scanning; ASH exits with the same code. Any other code without results exits 1. |
@@ -255,7 +255,7 @@ The named config path is the one `--config`, `ASH_CONFIG`, or the path argument 
 
 <!-- doctest: run expect-exit=1 -->
 ```bash
-mkdir -p .ash && printf 'project_name: payments-api\n' > .ash/.ash.yaml
+printf 'project_name: payments-api\n' > .ashrc.yaml
 ash config init
 ```
 

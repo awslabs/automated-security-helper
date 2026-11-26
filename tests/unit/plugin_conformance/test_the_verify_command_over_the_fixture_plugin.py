@@ -1,0 +1,242 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""``ash plugin verify`` over the fixture plugin: exit codes, ``--live-result`` and
+damaged transcript directories.
+
+The command's tests that need a plugin in a known state run here, over the fixture
+plugin and a private copy of its transcripts, so recording a corpus or promoting a real
+scanner cannot break them. ``tests/unit/cli/test_plugin_verify_cli.py`` keeps the usage
+errors and one smoke test over the real corpus that checks only the output shape.
+"""
+
+import json
+
+import pytest
+from typer.testing import CliRunner
+
+from automated_security_helper.base.plugin_manifest import EntryPoints
+from automated_security_helper.cli.plugin import plugin_group
+
+pytestmark = pytest.mark.unit
+
+runner = CliRunner()
+
+
+@pytest.fixture
+def two_scanners(fixture_manifest, monkeypatch):
+    """The command sees the fixture plugin and a second manifest of another name."""
+    import automated_security_helper.plugin_manifests as manifests
+
+    second = fixture_manifest.model_copy(update={"name": "fixture-lint-two"})
+    both = (fixture_manifest, second)
+    monkeypatch.setattr(manifests, "scanner_manifests", lambda: both)
+    monkeypatch.setattr(
+        manifests, "manifest_for", lambda name: {m.name: m for m in both}.get(name)
+    )
+    return both
+
+
+@pytest.fixture
+def one_scanner(fixture_manifest, monkeypatch):
+    import automated_security_helper.plugin_manifests as manifests
+
+    monkeypatch.setattr(manifests, "scanner_manifests", lambda: (fixture_manifest,))
+    monkeypatch.setattr(
+        manifests,
+        "manifest_for",
+        lambda name: fixture_manifest if name == fixture_manifest.name else None,
+    )
+    return fixture_manifest
+
+
+def _verify(root, *args: str):
+    return runner.invoke(
+        plugin_group, ["verify", "--transcripts-root", str(root), *args]
+    )
+
+
+def _rows(result) -> dict[str, dict[int, str]]:
+    return {
+        report["scanner"]: {row["row"]: row["status"] for row in report["rows"]}
+        for report in json.loads(result.output)
+    }
+
+
+# ---- exit codes ---------------------------------------------------------------
+
+
+def test_nothing_red_but_rows_not_run_exits_three(
+    one_scanner, transcripts_copy
+) -> None:
+    result = _verify(transcripts_copy, "fixture-lint")
+    assert result.exit_code == 3, result.output
+    assert "fixture-lint (alpha): incomplete" in result.output
+    assert "[green] facets green over committed transcripts" in result.output
+    assert "[not-run] live-tool cell" in result.output
+    assert "[not-run] docs generated from the manifest" in result.output
+
+
+def test_a_red_row_exits_one_and_names_why(one_scanner, transcripts_copy) -> None:
+    next(transcripts_copy.rglob("fixture-lint-1.0.0.sarif")).unlink()
+    result = _verify(transcripts_copy, "fixture-lint")
+    assert result.exit_code == 1, result.output
+    assert "fixture-lint (alpha): fail" in result.output
+    assert "[red] facets green over committed transcripts" in result.output
+    assert "is not a file" in result.output
+    assert "Traceback" not in result.output
+    assert isinstance(result.exception, SystemExit)
+
+
+def test_one_red_scanner_among_several_makes_the_whole_run_exit_one(
+    two_scanners, transcripts_copy
+) -> None:
+    """The second manifest has no recording of its own, so its row 1 is red."""
+    result = _verify(transcripts_copy, "--all", "--json")
+    assert result.exit_code == 1
+    rows = _rows(result)
+    assert rows["fixture-lint"][1] == "green"
+    assert rows["fixture-lint-two"][1] == "red"
+
+
+# ---- --live-result --------------------------------------------------------------
+
+
+def test_a_bare_live_result_reaches_row_three_when_one_scanner_is_verified(
+    one_scanner, transcripts_copy
+) -> None:
+    red = _verify(
+        transcripts_copy, "fixture-lint", "--json", "--live-result", "host=fail"
+    )
+    assert red.exit_code == 1
+    assert _rows(red)["fixture-lint"][3] == "red"
+    green = _verify(
+        transcripts_copy, "fixture-lint", "--json", "--live-result", "host=pass"
+    )
+    assert _rows(green)["fixture-lint"][3] == "green"
+
+
+def test_a_qualified_live_result_vouches_for_the_scanner_it_names_only(
+    two_scanners, transcripts_copy
+) -> None:
+    result = _verify(
+        transcripts_copy,
+        "--all",
+        "--json",
+        "--live-result",
+        "fixture-lint@host=pass",
+    )
+    rows = _rows(result)
+    assert rows["fixture-lint"][3] == "green"
+    assert rows["fixture-lint-two"][3] == "not-run"
+
+
+def test_a_bare_live_result_over_several_scanners_is_a_usage_error(
+    two_scanners, transcripts_copy
+) -> None:
+    result = _verify(transcripts_copy, "--all", "--live-result", "host=pass")
+    assert result.exit_code == 2
+    assert "names no scanner, and this run verifies 2" in result.output
+    assert "SCANNER@PLATFORM=pass" in result.output
+
+
+@pytest.mark.parametrize(
+    "entries, message",
+    [
+        (["other-tool@host=pass"], "does not verify"),
+        (["fixture-lint@host=fail", "fixture-lint@host=pass"], "more than once"),
+        (["fixture-lint@host=pass", "fixture-lint@host=pass"], "more than once"),
+        (["fixture-lint@=pass"], "needs both a scanner and a platform"),
+        (["@host=pass"], "needs both a scanner and a platform"),
+        (["fixture-lint@host=maybe"], "PLATFORM=pass"),
+        (["fixture-lint@host"], "PLATFORM=pass"),
+    ],
+)
+def test_a_wrong_live_result_is_a_usage_error(
+    two_scanners, transcripts_copy, entries, message
+) -> None:
+    args = [a for entry in entries for a in ("--live-result", entry)]
+    result = _verify(transcripts_copy, "--all", *args)
+    assert result.exit_code == 2, result.output
+    assert message in result.output
+
+
+def test_an_empty_platform_is_refused_with_one_scanner_too(
+    one_scanner, transcripts_copy
+) -> None:
+    result = _verify(transcripts_copy, "fixture-lint", "--live-result", "=pass")
+    assert result.exit_code == 2
+    assert "needs both a scanner and a platform" in result.output
+
+
+def test_a_retried_cell_cannot_turn_a_red_result_green_by_coming_last(
+    one_scanner, transcripts_copy
+) -> None:
+    result = _verify(
+        transcripts_copy,
+        "fixture-lint",
+        "--live-result",
+        "host=fail",
+        "--live-result",
+        "host=pass",
+    )
+    assert result.exit_code == 2 and "more than once" in result.output
+
+
+# ---- damaged directories and plugins ---------------------------------------------
+
+
+def test_a_foreign_newer_schema_file_does_not_abort_the_run(
+    one_scanner, transcripts_copy
+) -> None:
+    other = transcripts_copy / "other"
+    other.mkdir()
+    (other / "transcripts.json").write_text(
+        json.dumps(
+            {"schema_version": 2, "transcripts": [{"id": "x", "scanner": "other-tool"}]}
+        ),
+        encoding="utf-8",
+    )
+    result = _verify(transcripts_copy, "--all", "--json")
+    assert result.exit_code == 3, result.output
+    assert _rows(result)["fixture-lint"][1] == "green"
+
+
+def test_a_transcript_file_that_is_not_json_is_a_red_row_not_a_traceback(
+    one_scanner, transcripts_copy
+) -> None:
+    other = transcripts_copy / "other"
+    other.mkdir()
+    (other / "transcripts.json").write_text("{ not json", encoding="utf-8")
+    result = _verify(transcripts_copy, "--all")
+    assert result.exit_code == 1, result.output
+    assert "other/transcripts.json cannot be read as JSON" in result.output
+
+
+def test_a_root_with_no_transcript_file_is_a_usage_error(one_scanner, tmp_path) -> None:
+    result = _verify(tmp_path, "fixture-lint")
+    assert result.exit_code == 2
+    assert "no transcripts.json under" in result.output
+
+
+def test_a_manifest_whose_entry_point_cannot_be_loaded_is_a_usage_error_not_a_red_row(
+    fixture_manifest, monkeypatch, transcripts_copy
+) -> None:
+    import automated_security_helper.plugin_manifests as manifests
+
+    broken = fixture_manifest.model_copy(
+        update={"entry_points": EntryPoints(scanner="no_such_plugin_module:Scanner")}
+    )
+    monkeypatch.setattr(manifests, "scanner_manifests", lambda: (broken,))
+    monkeypatch.setattr(manifests, "manifest_for", lambda name: broken)
+    result = _verify(transcripts_copy, "--all")
+    assert result.exit_code == 2, result.output
+    assert "cannot be loaded" in result.output
+
+
+def test_the_json_output_carries_the_per_cell_verdicts(
+    one_scanner, transcripts_copy
+) -> None:
+    result = _verify(transcripts_copy, "fixture-lint", "--json")
+    report = json.loads(result.output)[0]
+    assert len(report["verdicts"]) == 20

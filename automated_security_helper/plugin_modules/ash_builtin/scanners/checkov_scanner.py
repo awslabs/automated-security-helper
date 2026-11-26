@@ -39,6 +39,7 @@ from automated_security_helper.base.options import (
     ScannerOptionsBase,
     tool_version_constraint,
 )
+from automated_security_helper.models.vocab import TargetType
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.core.constants import KNOWN_IGNORE_PATHS
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
@@ -1046,6 +1047,43 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
                 python_only=True,
                 use_uv_tool=True,
             ),
+            runtime_compat=opsf.RuntimeCompatFacet(
+                rows=(
+                    opsf.RuntimeCompatRow(
+                        runtime=opsf.RuntimeName.PYTHON,
+                        # No checkov release is known to fix this, so the tool
+                        # side is open: the row applies at every checkov
+                        # version until an upstream release passes array_hook.
+                        tool_versions="",
+                        # >=3.10 is checkov's own floor; <3.15 is the proved
+                        # upper bound (3.14.9 parses, 3.15.0 raises).
+                        runtime_request=">=3.10,<3.15",
+                        resolution=opsf.CompatResolution.PIN,
+                        reason=(
+                            "CPython 3.15 made array_hook a required argument "
+                            "of json.decoder.JSONArray (signature 3.14.9: "
+                            "(s_and_end, scan_once, _w, _ws); 3.15.0: "
+                            "(s_and_end, scan_once, array_hook, _w, _ws)); "
+                            "checkov's Decoder.json_array "
+                            "(checkov/common/parsers/json/decoder.py) calls it "
+                            "without one, so every JSON document that holds an "
+                            "array fails to parse, and on a large tree the "
+                            "parallel runner can wait indefinitely on the worker "
+                            "error; reported against checkov 3.4.3 and 3.4.0 on "
+                            "3.15.0; a fix is proposed upstream in "
+                            "bridgecrewio/checkov#7778 and not merged"
+                        ),
+                        upstream_issue=(
+                            "https://github.com/bridgecrewio/checkov/issues/7777"
+                        ),
+                        # Unsolved upstream: re-read whenever the checkov
+                        # version constraint moves (the consistency gate holds
+                        # this row to covering the default constraint), and
+                        # drop the upper bound once a release passes array_hook.
+                        open_ended=True,
+                    ),
+                ),
+            ),
             platforms=opsf.PlatformsFacet(
                 provisionable=(),
                 note="a PyPI package run through uv; platform support is the package's and was not read here",
@@ -1087,7 +1125,6 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
                 semantics="0 clean, 1 findings: the native-tool convention",
             ),
             provenance=opsf.ProvenanceFacet(
-                tier=opsf.Tier.BUILTIN_DEFAULT,
                 source=opsf.ProvenanceSource.PYPI_VIA_UV,
                 selection_surfaces=("options.frameworks", "options.skip_frameworks"),
                 upstream_license=(
@@ -1290,7 +1327,7 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
             # call of the mixin does: without it a scanner offline by its
             # options probed PyPI online while its run and install were offline.
             resolved = get_uv_tool_command(
-                self.command,
+                self._tool_command(),
                 from_spec=self._uv_probe_from_spec(),
                 offline=self._is_offline_mode(),
             )
@@ -1330,7 +1367,7 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         # scan went through uv, whose install had just failed. And a dependency
         # declared satisfied is recorded as such, as the branches above record it.
         resolved = get_uv_tool_command(
-            self.command,
+            self._tool_command(),
             from_spec=self._uv_probe_from_spec(),
             offline=self._is_offline_mode(),
         )
@@ -1360,7 +1397,7 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         executable = resolved[0]
         checked = verify_pre_installed_tool(
             executable,
-            self.command,
+            self._tool_command(),
             None,
             self._get_tool_version_constraint(),
             uv_executable=None,
@@ -1546,7 +1583,7 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
             frameworks = list(file_frameworks)
         for item in frameworks:
             self.args.extra_args.append(ToolExtraArg(key="--framework", value=item))
-        skip_frameworks = list(self.config.options.skip_frameworks)
+        skip_frameworks: list[str] = list(self.config.options.skip_frameworks)
         file_skip_frameworks = file_values.get("skip-framework")
         if isinstance(file_skip_frameworks, str):
             file_skip_frameworks = [file_skip_frameworks]
@@ -1627,7 +1664,7 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
     def _execute_scan(
         self,
         target: Path,
-        target_type: Literal["source", "converted"],
+        target_type: TargetType,
         global_ignore_paths: List[IgnorePathWithReason],
     ):
         """Resolve final argv and results path for Checkov.

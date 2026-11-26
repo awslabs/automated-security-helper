@@ -323,6 +323,12 @@ def test_every_re_emitted_flag_is_one_the_subcommand_takes():
         name: {param.name for param in declared_params(name, command)}
         for name, command in root.commands.items()
     }
+    # `ash --quiet container build` hands the root's --quiet to the leaf the group
+    # names (AshTyperGroup._options_for_subcommand), so the group takes what
+    # `build` takes.
+    declared["container"] = {
+        param.name for param in root.commands["container"].commands["build"].params
+    }
     assert subcommands == set(declared)
     assert quiet == {name for name, params in declared.items() if "quiet" in params}
     assert color == {name for name, params in declared.items() if "color" in params}

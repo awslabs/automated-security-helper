@@ -29,6 +29,7 @@
       "grype",
       "guarddog",
       "hadolint",
+      "mcp-config",
       "npm-audit",
       "opengrep",
       "semgrep",
@@ -49,6 +50,7 @@
       "detect-secrets",
       "gitleaks",
       "grype",
+      "mcp-config",
       "npm-audit",
       "opengrep",
       "semgrep",
@@ -56,7 +58,7 @@
       "trivy",
       "zizmor"
     ],
-    "builtin_count": 16,
+    "builtin_count": 17,
     "home": [
       {
         "name": "bandit",
@@ -277,6 +279,16 @@
       "name": "jupyter",
       "command": "jupyter-nbconvert",
       "description": "turns each notebook into a Python script with jupyter-nbconvert"
+    },
+    {
+      "name": "mcp_config",
+      "command": none,
+      "description": "turns each stdio server in a repo-local MCP config file into a shell script, with a sidecar that maps script lines back to the config"
+    },
+    {
+      "name": "sdist-lock-harvester",
+      "command": none,
+      "description": "Harvests embedded lockfiles from hash-pinned sdists of compiled dependencies, so the SBOM covers cross-toolchain packages"
     }
   ],
   "managed_tools": [

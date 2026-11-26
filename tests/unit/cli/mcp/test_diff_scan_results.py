@@ -10,6 +10,7 @@ import pytest
 
 from automated_security_helper.cli.mcp_tools import mcp_diff_scan_results
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
+from tests.unit.models._flat_vulnerability_helpers import flat_with_severity
 
 pytestmark = pytest.mark.unit
 
@@ -23,11 +24,13 @@ def _make_vuln(
     description: str = "desc",
 ) -> FlatVulnerability:
     """Build a FlatVulnerability whose loaded id will be ``fixture-<short_id>``."""
-    return FlatVulnerability(
+    # The off-ladder spellings ("high") stand for what an older results file holds:
+    # they are written into the JSON and graded when it is loaded.
+    return flat_with_severity(
+        severity,
         id=f"{_SCANNER}-{short_id}",
         title="Test finding",
         description=description,
-        severity=severity,
         scanner=_SCANNER,
         scanner_type="SAST",
     )

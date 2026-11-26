@@ -1,0 +1,17 @@
+
+ Usage: ash suppress refresh [OPTIONS] [paths]...
+
+ Record a new review: re-hash locked files whose bytes changed.
+
+ Run it after reading what changed in a file and confirming its suppressions
+ still hold. It prints each file whose hash changed. A locked file that no
+ longer exists is reported and left as it was; exit code 1 then.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│   paths      <str>  Locked files to re-hash. Every locked file when none is named.               │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --source-dir        <str>  The directory the scan covers, which holds .ash.lock. Defaults to the │
+│                            current directory.                                                    │
+│ --help                     Show this message and exit.                                           │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯

@@ -60,7 +60,7 @@ class TestRunnerSelection:
         from automated_security_helper.interactions import run_ash_container
 
         monkeypatch.setattr(run_ash_container, "_find_runner", lambda _name: None)
-        assert run_cli(["build-image", "--no-run"]) == snapshot
+        assert run_cli(["container", "build", "--no-run"]) == snapshot
 
 
 @pytest.mark.unit
@@ -118,10 +118,10 @@ class TestBuildFailure:
         self, run_cli, snapshot, fake_docker
     ):
         fake_docker.build = self.BUILD_ERROR
-        assert run_cli(["build-image", "--no-run"]) == snapshot
+        assert run_cli(["container", "build", "--no-run"]) == snapshot
         assert fake_docker.calls == ["build"]
 
     def test_build_image_no_run_succeeds(self, run_cli, snapshot, fake_docker):
         fake_docker.build = FakeStep(stdout="Successfully tagged image\n")
-        assert run_cli(["build-image", "--no-run"]) == snapshot
+        assert run_cli(["container", "build", "--no-run"]) == snapshot
         assert fake_docker.calls == ["build"]

@@ -473,12 +473,16 @@ def extract_root_advisories(properties: Any) -> List[Dict[str, str]]:
 # package or resource identity (a suppression's package and resource scope) takes.
 # Text goes into a String column through ``frame_text.wire``, so a name or a path
 # that carries a lone surrogate is held, not refused, and comes back unchanged.
+#
+# The column names are the one vocabulary these values already have everywhere
+# else: the SARIF property keys above, which are also the FlatVulnerability
+# field names these values fill (package_name/package_version/package_path and
+# resource_id/resource_type). A column that projects a model field bears that
+# field's name, so a join on these columns reads the same as the model it
+# joins against (tests/unit/utils/test_package_identity_frames.py pins the
+# correspondence).
 # ---------------------------------------------------------------------------
 
-# A package column is named for the property-bag key it is read from
-# (``package_name``, ``package_version``, ``package_path``), so a join on package
-# identity names the same thing the model does; the bare ``name`` / ``version`` /
-# ``path`` it had read as three other model fields.
 _PACKAGE_COLUMNS = (PACKAGE_NAME_KEY, PACKAGE_VERSION_KEY, PACKAGE_PATH_KEY)
 _RESOURCE_COLUMNS = ("resource_id", "resource_type")
 
@@ -495,13 +499,8 @@ def package_identity_frame(properties: Iterable[Any]) -> "pl.DataFrame":
 
     columns: Dict[str, List[Optional[str]]] = {key: [] for key in _PACKAGE_COLUMNS}
     for record in properties:
-        # Unpacked by name, not zipped by position: the extractor's tuple order
-        # and the column order are two facts, and each cell lands in the column
-        # that is named for it.
-        name, version, path = extract_package_identity(record)
-        columns[PACKAGE_NAME_KEY].append(wire(name))
-        columns[PACKAGE_VERSION_KEY].append(wire(version))
-        columns[PACKAGE_PATH_KEY].append(wire(path))
+        for key, value in zip(_PACKAGE_COLUMNS, extract_package_identity(record)):
+            columns[key].append(wire(value))
     return pl.DataFrame(columns, schema=dict.fromkeys(_PACKAGE_COLUMNS, pl.String))
 
 
@@ -515,9 +514,8 @@ def resource_identity_frame(properties: Iterable[Any]) -> "pl.DataFrame":
 
     columns: Dict[str, List[Optional[str]]] = {key: [] for key in _RESOURCE_COLUMNS}
     for record in properties:
-        resource_id, resource_type = extract_resource_identity(record)
-        columns["resource_id"].append(wire(resource_id))
-        columns["resource_type"].append(wire(resource_type))
+        for key, value in zip(_RESOURCE_COLUMNS, extract_resource_identity(record)):
+            columns[key].append(wire(value))
     return pl.DataFrame(columns, schema=dict.fromkeys(_RESOURCE_COLUMNS, pl.String))
 
 
@@ -528,9 +526,7 @@ def identity_properties_from_frame(frame: "pl.DataFrame") -> List[Dict[str, str]
     :func:`identity_properties` leaves it out.
     """
     out: List[Dict[str, str]] = []
-    for name, version, path in frame.select(
-        PACKAGE_NAME_KEY, PACKAGE_VERSION_KEY, PACKAGE_PATH_KEY
-    ).iter_rows():
+    for name, version, path in frame.select(*_PACKAGE_COLUMNS).iter_rows():
         out.append(
             identity_properties(
                 unwire_cell(name),
@@ -546,8 +542,8 @@ def package_identities_from_frame(
 ) -> List[Tuple[Optional[str], Optional[str], Optional[str]]]:
     """The ``(name, version, path)`` tuples a :func:`package_identity_frame` holds."""
     return [
-        tuple(unwire_cell(cell) for cell in row)  # type: ignore[misc]
-        for row in frame.select(*_PACKAGE_COLUMNS).iter_rows()
+        (unwire_cell(name), unwire_cell(version), unwire_cell(path))
+        for name, version, path in frame.select(*_PACKAGE_COLUMNS).iter_rows()
     ]
 
 
@@ -556,6 +552,6 @@ def resource_identities_from_frame(
 ) -> List[Tuple[Optional[str], Optional[str]]]:
     """The ``(resource_id, resource_type)`` tuples a :func:`resource_identity_frame` holds."""
     return [
-        tuple(unwire_cell(cell) for cell in row)  # type: ignore[misc]
-        for row in frame.select(*_RESOURCE_COLUMNS).iter_rows()
+        (unwire_cell(resource_id), unwire_cell(resource_type))
+        for resource_id, resource_type in frame.select(*_RESOURCE_COLUMNS).iter_rows()
     ]

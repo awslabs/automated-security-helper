@@ -75,6 +75,7 @@ NON_SCAN_SUBCOMMANDS = frozenset(
         "dependencies",
         "inspect",
         "plugin",
+        "suppress",
         "express",
         "trend",
     }
@@ -484,7 +485,7 @@ def _run_on_daemon(
         # autostart path (await_daemon) had the handshake budget.
         sock.settimeout(runtime.HANDSHAKE_TIMEOUT_SECONDS)
         request = {
-            "op": runtime.OP_SCAN,
+            "op": runtime.ExpressOp.SCAN.value,
             "protocol": runtime.PROTOCOL_VERSION,
             "version": runtime.ash_version(),
             "fingerprint": runtime.runtime_fingerprint(),

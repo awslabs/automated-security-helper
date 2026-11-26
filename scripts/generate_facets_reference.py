@@ -82,6 +82,103 @@ STATE_MEANINGS = (
 )
 
 
+def runtime_compat_section(rows: list) -> list[str]:
+    """The runtime-compatibility family of the operational register, as written.
+
+    Each scanner's rows say which range of the tool's versions needs which range
+    of its language runtime's versions, how that is resolved (an interpreter
+    pin, or a launch-time shim), and, for an unsolved upstream issue, the issue
+    and the open end of the row. A scanner whose class declares no operational
+    row, or an empty one, is counted and not listed: no known incompatibility.
+    """
+    from automated_security_helper.base.scanner_operational_facets import (
+        declared_operational_facets,
+    )
+    from automated_security_helper.utils.runtime_compat_ranges import RANGE_GRAMMARS
+
+    declared = []
+    for p, _facets in rows:
+        operational = declared_operational_facets(p.cls)
+        compat_rows = operational.runtime_compat.rows if operational else ()
+        declared.append((p, compat_rows))
+    with_rows = [(p, compat_rows) for p, compat_rows in declared if compat_rows]
+
+    lines = [
+        "## Runtime compatibility",
+        "",
+        (
+            "Some tool versions do not run on some versions of the language runtime "
+            "they are installed into. The operational register "
+            "(`automated_security_helper/base/scanner_operational_facets.py`) records "
+            "each known case as a row on the scanner's `runtime_compat` facet: a "
+            "range of tool versions, the range of runtime versions it needs, and the "
+            "reason, measured. The installer derives the interpreter it asks uv for "
+            "from these rows, so there is one place a range is declared."
+        ),
+        "",
+        (
+            "Ranges are written in the grammar native to the runtime: "
+            + "; ".join(
+                f"{code(runtime)} uses {md_prose(grammar)}"
+                for runtime, grammar in RANGE_GRAMMARS.items()
+            )
+            + ". An empty tool range means every version of the tool."
+        ),
+        "",
+        "- `pin`: the interpreter request is constrained to the runtime range. The preferred resolution.",
+        (
+            "- `polyfill`: a shim is applied over the runtime range at tool launch. "
+            "A polyfill row states why a pin cannot serve."
+        ),
+        (
+            "- open-ended: the incompatibility is unsolved upstream. The row declares "
+            "only the bounds that are proved, links the upstream issue, and is "
+            "re-read whenever the tool's version constraint moves."
+        ),
+        "",
+    ]
+    if with_rows:
+        lines += [
+            "| Scanner | Runtime | Tool versions | Runtime request | Resolution | Open-ended | Reason |",
+            "|---------|---------|---------------|-----------------|------------|------------|--------|",
+        ]
+        for p, compat_rows in with_rows:
+            for row in compat_rows:
+                reason = md_prose(row.reason)
+                if row.polyfill:
+                    reason += (
+                        f" Shim: {code(row.polyfill)}. Why not a pin: "
+                        f"{md_prose(row.pin_insufficient)}"
+                    )
+                tool_versions = code(row.tool_versions) if row.tool_versions else "all"
+                if row.open_ended:
+                    open_ended = (
+                        f"yes, [{md_prose(row.upstream_issue)}]({row.upstream_issue})"
+                    )
+                elif row.upstream_issue:
+                    open_ended = (
+                        f"no, [{md_prose(row.upstream_issue)}]({row.upstream_issue})"
+                    )
+                else:
+                    open_ended = "no"
+                lines.append(
+                    f"| [{code(p.name)}](#{p.name}) | {code(row.runtime.value)} | "
+                    f"{tool_versions} | {code(row.runtime_request)} | "
+                    f"{code(row.resolution.value)} | {open_ended} | {reason} |"
+                )
+        lines.append("")
+    without = len(declared) - len(with_rows)
+    lines += [
+        (
+            f"{len(with_rows)} of {len(declared)} scanners declare a row. The other "
+            f"{without} declare none: no incompatibility between their tool "
+            "versions and their runtime versions is known."
+        ),
+        "",
+    ]
+    return lines
+
+
 def generate() -> tuple[str, dict]:
     from _plugin_reference import discover
 
@@ -106,7 +203,9 @@ def generate() -> tuple[str, dict]:
     lines = banner(
         GENERATOR,
         "the scanner facets register (the `facets` class attribute of every "
-        "scanner, automated_security_helper/base/scanner_facets.py)",
+        "scanner, automated_security_helper/base/scanner_facets.py) and the "
+        "runtime_compat rows of the operational register "
+        "(automated_security_helper/base/scanner_operational_facets.py)",
         extra=[
             "",
             "Anchors: each scanner's heading id is its config name (#bandit).",
@@ -155,6 +254,7 @@ def generate() -> tuple[str, dict]:
             f"{declared.count(FacetState.UNCONFIRMED)} |"
         )
     lines.append("")
+    lines += runtime_compat_section(rows)
 
     for p, declaration in rows:
         lines += [
@@ -173,8 +273,15 @@ def generate() -> tuple[str, dict]:
             if cell.example:
                 example = f"Example: {code(cell.example)}"
                 notes = f"{notes} {example}".strip() if notes else example
+            # An n/a cell whose reason says UNCONFIRMED is the documented form
+            # for "the tool might carry it and no read says" (base/
+            # scanner_facets.py declaration rules); render it as such, so a
+            # reader does not take it for a confident "cannot exist".
+            state_text = cell.state.value
+            if cell.state is FacetState.NA and "UNCONFIRMED" in (cell.reason or ""):
+                state_text = f"{state_text}, unconfirmed"
             lines.append(
-                f"| {code(facet)} | {code(cell.state.value)} | "
+                f"| {code(facet)} | {code(state_text)} | "
                 f"{md_prose(cell.native_field) if cell.native_field else ''} | "
                 f"{notes} |"
             )

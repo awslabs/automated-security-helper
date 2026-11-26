@@ -1179,7 +1179,13 @@ class TestAllowlistsAreWhatTheArtifactContains:
     """The allowlists are claims about the built artifact. Pin the claims."""
 
     def test_assets_allowlist_has_the_measured_member_count(self):
-        """19 members in both the wheel and the sdist, measured, not guessed.
+        """20 members in both the wheel and the sdist, measured, not guessed.
+
+        Now 20. The one added is assets/plugin_provisioning.py, the flat copy of
+        base/plugin_provisioning.py that hatch_build.py stages beside
+        assets/tool_downloads.py: the pins every plugin declares, which
+        tool_downloads derives TOOL_VERSIONS from, so the shipped Dockerfile's
+        installer needs it in the same build context.
 
         A change to this number is a change to what ships in assets/, which is
         the thing the rule exists to make visible.
@@ -1200,7 +1206,7 @@ class TestAllowlistsAreWhatTheArtifactContains:
         read a parameter, an Fn::If and an Fn::Sub the same way. It is not a rule
         (cfn-nag runs only the files whose names end in Rule.rb) and it is ASH-authored.
         """
-        assert len(gate.ASSETS_ALLOWLIST) == 19
+        assert len(gate.ASSETS_ALLOWLIST) == 20
 
     @pytest.mark.parametrize("member", sorted(gate.ASSETS_ALLOWLIST))
     def test_every_allowlisted_asset_is_under_the_assets_prefix(self, member):

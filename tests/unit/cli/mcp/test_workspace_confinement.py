@@ -445,7 +445,7 @@ class TestOneRootPermitsEveryProjectBeneathIt:
         """Every entry in the list is consulted, not only the first.
 
         ``os.pathsep`` rather than a literal separator, for the reason
-        ``scan_target._allowed_roots`` documents: on Windows the separator is
+        ``config.mcp_sandbox._parse_roots`` documents: on Windows the separator is
         ``;`` and a colon appears inside ordinary paths.
         """
         root = tmp_path / "work"
