@@ -9,7 +9,7 @@ Those commands take an off-host reporter's destination and retry options, and
 its ``enabled``, from the trusted base and ``--config-overrides``
 (``config/reporter_trust.py``), and log what a repository file wrote for them.
 The config check warned only about the two options its own operator-only table
-names, so a repository's ``.ash/.ash.yaml`` that set the Security Hub retry
+names, so a repository's ``.ash.yaml`` that set the Security Hub retry
 count passed ``lint`` and ``validate`` clean and was ignored by every scan. The
 check now judges the destination table too, with the warning it already gives
 for an ignored operator-only option. A file outside the tree, and a value an
@@ -34,8 +34,8 @@ IGNORED = (
 
 
 def _repository_config(project: Path, body: str) -> Path:
-    path = project / ".ash" / ".ash.yaml"
-    path.parent.mkdir(parents=True)
+    path = project / ".ash.yaml"
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(body, encoding="utf-8")
     return path
 

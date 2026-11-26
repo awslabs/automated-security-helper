@@ -99,7 +99,7 @@ def _scanner(
         source = Path(context.source_dir)
         record_provenance(
             context.config,
-            in_tree=[] if operator else [source / ".ash" / ".ash.yaml"],
+            in_tree=[] if operator else [source / ".ash.yaml"],
             trusted=AshConfig(),
         )
     return GitleaksScanner(

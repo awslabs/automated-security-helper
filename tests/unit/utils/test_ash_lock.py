@@ -159,8 +159,7 @@ def _lock(root: Path, *scopes: LockScope) -> AshLock:
 
 
 def _config_text(root: Path, suppressions: str) -> Path:
-    path = root / ".ash" / ".ash.yaml"
-    path.parent.mkdir(parents=True, exist_ok=True)
+    path = root / ".ash.yaml"
     path.write_text(
         "project_name: t\nfail_on_findings: false\nglobal_settings:\n"
         f"  suppressions:\n{suppressions}",

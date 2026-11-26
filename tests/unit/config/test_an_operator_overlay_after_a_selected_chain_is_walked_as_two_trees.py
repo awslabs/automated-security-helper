@@ -44,7 +44,7 @@ def _no_ash_config(monkeypatch: pytest.MonkeyPatch) -> None:
 def _two_root_chain(tmp_path: Path):
     """A selected config's one-file chain followed by an overlay's one-file
     chain, with each file's own document, as the load leaves them."""
-    project = tmp_path / "repo" / ".ash" / ".ash.yaml"
+    project = tmp_path / "repo" / ".ash.yaml"
     operator = tmp_path / "operator" / "ash.yaml"
     for file in (project, operator):
         file.parent.mkdir(parents=True, exist_ok=True)
@@ -98,7 +98,7 @@ def test_the_floor_reads_the_overlay_roots_own_mode(tmp_path) -> None:
 def test_a_load_with_an_overlay_over_a_project_config_logs_no_rebuild_warning(
     tmp_path, caplog
 ) -> None:
-    project = tmp_path / "repo" / ".ash" / ".ash.yaml"
+    project = tmp_path / "repo" / ".ash.yaml"
     operator = tmp_path / "operator" / "ash.yaml"
     project.parent.mkdir(parents=True)
     operator.parent.mkdir(parents=True)

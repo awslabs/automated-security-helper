@@ -14,7 +14,7 @@ code says success. So a config file that does not parse, or parses and does not
 validate, refuses the run with exit 3 before anything is scanned, whichever way
 it was chosen:
 
-- discovered in the scanned directory (``.ash/.ash.yaml``), in a single-directory
+- discovered in the scanned directory (``.ash.yaml``), in a single-directory
   scan and for a workspace project;
 - named with ``--config``, in a single-directory scan, and in a workspace as the
   config of a project that declares none.
@@ -71,14 +71,13 @@ class _Run:
 
     @property
     def discovered(self) -> Path:
-        return self.project / ".ash" / ".ash.yaml"
+        return self.project / ".ash.yaml"
 
     @property
     def named(self) -> Path:
         return self.root / "defaults.yaml"
 
     def write_discovered(self, text: str) -> None:
-        self.discovered.parent.mkdir()
         self.discovered.write_text(text, encoding="utf-8")
 
     def write_named(self, text: str) -> None:
@@ -221,12 +220,8 @@ def test_a_workspace_root_config_that_does_not_parse_is_refused(run, dry_run):
     """The workspace root's config sets how the run is scheduled. Each project
     here has a config of its own that loads, and the root's still refuses the
     run: it was meant to configure this run."""
-    (run.project / ".ash").mkdir()
-    (run.project / ".ash" / ".ash.yaml").write_text(
-        "project_name: p1\n", encoding="utf-8"
-    )
-    root_config = run.root / ".ash" / ".ash.yaml"
-    root_config.parent.mkdir()
+    (run.project / ".ash.yaml").write_text("project_name: p1\n", encoding="utf-8")
+    root_config = run.root / ".ash.yaml"
     root_config.write_text(UNPARSABLE, encoding="utf-8")
 
     result = run.invoke(workspace=True, dry_run=dry_run, named=False)
@@ -325,12 +320,8 @@ async def test_the_mcp_workspace_plan_refuses_a_root_config_that_does_not_parse(
 
     monkeypatch.setenv(ASH_MCP_ALLOWED_ROOTS_ENV, str(run.root))
     monkeypatch.delenv("ASH_MCP_WORKSPACE_ROOT", raising=False)
-    (run.project / ".ash").mkdir()
-    (run.project / ".ash" / ".ash.yaml").write_text(
-        "project_name: p1\n", encoding="utf-8"
-    )
-    root_config = run.root / ".ash" / ".ash.yaml"
-    root_config.parent.mkdir()
+    (run.project / ".ash.yaml").write_text("project_name: p1\n", encoding="utf-8")
+    root_config = run.root / ".ash.yaml"
     root_config.write_text(UNPARSABLE, encoding="utf-8")
     workspace_file = run.root / "dev.code-workspace"
     workspace_file.write_text(

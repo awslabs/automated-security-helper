@@ -10,7 +10,7 @@ outside the scanned tree, and trivy is handed the path that was checked rather
 than one rebuilt from the configured value.
 
 The configs here come from ``resolve_config``, so provenance is recorded the way a
-scan records it: a ``.ash/.ash.yaml`` in the tree, a config an MCP client delivered
+scan records it: a ``.ash.yaml`` in the tree, a config an MCP client delivered
 (``untrusted_config``), a config file outside the tree, and ``--config-overrides``.
 """
 
@@ -179,7 +179,7 @@ def test_a_value_from_the_scanned_trees_config_is_not_used(
     """The file is outside the tree, but the repository chose it."""
     source = _source(tmp_path)
     chosen = _outside(tmp_path, name, content)
-    _write_config(source / ".ash" / ".ash.yaml", scanner, option, str(chosen))
+    _write_config(source / ".ash.yaml", scanner, option, str(chosen))
     config = resolve_config(source_dir=source)
 
     passed = _passed(
@@ -258,7 +258,7 @@ def test_an_operator_value_outside_the_tree_is_used(
     source = _source(tmp_path)
     chosen = _outside(tmp_path, name, content)
     if how == "override":
-        _write_config(source / ".ash" / ".ash.yaml", scanner, option, "")
+        _write_config(source / ".ash.yaml", scanner, option, "")
         config = resolve_config(
             source_dir=source,
             config_overrides=[f"scanners.{scanner}.options.{option}={chosen}"],
@@ -319,7 +319,7 @@ def test_trivy_config_from_the_environment_is_used_for_a_file_outside_the_tree(
     value = None
     if set_by != "unset":
         value = str(_outside(tmp_path, "tree-chose.yaml", ""))
-        _write_config(source / ".ash" / ".ash.yaml", scanner, "config_file", value)
+        _write_config(source / ".ash.yaml", scanner, "config_file", value)
     config = resolve_config(source_dir=source)
 
     argv = _argv(tmp_path, source, config, scanner, "config_file", value)
@@ -509,7 +509,7 @@ def test_trivy_repo_is_handed_the_modules_directory_that_was_checked(
         value = "~/modules"
     elif spelling == "tree":
         value = "~/modules"
-        _write_config(source / ".ash" / ".ash.yaml", "trivy-repo", "module_dir", value)
+        _write_config(source / ".ash.yaml", "trivy-repo", "module_dir", value)
         _set_home(monkeypatch, chosen.parent)
     else:
         value = _spelled(tmp_path, source, chosen, spelling)

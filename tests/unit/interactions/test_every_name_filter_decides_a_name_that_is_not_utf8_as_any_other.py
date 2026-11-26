@@ -102,9 +102,7 @@ def _yaml_config(section: str, *entries: bytes) -> Dict[bytes, bytes]:
     body = b"".join(
         b"    - path: " + entry + b'\n      reason: "x"\n' for entry in entries
     )
-    return {
-        b".ash/.ash.yaml": b"global_settings:\n  " + section.encode() + b":\n" + body
-    }
+    return {b".ash.yaml": b"global_settings:\n  " + section.encode() + b":\n" + body}
 
 
 @pytest.fixture(scope="module")
@@ -144,9 +142,7 @@ def test_an_operator_config_ignores_a_file_named_so_as_the_control(
 ):
     config = tmp_path / "operator.yaml"
     config.write_bytes(
-        _yaml_config("ignore_paths", b'"secr\\udce9t.py"', b'"secret.py"')[
-            b".ash/.ash.yaml"
-        ]
+        _yaml_config("ignore_paths", b'"secr\\udce9t.py"', b'"secret.py"')[b".ash.yaml"]
     )
 
     decisions = _scan(

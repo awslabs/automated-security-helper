@@ -108,13 +108,13 @@ class _World:
         self.root = root
         self.monkeypatch = monkeypatch
         self.project = root / "p1"
-        (self.project / ".ash").mkdir(parents=True)
+        self.project.mkdir(parents=True)
         (self.project / "a.py").write_text("x = 1\n", encoding="utf-8")
         self.output = root / "out"
 
     @property
     def discovered(self) -> Path:
-        return self.project / ".ash" / ".ash.yaml"
+        return self.project / ".ash.yaml"
 
     @property
     def named(self) -> Path:
@@ -122,7 +122,7 @@ class _World:
 
     @property
     def root_config(self) -> Path:
-        return self.root / ".ash" / ".ash.yaml"
+        return self.root / ".ash.yaml"
 
     @property
     def workspace_file(self) -> Path:

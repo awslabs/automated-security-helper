@@ -43,7 +43,7 @@ def _refused() -> ValidationError:
 
 def _one_scanner(monkeypatch, tmp_path, factory):
     monkeypatch.setenv("ASH_BIN_PATH", str(tmp_path / "bin"))
-    # The command reads the working directory's .ash/.ash.yaml.
+    # The command reads the working directory's .ash.yaml.
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(dependencies_module, "load_plugins", lambda *_a, **_k: {})
     monkeypatch.setattr(

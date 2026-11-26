@@ -362,7 +362,7 @@ def test_uses_env_references(tmp_path, text, expected):
 def test_lint_fix_refuses_a_file_with_env_references(tmp_path):
     """--fix writes parsed values back, which would bake in the resolved values."""
     cfg = _write(
-        tmp_path / ".ash" / ".ash.yaml",
+        tmp_path / ".ash.yaml",
         """
         project_name: !ENV ${ASH_TEST_PROJECT:demo}
         scanners:
@@ -479,7 +479,7 @@ def test_lint_fix_passes_a_clean_file_with_env_references(tmp_path):
     """`lint --fix --non-interactive` is the pre-commit recipe; with nothing to fix
     it must not refuse a file for using !ENV."""
     cfg = _write(
-        tmp_path / ".ash" / ".ash.yaml",
+        tmp_path / ".ash.yaml",
         """
         project_name: !ENV ${ASH_TEST_PROJECT:demo}
         """,
@@ -711,7 +711,7 @@ def test_the_checks_chain_load_classifies_repository_files_as_a_scan_does(
     """
     src = tmp_path / "src"
     mark_git_checkout(src)
-    inside = _write(src / ".ash" / ".ash.yaml", body)
+    inside = _write(src / ".ash.yaml", body)
     check = ConfigValidator.check_config_file(inside, source_dir=src)
     assert any(
         "findings_scope" in warning and "a scan ignores" in warning

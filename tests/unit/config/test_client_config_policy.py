@@ -245,7 +245,7 @@ def test_the_default_policy_accepts_an_ash_config_init_file(tmp_path) -> None:
     from automated_security_helper.cli.config import init
     from automated_security_helper.config.config_sources import read_config_file
 
-    target = tmp_path / ".ash" / ".ash.yaml"
+    target = tmp_path / ".ash.yaml"
     init(config=str(target), color=False)
     policy = RuntimeOverridesConfig()
     denials = config_document_denials(
@@ -286,7 +286,7 @@ def _denials_of_ashs_own_config(trusted: AshConfig) -> list:
 
 
 def test_the_default_policy_accepts_ashs_own_repository_config() -> None:
-    """ASH's own .ash/.ash.yaml writes defaults, plugin modules and suppressions.
+    """ASH's own .ash.yaml writes defaults, plugin modules and suppressions.
 
     ``fail_on_findings: true`` is the default, plugin modules are left to
     plugin_module_trust, and a delivered repository's own suppressions and ignore

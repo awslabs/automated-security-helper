@@ -28,10 +28,10 @@ def _error() -> ASHConfigUnsetVariableError:
     error = ASHConfigUnsetVariableError(
         "ASH_TOKEN_VALUE is not set",
         variable="ASH_TOKEN_VALUE",
-        config_file=Path("repo") / ".ash" / ".ash.yaml",
+        config_file=Path("repo") / ".ash.yaml",
         detail="the reference is not set",
     )
-    error.ash_config_file = Path("repo") / ".ash" / ".ash.yaml"
+    error.ash_config_file = Path("repo") / ".ash.yaml"
     return error
 
 

@@ -646,7 +646,7 @@ class TestEndToEndSeverityThresholdRegression:
     """End-to-end regression test for the severity threshold fix.
 
     This simulates what happens when a user:
-    1. Configures severity_threshold: MEDIUM in .ash/.ash.yaml
+    1. Configures severity_threshold: MEDIUM in .ash.yaml
     2. Runs a scan that finds only LOW severity issues
     3. Expects exit code 0 (no actionable findings above threshold)
     4. Gets exit code 0 (fixed: SARIF file count respects threshold)

@@ -96,9 +96,9 @@ def test_a_workspace_scans_output_never_shows_the_value(
     planted, monkeypatch, log_records
 ):
     root = planted / "ws"
-    (root / "api" / ".ash").mkdir(parents=True)
+    (root / "api").mkdir(parents=True)
     (root / "api" / "app.py").write_text("x = 1\n", encoding="utf-8")
-    (root / "api" / ".ash" / ".ash.yaml").write_text(_config_text(), encoding="utf-8")
+    (root / "api" / ".ash.yaml").write_text(_config_text(), encoding="utf-8")
     workspace = root / "dev.code-workspace"
     workspace.write_text(json.dumps({"folders": [{"path": "api"}]}), encoding="utf-8")
     monkeypatch.chdir(planted)

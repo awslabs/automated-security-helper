@@ -52,11 +52,10 @@ def test_the_wizards_write_route_lands_in_the_real_cwd(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.chdir(tmp_path)
-    (tmp_path / ".ash").mkdir()
     with displayed_cwd(monkeypatch):
-        _write_config_text(Path(".ash") / ".ash.yaml", "project_name: demo\n")
+        _write_config_text(Path(".ash.yaml"), "project_name: demo\n")
 
-    assert (tmp_path / ".ash" / ".ash.yaml").read_text(encoding="utf-8") == (
+    assert (tmp_path / ".ash.yaml").read_text(encoding="utf-8") == (
         "project_name: demo\n"
     )
 

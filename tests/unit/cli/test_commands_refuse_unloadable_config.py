@@ -127,15 +127,14 @@ def test_a_named_config_that_does_not_parse_exits_three(tmp_path, command):
 
 
 def test_a_discovered_config_that_does_not_parse_exits_three(tmp_path):
-    """No --config: ``ash plugin`` discovers .ash/.ash.yaml in the working directory."""
-    config = tmp_path / ".ash" / ".ash.yaml"
-    config.parent.mkdir()
+    """No --config: ``ash plugin`` discovers .ash.yaml in the working directory."""
+    config = tmp_path / ".ash.yaml"
     config.write_text(BAD_YAML, encoding="utf-8")
 
     result = CliRunner().invoke(app, ["plugin", "list"])
 
     assert result.exit_code == 3, result.output
-    assert ".ash/.ash.yaml" in _flat(result.output)
+    assert ".ash.yaml" in _flat(result.output)
 
 
 def test_control_a_config_that_loads_is_used(tmp_path):

@@ -43,7 +43,7 @@ def _plain(text: str) -> str:
 def _patch_one_plugin(monkeypatch, tmp_path, commands):
     monkeypatch.setenv("ASH_BIN_PATH", str(tmp_path / "bin"))
     monkeypatch.setenv("COLUMNS", "200")
-    # The command reads the working directory's .ash/.ash.yaml.
+    # The command reads the working directory's .ash.yaml.
     monkeypatch.chdir(tmp_path)
     fake = MagicMock()
     fake.config = SimpleNamespace(name="fake-scanner")

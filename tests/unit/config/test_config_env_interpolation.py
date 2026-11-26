@@ -244,7 +244,7 @@ class TestDocumentedNamesStillResolve:
 class TestAshOwnConfigStaysLoadable:
     """Every reference ASH's own config writes must be one ASH still resolves.
 
-    ``.ash/.ash.yaml`` carries the reporter examples operators copy, including
+    ``.ash.yaml`` carries the reporter examples operators copy, including
     commented-out ones. If the allowlist and that file ever disagree, the file
     is the thing that breaks, so this reads the file rather than restating it.
     """

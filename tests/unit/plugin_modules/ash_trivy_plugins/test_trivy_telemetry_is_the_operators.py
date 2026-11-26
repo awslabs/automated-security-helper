@@ -75,7 +75,7 @@ def _write(path: Path, text: str) -> Path:
 def _repo(tmp_path: Path, text: str) -> Path:
     repo = tmp_path / "repo"
     (repo / ".git").mkdir(parents=True)
-    _write(repo / ".ash" / ".ash.yaml", text)
+    _write(repo / ".ash.yaml", text)
     return repo
 
 

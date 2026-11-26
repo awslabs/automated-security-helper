@@ -982,7 +982,6 @@ class TestAConfigLinkedOutOfTheTreeIsRefused:
     def checkout(self, tmp_path):
         root = tmp_path / "repo"
         (root / ".git").mkdir(parents=True)
-        (root / ".ash").mkdir()
         outside = tmp_path / "other" / "settings" / "config.json"
         outside.parent.mkdir(parents=True)
         outside.write_text("{}\n")
@@ -990,10 +989,10 @@ class TestAConfigLinkedOutOfTheTreeIsRefused:
 
     def test_a_file_link_is_refused(self, fake_runner, checkout):
         root, outside = checkout
-        (root / ".ash" / ".ash.yaml").symlink_to(outside)
+        (root / ".ash.yaml").symlink_to(outside)
 
         rc, output, calls = _run_ash_status(
-            fake_runner, root, ["--no-build", "--config", ".ash/.ash.yaml"]
+            fake_runner, root, ["--no-build", "--config", ".ash.yaml"]
         )
 
         assert rc == 3, output
@@ -1013,17 +1012,15 @@ class TestAConfigLinkedOutOfTheTreeIsRefused:
     def test_a_link_that_stays_inside_still_runs(self, fake_runner, checkout):
         """Control."""
         root, _ = checkout
-        (root / ".ash" / "real.yaml").write_text("project_name: p\n")
-        (root / ".ash" / ".ash.yaml").symlink_to("real.yaml")
+        (root / "real.yaml").write_text("project_name: p\n")
+        (root / ".ash.yaml").symlink_to("real.yaml")
 
         rc, output, calls = _run_ash_status(
-            fake_runner, root, ["--no-build", "--config", ".ash/.ash.yaml"]
+            fake_runner, root, ["--no-build", "--config", ".ash.yaml"]
         )
 
         assert rc == 0, output
-        assert (
-            _flag(_inner_args(_only(calls, "run")), "--config") == "/src/.ash/real.yaml"
-        )
+        assert _flag(_inner_args(_only(calls, "run")), "--config") == "/src/real.yaml"
 
     @pytest.mark.skipif(
         # os.geteuid does not exist on Windows, and the module is skipped there

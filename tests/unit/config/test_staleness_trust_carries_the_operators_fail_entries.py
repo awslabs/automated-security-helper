@@ -56,9 +56,7 @@ def _policies(config: AshConfig) -> List[Tuple[str, str]]:
 
 
 def _confine(config: AshConfig, trusted: AshConfig, tmp_path: Path) -> None:
-    confine_content_db_staleness(
-        config, trusted, [], [tmp_path / "repo" / ".ash" / ".ash.yaml"]
-    )
+    confine_content_db_staleness(config, trusted, [], [tmp_path / "repo" / ".ash.yaml"])
 
 
 def test_the_operators_fail_entry_is_carried_into_a_config_that_lacks_it(tmp_path):

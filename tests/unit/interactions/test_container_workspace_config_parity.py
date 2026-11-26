@@ -82,11 +82,9 @@ def _workspace(root: Path) -> Path:
     """A workspace with one project that has no config and one that has its own."""
     (root / "bare").mkdir(parents=True)
     (root / "bare" / "a.py").write_text("x = 1\n", encoding="utf-8")
-    (root / "own" / ".ash").mkdir(parents=True)
+    (root / "own").mkdir(parents=True)
     (root / "own" / "b.py").write_text("y = 2\n", encoding="utf-8")
-    (root / "own" / ".ash" / ".ash.yaml").write_text(
-        "project_name: own\n", encoding="utf-8"
-    )
+    (root / "own" / ".ash.yaml").write_text("project_name: own\n", encoding="utf-8")
     definition = root / "ash.code-workspace"
     definition.write_text(
         json.dumps({"folders": [{"path": "bare"}, {"path": "own"}]}),

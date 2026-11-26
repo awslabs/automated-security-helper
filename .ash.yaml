@@ -35,15 +35,15 @@ global_settings:
         one is shown as. No value is held.
     - rule_id: SECRET-SECRET-KEYWORD
       path: automated_security_helper/utils/scanner_tool_types.py
-      line_start: 34
-      line_end: 34
+      line_start: 38
+      line_end: 38
       reason: >-
         False positive. The constant names the secrets tool category; it is a label,
         not a credential.
     - rule_id: SECRET-SECRET-KEYWORD
       path: automated_security_helper/utils/scanner_names.py
-      line_start: 133
-      line_end: 133
+      line_start: 136
+      line_end: 136
       reason: >-
         False positive. The table entry maps the detect-secrets scanner to the secrets
         tool category.
@@ -455,7 +455,7 @@ global_settings:
     # so the entry below covers them. A transitive finding that gains a second,
     # unsuppressed root stays visible and fails the scan.
     - rule_id: "GHSA-vfj7-8cjw-p6xm"
-      path: "node_modules/braces/package.json"
+      path: "deploy/cdk-constructs/package-lock.json"
       package_name: "braces"
       package_version: "3.0.3"
       package_path: "deploy/cdk-constructs/node_modules/braces"
@@ -477,7 +477,7 @@ global_settings:
     # `npm-audit-transitive-<package>` findings are covered by these root entries, as
     # the braces block above explains.
     - rule_id: "GHSA-gcqx-w48m-w2h4"
-      path: "node_modules/deepmerge/package.json"
+      path: "deploy/cdk/package-lock.json"
       package_name: "deepmerge"
       package_version: "4.3.1"
       package_path: "deploy/cdk/node_modules/deepmerge"
@@ -489,7 +489,7 @@ global_settings:
         npm's only fix is a jest 25.1.0 major downgrade, refused. Revisit when a fix ships;
         see the block comment above.
     - rule_id: "GHSA-gcqx-w48m-w2h4"
-      path: "node_modules/deepmerge/package.json"
+      path: "deploy/cdk-constructs/package-lock.json"
       package_name: "deepmerge"
       package_version: "4.3.1"
       package_path: "deploy/cdk-constructs/node_modules/deepmerge"
@@ -500,67 +500,6 @@ global_settings:
         dependency only, reached through jest-config, not shipped in the wheel or the
         container image. npm's only fix is a jest 25.1.0 major downgrade, refused. Revisit
         when a fix ships; see the block comment above.
-    # === Time-boxed: minimatch GHSA-g3hv-75wg-m249 bundled inside aws-cdk-lib (expires 2026-12-27) ===
-    # minimatch below 11.0.1 is affected (globparts amplification denial of service).
-    # The copies our lockfiles resolve are overridden to 11.x in deploy/cdk and
-    # deploy/cdk-constructs, so the only affected copy left is the one BUNDLED inside
-    # aws-cdk-lib (`inBundle` lockfile entries). npm `overrides` cannot replace a
-    # bundled dependency, and every aws-cdk-lib release through 2.277.0 (the latest at
-    # 2026-11-13, bundling minimatch ^10.2.6 per its registry metadata) bundles
-    # minimatch ^10. It is deploy tooling only: none of it ships in
-    # the wheel or the container image. One npm-audit entry per lockfile; grype and
-    # trivy each report the same bundled copy against deploy/cdk/package-lock.json
-    # under their own id spellings, one entry per spelling. The transitive findings are
-    # covered by these root entries, as the braces block above explains. Revisit when
-    # an aws-cdk-lib release bundles minimatch 11.0.1 or later.
-    - rule_id: "GHSA-g3hv-75wg-m249"
-      path: "node_modules/aws-cdk-lib/minimatch/package.json"
-      package_name: "minimatch"
-      package_version: "10.2.5"
-      package_path: "deploy/cdk/node_modules/aws-cdk-lib/node_modules/minimatch"
-      expires: "2026-12-27"
-      reason: >-
-        GHSA-g3hv-75wg-m249: minimatch 10.2.5 bundled inside aws-cdk-lib 2.273.0 in
-        deploy/cdk/package-lock.json. npm overrides cannot replace a bundled dependency and
-        no aws-cdk-lib release bundles the fixed 11.0.1 yet (latest 2.277.0 bundles ^10.2.6).
-        Deploy tooling only, not shipped in the wheel or the container image. Revisit when
-        aws-cdk-lib rebundles; see the block comment above.
-    - rule_id: "GHSA-g3hv-75wg-m249"
-      path: "node_modules/aws-cdk-lib/minimatch/package.json"
-      package_name: "minimatch"
-      package_version: "10.2.5"
-      package_path: "deploy/cdk-constructs/node_modules/aws-cdk-lib/node_modules/minimatch"
-      expires: "2026-12-27"
-      reason: >-
-        GHSA-g3hv-75wg-m249: minimatch 10.2.5 bundled inside aws-cdk-lib 2.273.0 in
-        deploy/cdk-constructs/package-lock.json. npm overrides cannot replace a bundled
-        dependency and no aws-cdk-lib release bundles the fixed 11.0.1 yet (latest 2.277.0
-        bundles ^10.2.6). Dev dependency of the constructs package only, not shipped in the
-        wheel or the container image. Revisit when aws-cdk-lib rebundles; see the block
-        comment above.
-    - rule_id: "GHSA-g3hv-75wg-m249-minimatch"
-      path: "deploy/cdk/package-lock.json"
-      package_name: "minimatch"
-      package_version: "10.2.5"
-      expires: "2026-12-27"
-      reason: >-
-        GHSA-g3hv-75wg-m249 (grype spelling): minimatch 10.2.5 bundled inside aws-cdk-lib
-        2.273.0 in deploy/cdk/package-lock.json. The lockfile's own minimatch is overridden
-        to 11.x; the bundled copy cannot be overridden and no aws-cdk-lib release bundles
-        11.0.1 yet. Deploy tooling only, not shipped in the wheel or the container image.
-        Revisit when aws-cdk-lib rebundles; see the block comment above.
-    - rule_id: "CVE-2026-118764"
-      path: "deploy/cdk/package-lock.json"
-      package_name: "minimatch"
-      package_version: "10.2.5"
-      expires: "2027-02-06"
-      reason: >-
-        CVE-2026-118764 (GHSA-g3hv-75wg-m249, trivy spelling): minimatch 10.2.5 bundled
-        inside aws-cdk-lib 2.273.0 in deploy/cdk/package-lock.json. The lockfile's own
-        minimatch is overridden to 11.x; the bundled copy cannot be overridden and no
-        aws-cdk-lib release bundles 11.0.1 yet. Deploy tooling only, not shipped in the
-        wheel or the container image. Revisit when aws-cdk-lib rebundles; see the block
-        comment above.
     # === Time-boxed: picomatch GHSA-fc5q-39xc-vjpf, no patched version (expires 2026-12-27) ===
     # picomatch up to and including 4.0.7 is affected (ReDoS through single-branch
     # repeated extglobs) and 4.0.7 is the newest release on the registry (read
@@ -569,98 +508,39 @@ global_settings:
     # copy in both lockfiles is a dev dependency ("dev": true) of the deploy tooling
     # (jest 30, @parcel/watcher, anymatch and micromatch under ts-jest and the jsii
     # toolchain); none of it ships in the wheel or the container image. One entry per
-    # install path, version pinned, so a new copy or a different version reports again.
+    # lockfile, scoped to the advisory it names and to picomatch installs under that
+    # lockfile's node_modules (package_path glob): npm-audit locates every advisory at
+    # the lockfile it audited, so the lockfile is the path, and the copies inside one
+    # lockfile are told apart by package_path alone. A copy in a new lockfile reports
+    # again; a new version inside these lockfiles is still in the affected range (every
+    # release through 4.0.7 is) and stays covered until the expiry forces a revisit.
     # The `npm-audit-transitive-<package>` findings whose via chains reach these copies
     # are covered by these root entries, as the braces block above explains. Revisit
     # when a picomatch release above 4.0.7 ships.
     - rule_id: "GHSA-fc5q-39xc-vjpf"
-      path: "node_modules/picomatch/package.json"
+      path: "deploy/cdk/package-lock.json"
       package_name: "picomatch"
-      package_version: "2.3.2"
-      package_path: "deploy/cdk/node_modules/picomatch"
+      package_path: "deploy/cdk/node_modules/**/picomatch"
       expires: "2026-12-27"
       reason: >-
-        GHSA-fc5q-39xc-vjpf: picomatch 2.3.2 in deploy/cdk/package-lock.json, hoisted for
-        anymatch. No patched version exists (newest release is 4.0.7, inside the affected
-        range). Dev dependency of the deploy tooling only, not shipped in the wheel or the
-        container image. Revisit when a fix ships; see the block comment above.
+        GHSA-fc5q-39xc-vjpf: every picomatch copy in deploy/cdk/package-lock.json (2.3.2
+        hoisted for anymatch; 4.0.7 under @parcel/watcher, jest-haste-map,
+        jest-message-util and jest-util). No patched version exists (newest release is
+        4.0.7, inside the affected range). Dev dependencies of the deploy tooling only,
+        not shipped in the wheel or the container image. Revisit when a fix ships; see
+        the block comment above.
     - rule_id: "GHSA-fc5q-39xc-vjpf"
-      path: "node_modules/@parcel/watcher/picomatch/package.json"
+      path: "deploy/cdk-constructs/package-lock.json"
       package_name: "picomatch"
-      package_version: "4.0.7"
-      package_path: "deploy/cdk/node_modules/@parcel/watcher/node_modules/picomatch"
+      package_path: "deploy/cdk-constructs/node_modules/**/picomatch"
       expires: "2026-12-27"
       reason: >-
-        GHSA-fc5q-39xc-vjpf: picomatch 4.0.7 under @parcel/watcher in
-        deploy/cdk/package-lock.json. No patched version exists. Dev dependency of the
-        deploy tooling only, not shipped in the wheel or the container image. Revisit when
-        a fix ships; see the block comment above.
-    - rule_id: "GHSA-fc5q-39xc-vjpf"
-      path: "node_modules/jest-haste-map/picomatch/package.json"
-      package_name: "picomatch"
-      package_version: "4.0.7"
-      package_path: "deploy/cdk/node_modules/jest-haste-map/node_modules/picomatch"
-      expires: "2026-12-27"
-      reason: >-
-        GHSA-fc5q-39xc-vjpf: picomatch 4.0.7 under jest-haste-map in
-        deploy/cdk/package-lock.json. No patched version exists. Dev dependency of the
-        deploy tooling only, not shipped in the wheel or the container image. Revisit when
-        a fix ships; see the block comment above.
-    - rule_id: "GHSA-fc5q-39xc-vjpf"
-      path: "node_modules/jest-message-util/picomatch/package.json"
-      package_name: "picomatch"
-      package_version: "4.0.7"
-      package_path: "deploy/cdk/node_modules/jest-message-util/node_modules/picomatch"
-      expires: "2026-12-27"
-      reason: >-
-        GHSA-fc5q-39xc-vjpf: picomatch 4.0.7 under jest-message-util in
-        deploy/cdk/package-lock.json. No patched version exists. Dev dependency of the
-        deploy tooling only, not shipped in the wheel or the container image. Revisit when
-        a fix ships; see the block comment above.
-    - rule_id: "GHSA-fc5q-39xc-vjpf"
-      path: "node_modules/jest-util/picomatch/package.json"
-      package_name: "picomatch"
-      package_version: "4.0.7"
-      package_path: "deploy/cdk/node_modules/jest-util/node_modules/picomatch"
-      expires: "2026-12-27"
-      reason: >-
-        GHSA-fc5q-39xc-vjpf: picomatch 4.0.7 under jest-util in
-        deploy/cdk/package-lock.json. No patched version exists. Dev dependency of the
-        deploy tooling only, not shipped in the wheel or the container image. Revisit when
-        a fix ships; see the block comment above.
-    - rule_id: "GHSA-fc5q-39xc-vjpf"
-      path: "node_modules/picomatch/package.json"
-      package_name: "picomatch"
-      package_version: "4.0.7"
-      package_path: "deploy/cdk-constructs/node_modules/picomatch"
-      expires: "2026-12-27"
-      reason: >-
-        GHSA-fc5q-39xc-vjpf: picomatch 4.0.7 in deploy/cdk-constructs/package-lock.json,
-        hoisted for fdir and the jest 30 tree. No patched version exists. Dev dependency of
-        the constructs package's build tooling only, not shipped in the wheel or the
-        container image. Revisit when a fix ships; see the block comment above.
-    - rule_id: "GHSA-fc5q-39xc-vjpf"
-      path: "node_modules/anymatch/picomatch/package.json"
-      package_name: "picomatch"
-      package_version: "2.3.2"
-      package_path: "deploy/cdk-constructs/node_modules/anymatch/node_modules/picomatch"
-      expires: "2026-12-27"
-      reason: >-
-        GHSA-fc5q-39xc-vjpf: picomatch 2.3.2 under anymatch in
-        deploy/cdk-constructs/package-lock.json. No patched version exists. Dev dependency
-        of the constructs package's build tooling only, not shipped in the wheel or the
-        container image. Revisit when a fix ships; see the block comment above.
-    - rule_id: "GHSA-fc5q-39xc-vjpf"
-      path: "node_modules/micromatch/picomatch/package.json"
-      package_name: "picomatch"
-      package_version: "2.3.2"
-      package_path: "deploy/cdk-constructs/node_modules/micromatch/node_modules/picomatch"
-      expires: "2026-12-27"
-      reason: >-
-        GHSA-fc5q-39xc-vjpf: picomatch 2.3.2 under micromatch in
-        deploy/cdk-constructs/package-lock.json. No patched version exists. Dev dependency
-        of the constructs package's build tooling only, not shipped in the wheel or the
-        container image. Revisit when a fix ships; see the block comment above.
+        GHSA-fc5q-39xc-vjpf: every picomatch copy in
+        deploy/cdk-constructs/package-lock.json (4.0.7 hoisted for fdir and the jest 30
+        tree; 2.3.2 under anymatch and micromatch). No patched version exists. Dev
+        dependencies of the constructs package's build tooling only, not shipped in the
+        wheel or the container image. Revisit when a fix ships; see the block comment
+        above.
     # === detect-secrets: broad patterns by path ===
     #
     # detect-secrets does support an inline marker: `# pragma: allowlist secret` on
@@ -1062,12 +942,17 @@ global_settings:
         OSError matching TMPDIR). The unsafe mode is the input of a refusal test.
     - rule_id: B104
       path: automated_security_helper/cli/mcp/__init__.py
+      symbol: _log_where_the_server_listens
       reason: >-
         Not a bind. The flagged line is the startup LOG helper that reproduces
         uvicorn's "running on" message: host = "0.0.0.0" if config.host is None
         mirrors the display default uvicorn itself logs; the socket was bound
         elsewhere, where tests/unit/cli/test_mcp_non_loopback_bind_is_refused.py
         asserts a non-loopback bind is refused without the explicit opt-in.
+        Pinned to the helper (kept in step with the same entry in
+        .ash/.ash_alpha_plugins.yaml) so a bind added anywhere else in the
+        file still reports; tests/unit/cli/mcp/test_b104_suppressions_stay_pinned.py
+        fails if the helper loses the expression or either entry goes file-wide.
     - rule_id: B104
       path: tests/unit/cli/test_mcp_loopback_accepts_only_its_own_origin.py
       reason: >-
@@ -3752,10 +3637,11 @@ global_settings:
     # --ignore-gitleaks-allow and neutralizes .gitleaksignore, so the inline
     # "gitleaks:allow" markers these fixture lines carry are inert by design
     # in ASH scans; this config is the suppression mechanism the existing
-    # gitleaks entries already use. All seven findings are deliberate,
-    # permanent test fixtures, so the entries carry no expiration, as the
-    # other gitleaks false-positive entries do. The required PR check reads
-    # this config from the BASE commit, so these entries take effect at
+    # gitleaks entries already use. All seven findings are deliberate test
+    # fixtures. The five generic-api-key entries expire on 2027-05-06, the
+    # review date their alpha-config copies carry, so each is looked at again
+    # then; the private-key entry carries no expiration. The required PR check
+    # reads this config from the BASE commit, so these entries take effect at
     # merge; the pre-merge residual on the PR's own run is by design.
     - rule_id: "generic-api-key"
       path: "tests/unit/base/test_uv_tool_mixin_guards_and_decisions.py"
@@ -3794,8 +3680,8 @@ global_settings:
     # bounded in length, so none of these is wider than it has to be.
     - rule_id: B104
       path: automated_security_helper/utils/secret_masking.py
-      line_start: 458
-      line_end: 458
+      line_start: 463
+      line_end: 463
       reason: >-
         False positive. "0.0.0.0" here is a schema-satisfying placeholder in the
         tuple of synthetic replacement values a masked SARIF field can take, not
@@ -3824,8 +3710,8 @@ global_settings:
         shown_flake_ref REDACTS. No value is held.
     - rule_id: SECRET-BASIC-AUTH-CREDENTIALS
       path: automated_security_helper/plugin_modules/ash_builtin/scanners/npm_audit_scanner.py
-      line_start: 155
-      line_end: 155
+      line_start: 171
+      line_end: 171
       reason: >-
         False positive. A comment placeholder URL above the regex that MASKS a
         URL's userinfo in log excerpts. No value is held.
@@ -3844,8 +3730,8 @@ global_settings:
         the quoting lambda below it covers. No value is held.
     - rule_id: SECRET-SECRET-KEYWORD
       path: automated_security_helper/plugin_modules/ash_builtin/reporters/gitlab_sast_reporter.py
-      line_start: 50
-      line_end: 50
+      line_start: 82
+      line_end: 82
       reason: >-
         False positive. The constant names the rule-id PREFIX the reporter
         strips when classifying secret findings; a label, not a value.

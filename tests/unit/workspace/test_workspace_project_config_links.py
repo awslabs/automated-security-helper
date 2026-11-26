@@ -6,7 +6,7 @@
 A workspace is resolved once into a plan and then each project's config is
 resolved again when the project is scanned (``workspace/execution.py``). Both
 resolutions read the config by the path the project's directory holds it at,
-so a ``.ash/.ash.yaml`` that links to a file outside the tree is held to the
+so a ``.ash.yaml`` that links to a file outside the tree is held to the
 limits of a config inside the tree on the CLI, and to a client's limits when an
 MCP client delivered the tree, as a single-directory scan holds it.
 """
@@ -94,7 +94,7 @@ def _cli_workspace(tmp_path: Path, layout: str) -> Path:
         root / "dev.code-workspace", json.dumps({"folders": [{"path": "app"}]})
     )
     write(root / "app" / "main.py", "x = 1\n")
-    target = root / "app" / ".ash" / ".ash.yaml"
+    target = root / "app" / ".ash.yaml"
     if layout == "in place":
         write(target, _grants(tmp_path))
     else:
@@ -111,7 +111,7 @@ def _delivered_workspace(server, text: str) -> Path:
             "dev.code-workspace": json.dumps({"folders": [{"path": "app"}]}),
             "app/main.py": "x = 1\n",
         },
-        {"app/.ash/.ash.yaml": host_file},
+        {"app/.ash.yaml": host_file},
         SESSION,
     )
 
@@ -153,7 +153,7 @@ def test_the_plan_names_a_linked_project_config_by_its_path_in_the_project(
 
     assert (
         project.config_source
-        == (workspace.parent.resolve() / "app" / ".ash" / ".ash.yaml").as_posix()
+        == (workspace.parent.resolve() / "app" / ".ash.yaml").as_posix()
     )
 
 
@@ -230,7 +230,7 @@ def test_a_remote_resolve_workspace_refuses_a_project_config_linking_out(
 
     (result,) = out
     _assert_refused_unread(_server, result, read)
-    assert ".ash/.ash.yaml" in result["error"], result
+    assert ".ash.yaml" in result["error"], result
 
 
 def test_a_remote_scan_workspace_refuses_it_too(_server) -> None:
@@ -272,14 +272,14 @@ def test_the_scan_side_refuses_it_without_the_plans_check(_server, tmp_path) -> 
             "app/main.py": "x = 1\n",
             "app/conf/real.yaml": "project_name: first\n",
         },
-        {"app/.ash/.ash.yaml": Path("../conf/real.yaml")},
+        {"app/.ash.yaml": Path("conf/real.yaml")},
         SESSION,
     )
     (project,) = resolve_workspace(
         source / "dev.code-workspace", permit_base=config_base_gate(SESSION)
     ).projects
     # The link now points outside every root.
-    link = source / "app" / ".ash" / ".ash.yaml"
+    link = source / "app" / ".ash.yaml"
     link.unlink()
     symlink(link, write(_server["host"] / "ash.yaml", LINK_OUT))
     settings = execution.ProjectScanSettings(
@@ -416,7 +416,10 @@ _ASH_DIR_TARGETS = ["missing", "unreadable", "empty", "holding a config"]
 def test_a_linked_ash_directory_is_refused_alike_whatever_it_holds(
     linked_pyproject, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Checked as a directory, so an unlistable or empty target answers the same."""
+    """Checked as a directory, so an unlistable or empty target answers the same.
+
+    Legacy location: this test's subject is the deprecated ``.ash/`` directory.
+    """
     from automated_security_helper.cli.mcp import workspace as ws
 
     root, workspace, _ = linked_pyproject

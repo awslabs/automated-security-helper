@@ -79,7 +79,7 @@ def _refused(opts: ScanOptions, capsys: pytest.CaptureFixture) -> bool:
 
 class TestTheScannedTreeCannotSkipIt:
     def test_a_repository_config_that_turns_the_sandbox_off(self, tree, capsys):
-        _write(tree.source / ".ash" / ".ash.yaml", _mode("off"))
+        _write(tree.source / ".ash.yaml", _mode("off"))
         _write(tree.operator, _mode("auto"))
         opts = ScanOptions(
             source_dir=tree.source,
@@ -119,7 +119,7 @@ class TestTheScannedTreeCannotSkipIt:
 class TestAnOperatorSourceDoesNotSkipItEither:
     def test_the_cli_flag(self, tree, capsys):
         # `--sandbox off` reaches the scan as this override.
-        _write(tree.source / ".ash" / ".ash.yaml", _mode("auto"))
+        _write(tree.source / ".ash.yaml", _mode("auto"))
         _write(tree.operator, _mode("auto"))
         opts = ScanOptions(
             source_dir=tree.source,
@@ -161,7 +161,7 @@ class TestWorkspaceMode:
         """Two projects; ``web`` has its own config, recorded as the resolver would."""
         from automated_security_helper.workspace.plan import ProjectPlan, WorkspacePlan
 
-        web_config = _write(root / "web" / ".ash" / ".ash.yaml", _mode(web_mode))
+        web_config = _write(root / "web" / ".ash.yaml", _mode(web_mode))
         projects = []
         for key in ("api", "web"):
             (root / key).mkdir(exist_ok=True)

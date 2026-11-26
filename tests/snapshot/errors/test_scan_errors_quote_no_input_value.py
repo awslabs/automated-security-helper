@@ -88,7 +88,7 @@ def _workspace(root: Path, *, project_config: bool) -> Path:
     project = root / "api"
     _write(project / "app.py", "print('hello')\n")
     if project_config:
-        _write(project / ".ash" / ".ash.yaml", BAD)
+        _write(project / ".ash.yaml", BAD)
     return _write(
         root / "demo.code-workspace", json.dumps({"folders": [{"path": "api"}]})
     )
@@ -141,7 +141,7 @@ def test_an_invalid_config_file(run_cli, in_tmp, config):
 @pytest.mark.parametrize("config", REFUSED_FIELDS.values(), ids=REFUSED_FIELDS)
 def test_an_invalid_repository_config(run_cli, in_tmp, config):
     _write(in_tmp / "src" / "app.py", "print('hello')\n")
-    _write(in_tmp / "src" / ".ash" / ".ash.yaml", config)
+    _write(in_tmp / "src" / ".ash.yaml", config)
     seen = run_cli([*SCAN, "--source-dir", "src", "--output-dir", "out"])
     _assert_no_canary(seen, in_tmp)
 
@@ -174,7 +174,7 @@ def test_an_env_read_option_key_of_a_loaded_plugin(run_cli, in_tmp):
     `${ASH_PROBE_VALUE}: true` under trivy-repo's options."""
     _write(in_tmp / "src" / "app.py", "print('hello')\n")
     _write(
-        in_tmp / "src" / ".ash" / ".ash.yaml",
+        in_tmp / "src" / ".ash.yaml",
         "project_name: canary\n"
         "ash_plugin_modules:\n"
         "  - automated_security_helper.plugin_modules.ash_trivy_plugins\n"

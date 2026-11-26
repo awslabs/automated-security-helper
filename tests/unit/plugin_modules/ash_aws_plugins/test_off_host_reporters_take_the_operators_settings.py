@@ -6,7 +6,7 @@ A reporter that sends findings off the host (``sends_off_host``: the four AWS
 reporters, or any plugin's) does it with the host's credentials. Whether it runs,
 and where it sends (a bucket, a log group, a model, a Region, a profile), must not
 be read from the resolved configuration whatever had set it: a repository's own
-``.ash/.ash.yaml`` naming ``ash_aws_plugins`` and setting ``s3: {enabled: true,
+``.ash.yaml`` naming ``ash_aws_plugins`` and setting ``s3: {enabled: true,
 bucket_name: repo-chosen-bucket}`` would make a scan of it call STS and HeadBucket
 and put the findings in that bucket, and a config an MCP client uploaded the same.
 
@@ -181,8 +181,7 @@ def _source_tree(root: Path, in_tree_config: str = "") -> Path:
     source.mkdir(parents=True)
     (source / "app.py").write_text("value = 1\n", encoding="utf-8")
     if in_tree_config:
-        (source / ".ash").mkdir()
-        (source / ".ash" / ".ash.yaml").write_text(in_tree_config, encoding="utf-8")
+        (source / ".ash.yaml").write_text(in_tree_config, encoding="utf-8")
     return source
 
 
@@ -316,7 +315,7 @@ def _stored_results(output: Path) -> None:
 
 
 def _report_s3_in_the_checkout(tmp_path: Path, endpoint: str, overrides: List[str]):
-    """`ash report --format s3 --config .ash/.ash.yaml`, run in the checkout,
+    """`ash report --format s3 --config .ash.yaml`, run in the checkout,
     where that file turns S3 on and aims it at the repository's bucket."""
     source = _source_tree(tmp_path, _repository_enables("s3"))
     output = tmp_path / "out"
@@ -331,7 +330,7 @@ def _report_s3_in_the_checkout(tmp_path: Path, endpoint: str, overrides: List[st
         "--output-dir",
         str(output),
         "--config",
-        str(source / ".ash" / ".ash.yaml"),
+        str(source / ".ash.yaml"),
         "--no-color",
     ]
     for override in overrides:
@@ -712,8 +711,7 @@ def _results_the_reporter_imports_and_archives(
     detect_secrets = results["scanner_results"]["detect-secrets"]
     assert detect_secrets["status"] in ("PASSED", "FAILED"), detect_secrets
     # The decoy goes in after the scan, so the scan itself had nothing to send.
-    (source / ".ash").mkdir()
-    (source / ".ash" / ".ash.yaml").write_text(decoy, encoding="utf-8")
+    (source / ".ash.yaml").write_text(decoy, encoding="utf-8")
     return source
 
 
@@ -786,7 +784,7 @@ def _report_security_hub(tmp_path, endpoint, source, format_spelling, overrides)
         "--output-dir",
         str(tmp_path / "out"),
         "--config",
-        str(source / ".ash" / ".ash.yaml"),
+        str(source / ".ash.yaml"),
         "--no-color",
     ]
     for override in overrides:

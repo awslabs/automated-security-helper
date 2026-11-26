@@ -20,18 +20,24 @@ What this checks
   B607 for a product file.
 * The B404 entries are one per file, each pinned to a single line that is that file's
   ``subprocess`` import.
-* The set of product files with an ``import subprocess`` statement that carries no
-  ``nosec`` comment is exactly the set of files with a B404 entry, so a sixth
-  importing file fails here until it is pinned.
+* The set of ``import subprocess`` statements that no ``nosec`` comment silences for
+  B404 is exactly the set of lines the B404 entries pin, line for line, so a sixth
+  importing file, or a second import in a pinned file, fails here until it is pinned.
+  A ``nosec`` that lists other rule ids (``# nosec B603``) does not silence B404, as
+  bandit reads it.
 * Nothing under the product calls the standard ``subprocess`` module's process
-  functions without a ``nosec`` comment, which is why no B603 or B607 entry exists.
+  functions without a ``nosec`` comment that silences B603, which is why no B603 or
+  B607 entry exists. Only a call spelled ``subprocess.<function>(...)`` in a module
+  that does a plain ``import subprocess`` is read; an aliased or from-imported call is
+  left to the self-scan itself.
 * The two ``nosec`` comments in ``ferret_scanner.py`` that replaced its pinned entries
   are still on the import and on the call.
 """
 
 import ast
+import re
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Set, Tuple
 
 import pytest
 import yaml
@@ -57,13 +63,29 @@ PROCESS_FUNCTIONS = frozenset(
 )
 
 
-def _span_has_nosec(lines: List[str], first: int, last: int) -> bool:
-    """Whether a ``nosec`` comment sits on any line of a statement, as bandit reads it."""
-    return any("nosec" in line for line in lines[first - 1 : last])
+_NOSEC = re.compile(r"#\s*nosec\b:?(?P<rest>[^#\n]*)")
+_RULE_ID = re.compile(r"\bB\d{3}\b")
+
+
+def _span_silences(lines: List[str], first: int, last: int, rule: str) -> bool:
+    """Whether a ``nosec`` comment on any line of a statement silences ``rule``.
+
+    Bandit reads the rule ids after ``nosec``: with none listed the comment silences
+    every rule on the statement, and with some listed it silences only those. So
+    ``# nosec B603`` leaves the B404 on an ``import subprocess`` reported. A comment
+    that gives its reason in words and lists no id is read as listing none.
+    """
+    for line in lines[first - 1 : last]:
+        found = _NOSEC.search(line)
+        if found:
+            listed = _RULE_ID.findall(found.group("rest"))
+            if not listed or rule in listed:
+                return True
+    return False
 
 
 def subprocess_imports(source: str) -> List[Tuple[int, bool]]:
-    """Each ``subprocess`` import statement as (first line, carries a nosec comment)."""
+    """Each ``subprocess`` import statement as (first line, silences B404)."""
     lines = source.splitlines()
     found = []
     for node in ast.walk(ast.parse(source)):
@@ -77,14 +99,26 @@ def subprocess_imports(source: str) -> List[Tuple[int, bool]]:
             found.append(
                 (
                     node.lineno,
-                    _span_has_nosec(lines, node.lineno, node.end_lineno or node.lineno),
+                    _span_silences(
+                        lines, node.lineno, node.end_lineno or node.lineno, "B404"
+                    ),
                 )
             )
     return sorted(found)
 
 
+def unmarked_import_lines(sources: List[Tuple[str, str]]) -> Set[Tuple[str, int]]:
+    """Each (path, first line) of a ``subprocess`` import no nosec comment silences."""
+    return {
+        (path, line)
+        for path, source in sources
+        for line, silenced in subprocess_imports(source)
+        if not silenced
+    }
+
+
 def unmarked_process_calls(source: str) -> List[int]:
-    """Lines of calls to the stdlib module's process functions with no nosec comment.
+    """Lines of calls to the stdlib module's process functions B603 is not silenced on.
 
     Only a module that does ``import subprocess`` itself is read: a file that binds
     another object to the name ``subprocess`` is not calling the standard module.
@@ -106,7 +140,9 @@ def unmarked_process_calls(source: str) -> List[int]:
             and isinstance(node.func.value, ast.Name)
             and node.func.value.id == "subprocess"
             and node.func.attr in PROCESS_FUNCTIONS
-            and not _span_has_nosec(lines, node.lineno, node.end_lineno or node.lineno)
+            and not _span_silences(
+                lines, node.lineno, node.end_lineno or node.lineno, "B603"
+            )
         ):
             found.append(node.lineno)
     return sorted(found)
@@ -176,13 +212,9 @@ def test_each_b404_pin_names_the_line_that_imports_subprocess(
     )
 
 
-def test_the_files_that_import_subprocess_are_the_files_pinned() -> None:
-    importing = {
-        path
-        for path, source in _product_sources()
-        if any(not nosec for _, nosec in subprocess_imports(source))
-    }
-    assert importing == {e["path"] for e in _b404_pins()}
+def test_the_subprocess_imports_no_nosec_silences_are_the_lines_pinned() -> None:
+    importing = unmarked_import_lines(_product_sources())
+    assert importing == {(e["path"], e["line_start"]) for e in _b404_pins()}
 
 
 def test_the_product_calls_no_subprocess_process_function_without_a_nosec_comment() -> (
@@ -215,6 +247,11 @@ def test_the_ferret_scanner_keeps_the_nosec_comments_that_stand_for_its_old_pins
     [
         ("import subprocess\n", [(1, False)]),
         ("import os, subprocess  # nosec B404\n", [(1, True)]),
+        ("import subprocess  # nosec\n", [(1, True)]),
+        ("import subprocess  # nosec B404, B603\n", [(1, True)]),
+        ("import subprocess  # nosec B603 B404 - why\n", [(1, True)]),
+        ("import subprocess  # nosec B603\n", [(1, False)]),
+        ("import subprocess  # nosec B603 B607\n", [(1, False)]),
         ("from subprocess import (\n    A,\n)  # nosec B404\n", [(1, True)]),
         ("from subprocess import SubprocessError\n", [(1, False)]),
         ("def f():\n    import subprocess\n", [(2, False)]),
@@ -233,6 +270,9 @@ def test_the_import_reader_finds_a_subprocess_import_and_its_nosec(
     [
         ("import subprocess\nsubprocess.run(['a'])\n", [2]),
         ("import subprocess\nsubprocess.run(\n    ['a'],\n)  # nosec B603\n", []),
+        ("import subprocess\nsubprocess.run(['a'])  # nosec\n", []),
+        ("import subprocess\nsubprocess.run(['a'])  # nosec B404\n", [2]),
+        ("import subprocess\nsubprocess.run(['a'])  # nosec B603 B607\n", []),
         ("import subprocess\nsubprocess.DEVNULL\n", []),
         ("from x import y as subprocess\nsubprocess.run(['a'])\n", []),
         ("import subprocess\nsubprocess.Popen(['a'])\n", [2]),
@@ -242,3 +282,24 @@ def test_the_call_reader_finds_a_process_call_with_no_nosec(
     source: str, expected: List[int]
 ) -> None:
     assert unmarked_process_calls(source) == expected
+
+
+def test_a_second_unmarked_import_in_a_file_with_a_pinned_import_is_found() -> None:
+    source = (
+        "import subprocess\n"
+        "\n"
+        "\n"
+        "def later():\n"
+        "    import subprocess\n"
+        "    return subprocess\n"
+    )
+    assert unmarked_import_lines([("a.py", source)]) == {("a.py", 1), ("a.py", 5)}
+
+
+def test_an_import_that_silences_another_rule_is_still_an_unmarked_import() -> None:
+    sources = [
+        ("a.py", "import subprocess  # nosec B603\n"),
+        ("b.py", "import subprocess  # nosec B404\n"),
+        ("c.py", "import os\n"),
+    ]
+    assert unmarked_import_lines(sources) == {("a.py", 1)}

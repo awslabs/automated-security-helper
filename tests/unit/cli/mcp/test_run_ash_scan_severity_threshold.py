@@ -94,8 +94,7 @@ def _project(tmp_path: Path, configured: str | None = None) -> Path:
     project.mkdir(parents=True)
     (project / "app.py").write_text("x = 1\n", encoding="utf-8")
     if configured is not None:
-        (project / ".ash").mkdir()
-        (project / ".ash" / ".ash.yaml").write_text(
+        (project / ".ash.yaml").write_text(
             "project_name: project\n"
             "global_settings:\n"
             f"  severity_threshold: {configured}\n",
@@ -224,8 +223,7 @@ def _project_with_scanner_threshold(tmp_path: Path, threshold: str) -> Path:
     project = tmp_path / "allowed" / "project"
     project.mkdir(parents=True)
     (project / "app.py").write_text("x = 1\n", encoding="utf-8")
-    (project / ".ash").mkdir()
-    (project / ".ash" / ".ash.yaml").write_text(
+    (project / ".ash.yaml").write_text(
         "project_name: project\n"
         "scanners:\n"
         "  bandit:\n"

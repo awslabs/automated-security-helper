@@ -42,7 +42,10 @@ from automated_security_helper.base.options import (
     ConverterOptionsBase,
     tool_version_constraint,
 )
-from automated_security_helper.base.uv_tool_mixin import deferred_tool_version_probes
+from automated_security_helper.base.uv_tool_mixin import (
+    _tool_name,
+    deferred_tool_version_probes,
+)
 from automated_security_helper.plugins.decorators import ash_converter_plugin
 from automated_security_helper.utils.get_scan_set import (
     honors_ignore_files,
@@ -363,7 +366,7 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
         # might never need. The spec the probe resolves under is _uv_from_spec,
         # the requirement the check reads, so it reports the version that runs.
         with deferred_tool_version_probes():
-            self.tool_version = self._get_uv_tool_version(self._tool_command())
+            self.tool_version = self._get_uv_tool_version(_tool_name(self))
 
     def _probe_scope(self) -> ContextManager[Optional[SandboxUnavailable]]:
         """Sandbox this converter's probes, unless a caller already confined them.
@@ -536,7 +539,7 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
                         ),
                         extra=NO_MARKUP,
                     )
-                    self.tool_version = self._get_uv_tool_version(self._tool_command())
+                    self.tool_version = self._get_uv_tool_version(_tool_name(self))
                     self._nbconvert_route = "uv"
                     return True
                 return self._nbconvert_unavailable(found.reason, found.detail)
@@ -549,7 +552,7 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
             if installation_success:
                 ASH_LOGGER.debug(f"UV tool installation successful for {self.command}")
                 # Update tool version after successful installation
-                self.tool_version = self._get_uv_tool_version(self._tool_command())
+                self.tool_version = self._get_uv_tool_version(_tool_name(self))
                 self._nbconvert_route = "uv"
                 return True
             else:
@@ -646,7 +649,7 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
         requirement = self._shown_uv_from_spec()
         if executable is None:
             executable, refused = lookup_for_scan(
-                self._tool_command(), self.context.source_dir
+                _tool_name(self), self.context.source_dir
             )
             if executable is None:
                 reason = refused or (
@@ -745,7 +748,7 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
             # the command name, which uv refuses.
             requirement = self._uv_from_spec()
             result = uv_runner.run_tool(
-                tool_name=self._tool_command(),
+                tool_name=_tool_name(self),
                 package_name=requirement,
                 args=jupyter_args,
                 cwd=cwd,

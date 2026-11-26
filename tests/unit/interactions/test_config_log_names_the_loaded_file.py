@@ -70,15 +70,16 @@ def scan(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
 
 def test_a_discovered_config_is_named_once_it_has_loaded(tmp_path, scan):
-    (tmp_path / "src" / ".ash").mkdir()
-    (tmp_path / "src" / ".ash" / ".ash.yaml").write_text(
+    (tmp_path / "src" / ".ash.yaml").write_text(
         "project_name: discovered\n", encoding="utf-8"
     )
 
     result, record, _ = scan()
 
     assert result.exit_code == 0, result.output
-    assert record and all(".ash/.ash.yaml" in line for line in record), record
+    assert record and all(".ash.yaml" in line for line in record), record
+    # The canonical file at the scan root, not a legacy .ash/.ash.yaml.
+    assert not any("/.ash/.ash.yaml" in line for line in record), record
 
 
 def test_a_named_config_is_named_once_it_has_loaded(tmp_path, scan):
@@ -101,8 +102,7 @@ def test_a_named_config_that_does_not_exist_exits_3_and_is_not_named(scan):
 
 def test_the_line_goes_with_the_loader(tmp_path, scan, monkeypatch):
     """Break the loader, and the line goes: it reports what loaded, not what was found."""
-    (tmp_path / "src" / ".ash").mkdir()
-    (tmp_path / "src" / ".ash" / ".ash.yaml").write_text(
+    (tmp_path / "src" / ".ash.yaml").write_text(
         "project_name: discovered\n", encoding="utf-8"
     )
 
@@ -119,8 +119,7 @@ def test_the_line_goes_with_the_loader(tmp_path, scan, monkeypatch):
 
 def test_the_line_names_the_file_the_loader_read(tmp_path, scan, monkeypatch):
     """Point discovery elsewhere, and the line follows it."""
-    (tmp_path / "src" / ".ash").mkdir()
-    (tmp_path / "src" / ".ash" / ".ash.yaml").write_text(
+    (tmp_path / "src" / ".ash.yaml").write_text(
         "project_name: discovered\n", encoding="utf-8"
     )
     (tmp_path / "src" / ".ashrc.yaml").write_text(

@@ -129,9 +129,7 @@ class TestARealWorkspaceRunNamesAnEnvReadEntryMasked:
         workspace_root = tmp_path / "ws"
         (workspace_root / "api").mkdir(parents=True)
         (workspace_root / "api" / "app.py").write_text("x = 1\n", encoding="utf-8")
-        config_dir = workspace_root / "api" / ".ash"
-        config_dir.mkdir()
-        (config_dir / ".ash.yaml").write_text(
+        (workspace_root / "api" / ".ash.yaml").write_text(
             "project_name: api\n"
             "ash_plugin_modules:\n  - !ENV ${ASH_WS_CANARY}\n"
             "scanners:\n  bandit:\n    enabled: false\n",
@@ -202,9 +200,9 @@ class TestEveryProjectEngineNamesTheModuleByTheRunsMap:
             "literal": f"ash_plugin_modules:\n  - {package}\n",
         }
         for name, modules in entries.items():
-            (root / name / ".ash").mkdir(parents=True)
+            (root / name).mkdir(parents=True)
             (root / name / "app.py").write_text("x = 1\n", encoding="utf-8")
-            (root / name / ".ash" / ".ash.yaml").write_text(
+            (root / name / ".ash.yaml").write_text(
                 f"project_name: {name}\n{modules}{disabled}", encoding="utf-8"
             )
         order = ["envread", "literal"] if env_read_first else ["literal", "envread"]

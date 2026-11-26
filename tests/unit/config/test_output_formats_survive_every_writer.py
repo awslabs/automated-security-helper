@@ -100,8 +100,7 @@ def test_one_file_keeps_output_formats_through_every_writer(tmp_path):
         materialize_session_config,
     )
 
-    first = tmp_path / ".ash" / ".ash.yaml"
-    first.parent.mkdir()
+    first = tmp_path / ".ash.yaml"
     first.write_text(
         "project_name: p\n"
         f"output_formats: [{', '.join(NAMES)}]\n"

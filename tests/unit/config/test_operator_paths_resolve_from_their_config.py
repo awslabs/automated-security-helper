@@ -352,7 +352,7 @@ def test_a_workspace_projects_decoy_is_not_the_operators_file(tmp_path: Path) ->
     repo = _repo(tmp_path)
     _touch(repo / "bandit.yaml")
     _write(
-        repo / ".ash" / ".ash.yaml",
+        repo / ".ash.yaml",
         {"scanners": {"bandit": {"options": {"config_file": "bandit.yaml"}}}},
     )
     operator = _write(
@@ -362,7 +362,7 @@ def test_a_workspace_projects_decoy_is_not_the_operators_file(tmp_path: Path) ->
     wanted = _touch(operator.parent / "bandit.yaml")
 
     config = resolve_config(
-        config_path=repo / ".ash" / ".ash.yaml",
+        config_path=repo / ".ash.yaml",
         source_dir=repo,
         trusted_config_path=operator,
         overlay_config_path=operator,
@@ -490,7 +490,7 @@ def test_the_scanner_is_given_the_file_where_the_operator_set_it(
         workdir = tmp_path / "ci"
         wanted = _touch(workdir / "tools" / "named.cfg")
         monkeypatch.chdir(workdir)
-        _write(repo / ".ash" / ".ash.yaml", {"project_name": "scanned"})
+        _write(repo / ".ash.yaml", {"project_name": "scanned"})
         config = resolve_config(
             source_dir=repo,
             config_overrides=[path.option.override("tools/named.cfg")],
@@ -502,7 +502,7 @@ def test_the_scanner_is_given_the_file_where_the_operator_set_it(
         wanted = _touch(operator.parent / "tools" / "named.cfg")
         if how == "workspace":
             project = _write(
-                repo / ".ash" / ".ash.yaml", path.option.document("tools/named.cfg")
+                repo / ".ash.yaml", path.option.document("tools/named.cfg")
             )
             config = resolve_config(
                 config_path=project,
@@ -542,9 +542,7 @@ def test_a_config_in_the_tree_is_left_as_written_and_is_not_the_operators(
     """
     repo = _repo(tmp_path)
     _touch(repo / "tools" / "named.cfg")
-    project = _write(
-        repo / ".ash" / ".ash.yaml", path.option.document("tools/named.cfg")
-    )
+    project = _write(repo / ".ash.yaml", path.option.document("tools/named.cfg"))
     operator = None
     if operator_sets_it:
         operator = _write(

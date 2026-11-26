@@ -34,7 +34,7 @@ def _operators() -> AshConfig:
 
 def _confine(config: AshConfig, tmp_path: Path) -> None:
     confine_content_db_staleness(
-        config, _operators(), [], [tmp_path / "repo" / ".ash" / ".ash.yaml"]
+        config, _operators(), [], [tmp_path / "repo" / ".ash.yaml"]
     )
 
 

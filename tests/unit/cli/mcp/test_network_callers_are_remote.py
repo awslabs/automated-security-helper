@@ -57,7 +57,7 @@ def layout(tmp_path, monkeypatch) -> Dict[str, Path]:
     (other_output / "reports").mkdir(parents=True)
     ungranted_output = tmp_path / "ungranted" / ".ash" / "ash_output"
     (ungranted_output / "reports").mkdir(parents=True)
-    ungranted_config = tmp_path / "ungranted" / ".ash" / ".ash.yaml"
+    ungranted_config = tmp_path / "ungranted" / ".ash.yaml"
     ungranted_config.write_text("project_name: ungranted\n", encoding="utf-8")
     granted_output = tmp_path / "granted" / ".ash" / "ash_output"
     (granted_output / "reports").mkdir(parents=True)

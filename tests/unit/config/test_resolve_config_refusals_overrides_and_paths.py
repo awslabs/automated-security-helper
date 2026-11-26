@@ -350,7 +350,7 @@ def test_the_overlays_tool_path_is_the_operators_for_a_project_with_its_own_conf
 ):
     tool_path = _tool_path(tmp_path)
     project = _write(
-        tmp_path / "repo" / ".ash" / ".ash.yaml",
+        tmp_path / "repo" / ".ash.yaml",
         yaml.safe_dump({"project_name": "api"}),
     )
     operator = _write(
@@ -388,7 +388,7 @@ def test_the_trusted_bases_tool_path_is_the_operators_over_a_repository_file(
     )
     monkeypatch.setenv("ASH_CONFIG", str(operator))
     project = _write(
-        tmp_path / "repo" / ".ash" / ".ash.yaml",
+        tmp_path / "repo" / ".ash.yaml",
         yaml.safe_dump(
             {
                 "project_name": "api",

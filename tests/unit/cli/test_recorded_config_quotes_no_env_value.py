@@ -83,9 +83,9 @@ def runs(tmp_path_factory: pytest.TempPathFactory):
     from automated_security_helper.utils import log, uv_tool_runner
 
     root = tmp_path_factory.mktemp("recorded")
-    (root / "src" / ".ash").mkdir(parents=True)
+    (root / "src").mkdir(parents=True)
     (root / "src" / "app.py").write_text("print('hello')\n", encoding="utf-8")
-    (root / "src" / ".ash" / ".ash.yaml").write_text(CONFIG, encoding="utf-8")
+    (root / "src" / ".ash.yaml").write_text(CONFIG, encoding="utf-8")
     get_logger = log.get_logger
 
     def both(*args, **kwargs):

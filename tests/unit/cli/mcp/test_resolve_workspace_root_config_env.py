@@ -118,7 +118,7 @@ def errors(monkeypatch) -> List[BaseException]:
 
 
 def _root_config(scan_root: Path, text: str) -> Path:
-    path = scan_root / ".ash" / ".ash.yaml"
+    path = scan_root / ".ash.yaml"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
     return path
@@ -227,8 +227,7 @@ def test_planning_and_the_scan_refuse_a_root_config_linked_outside_the_grant(_se
     outside = _server["tmp"] / "outside" / "ash.yaml"
     outside.parent.mkdir()
     outside.write_text("workspace:\n  max_parallel_projects: 2\n", encoding="utf-8")
-    link = _server["scan_root"] / ".ash" / ".ash.yaml"
-    link.parent.mkdir()
+    link = _server["scan_root"] / ".ash.yaml"
     link.symlink_to(outside)
 
     planned = _resolve(_server["workspace_file"], SESSION)

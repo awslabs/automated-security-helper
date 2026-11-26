@@ -45,10 +45,7 @@ def _project(root: Path, relative: str, config: Dict[str, Any] | None = None) ->
     project = root / relative
     project.mkdir(parents=True, exist_ok=True)
     if config is not None:
-        (project / ".ash").mkdir(exist_ok=True)
-        (project / ".ash" / "ash.yaml").write_text(
-            yaml.safe_dump(config), encoding="utf-8"
-        )
+        (project / ".ash.yaml").write_text(yaml.safe_dump(config), encoding="utf-8")
     return project
 
 
@@ -161,9 +158,7 @@ def test_the_plan_takes_the_threshold_the_operator_sets(tmp_path):
 
     project = plan.active_projects[0]
     assert project.severity_threshold == "CRITICAL"
-    assert project.config_source == (
-        (root / "api" / ".ash" / "ash.yaml").resolve().as_posix()
-    )
+    assert project.config_source == (root / "api" / ".ash.yaml").resolve().as_posix()
     assert project.operator_config == operator.resolve().as_posix()
 
 

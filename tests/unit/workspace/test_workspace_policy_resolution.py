@@ -55,9 +55,7 @@ def _project(root, relative, threshold=None, disabled_scanners=None):
         for scanner in disabled_scanners:
             lines.append(f"  {scanner}:")
             lines.append("    enabled: false")
-    ash_dir = project / ".ash"
-    ash_dir.mkdir(exist_ok=True)
-    (ash_dir / "ash.yaml").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    (project / ".ash.yaml").write_text("\n".join(lines) + "\n", encoding="utf-8")
     return project
 
 
@@ -176,18 +174,17 @@ def test_an_explicit_policy_file_overrides_discovery(tmp_path):
 
 
 def test_a_workspace_root_that_is_also_a_project_keeps_its_config_separate(tmp_path):
-    """The root's .ash/ash.yaml is the root project's config, not workspace policy.
+    """The root's .ash.yaml is the root project's config, not workspace policy.
 
     Reading it as policy would apply one project's threshold to its siblings.
     Here the root project declares CRITICAL and the policy declares a MEDIUM
     ceiling, so mixing them up is visible in the sibling's effective threshold.
     """
     root_project = _project(tmp_path, "root-app", threshold="CRITICAL")
-    assert (root_project / ".ash" / "ash.yaml").exists()
+    assert (root_project / ".ash.yaml").exists()
     _project(tmp_path, "sibling", threshold="CRITICAL")
-    # The workspace root's own config, distinct from the policy beside it.
-    (tmp_path / ".ash").mkdir(exist_ok=True)
-    (tmp_path / ".ash" / "ash.yaml").write_text(
+    # The workspace root's own config, distinct from the policy in .ash/.
+    (tmp_path / ".ash.yaml").write_text(
         "global_settings:\n  severity_threshold: ALL\n", encoding="utf-8"
     )
     _policy_file(tmp_path, "workspace:\n  max_severity_threshold: MEDIUM\n")
@@ -207,7 +204,7 @@ def test_naming_a_project_config_as_the_policy_file_is_refused(tmp_path):
     workspace = _workspace(tmp_path, ["api"])
 
     with pytest.raises(WorkspaceDefinitionError) as excinfo:
-        resolve_workspace(workspace, workspace_config=project / ".ash" / "ash.yaml")
+        resolve_workspace(workspace, workspace_config=project / ".ash.yaml")
     assert "ash.yaml" in str(excinfo.value)
 
 

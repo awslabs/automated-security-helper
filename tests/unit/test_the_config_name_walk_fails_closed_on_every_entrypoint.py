@@ -817,12 +817,12 @@ def _env_layout(tmp_path: Path, discoverable: bool) -> Dict[str, Path]:
     (checkout / ".git").mkdir(parents=True)
     (checkout / ".git" / "HEAD").write_text("ref: refs/heads/scan\n", encoding="utf-8")
     source = checkout / "services" / "api"
-    (source / ".ash").mkdir(parents=True)
+    source.mkdir(parents=True)
     (checkout / "ci").mkdir()
     env_config = checkout / "ci" / "ash.yaml"
     env_config.write_text("project_name: ci\n", encoding="utf-8")
     if discoverable:
-        (source / ".ash" / ".ash.yaml").write_text(
+        (source / ".ash.yaml").write_text(
             "project_name: discovered\n", encoding="utf-8"
         )
     out = tmp_path / "out"

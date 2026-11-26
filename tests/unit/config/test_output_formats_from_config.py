@@ -49,7 +49,7 @@ pytestmark = pytest.mark.unit
 
 
 def _write_config(directory: Path, body: str) -> Path:
-    config_path = directory / ".ash" / ".ash.yaml"
+    config_path = directory / ".ash.yaml"
     config_path.parent.mkdir(parents=True, exist_ok=True)
     config_path.write_text(body, encoding="utf-8")
     return config_path
@@ -305,8 +305,7 @@ class TestTheConfigWritesBack:
             ]
 
     def test_save_round_trips(self, tmp_path):
-        config_path = tmp_path / ".ash" / ".ash.yaml"
-        config_path.parent.mkdir(parents=True)
+        config_path = tmp_path / ".ash.yaml"
 
         AshConfig.model_validate(self.CONFIG).save(config_path, as_written=False)
 

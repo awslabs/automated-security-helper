@@ -1126,7 +1126,7 @@ class TestConfigFileResolution:
 
         source = tmp_path / "src"
         mark_git_checkout(source)
-        repository = source / ".ash" / ".ash.yaml"
+        repository = source / ".ash.yaml"
         repository.parent.mkdir(parents=True, exist_ok=True)
         repository.write_text(
             "project_name: repository\nreporters:\n  AwsSecurityHub:\n"
@@ -1181,7 +1181,7 @@ class TestConfigFileResolution:
         monkeypatch.delenv("ASH_CONFIG", raising=False)
         source = tmp_path / "src"
         mark_git_checkout(source)
-        repository = source / ".ash" / ".ash.yaml"
+        repository = source / ".ash.yaml"
         repository.parent.mkdir(parents=True, exist_ok=True)
         repository.write_text(
             "project_name: repository\nreporters:\n  AwsSecurityHub:\n"

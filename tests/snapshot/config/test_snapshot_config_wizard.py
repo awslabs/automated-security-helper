@@ -89,8 +89,7 @@ def test_config_wizard_from_defaults(host, project_dir, monkeypatch, text_snapsh
 
 @pytest.mark.parametrize("host", CONFIG_HOSTS, ids=lambda h: h.id)
 def test_config_wizard_edits_existing(host, project_dir, monkeypatch, text_snapshot):
-    config = project_dir / ".ash" / ".ash.yaml"
-    config.parent.mkdir()
+    config = project_dir / ".ash.yaml"
     config.write_text(EXISTING_CONFIG, encoding="utf-8")
 
     with simulated_host(monkeypatch, host), displayed_cwd(monkeypatch):

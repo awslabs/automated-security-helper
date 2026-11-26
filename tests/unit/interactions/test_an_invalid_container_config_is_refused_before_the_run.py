@@ -2641,8 +2641,7 @@ def test_the_pre_run_gate_discovers_the_config_file_once(tmp_path, monkeypatch):
     question for."""
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     src = _a_source_with_no_config(tmp_path)
-    (src / ".ash").mkdir()
-    (src / ".ash" / ".ash.yaml").write_text("project_name: found\n", encoding="utf-8")
+    (src / ".ash.yaml").write_text("project_name: found\n", encoding="utf-8")
     discoveries: list[object] = []
     real = ras._discovered_config_path
 
@@ -2678,8 +2677,7 @@ def test_a_selection_of_no_file_is_not_a_request_to_discover_one(tmp_path, monke
     the gate never judged."""
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     src = _a_source_with_no_config(tmp_path)
-    (src / ".ash").mkdir()
-    (src / ".ash" / ".ash.yaml").write_text("project_name: found\n", encoding="utf-8")
+    (src / ".ash.yaml").write_text("project_name: found\n", encoding="utf-8")
     discoveries: list[int] = []
     real = ras._discovered_config_path
 
@@ -3087,8 +3085,8 @@ def test_a_discovered_config_nested_past_the_recursion_limit_is_refused(
     tmp_path, recording_runner, monkeypatch, capsys, mode
 ):
     """With no ``--config`` the scan reads the file the scanned repository
-    keeps at ``.ash/.ash.yaml``, which the repository controls."""
-    _nested_past_the_recursion_limit(tmp_path / "repo" / "app" / ".ash" / ".ash.yaml")
+    keeps at ``.ash.yaml``, which the repository controls."""
+    _nested_past_the_recursion_limit(tmp_path / "repo" / "app" / ".ash.yaml")
 
     code, shown, shell_entered, kept = _scan_through_the_gate(
         tmp_path, monkeypatch, capsys, mode, None
@@ -3311,7 +3309,7 @@ def test_a_workspace_plan_container_run_refuses_a_discovered_config_nested_too_d
 ):
     """With no ``--config`` the parse check reads the file discovery finds at
     the workspace root, which the scanned repository controls."""
-    _nested_past_the_recursion_limit(tmp_path / "ws" / ".ash" / ".ash.yaml")
+    _nested_past_the_recursion_limit(tmp_path / "ws" / ".ash.yaml")
 
     code, shown, kept = _workspace_container_scan(
         tmp_path, monkeypatch, capsys, build, None

@@ -648,7 +648,7 @@ def _layout(
     mark_git_checkout(repo)
     _write(repo / "a.py", "x = 1\n")
     _write(
-        repo / ".ash" / ".ash.yaml",
+        repo / ".ash.yaml",
         yaml.safe_dump({"sandbox": {"extra_read_paths": [REPOSITORY_GRANT]}}),
     )
     _write(repo / ".ash" / "base.yaml", "project_name: base\n")

@@ -5,8 +5,8 @@
 
 The facets register (automated_security_helper/base/scanner_facets.py) says,
 per scanner and facet, whether the native output maps (MAPPED), could map but
-is discarded today (DROPPED), or cannot be there (N/A). The conformance rows
-beside this module prove one cell at a time that a declaration is not a lie
+is discarded today (DROPPED), cannot be there (N/A), or has not been read from
+a real run (UNCONFIRMED). The conformance rows beside this module prove one cell at a time that a declaration is not a lie
 (``resource_id`` against the code and one fixture). This module adds the
 corpus-wide, column-level direction: it joins what each scanner DECLARES with
 what the committed fixtures OBSERVABLY carry in the flat row (the one place
@@ -25,6 +25,11 @@ disagreement:
   facet (decision G9: FAIL, not warn).
 - DROPPED, and the observed column is populated: the cell is out of date;
   redeclare it MAPPED.
+- UNCONFIRMED, and the observed column is empty or the scanner has no corpus:
+  a fixture owed, listed in the gate table and never failed. The owed set must
+  equal the register's UNCONFIRMED cells, excluded columns included.
+- UNCONFIRMED, and the observed column is populated: the cell is settled or
+  contaminated, so it FAILS; redeclare it with the evidence, or fix the adapter.
 
 Contract (the waiver rule, asserted by the test below): the register is the
 only place the truth lives. There is no suppression list, skip list or
@@ -78,6 +83,7 @@ from automated_security_helper.base.facet_conformance import (
 from automated_security_helper.base.scanner_facets import (
     FACET_NAMES,
     SCANNER_FACETS_ATTR,
+    FacetDecl,
     FacetState,
 )
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
@@ -205,10 +211,16 @@ CORPORA: Mapping[str, Optional[CorpusSpec]] = {
     "npm-audit": CorpusSpec("npmaudit", prep="npm-audit"),
     "opengrep": CorpusSpec("opengrep", sarif=("captured/*.sarif",)),
     "semgrep": CorpusSpec("semgrep", sarif=("captured/*.sarif",)),
-    # Authored in the shape `snyk code test --sarif` writes (see the README in
-    # the directory); a licensed capture committed under captured/ joins it.
+    # No corpus until a licensed `snyk code test --sarif` run is committed under
+    # captured/: the authored file beside it is written to match the adapter, so
+    # it is not read as evidence of the tool (see the README in the directory).
+    # The register's snyk-code cells are UNCONFIRMED for that reason. When a
+    # capture lands, point this row at "captured/*.sarif" with prep="snyk-code".
     "snyk-code": CorpusSpec(
-        "snyk", sarif=("authored/*.sarif", "captured/*.sarif"), prep="snyk-code"
+        "snyk",
+        missing="no snyk SARIF from a licensed run is committed; commit "
+        "`snyk code test --sarif` output under snyk/captured/ (the authored "
+        "shape under snyk/authored is not evidence of the tool)",
     ),
     "syft": CorpusSpec(
         "syft",
@@ -773,9 +785,12 @@ def test_discovery_does_not_depend_on_which_tier_declares_a_scanner() -> None:
         assert needle not in body, needle
 
 
-def test_the_scanners_read_from_captures_and_authored_shapes_are_observed() -> None:
-    """The scanners whose cells were redeclared unread are observed now."""
-    for name in ("snyk-code", "grype", "ferret-scan"):
+def test_the_scanners_read_from_captures_are_observed() -> None:
+    """The scanners whose cells were redeclared unread are observed now, over a
+    capture of the tool. snyk-code is not among them: its only committed SARIF is
+    authored, so it has no corpus and its cells stay unconfirmed."""
+    assert observed_frame("snyk-code", CORPORA["snyk-code"]) is None
+    for name in ("grype", "ferret-scan"):
         frame = observed_frame(name, CORPORA[name])
         assert frame is not None, name
         assert frame["rule_id"][1] > 0 and frame["rule_id"][0] == frame["rule_id"][1]
@@ -867,48 +882,97 @@ def test_planted_legitimate_cells_pass(
     assert judge("planted", "tags", state, observed).outcome == "ok"
 
 
-@pytest.mark.parametrize(
-    "observed", [(3, 4), (0, 4), None], ids=["populated", "empty", "no-corpus"]
-)
-def test_planted_an_unconfirmed_facet_is_owed_never_failed(
+@pytest.mark.parametrize("observed", [(0, 4), None], ids=["empty", "no-corpus"])
+def test_planted_an_unconfirmed_facet_over_no_observation_is_owed(
     observed: Optional[tuple[int, int]],
 ) -> None:
-    """UNCONFIRMED is neither contamination (a populated column does not fail
-    it, as it fails N/A) nor proof (an empty one does not pass it, as it passes
-    N/A): it is listed as a fixture owed whatever the corpus holds."""
+    """UNCONFIRMED over an empty or absent column is a fixture owed: nothing
+    has been read, so the cell is listed, never failed and never passed."""
     verdict = judge("planted", "rule_id", FacetState.UNCONFIRMED, observed)
     assert verdict.outcome == "owed", verdict.detail
     assert "fixture owed" in verdict.detail
-    # The same populated column fails an N/A declaration: the states differ.
-    if observed == (3, 4):
-        assert judge("planted", "rule_id", FacetState.NA, observed).outcome == "FAIL"
 
 
-def test_the_owed_fixtures_are_listed_by_the_gate_table() -> None:
-    owed = [v for v in verdict_rows() if v.outcome == "owed"]
-    assert owed, (
-        "no UNCONFIRMED cell is listed: the register has none, or the gate hides them"
+def test_planted_an_unconfirmed_facet_over_a_populated_column_fails() -> None:
+    """A populated column is a read: the cell is settled (redeclare it MAPPED)
+    or contaminated (fix the adapter). Leaving it UNCONFIRMED would let a value
+    reach the flat row from a committed fixture with no check."""
+    verdict = judge("planted", "rule_id", FacetState.UNCONFIRMED, (3, 4))
+    assert verdict.outcome == "FAIL", verdict.detail
+    assert "planted.rule_id declared unconfirmed" in verdict.detail
+    assert "settled or contaminated" in verdict.detail
+    assert "redeclare" in verdict.detail and "fix the adapter" in verdict.detail
+
+
+@pytest.mark.parametrize("facet", ["column", "remediation_text", "extras"])
+def test_planted_an_unconfirmed_facet_on_an_excluded_column_is_still_owed(
+    facet: str,
+) -> None:
+    """The excluded columns cannot be observed, so the owed list is the only
+    place an UNCONFIRMED cell on them is visible: it must not read "excluded"."""
+    verdict = judge("planted", facet, FacetState.UNCONFIRMED, None)
+    assert verdict.outcome == "owed", verdict.outcome
+    assert judge("planted", facet, FacetState.MAPPED, None).outcome == "excluded"
+
+
+def test_the_owed_fixtures_are_exactly_the_registers_unconfirmed_cells() -> None:
+    declared = {
+        (_name(cls), facet)
+        for cls in SCANNER_CLASSES
+        for facet in FACET_NAMES
+        if getattr(vars(cls).get(SCANNER_FACETS_ATTR), facet).state
+        is FacetState.UNCONFIRMED
+    }
+    assert declared, "the register declares no UNCONFIRMED cell: the control is dead"
+    owed = {(v.scanner, v.facet) for v in verdict_rows() if v.outcome == "owed"}
+    assert owed == declared, (
+        f"owed but not declared: {sorted(owed - declared)}; "
+        f"declared but not owed: {sorted(declared - owed)}"
     )
-    assert {v.state for v in owed} == {FacetState.UNCONFIRMED.value}
 
 
-def test_no_na_cell_is_the_unread_state_in_disguise() -> None:
-    """N/A means the tool cannot carry the facet. A cell whose reason says no run
-    was read, or begins UNCONFIRMED, is the unconfirmed state and is declared so."""
-    stretched = []
-    for cls in SCANNER_CLASSES:
-        facets = vars(cls).get(SCANNER_FACETS_ATTR)
-        for facet in FACET_NAMES:
-            cell = getattr(facets, facet)
-            reason = (cell.reason or "").lower()
-            if cell.state is FacetState.NA and (
-                reason.startswith("unconfirmed") or "output not read" in reason
-            ):
-                stretched.append(f"{_name(cls)}.{facet}")
+def test_no_cell_is_the_unread_state_in_disguise() -> None:
+    """Only UNCONFIRMED means nobody read a run. A MAPPED, DROPPED or N/A cell
+    whose reason says it is unconfirmed, or that no output was read, claims a
+    state the evidence does not back; it is declared UNCONFIRMED instead."""
+    cells = [
+        (f"{_name(cls)}.{facet}", getattr(vars(cls).get(SCANNER_FACETS_ATTR), facet))
+        for cls in SCANNER_CLASSES
+        for facet in FACET_NAMES
+    ]
+    stretched = _unread_in_disguise(cells)
     assert not stretched, (
-        "declared n/a but worded as unread: declare these UNCONFIRMED -- "
-        + ", ".join(stretched)
+        "declared a settled state but worded as unread: redeclare these "
+        "UNCONFIRMED, or settle them with the evidence -- " + ", ".join(stretched)
     )
+
+
+def _unread_in_disguise(cells: list[tuple[str, FacetDecl]]) -> list[str]:
+    """The cells that are not UNCONFIRMED yet say, anywhere in the reason, that
+    nobody read a run (case-insensitive), in every settled state."""
+    found = []
+    for label, cell in cells:
+        reason = (cell.reason or "").lower()
+        if cell.state is not FacetState.UNCONFIRMED and (
+            "unconfirmed" in reason or "output not read" in reason
+        ):
+            found.append(f"{label} ({cell.state.value})")
+    return found
+
+
+def test_the_disguise_check_flags_a_planted_cell_of_every_state() -> None:
+    """Must-flag and must-not-flag controls through the real check."""
+    worded = "mid-sentence, Unconfirmed against a real tool run"
+    planted = [
+        (f"p.{state.value}", FacetDecl(state=state, native_field="f", reason=worded))
+        for state in (FacetState.MAPPED, FacetState.DROPPED, FacetState.NA)
+    ]
+    assert len(_unread_in_disguise(planted)) == 3
+    honest = [
+        ("p.unconfirmed", FacetDecl(state=FacetState.UNCONFIRMED, reason=worded)),
+        ("p.na", FacetDecl(state=FacetState.NA, reason="the tool cannot carry it")),
+    ]
+    assert _unread_in_disguise(honest) == []
 
 
 def test_planted_an_excluded_facet_is_never_judged() -> None:

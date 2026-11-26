@@ -35,8 +35,7 @@ def _no_operator_config(monkeypatch: pytest.MonkeyPatch) -> None:
 def _resolution(tmp_path: Path, repo_text: str, operator_text: str, override: str):
     checkout = tmp_path / "checkout"
     mark_git_checkout(checkout)
-    (checkout / ".ash").mkdir()
-    (checkout / ".ash" / ".ash.yaml").write_text(repo_text, encoding="utf-8")
+    (checkout / ".ash.yaml").write_text(repo_text, encoding="utf-8")
     operator = tmp_path / "operator.yaml"
     operator.write_text(operator_text, encoding="utf-8")
     return resolve_config(
