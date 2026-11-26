@@ -303,10 +303,13 @@ def trend_command(
         # newest record instead, and the cut is reported.
         runs, cut = longest_compatible_suffix(runs)
         if len(runs) < 2 and cut:
+            # Raw values: _refuse shows the whole reason as one
+            # shown_on_one_line call, so escaping the cut here would show
+            # its escapes a second time.
             _refuse(
                 f"only {len(runs)} of the recorded runs form one series ending "
                 f"at the newest record ({len(cut)} left out: "
-                f"{shown_on_one_line(', '.join(cut))})"
+                f"{', '.join(cut)})"
             )
         if len(runs) < 2:
             # Nothing was cut: one readable record is simply not a series.

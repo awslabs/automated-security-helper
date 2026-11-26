@@ -11,6 +11,7 @@ of files whose bytes changed, and ``ash suppress verify`` exits non-zero when
 the lock is out of date, for CI.
 """
 
+import shlex
 from pathlib import Path
 from typing import Annotated, Any, Dict, List, NoReturn, Optional
 
@@ -26,6 +27,7 @@ from automated_security_helper.utils.ash_lock import (
     LockScope,
     add_command_for,
     lock_key,
+    scope_is_recorded,
 )
 from automated_security_helper.utils.console import echo
 from automated_security_helper.utils.log import show_debug_locals
@@ -84,13 +86,21 @@ def _note_legacy(lock: AshLock) -> None:
 
 
 def _key_for(root: Path, path: str) -> str:
-    """The lock key of ``path``, read relative to the source directory."""
+    """The lock key of ``path``: resolved, then relative to the source directory.
+
+    A relative path is resolved too, exactly as the scan's resolver builds the
+    key it looks up (``SymbolResolver._locked_and_unchanged``): with
+    ``link -> src``, an entry written under ``link/app.py`` would never be read
+    by a scan looking up ``src/app.py``, and the suppression would sit inert
+    with ``add`` and ``verify`` both green.
+    """
     candidate = Path(path)
-    if candidate.is_absolute():
-        try:
-            candidate = candidate.resolve().relative_to(root)
-        except (OSError, ValueError):
-            _fail(f"{path} is not inside the source directory {root.as_posix()}")
+    if not candidate.is_absolute():
+        candidate = root / candidate
+    try:
+        candidate = candidate.resolve().relative_to(root)
+    except (OSError, ValueError):
+        _fail(f"{path} is not inside the source directory {root.as_posix()}")
     key = lock_key(candidate.as_posix())
     if key is None:
         _fail(f"{path} is not a path inside the source directory")
@@ -191,7 +201,10 @@ def add(
         ash suppress add B602 --symbol Handler.run --file src/app.py \\
             --reason "The command is a constant."
     """
-    if not rule_id.strip():
+    # Stored stripped: rule ids match case-insensitively, so the duplicate
+    # check below must not read ``b602`` and ``B602`` as two entries.
+    rule_id = rule_id.strip()
+    if not rule_id:
         _fail("the rule id is blank")
     if not reason.strip():
         _fail("--reason is blank; say why the finding is safe to suppress")
@@ -223,7 +236,8 @@ def add(
         _fail(str(e))
 
     already = any(
-        e.get("rule_id") == rule_id
+        isinstance(e.get("rule_id"), str)
+        and e["rule_id"].strip().casefold() == rule_id.casefold()
         and e.get("symbol") == symbol
         and isinstance(e.get("path"), str)
         and lock_key(e["path"]) == key
@@ -270,9 +284,25 @@ def refresh(
     paths: Annotated[
         Optional[List[str]],
         typer.Argument(
-            help="Locked files to re-hash. Every locked file when none is named.",
+            help="Locked files to re-hash. Pass --all for every locked file.",
         ),
     ] = None,
+    all_files: Annotated[
+        bool,
+        typer.Option(
+            "--all",
+            help="Re-hash every locked file. A refresh re-approves each changed "
+            "file it touches, so the whole-lock run is asked for explicitly.",
+        ),
+    ] = False,
+    drop_missing: Annotated[
+        bool,
+        typer.Option(
+            "--drop-missing",
+            help="Remove the entry of a named file that no longer exists, "
+            "instead of leaving it and exiting 1.",
+        ),
+    ] = False,
     source_dir: Annotated[
         Optional[str],
         typer.Option("--source-dir", help=_SOURCE_DIR_HELP),
@@ -282,7 +312,8 @@ def refresh(
 
     Run it after reading what changed in a file and confirming its suppressions
     still hold. It prints each file whose hash changed. A locked file that no
-    longer exists is reported and left as it was; exit code 1 then.
+    longer exists is reported and left as it was (exit code 1), unless
+    --drop-missing removes its dead entry.
     """
     root = _root(source_dir)
     lock = _load_lock(root)
@@ -294,30 +325,50 @@ def refresh(
                 f"{', '.join(unknown)} has no entry in {LOCK_RELATIVE_PATH}; "
                 "create one with `ash suppress add`"
             )
-    else:
+    elif all_files:
         keys = sorted(lock.entries)
+    else:
+        # Not a default: re-hashing every locked file re-approves every
+        # changed one in one step, without naming what is approved, which is
+        # the failure the lock exists to stop. The whole-lock run is spelled
+        # out.
+        _fail(
+            "name the locked files to re-hash, or pass --all to re-hash "
+            "every locked file after reviewing every change"
+        )
     changed = 0
     missing = 0
+    dropped = 0
     for key in keys:
         old, new = lock.refresh(key)
         if new is None:
-            missing += 1
-            echo(
-                shown_on_one_line(f"missing:   {key} (cannot be read; left as it was)")
-            )
+            if drop_missing:
+                lock.drop(key)
+                dropped += 1
+                echo(shown_on_one_line(f"dropped:   {key} (no longer exists)"))
+            else:
+                missing += 1
+                echo(
+                    shown_on_one_line(
+                        f"missing:   {key} (cannot be read; left as it was; "
+                        "drop the dead entry with --drop-missing)"
+                    )
+                )
         elif old != new:
             changed += 1
             echo(shown_on_one_line(f"refreshed: {key} {old[:12]} -> {new[:12]}"))
         else:
             echo(shown_on_one_line(f"unchanged: {key}"))
-    if changed or lock.from_legacy:
+    if changed or dropped or lock.from_legacy:
         try:
             lock.save()
         except OSError as e:
             _fail(f"the lock was not written ({type(e).__name__})")
         _note_legacy(lock)
+    unchanged = len(keys) - changed - missing - dropped
     echo(
-        f"{changed} refreshed, {len(keys) - changed - missing} unchanged, {missing} missing"
+        f"{changed} refreshed, {unchanged} unchanged, {missing} missing, "
+        f"{dropped} dropped"
     )
     if missing:
         raise typer.Exit(1)
@@ -343,22 +394,40 @@ def verify(
     """Check the lock against the tree. Exits 1 when anything is out of date.
 
     Lists every locked file whose bytes changed or that is gone, and every
-    symbol suppression in the named configs whose file has no lock entry. Exit
-    code 0 means a scan applies every symbol suppression.
+    symbol suppression in the checked configs that the lock does not record
+    (no entry for its file, or no recorded (rule_id, symbol) scope). It checks
+    the named --config files, or the one config file a scan of the source
+    directory discovers, and prints which; suppressions an `extends` base
+    contributes are not read, so exit code 0 covers the checked files, not
+    every config a scan could merge.
     """
     root = _root(source_dir)
     lock = _load_lock(root)
     problems: List[str] = []
     for key, state in lock.problems():
         scopes = ", ".join(s.describe() for s in sorted(lock.entries[key].scopes))
-        label = "stale" if state == "stale" else "missing"
-        problems.append(
-            f"{label}: {key} ({scopes or 'no scopes'}); after review run "
-            f"`{REFRESH_COMMAND} {key}`"
-        )
+        if state == "missing":
+            problems.append(
+                f"missing: {key} ({scopes or 'no scopes'}); the file is gone, so "
+                f"drop the dead entry with "
+                f"`{REFRESH_COMMAND} --drop-missing {shlex.quote(key)}`"
+            )
+        else:
+            problems.append(
+                f"stale: {key} ({scopes or 'no scopes'}); after review run "
+                f"`{REFRESH_COMMAND} {shlex.quote(key)}`"
+            )
     config_paths = (
         [_config_file(c, root) for c in config] if config else _default_configs(root)
     )
+    if config_paths:
+        checked = ", ".join(p.as_posix() for p in config_paths)
+        echo(shown_on_one_line(f"checking suppressions in: {checked}"))
+    else:
+        echo(
+            "checking no config file: none was named and the source directory "
+            "has no YAML config, so only the lock itself is checked"
+        )
     for config_path in config_paths:
         for entry in _suppressions_in(config_path):
             symbol = entry.get("symbol")
@@ -366,7 +435,10 @@ def verify(
             if not symbol or not isinstance(path, str):
                 continue
             key = lock_key(path)
-            if key is None or key not in lock.entries:
+            locked = lock.entries.get(key) if key is not None else None
+            if locked is None or not scope_is_recorded(
+                locked, entry.get("rule_id"), str(symbol)
+            ):
                 problems.append(
                     f"unlocked: {path} in {config_path.name}; run "
                     f"`{add_command_for(entry.get('rule_id'), str(symbol), path)}`"

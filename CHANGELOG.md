@@ -157,17 +157,24 @@
 ### Features
 
 - **Symbol suppressions are bound to their file's content hash in `.ash.lock`.**
-  A symbol-scoped suppression whose file has no lock entry is refused when the config is
-  validated (`ash scan`, `ash config validate`), with a message that names the command to
-  run. When a locked file's bytes change, its symbol suppressions stop applying, their
-  findings return, and the scan prints one notice naming the file, the suppressions and
-  `ash suppress refresh`. The new `ash suppress add`, `refresh` and `verify` commands
-  write the suppression and its lock entry together, record a reviewed change, and fail
-  CI when the lock is out of date. Line-range suppressions are unchanged. This
-  repository's own symbol suppressions are locked in the same change. The lock is the
-  root dotfile `.ash.lock`; a lock still at `.ash/ash.lock` is read with a deprecation
-  warning (deprecated in v3.9, removed in v4.0) and rewritten to `.ash.lock` by
-  `ash suppress add` or `refresh`. See
+  A symbol-scoped suppression the lock does not record is refused when the config is
+  validated (`ash scan`, a workspace scan handing the orchestrator a resolved config,
+  `ash config validate`, and the MCP `validate_config`, which used to skip the check
+  without a source directory), with a message that names the command to run. The lock
+  records the reviewed `(rule_id, symbol)` scopes beside each file's hash and both are
+  required: locking a file for one rule does not approve a suppression added to the
+  same file later. When a locked file's bytes change, its symbol suppressions stop
+  applying, their findings return, and the scan prints one notice naming the file, the
+  suppressions and `ash suppress refresh`. The new `ash suppress add`, `refresh` and
+  `verify` commands write the suppression and its lock entry together, record a
+  reviewed change, and fail CI when the lock is out of date; `add` resolves `--file`
+  to the key the scan looks up (a path through a symlink locks the real file), a
+  whole-lock refresh is the explicit `refresh --all`, and `refresh --drop-missing`
+  removes the entry of a locked file that is gone. Line-range suppressions are
+  unchanged. This repository's own symbol suppressions are locked in the same change.
+  The lock is the root dotfile `.ash.lock`; a lock still at `.ash/ash.lock` is read
+  with a deprecation warning (deprecated in v3.9, removed in v4.0) that advises
+  `git mv`. See
   [Lock a symbol suppression to its file](docs/content/how-to/suppress-findings.md#lock).
 - **ASFF findings of one secret carry one `ash/correlationId`.** ASH does not
   deduplicate, so a secret that two scanners find is two findings with two Ids in
