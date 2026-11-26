@@ -727,7 +727,7 @@ ENV _ASH_EXEC_MODE="local"
 # (GuardDog's uv tool among them) are installed and pinned too, and the image carries
 # them; a scan in the image still loads a module only when it is listed. trivy-repo,
 # snyk and ferret are not in the list: their tools come another way.
-ARG ASH_ALPHA_PLUGIN_MODULES="automated_security_helper.plugin_modules.ash_betterleaks_plugins,automated_security_helper.plugin_modules.ash_ggshield_plugins,automated_security_helper.plugin_modules.ash_gosec_plugins,automated_security_helper.plugin_modules.ash_guarddog_plugins,automated_security_helper.plugin_modules.ash_hadolint_plugins,automated_security_helper.plugin_modules.ash_kingfisher_plugins,automated_security_helper.plugin_modules.ash_polaris_plugins"
+ARG ASH_ALPHA_PLUGIN_MODULES="automated_security_helper.plugin_modules.ash_betterleaks_plugins,automated_security_helper.plugin_modules.ash_ggshield_plugins,automated_security_helper.plugin_modules.ash_gosec_plugins,automated_security_helper.plugin_modules.ash_guarddog_plugins,automated_security_helper.plugin_modules.ash_hadolint_plugins,automated_security_helper.plugin_modules.ash_kingfisher_plugins,automated_security_helper.plugin_modules.ash_polaris_plugins,automated_security_helper.plugin_modules.ash_yara_x_plugins"
 # The pre-rename name of the build argument, honored until ASH 3.9.0: a value given
 # for it, an explicitly empty one included, wins over ASH_ALPHA_PLUGIN_MODULES below.
 # The default is a sentinel because an empty-string default cannot tell "not given"
@@ -753,7 +753,7 @@ ENV PATH="${ASH_BIN_PATH}:$PATH"
 # The Python tools' license files, read from each installed wheel's dist-info and,
 # for semgrep, whose wheel carries none, fetched from its repository at the pinned
 # commit and checked against their SHA256.
-RUN with-retry 'install-pinned-tool --licenses-only bandit cfn-lint checkov ggshield guarddog polaris semgrep zizmor'
+RUN with-retry 'install-pinned-tool --licenses-only bandit cfn-lint checkov ggshield guarddog polaris semgrep yara-x zizmor'
 
 # zizmor (builtin scanner) is installed by the line above through `uv tool install`
 # within ZIZMOR_DEFAULT_VERSION_CONSTRAINT; this fails the build if it was not.
@@ -786,6 +786,13 @@ RUN ggshield --version
 # flag; `polaris version` is the version query.
 #
 RUN polaris version
+
+#
+# YARA-X (alpha scanner). Installed by `ash dependencies install` above through its
+# module-local pinned installer (yara_x_install.py: version, per-platform assets,
+# archive and executable digests). The executable is `yr`.
+#
+RUN yr --version
 
 #
 # Every bundled third-party tool has its license files, they match their pins, and
@@ -907,7 +914,7 @@ ENV PATH="${ASHUSER_HOME}/.local/bin:$PATH"
 # Python tools are installed again here and would otherwise float. The same alpha
 # modules are loaded for it; an ARG does not reach a stage built FROM another, so it
 # is declared again (a unit test keeps the two equal).
-ARG ASH_ALPHA_PLUGIN_MODULES="automated_security_helper.plugin_modules.ash_betterleaks_plugins,automated_security_helper.plugin_modules.ash_ggshield_plugins,automated_security_helper.plugin_modules.ash_gosec_plugins,automated_security_helper.plugin_modules.ash_guarddog_plugins,automated_security_helper.plugin_modules.ash_hadolint_plugins,automated_security_helper.plugin_modules.ash_kingfisher_plugins,automated_security_helper.plugin_modules.ash_polaris_plugins"
+ARG ASH_ALPHA_PLUGIN_MODULES="automated_security_helper.plugin_modules.ash_betterleaks_plugins,automated_security_helper.plugin_modules.ash_ggshield_plugins,automated_security_helper.plugin_modules.ash_gosec_plugins,automated_security_helper.plugin_modules.ash_guarddog_plugins,automated_security_helper.plugin_modules.ash_hadolint_plugins,automated_security_helper.plugin_modules.ash_kingfisher_plugins,automated_security_helper.plugin_modules.ash_polaris_plugins,automated_security_helper.plugin_modules.ash_yara_x_plugins"
 # The pre-rename name of the build argument, honored until ASH 3.9.0: a value given
 # for it, an explicitly empty one included, wins over ASH_ALPHA_PLUGIN_MODULES below.
 # The default is a sentinel because an empty-string default cannot tell "not given"

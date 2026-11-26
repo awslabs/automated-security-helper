@@ -65,6 +65,7 @@ PACKAGE_DIRS = frozenset(
         "plugin_modules/ash_secretlint_plugins",
         "plugin_modules/ash_snyk_plugins",
         "plugin_modules/ash_trivy_plugins",
+        "plugin_modules/ash_yara_x_plugins",
         "plugins",
         "schemas",
         "utils/mcp_config",

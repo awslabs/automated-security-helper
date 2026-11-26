@@ -1,0 +1,94 @@
+{
+  "runs": [
+    {
+      "results": [
+        {
+          "level": "error",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/a.txt"
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "demo marker"
+          },
+          "partialFingerprints": {
+            "yara_x/v1": "d72fee15e51f38d7414fa0ea7a3d90a7"
+          },
+          "properties": {
+            "issue_severity": "HIGH",
+            "tags": [
+              "sample"
+            ],
+            "yara_tags": [
+              "sample"
+            ]
+          },
+          "ruleId": "demo_marker"
+        },
+        {
+          "level": "none",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/a.txt"
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "YARA rule no_sev matched"
+          },
+          "partialFingerprints": {
+            "yara_x/v1": "34f1d5c7a089ced452db265380aa4ad9"
+          },
+          "properties": {
+            "issue_severity": "INFO",
+            "tags": [],
+            "yara_tags": []
+          },
+          "ruleId": "no_sev"
+        }
+      ],
+      "tool": {
+        "driver": {
+          "informationUri": "https://virustotal.github.io/yara-x/",
+          "name": "yara-x",
+          "rules": [
+            {
+              "id": "demo_marker",
+              "name": "demo_marker",
+              "properties": {
+                "tags": [
+                  "yara-x",
+                  "sample"
+                ]
+              },
+              "shortDescription": {
+                "text": "demo marker"
+              }
+            },
+            {
+              "id": "no_sev",
+              "name": "no_sev",
+              "properties": {
+                "tags": [
+                  "yara-x"
+                ]
+              },
+              "shortDescription": {
+                "text": "YARA rule no_sev matched"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "version": "2.1.0"
+}

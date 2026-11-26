@@ -254,6 +254,9 @@ CORPORA: Mapping[str, Optional[CorpusSpec]] = {
     "trivy-repo": CorpusSpec(
         "trivy", sarif=("*.sarif", "captured/*.sarif"), prep="trivy"
     ),
+    # The committed SARIF is the converter's output for a REAL captured yr 1.23.0
+    # run (captured/positive.ndjson); a regeneration test keeps it honest.
+    "yara-x": CorpusSpec("yara_x", sarif=("captured/*.sarif",)),
     "zizmor": CorpusSpec("zizmor", sarif=("*.sarif",)),
 }
 

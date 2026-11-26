@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "transcripts": [
+    {
+      "adapter_prep": null,
+      "also_for": [],
+      "argv": [
+        "yr",
+        "scan",
+        "--output-format=ndjson",
+        "--print-meta",
+        "--print-tags",
+        "--disable-console-logs",
+        "--recursive",
+        "--",
+        "rules",
+        "."
+      ],
+      "env_allowlist": [],
+      "exit_code": 0,
+      "fixture_tree": null,
+      "id": "yara-x-1.23.0-positive",
+      "live_input": false,
+      "note": "The results file is ASH's conversion of yr's standard output: convert_ndjson over the side report captured/positive.ndjson, with no tool version. captured/README.md records the inputs and the rules; the input tree is not committed.",
+      "observable": true,
+      "pin_stamp": null,
+      "provenance": "captured",
+      "reason": null,
+      "recorded_on": "2026-11-26",
+      "results": [
+        {
+          "format": "sarif",
+          "path": "captured/positive.sarif",
+          "sha256": "6826745dee528905f6bbde089b5eb4c1b049219dba9838095da9550859985962"
+        }
+      ],
+      "retention": "current",
+      "scanner": "yara-x",
+      "side_reports": [
+        {
+          "format": "text",
+          "path": "captured/positive.ndjson",
+          "sha256": "d22d501ec082987dd6837e63ccea8828f06641cb390d8c7d5d46988701c44232"
+        }
+      ],
+      "stderr_tail": null,
+      "tool": {
+        "name": "yara-x-cli",
+        "version": "1.23.0"
+      }
+    }
+  ],
+  "unrecorded": []
+}

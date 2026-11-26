@@ -157,6 +157,7 @@ SCANNER_TOOL_TYPES: Mapping[str, str] = {
     "syft": ScannerToolType.SBOM.value,
     "trivy": ScannerToolType.SCA.value,
     "trivy-repo": ScannerToolType.SCA.value,
+    "yara-x": ScannerToolType.SAST.value,
     "zizmor": ScannerToolType.SAST.value,
 }
 

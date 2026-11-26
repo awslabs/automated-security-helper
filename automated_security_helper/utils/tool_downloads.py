@@ -1152,6 +1152,8 @@ _THIRD_PARTY_HASHES: dict[str, str] = {
     "uv commit": "6b2d39dcc390293d51c9c0d2bbcd650f4bcbfdce",  # pragma: allowlist secret
     "uv/LICENSE-APACHE": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",  # pragma: allowlist secret
     "uv/LICENSE-MIT": "860e3d7a86b84e6a7012c7a635fc64df475cebc6cce34dfeb73a5982ec58176c",  # pragma: allowlist secret
+    "yara-x commit": "afe4585b12f56c698794dc80b3d28ddb87b56c0a",  # pragma: allowlist secret
+    "yara-x/LICENSE": "fdf05444c9178e662fa28810d94a1fa6ec32d7be798241c98094213317265880",  # pragma: allowlist secret
     "zizmor commit": "0af0be985a4cae71ecfaa64ef574a94b35dc722a",  # pragma: allowlist secret
 }
 
@@ -1639,6 +1641,23 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
             _from_source("uv", "https://github.com/astral-sh/uv", "LICENSE-MIT"),
         ),
         executables=("uv", "uvx"),
+    ),
+    # The alpha YARA-X scanner's tool. Pinned and installed by its own module
+    # (``ash_yara_x_plugins/yara_x_install.py``), not by install-pinned-tool, so its
+    # license is staged from the repository at the pinned commit on the
+    # --licenses-only line: each release archive holds the ``yr`` executable alone
+    # (read on 2026-11-26). The executable on PATH is ``yr``, whose ``--version``
+    # prints "yara-x-cli 1.23.0".
+    "yara-x": ThirdPartyLicense(
+        tool="yara-x",
+        version="v1.23.0",
+        license="BSD-3-Clause",
+        repository="https://github.com/VirusTotal/yara-x",
+        commit=_THIRD_PARTY_HASHES["yara-x commit"],
+        files=(
+            _from_source("yara-x", "https://github.com/VirusTotal/yara-x", "LICENSE"),
+        ),
+        executables=("yr",),
     ),
     # The zizmor scanner's uv tool, a compiled Rust binary in a wheel. The
     # wheel's dist-info carries licenses/LICENSE.

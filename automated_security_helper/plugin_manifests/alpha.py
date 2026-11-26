@@ -249,6 +249,14 @@ MANIFESTS = (
         "TrivyRepoScannerConfigOptions",
         owned=(f"{_DOCS}/trivy-plugin.md",),
     ),
+    _alpha(
+        "yara-x",
+        "ash_yara_x_plugins",
+        "yara_x_scanner",
+        "YaraXScanner",
+        "YaraXScannerConfigOptions",
+        owned=(f"{_DOCS}/yara-x-plugin.md", f"{_FIXTURES}/yara_x"),
+    ),
 )
 
 check_table_rows(

@@ -20,8 +20,9 @@ This section covers the alpha plugins for ASH: the opt-in scanner packages (`ash
 - **[Secretlint Plugin](secretlint-plugin.md)** (`ash_secretlint_plugins`) - Secret detection with Secretlint
 - **[Snyk Code Plugin](snyk-plugin.md)** - Integrates Snyk Code for static application security testing (SAST) of source code vulnerabilities
 - **[Trivy Plugin](trivy-plugin.md)** - Integrates Aquasec's Trivy for vulnerability, misconfiguration, secret, and license scanning
+- **[YARA-X Plugin](yara-x-plugin.md)** (`ash_yara_x_plugins`) - File pattern matching with VirusTotal's YARA-X and a rule set you supply
 
-These fourteen ship inside ASH. Each takes part in a scan only when that scan names its
+These fifteen ship inside ASH. Each takes part in a scan only when that scan names its
 plugin module in `ash_plugin_modules` or `--ash-plugin-modules`, as its page shows.
 The MCP `list_scanners` tool reports them either way; listing one does not add it to
 any scan.
