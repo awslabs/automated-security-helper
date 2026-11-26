@@ -559,8 +559,8 @@ global_settings:
         literal; the text explains why another finding is a false positive.
     - path: .github/workflows/ash-repo-docs.yml
       rule_id: API_KEY_OR_SECRET
-      line_start: 158
-      line_end: 158
+      line_start: 159
+      line_end: 159
       reason: >-
         False positive. A shell variable named for a token, filled at run time
         from /dev/urandom as a per-run nonce. No value is stored in the file.

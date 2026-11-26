@@ -35,15 +35,15 @@ global_settings:
         one is shown as. No value is held.
     - rule_id: SECRET-SECRET-KEYWORD
       path: automated_security_helper/utils/scanner_tool_types.py
-      line_start: 34
-      line_end: 34
+      line_start: 38
+      line_end: 38
       reason: >-
         False positive. The constant names the secrets tool category; it is a label,
         not a credential.
     - rule_id: SECRET-SECRET-KEYWORD
       path: automated_security_helper/utils/scanner_names.py
-      line_start: 133
-      line_end: 133
+      line_start: 136
+      line_end: 136
       reason: >-
         False positive. The table entry maps the detect-secrets scanner to the secrets
         tool category.
@@ -3799,8 +3799,8 @@ global_settings:
     # bounded in length, so none of these is wider than it has to be.
     - rule_id: B104
       path: automated_security_helper/utils/secret_masking.py
-      line_start: 458
-      line_end: 458
+      line_start: 463
+      line_end: 463
       reason: >-
         False positive. "0.0.0.0" here is a schema-satisfying placeholder in the
         tuple of synthetic replacement values a masked SARIF field can take, not
@@ -3829,8 +3829,8 @@ global_settings:
         shown_flake_ref REDACTS. No value is held.
     - rule_id: SECRET-BASIC-AUTH-CREDENTIALS
       path: automated_security_helper/plugin_modules/ash_builtin/scanners/npm_audit_scanner.py
-      line_start: 155
-      line_end: 155
+      line_start: 171
+      line_end: 171
       reason: >-
         False positive. A comment placeholder URL above the regex that MASKS a
         URL's userinfo in log excerpts. No value is held.
@@ -3849,8 +3849,8 @@ global_settings:
         the quoting lambda below it covers. No value is held.
     - rule_id: SECRET-SECRET-KEYWORD
       path: automated_security_helper/plugin_modules/ash_builtin/reporters/gitlab_sast_reporter.py
-      line_start: 50
-      line_end: 50
+      line_start: 82
+      line_end: 82
       reason: >-
         False positive. The constant names the rule-id PREFIX the reporter
         strips when classifying secret findings; a label, not a value.
