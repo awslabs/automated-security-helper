@@ -17,6 +17,9 @@ order, and the first that answers wins:
    in ``RepoDigests`` that belongs to the reference's repository, else the
    image's own ``Id``. It needs no network, so it works offline, and no layer
    is read. An image the daemon does not hold answers 404 and the ladder goes on.
+   A Python with no unix sockets (Windows' CPython has no ``socket.AF_UNIX``)
+   cannot open an engine's socket, so there the rung answers nothing, with that
+   reason, and the ladder goes on.
 2. **The registry.** ``crane digest`` (the pinned ``crane`` of
    ``utils/tool_downloads``) reads the manifest's digest from the registry. It
    is a registry read, so it is network use: offline mode never makes it,
@@ -127,8 +130,13 @@ def inspect_digest(ref: str, socket_path: str) -> "Tuple[Optional[str], str]":
     The ``RepoDigests`` entry of the reference's own repository (the registry
     manifest digest, what ``crane digest`` would print), else the image's
     ``Id``. A request the engine answers with anything but a 200 and a body that
-    names no digest are both "answered nothing" with the reason.
+    names no digest are both "answered nothing" with the reason, and so is a
+    Python that has no unix sockets at all.
     """
+    if not hasattr(socket, "AF_UNIX"):
+        # Windows' CPython has no socket.AF_UNIX: no engine socket can be opened,
+        # and the rung answers nothing rather than raising AttributeError.
+        return None, "the engine could not be asked (this Python has no unix sockets)"
     connection = _UnixHTTPConnection(socket_path, ENGINE_TIMEOUT_SECONDS)
     try:
         # Unversioned: both docker and podman route it to their current API.
