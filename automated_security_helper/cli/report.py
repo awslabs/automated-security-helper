@@ -36,6 +36,7 @@ from automated_security_helper.config.operator_only_options import reporter_sect
 from automated_security_helper.config.plugin_section_names import ascii_lower
 from automated_security_helper.config.recorded_config import (
     HOW_TO_SUPPLY,
+    _sets,
     take_own_values,
 )
 from automated_security_helper.config.reporter_trust import (
@@ -428,39 +429,6 @@ def _named_config_files(config: Optional[str]) -> List[str]:
     if from_environment and from_environment not in named:
         named.append(from_environment)
     return named
-
-
-def _dedup_names_written(
-    config: Optional[str],
-    named: bool,
-    results_file: Optional[Path],
-    config_overrides: List[str],
-) -> set[str]:
-    """The ``global_settings.deduplication`` fields the operator's input names.
-
-    The fields the configuration holds before any override names, read from a
-    second resolution with no overrides (where ``model_fields_set`` is what the
-    document wrote), and the fields an override names by its key. A second
-    resolution that fails names nothing: only the overrides count then.
-    """
-    prefix = "global_settings.deduplication."
-    names = {
-        key[len(prefix) :]
-        for key in (override.partition("=")[0].strip() for override in config_overrides)
-        if key.startswith(prefix)
-    }
-    try:
-        before = resolve_config(
-            config_path=config,
-            config_overrides=[],
-            fallback_to_default=not named,
-            also_scanned=[results_file.parent] if results_file is not None else [],
-            named_config_source=REPORT_CONFIG_FILE_IN_TREE,
-        )
-    except Exception:  # noqa: BLE001 - the first resolution already succeeded
-        return names
-    dedup = getattr(getattr(before, "global_settings", None), "deduplication", None)
-    return names | set(getattr(dedup, "model_fields_set", ()) or ())
 
 
 def _refused_config_name(config: Optional[str]) -> str:
@@ -1231,6 +1199,16 @@ def report_command(
     # honored as given, false included, so a consumer that needs the old
     # column shape back can get it (only a field the configuration names
     # counts: a defaulted False never turns a recorded setting off).
+    #
+    # The fields the configuration names are read from the configuration this
+    # command resolved, through recorded_config._sets. With no override that
+    # is what the document wrote. With an override it is the record
+    # apply_config_overrides stamps from the keys each override landed on, so
+    # the rebuild's round trip through a dump and a validate, which marks every
+    # default as set, does not make every default count, and every spelling
+    # the override parser accepts counts as written: an object value at the
+    # section or at its parent, a hyphen for an underscore, a trailing "+".
+    # No second resolution is made.
     recorded_dedup = getattr(
         getattr(getattr(model, "ash_config", None), "global_settings", None),
         "deduplication",
@@ -1239,16 +1217,11 @@ def report_command(
     own_dedup = getattr(
         getattr(ash_config, "global_settings", None), "deduplication", None
     )
-    own_set = set(getattr(own_dedup, "model_fields_set", ()) or ())
-    if config_overrides:
-        # Any override round-trips the whole model through a dump and a
-        # validate (config/resolve_config.apply_config_overrides), which
-        # materializes every default into model_fields_set, so the set read
-        # above names fields the operator never wrote and turned a recorded
-        # True off. The names the operator wrote are the ones the same
-        # configuration holds before the overrides, plus the ones an override
-        # names.
-        own_set = _dedup_names_written(config, named, results_file, config_overrides)
+    own_set = {
+        name
+        for name in ("annotate", "fold")
+        if _sets(ash_config, ("global_settings", "deduplication", name))
+    }
     requested = {
         "annotate": annotate_duplicates,
         "fold": fold_duplicates,
